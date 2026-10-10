@@ -1,0 +1,13 @@
+[package]
+name = "hypha-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+uuid.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true
