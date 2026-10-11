@@ -2,6 +2,7 @@ pub mod error;
 pub mod handle;
 pub mod option;
 pub mod product;
+pub mod repo;
 pub mod variant;
 
 pub use error::{HandleError, ProductError};

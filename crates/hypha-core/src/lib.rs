@@ -11,3 +11,4 @@ pub use ids::{
     VariantId,
 };
 pub use money::{Currency, Money, MoneyError, Price};
+pub use ports::{IdGenerator, RepoError};
