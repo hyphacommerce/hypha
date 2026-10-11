@@ -75,6 +75,8 @@ define_id!(OptionValueId, "optval");
 define_id!(MarketId, "mkt");
 define_id!(CatalogId, "cat");
 define_id!(PriceListId, "pl");
+define_id!(UserId, "user");
+define_id!(AgentId, "agent");
 
 #[cfg(test)]
 mod tests {
