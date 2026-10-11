@@ -11,4 +11,5 @@ pub use error::{HandleError, ProductError};
 pub use handle::Handle;
 pub use option::{OptionValue, ProductOption};
 pub use product::{Product, ProductStatus};
+pub use repo::ProductRepo;
 pub use variant::{NewVariant, Variant};

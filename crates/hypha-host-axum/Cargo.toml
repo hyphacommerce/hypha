@@ -1,0 +1,22 @@
+[package]
+name = "hypha-host-axum"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+hypha-core.workspace = true
+hypha-products = { path = "../hypha-products" }
+hypha-testkit = { path = "../hypha-testkit" }
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+serde.workspace = true
+serde_json.workspace = true
+uuid = { workspace = true, features = ["v7"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tower-http = { version = "0.6", features = ["trace"] }
+
+[lints]
+workspace = true

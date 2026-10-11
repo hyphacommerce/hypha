@@ -3,7 +3,7 @@ use hypha_core::{
 };
 use thiserror::Error;
 
-use crate::{Handle, Product, ProductError, commands::CommandError::NotFound, repo::ProductRepo};
+use crate::{Handle, Product, ProductError, ProductRepo};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -27,10 +27,10 @@ pub struct CreateSimpleProduct {
     pub price: Money,
 }
 
-pub async fn create_simple_product<R: ProductRepo>(
+pub async fn create_simple_product<R: ProductRepo, I: IdGenerator>(
     ctx: &Ctx,
     repo: &R,
-    ids: &dyn IdGenerator,
+    ids: &I,
     input: CreateSimpleProduct,
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsWrite)?;
@@ -60,11 +60,5 @@ pub async fn get_product<R: ProductRepo>(
     id: ProductId,
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsRead)?;
-
-    if repo.get(id).await?.is_some() {
-        return Err(NotFound(id));
-    }
-
-    let product = repo.get(id).await?.unwrap();
-    Ok(product)
+    repo.get(id).await?.ok_or(CommandError::NotFound(id))
 }
