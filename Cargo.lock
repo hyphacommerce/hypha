@@ -62,6 +62,8 @@ name = "hypha-markets"
 version = "0.1.0"
 dependencies = [
  "hypha-core",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]

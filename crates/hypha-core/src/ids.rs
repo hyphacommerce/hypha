@@ -72,6 +72,9 @@ define_id!(VariantId, "var");
 define_id!(CartId, "cart");
 define_id!(OptionId, "opt");
 define_id!(OptionValueId, "optval");
+define_id!(MarketId, "mkt");
+define_id!(CatalogId, "cat");
+define_id!(PriceListId, "pl");
 
 #[cfg(test)]
 mod tests {

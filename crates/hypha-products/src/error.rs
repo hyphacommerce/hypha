@@ -35,5 +35,8 @@ pub enum ProductError {
     #[error("option value {0} is used twice")]
     DuplicateOptionValue(OptionValueId),
     #[error("invalid status transition from {from:?} to {to:?}")]
-    InvalidTransition { from: ProductStatus, to: ProductStatus}
+    InvalidTransition {
+        from: ProductStatus,
+        to: ProductStatus,
+    },
 }
