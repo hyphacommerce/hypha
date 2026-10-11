@@ -1,0 +1,11 @@
+[package]
+name = "hypha-markets"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+
+[lints]
+workspace = true
