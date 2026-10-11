@@ -80,6 +80,8 @@ name = "hypha-products"
 version = "0.1.0"
 dependencies = [
  "hypha-core",
+ "hypha-testkit",
+ "pollster",
  "serde",
  "thiserror",
  "uuid",
