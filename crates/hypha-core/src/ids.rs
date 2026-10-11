@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use thiserror::Error;
@@ -13,7 +14,8 @@ pub enum IdError {
 
 macro_rules! define_id {
     ($name:ident, $prefix:literal) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[serde(try_from = "String", into = "String")]
         pub struct $name(Uuid);
 
         impl $name {
@@ -48,12 +50,28 @@ macro_rules! define_id {
                 Ok(Self(uuid))
             }
         }
+
+        impl TryFrom<String> for $name {
+            type Error = IdError;
+
+            fn try_from(s: String) -> Result<Self, Self::Error> {
+                s.parse()
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(id: $name) -> String {
+                id.to_string()
+            }
+        }
     };
 }
 
 define_id!(ProductId, "prod");
 define_id!(VariantId, "var");
 define_id!(CartId, "cart");
+define_id!(OptionId, "opt");
+define_id!(OptionValueId, "optval");
 
 #[cfg(test)]
 mod tests {
@@ -78,5 +96,24 @@ mod tests {
         let var_id_text = VariantId::from_uuid(Uuid::from_u128(12)).to_string();
         let parsed = var_id_text.parse::<ProductId>();
         assert_eq!(parsed, Err(IdError::WrongPrefix { expected: "prod" }));
+    }
+
+    #[test]
+    fn invalid_uuid_fails() {
+        let parsed = "prod_nothex".parse::<ProductId>();
+        assert_eq!(parsed, Err(IdError::InvalidUuid));
+    }
+
+    #[test]
+    fn serializes_as_prefixed_string() {
+        let id = ProductId::from_uuid(Uuid::from_u128(1));
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, format!("\"{}\"", id));
+    }
+
+    #[test]
+    fn deserialize_rejects_wrong_prefix() {
+        let json = format!("\"{}\"", VariantId::from_uuid(Uuid::from_u128(1)));
+        assert!(serde_json::from_str::<ProductId>(&json).is_err())
     }
 }

@@ -1,10 +1,11 @@
 [package]
-name = "hypha-catalog"
+name = "hypha-products"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 
 [dependencies]
+hypha-core.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 serde.workspace = true
