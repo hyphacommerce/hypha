@@ -1,0 +1,77 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+Hypha (working name): open-source, modular e-commerce API in Rust (edition 2024, Cargo workspace, `crates/*`).
+- **Modular**: one crate per domain; behavior is extended through plugins ("spores") via traits and events, not by editing core.
+- **Agent-native**: every operation is a command with typed input, required scopes and typed errors, so the same surface can be exposed over HTTP, MCP and CLI. Agents are first-class actors (`Actor::Agent`).
+- **Large catalogs**: sparse explicit variants (never generate the Cartesian product of options); Shopify-style markets / catalogs / price lists.
+- **Multi-host**: the same core runs on Cloudflare Workers (WASM), AWS Lambda, Vercel and a plain VPS (axum).
+- It's also a Rust learning project for the maintainer (Danilo, TypeScript background). See "Working with Danilo".
+
+## Commands
+
+Run all four before considering work done:
+
+```bash
+cargo fmt --all
+cargo clippy --workspace --all-targets
+cargo test --workspace
+cargo build -p hypha-core -p hypha-products -p hypha-markets --target wasm32-unknown-unknown
+```
+
+Extend the wasm build list as domain crates gain real code (`hypha-pricing`, `hypha-cart` are still `cargo new` stubs).
+
+- Single crate's tests: `cargo test -p hypha-products`
+- Single test by name: `cargo test -p hypha-products rejects_same_handle_products`
+- Only an integration test file: `cargo test -p hypha-products --test commands`
+- Run the HTTP host (binds `127.0.0.1:3000`, `RUST_LOG` respected): `cargo run -p hypha-host-axum`
+
+## Architecture (hexagonal / ports and adapters)
+
+Dependencies point inward: hosts → domain crates → core. Core and domain crates never depend on storage, HTTP or runtimes.
+
+- `hypha-core`: shared types only — `Money`/`Price`/`BasisPoints` (`money/`), prefixed IDs (`ids.rs`), `CountryCode`, `Scope`, `Ctx`/`Actor`, generic ports (`IdGenerator`, `RepoError` in `ports.rs`). No domain logic, no I/O.
+- Domain crates (`hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-cart`): aggregates with private fields and validated constructors, a repository trait (port) per aggregate in `repo.rs`, error enums in `error.rs`, and commands in `commands.rs` (currently only products has commands — use it as the template).
+- `hypha-testkit`: in-memory repos (`InMemoryProductRepo`, `InMemoryMarketRepo`) and deterministic ports (`SequentialIds`). It depends on domain crates, so domain crates use it only as a dev-dependency from their `tests/` folder.
+- `hypha-host-axum`: the only place with Tokio, HTTP, auth parsing, logging subscribers (`tracing`) and real ID generation (`UuidV7Ids`). It owns its own request/response DTOs and maps `CommandError` → HTTP status in `ApiError`. Currently uses `Ctx::system()` (no auth yet) and the testkit in-memory repo as storage.
+
+Command shape (see `crates/hypha-products/src/commands.rs`): `async fn cmd(ctx: &Ctx, repo: &impl Repo, ids: &impl IdGenerator, input: RawInput) -> Result<_, CommandError>`; first line `ctx.require(Scope::...)?`, then validate raw input through domain constructors. `CommandError` composes lower errors via `#[from]`.
+
+## Hard constraints
+
+- Core and domain crates must compile for `wasm32-unknown-unknown`: no Tokio, threads, `std::fs`, `SystemTime::now()` or random UUID generation there. Time, IDs and randomness come in through ports.
+- Repository traits use `async fn` with `#[allow(async_fn_in_trait)]` and **no `Send` bound**, on purpose (Cloudflare futures are `!Send`). Hosts use concrete types/generics so the compiler can prove `Send`; never `&dyn` for ports used across `.await`.
+- Authorization lives in commands (`ctx.require(Scope::...)?`); authentication lives in hosts. Commands never trust raw input.
+
+## Code standards
+
+- Money: integer minor units (`i64`), never floats. Checked arithmetic returning `Result`; percentages as `BasisPoints` with round-half-away-from-zero; `i128` for intermediates.
+- Newtypes with validated constructors for anything with rules (`Handle`, `Price`, `CountryCode`, IDs). Don't derive `Deserialize` on validated types unless via `#[serde(try_from = ...)]`.
+- IDs: `define_id!` macro in `hypha-core/src/ids.rs` — UUID inside, prefixed string at the edges (`prod_…`, `var_…`, `mkt_…`, `pl_…`). Store native UUIDs; UUIDv7 in hosts.
+- Errors: `thiserror` enums with specific variants (no stringly errors). No `unwrap`/`expect`/panics in non-test code except documented invariants.
+- Aggregates own their children (Product owns Variants); cross-aggregate rules live in commands/functions above them.
+- Getters return values for `Copy` types and references (`&str`, slices) for owned heap data.
+- Workspace lints: `unsafe_code = "forbid"`, `clippy::all = "warn"`. Code must be fmt-clean and clippy-warning-free.
+
+## Testing
+
+- Unit tests in `#[cfg(test)] mod tests` at the bottom of each file; one rule per test; test boundaries (0 vs -1, exact rounding halves); compare expected errors exactly with `assert_eq!(result, Err(...))`, never via `unwrap`.
+- Command tests are integration tests in each crate's `tests/` folder using `hypha-testkit` (avoids duplicate-crate issues with dev-dependencies).
+- Async in tests via `pollster::block_on`; deterministic IDs via `SequentialIds` and `Uuid::from_u128(n)`.
+
+## Conventions
+
+- Conventional Commits (`feat(products): …`, `refactor(core): …`); pure moves/refactors in separate commits from features.
+- LF line endings (enforced by `.gitattributes`). Windows dev machine; prefer cross-platform commands.
+
+## Working with Danilo
+
+- He's learning Rust by building this. Default to explaining *why* and naming the Rust concept involved (ownership, traits, lifetimes, etc.), and review his code rather than rewriting whole files unprompted. When he explicitly asks for code, write it fully.
+- Flag hard-to-reverse design decisions (public API shapes, `Send` bounds, storage schema) instead of choosing silently.
+
+## Roadmap / deferred (don't build unless asked)
+
+Price lists + catalogs + price resolution (in progress), cart, Postgres adapter (sqlx), API keys then OAuth, structured logging (tracing), combined listings (variants as products), FX rates as a port, MCP tool generation from commands, admin AI features as plugins behind a `ModelProvider` port.
