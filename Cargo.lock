@@ -300,6 +300,7 @@ dependencies = [
  "hypha-testkit",
  "pollster",
  "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
