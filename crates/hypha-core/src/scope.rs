@@ -14,16 +14,22 @@ pub enum Scope {
     PricingRead,
     #[serde(rename = "pricing:write")]
     PricingWrite,
+    #[serde(rename = "carts:read")]
+    CartsRead,
+    #[serde(rename = "carts:write")]
+    CartsWrite,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 6] = [
+    pub const ALL: [Scope; 8] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
         Scope::MarketsWrite,
         Scope::PricingRead,
         Scope::PricingWrite,
+        Scope::CartsRead,
+        Scope::CartsWrite,
     ];
 }
 
