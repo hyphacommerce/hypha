@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use hypha_core::ErrorCode;
+use hypha_core::{ErrorCode, RepoError};
 
 /// Every error the API returns, as `{"code": "<stable_code>", "error": "<message>"}`.
 ///
@@ -12,7 +12,7 @@ use hypha_core::ErrorCode;
 /// and is what clients should match on; `error` is for humans and may change.
 ///
 /// Status rules: 403 missing scope; 404 when the resource in the URL doesn't exist;
-/// 409 conflicts with existing data; 422 invalid input, including IDs in the body
+/// 409 conflicts with existing data or a concurrent change (`concurrent_modification`); 422 invalid input, including IDs in the body
 /// that don't exist; 500 storage failures (message hidden, logged instead).
 #[derive(Debug)]
 pub struct ApiError {
@@ -102,7 +102,8 @@ impl From<hypha_products::CommandError> for ApiError {
             E::Product(_) | E::Money(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::HandleTaken(_) => StatusCode::CONFLICT,
             E::NotFound(_) => StatusCode::NOT_FOUND,
-            E::Repo(_) => return Self::internal(e),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
     }
@@ -122,7 +123,8 @@ impl From<hypha_markets::CommandError> for ApiError {
             | E::PriceListNotFound(_)
             | E::MarketNotFound(_)
             | E::CurrencyMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
-            E::Repo(_) => return Self::internal(e),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
     }
@@ -139,7 +141,8 @@ impl From<hypha_cart::CommandError> for ApiError {
             | E::Money(_)
             | E::MarketNotFound(_)
             | E::VariantNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            E::Repo(_) => return Self::internal(e),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
     }
@@ -147,7 +150,7 @@ impl From<hypha_cart::CommandError> for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::{AuthError, CartId, RepoError, Scope};
+    use hypha_core::{AuthError, CartId, Scope};
     use uuid::Uuid;
 
     use super::*;
@@ -169,6 +172,13 @@ mod tests {
         assert_eq!(e.status, StatusCode::FORBIDDEN);
         assert_eq!(e.code, "missing_scope");
         assert_eq!(e.message, "missing scope pricing:write");
+    }
+
+    #[test]
+    fn stale_version_is_a_conflict() {
+        let e = ApiError::from(hypha_cart::CommandError::Repo(RepoError::StaleVersion));
+        assert_eq!(e.status, StatusCode::CONFLICT);
+        assert_eq!(e.code, "concurrent_modification");
     }
 
     #[test]
