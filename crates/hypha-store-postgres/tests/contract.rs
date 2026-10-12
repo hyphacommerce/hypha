@@ -97,3 +97,9 @@ async fn customer_repo() {
     let Some(url) = database_url() else { return };
     contract::customer_repo(async || fresh_store(&url, "contract_customers").await).await;
 }
+
+#[tokio::test]
+async fn store_repo() {
+    let Some(url) = database_url() else { return };
+    contract::store_repo(async || fresh_store(&url, "contract_stores").await).await;
+}

@@ -6,6 +6,7 @@ use hypha_customers::repo::keys as customer_keys;
 use hypha_inventory::repo::keys as inventory_keys;
 use hypha_markets::repo::keys as market_keys;
 use hypha_products::repo::keys as product_keys;
+use hypha_stores::repo::keys as store_keys;
 use hypha_tax::repo::keys as tax_keys;
 use tokio_postgres::error::SqlState;
 
@@ -32,6 +33,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ),
     ("customers_pkey", customer_keys::CUSTOMER_ID),
     ("customer_email", customer_keys::CUSTOMER_EMAIL),
+    ("stores_pkey", store_keys::STORE_ID),
 ];
 
 /// Maps a driver error to the repo error the ports promise.

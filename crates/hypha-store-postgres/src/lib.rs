@@ -21,6 +21,7 @@ mod markets;
 mod migrate;
 mod products;
 mod store;
+mod stores;
 mod tax;
 
 pub use migrate::{CORE, MigrateError, Migration, MigrationSet, migrate};

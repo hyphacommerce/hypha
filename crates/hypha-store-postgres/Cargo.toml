@@ -12,6 +12,7 @@ hypha-cart = { path = "../hypha-cart" }
 hypha-tax = { path = "../hypha-tax" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-customers = { path = "../hypha-customers" }
+hypha-stores = { path = "../hypha-stores" }
 uuid.workspace = true
 # No runtime feature: the adapter never opens connections, hosts hand it a Client.
 tokio-postgres = { version = "0.7.18", default-features = false, features = ["with-uuid-1"] }

@@ -518,6 +518,7 @@ dependencies = [
  "hypha-inventory",
  "hypha-markets",
  "hypha-products",
+ "hypha-stores",
  "hypha-tax",
  "hypha-testkit",
  "tokio",

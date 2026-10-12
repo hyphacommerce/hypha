@@ -1,0 +1,80 @@
+use hypha_core::{RepoError, StoreId, Version, Versioned};
+use hypha_stores::{Store, StoreRepo, StoreSnapshot};
+use tokio_postgres::{Row, types::Type};
+
+use crate::{
+    columns::{version_from_db, version_to_db},
+    error::{corrupt, repo_error},
+    store::{PgConnection, PgStore},
+};
+
+fn store_from_row(row: &Row) -> Result<Store, RepoError> {
+    let id = StoreId::from_uuid(row.get(0));
+    Store::restore(StoreSnapshot {
+        id,
+        version: version_from_db(row.get(1))?,
+        name: row.get(2),
+    })
+    .map_err(|e| corrupt(format!("store {id}: {e}")))
+}
+
+impl<C: PgConnection> StoreRepo for PgStore<C> {
+    async fn get(&self, id: StoreId) -> Result<Option<Store>, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .client()
+            .query_typed_opt(
+                "SELECT id, version, name FROM stores WHERE id = $1",
+                &[(&id.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?;
+        row.as_ref().map(store_from_row).transpose()
+    }
+
+    async fn list_all(&self) -> Result<Vec<Store>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.client()
+            .query_typed("SELECT id, version, name FROM stores", &[])
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(store_from_row)
+            .collect()
+    }
+
+    async fn insert(&self, store: &mut Store) -> Result<(), RepoError> {
+        let s = store.snapshot();
+        let mut conn = self.conn().await;
+        conn.client()
+            .query_typed(
+                "INSERT INTO stores (id, version, name) VALUES ($1, 1, $2)",
+                &[(&s.id.as_uuid(), Type::UUID), (&s.name, Type::TEXT)],
+            )
+            .await
+            .map_err(repo_error)?;
+        store.set_version(Version::NEW.next());
+        Ok(())
+    }
+
+    async fn update(&self, store: &mut Store) -> Result<(), RepoError> {
+        let s = store.snapshot();
+        let mut conn = self.conn().await;
+        let bumped = conn
+            .client()
+            .query_typed_opt(
+                "UPDATE stores SET version = version + 1, name = $3
+                 WHERE id = $1 AND version = $2 RETURNING version",
+                &[
+                    (&s.id.as_uuid(), Type::UUID),
+                    (&version_to_db(s.version)?, Type::INT8),
+                    (&s.name, Type::TEXT),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        let row = bumped.ok_or(RepoError::StaleVersion)?;
+        store.set_version(version_from_db(row.get(0))?);
+        Ok(())
+    }
+}
