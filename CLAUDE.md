@@ -96,6 +96,8 @@ When a command needs more than two or three ports, group them in a `XxxPorts` tr
 
 ## Roadmap / deferred (don't build unless asked)
 
+Tenancy (`docs/design/0003-multi-tenancy.md`): one store per deployment (model A); a store is resolved by the host and passed to `Storage::ports(store)`. Domain crates, aggregates and commands never see a store ID.
+
 Extensibility direction (custom fields, policies, events/outbox/webhooks, spores, TS-first external apps): `docs/design/0002-extensibility.md`. Its section 7 lists what to reserve while building core features.
 
 Cart quantity/remove commands, orders, API keys then OAuth, structured logging (tracing), combined listings (variants as products), FX rates as a port, MCP tool generation from commands, UCP adapter for agentic shopping (via ucphub.ai), admin AI features as plugins behind a `ModelProvider` port.
