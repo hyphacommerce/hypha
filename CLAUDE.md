@@ -33,6 +33,17 @@ Extend the wasm build list as domain crates gain real code (`hypha-cart` is stil
 
 Dependencies point inward: hosts → domain crates → core. Core and domain crates never depend on storage, HTTP or runtimes.
 
+Domain crates are layered; a crate may only depend on layers below it (Cargo rejects cycles, so a wrong edge forces a painful restructure later):
+
+| Layer | Crates | May depend on |
+| --- | --- | --- |
+| Hosts | `hypha-host-axum` | anything |
+| Composing domains | `hypha-cart` (later orders) | leaf domains, core |
+| Leaf domains | `hypha-products`, `hypha-markets`, `hypha-pricing` | core; `hypha-pricing` → `hypha-markets` only |
+| Core | `hypha-core` | nothing internal |
+
+Leaf functions take the plain values they need (IDs, `Price`), not another leaf's aggregate. E.g. `resolve_price` takes `ProductId`, `VariantId` and the base `Price` rather than `&Product`; the composing command (cart) loads the product and passes them in. Ask before adding a new edge between domain crates.
+
 - `hypha-core`: shared types only — `Money`/`Price`/`BasisPoints` (`money/`), prefixed IDs (`ids.rs`), `CountryCode`, `Scope`, `Ctx`/`Actor`, generic ports (`IdGenerator`, `RepoError` in `ports.rs`). No domain logic, no I/O.
 - Domain crates (`hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-cart`): aggregates with private fields and validated constructors, a repository trait (port) per aggregate in `repo.rs`, error enums in `error.rs`, and commands in `commands.rs` (currently only products has commands — use it as the template).
 - `hypha-testkit`: in-memory repos (`InMemoryProductRepo`, `InMemoryMarketRepo`) and deterministic ports (`SequentialIds`). It depends on domain crates, so domain crates use it only as a dev-dependency from their `tests/` folder.
