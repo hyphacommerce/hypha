@@ -51,6 +51,8 @@ Leaf functions take the plain values they need (IDs, `Price`), not another leaf'
 
 Command shape (see `crates/hypha-products/src/commands.rs`): `async fn cmd(ctx: &Ctx, repo: &impl Repo, ids: &impl IdGenerator, input: RawInput) -> Result<_, CommandError>`; first line `ctx.require(Scope::...)?`, then validate raw input through domain constructors. `CommandError` composes lower errors via `#[from]`.
 
+When a command needs more than two or three ports, group them in a `XxxPorts` trait with associated types (see `CartPorts` in `crates/hypha-cart/src/commands.rs`) and take `ports: &impl XxxPorts`. Hosts and test worlds implement it once; static dispatch keeps `Send` provable. Don't bundle them into `&dyn` objects.
+
 ## Hard constraints
 
 - Core and domain crates must compile for `wasm32-unknown-unknown`: no Tokio, threads, `std::fs`, `SystemTime::now()` or random UUID generation there. Time, IDs and randomness come in through ports.

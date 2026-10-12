@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_cart::{
-    AddLine, CartError, CartRepo, CommandError, PriceCartError, PricedCart, add_line, create_cart,
-    get_cart,
+    AddLine, CartError, CartPorts, CartRepo, CommandError, PriceCartError, PricedCart, add_line,
+    create_cart, get_cart,
 };
 use hypha_core::{
     Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, Ctx, Currency, MarketId, Money,
@@ -123,15 +123,9 @@ impl World {
     }
 
     fn create_cart(&self) -> CartId {
-        block_on(create_cart(
-            &Ctx::system(),
-            &self.markets,
-            &self.carts,
-            &self.ids,
-            market_id(),
-        ))
-        .unwrap()
-        .id()
+        block_on(create_cart(&Ctx::system(), self, &self.ids, market_id()))
+            .unwrap()
+            .id()
     }
 
     fn add(
@@ -143,11 +137,7 @@ impl World {
     ) -> Result<PricedCart, CommandError> {
         block_on(add_line(
             ctx,
-            &self.carts,
-            &self.products,
-            &self.markets,
-            &self.catalogs,
-            &self.price_lists,
+            self,
             AddLine {
                 cart,
                 product: pid(name),
@@ -158,15 +148,7 @@ impl World {
     }
 
     fn get(&self, cart: CartId) -> Result<PricedCart, CommandError> {
-        block_on(get_cart(
-            &Ctx::system(),
-            &self.carts,
-            &self.products,
-            &self.markets,
-            &self.catalogs,
-            &self.price_lists,
-            cart,
-        ))
+        block_on(get_cart(&Ctx::system(), self, cart))
     }
 
     fn stored_line_count(&self, cart: CartId) -> usize {
@@ -178,17 +160,35 @@ impl World {
     }
 }
 
+impl CartPorts for World {
+    type Carts = InMemoryCartRepo;
+    type Products = InMemoryProductRepo;
+    type Markets = InMemoryMarketRepo;
+    type Catalogs = InMemoryCatalogRepo;
+    type PriceLists = InMemoryPriceListRepo;
+
+    fn carts(&self) -> &Self::Carts {
+        &self.carts
+    }
+    fn products(&self) -> &Self::Products {
+        &self.products
+    }
+    fn markets(&self) -> &Self::Markets {
+        &self.markets
+    }
+    fn catalogs(&self) -> &Self::Catalogs {
+        &self.catalogs
+    }
+    fn price_lists(&self) -> &Self::PriceLists {
+        &self.price_lists
+    }
+}
+
 #[test]
 fn create_cart_rejects_unknown_market() {
     let world = World::new();
     let unknown = MarketId::from_uuid(Uuid::from_u128(9999));
-    let result = block_on(create_cart(
-        &Ctx::system(),
-        &world.markets,
-        &world.carts,
-        &world.ids,
-        unknown,
-    ));
+    let result = block_on(create_cart(&Ctx::system(), &world, &world.ids, unknown));
     assert_eq!(result, Err(CommandError::MarketNotFound(unknown)));
 }
 

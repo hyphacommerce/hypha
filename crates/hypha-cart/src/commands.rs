@@ -27,21 +27,40 @@ pub enum CommandError {
     MarketNotFound(MarketId),
 }
 
-pub async fn create_cart<M: MarketRepo, C: CartRepo, I: IdGenerator>(
+/// Every port the cart commands use, implemented once by whoever owns the repos
+/// (a host's app state, a test world).
+///
+/// Associated types instead of `&dyn` keep dispatch static, so hosts can still
+/// prove `Send` where they need it. Adding a port later touches this trait and
+/// its impls, not every command signature.
+pub trait CartPorts {
+    type Carts: CartRepo;
+    type Products: ProductRepo;
+    type Markets: MarketRepo;
+    type Catalogs: CatalogRepo;
+    type PriceLists: PriceListRepo;
+
+    fn carts(&self) -> &Self::Carts;
+    fn products(&self) -> &Self::Products;
+    fn markets(&self) -> &Self::Markets;
+    fn catalogs(&self) -> &Self::Catalogs;
+    fn price_lists(&self) -> &Self::PriceLists;
+}
+
+pub async fn create_cart<S: CartPorts, I: IdGenerator>(
     ctx: &Ctx,
-    markets: &M,
-    carts: &C,
+    ports: &S,
     ids: &I,
     market: MarketId,
 ) -> Result<Cart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
 
-    if markets.get(market).await?.is_none() {
+    if ports.markets().get(market).await?.is_none() {
         return Err(CommandError::MarketNotFound(market));
     }
 
     let cart = Cart::new(CartId::from_uuid(ids.new_uuid()), market);
-    carts.save(&cart).await?;
+    ports.carts().save(&cart).await?;
     Ok(cart)
 }
 
@@ -56,71 +75,53 @@ pub struct AddLine {
 ///
 /// The variant must be sellable in the cart's market right now: the product is active,
 /// owns the variant, and is in the market's catalog with a price in its currency.
-pub async fn add_line<C, P, M, K, L>(
+pub async fn add_line<S: CartPorts>(
     ctx: &Ctx,
-    carts: &C,
-    products: &P,
-    markets: &M,
-    catalogs: &K,
-    price_lists: &L,
+    ports: &S,
     input: AddLine,
-) -> Result<PricedCart, CommandError>
-where
-    C: CartRepo,
-    P: ProductRepo,
-    M: MarketRepo,
-    K: CatalogRepo,
-    L: PriceListRepo,
-{
+) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
 
     let quantity = Quantity::new(input.quantity)?;
-    let mut cart = carts
+    let mut cart = ports
+        .carts()
         .get(input.cart)
         .await?
         .ok_or(CommandError::CartNotFound(input.cart))?;
-    let product = products
+    let product = ports
+        .products()
         .get(input.product)
         .await?
         .ok_or(PriceCartError::ProductNotFound(input.product))?;
 
-    let (market, catalogs, price_lists) =
-        load_pricing(markets, catalogs, price_lists, cart.market()).await?;
+    let (market, catalogs, price_lists) = load_pricing(ports, cart.market()).await?;
 
     price_line(&product, input.variant, &market, &catalogs, &price_lists)?;
     cart.add_line(input.product, input.variant, quantity)?;
 
     // Price the whole cart before saving, so a failure stores nothing.
-    let cart_products = load_products(products, &cart).await?;
+    let cart_products = load_products(ports, &cart).await?;
     let priced = price_cart(&cart, &cart_products, &market, &catalogs, &price_lists)?;
 
-    carts.save(&cart).await?;
+    ports.carts().save(&cart).await?;
     Ok(priced)
 }
 
 /// The cart at current prices.
-pub async fn get_cart<C, P, M, K, L>(
+pub async fn get_cart<S: CartPorts>(
     ctx: &Ctx,
-    carts: &C,
-    products: &P,
-    markets: &M,
-    catalogs: &K,
-    price_lists: &L,
+    ports: &S,
     id: CartId,
-) -> Result<PricedCart, CommandError>
-where
-    C: CartRepo,
-    P: ProductRepo,
-    M: MarketRepo,
-    K: CatalogRepo,
-    L: PriceListRepo,
-{
+) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsRead)?;
 
-    let cart = carts.get(id).await?.ok_or(CommandError::CartNotFound(id))?;
-    let (market, catalogs, price_lists) =
-        load_pricing(markets, catalogs, price_lists, cart.market()).await?;
-    let cart_products = load_products(products, &cart).await?;
+    let cart = ports
+        .carts()
+        .get(id)
+        .await?
+        .ok_or(CommandError::CartNotFound(id))?;
+    let (market, catalogs, price_lists) = load_pricing(ports, cart.market()).await?;
+    let cart_products = load_products(ports, &cart).await?;
 
     Ok(price_cart(
         &cart,
@@ -133,21 +134,21 @@ where
 
 /// The market plus its catalog and price list, if any. Missing ones are left out
 /// rather than reported here: `resolve_price` turns them into precise errors.
-async fn load_pricing<M: MarketRepo, K: CatalogRepo, L: PriceListRepo>(
-    markets: &M,
-    catalogs: &K,
-    price_lists: &L,
+async fn load_pricing<S: CartPorts>(
+    ports: &S,
     market_id: MarketId,
 ) -> Result<(Market, Vec<Catalog>, Vec<PriceList>), CommandError> {
-    let market = markets
+    let market = ports
+        .markets()
         .get(market_id)
         .await?
         .ok_or(CommandError::MarketNotFound(market_id))?;
-    let catalog = catalogs
+    let catalog = ports
+        .catalogs()
         .get_by_context(CatalogContext::Market(market_id))
         .await?;
     let price_list = match catalog.as_ref().and_then(|c| c.price_list()) {
-        Some(id) => price_lists.get(id).await?,
+        Some(id) => ports.price_lists().get(id).await?,
         None => None,
     };
     Ok((
@@ -159,16 +160,13 @@ async fn load_pricing<M: MarketRepo, K: CatalogRepo, L: PriceListRepo>(
 
 /// Loads each product in the cart once. Missing products are left out;
 /// `price_cart` reports them as `ProductNotFound`.
-async fn load_products<P: ProductRepo>(
-    products: &P,
-    cart: &Cart,
-) -> Result<Vec<Product>, CommandError> {
+async fn load_products<S: CartPorts>(ports: &S, cart: &Cart) -> Result<Vec<Product>, CommandError> {
     let mut loaded: Vec<Product> = Vec::new();
     for line in cart.lines() {
         if loaded.iter().any(|p| p.id() == line.product()) {
             continue;
         }
-        if let Some(product) = products.get(line.product()).await? {
+        if let Some(product) = ports.products().get(line.product()).await? {
             loaded.push(product);
         }
     }
