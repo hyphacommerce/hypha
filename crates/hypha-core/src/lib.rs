@@ -14,7 +14,7 @@ pub use ids::{
     AgentId, CartId, CatalogId, IdError, MarketId, OptionId, OptionValueId, PriceListId, ProductId,
     UserId, VariantId,
 };
-pub use money::{BasisPoints, Currency, Money, MoneyError, Price};
+pub use money::{BasisPoints, Currency, Money, MoneyError, Price, UnknownCurrency};
 pub use ports::{IdGenerator, RepoError};
 pub use scope::Scope;
 pub use version::{Version, Versioned};

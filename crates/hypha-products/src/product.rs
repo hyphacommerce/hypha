@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt};
+use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{Price, ProductId, VariantId, Version, Versioned};
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,23 @@ impl ProductStatus {
 impl fmt::Display for ProductStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ProductStatus {
+    /// The text that didn't match a status.
+    type Err = String;
+
+    /// Parses the string produced by `as_str` (e.g. "active").
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        [
+            ProductStatus::Draft,
+            ProductStatus::Active,
+            ProductStatus::Archived,
+        ]
+        .into_iter()
+        .find(|status| status.as_str() == s)
+        .ok_or_else(|| s.to_string())
     }
 }
 
@@ -310,6 +327,18 @@ mod tests {
             ProductStatus::Active
         );
         assert!(serde_json::from_str::<ProductStatus>("\"Active\"").is_err());
+    }
+
+    #[test]
+    fn status_parses_its_own_strings_only() {
+        for status in [
+            ProductStatus::Draft,
+            ProductStatus::Active,
+            ProductStatus::Archived,
+        ] {
+            assert_eq!(status.as_str().parse::<ProductStatus>(), Ok(status));
+        }
+        assert_eq!("Active".parse::<ProductStatus>(), Err("Active".to_string()));
     }
 
     // ---- helpers ----

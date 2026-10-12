@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -31,6 +31,23 @@ impl Currency {
 impl fmt::Display for Currency {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// A currency code Hypha doesn't support.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("unknown currency {0:?}")]
+pub struct UnknownCurrency(pub String);
+
+impl FromStr for Currency {
+    type Err = UnknownCurrency;
+
+    /// Parses the ISO 4217 code produced by `as_str` (e.g. "EUR"); case-sensitive.
+    fn from_str(code: &str) -> Result<Self, Self::Err> {
+        [Currency::Eur, Currency::Usd, Currency::Rsd]
+            .into_iter()
+            .find(|c| c.as_str() == code)
+            .ok_or_else(|| UnknownCurrency(code.to_string()))
     }
 }
 
@@ -186,6 +203,17 @@ mod tests {
     }
 
     // ---- currency ----
+
+    #[test]
+    fn currency_parses_its_own_code_only() {
+        for c in [Currency::Eur, Currency::Usd, Currency::Rsd] {
+            assert_eq!(c.as_str().parse::<Currency>(), Ok(c));
+        }
+        assert_eq!(
+            "eur".parse::<Currency>(),
+            Err(UnknownCurrency("eur".to_string()))
+        );
+    }
 
     #[test]
     fn currency_display_matches_json() {
