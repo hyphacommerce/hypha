@@ -8,8 +8,10 @@ publish = false
 [dependencies]
 hypha-core.workspace = true
 hypha-products = { path = "../hypha-products" }
+hypha-markets = { path = "../hypha-markets" }
+hypha-cart = { path = "../hypha-cart" }
 hypha-testkit = { path = "../hypha-testkit" }
-axum = "0.8"
+axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 serde.workspace = true
 serde_json.workspace = true
