@@ -15,7 +15,7 @@ pub enum CommandError {
     Money(#[from] MoneyError),
     #[error(transparent)]
     Repo(#[from] RepoError),
-    #[error("handle {0:?} is already taken")]
+    #[error("handle {0} is already taken")]
     HandleTaken(Handle),
     #[error("product {0} not found")]
     NotFound(ProductId),
