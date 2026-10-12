@@ -19,10 +19,10 @@ Run all four before considering work done:
 cargo fmt --all
 cargo clippy --workspace --all-targets
 cargo test --workspace
-cargo build -p hypha-core -p hypha-products -p hypha-markets --target wasm32-unknown-unknown
+cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing --target wasm32-unknown-unknown
 ```
 
-Extend the wasm build list as domain crates gain real code (`hypha-pricing`, `hypha-cart` are still `cargo new` stubs).
+Extend the wasm build list as domain crates gain real code (`hypha-cart` is still a `cargo new` stub).
 
 - Single crate's tests: `cargo test -p hypha-products`
 - Single test by name: `cargo test -p hypha-products rejects_same_handle_products`

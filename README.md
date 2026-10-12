@@ -63,7 +63,7 @@ cargo test --workspace
 Check that the core still builds for WASM:
 
 ```bash
-cargo build -p hypha-core -p hypha-products -p hypha-markets --target wasm32-unknown-unknown
+cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing --target wasm32-unknown-unknown
 ```
 
 Start the HTTP host on `http://127.0.0.1:3000` (data lives in memory). Set the log level with `RUST_LOG`:

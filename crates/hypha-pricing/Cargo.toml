@@ -5,9 +5,13 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
-uuid.workspace = true
+hypha-core.workspace = true
+hypha-products = { path = "../hypha-products" }
+hypha-markets = { path = "../hypha-markets" }
 thiserror.workspace = true
-serde.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
 
 [lints]
 workspace = true
