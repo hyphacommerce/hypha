@@ -7,11 +7,23 @@ struct Migration {
 }
 
 /// Every migration, in order. Append only: never edit or reorder an applied one.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "products",
-    sql: include_str!("../migrations/0001_products.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "products",
+        sql: include_str!("../migrations/0001_products.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "markets",
+        sql: include_str!("../migrations/0002_markets.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "carts",
+        sql: include_str!("../migrations/0003_carts.sql"),
+    },
+];
 
 /// Applies the migrations that haven't been applied yet, each in its own transaction.
 ///

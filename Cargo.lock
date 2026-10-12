@@ -448,7 +448,9 @@ name = "hypha-store-postgres"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "hypha-cart",
  "hypha-core",
+ "hypha-markets",
  "hypha-products",
  "hypha-testkit",
  "tokio",

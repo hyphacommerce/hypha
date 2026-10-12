@@ -264,7 +264,12 @@ impl Product {
    **Done (2026-10-12)**, with `worker` 0.8.7, `wrangler` 4 and local D1. Results are in
    section 6.
 5. `hypha-store-postgres`: schema, migrations, the repo impls. The contract tests pass
-   against Postgres.
+   against Postgres. **Done (2026-10-13)** on `tokio-postgres` (section 7): all five
+   contracts pass against Docker Postgres 18.6, and injected bugs (missing version checks,
+   missing key mappings) make them fail. It also builds for `wasm32`. Batched writes use
+   `unnest` (`WITH ORDINALITY` to keep order). Product children are still inserted row by
+   row; batch them if large products make saves slow. `uuid[]` for variant selections is
+   Postgres-only, which is acceptable now that D1 is optional.
 6. The host chooses storage from `DATABASE_URL`. `scripts/e2e.sh` passes against
    Postgres.
 7. Later, in its own note: the Cloudflare host and the D1 adapter.

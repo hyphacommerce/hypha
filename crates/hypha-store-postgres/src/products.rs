@@ -11,6 +11,7 @@ use tokio_postgres::{Client, GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
+    columns::{currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore},
 };
@@ -121,16 +122,6 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         product.set_version(new_version);
         Ok(())
     }
-}
-
-fn version_to_db(version: Version) -> Result<i64, RepoError> {
-    i64::try_from(version.value()).map_err(|_| corrupt(format!("version {version:?} too large")))
-}
-
-fn version_from_db(version: i64) -> Result<Version, RepoError> {
-    u64::try_from(version)
-        .map(Version::new)
-        .map_err(|_| corrupt(format!("negative version {version}")))
 }
 
 async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<(), RepoError> {
@@ -254,8 +245,7 @@ async fn load(client: &Client, ids: &[Uuid]) -> Result<Vec<Product>, RepoError> 
         .await
         .map_err(repo_error)?
     {
-        let currency: String = row.get(4);
-        let currency = currency.parse().map_err(corrupt)?;
+        let currency = currency_from_db(row.get(4))?;
         let base_price = Money::new(row.get(3), currency).map_err(corrupt)?;
         let selections: Vec<Uuid> = row.get(5);
         variants

@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 hypha-core.workspace = true
 hypha-products = { path = "../hypha-products" }
+hypha-markets = { path = "../hypha-markets" }
+hypha-cart = { path = "../hypha-cart" }
 uuid.workspace = true
 # No runtime feature: the adapter never opens connections, hosts hand it a Client.
 tokio-postgres = { version = "0.7.18", default-features = false, features = ["with-uuid-1"] }

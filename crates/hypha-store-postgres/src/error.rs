@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
+use hypha_cart::repo::keys as cart_keys;
 use hypha_core::RepoError;
+use hypha_markets::repo::keys as market_keys;
 use hypha_products::repo::keys as product_keys;
 use tokio_postgres::error::SqlState;
 
@@ -10,6 +12,12 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("products_pkey", product_keys::PRODUCT_ID),
     ("product_handle", product_keys::HANDLE),
     ("variant_id", product_keys::VARIANT_ID),
+    ("markets_pkey", market_keys::MARKET_ID),
+    ("market_country", market_keys::COUNTRY),
+    ("catalogs_pkey", market_keys::CATALOG_ID),
+    ("catalog_context", market_keys::CATALOG_CONTEXT),
+    ("price_lists_pkey", market_keys::PRICE_LIST_ID),
+    ("carts_pkey", cart_keys::CART_ID),
 ];
 
 /// Maps a driver error to the repo error the ports promise.

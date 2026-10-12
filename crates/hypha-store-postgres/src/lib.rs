@@ -12,7 +12,10 @@
 //!   check, so it maps onto D1's `batch()` too;
 //! - errors are mapped by SQLSTATE and constraint name (`error.rs`), never by message text.
 
+mod carts;
+mod columns;
 mod error;
+mod markets;
 mod migrate;
 mod products;
 mod store;

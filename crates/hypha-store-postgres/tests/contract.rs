@@ -42,3 +42,27 @@ async fn product_repo() {
     let Some(url) = database_url() else { return };
     contract::product_repo(async || fresh_store(&url, "contract_products").await).await;
 }
+
+#[tokio::test]
+async fn market_repo() {
+    let Some(url) = database_url() else { return };
+    contract::market_repo(async || fresh_store(&url, "contract_markets").await).await;
+}
+
+#[tokio::test]
+async fn catalog_repo() {
+    let Some(url) = database_url() else { return };
+    contract::catalog_repo(async || fresh_store(&url, "contract_catalogs").await).await;
+}
+
+#[tokio::test]
+async fn price_list_repo() {
+    let Some(url) = database_url() else { return };
+    contract::price_list_repo(async || fresh_store(&url, "contract_price_lists").await).await;
+}
+
+#[tokio::test]
+async fn cart_repo() {
+    let Some(url) = database_url() else { return };
+    contract::cart_repo(async || fresh_store(&url, "contract_carts").await).await;
+}
