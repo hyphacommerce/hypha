@@ -260,6 +260,9 @@ impl Product {
 
    The Postgres adapter is then written in the same shape: each save is one atomic write
    with no reads inside, and no Postgres-only features.
+
+   **Done (2026-10-12)**, with `worker` 0.8.7, `wrangler` 4 and local D1. Results are in
+   section 6.
 5. `hypha-store-postgres`: schema, migrations, the repo impls. The contract tests pass
    against Postgres.
 6. The host chooses storage from `DATABASE_URL`. `scripts/e2e.sh` passes against
@@ -282,3 +285,48 @@ Steps 1–3 involve no database at all, and they're where most of the design ris
 - **Durable Objects SQLite** for coordination within a single object (for example a
   per-store sequence of order numbers). D1 docs say its limits and pricing are identical
   to D1. Not a replacement for the storage ports.
+
+## 6. D1 experiment results (step 4)
+
+Setup: a throwaway Worker (`worker` 0.8.7 with the `d1` feature), run with
+`wrangler dev --local`. That's local D1, on the same SQLite engine as production. Error
+text may differ slightly in production, so the adapter should match on the stable parts
+quoted below. Each experiment ran on a freshly created schema.
+
+| # | Experiment | Observed |
+| --- | --- | --- |
+| 1 | `batch()` whose 2nd insert breaks a UNIQUE | Error, and **the 1st insert was rolled back** (0 rows). Batches are atomic through `workers-rs`. |
+| 2 | UNIQUE violation, as seen in Rust | `UNIQUE constraint failed: products.handle: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)`. For the primary key: `…products.id … SQLITE_CONSTRAINT_PRIMARYKEY`. The **constraint name is not reported**, even when the constraint is declared as `CONSTRAINT product_handle UNIQUE (handle)`. Only `table.column` is. |
+| 3 | Save batch with a plain `UPDATE … WHERE version = 99` (stored version 1), then delete and insert lines | **No error.** `meta.changes` = `[0, 1, 1]`. The version stayed 1, but **the lines were replaced**. The trap is real: someone else's cart would be silently overwritten. |
+| 4a | Same batch with `SET version = CASE WHEN version = ?2 THEN version + 1 END` (wrong version) | Error `NOT NULL constraint failed: carts.version`. **The whole batch rolled back**, so the lines are untouched. The fix works. |
+| 4b | Same, with the right version | No error, `changes` = `[1, 1, 1]`, version 2, lines replaced. A normal save. |
+| 5 | Save of a cart that doesn't exist | With new lines: `FOREIGN KEY constraint failed` (no table named) and nothing written; **foreign keys are enforced by default**. Without new lines: no error, `changes` = `[0, 0]`, nothing written. |
+| 6 | Read back 2⁵³ − 1 and 2⁵³ + 1 | 2⁵³ − 1 is exact. 2⁵³ + 1 came back as **9007199254740992, silently wrong** (`CAST(v AS TEXT)` shows the true value). This confirms D6. |
+
+Also found: **`impl Display for D1Error` in `worker` 0.8.7 panics** when the JS error's
+`cause` isn't a string. The panic hung the request (the runtime reported it as hung, not
+as an error). Adapters must not format a `D1Error` with `{}`, and must not call
+`worker::Error::to_string()` on one. Use `D1Error::cause()` and the inner
+`js_sys::Error::message()`.
+
+### Rules for the D1 adapter (and the shape the Postgres adapter follows)
+
+- **Every `update` is one `batch()`** whose first statement is the version step:
+  `UPDATE <root> SET version = CASE WHEN version = ?expected THEN version + 1 END, … WHERE id = ?id`,
+  with `version INTEGER NOT NULL`. The child-row statements follow it.
+- **Map the errors** (on `cause()`):
+  - `NOT NULL constraint failed: <root>.version` → `StaleVersion`
+  - `FOREIGN KEY constraint failed` inside a save batch → `StaleVersion` (the root is gone)
+  - `UNIQUE constraint failed: <table>.<column(s)>` → `Duplicate(key)`, using a fixed
+    table of `"products.handle" → keys::HANDLE`, `"products.id" → keys::PRODUCT_ID`,
+    and so on. The contract tests check each key.
+  - anything else → `Backend`
+- **After a successful batch, check that the version statement reported
+  `meta.changes == 1`.** If it's 0, the root row didn't exist and nothing was written
+  (experiment 5 without lines), so return `StaleVersion`.
+- **Inserts** are one batch too: the root (with `version = 1`), then the children.
+- **Postgres** follows the same shape inside one short transaction: the same
+  `CASE … END` / `NOT NULL` trick, or `WHERE version = $2` plus a check of the affected
+  row count before touching the children. It reads nothing inside the transaction and uses
+  no Postgres-only features. Unique keys are mapped from constraint names, which Postgres
+  does report (`products_handle_key`).
