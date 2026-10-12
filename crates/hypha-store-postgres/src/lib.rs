@@ -20,5 +20,5 @@ mod migrate;
 mod products;
 mod store;
 
-pub use migrate::migrate;
+pub use migrate::{CORE, MigrateError, Migration, MigrationSet, migrate};
 pub use store::{PgConnection, PgStore};

@@ -7,7 +7,7 @@
 //! Without `DATABASE_URL` the tests print a notice and pass, so `cargo test --workspace`
 //! still works on machines without Docker.
 
-use hypha_store_postgres::{PgStore, migrate};
+use hypha_store_postgres::{CORE, PgStore, migrate};
 use hypha_testkit::contract;
 use tokio_postgres::{Client, NoTls};
 
@@ -33,7 +33,7 @@ async fn fresh_store(url: &str, schema: &str) -> PgStore<Client> {
         ))
         .await
         .expect("reset schema");
-    migrate(&mut client).await.expect("migrate");
+    migrate(&mut client, &[CORE]).await.expect("migrate");
     PgStore::new(client)
 }
 

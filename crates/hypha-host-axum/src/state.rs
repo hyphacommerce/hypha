@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use hypha_cart::CartPorts;
 use hypha_core::IdGenerator;
-use hypha_store_postgres::{PgConnection, PgStore, migrate};
+use hypha_store_postgres::{CORE, PgConnection, PgStore, migrate};
 use hypha_testkit::{
     InMemoryCartRepo, InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo,
     InMemoryProductRepo,
@@ -117,7 +117,7 @@ impl PgStorage {
             .get()
             .await
             .map_err(|e| format!("cannot connect to Postgres: {e}"))?;
-        migrate(&mut conn)
+        migrate(&mut conn, &[CORE])
             .await
             .map_err(|e| format!("migrations failed: {e}"))?;
         Ok(Self { pool })
