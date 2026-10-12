@@ -12,7 +12,7 @@
 | D1 | The version is a field on the aggregate root |
 | D2 | Unique keys are `&'static str` constants owned by each domain crate, each covered by a contract test |
 | D3 | Catalog products and price-list fixed prices move behind narrow, batched port methods first (step 1) |
-| D4 | sqlx runtime queries (`query_as`) to start |
+| D4 | **Changed 2026-10-13:** `tokio-postgres`, not sqlx, using only `query_typed` / `batch_execute`, so the same adapter also runs on Cloudflare Workers through Hyperdrive. See section 7 |
 | D5 | Docker: `compose.yaml` at the repo root (Postgres 18) |
 | D6 | `Money` amounts are capped at ±(2⁵³ − 1) |
 
@@ -216,7 +216,7 @@ impl Product {
   `PgStore { pool }`. Migrations live in `migrations/` and run with `sqlx::migrate!`.
 - `hypha-host-axum` picks its storage at startup: `DATABASE_URL` set means Postgres,
   otherwise in memory.
-- **Decided: D4, sqlx query style.**
+- **Decided: D4, sqlx query style.** *Superseded by section 7: `tokio-postgres`.*
   - **(a) Runtime `query_as`.** No database needed at build time. Mistakes surface in
     the contract tests.
   - **(b) Compile-time `query!` macros**, with an offline `.sqlx` cache committed via
@@ -330,3 +330,64 @@ as an error). Adapters must not format a `D1Error` with `{}`, and must not call
   row count before touching the children. It reads nothing inside the transaction and uses
   no Postgres-only features. Unique keys are mapped from constraint names, which Postgres
   does report (`products_handle_key`).
+
+## 7. Postgres from Cloudflare Workers through Hyperdrive (2026-10-13)
+
+**Question:** can the Postgres adapter run on Cloudflare too, so one SQL adapter serves
+every host? **Answer: yes, verified locally.**
+
+The pieces:
+- `worker` 0.8.7 has a `tokio-postgres` feature, and `Env::hyperdrive("…")` returns a
+  binding with `connect() -> Socket` and `connection_string()`.
+- `tokio_postgres::Config::connect_raw(socket, worker::postgres_tls::PassthroughTls)`
+  opens a `Client` on that socket. `tokio-postgres` is built with its `js` feature for
+  WASM, and the `Connection` future is driven with `wasm_bindgen_futures::spawn_local`.
+- `tokio-postgres` documents `query_typed` as being for "environments where prepared
+  statements aren't supported (such as Cloudflare Workers with Hyperdrive)". It sends
+  each query without a named prepared statement, so it has no prepare and close round
+  trips.
+
+Experiment: a throwaway Worker (`D:\dev\hypha-pg-spike`, not merged) running under
+`wrangler dev --local`. Its Hyperdrive binding's `localConnectionString` pointed at the
+Docker Postgres 18.6 from `compose.yaml`.
+
+| # | Experiment | Observed |
+| --- | --- | --- |
+| 0–1 | Connect through the binding; `query_typed("SELECT version()")` | Works. Postgres 18.6 answered over the Hyperdrive socket. |
+| 2 | Unique violations | Structured errors: SQLSTATE `23505`, `constraint = "product_handle"` (our declared name) or `"products_pkey"`, plus `table`. **No text parsing needed**, unlike D1. |
+| 3 | Interactive transaction: `UPDATE … WHERE version = $2 RETURNING version`, then replace the lines only if a row came back | Stale (expected 99): no row, rolled back, lines untouched. Good (expected 1): committed, version 2, lines replaced. `BEGIN`/`COMMIT`/`ROLLBACK` work. |
+| 4 | The D1-shaped `CASE … END` / `NOT NULL` trick | SQLSTATE `23502` on `carts.version`. The transaction was rolled back and nothing changed. The same SQL shape works on both backends. |
+| 5 | `i64` round trip of 2⁵³ + 1 | **Exact.** The binary protocol never passes through a JavaScript number, so the precision problem exists only on D1. The money cap (D6) still matters for JSON clients and D1. |
+| 6 | A named prepared statement (`client.query`) | Works locally, but local Hyperdrive doesn't pool, so this **says nothing about production**. Rule: use `query_typed` only. |
+
+### Consequences for the plan
+
+- **One SQL adapter for all hosts.** `hypha-store-postgres` uses `tokio-postgres` and
+  builds for native targets (axum on a VPS, Lambda) **and** for `wasm32-unknown-unknown`
+  (Workers + Hyperdrive). It never owns a runtime or a pool: it receives a `Client`.
+  - The axum host pools connections (for example `deadpool-postgres`) and lends a
+    `Client` per request.
+  - The Workers host opens one connection per request through the Hyperdrive binding.
+    Hyperdrive pools on Cloudflare's side; in-Worker pools don't work, since Workers keep
+    no state between requests.
+- **Adapter rules:**
+  - Only `query_typed*` and `batch_execute`, never `query`, `prepare` or `execute`.
+  - Map errors by SQLSTATE and constraint name:
+    - `23505` + constraint name → `Duplicate(key)`, using a fixed table, for example
+      `product_handle → keys::HANDLE`
+    - `23502` on `<root>.version` → `StaleVersion`
+    - `23503` inside a save → `StaleVersion`
+    - anything else → `Backend`
+  - Keep the D1 save shape: the version step first, then the children, in one short
+    transaction with no reads in it.
+- **Hyperdrive's query cache must be off for this database** (`--caching-disabled`). It
+  caches reads for up to 60 s and isn't invalidated by writes, so a command would load old
+  versions and hit avoidable `StaleVersion` conflicts. A separate, cached Hyperdrive
+  config can be added later for storefront reads that don't need to be fresh.
+- **Migrations:** sqlx's migrator is gone. A small runner with `include_str!`'d SQL files
+  and a `schema_migrations` table, run from native code (a CLI or host startup), never
+  from a Worker.
+- **D1 becomes optional.** It's still viable (section 6), but no longer needed for the
+  Cloudflare host. Revisit it for very cheap per-store databases.
+- **Still unverified:** production Hyperdrive (transaction pooling, real TLS, latency),
+  because it needs a Cloudflare account. Test it before relying on the Workers host.
