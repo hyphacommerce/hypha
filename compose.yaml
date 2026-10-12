@@ -1,0 +1,29 @@
+# Local development database for hypha-store-postgres (design note 0001, step 5).
+#
+#   docker compose up -d          # start Postgres in the background
+#   docker compose down           # stop it (data is kept in the named volume)
+#   docker compose down -v        # stop it and delete the data
+#
+# Connection string for the host and the contract tests:
+#   DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha
+#
+# Development only: the credentials are not secret.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: hypha
+      POSTGRES_PASSWORD: hypha
+      POSTGRES_DB: hypha
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hypha -d hypha"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  postgres-data:

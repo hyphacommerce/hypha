@@ -13,7 +13,7 @@
 | D2 | Unique keys are `&'static str` constants owned by each domain crate, each covered by a contract test |
 | D3 | Catalog products and price-list fixed prices move behind narrow, batched port methods first (step 1) |
 | D4 | sqlx runtime queries (`query_as`) to start |
-| D5 | Deferred to step 5 (first step needing a database). Default is a Docker `compose.yaml` unless Danilo prefers a native install |
+| D5 | Docker: `compose.yaml` at the repo root (Postgres 18) |
 | D6 | `Money` amounts are capped at ±(2⁵³ − 1) |
 
 ## 1. Problem
