@@ -6,6 +6,7 @@ mod customers;
 mod inventory;
 mod markets;
 mod products;
+mod stores;
 mod taxes;
 
 use axum::{
@@ -24,6 +25,8 @@ use crate::{
 macro_rules! router {
     ($storage:ty) => {
         Router::new()
+            // the store this deployment serves
+            .route("/store", get(stores::fetch::<$storage>))
             // products
             .route("/products", post(products::create::<$storage>))
             .route("/products/{id}", get(products::fetch::<$storage>))

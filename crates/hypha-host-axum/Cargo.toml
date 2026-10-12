@@ -15,6 +15,7 @@ hypha-inventory = { path = "../hypha-inventory" }
 hypha-customers = { path = "../hypha-customers" }
 hypha-testkit = { path = "../hypha-testkit" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
+hypha-stores = { path = "../hypha-stores" }
 deadpool-postgres = "0.14.2"
 tokio-postgres = "0.7.18"
 axum = { version = "0.8", features = ["macros"] }

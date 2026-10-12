@@ -149,7 +149,7 @@ pub(super) async fn create<S: Storage>(
     JsonBody(req): JsonBody<CreateCartRequest>,
 ) -> Result<(StatusCode, Json<CartResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let cart = create_cart(&ctx, &ports, &state.ids, req.country).await?;
     // A new cart is empty, so pricing it can't fail; return the same shape as GET.
     let priced = get_cart(&ctx, &ports, cart.id()).await?;
@@ -161,7 +161,7 @@ pub(super) async fn fetch<S: Storage>(
     PathId(id): PathId<CartId>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let priced = get_cart(&ctx, &ports, id).await?;
     Ok(Json(CartResponse::from(&priced)))
 }
@@ -172,7 +172,7 @@ pub(super) async fn add<S: Storage>(
     JsonBody(req): JsonBody<AddLineRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = AddLine {
         cart: id,
         variant: req.variant,
@@ -188,7 +188,7 @@ pub(super) async fn set_email<S: Storage>(
     JsonBody(req): JsonBody<SetEmailRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     set_cart_email(&ctx, &ports, id, req.email).await?;
     let priced = get_cart(&ctx, &ports, id).await?;
     Ok(Json(CartResponse::from(&priced)))
@@ -200,7 +200,7 @@ pub(super) async fn set_customer<S: Storage>(
     JsonBody(req): JsonBody<SetCustomerRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     set_cart_customer(&ctx, &ports, id, req.customer).await?;
     let priced = get_cart(&ctx, &ports, id).await?;
     Ok(Json(CartResponse::from(&priced)))

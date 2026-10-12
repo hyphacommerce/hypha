@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use hypha_cart::CartPorts;
-use hypha_core::IdGenerator;
+use hypha_core::{IdGenerator, StoreId};
 use hypha_store_postgres::{CORE, PgConnection, PgStore, migrate};
+use hypha_stores::StoreRepo;
 use hypha_testkit::{
     InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryInventoryItemRepo,
     InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo,
-    InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
+    InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
 };
 use uuid::Uuid;
 
@@ -25,6 +26,17 @@ impl IdGenerator for UuidV7Ids {
 pub struct AppState<S> {
     pub storage: S,
     pub ids: UuidV7Ids,
+    /// The one store this deployment serves (design note 0003, model A), set at startup.
+    pub store: StoreId,
+}
+
+impl<S: Storage> AppState<S> {
+    /// Ports scoped to the store this request is for. With one store per deployment
+    /// that's always `self.store`; a multi-store host would resolve it from the request
+    /// (API key, hostname) here, and nothing else would change.
+    pub async fn ports(&self) -> Result<S::Ports<'_>, ApiError> {
+        self.storage.ports(self.store).await
+    }
 }
 
 pub type SharedState<S> = Arc<AppState<S>>;
@@ -40,14 +52,24 @@ pub trait Storage: Send + Sync + 'static {
     type Ports<'a>: CartPorts
     where
         Self: 'a;
+    type Directory<'a>: StoreRepo
+    where
+        Self: 'a;
 
-    async fn ports(&self) -> Result<Self::Ports<'_>, ApiError>;
+    /// Repositories that only see `store`'s data (design note 0003). With one store per
+    /// deployment (model A) the database *is* the store, so implementations ignore it;
+    /// shared tables (B) would filter by it, a database per store (C) would pick by it.
+    async fn ports(&self, store: StoreId) -> Result<Self::Ports<'_>, ApiError>;
+
+    /// The stores this deployment knows (in model C, a control plane).
+    async fn directory(&self) -> Result<Self::Directory<'_>, ApiError>;
 }
 
 // ---------- in memory (default; data is lost on restart) ----------
 
 #[derive(Default)]
 pub struct MemoryStorage {
+    stores: InMemoryStoreRepo,
     products: InMemoryProductRepo,
     markets: InMemoryMarketRepo,
     catalogs: InMemoryCatalogRepo,
@@ -106,9 +128,14 @@ impl CartPorts for MemoryStorage {
 
 impl Storage for MemoryStorage {
     type Ports<'a> = &'a MemoryStorage;
+    type Directory<'a> = &'a InMemoryStoreRepo;
 
-    async fn ports(&self) -> Result<&MemoryStorage, ApiError> {
+    async fn ports(&self, _store: StoreId) -> Result<&MemoryStorage, ApiError> {
         Ok(self)
+    }
+
+    async fn directory(&self) -> Result<&InMemoryStoreRepo, ApiError> {
+        Ok(&self.stores)
     }
 }
 
@@ -150,11 +177,22 @@ impl PgStorage {
     }
 }
 
-impl Storage for PgStorage {
-    type Ports<'a> = PgStore<PooledClient>;
-
-    async fn ports(&self) -> Result<PgStore<PooledClient>, ApiError> {
+impl PgStorage {
+    async fn store(&self) -> Result<PgStore<PooledClient>, ApiError> {
         let conn = self.pool.get().await.map_err(ApiError::internal)?;
         Ok(PgStore::new(PooledClient(conn)))
+    }
+}
+
+impl Storage for PgStorage {
+    type Ports<'a> = PgStore<PooledClient>;
+    type Directory<'a> = PgStore<PooledClient>;
+
+    async fn ports(&self, _store: StoreId) -> Result<PgStore<PooledClient>, ApiError> {
+        self.store().await
+    }
+
+    async fn directory(&self) -> Result<PgStore<PooledClient>, ApiError> {
+        self.store().await
     }
 }

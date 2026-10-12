@@ -61,7 +61,7 @@ pub(super) async fn create_market_handler<S: Storage>(
     JsonBody(req): JsonBody<CreateMarketRequest>,
 ) -> Result<(StatusCode, Json<MarketResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = CreateMarket {
         name: req.name,
         countries: req.countries,
@@ -78,7 +78,7 @@ pub(super) async fn update_market_handler<S: Storage>(
     JsonBody(req): JsonBody<UpdateMarketRequest>,
 ) -> Result<Json<MarketResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let market = set_prices_include_tax(&ctx, ports.markets(), id, req.prices_include_tax)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
@@ -133,7 +133,7 @@ pub(super) async fn create_price_list_handler<S: Storage>(
     JsonBody(req): JsonBody<CreatePriceListRequest>,
 ) -> Result<(StatusCode, Json<PriceListResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = CreatePriceList {
         currency: req.currency,
         adjustment: req.adjustment,
@@ -148,7 +148,7 @@ pub(super) async fn set_fixed_prices_handler<S: Storage>(
     JsonBody(req): JsonBody<SetFixedPricesRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let prices = req
         .fixed_prices
         .into_iter()
@@ -169,7 +169,7 @@ pub(super) async fn remove_fixed_prices_handler<S: Storage>(
     JsonBody(req): JsonBody<RemoveFixedPricesRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     remove_fixed_prices(&ctx, ports.price_lists(), id, req.variants)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
@@ -218,7 +218,7 @@ pub(super) async fn create_catalog_handler<S: Storage>(
     JsonBody(req): JsonBody<CreateCatalogRequest>,
 ) -> Result<(StatusCode, Json<CatalogResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = CreateCatalog { market: req.market };
     let catalog =
         create_catalog(&ctx, ports.markets(), ports.catalogs(), &state.ids, input).await?;
@@ -231,7 +231,7 @@ pub(super) async fn add_products_handler<S: Storage>(
     JsonBody(req): JsonBody<CatalogProductsRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     add_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -242,7 +242,7 @@ pub(super) async fn remove_products_handler<S: Storage>(
     JsonBody(req): JsonBody<CatalogProductsRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     remove_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -253,7 +253,7 @@ pub(super) async fn assign_price_list_handler<S: Storage>(
     JsonBody(req): JsonBody<AssignPriceListRequest>,
 ) -> Result<Json<CatalogResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let catalog = assign_price_list(
         &ctx,
         ports.markets(),

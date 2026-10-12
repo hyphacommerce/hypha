@@ -22,7 +22,7 @@ Run all four before considering work done:
 cargo fmt --all
 cargo clippy --workspace --all-targets
 cargo test --workspace
-cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-tax -p hypha-inventory -p hypha-customers -p hypha-store-postgres --target wasm32-unknown-unknown
+cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-tax -p hypha-inventory -p hypha-customers -p hypha-stores -p hypha-store-postgres --target wasm32-unknown-unknown
 ```
 
 Extend the wasm build list when a domain crate or storage adapter is added.
@@ -45,7 +45,7 @@ Domain crates are layered; a crate may only depend on layers below it (Cargo rej
 | Hosts | `hypha-host-axum` | anything |
 | Storage adapters | `hypha-store-postgres` (tokio-postgres; native and Workers via Hyperdrive) | domain crates, core; never hosts |
 | Composing domains | `hypha-cart` (later orders) | leaf domains, core |
-| Leaf domains | `hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-tax`, `hypha-inventory`, `hypha-customers` | core; `hypha-pricing` → `hypha-markets` only |
+| Leaf domains | `hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-tax`, `hypha-inventory`, `hypha-customers`, `hypha-stores` | core; `hypha-pricing` → `hypha-markets` only |
 | Core | `hypha-core` | nothing internal |
 
 Leaf functions take the plain values they need (IDs, `Price`), not another leaf's aggregate. E.g. `resolve_price` takes `ProductId`, `VariantId` and the base `Price` rather than `&Product`; the composing command (cart) loads the product and passes them in. Ask before adding a new edge between domain crates.

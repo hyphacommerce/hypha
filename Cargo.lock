@@ -450,6 +450,7 @@ dependencies = [
  "hypha-markets",
  "hypha-products",
  "hypha-store-postgres",
+ "hypha-stores",
  "hypha-tax",
  "hypha-testkit",
  "serde",

@@ -9,7 +9,10 @@ use axum::Router;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use crate::state::{AppState, MemoryStorage, PgStorage, SharedState, UuidV7Ids};
+use hypha_core::Ctx;
+use hypha_stores::ensure_single_store;
+
+use crate::state::{AppState, MemoryStorage, PgStorage, SharedState, Storage, UuidV7Ids};
 
 #[tokio::main]
 async fn main() {
@@ -39,10 +42,29 @@ async fn main() {
     }
 }
 
-async fn serve<S: Send + Sync + 'static>(router: Router<SharedState<S>>, storage: S) {
+async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S) {
+    let ids = UuidV7Ids;
+    // One store per deployment (design note 0003, model A): created on first start.
+    let name = std::env::var("HYPHA_STORE_NAME").unwrap_or_else(|_| "My store".to_string());
+    let store = match storage.directory().await {
+        Ok(directory) => ensure_single_store(&Ctx::system(), &directory, &ids, &name)
+            .await
+            .map_err(|e| e.to_string()),
+        Err(_) => Err("cannot reach the store directory".to_string()),
+    };
+    let store = match store {
+        Ok(store) => store,
+        Err(e) => {
+            tracing::error!("store setup failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!(store = %store.id(), name = store.name(), "serving store");
+
     let state = Arc::new(AppState {
         storage,
-        ids: UuidV7Ids,
+        ids,
+        store: store.id(),
     });
     let app = router.layer(TraceLayer::new_for_http()).with_state(state);
 

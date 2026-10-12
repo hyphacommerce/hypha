@@ -139,7 +139,7 @@ pub(super) async fn create<S: Storage>(
     JsonBody(req): JsonBody<CreateCustomerRequest>,
 ) -> Result<(StatusCode, Json<CustomerResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = CreateCustomer {
         email: req.email,
         first_name: req.first_name,
@@ -155,7 +155,7 @@ pub(super) async fn fetch<S: Storage>(
     PathId(id): PathId<CustomerId>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let customer = get_customer(&ctx, ports.customers(), id).await?;
     Ok(Json(CustomerResponse::from(&customer)))
 }
@@ -166,7 +166,7 @@ pub(super) async fn update<S: Storage>(
     JsonBody(req): JsonBody<UpdateCustomerRequest>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = UpdateCustomer {
         email: req.email,
         first_name: req.first_name,
@@ -183,7 +183,7 @@ pub(super) async fn add_address_handler<S: Storage>(
     JsonBody(req): JsonBody<AddressRequest>,
 ) -> Result<(StatusCode, Json<CustomerResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let customer = add_address(&ctx, ports.customers(), &state.ids, id, req.into()).await?;
     Ok((StatusCode::CREATED, Json(CustomerResponse::from(&customer))))
 }
@@ -194,7 +194,7 @@ pub(super) async fn update_address_handler<S: Storage>(
     JsonBody(req): JsonBody<AddressRequest>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let customer = update_address(&ctx, ports.customers(), id, address, req.into()).await?;
     Ok(Json(CustomerResponse::from(&customer)))
 }
@@ -204,7 +204,7 @@ pub(super) async fn remove_address_handler<S: Storage>(
     PathId((id, address)): PathId<(CustomerId, AddressId)>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let customer = remove_address(&ctx, ports.customers(), id, address).await?;
     Ok(Json(CustomerResponse::from(&customer)))
 }

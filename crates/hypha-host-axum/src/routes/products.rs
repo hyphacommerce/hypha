@@ -64,7 +64,7 @@ pub(super) async fn create<S: Storage>(
     JsonBody(req): JsonBody<CreateProductRequest>,
 ) -> Result<(StatusCode, Json<ProductResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth (API keys / tokens)
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = CreateSimpleProduct {
         handle: req.handle,
         title: req.title,
@@ -79,7 +79,7 @@ pub(super) async fn fetch<S: Storage>(
     PathId(id): PathId<ProductId>,
 ) -> Result<Json<ProductResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let product = get_product(&ctx, ports.products(), id).await?;
     Ok(Json(ProductResponse::from(&product)))
 }
@@ -90,7 +90,7 @@ pub(super) async fn set_status<S: Storage>(
     JsonBody(req): JsonBody<SetStatusRequest>,
 ) -> Result<Json<ProductResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let product = set_product_status(&ctx, ports.products(), id, req.status).await?;
     Ok(Json(ProductResponse::from(&product)))
 }

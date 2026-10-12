@@ -50,7 +50,7 @@ pub(super) async fn create_class<S: Storage>(
     JsonBody(req): JsonBody<CreateTaxClassRequest>,
 ) -> Result<(StatusCode, Json<TaxClassResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = CreateTaxClass { name: req.name };
     let class = create_tax_class(&ctx, ports.tax_classes(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(TaxClassResponse::from(&class))))
@@ -61,7 +61,7 @@ pub(super) async fn assign_class<S: Storage>(
     JsonBody(req): JsonBody<AssignTaxClassRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = AssignTaxClass {
         products: req.products,
         class: req.tax_class,
@@ -126,7 +126,7 @@ pub(super) async fn create_region<S: Storage>(
     JsonBody(req): JsonBody<CreateTaxRegionRequest>,
 ) -> Result<(StatusCode, Json<TaxRegionResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let input = CreateTaxRegion {
         country: req.country,
         default_rate: req.default_rate,
@@ -140,7 +140,7 @@ pub(super) async fn fetch_region<S: Storage>(
     PathId(id): PathId<TaxRegionId>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let region = get_tax_region(&ctx, ports.tax_regions(), id).await?;
     Ok(Json(TaxRegionResponse::from(&region)))
 }
@@ -151,7 +151,7 @@ pub(super) async fn update_region<S: Storage>(
     JsonBody(req): JsonBody<UpdateTaxRegionRequest>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let region = set_default_rate(&ctx, ports.tax_regions(), id, req.default_rate).await?;
     Ok(Json(TaxRegionResponse::from(&region)))
 }
@@ -162,7 +162,7 @@ pub(super) async fn set_region_class_rate<S: Storage>(
     JsonBody(req): JsonBody<SetClassRateRequest>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let region = set_class_rate(
         &ctx,
         ports.tax_regions(),
@@ -181,7 +181,7 @@ pub(super) async fn remove_region_class_rate<S: Storage>(
     PathId((id, class)): PathId<(TaxRegionId, TaxClassId)>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let ports = state.storage.ports().await?;
+    let ports = state.ports().await?;
     let region = remove_class_rate(&ctx, ports.tax_regions(), id, class).await?;
     Ok(Json(TaxRegionResponse::from(&region)))
 }

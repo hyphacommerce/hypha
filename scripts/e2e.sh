@@ -58,6 +58,8 @@ if ! curl -s -o /dev/null "$BASE/"; then
 fi
 
 echo "## happy path"
+step "the store this deployment serves" 200 - "$BASE/store"
+contains "store has a store_ ID" '"id":"store_'
 step "create mug" 201 - -X POST "$BASE/products" -H "$JSON" \
     -d '{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}'
 if [[ $BODY == *'"code":"handle_taken"'* ]]; then
