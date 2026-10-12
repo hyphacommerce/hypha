@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Mutex};
 
-use hypha_core::{ProductId, RepoError};
+use hypha_core::{ProductId, RepoError, VariantId};
 use hypha_products::{Handle, Product, repo::ProductRepo};
 
 #[derive(Default)]
@@ -19,6 +19,14 @@ impl ProductRepo for InMemoryProductRepo {
         Ok(products.values().find(|p| p.handle() == handle).cloned())
     }
 
+    async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError> {
+        let products = self.products.lock().unwrap();
+        Ok(products
+            .values()
+            .find(|p| p.variants().iter().any(|v| v.id() == variant))
+            .cloned())
+    }
+
     async fn save(&self, product: &Product) -> Result<(), RepoError> {
         let mut products = self.products.lock().unwrap();
         products.insert(product.id(), product.clone());
@@ -29,7 +37,7 @@ impl ProductRepo for InMemoryProductRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hypha_core::{Currency, Money, Price, VariantId};
+    use hypha_core::{Currency, Money, Price};
     use uuid::Uuid;
 
     fn product(n: u128, handle: &str) -> Product {
@@ -69,5 +77,22 @@ mod tests {
 
         let missing = pollster::block_on(repo.get_by_handle(&Handle::new("hat").unwrap()));
         assert_eq!(missing, Ok(None));
+    }
+
+    #[test]
+    fn get_by_variant_finds_the_owning_product() {
+        let repo = InMemoryProductRepo::default();
+        let mug = product(1, "mug");
+        pollster::block_on(repo.save(&mug)).unwrap();
+        pollster::block_on(repo.save(&product(2, "shirt"))).unwrap();
+
+        let variant = VariantId::from_uuid(Uuid::from_u128(1001));
+        assert_eq!(
+            pollster::block_on(repo.get_by_variant(variant)),
+            Ok(Some(mug))
+        );
+
+        let unknown = VariantId::from_uuid(Uuid::from_u128(9999));
+        assert_eq!(pollster::block_on(repo.get_by_variant(unknown)), Ok(None));
     }
 }
