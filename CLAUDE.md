@@ -79,6 +79,7 @@ When a command needs more than two or three ports, group them in a `XxxPorts` tr
 - Unit tests in `#[cfg(test)] mod tests` at the bottom of each file; one rule per test; test boundaries (0 vs -1, exact rounding halves); compare expected errors exactly with `assert_eq!(result, Err(...))`, never via `unwrap`.
 - Command tests are integration tests in each crate's `tests/` folder using `hypha-testkit` (avoids duplicate-crate issues with dev-dependencies).
 - Async in tests via `pollster::block_on`; deterministic IDs via `SequentialIds` and `Uuid::from_u128(n)`.
+- Repository contract: `hypha_testkit::contract::{product_repo, market_repo, catalog_repo, price_list_repo, cart_repo}` define what every repo adapter must do (round trips, versions, unique keys, batched methods). The in-memory repos run them in `crates/hypha-testkit/tests/contract.rs`, and every new adapter must run them too. When a repo trait gains a method or a unique key, add a contract scenario first.
 
 ## Conventions
 
