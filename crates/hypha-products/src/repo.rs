@@ -14,6 +14,9 @@ pub mod keys {
 #[allow(async_fn_in_trait)]
 pub trait ProductRepo {
     async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError>;
+    /// The products among `ids` that exist, in no particular order. One query however
+    /// many IDs, so pricing a cart stays within per-request query limits.
+    async fn get_many(&self, ids: &[ProductId]) -> Result<Vec<Product>, RepoError>;
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError>;
     /// The product that owns `variant`.
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError>;

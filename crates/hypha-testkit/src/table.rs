@@ -27,6 +27,11 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         self.rows.lock().unwrap().get(id).cloned()
     }
 
+    pub(crate) fn get_many(&self, ids: &[K]) -> Vec<T> {
+        let rows = self.rows.lock().unwrap();
+        ids.iter().filter_map(|id| rows.get(id).cloned()).collect()
+    }
+
     pub(crate) fn find(&self, matches: impl Fn(&T) -> bool) -> Option<T> {
         self.rows
             .lock()

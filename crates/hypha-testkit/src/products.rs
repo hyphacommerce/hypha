@@ -28,6 +28,10 @@ impl ProductRepo for InMemoryProductRepo {
         Ok(self.products.get(&id))
     }
 
+    async fn get_many(&self, ids: &[ProductId]) -> Result<Vec<Product>, RepoError> {
+        Ok(self.products.get_many(ids))
+    }
+
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {
         Ok(self.products.find(|p| p.handle() == handle))
     }
@@ -74,6 +78,17 @@ mod tests {
         block_on(repo.insert(&mut p)).unwrap();
         assert_eq!(p.version(), Version::new(1));
         assert_eq!(block_on(repo.get(p.id())), Ok(Some(p)));
+    }
+
+    #[test]
+    fn get_many_returns_only_existing_products() {
+        let repo = InMemoryProductRepo::default();
+        let mut mug = product(1, "mug");
+        block_on(repo.insert(&mut mug)).unwrap();
+        block_on(repo.insert(&mut product(2, "shirt"))).unwrap();
+        let unknown = ProductId::from_uuid(Uuid::from_u128(99));
+
+        assert_eq!(block_on(repo.get_many(&[mug.id(), unknown])), Ok(vec![mug]));
     }
 
     #[test]

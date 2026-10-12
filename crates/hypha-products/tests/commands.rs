@@ -182,6 +182,9 @@ impl ProductRepo for RacingRepo {
     async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError> {
         self.0.get(id).await
     }
+    async fn get_many(&self, ids: &[ProductId]) -> Result<Vec<Product>, RepoError> {
+        self.0.get_many(ids).await
+    }
     async fn get_by_handle(&self, _: &Handle) -> Result<Option<Product>, RepoError> {
         Ok(None)
     }

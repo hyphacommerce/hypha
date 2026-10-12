@@ -149,6 +149,7 @@ pub async fn get_cart<S: CartPorts>(
 
 /// Everything needed to price the cart's lines, with a fixed number of queries
 /// however many lines there are: membership and fixed prices are fetched in batches.
+/// With `load_products`, pricing a cart costs 6 queries in total.
 ///
 /// A missing catalog or price list is left out rather than reported here:
 /// `resolve_price` turns it into a precise per-line reason.
@@ -171,9 +172,7 @@ async fn load_pricing<S: CartPorts>(
         None => None,
     };
 
-    let mut products: Vec<ProductId> = cart.lines().iter().map(|l| l.product()).collect();
-    products.sort_by_key(|p| p.as_uuid());
-    products.dedup();
+    let products = product_ids(cart);
     let variants: Vec<VariantId> = cart.lines().iter().map(|l| l.variant()).collect();
 
     let included_products = match &catalog {
@@ -199,17 +198,16 @@ async fn load_pricing<S: CartPorts>(
     })
 }
 
-/// Loads each product in the cart once. Missing (deleted) products are left out;
+/// The cart's products, in one query. Missing (deleted) products are left out;
 /// `price_cart` marks their lines unavailable with `ProductNotFound`.
 async fn load_products<S: CartPorts>(ports: &S, cart: &Cart) -> Result<Vec<Product>, CommandError> {
-    let mut loaded: Vec<Product> = Vec::new();
-    for line in cart.lines() {
-        if loaded.iter().any(|p| p.id() == line.product()) {
-            continue;
-        }
-        if let Some(product) = ports.products().get(line.product()).await? {
-            loaded.push(product);
-        }
-    }
-    Ok(loaded)
+    Ok(ports.products().get_many(&product_ids(cart)).await?)
+}
+
+/// Each product in the cart once.
+fn product_ids(cart: &Cart) -> Vec<ProductId> {
+    let mut ids: Vec<ProductId> = cart.lines().iter().map(|l| l.product()).collect();
+    ids.sort_by_key(|p| p.as_uuid());
+    ids.dedup();
+    ids
 }
