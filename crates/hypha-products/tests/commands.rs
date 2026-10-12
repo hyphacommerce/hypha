@@ -1,7 +1,7 @@
 use hypha_core::{Actor, AuthError, Ctx, Currency, Money, MoneyError, ProductId, Scope, UserId};
 use hypha_products::{
-    CommandError, CreateSimpleProduct, Handle, HandleError, ProductError, create_simple_product,
-    get_product, repo::ProductRepo,
+    CommandError, CreateSimpleProduct, Handle, HandleError, ProductError, ProductStatus,
+    create_simple_product, get_product, repo::ProductRepo, set_product_status,
 };
 use hypha_testkit::{InMemoryProductRepo, SequentialIds};
 use pollster::block_on;
@@ -108,4 +108,65 @@ fn get_unknown_product_is_not_found() {
     let result = block_on(get_product(&Ctx::system(), &repo, id));
 
     assert_eq!(result, Err(CommandError::NotFound(id)));
+}
+
+#[test]
+fn set_status_activates_and_stores_product() {
+    let repo = InMemoryProductRepo::default();
+    let ids = SequentialIds::default();
+    let ctx = Ctx::system();
+    let created = block_on(create_simple_product(&ctx, &repo, &ids, mug())).unwrap();
+
+    let active = block_on(set_product_status(
+        &ctx,
+        &repo,
+        created.id(),
+        ProductStatus::Active,
+    ))
+    .unwrap();
+
+    assert_eq!(active.status(), ProductStatus::Active);
+    assert_eq!(
+        block_on(repo.get(created.id()))
+            .unwrap()
+            .map(|p| p.status()),
+        Some(ProductStatus::Active)
+    );
+}
+
+#[test]
+fn set_status_rejects_invalid_transition() {
+    let repo = InMemoryProductRepo::default();
+    let ids = SequentialIds::default();
+    let ctx = Ctx::system();
+    let created = block_on(create_simple_product(&ctx, &repo, &ids, mug())).unwrap();
+
+    assert_eq!(
+        block_on(set_product_status(
+            &ctx,
+            &repo,
+            created.id(),
+            ProductStatus::Archived
+        )),
+        Err(CommandError::Product(ProductError::InvalidTransition {
+            from: ProductStatus::Draft,
+            to: ProductStatus::Archived,
+        }))
+    );
+}
+
+#[test]
+fn set_status_rejects_unknown_product() {
+    let repo = InMemoryProductRepo::default();
+    let id = ProductId::from_uuid(Uuid::from_u128(99));
+
+    assert_eq!(
+        block_on(set_product_status(
+            &Ctx::system(),
+            &repo,
+            id,
+            ProductStatus::Active
+        )),
+        Err(CommandError::NotFound(id))
+    );
 }

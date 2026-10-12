@@ -3,7 +3,7 @@ use hypha_core::{
 };
 use thiserror::Error;
 
-use crate::{Handle, Product, ProductError, ProductRepo};
+use crate::{Handle, Product, ProductError, ProductRepo, ProductStatus};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -61,4 +61,20 @@ pub async fn get_product<R: ProductRepo>(
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsRead)?;
     repo.get(id).await?.ok_or(CommandError::NotFound(id))
+}
+
+/// Moves a product to `status`, following the allowed transitions
+/// (draft ↔ active, active → archived, archived → draft).
+pub async fn set_product_status<R: ProductRepo>(
+    ctx: &Ctx,
+    repo: &R,
+    id: ProductId,
+    status: ProductStatus,
+) -> Result<Product, CommandError> {
+    ctx.require(Scope::ProductsWrite)?;
+
+    let mut product = repo.get(id).await?.ok_or(CommandError::NotFound(id))?;
+    product.set_status(status)?;
+    repo.save(&product).await?;
+    Ok(product)
 }
