@@ -66,6 +66,31 @@ pub trait CartPorts {
     fn price_lists(&self) -> &Self::PriceLists;
 }
 
+/// Borrowed ports are ports too, so a host can lend out `&Storage` per request.
+impl<T: CartPorts + ?Sized> CartPorts for &T {
+    type Carts = T::Carts;
+    type Products = T::Products;
+    type Markets = T::Markets;
+    type Catalogs = T::Catalogs;
+    type PriceLists = T::PriceLists;
+
+    fn carts(&self) -> &Self::Carts {
+        (**self).carts()
+    }
+    fn products(&self) -> &Self::Products {
+        (**self).products()
+    }
+    fn markets(&self) -> &Self::Markets {
+        (**self).markets()
+    }
+    fn catalogs(&self) -> &Self::Catalogs {
+        (**self).catalogs()
+    }
+    fn price_lists(&self) -> &Self::PriceLists {
+        (**self).price_lists()
+    }
+}
+
 pub async fn create_cart<S: CartPorts, I: IdGenerator>(
     ctx: &Ctx,
     ports: &S,

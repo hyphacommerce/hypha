@@ -1,9 +1,5 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    routing::{get, patch, post},
-};
+use axum::{Json, extract::State, http::StatusCode};
+use hypha_cart::CartPorts;
 use hypha_core::{Ctx, Money, ProductId, VariantId};
 use hypha_products::{
     CreateSimpleProduct, Product, ProductStatus, create_simple_product, get_product,
@@ -14,30 +10,23 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::ApiError,
     extract::{JsonBody, PathId},
-    state::SharedState,
+    state::{SharedState, Storage},
 };
 
-pub fn router() -> Router<SharedState> {
-    Router::new()
-        .route("/products", post(create))
-        .route("/products/{id}", get(fetch))
-        .route("/products/{id}/status", patch(set_status))
-}
-
 #[derive(Deserialize)]
-struct CreateProductRequest {
+pub(super) struct CreateProductRequest {
     handle: String,
     title: String,
     price: Money,
 }
 
 #[derive(Deserialize)]
-struct SetStatusRequest {
+pub(super) struct SetStatusRequest {
     status: ProductStatus,
 }
 
 #[derive(Serialize)]
-struct ProductResponse {
+pub(super) struct ProductResponse {
     id: ProductId,
     handle: String,
     title: String,
@@ -46,7 +35,7 @@ struct ProductResponse {
 }
 
 #[derive(Serialize)]
-struct VariantResponse {
+pub(super) struct VariantResponse {
     id: VariantId,
     price: Money,
 }
@@ -70,35 +59,38 @@ impl From<&Product> for ProductResponse {
     }
 }
 
-async fn create(
-    State(state): State<SharedState>,
+pub(super) async fn create<S: Storage>(
+    State(state): State<SharedState<S>>,
     JsonBody(req): JsonBody<CreateProductRequest>,
 ) -> Result<(StatusCode, Json<ProductResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth (API keys / tokens)
+    let ports = state.storage.ports().await?;
     let input = CreateSimpleProduct {
         handle: req.handle,
         title: req.title,
         price: req.price,
     };
-    let product = create_simple_product(&ctx, &state.products, &state.ids, input).await?;
+    let product = create_simple_product(&ctx, ports.products(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(ProductResponse::from(&product))))
 }
 
-async fn fetch(
-    State(state): State<SharedState>,
+pub(super) async fn fetch<S: Storage>(
+    State(state): State<SharedState<S>>,
     PathId(id): PathId<ProductId>,
 ) -> Result<Json<ProductResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let product = get_product(&ctx, &state.products, id).await?;
+    let ports = state.storage.ports().await?;
+    let product = get_product(&ctx, ports.products(), id).await?;
     Ok(Json(ProductResponse::from(&product)))
 }
 
-async fn set_status(
-    State(state): State<SharedState>,
+pub(super) async fn set_status<S: Storage>(
+    State(state): State<SharedState<S>>,
     PathId(id): PathId<ProductId>,
     JsonBody(req): JsonBody<SetStatusRequest>,
 ) -> Result<Json<ProductResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let product = set_product_status(&ctx, &state.products, id, req.status).await?;
+    let ports = state.storage.ports().await?;
+    let product = set_product_status(&ctx, ports.products(), id, req.status).await?;
     Ok(Json(ProductResponse::from(&product)))
 }

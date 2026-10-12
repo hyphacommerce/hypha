@@ -1,9 +1,4 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    routing::{get, post},
-};
+use axum::{Json, extract::State, http::StatusCode};
 use hypha_cart::{AddLine, LineStatus, PricedCart, add_line, create_cart, get_cart};
 use hypha_core::{CartId, Ctx, ErrorCode, MarketId, Money, ProductId, VariantId};
 use serde::{Deserialize, Serialize};
@@ -11,29 +6,22 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::ApiError,
     extract::{JsonBody, PathId},
-    state::SharedState,
+    state::{SharedState, Storage},
 };
 
-pub fn router() -> Router<SharedState> {
-    Router::new()
-        .route("/carts", post(create))
-        .route("/carts/{id}", get(fetch))
-        .route("/carts/{id}/lines", post(add))
-}
-
 #[derive(Deserialize)]
-struct CreateCartRequest {
+pub(super) struct CreateCartRequest {
     market: MarketId,
 }
 
 #[derive(Deserialize)]
-struct AddLineRequest {
+pub(super) struct AddLineRequest {
     variant: VariantId,
     quantity: u32,
 }
 
 #[derive(Serialize)]
-struct CartResponse {
+pub(super) struct CartResponse {
     id: CartId,
     /// Sum of the available lines only.
     total: Money,
@@ -44,7 +32,7 @@ struct CartResponse {
 
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-enum LineState {
+pub(super) enum LineState {
     Priced {
         unit_price: Money,
         total: Money,
@@ -57,7 +45,7 @@ enum LineState {
 }
 
 #[derive(Serialize)]
-struct LineResponse {
+pub(super) struct LineResponse {
     product: ProductId,
     variant: VariantId,
     quantity: u32,
@@ -94,37 +82,40 @@ impl From<&PricedCart> for CartResponse {
     }
 }
 
-async fn create(
-    State(state): State<SharedState>,
+pub(super) async fn create<S: Storage>(
+    State(state): State<SharedState<S>>,
     JsonBody(req): JsonBody<CreateCartRequest>,
 ) -> Result<(StatusCode, Json<CartResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let cart = create_cart(&ctx, state.as_ref(), &state.ids, req.market).await?;
+    let ports = state.storage.ports().await?;
+    let cart = create_cart(&ctx, &ports, &state.ids, req.market).await?;
     // A new cart is empty, so pricing it can't fail; return the same shape as GET.
-    let priced = get_cart(&ctx, state.as_ref(), cart.id()).await?;
+    let priced = get_cart(&ctx, &ports, cart.id()).await?;
     Ok((StatusCode::CREATED, Json(CartResponse::from(&priced))))
 }
 
-async fn fetch(
-    State(state): State<SharedState>,
+pub(super) async fn fetch<S: Storage>(
+    State(state): State<SharedState<S>>,
     PathId(id): PathId<CartId>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let priced = get_cart(&ctx, state.as_ref(), id).await?;
+    let ports = state.storage.ports().await?;
+    let priced = get_cart(&ctx, &ports, id).await?;
     Ok(Json(CartResponse::from(&priced)))
 }
 
-async fn add(
-    State(state): State<SharedState>,
+pub(super) async fn add<S: Storage>(
+    State(state): State<SharedState<S>>,
     PathId(id): PathId<CartId>,
     JsonBody(req): JsonBody<AddLineRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.storage.ports().await?;
     let input = AddLine {
         cart: id,
         variant: req.variant,
         quantity: req.quantity,
     };
-    let priced = add_line(&ctx, state.as_ref(), input).await?;
+    let priced = add_line(&ctx, &ports, input).await?;
     Ok(Json(CartResponse::from(&priced)))
 }

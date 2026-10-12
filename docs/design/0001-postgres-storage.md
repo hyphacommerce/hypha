@@ -271,7 +271,10 @@ impl Product {
    row; batch them if large products make saves slow. `uuid[]` for variant selections is
    Postgres-only, which is acceptable now that D1 is optional.
 6. The host chooses storage from `DATABASE_URL`. `scripts/e2e.sh` passes against
-   Postgres.
+   Postgres. **Done (2026-10-13).** Handlers are generic over a host `Storage` trait
+   (in memory or a deadpool pool lending one `PgStore` per request). The route table is a
+   macro stamped out per concrete storage, because axum must prove handler futures `Send`.
+   The e2e script passes on both, and data and migrations survive a restart.
 7. Later, in its own note: the Cloudflare host and the D1 adapter.
 
 Steps 1–3 involve no database at all, and they're where most of the design risk is.

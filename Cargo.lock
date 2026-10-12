@@ -188,6 +188,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "deadpool"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e98a7e119cd347f4201e1159b19831029e203e2d8b790547708e8157b4acf1e"
+dependencies = [
+ "deadpool-runtime",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool-postgres"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65a536565624b97fc19f758cd01b15d12908d3344425066efc8162236fbd3749"
+dependencies = [
+ "async-trait",
+ "deadpool",
+ "getrandom",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+]
+
+[[package]]
+name = "deadpool-runtime"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2657f61fb1dd8bf37a8d51093cc7cee4e77125b22f7753f49b289f831bec2bae"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "digest"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -395,14 +428,17 @@ name = "hypha-host-axum"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "deadpool-postgres",
  "hypha-cart",
  "hypha-core",
  "hypha-markets",
  "hypha-products",
+ "hypha-store-postgres",
  "hypha-testkit",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-postgres",
  "tower-http",
  "tracing",
  "tracing-subscriber",

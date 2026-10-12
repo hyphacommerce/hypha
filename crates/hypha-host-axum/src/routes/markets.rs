@@ -1,11 +1,7 @@
 //! Markets, price lists and catalogs (all live in `hypha-markets`).
 
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    routing::{post, put},
-};
+use axum::{Json, extract::State, http::StatusCode};
+use hypha_cart::CartPorts;
 use hypha_core::{
     CatalogId, CountryCode, Ctx, Currency, MarketId, Money, PriceListId, ProductId, VariantId,
 };
@@ -19,36 +15,20 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::ApiError,
     extract::{JsonBody, PathId},
-    state::SharedState,
+    state::{SharedState, Storage},
 };
-
-pub fn router() -> Router<SharedState> {
-    Router::new()
-        .route("/markets", post(create_market_handler))
-        .route("/price-lists", post(create_price_list_handler))
-        .route(
-            "/price-lists/{id}/fixed-prices",
-            put(set_fixed_prices_handler).delete(remove_fixed_prices_handler),
-        )
-        .route("/catalogs", post(create_catalog_handler))
-        .route(
-            "/catalogs/{id}/products",
-            post(add_products_handler).delete(remove_products_handler),
-        )
-        .route("/catalogs/{id}/price-list", put(assign_price_list_handler))
-}
 
 // ---------- markets ----------
 
 #[derive(Deserialize)]
-struct CreateMarketRequest {
+pub(super) struct CreateMarketRequest {
     name: String,
     countries: Vec<String>,
     currency: Currency,
 }
 
 #[derive(Serialize)]
-struct MarketResponse {
+pub(super) struct MarketResponse {
     id: MarketId,
     name: String,
     countries: Vec<CountryCode>,
@@ -66,24 +46,25 @@ impl From<&Market> for MarketResponse {
     }
 }
 
-async fn create_market_handler(
-    State(state): State<SharedState>,
+pub(super) async fn create_market_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
     JsonBody(req): JsonBody<CreateMarketRequest>,
 ) -> Result<(StatusCode, Json<MarketResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.storage.ports().await?;
     let input = CreateMarket {
         name: req.name,
         countries: req.countries,
         currency: req.currency,
     };
-    let market = create_market(&ctx, &state.markets, &state.ids, input).await?;
+    let market = create_market(&ctx, ports.markets(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(MarketResponse::from(&market))))
 }
 
 // ---------- price lists ----------
 
 #[derive(Deserialize)]
-struct CreatePriceListRequest {
+pub(super) struct CreatePriceListRequest {
     currency: Currency,
     /// Basis points: -1000 = 10% off. Defaults to 0.
     #[serde(default)]
@@ -91,7 +72,7 @@ struct CreatePriceListRequest {
 }
 
 #[derive(Serialize)]
-struct PriceListResponse {
+pub(super) struct PriceListResponse {
     id: PriceListId,
     currency: Currency,
     adjustment: i32,
@@ -108,40 +89,42 @@ impl From<&PriceList> for PriceListResponse {
 }
 
 #[derive(Deserialize)]
-struct SetFixedPricesRequest {
+pub(super) struct SetFixedPricesRequest {
     fixed_prices: Vec<FixedPriceDto>,
 }
 
 #[derive(Deserialize)]
-struct FixedPriceDto {
+pub(super) struct FixedPriceDto {
     variant: VariantId,
     price: Money,
 }
 
 #[derive(Deserialize)]
-struct RemoveFixedPricesRequest {
+pub(super) struct RemoveFixedPricesRequest {
     variants: Vec<VariantId>,
 }
 
-async fn create_price_list_handler(
-    State(state): State<SharedState>,
+pub(super) async fn create_price_list_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
     JsonBody(req): JsonBody<CreatePriceListRequest>,
 ) -> Result<(StatusCode, Json<PriceListResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.storage.ports().await?;
     let input = CreatePriceList {
         currency: req.currency,
         adjustment: req.adjustment,
     };
-    let list = create_price_list(&ctx, &state.price_lists, &state.ids, input).await?;
+    let list = create_price_list(&ctx, ports.price_lists(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(PriceListResponse::from(&list))))
 }
 
-async fn set_fixed_prices_handler(
-    State(state): State<SharedState>,
+pub(super) async fn set_fixed_prices_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
     PathId(id): PathId<PriceListId>,
     JsonBody(req): JsonBody<SetFixedPricesRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.storage.ports().await?;
     let prices = req
         .fixed_prices
         .into_iter()
@@ -150,19 +133,20 @@ async fn set_fixed_prices_handler(
             price: f.price,
         })
         .collect();
-    set_fixed_prices(&ctx, &state.price_lists, id, prices)
+    set_fixed_prices(&ctx, ports.price_lists(), id, prices)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn remove_fixed_prices_handler(
-    State(state): State<SharedState>,
+pub(super) async fn remove_fixed_prices_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
     PathId(id): PathId<PriceListId>,
     JsonBody(req): JsonBody<RemoveFixedPricesRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    remove_fixed_prices(&ctx, &state.price_lists, id, req.variants)
+    let ports = state.storage.ports().await?;
+    remove_fixed_prices(&ctx, ports.price_lists(), id, req.variants)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
     Ok(StatusCode::NO_CONTENT)
@@ -171,23 +155,23 @@ async fn remove_fixed_prices_handler(
 // ---------- catalogs ----------
 
 #[derive(Deserialize)]
-struct CreateCatalogRequest {
+pub(super) struct CreateCatalogRequest {
     market: MarketId,
 }
 
 #[derive(Deserialize)]
-struct CatalogProductsRequest {
+pub(super) struct CatalogProductsRequest {
     products: Vec<ProductId>,
 }
 
 #[derive(Deserialize)]
-struct AssignPriceListRequest {
+pub(super) struct AssignPriceListRequest {
     /// `null` detaches the current price list.
     price_list: Option<PriceListId>,
 }
 
 #[derive(Serialize)]
-struct CatalogResponse {
+pub(super) struct CatalogResponse {
     id: CatalogId,
     market: MarketId,
     price_list: Option<PriceListId>,
@@ -205,47 +189,52 @@ impl From<&Catalog> for CatalogResponse {
     }
 }
 
-async fn create_catalog_handler(
-    State(state): State<SharedState>,
+pub(super) async fn create_catalog_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
     JsonBody(req): JsonBody<CreateCatalogRequest>,
 ) -> Result<(StatusCode, Json<CatalogResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.storage.ports().await?;
     let input = CreateCatalog { market: req.market };
-    let catalog = create_catalog(&ctx, &state.markets, &state.catalogs, &state.ids, input).await?;
+    let catalog =
+        create_catalog(&ctx, ports.markets(), ports.catalogs(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(CatalogResponse::from(&catalog))))
 }
 
-async fn add_products_handler(
-    State(state): State<SharedState>,
+pub(super) async fn add_products_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
     PathId(id): PathId<CatalogId>,
     JsonBody(req): JsonBody<CatalogProductsRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    add_catalog_products(&ctx, &state.catalogs, id, req.products).await?;
+    let ports = state.storage.ports().await?;
+    add_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn remove_products_handler(
-    State(state): State<SharedState>,
+pub(super) async fn remove_products_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
     PathId(id): PathId<CatalogId>,
     JsonBody(req): JsonBody<CatalogProductsRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    remove_catalog_products(&ctx, &state.catalogs, id, req.products).await?;
+    let ports = state.storage.ports().await?;
+    remove_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn assign_price_list_handler(
-    State(state): State<SharedState>,
+pub(super) async fn assign_price_list_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
     PathId(id): PathId<CatalogId>,
     JsonBody(req): JsonBody<AssignPriceListRequest>,
 ) -> Result<Json<CatalogResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.storage.ports().await?;
     let catalog = assign_price_list(
         &ctx,
-        &state.markets,
-        &state.catalogs,
-        &state.price_lists,
+        ports.markets(),
+        ports.catalogs(),
+        ports.price_lists(),
         id,
         req.price_list,
     )

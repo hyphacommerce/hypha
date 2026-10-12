@@ -39,3 +39,28 @@ impl<C: PgConnection> PgStore<C> {
         self.conn.lock().await
     }
 }
+
+/// One `PgStore` implements every repository, so it is all of the cart's ports at once.
+impl<C: PgConnection> hypha_cart::CartPorts for PgStore<C> {
+    type Carts = Self;
+    type Products = Self;
+    type Markets = Self;
+    type Catalogs = Self;
+    type PriceLists = Self;
+
+    fn carts(&self) -> &Self {
+        self
+    }
+    fn products(&self) -> &Self {
+        self
+    }
+    fn markets(&self) -> &Self {
+        self
+    }
+    fn catalogs(&self) -> &Self {
+        self
+    }
+    fn price_lists(&self) -> &Self {
+        self
+    }
+}
