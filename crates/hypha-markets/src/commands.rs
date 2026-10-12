@@ -33,7 +33,7 @@ pub async fn assign_price_list<M: MarketRepo, C: CatalogRepo, P: PriceListRepo>(
     catalog_id: CatalogId,
     price_list_id: Option<PriceListId>,
 ) -> Result<Catalog, CommandError> {
-    ctx.require(Scope::MarketsWrite)?;
+    ctx.require(Scope::PricingWrite)?;
 
     let mut catalog = catalogs
         .get(catalog_id)

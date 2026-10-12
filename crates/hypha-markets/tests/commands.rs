@@ -155,16 +155,16 @@ fn rejects_catalog_whose_market_is_missing() {
 }
 
 #[test]
-fn rejects_missing_write_scope_and_stores_nothing() {
+fn rejects_missing_pricing_write_scope_and_stores_nothing() {
     let world = World::new();
     let reader = Ctx::new(
         Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
-        vec![Scope::MarketsRead],
+        vec![Scope::MarketsWrite, Scope::PricingRead],
     );
     assert_eq!(
         world.assign(&reader, catalog_id(), Some(list_id(10))),
         Err(CommandError::Auth(AuthError::MissingScope(
-            Scope::MarketsWrite
+            Scope::PricingWrite
         )))
     );
     assert_eq!(world.stored_price_list(), None);
