@@ -4,30 +4,38 @@ use std::{
 };
 
 use hypha_core::{CatalogId, ProductId, RepoError};
-use hypha_markets::{Catalog, CatalogContext, CatalogRepo};
+use hypha_markets::{Catalog, CatalogContext, CatalogRepo, repo::keys};
+
+use crate::table::Table;
 
 #[derive(Default)]
 pub struct InMemoryCatalogRepo {
-    catalogs: Mutex<HashMap<CatalogId, Catalog>>,
+    catalogs: Table<CatalogId, Catalog>,
     /// Catalog membership, stored apart from the catalog like a separate table would be.
     products: Mutex<HashMap<CatalogId, HashSet<ProductId>>>,
 }
 
+/// At most one catalog per context.
+fn unique(new: &Catalog, other: &Catalog) -> Option<&'static str> {
+    (new.context() == other.context()).then_some(keys::CATALOG_CONTEXT)
+}
+
 impl CatalogRepo for InMemoryCatalogRepo {
     async fn get(&self, id: CatalogId) -> Result<Option<Catalog>, RepoError> {
-        let catalogs = self.catalogs.lock().unwrap();
-        Ok(catalogs.get(&id).cloned())
+        Ok(self.catalogs.get(&id))
     }
 
     async fn get_by_context(&self, context: CatalogContext) -> Result<Option<Catalog>, RepoError> {
-        let catalogs = self.catalogs.lock().unwrap();
-        Ok(catalogs.values().find(|c| c.context() == context).cloned())
+        Ok(self.catalogs.find(|c| c.context() == context))
     }
 
-    async fn save(&self, catalog: &Catalog) -> Result<(), RepoError> {
-        let mut catalogs = self.catalogs.lock().unwrap();
-        catalogs.insert(catalog.id(), catalog.clone());
-        Ok(())
+    async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
+        self.catalogs
+            .insert(catalog.id(), catalog, keys::CATALOG_ID, &unique)
+    }
+
+    async fn update(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
+        self.catalogs.update(catalog.id(), catalog, &unique)
     }
 
     async fn add_products(
@@ -96,21 +104,32 @@ mod tests {
     #[test]
     fn saves_and_loads_catalogs() {
         let repo = InMemoryCatalogRepo::default();
-        let c = catalog(1, in_market(1));
-        block_on(repo.save(&c)).unwrap();
+        let mut c = catalog(1, in_market(1));
+        block_on(repo.insert(&mut c)).unwrap();
         assert_eq!(block_on(repo.get(c.id())), Ok(Some(c)));
     }
 
     #[test]
     fn finds_catalog_by_context() {
         let repo = InMemoryCatalogRepo::default();
-        block_on(repo.save(&catalog(1, in_market(1)))).unwrap();
-        block_on(repo.save(&catalog(2, in_market(2)))).unwrap();
+        block_on(repo.insert(&mut catalog(1, in_market(1)))).unwrap();
+        let mut second = catalog(2, in_market(2));
+        block_on(repo.insert(&mut second)).unwrap();
         assert_eq!(
             block_on(repo.get_by_context(in_market(2))),
-            Ok(Some(catalog(2, in_market(2))))
+            Ok(Some(second))
         );
         assert_eq!(block_on(repo.get_by_context(in_market(3))), Ok(None));
+    }
+
+    #[test]
+    fn insert_rejects_second_catalog_for_context() {
+        let repo = InMemoryCatalogRepo::default();
+        block_on(repo.insert(&mut catalog(1, in_market(1)))).unwrap();
+        assert_eq!(
+            block_on(repo.insert(&mut catalog(2, in_market(1)))),
+            Err(RepoError::Duplicate(keys::CATALOG_CONTEXT))
+        );
     }
 
     #[test]

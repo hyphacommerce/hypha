@@ -1,6 +1,9 @@
-use hypha_core::{Actor, AuthError, Ctx, Currency, Money, MoneyError, ProductId, Scope, UserId};
+use hypha_core::{
+    Actor, AuthError, Ctx, Currency, Money, MoneyError, ProductId, RepoError, Scope, UserId,
+    VariantId,
+};
 use hypha_products::{
-    CommandError, CreateSimpleProduct, Handle, HandleError, ProductError, ProductStatus,
+    CommandError, CreateSimpleProduct, Handle, HandleError, Product, ProductError, ProductStatus,
     create_simple_product, get_product, repo::ProductRepo, set_product_status,
 };
 use hypha_testkit::{InMemoryProductRepo, SequentialIds};
@@ -169,4 +172,37 @@ fn set_status_rejects_unknown_product() {
         )),
         Err(CommandError::NotFound(id))
     );
+}
+
+/// Simulates a race: its lookups never see existing products, as if another request
+/// inserted one between the command's pre-check and its insert.
+struct RacingRepo(InMemoryProductRepo);
+
+impl ProductRepo for RacingRepo {
+    async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError> {
+        self.0.get(id).await
+    }
+    async fn get_by_handle(&self, _: &Handle) -> Result<Option<Product>, RepoError> {
+        Ok(None)
+    }
+    async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError> {
+        self.0.get_by_variant(variant).await
+    }
+    async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
+        self.0.insert(product).await
+    }
+    async fn update(&self, product: &mut Product) -> Result<(), RepoError> {
+        self.0.update(product).await
+    }
+}
+
+#[test]
+fn handle_taken_by_a_concurrent_insert_is_still_handle_taken() {
+    let repo = RacingRepo(InMemoryProductRepo::default());
+    let ids = SequentialIds::default();
+    block_on(create_simple_product(&Ctx::system(), &repo, &ids, mug())).unwrap();
+
+    let result = block_on(create_simple_product(&Ctx::system(), &repo, &ids, mug()));
+
+    assert_eq!(result, Err(CommandError::HandleTaken(handle("mug"))));
 }

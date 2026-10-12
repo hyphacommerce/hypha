@@ -78,8 +78,8 @@ pub async fn create_cart<S: CartPorts, I: IdGenerator>(
         return Err(CommandError::MarketNotFound(market));
     }
 
-    let cart = Cart::new(CartId::from_uuid(ids.new_uuid()), market);
-    ports.carts().save(&cart).await?;
+    let mut cart = Cart::new(CartId::from_uuid(ids.new_uuid()), market);
+    ports.carts().insert(&mut cart).await?;
     Ok(cart)
 }
 
@@ -122,7 +122,9 @@ pub async fn add_line<S: CartPorts>(
     let cart_products = load_products(ports, &cart).await?;
     let priced = price_cart(&cart, &cart_products, &pricing)?;
 
-    ports.carts().save(&cart).await?;
+    // Fails with StaleVersion (409) if another request changed the cart meanwhile,
+    // instead of silently dropping that request's line.
+    ports.carts().update(&mut cart).await?;
     Ok(priced)
 }
 

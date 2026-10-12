@@ -36,19 +36,19 @@ impl World {
             catalogs: InMemoryCatalogRepo::default(),
             price_lists: InMemoryPriceListRepo::default(),
         };
-        let market = Market::new(
+        let mut market = Market::new(
             market_id(),
             "Eurozone".to_string(),
             vec![CountryCode::new("HR").unwrap()],
             Currency::Eur,
         )
         .unwrap();
-        let catalog = Catalog::new(catalog_id(), CatalogContext::Market(market_id()), None);
-        block_on(world.markets.save(&market)).unwrap();
-        block_on(world.catalogs.save(&catalog)).unwrap();
+        let mut catalog = Catalog::new(catalog_id(), CatalogContext::Market(market_id()), None);
+        block_on(world.markets.insert(&mut market)).unwrap();
+        block_on(world.catalogs.insert(&mut catalog)).unwrap();
         for (n, currency) in [(10, Currency::Eur), (11, Currency::Rsd)] {
-            let list = PriceList::new(list_id(n), currency, BasisPoints::ZERO);
-            block_on(world.price_lists.save(&list)).unwrap();
+            let mut list = PriceList::new(list_id(n), currency, BasisPoints::ZERO);
+            block_on(world.price_lists.insert(&mut list)).unwrap();
         }
         world
     }
@@ -133,12 +133,12 @@ fn rejects_unknown_price_list() {
 fn rejects_catalog_whose_market_is_missing() {
     let world = World::new();
     let orphan_market = MarketId::from_uuid(Uuid::from_u128(98));
-    let orphan = Catalog::new(
+    let mut orphan = Catalog::new(
         CatalogId::from_uuid(Uuid::from_u128(97)),
         CatalogContext::Market(orphan_market),
         None,
     );
-    block_on(world.catalogs.save(&orphan)).unwrap();
+    block_on(world.catalogs.insert(&mut orphan)).unwrap();
     assert_eq!(
         world.assign(&Ctx::system(), orphan.id(), Some(list_id(10))),
         Err(CommandError::MarketNotFound(orphan_market))

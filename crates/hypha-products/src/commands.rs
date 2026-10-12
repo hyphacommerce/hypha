@@ -4,7 +4,7 @@ use hypha_core::{
 };
 use thiserror::Error;
 
-use crate::{Handle, Product, ProductError, ProductRepo, ProductStatus};
+use crate::{Handle, Product, ProductError, ProductRepo, ProductStatus, repo::keys};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -52,11 +52,12 @@ pub async fn create_simple_product<R: ProductRepo, I: IdGenerator>(
     let handle = Handle::new(&input.handle)?;
     let price = Price::new(input.price)?;
 
+    // Precise error in the normal case; the repo's unique key catches a concurrent insert.
     if repo.get_by_handle(&handle).await?.is_some() {
         return Err(CommandError::HandleTaken(handle));
     }
 
-    let product = Product::new_simple(
+    let mut product = Product::new_simple(
         ProductId::from_uuid(ids.new_uuid()),
         handle,
         input.title,
@@ -64,7 +65,10 @@ pub async fn create_simple_product<R: ProductRepo, I: IdGenerator>(
         price,
     );
 
-    repo.save(&product).await?;
+    repo.insert(&mut product).await.map_err(|e| match e {
+        RepoError::Duplicate(keys::HANDLE) => CommandError::HandleTaken(product.handle().clone()),
+        e => e.into(),
+    })?;
     Ok(product)
 }
 
@@ -89,6 +93,6 @@ pub async fn set_product_status<R: ProductRepo>(
 
     let mut product = repo.get(id).await?.ok_or(CommandError::NotFound(id))?;
     product.set_status(status)?;
-    repo.save(&product).await?;
+    repo.update(&mut product).await?;
     Ok(product)
 }

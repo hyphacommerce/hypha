@@ -5,6 +5,7 @@ pub mod ids;
 pub mod money;
 pub mod ports;
 pub mod scope;
+pub mod version;
 
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
@@ -16,3 +17,4 @@ pub use ids::{
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price};
 pub use ports::{IdGenerator, RepoError};
 pub use scope::Scope;
+pub use version::{Version, Versioned};

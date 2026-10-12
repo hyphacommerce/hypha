@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     Catalog, CatalogContext, CatalogRepo, Market, MarketError, MarketRepo, PriceList,
-    PriceListError, PriceListRepo,
+    PriceListError, PriceListRepo, repo::keys,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -107,7 +107,7 @@ pub async fn assign_price_list<M: MarketRepo, C: CatalogRepo, P: PriceListRepo>(
     }
 
     catalog.set_price_list(price_list_id);
-    catalogs.save(&catalog).await?;
+    catalogs.update(&mut catalog).await?;
     Ok(catalog)
 }
 
@@ -132,24 +132,44 @@ pub async fn create_market<M: MarketRepo, I: IdGenerator>(
         .iter()
         .map(|c| CountryCode::new(c))
         .collect::<Result<Vec<_>, _>>()?;
-    let market = Market::new(
+    let mut market = Market::new(
         MarketId::from_uuid(ids.new_uuid()),
         input.name,
         countries,
         input.currency,
     )?;
 
-    for existing in markets.list_all().await? {
-        if let Some(country) = market.countries().iter().find(|c| existing.covers(**c)) {
-            return Err(CommandError::CountryInOtherMarket {
-                country: *country,
-                market: existing.id(),
-            });
-        }
+    // Precise error in the normal case; the repo's unique key catches a concurrent insert.
+    if let Some(conflict) = country_conflict(markets, &market).await? {
+        return Err(conflict);
     }
 
-    markets.save(&market).await?;
-    Ok(market)
+    match markets.insert(&mut market).await {
+        Ok(()) => Ok(market),
+        Err(RepoError::Duplicate(keys::COUNTRY)) => Err(country_conflict(markets, &market)
+            .await?
+            .unwrap_or(CommandError::Repo(RepoError::Duplicate(keys::COUNTRY)))),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// `CountryInOtherMarket` for the first of `market`'s countries another market owns.
+async fn country_conflict<M: MarketRepo>(
+    markets: &M,
+    market: &Market,
+) -> Result<Option<CommandError>, CommandError> {
+    for existing in markets.list_all().await? {
+        if existing.id() == market.id() {
+            continue;
+        }
+        if let Some(country) = market.countries().iter().find(|c| existing.covers(**c)) {
+            return Ok(Some(CommandError::CountryInOtherMarket {
+                country: *country,
+                market: existing.id(),
+            }));
+        }
+    }
+    Ok(None)
 }
 
 pub struct CreatePriceList {
@@ -168,12 +188,12 @@ pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
     ctx.require(Scope::PricingWrite)?;
 
     let adjustment = BasisPoints::new(input.adjustment)?;
-    let list = PriceList::new(
+    let mut list = PriceList::new(
         PriceListId::from_uuid(ids.new_uuid()),
         input.currency,
         adjustment,
     );
-    price_lists.save(&list).await?;
+    price_lists.insert(&mut list).await?;
     Ok(list)
 }
 
@@ -245,6 +265,7 @@ pub async fn create_catalog<M: MarketRepo, C: CatalogRepo, I: IdGenerator>(
     }
 
     let context = CatalogContext::Market(input.market);
+    // Precise error in the normal case; the repo's unique key catches a concurrent insert.
     if let Some(existing) = catalogs.get_by_context(context).await? {
         return Err(CommandError::CatalogExists {
             market: input.market,
@@ -252,9 +273,20 @@ pub async fn create_catalog<M: MarketRepo, C: CatalogRepo, I: IdGenerator>(
         });
     }
 
-    let catalog = Catalog::new(CatalogId::from_uuid(ids.new_uuid()), context, None);
-    catalogs.save(&catalog).await?;
-    Ok(catalog)
+    let mut catalog = Catalog::new(CatalogId::from_uuid(ids.new_uuid()), context, None);
+    match catalogs.insert(&mut catalog).await {
+        Ok(()) => Ok(catalog),
+        Err(RepoError::Duplicate(keys::CATALOG_CONTEXT)) => {
+            match catalogs.get_by_context(context).await? {
+                Some(existing) => Err(CommandError::CatalogExists {
+                    market: input.market,
+                    catalog: existing.id(),
+                }),
+                None => Err(RepoError::Duplicate(keys::CATALOG_CONTEXT).into()),
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Makes products sellable in the catalog's context. Products already included are ignored.

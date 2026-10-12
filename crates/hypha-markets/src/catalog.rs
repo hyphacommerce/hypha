@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt};
 
-use hypha_core::{CatalogId, MarketId, PriceListId};
+use hypha_core::{CatalogId, MarketId, PriceListId, Version, Versioned};
 
 use crate::error::CatalogError;
 
@@ -26,14 +26,26 @@ impl fmt::Display for CatalogContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Catalog {
     id: CatalogId,
+    version: Version,
     context: CatalogContext,
     price_list: Option<PriceListId>,
+}
+
+impl Versioned for Catalog {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
 }
 
 impl Catalog {
     pub fn new(id: CatalogId, context: CatalogContext, price_list: Option<PriceListId>) -> Self {
         Self {
             id,
+            version: Version::NEW,
             context,
             price_list,
         }

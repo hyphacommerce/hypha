@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt};
 
-use hypha_core::{Price, ProductId, VariantId};
+use hypha_core::{Price, ProductId, VariantId, Version, Versioned};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -38,11 +38,22 @@ impl fmt::Display for ProductStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Product {
     id: ProductId,
+    version: Version,
     handle: Handle,
     title: String,
     status: ProductStatus,
     options: Vec<ProductOption>,
     variants: Vec<Variant>,
+}
+
+impl Versioned for Product {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
 }
 
 impl Product {
@@ -55,6 +66,7 @@ impl Product {
     ) -> Self {
         Self {
             id,
+            version: Version::NEW,
             handle,
             title,
             status: ProductStatus::Draft,
@@ -98,6 +110,7 @@ impl Product {
 
         let mut product = Self {
             id,
+            version: Version::NEW,
             handle,
             title,
             status: ProductStatus::Draft,

@@ -1,25 +1,34 @@
 use std::{collections::HashMap, sync::Mutex};
 
 use hypha_core::{Price, PriceListId, RepoError, VariantId};
-use hypha_markets::{PriceList, PriceListRepo};
+use hypha_markets::{PriceList, PriceListRepo, repo::keys};
+
+use crate::table::{Table, no_unique_keys};
 
 #[derive(Default)]
 pub struct InMemoryPriceListRepo {
-    price_lists: Mutex<HashMap<PriceListId, PriceList>>,
+    price_lists: Table<PriceListId, PriceList>,
     /// Fixed prices, stored apart from the list like a separate table would be.
     fixed_prices: Mutex<HashMap<PriceListId, HashMap<VariantId, Price>>>,
 }
 
 impl PriceListRepo for InMemoryPriceListRepo {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError> {
-        let price_lists = self.price_lists.lock().unwrap();
-        Ok(price_lists.get(&id).cloned())
+        Ok(self.price_lists.get(&id))
     }
 
-    async fn save(&self, price_list: &PriceList) -> Result<(), RepoError> {
-        let mut price_lists = self.price_lists.lock().unwrap();
-        price_lists.insert(price_list.id(), price_list.clone());
-        Ok(())
+    async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        self.price_lists.insert(
+            price_list.id(),
+            price_list,
+            keys::PRICE_LIST_ID,
+            &no_unique_keys,
+        )
+    }
+
+    async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        self.price_lists
+            .update(price_list.id(), price_list, &no_unique_keys)
     }
 
     async fn set_fixed_prices(
@@ -85,8 +94,8 @@ mod tests {
     #[test]
     fn saves_and_loads_price_lists() {
         let repo = InMemoryPriceListRepo::default();
-        let list = PriceList::new(list_id(), Currency::Eur, BasisPoints::ZERO);
-        block_on(repo.save(&list)).unwrap();
+        let mut list = PriceList::new(list_id(), Currency::Eur, BasisPoints::ZERO);
+        block_on(repo.insert(&mut list)).unwrap();
         assert_eq!(block_on(repo.get(list.id())), Ok(Some(list)));
     }
 

@@ -237,7 +237,11 @@ impl Product {
 2. Add versions, snapshots and `restore`, the `insert`/`update` split and the typed
    `RepoError`, still in memory. Commands map `Duplicate`/`StaleVersion` to domain
    errors and codes. Add the D6 money cap, and `ProductRepo::get_many` so a cart's
-   products load in one query.
+   products load in one query. **Done except snapshots/`restore` and
+   `get_many`:** `Version` + `Versioned` in core; the testkit `Table` enforces versions and
+   unique keys; `create_simple_product`, `create_market` and `create_catalog` map a racing
+   `Duplicate` to the same error as their pre-check (tested with repos that hide rows from
+   the pre-check).
 3. Contract tests in testkit. The in-memory repos pass them.
 4. **D1 experiment (throwaway, not merged).** A minimal `workers-rs` Worker with one table,
    run with `wrangler dev`. It verifies:

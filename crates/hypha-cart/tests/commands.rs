@@ -79,14 +79,14 @@ impl World {
             ids: SequentialIds::default(),
         };
 
-        let market = Market::new(
+        let mut market = Market::new(
             market_id(),
             "Eurozone".to_string(),
             vec![CountryCode::new("HR").unwrap()],
             Currency::Eur,
         )
         .unwrap();
-        block_on(world.markets.save(&market)).unwrap();
+        block_on(world.markets.insert(&mut market)).unwrap();
 
         for (name, active) in [
             ("mug", true),
@@ -104,15 +104,15 @@ impl World {
             if active {
                 product.set_status(ProductStatus::Active).unwrap();
             }
-            block_on(world.products.save(&product)).unwrap();
+            block_on(world.products.insert(&mut product)).unwrap();
         }
 
-        let catalog = Catalog::new(
+        let mut catalog = Catalog::new(
             catalog_id(),
             CatalogContext::Market(market_id()),
             Some(list_id()),
         );
-        block_on(world.catalogs.save(&catalog)).unwrap();
+        block_on(world.catalogs.insert(&mut catalog)).unwrap();
         block_on(
             world
                 .catalogs
@@ -124,8 +124,17 @@ impl World {
     }
 
     fn set_adjustment(&self, bp: i32) {
-        let list = PriceList::new(list_id(), Currency::Eur, BasisPoints::new(bp).unwrap());
-        block_on(self.price_lists.save(&list)).unwrap();
+        let bp = BasisPoints::new(bp).unwrap();
+        match block_on(self.price_lists.get(list_id())).unwrap() {
+            Some(mut list) => {
+                list.set_adjustment(bp);
+                block_on(self.price_lists.update(&mut list)).unwrap();
+            }
+            None => {
+                let mut list = PriceList::new(list_id(), Currency::Eur, bp);
+                block_on(self.price_lists.insert(&mut list)).unwrap();
+            }
+        }
     }
 
     fn create_cart(&self) -> CartId {
@@ -159,7 +168,7 @@ impl World {
     fn archive(&self, name: &str) {
         let mut product = block_on(self.products.get(pid(name))).unwrap().unwrap();
         product.set_status(ProductStatus::Archived).unwrap();
-        block_on(self.products.save(&product)).unwrap();
+        block_on(self.products.update(&mut product)).unwrap();
     }
 
     fn stored_line_count(&self, cart: CartId) -> usize {

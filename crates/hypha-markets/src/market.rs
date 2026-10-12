@@ -1,15 +1,26 @@
 use std::collections::HashSet;
 
-use hypha_core::{CountryCode, Currency, MarketId};
+use hypha_core::{CountryCode, Currency, MarketId, Version, Versioned};
 
 use crate::error::MarketError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Market {
     id: MarketId,
+    version: Version,
     name: String,
     countries: Vec<CountryCode>,
     currency: Currency,
+}
+
+impl Versioned for Market {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
 }
 
 impl Market {
@@ -32,6 +43,7 @@ impl Market {
 
         Ok(Self {
             id,
+            version: Version::NEW,
             name,
             countries,
             currency,

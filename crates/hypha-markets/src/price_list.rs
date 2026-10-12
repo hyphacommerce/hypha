@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use hypha_core::{BasisPoints, Currency, Price, PriceListId, VariantId};
+use hypha_core::{BasisPoints, Currency, Price, PriceListId, VariantId, Version, Versioned};
 
 use crate::error::{MismatchedPrice, PriceListError};
 
@@ -12,8 +12,19 @@ use crate::error::{MismatchedPrice, PriceListError};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriceList {
     id: PriceListId,
+    version: Version,
     currency: Currency,
     adjustment: BasisPoints,
+}
+
+impl Versioned for PriceList {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
 }
 
 impl PriceList {
@@ -21,6 +32,7 @@ impl PriceList {
     pub fn new(id: PriceListId, currency: Currency, adjustment: BasisPoints) -> Self {
         Self {
             id,
+            version: Version::NEW,
             currency,
             adjustment,
         }

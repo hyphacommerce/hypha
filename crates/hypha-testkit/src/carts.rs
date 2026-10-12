@@ -1,48 +1,89 @@
-use std::{collections::HashMap, sync::Mutex};
-
-use hypha_cart::{Cart, CartRepo};
+use hypha_cart::{Cart, CartRepo, repo::keys};
 use hypha_core::{CartId, RepoError};
+
+use crate::table::{Table, no_unique_keys};
 
 #[derive(Default)]
 pub struct InMemoryCartRepo {
-    carts: Mutex<HashMap<CartId, Cart>>,
+    carts: Table<CartId, Cart>,
 }
 
 impl CartRepo for InMemoryCartRepo {
     async fn get(&self, id: CartId) -> Result<Option<Cart>, RepoError> {
-        let carts = self.carts.lock().unwrap();
-        Ok(carts.get(&id).cloned())
+        Ok(self.carts.get(&id))
     }
 
-    async fn save(&self, cart: &Cart) -> Result<(), RepoError> {
-        let mut carts = self.carts.lock().unwrap();
-        carts.insert(cart.id(), cart.clone());
-        Ok(())
+    async fn insert(&self, cart: &mut Cart) -> Result<(), RepoError> {
+        self.carts
+            .insert(cart.id(), cart, keys::CART_ID, &no_unique_keys)
+    }
+
+    async fn update(&self, cart: &mut Cart) -> Result<(), RepoError> {
+        self.carts.update(cart.id(), cart, &no_unique_keys)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::MarketId;
+    use hypha_cart::Quantity;
+    use hypha_core::{MarketId, ProductId, VariantId, Version, Versioned};
+    use pollster::block_on;
     use uuid::Uuid;
 
     use super::*;
 
-    #[test]
-    fn saves_and_loads_carts() {
-        let repo = InMemoryCartRepo::default();
-        let cart = Cart::new(
+    fn cart() -> Cart {
+        Cart::new(
             CartId::from_uuid(Uuid::from_u128(1)),
             MarketId::from_uuid(Uuid::from_u128(2)),
-        );
-        pollster::block_on(repo.save(&cart)).unwrap();
-        assert_eq!(pollster::block_on(repo.get(cart.id())), Ok(Some(cart)));
+        )
+    }
+
+    #[test]
+    fn insert_stores_cart_at_version_1() {
+        let repo = InMemoryCartRepo::default();
+        let mut c = cart();
+        block_on(repo.insert(&mut c)).unwrap();
+        assert_eq!(c.version(), Version::new(1));
+        assert_eq!(block_on(repo.get(c.id())), Ok(Some(c)));
     }
 
     #[test]
     fn get_unknown_is_none() {
         let repo = InMemoryCartRepo::default();
         let id = CartId::from_uuid(Uuid::from_u128(99));
-        assert_eq!(pollster::block_on(repo.get(id)), Ok(None));
+        assert_eq!(block_on(repo.get(id)), Ok(None));
+    }
+
+    #[test]
+    fn insert_rejects_duplicate_id() {
+        let repo = InMemoryCartRepo::default();
+        block_on(repo.insert(&mut cart())).unwrap();
+        assert_eq!(
+            block_on(repo.insert(&mut cart())),
+            Err(RepoError::Duplicate(keys::CART_ID))
+        );
+    }
+
+    /// The lost-update case from design note 0001: two writers load the same cart,
+    /// both add a line, and the second save must fail instead of dropping a line.
+    #[test]
+    fn concurrent_changes_cannot_lose_a_line() {
+        let repo = InMemoryCartRepo::default();
+        let mut stored = cart();
+        block_on(repo.insert(&mut stored)).unwrap();
+        let mut a = block_on(repo.get(stored.id())).unwrap().unwrap();
+        let mut b = block_on(repo.get(stored.id())).unwrap().unwrap();
+        let qty = Quantity::new(1).unwrap();
+        let product = ProductId::from_uuid(Uuid::from_u128(3));
+
+        a.add_line(product, VariantId::from_uuid(Uuid::from_u128(4)), qty)
+            .unwrap();
+        b.add_line(product, VariantId::from_uuid(Uuid::from_u128(5)), qty)
+            .unwrap();
+        block_on(repo.update(&mut a)).unwrap();
+
+        assert_eq!(block_on(repo.update(&mut b)), Err(RepoError::StaleVersion));
+        assert_eq!(block_on(repo.get(stored.id())), Ok(Some(a)));
     }
 }

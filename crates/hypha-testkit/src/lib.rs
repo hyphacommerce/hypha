@@ -4,6 +4,7 @@ mod ids;
 mod markets;
 mod price_lists;
 mod products;
+mod table;
 
 pub use carts::InMemoryCartRepo;
 pub use catalogs::InMemoryCatalogRepo;

@@ -1,4 +1,4 @@
-use hypha_core::{CartId, MarketId, ProductId, VariantId};
+use hypha_core::{CartId, MarketId, ProductId, VariantId, Version, Versioned};
 
 use crate::{error::CartError, quantity::Quantity};
 
@@ -29,14 +29,26 @@ impl CartLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cart {
     id: CartId,
+    version: Version,
     market: MarketId,
     lines: Vec<CartLine>,
+}
+
+impl Versioned for Cart {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
 }
 
 impl Cart {
     pub fn new(id: CartId, market: MarketId) -> Self {
         Self {
             id,
+            version: Version::NEW,
             market,
             lines: Vec::new(),
         }

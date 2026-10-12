@@ -1,12 +1,15 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use hypha_core::{
     Actor, AuthError, CatalogId, CountryCode, CountryError, Ctx, Currency, MarketId, Money,
-    MoneyError, Price, PriceListId, ProductId, Scope, UserId, VariantId,
+    MoneyError, Price, PriceListId, ProductId, RepoError, Scope, UserId, VariantId,
 };
 use hypha_markets::{
     CatalogContext, CatalogRepo, CommandError, CreateCatalog, CreateMarket, CreatePriceList,
-    FixedPrice, MarketError, MarketRepo, MismatchedPrice, PriceListError, PriceListRepo,
+    FixedPrice, Market, MarketError, MarketRepo, MismatchedPrice, PriceListError, PriceListRepo,
     add_catalog_products, create_catalog, create_market, create_price_list,
     remove_catalog_products, remove_fixed_prices, set_fixed_prices,
 };
@@ -533,5 +536,60 @@ fn add_catalog_products_requires_markets_write() {
     assert_eq!(
         block_on(catalogs.included_products(catalog, &[pid(1)])),
         Ok(HashSet::new())
+    );
+}
+
+// ---- races: pre-check passes, the repo's unique key catches it ----
+
+/// Hides existing markets from the first `list_all` (the command's pre-check), as if
+/// another request inserted one right after it.
+#[derive(Default)]
+struct RacingMarkets {
+    inner: InMemoryMarketRepo,
+    lists: AtomicUsize,
+}
+
+impl MarketRepo for RacingMarkets {
+    async fn get(&self, id: MarketId) -> Result<Option<Market>, RepoError> {
+        self.inner.get(id).await
+    }
+    async fn list_all(&self) -> Result<Vec<Market>, RepoError> {
+        if self.lists.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Ok(vec![]);
+        }
+        self.inner.list_all().await
+    }
+    async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {
+        self.inner.insert(market).await
+    }
+    async fn update(&self, market: &mut Market) -> Result<(), RepoError> {
+        self.inner.update(market).await
+    }
+}
+
+#[test]
+fn country_taken_by_a_concurrent_insert_names_the_owner() {
+    let markets = RacingMarkets::default();
+    let ids = SequentialIds::default();
+    let mut first = Market::new(
+        MarketId::from_uuid(Uuid::from_u128(500)),
+        "First".to_string(),
+        vec![cc("RS")],
+        Currency::Rsd,
+    )
+    .unwrap();
+    block_on(markets.inner.insert(&mut first)).unwrap();
+
+    assert_eq!(
+        block_on(create_market(
+            &Ctx::system(),
+            &markets,
+            &ids,
+            balkans(&["BA", "RS"])
+        )),
+        Err(CommandError::CountryInOtherMarket {
+            country: cc("RS"),
+            market: first.id(),
+        })
     );
 }

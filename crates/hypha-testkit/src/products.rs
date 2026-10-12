@@ -1,44 +1,61 @@
-use std::{collections::HashMap, sync::Mutex};
-
 use hypha_core::{ProductId, RepoError, VariantId};
-use hypha_products::{Handle, Product, repo::ProductRepo};
+use hypha_products::{
+    Handle, Product,
+    repo::{ProductRepo, keys},
+};
+
+use crate::table::Table;
 
 #[derive(Default)]
 pub struct InMemoryProductRepo {
-    products: Mutex<HashMap<ProductId, Product>>,
+    products: Table<ProductId, Product>,
+}
+
+/// The unique keys of `keys` that `new` would break against `other`.
+fn unique(new: &Product, other: &Product) -> Option<&'static str> {
+    if new.handle() == other.handle() {
+        return Some(keys::HANDLE);
+    }
+    let shares_variant = new
+        .variants()
+        .iter()
+        .any(|v| other.variants().iter().any(|o| o.id() == v.id()));
+    shares_variant.then_some(keys::VARIANT_ID)
 }
 
 impl ProductRepo for InMemoryProductRepo {
-    async fn get(&self, id: ProductId) -> Result<Option<Product>, hypha_core::RepoError> {
-        let products = self.products.lock().unwrap();
-        Ok(products.get(&id).cloned())
+    async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError> {
+        Ok(self.products.get(&id))
     }
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {
-        let products = self.products.lock().unwrap();
-        Ok(products.values().find(|p| p.handle() == handle).cloned())
+        Ok(self.products.find(|p| p.handle() == handle))
     }
 
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError> {
-        let products = self.products.lock().unwrap();
-        Ok(products
-            .values()
-            .find(|p| p.variants().iter().any(|v| v.id() == variant))
-            .cloned())
+        Ok(self
+            .products
+            .find(|p| p.variants().iter().any(|v| v.id() == variant)))
     }
 
-    async fn save(&self, product: &Product) -> Result<(), RepoError> {
-        let mut products = self.products.lock().unwrap();
-        products.insert(product.id(), product.clone());
-        Ok(())
+    async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
+        self.products
+            .insert(product.id(), product, keys::PRODUCT_ID, &unique)
+    }
+
+    async fn update(&self, product: &mut Product) -> Result<(), RepoError> {
+        self.products.update(product.id(), product, &unique)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use hypha_core::{Currency, Money, Price};
+    use hypha_core::{Currency, Money, Price, Version, Versioned};
+    use hypha_products::ProductStatus;
+    use pollster::block_on;
     use uuid::Uuid;
+
+    use super::*;
 
     fn product(n: u128, handle: &str) -> Product {
         Product::new_simple(
@@ -51,48 +68,114 @@ mod tests {
     }
 
     #[test]
-    fn saves_and_loads_product() {
+    fn insert_stores_product_at_version_1() {
         let repo = InMemoryProductRepo::default();
-        let p = product(1, "mug");
-        pollster::block_on(repo.save(&p)).unwrap();
-        assert_eq!(pollster::block_on(repo.get(p.id())), Ok(Some(p)));
+        let mut p = product(1, "mug");
+        block_on(repo.insert(&mut p)).unwrap();
+        assert_eq!(p.version(), Version::new(1));
+        assert_eq!(block_on(repo.get(p.id())), Ok(Some(p)));
     }
 
     #[test]
     fn get_unknown_is_none() {
         let repo = InMemoryProductRepo::default();
         let id = ProductId::from_uuid(Uuid::from_u128(99));
-        assert_eq!(pollster::block_on(repo.get(id)), Ok(None));
+        assert_eq!(block_on(repo.get(id)), Ok(None));
     }
 
     #[test]
     fn get_by_handle_finds_the_right_product() {
         let repo = InMemoryProductRepo::default();
-        let mug = product(1, "mug");
-        pollster::block_on(repo.save(&mug)).unwrap();
-        pollster::block_on(repo.save(&product(2, "shirt"))).unwrap();
+        let mut mug = product(1, "mug");
+        block_on(repo.insert(&mut mug)).unwrap();
+        block_on(repo.insert(&mut product(2, "shirt"))).unwrap();
 
-        let found = pollster::block_on(repo.get_by_handle(&Handle::new("mug").unwrap()));
+        let found = block_on(repo.get_by_handle(&Handle::new("mug").unwrap()));
         assert_eq!(found, Ok(Some(mug)));
 
-        let missing = pollster::block_on(repo.get_by_handle(&Handle::new("hat").unwrap()));
+        let missing = block_on(repo.get_by_handle(&Handle::new("hat").unwrap()));
         assert_eq!(missing, Ok(None));
     }
 
     #[test]
     fn get_by_variant_finds_the_owning_product() {
         let repo = InMemoryProductRepo::default();
-        let mug = product(1, "mug");
-        pollster::block_on(repo.save(&mug)).unwrap();
-        pollster::block_on(repo.save(&product(2, "shirt"))).unwrap();
+        let mut mug = product(1, "mug");
+        block_on(repo.insert(&mut mug)).unwrap();
+        block_on(repo.insert(&mut product(2, "shirt"))).unwrap();
 
         let variant = VariantId::from_uuid(Uuid::from_u128(1001));
-        assert_eq!(
-            pollster::block_on(repo.get_by_variant(variant)),
-            Ok(Some(mug))
-        );
+        assert_eq!(block_on(repo.get_by_variant(variant)), Ok(Some(mug)));
 
         let unknown = VariantId::from_uuid(Uuid::from_u128(9999));
-        assert_eq!(pollster::block_on(repo.get_by_variant(unknown)), Ok(None));
+        assert_eq!(block_on(repo.get_by_variant(unknown)), Ok(None));
+    }
+
+    #[test]
+    fn insert_rejects_duplicate_id_handle_and_variant() {
+        let repo = InMemoryProductRepo::default();
+        block_on(repo.insert(&mut product(1, "mug"))).unwrap();
+
+        assert_eq!(
+            block_on(repo.insert(&mut product(1, "other"))),
+            Err(RepoError::Duplicate(keys::PRODUCT_ID))
+        );
+        assert_eq!(
+            block_on(repo.insert(&mut product(2, "mug"))),
+            Err(RepoError::Duplicate(keys::HANDLE))
+        );
+        // Product 3 reuses product 1's variant ID (1001).
+        let reused_variant = Product::new_simple(
+            ProductId::from_uuid(Uuid::from_u128(3)),
+            Handle::new("cup").unwrap(),
+            "Cup".to_string(),
+            VariantId::from_uuid(Uuid::from_u128(1001)),
+            Price::new(Money::new(1, Currency::Eur).unwrap()).unwrap(),
+        );
+        assert_eq!(
+            block_on(repo.insert(&mut reused_variant.clone())),
+            Err(RepoError::Duplicate(keys::VARIANT_ID))
+        );
+    }
+
+    #[test]
+    fn update_bumps_version() {
+        let repo = InMemoryProductRepo::default();
+        let mut p = product(1, "mug");
+        block_on(repo.insert(&mut p)).unwrap();
+
+        p.set_status(ProductStatus::Active).unwrap();
+        block_on(repo.update(&mut p)).unwrap();
+
+        assert_eq!(p.version(), Version::new(2));
+        assert_eq!(block_on(repo.get(p.id())), Ok(Some(p)));
+    }
+
+    #[test]
+    fn update_from_stale_copy_fails_and_keeps_newer_write() {
+        let repo = InMemoryProductRepo::default();
+        let mut p = product(1, "mug");
+        block_on(repo.insert(&mut p)).unwrap();
+        let mut first = p.clone();
+        let mut second = p.clone();
+
+        first.set_status(ProductStatus::Active).unwrap();
+        block_on(repo.update(&mut first)).unwrap();
+        second.set_status(ProductStatus::Active).unwrap();
+
+        assert_eq!(
+            block_on(repo.update(&mut second)),
+            Err(RepoError::StaleVersion)
+        );
+        assert_eq!(block_on(repo.get(p.id())), Ok(Some(first)));
+    }
+
+    #[test]
+    fn update_of_missing_product_is_stale() {
+        let repo = InMemoryProductRepo::default();
+        assert_eq!(
+            block_on(repo.update(&mut product(1, "mug"))),
+            Err(RepoError::StaleVersion)
+        );
     }
 }
