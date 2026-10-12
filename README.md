@@ -2,12 +2,12 @@
 
 > Working name. Early-stage and not ready for production use.
 
-Hypha is an open-source, modular e-commerce API written in Rust. The same core is meant to run anywhere, from Cloudflare Workers (WASM) and AWS Lambda to Vercel and a plain VPS, and it treats AI agents as first-class users of the API.
+Hypha is an open-source, modular e-commerce API written in Rust. The same core is meant to run anywhere, from Cloudflare Workers (WASM) and AWS Lambda to Vercel and a plain VPS. It is built to be easy for AI coding agents to extend, and for AI assistants to operate from the admin panel.
 
 ## Goals
 
 - **Modular.** Each domain (products, markets, pricing, cart, orders…) is its own crate. You extend behavior with plugins ("spores") built on traits and events, so you never have to fork the core.
-- **Agent-native.** Every operation is a *command* with typed input, required scopes and typed errors. One command surface can be exposed over HTTP, MCP and a CLI. Agents are actors in their own right (`Actor::Agent`), with their own scopes.
+- **Agent-friendly.** The codebase is meant to be easy for coding agents to extend: small crates, explicit types, exact errors, fast deterministic tests. Every operation is a *command* with typed input, required scopes and typed errors, so the same surface can be exposed over HTTP, MCP and a CLI for admin assistants (`Actor::Agent`, with their own scopes). Agentic shopping is handled separately by a planned [Universal Commerce Protocol](https://ucp.dev) adapter.
 - **Built for large catalogs.** Variants are sparse and explicit, never generated as a Cartesian product of options. Markets, catalogs and price lists follow the Shopify model.
 - **Runs on many hosts.** Core and domain crates compile to `wasm32-unknown-unknown` and contain no runtime, storage or HTTP code. Each deployment target is a thin host crate.
 

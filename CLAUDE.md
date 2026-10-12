@@ -6,7 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hypha (working name): open-source, modular e-commerce API in Rust (edition 2024, Cargo workspace, `crates/*`).
 - **Modular**: one crate per domain; behavior is extended through plugins ("spores") via traits and events, not by editing core.
-- **Agent-native**: every operation is a command with typed input, required scopes and typed errors, so the same surface can be exposed over HTTP, MCP and CLI. Agents are first-class actors (`Actor::Agent`).
+- **Agent-friendly, in two specific ways** (shopping agents are *not* the target of the core API):
+  1. **Building Hypha**: the codebase is meant to be easy for coding agents to extend: core, domain crates and plugins ("spores"). Favor explicit types, small crates with clear ports, exact errors and fast deterministic tests over cleverness.
+  2. **Admin assistance**: agents will help merchants operate the system from the admin panel. Every operation is a command with typed input, required scopes and typed errors, so the same surface can be exposed over HTTP, MCP and CLI; such agents act as `Actor::Agent` with their own scopes.
+  - Agentic *shopping* goes through a separate adapter for the Universal Commerce Protocol (UCP, ucp.dev; planned via ucphub.ai), not through the core commands directly. Design storefront-facing read models (e.g. priced carts) so they map cleanly onto UCP, e.g. per-line problems → UCP `messages` with a `path` to the line.
 - **Large catalogs**: sparse explicit variants (never generate the Cartesian product of options); Shopify-style markets / catalogs / price lists.
 - **Multi-host**: the same core runs on Cloudflare Workers (WASM), AWS Lambda, Vercel and a plain VPS (axum).
 - It's also a Rust learning project for the maintainer (Danilo, TypeScript background). See "Working with Danilo".
@@ -87,4 +90,4 @@ When a command needs more than two or three ports, group them in a `XxxPorts` tr
 
 ## Roadmap / deferred (don't build unless asked)
 
-Price lists + catalogs + price resolution (in progress), cart, Postgres adapter (sqlx), API keys then OAuth, structured logging (tracing), combined listings (variants as products), FX rates as a port, MCP tool generation from commands, admin AI features as plugins behind a `ModelProvider` port.
+Cart line status (Shopify-style warnings), cart quantity/remove commands and HTTP routes, orders, Postgres adapter (sqlx), API keys then OAuth, structured logging (tracing), combined listings (variants as products), FX rates as a port, MCP tool generation from commands, UCP adapter for agentic shopping (via ucphub.ai), admin AI features as plugins behind a `ModelProvider` port.
