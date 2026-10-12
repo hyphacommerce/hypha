@@ -8,6 +8,7 @@ license.workspace = true
 hypha-core.workspace = true
 hypha-products = { path = "../hypha-products" }
 hypha-markets = { path = "../hypha-markets" }
+hypha-cart = { path = "../hypha-cart" }
 uuid.workspace = true
 
 [dev-dependencies]

@@ -220,7 +220,12 @@ dependencies = [
 name = "hypha-cart"
 version = "0.1.0"
 dependencies = [
- "serde",
+ "hypha-core",
+ "hypha-markets",
+ "hypha-pricing",
+ "hypha-products",
+ "hypha-testkit",
+ "pollster",
  "thiserror",
  "uuid",
 ]
@@ -289,6 +294,7 @@ dependencies = [
 name = "hypha-testkit"
 version = "0.1.0"
 dependencies = [
+ "hypha-cart",
  "hypha-core",
  "hypha-markets",
  "hypha-products",

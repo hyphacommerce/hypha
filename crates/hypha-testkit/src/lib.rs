@@ -1,9 +1,11 @@
+mod carts;
 mod catalogs;
 mod ids;
 mod markets;
 mod price_lists;
 mod products;
 
+pub use carts::InMemoryCartRepo;
 pub use catalogs::InMemoryCatalogRepo;
 pub use ids::SequentialIds;
 pub use markets::InMemoryMarketRepo;
