@@ -233,10 +233,7 @@ mod tests {
 
     #[test]
     fn sum_respects_currency_param() {
-        let items = vec![
-            Money::new(69, Currency::Usd),
-            Money::new(67, Currency::Usd),
-        ];
+        let items = vec![Money::new(69, Currency::Usd), Money::new(67, Currency::Usd)];
         assert_eq!(
             Money::sum(&items, Currency::Eur),
             Err(MoneyError::CurrencyMismatch(Currency::Eur, Currency::Usd))

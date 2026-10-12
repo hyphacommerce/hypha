@@ -99,7 +99,6 @@ pub fn check_no_overlap(markets: &[Market]) -> Result<(), MarketError> {
 }
 
 #[cfg(test)]
-
 mod tests {
     use uuid::Uuid;
 
