@@ -18,9 +18,9 @@ Hypha is an open-source, modular e-commerce API written in Rust. The same core i
 | Core types: money, prices, basis points, prefixed IDs, countries, scopes, actor context | ✅ |
 | Products: handles, options, explicit variants, status transitions, create/get commands | ✅ |
 | Markets, catalogs (one per market) and price lists, with `assign_price_list` | ✅ |
-| HTTP host (axum) with in-memory storage | ✅ basic `POST /products`, `GET /products/{id}` |
+| HTTP host (axum) with in-memory storage: products, markets, price lists, catalogs, carts; JSON errors everywhere | ✅ |
 | Price resolution: fixed price, else base price adjusted by basis points | ✅ |
-| Cart: create, add line by variant, get at current prices with per-line availability (domain only, no HTTP routes yet) | ✅ |
+| Cart: create, add line by variant, get at current prices with per-line availability | ✅ |
 | Orders | ⏳ planned |
 | Postgres adapter, API keys / OAuth, MCP tools, Cloudflare / Lambda hosts | ⏳ planned |
 
