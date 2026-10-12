@@ -1,6 +1,6 @@
 use hypha_core::{Currency, MarketId, MoneyError, PriceListId, ProductId};
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum PricingError {
     #[error("product {product} is not available in market {market}")]
     NotAvailable {

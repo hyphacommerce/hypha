@@ -21,7 +21,7 @@ pub struct Money {
     currency: Currency,
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum MoneyError {
     #[error("currency mismatch: {0:?} vs {1:?}")]
     CurrencyMismatch(Currency, Currency),
