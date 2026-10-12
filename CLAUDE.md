@@ -22,16 +22,17 @@ Run all four before considering work done:
 cargo fmt --all
 cargo clippy --workspace --all-targets
 cargo test --workspace
-cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart --target wasm32-unknown-unknown
+cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-store-postgres --target wasm32-unknown-unknown
 ```
 
-Extend the wasm build list when a domain crate is added.
+Extend the wasm build list when a domain crate or storage adapter is added.
 
 - Single crate's tests: `cargo test -p hypha-products`
 - Single test by name: `cargo test -p hypha-products rejects_same_handle_products`
 - Only an integration test file: `cargo test -p hypha-products --test commands`
 - Run the HTTP host (binds `127.0.0.1:3000`, `RUST_LOG` respected): `cargo run -p hypha-host-axum`
 - End-to-end check against a freshly started host (Git Bash on Windows): `bash scripts/e2e.sh`. Asserts status + error `code` per step, exits non-zero on failure. Run it after changing routes, DTOs or error mapping, and add a step for new routes.
+- Postgres (Docker Desktop): `docker compose up -d`, then `DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha cargo test -p hypha-store-postgres` runs the repository contract against it (each test gets its own schema). Without `DATABASE_URL` those tests skip themselves.
 
 ## Architecture (hexagonal / ports and adapters)
 
@@ -42,6 +43,7 @@ Domain crates are layered; a crate may only depend on layers below it (Cargo rej
 | Layer | Crates | May depend on |
 | --- | --- | --- |
 | Hosts | `hypha-host-axum` | anything |
+| Storage adapters | `hypha-store-postgres` (tokio-postgres; native and Workers via Hyperdrive) | domain crates, core; never hosts |
 | Composing domains | `hypha-cart` (later orders) | leaf domains, core |
 | Leaf domains | `hypha-products`, `hypha-markets`, `hypha-pricing` | core; `hypha-pricing` → `hypha-markets` only |
 | Core | `hypha-core` | nothing internal |
