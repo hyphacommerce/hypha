@@ -110,6 +110,35 @@ pub fn check_no_overlap(markets: &[Market]) -> Result<(), MarketError> {
     Ok(())
 }
 
+/// Plain-data form of a `Market` for storage adapters (design note 0001, 3.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketSnapshot {
+    pub id: MarketId,
+    pub version: Version,
+    pub name: String,
+    pub countries: Vec<CountryCode>,
+    pub currency: Currency,
+}
+
+impl Market {
+    pub fn snapshot(&self) -> MarketSnapshot {
+        MarketSnapshot {
+            id: self.id,
+            version: self.version,
+            name: self.name.clone(),
+            countries: self.countries.clone(),
+            currency: self.currency,
+        }
+    }
+
+    /// Rebuilds a market from storage through `Market::new`, so its rules still hold.
+    pub fn restore(s: MarketSnapshot) -> Result<Market, MarketError> {
+        let mut market = Market::new(s.id, s.name, s.countries, s.currency)?;
+        market.version = s.version;
+        Ok(market)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
@@ -214,6 +243,23 @@ mod tests {
         assert_eq!(
             check_no_overlap(&markets),
             Err(MarketError::DuplicateCountry(cc("HR")))
+        );
+    }
+
+    #[test]
+    fn restore_round_trips() {
+        let mut m = market(1, &["RS", "HR"]).unwrap();
+        m.set_version(Version::new(3));
+        assert_eq!(Market::restore(m.snapshot()), Ok(m));
+    }
+
+    #[test]
+    fn restore_rejects_duplicate_country() {
+        let mut s = market(1, &["RS"]).unwrap().snapshot();
+        s.countries.push(cc("RS"));
+        assert_eq!(
+            Market::restore(s),
+            Err(MarketError::DuplicateCountry(cc("RS")))
         );
     }
 }

@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::ProductError,
     handle::Handle,
-    option::ProductOption,
+    option::{OptionValue, ProductOption},
+    snapshot::{OptionSnapshot, OptionValueSnapshot, ProductSnapshot, VariantSnapshot},
     variant::{NewVariant, Variant},
 };
 
@@ -85,28 +86,7 @@ impl Product {
         if options.is_empty() {
             return Err(ProductError::NoOptions);
         }
-
-        for option in &options {
-            if option.values().is_empty() {
-                return Err(ProductError::EmptyOption(option.id()));
-            }
-        }
-
-        let mut seen_names = HashSet::new();
-        for option in &options {
-            if !seen_names.insert(option.name()) {
-                return Err(ProductError::DuplicateOptionName(option.name().to_string()));
-            }
-        }
-
-        let mut seen_value_ids = HashSet::new();
-        for option in &options {
-            for value in option.values() {
-                if !seen_value_ids.insert(value.id()) {
-                    return Err(ProductError::DuplicateOptionValue(value.id()));
-                }
-            }
-        }
+        validate_options(&options)?;
 
         let mut product = Self {
             id,
@@ -196,11 +176,121 @@ impl Product {
     }
 }
 
+/// Option rules shared by `new_configurable` and `restore`: every option has values,
+/// option names are unique, and value IDs are unique across all options.
+fn validate_options(options: &[ProductOption]) -> Result<(), ProductError> {
+    for option in options {
+        if option.values().is_empty() {
+            return Err(ProductError::EmptyOption(option.id()));
+        }
+    }
+
+    let mut seen_names = HashSet::new();
+    for option in options {
+        if !seen_names.insert(option.name()) {
+            return Err(ProductError::DuplicateOptionName(option.name().to_string()));
+        }
+    }
+
+    let mut seen_value_ids = HashSet::new();
+    for option in options {
+        for value in option.values() {
+            if !seen_value_ids.insert(value.id()) {
+                return Err(ProductError::DuplicateOptionValue(value.id()));
+            }
+        }
+    }
+    Ok(())
+}
+
+impl Product {
+    /// Plain-data form for storage adapters.
+    pub fn snapshot(&self) -> ProductSnapshot {
+        ProductSnapshot {
+            id: self.id,
+            version: self.version,
+            handle: self.handle.as_str().to_string(),
+            title: self.title.clone(),
+            status: self.status,
+            options: self
+                .options
+                .iter()
+                .map(|o| OptionSnapshot {
+                    id: o.id(),
+                    name: o.name().to_string(),
+                    values: o
+                        .values()
+                        .iter()
+                        .map(|v| OptionValueSnapshot {
+                            id: v.id(),
+                            label: v.label().to_string(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            variants: self
+                .variants
+                .iter()
+                .map(|v| VariantSnapshot {
+                    id: v.id(),
+                    sku: v.sku().map(str::to_string),
+                    base_price: v.base_price().money(),
+                    selections: v.selections().to_vec(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Rebuilds a product from storage, re-checking every invariant the constructors
+    /// enforce. Any status is accepted: transitions were checked when it was set.
+    pub fn restore(s: ProductSnapshot) -> Result<Product, ProductError> {
+        let handle = Handle::new(&s.handle)?;
+        let options: Vec<ProductOption> = s
+            .options
+            .into_iter()
+            .map(|o| {
+                let values = o
+                    .values
+                    .into_iter()
+                    .map(|v| OptionValue::new(v.id, v.label))
+                    .collect();
+                ProductOption::new(o.id, o.name, values)
+            })
+            .collect();
+        validate_options(&options)?;
+
+        let mut product = Product {
+            id: s.id,
+            version: s.version,
+            handle,
+            title: s.title,
+            status: s.status,
+            options,
+            variants: Vec::with_capacity(s.variants.len()),
+        };
+        // add_variant checks IDs, selection count, option values and unique combinations;
+        // with no options it allows exactly one variant (the simple-product shape).
+        for v in s.variants {
+            let price = Price::new(v.base_price).map_err(ProductError::InvalidPrice)?;
+            product.add_variant(NewVariant {
+                id: v.id,
+                sku: v.sku,
+                price,
+                selections: v.selections,
+            })?;
+        }
+        if product.variants.is_empty() {
+            return Err(ProductError::NoVariants);
+        }
+        Ok(product)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::option::OptionValue;
-    use hypha_core::{Currency, Money, OptionId, OptionValueId};
+    use crate::error::HandleError;
+    use hypha_core::{Currency, Money, MoneyError, OptionId, OptionValueId};
     use uuid::Uuid;
 
     #[test]
@@ -484,5 +574,91 @@ mod tests {
             })
         );
         assert_eq!(p.status(), ProductStatus::Archived);
+    }
+    // ---- snapshot / restore ----
+
+    #[test]
+    fn restore_round_trips_configurable_product() {
+        let mut p = shirt();
+        p.add_variant(new_var(2, vec![val(12), val(22)])).unwrap();
+        p.set_status(ProductStatus::Active).unwrap();
+        p.set_version(Version::new(7));
+        assert_eq!(Product::restore(p.snapshot()), Ok(p));
+    }
+
+    #[test]
+    fn restore_round_trips_simple_product() {
+        let p = simple();
+        assert_eq!(Product::restore(p.snapshot()), Ok(p));
+    }
+
+    #[test]
+    fn restore_accepts_any_stored_status() {
+        // Draft -> Archived is not an allowed transition, but stored state is just state.
+        let mut s = simple().snapshot();
+        s.status = ProductStatus::Archived;
+        assert_eq!(
+            Product::restore(s).map(|p| p.status()),
+            Ok(ProductStatus::Archived)
+        );
+    }
+
+    #[test]
+    fn restore_rejects_invalid_handle() {
+        let mut s = simple().snapshot();
+        s.handle = "Bad Handle".to_string();
+        assert_eq!(
+            Product::restore(s),
+            Err(ProductError::InvalidHandle(HandleError::InvalidChar('B')))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_negative_price() {
+        let mut s = simple().snapshot();
+        s.variants[0].base_price = Money::new(-1, Currency::Eur).unwrap();
+        assert_eq!(
+            Product::restore(s),
+            Err(ProductError::InvalidPrice(MoneyError::Negative))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_product_without_variants() {
+        let mut s = simple().snapshot();
+        s.variants.clear();
+        assert_eq!(Product::restore(s), Err(ProductError::NoVariants));
+    }
+
+    #[test]
+    fn restore_rejects_second_variant_on_simple_product() {
+        let mut s = simple().snapshot();
+        s.variants.push(VariantSnapshot {
+            id: var(2),
+            sku: None,
+            base_price: price().money(),
+            selections: vec![],
+        });
+        assert_eq!(Product::restore(s), Err(ProductError::DuplicateCombination));
+    }
+
+    #[test]
+    fn restore_rejects_selection_of_unknown_value() {
+        let mut s = shirt().snapshot();
+        s.variants[0].selections = vec![val(11), val(99)];
+        assert_eq!(
+            Product::restore(s),
+            Err(ProductError::UnknownOptionValue(val(99)))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_duplicate_option_value() {
+        let mut s = shirt().snapshot();
+        s.options[1].values[0].id = val(11);
+        assert_eq!(
+            Product::restore(s),
+            Err(ProductError::DuplicateOptionValue(val(11)))
+        );
     }
 }

@@ -1,4 +1,4 @@
-use hypha_core::{ErrorCode, OptionId, OptionValueId, VariantId};
+use hypha_core::{ErrorCode, MoneyError, OptionId, OptionValueId, VariantId};
 
 use crate::ProductStatus;
 
@@ -39,6 +39,10 @@ pub enum ProductError {
         from: ProductStatus,
         to: ProductStatus,
     },
+    #[error("a product needs at least one variant")]
+    NoVariants,
+    #[error("invalid price: {0}")]
+    InvalidPrice(MoneyError),
 }
 
 impl ErrorCode for HandleError {
@@ -65,6 +69,8 @@ impl ErrorCode for ProductError {
             ProductError::DuplicateOptionName(_) => "duplicate_option_name",
             ProductError::DuplicateOptionValue(_) => "duplicate_option_value",
             ProductError::InvalidTransition { .. } => "invalid_status_transition",
+            ProductError::NoVariants => "no_variants",
+            ProductError::InvalidPrice(e) => e.code(),
         }
     }
 }

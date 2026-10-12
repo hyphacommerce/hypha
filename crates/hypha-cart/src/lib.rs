@@ -5,7 +5,7 @@ pub mod pricing;
 pub mod quantity;
 pub mod repo;
 
-pub use cart::{Cart, CartLine};
+pub use cart::{Cart, CartLine, CartLineSnapshot, CartSnapshot};
 pub use commands::{AddLine, CartPorts, CommandError, add_line, create_cart, get_cart};
 pub use error::{CartError, LineError};
 pub use pricing::{LineStatus, PricedCart, PricedLine, price_cart, price_line};

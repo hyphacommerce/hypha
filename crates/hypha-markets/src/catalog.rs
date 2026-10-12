@@ -83,6 +83,37 @@ pub fn check_one_catalog_per_context(catalogs: &[Catalog]) -> Result<(), Catalog
     Ok(())
 }
 
+/// Plain-data form of a `Catalog` for storage adapters (design note 0001, 3.4).
+/// Its products are stored separately (see `CatalogRepo`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogSnapshot {
+    pub id: CatalogId,
+    pub version: Version,
+    pub context: CatalogContext,
+    pub price_list: Option<PriceListId>,
+}
+
+impl Catalog {
+    pub fn snapshot(&self) -> CatalogSnapshot {
+        CatalogSnapshot {
+            id: self.id,
+            version: self.version,
+            context: self.context,
+            price_list: self.price_list,
+        }
+    }
+
+    /// Infallible: a catalog has no rules beyond its field types.
+    pub fn restore(s: CatalogSnapshot) -> Catalog {
+        Catalog {
+            id: s.id,
+            version: s.version,
+            context: s.context,
+            price_list: s.price_list,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
@@ -130,5 +161,13 @@ mod tests {
             check_one_catalog_per_context(&catalogs),
             Err(CatalogError::DuplicateContext(in_market(1)))
         );
+    }
+
+    #[test]
+    fn restore_round_trips() {
+        let mut c = catalog(1, in_market(1));
+        c.set_price_list(Some(PriceListId::from_uuid(Uuid::from_u128(9))));
+        c.set_version(Version::new(4));
+        assert_eq!(Catalog::restore(c.snapshot()), c);
     }
 }

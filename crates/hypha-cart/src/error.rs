@@ -9,6 +9,8 @@ pub enum CartError {
     QuantityOverflow,
     #[error("variant {0} is not in the cart")]
     LineNotFound(VariantId),
+    #[error("variant {0} is on more than one line")]
+    DuplicateLine(VariantId),
 }
 
 /// Why a line can't be priced. Returned as an error by `price_line` (and so by `add_line`),
@@ -36,6 +38,7 @@ impl ErrorCode for CartError {
             CartError::ZeroQuantity => "invalid_quantity",
             CartError::QuantityOverflow => "quantity_overflow",
             CartError::LineNotFound(_) => "line_not_found",
+            CartError::DuplicateLine(_) => "duplicate_line",
         }
     }
 }

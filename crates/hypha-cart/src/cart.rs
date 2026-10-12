@@ -107,6 +107,63 @@ impl Cart {
     }
 }
 
+/// Plain-data form of a `Cart` for storage adapters (design note 0001, 3.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CartSnapshot {
+    pub id: CartId,
+    pub version: Version,
+    pub market: MarketId,
+    pub lines: Vec<CartLineSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CartLineSnapshot {
+    pub product: ProductId,
+    pub variant: VariantId,
+    pub quantity: u32,
+}
+
+impl Cart {
+    pub fn snapshot(&self) -> CartSnapshot {
+        CartSnapshot {
+            id: self.id,
+            version: self.version,
+            market: self.market,
+            lines: self
+                .lines
+                .iter()
+                .map(|l| CartLineSnapshot {
+                    product: l.product,
+                    variant: l.variant,
+                    quantity: l.quantity.value(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Rebuilds a cart from storage: quantities must be at least 1 and each variant may
+    /// appear on one line only (`add_line` merges, so a second line means bad data).
+    pub fn restore(s: CartSnapshot) -> Result<Cart, CartError> {
+        let mut lines: Vec<CartLine> = Vec::with_capacity(s.lines.len());
+        for line in s.lines {
+            if lines.iter().any(|l| l.variant == line.variant) {
+                return Err(CartError::DuplicateLine(line.variant));
+            }
+            lines.push(CartLine {
+                product: line.product,
+                variant: line.variant,
+                quantity: Quantity::new(line.quantity)?,
+            });
+        }
+        Ok(Cart {
+            id: s.id,
+            version: s.version,
+            market: s.market,
+            lines,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
@@ -189,5 +246,32 @@ mod tests {
         assert!(c.remove_line(vid(1)));
         assert!(!c.remove_line(vid(1)));
         assert!(c.lines().is_empty());
+    }
+
+    #[test]
+    fn restore_round_trips() {
+        let mut c = cart();
+        c.add_line(pid(), vid(1), qty(2)).unwrap();
+        c.add_line(pid(), vid(2), qty(1)).unwrap();
+        c.set_version(Version::new(5));
+        assert_eq!(Cart::restore(c.snapshot()), Ok(c));
+    }
+
+    #[test]
+    fn restore_rejects_zero_quantity() {
+        let mut c = cart();
+        c.add_line(pid(), vid(1), qty(2)).unwrap();
+        let mut s = c.snapshot();
+        s.lines[0].quantity = 0;
+        assert_eq!(Cart::restore(s), Err(CartError::ZeroQuantity));
+    }
+
+    #[test]
+    fn restore_rejects_duplicate_variant_line() {
+        let mut c = cart();
+        c.add_line(pid(), vid(1), qty(2)).unwrap();
+        let mut s = c.snapshot();
+        s.lines.push(s.lines[0].clone());
+        assert_eq!(Cart::restore(s), Err(CartError::DuplicateLine(vid(1))));
     }
 }

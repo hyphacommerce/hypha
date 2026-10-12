@@ -87,6 +87,37 @@ impl PriceList {
     }
 }
 
+/// Plain-data form of a `PriceList` for storage adapters (design note 0001, 3.4).
+/// Its fixed prices are stored separately (see `PriceListRepo`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PriceListSnapshot {
+    pub id: PriceListId,
+    pub version: Version,
+    pub currency: Currency,
+    pub adjustment: BasisPoints,
+}
+
+impl PriceList {
+    pub fn snapshot(&self) -> PriceListSnapshot {
+        PriceListSnapshot {
+            id: self.id,
+            version: self.version,
+            currency: self.currency,
+            adjustment: self.adjustment,
+        }
+    }
+
+    /// Infallible: `BasisPoints` is already valid by construction.
+    pub fn restore(s: PriceListSnapshot) -> PriceList {
+        PriceList {
+            id: s.id,
+            version: s.version,
+            currency: s.currency,
+            adjustment: s.adjustment,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hypha_core::Money;
@@ -178,5 +209,13 @@ mod tests {
             eur_list().check_fixed_prices(&prices),
             Err(PriceListError::DuplicateFixedPrice(vid(1)))
         );
+    }
+
+    #[test]
+    fn restore_round_trips() {
+        let mut list = eur_list();
+        list.set_adjustment(BasisPoints::new(-1500).unwrap());
+        list.set_version(Version::new(2));
+        assert_eq!(PriceList::restore(list.snapshot()), list);
     }
 }
