@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt};
 
 use hypha_core::{CatalogId, MarketId, PriceListId, ProductId};
 
@@ -8,6 +8,14 @@ use crate::error::CatalogError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CatalogContext {
     Market(MarketId),
+}
+
+impl fmt::Display for CatalogContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CatalogContext::Market(id) => write!(f, "market {id}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

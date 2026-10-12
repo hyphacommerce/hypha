@@ -32,7 +32,7 @@ pub enum CommandError {
     #[error("market {0} not found")]
     MarketNotFound(MarketId),
     /// Until exchange rates exist, a catalog's price list must be in its market's currency.
-    #[error("price list is in {found:?}, but the market sells in {expected:?}")]
+    #[error("price list is in {found}, but the market sells in {expected}")]
     CurrencyMismatch { expected: Currency, found: Currency },
     #[error("country {country} already belongs to market {market}")]
     CountryInOtherMarket {

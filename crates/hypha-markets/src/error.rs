@@ -16,7 +16,7 @@ pub enum MarketError {
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CatalogError {
-    #[error("more than one catalog for {0:?}")]
+    #[error("more than one catalog for {0}")]
     DuplicateContext(CatalogContext),
 }
 
@@ -29,7 +29,7 @@ pub struct MismatchedPrice {
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum PriceListError {
-    #[error("{} fixed price(s) are not in the price list's currency {expected:?}", prices.len())]
+    #[error("{} fixed price(s) are not in the price list's currency {expected}", prices.len())]
     CurrencyMismatch {
         expected: Currency,
         /// Sorted by variant ID.

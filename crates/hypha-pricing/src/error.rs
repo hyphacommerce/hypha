@@ -10,7 +10,7 @@ pub enum PricingError {
     #[error("price list {0} is referenced by a catalog but was not provided")]
     PriceListNotFound(PriceListId),
     /// Until exchange rates exist, a price can't be converted to the market's currency.
-    #[error("price is in {found:?}, but the market sells in {expected:?}")]
+    #[error("price is in {found}, but the market sells in {expected}")]
     CurrencyMismatch { expected: Currency, found: Currency },
     #[error(transparent)]
     Money(#[from] MoneyError),

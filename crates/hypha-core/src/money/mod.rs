@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -15,6 +17,23 @@ pub enum Currency {
     Rsd,
 }
 
+impl Currency {
+    /// ISO 4217 code, the same string used in JSON.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Currency::Eur => "EUR",
+            Currency::Usd => "USD",
+            Currency::Rsd => "RSD",
+        }
+    }
+}
+
+impl fmt::Display for Currency {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Money {
     amount: i64, // minor units: 1050 = €10.50
@@ -23,7 +42,7 @@ pub struct Money {
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum MoneyError {
-    #[error("currency mismatch: {0:?} vs {1:?}")]
+    #[error("currency mismatch: {0} vs {1}")]
     CurrencyMismatch(Currency, Currency),
     #[error("amount overflow")]
     Overflow,
@@ -125,6 +144,13 @@ mod tests {
     }
 
     // ---- currency ----
+
+    #[test]
+    fn currency_display_matches_json() {
+        for c in [Currency::Eur, Currency::Usd, Currency::Rsd] {
+            assert_eq!(serde_json::to_string(&c).unwrap(), format!("\"{c}\""));
+        }
+    }
 
     #[test]
     fn currency_serializes_uppercase() {

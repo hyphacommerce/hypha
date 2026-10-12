@@ -18,7 +18,7 @@ pub struct Ctx {
 #[derive(Debug, Error, PartialEq, Eq)]
 
 pub enum AuthError {
-    #[error("missing scope {0:?}")]
+    #[error("missing scope {0}")]
     MissingScope(Scope),
 }
 

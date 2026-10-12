@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt};
 
 use hypha_core::{Price, ProductId, VariantId};
 use serde::{Deserialize, Serialize};
@@ -11,10 +11,28 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProductStatus {
     Draft,
     Active,
     Archived,
+}
+
+impl ProductStatus {
+    /// The same string used in JSON, e.g. "active".
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProductStatus::Draft => "draft",
+            ProductStatus::Active => "active",
+            ProductStatus::Archived => "archived",
+        }
+    }
+}
+
+impl fmt::Display for ProductStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +189,25 @@ mod tests {
     use crate::option::OptionValue;
     use hypha_core::{Currency, Money, OptionId, OptionValueId};
     use uuid::Uuid;
+
+    #[test]
+    fn status_uses_snake_case_in_json_and_display() {
+        for status in [
+            ProductStatus::Draft,
+            ProductStatus::Active,
+            ProductStatus::Archived,
+        ] {
+            assert_eq!(
+                serde_json::to_string(&status).unwrap(),
+                format!("\"{status}\"")
+            );
+        }
+        assert_eq!(
+            serde_json::from_str::<ProductStatus>("\"active\"").unwrap(),
+            ProductStatus::Active
+        );
+        assert!(serde_json::from_str::<ProductStatus>("\"Active\"").is_err());
+    }
 
     // ---- helpers ----
 

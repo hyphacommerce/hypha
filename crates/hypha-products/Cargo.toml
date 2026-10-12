@@ -14,6 +14,7 @@ serde.workspace = true
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
 pollster = "0.4"
+serde_json.workspace = true
 
 [lints]
 workspace = true
