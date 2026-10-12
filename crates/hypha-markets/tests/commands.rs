@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use hypha_core::{
     Actor, AuthError, BasisPoints, CatalogId, CountryCode, Ctx, Currency, MarketId, PriceListId,
     Scope, UserId,
@@ -45,17 +43,11 @@ impl World {
             Currency::Eur,
         )
         .unwrap();
-        let catalog = Catalog::new(
-            catalog_id(),
-            CatalogContext::Market(market_id()),
-            HashSet::new(),
-            None,
-        );
+        let catalog = Catalog::new(catalog_id(), CatalogContext::Market(market_id()), None);
         block_on(world.markets.save(&market)).unwrap();
         block_on(world.catalogs.save(&catalog)).unwrap();
         for (n, currency) in [(10, Currency::Eur), (11, Currency::Rsd)] {
-            let list =
-                PriceList::new(list_id(n), currency, BasisPoints::ZERO, HashMap::new()).unwrap();
+            let list = PriceList::new(list_id(n), currency, BasisPoints::ZERO);
             block_on(world.price_lists.save(&list)).unwrap();
         }
         world
@@ -144,7 +136,6 @@ fn rejects_catalog_whose_market_is_missing() {
     let orphan = Catalog::new(
         CatalogId::from_uuid(Uuid::from_u128(97)),
         CatalogContext::Market(orphan_market),
-        HashSet::new(),
         None,
     );
     block_on(world.catalogs.save(&orphan)).unwrap();

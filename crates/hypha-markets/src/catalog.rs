@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt};
 
-use hypha_core::{CatalogId, MarketId, PriceListId, ProductId};
+use hypha_core::{CatalogId, MarketId, PriceListId};
 
 use crate::error::CatalogError;
 
@@ -18,41 +18,25 @@ impl fmt::Display for CatalogContext {
     }
 }
 
+/// Which products are sellable in a context, and at which price list.
+///
+/// The products themselves are not held here: a catalog can include a whole large
+/// catalog's worth of them. They live behind `CatalogRepo::{add_products,
+/// included_products}` and are queried in batches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Catalog {
     id: CatalogId,
     context: CatalogContext,
-    products: HashSet<ProductId>,
     price_list: Option<PriceListId>,
 }
 
 impl Catalog {
-    pub fn new(
-        id: CatalogId,
-        context: CatalogContext,
-        products: HashSet<ProductId>,
-        price_list: Option<PriceListId>,
-    ) -> Self {
+    pub fn new(id: CatalogId, context: CatalogContext, price_list: Option<PriceListId>) -> Self {
         Self {
             id,
             context,
-            products,
             price_list,
         }
-    }
-
-    /// Returns `false` if the product was already in the catalog.
-    pub fn add_product(&mut self, product: ProductId) -> bool {
-        self.products.insert(product)
-    }
-
-    /// Returns `false` if the product wasn't in the catalog.
-    pub fn remove_product(&mut self, product: ProductId) -> bool {
-        self.products.remove(&product)
-    }
-
-    pub fn includes(&self, product: ProductId) -> bool {
-        self.products.contains(&product)
     }
 
     pub fn set_price_list(&mut self, price_list: Option<PriceListId>) {
@@ -65,10 +49,6 @@ impl Catalog {
 
     pub fn context(&self) -> CatalogContext {
         self.context
-    }
-
-    pub fn products(&self) -> &HashSet<ProductId> {
-        &self.products
     }
 
     pub fn price_list(&self) -> Option<PriceListId> {
@@ -97,44 +77,12 @@ mod tests {
 
     use super::*;
 
-    fn pid(n: u128) -> ProductId {
-        ProductId::from_uuid(Uuid::from_u128(n))
-    }
-
     fn in_market(n: u128) -> CatalogContext {
         CatalogContext::Market(MarketId::from_uuid(Uuid::from_u128(n)))
     }
 
     fn catalog(n: u128, context: CatalogContext) -> Catalog {
-        Catalog::new(
-            CatalogId::from_uuid(Uuid::from_u128(n)),
-            context,
-            HashSet::from([pid(1)]),
-            None,
-        )
-    }
-
-    #[test]
-    fn includes_only_listed_products() {
-        let c = catalog(1, in_market(1));
-        assert!(c.includes(pid(1)));
-        assert!(!c.includes(pid(2)));
-    }
-
-    #[test]
-    fn add_product_reports_whether_it_was_new() {
-        let mut c = catalog(1, in_market(1));
-        assert!(c.add_product(pid(2)));
-        assert!(!c.add_product(pid(2)));
-        assert!(c.includes(pid(2)));
-    }
-
-    #[test]
-    fn remove_product_reports_whether_it_was_there() {
-        let mut c = catalog(1, in_market(1));
-        assert!(c.remove_product(pid(1)));
-        assert!(!c.remove_product(pid(1)));
-        assert!(!c.includes(pid(1)));
+        Catalog::new(CatalogId::from_uuid(Uuid::from_u128(n)), context, None)
     }
 
     #[test]

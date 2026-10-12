@@ -75,12 +75,15 @@ step "activate cup" 200 - -X PATCH "$BASE/products/$CUP/status" -H "$JSON" -d '{
 step "create market" 201 - -X POST "$BASE/markets" -H "$JSON" \
     -d '{"name":"Eurozone","countries":["HR","DE"],"currency":"EUR"}'
 MARKET=$(id)
-step "create price list (-10%, cup fixed at 200)" 201 - -X POST "$BASE/price-lists" -H "$JSON" \
-    -d "{\"currency\":\"EUR\",\"adjustment\":-1000,\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}}]}"
+step "create price list (-10%)" 201 - -X POST "$BASE/price-lists" -H "$JSON" \
+    -d '{"currency":"EUR","adjustment":-1000}'
 LIST=$(id)
-step "create catalog" 201 - -X POST "$BASE/catalogs" -H "$JSON" \
-    -d "{\"market\":\"$MARKET\",\"products\":[\"$MUG\",\"$CUP\"]}"
+step "fix cup price at 200" 204 - -X PUT "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}}]}"
+step "create catalog" 201 - -X POST "$BASE/catalogs" -H "$JSON" -d "{\"market\":\"$MARKET\"}"
 CATALOG=$(id)
+step "add mug and cup to catalog" 204 - -X POST "$BASE/catalogs/$CATALOG/products" -H "$JSON" \
+    -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
 step "assign price list" 200 - -X PUT "$BASE/catalogs/$CATALOG/price-list" -H "$JSON" \
     -d "{\"price_list\":\"$LIST\"}"
 
@@ -97,6 +100,15 @@ step "archive mug" 200 - -X PATCH "$BASE/products/$MUG/status" -H "$JSON" -d '{"
 step "get cart" 200 - "$BASE/carts/$CART"
 contains "mug line is unavailable" '"status":"unavailable","reason_code":"product_not_active"'
 contains "total only counts the cup" '"total":{"amount":600,"currency":"EUR"},"fully_available":false'
+
+step "remove cup's fixed price" 204 - -X DELETE "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    -d "{\"variants\":[\"$CUP_VAR\"]}"
+step "get cart" 200 - "$BASE/carts/$CART"
+contains "cup falls back to 250 - 10% = 225" '"unit_price":{"amount":225,"currency":"EUR"},"total":{"amount":675'
+step "remove cup from catalog" 204 - -X DELETE "$BASE/catalogs/$CATALOG/products" -H "$JSON" \
+    -d "{\"products\":[\"$CUP\"]}"
+step "get cart" 200 - "$BASE/carts/$CART"
+contains "cup line is unavailable" '"status":"unavailable","reason_code":"not_available_in_market"'
 
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
@@ -117,6 +129,13 @@ step "create RSD price list" 201 - -X POST "$BASE/price-lists" -H "$JSON" -d '{"
 RSD_LIST=$(id)
 step "assign RSD list to EUR market" 422 price_list_currency_mismatch -X PUT \
     "$BASE/catalogs/$CATALOG/price-list" -H "$JSON" -d "{\"price_list\":\"$RSD_LIST\"}"
+step "fixed prices on unknown list" 404 price_list_not_found -X PUT \
+    "$BASE/price-lists/pl_00000000000000000000000000000063/fixed-prices" -H "$JSON" -d '{"fixed_prices":[]}'
+step "fixed price in other currency" 422 fixed_price_currency_mismatch -X PUT \
+    "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"RSD\"}}]}"
+step "products for unknown catalog" 404 catalog_not_found -X POST \
+    "$BASE/catalogs/cat_00000000000000000000000000000063/products" -H "$JSON" -d '{"products":[]}'
 step "add archived mug" 422 product_not_active -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "zero quantity" 422 invalid_quantity -X POST "$BASE/carts/$CART/lines" -H "$JSON" \

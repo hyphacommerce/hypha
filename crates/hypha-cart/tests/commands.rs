@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use hypha_cart::{
     AddLine, CartError, CartPorts, CartRepo, CommandError, LineError, LineStatus, PricedCart,
     add_line, create_cart, get_cart,
@@ -112,22 +110,21 @@ impl World {
         let catalog = Catalog::new(
             catalog_id(),
             CatalogContext::Market(market_id()),
-            HashSet::from([pid("mug"), pid("cup"), pid("draft")]),
             Some(list_id()),
         );
         block_on(world.catalogs.save(&catalog)).unwrap();
+        block_on(
+            world
+                .catalogs
+                .add_products(catalog_id(), &[pid("mug"), pid("cup"), pid("draft")]),
+        )
+        .unwrap();
         world.set_adjustment(0);
         world
     }
 
     fn set_adjustment(&self, bp: i32) {
-        let list = PriceList::new(
-            list_id(),
-            Currency::Eur,
-            BasisPoints::new(bp).unwrap(),
-            HashMap::new(),
-        )
-        .unwrap();
+        let list = PriceList::new(list_id(), Currency::Eur, BasisPoints::new(bp).unwrap());
         block_on(self.price_lists.save(&list)).unwrap();
     }
 
@@ -359,4 +356,40 @@ fn add_line_still_works_when_another_line_is_stale() {
 
     assert_eq!(priced.lines.len(), 2);
     assert_eq!(priced.total, eur(3000));
+}
+
+#[test]
+fn uses_fixed_price_from_price_list() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let fixed = Price::new(eur(450)).unwrap();
+    block_on(
+        world
+            .price_lists
+            .set_fixed_prices(list_id(), &[(vid("cup"), fixed)]),
+    )
+    .unwrap();
+
+    let priced = world.add(&Ctx::system(), cart, "cup", 2).unwrap();
+
+    assert_eq!(priced.total, eur(900));
+}
+
+#[test]
+fn line_becomes_unavailable_when_product_leaves_catalog() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 1).unwrap();
+
+    block_on(world.catalogs.remove_products(catalog_id(), &[pid("mug")])).unwrap();
+    let priced = world.get(cart).unwrap();
+
+    assert_eq!(
+        priced.lines[0].status,
+        LineStatus::Unavailable(LineError::Pricing(PricingError::NotAvailable {
+            product: pid("mug"),
+            market: market_id(),
+        }))
+    );
+    assert_eq!(priced.total, eur(0));
 }

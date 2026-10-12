@@ -35,6 +35,8 @@ pub enum PriceListError {
         /// Sorted by variant ID.
         prices: Vec<MismatchedPrice>,
     },
+    #[error("variant {0} has more than one fixed price")]
+    DuplicateFixedPrice(VariantId),
 }
 
 impl ErrorCode for MarketError {
@@ -60,6 +62,7 @@ impl ErrorCode for PriceListError {
     fn code(&self) -> &'static str {
         match self {
             PriceListError::CurrencyMismatch { .. } => "fixed_price_currency_mismatch",
+            PriceListError::DuplicateFixedPrice(_) => "duplicate_fixed_price",
         }
     }
 }

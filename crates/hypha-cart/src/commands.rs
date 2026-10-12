@@ -1,10 +1,11 @@
+use std::collections::{HashMap, HashSet};
+
 use hypha_core::{
-    AuthError, CartId, Ctx, ErrorCode, IdGenerator, MarketId, MoneyError, RepoError, Scope,
-    VariantId,
+    AuthError, CartId, Ctx, ErrorCode, IdGenerator, MarketId, MoneyError, ProductId, RepoError,
+    Scope, VariantId,
 };
-use hypha_markets::{
-    Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo,
-};
+use hypha_markets::{CatalogContext, CatalogRepo, MarketRepo, PriceListRepo};
+use hypha_pricing::PricingContext;
 use hypha_products::{Product, ProductRepo};
 use thiserror::Error;
 
@@ -112,14 +113,14 @@ pub async fn add_line<S: CartPorts>(
         .await?
         .ok_or(CommandError::VariantNotFound(input.variant))?;
 
-    let (market, catalogs, price_lists) = load_pricing(ports, cart.market()).await?;
-
-    price_line(&product, input.variant, &market, &catalogs, &price_lists)?;
+    // Only changes the copy in memory; nothing is saved unless every check below passes.
     cart.add_line(product.id(), input.variant, quantity)?;
 
-    // Price the whole cart before saving, so a failure (total overflow) stores nothing.
+    let pricing = load_pricing(ports, &cart).await?;
+    price_line(&product, input.variant, &pricing)?;
+
     let cart_products = load_products(ports, &cart).await?;
-    let priced = price_cart(&cart, &cart_products, &market, &catalogs, &price_lists)?;
+    let priced = price_cart(&cart, &cart_products, &pricing)?;
 
     ports.carts().save(&cart).await?;
     Ok(priced)
@@ -138,24 +139,22 @@ pub async fn get_cart<S: CartPorts>(
         .get(id)
         .await?
         .ok_or(CommandError::CartNotFound(id))?;
-    let (market, catalogs, price_lists) = load_pricing(ports, cart.market()).await?;
+    let pricing = load_pricing(ports, &cart).await?;
     let cart_products = load_products(ports, &cart).await?;
 
-    Ok(price_cart(
-        &cart,
-        &cart_products,
-        &market,
-        &catalogs,
-        &price_lists,
-    )?)
+    Ok(price_cart(&cart, &cart_products, &pricing)?)
 }
 
-/// The market plus its catalog and price list, if any. Missing ones are left out
-/// rather than reported here: `resolve_price` turns them into precise errors.
+/// Everything needed to price the cart's lines, with a fixed number of queries
+/// however many lines there are: membership and fixed prices are fetched in batches.
+///
+/// A missing catalog or price list is left out rather than reported here:
+/// `resolve_price` turns it into a precise per-line reason.
 async fn load_pricing<S: CartPorts>(
     ports: &S,
-    market_id: MarketId,
-) -> Result<(Market, Vec<Catalog>, Vec<PriceList>), CommandError> {
+    cart: &Cart,
+) -> Result<PricingContext, CommandError> {
+    let market_id = cart.market();
     let market = ports
         .markets()
         .get(market_id)
@@ -169,11 +168,33 @@ async fn load_pricing<S: CartPorts>(
         Some(id) => ports.price_lists().get(id).await?,
         None => None,
     };
-    Ok((
+
+    let mut products: Vec<ProductId> = cart.lines().iter().map(|l| l.product()).collect();
+    products.sort_by_key(|p| p.as_uuid());
+    products.dedup();
+    let variants: Vec<VariantId> = cart.lines().iter().map(|l| l.variant()).collect();
+
+    let included_products = match &catalog {
+        Some(c) => {
+            ports
+                .catalogs()
+                .included_products(c.id(), &products)
+                .await?
+        }
+        None => HashSet::new(),
+    };
+    let fixed_prices = match &price_list {
+        Some(l) => ports.price_lists().fixed_prices(l.id(), &variants).await?,
+        None => HashMap::new(),
+    };
+
+    Ok(PricingContext {
         market,
-        catalog.into_iter().collect(),
-        price_list.into_iter().collect(),
-    ))
+        catalog,
+        price_list,
+        included_products,
+        fixed_prices,
+    })
 }
 
 /// Loads each product in the cart once. Missing (deleted) products are left out;

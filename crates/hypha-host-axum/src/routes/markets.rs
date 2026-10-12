@@ -11,7 +11,8 @@ use hypha_core::{
 };
 use hypha_markets::{
     Catalog, CatalogContext, CreateCatalog, CreateMarket, CreatePriceList, FixedPrice, Market,
-    PriceList, assign_price_list, create_catalog, create_market, create_price_list,
+    PriceList, add_catalog_products, assign_price_list, create_catalog, create_market,
+    create_price_list, remove_catalog_products, remove_fixed_prices, set_fixed_prices,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +26,15 @@ pub fn router() -> Router<SharedState> {
     Router::new()
         .route("/markets", post(create_market_handler))
         .route("/price-lists", post(create_price_list_handler))
+        .route(
+            "/price-lists/{id}/fixed-prices",
+            put(set_fixed_prices_handler).delete(remove_fixed_prices_handler),
+        )
         .route("/catalogs", post(create_catalog_handler))
+        .route(
+            "/catalogs/{id}/products",
+            post(add_products_handler).delete(remove_products_handler),
+        )
         .route("/catalogs/{id}/price-list", put(assign_price_list_handler))
 }
 
@@ -79,14 +88,6 @@ struct CreatePriceListRequest {
     /// Basis points: -1000 = 10% off. Defaults to 0.
     #[serde(default)]
     adjustment: i32,
-    #[serde(default)]
-    fixed_prices: Vec<FixedPriceDto>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct FixedPriceDto {
-    variant: VariantId,
-    price: Money,
 }
 
 #[derive(Serialize)]
@@ -94,28 +95,32 @@ struct PriceListResponse {
     id: PriceListId,
     currency: Currency,
     adjustment: i32,
-    /// Sorted by variant ID so responses are stable.
-    fixed_prices: Vec<FixedPriceDto>,
 }
 
 impl From<&PriceList> for PriceListResponse {
     fn from(l: &PriceList) -> Self {
-        let mut fixed_prices: Vec<FixedPriceDto> = l
-            .fixed_prices()
-            .iter()
-            .map(|(variant, price)| FixedPriceDto {
-                variant: *variant,
-                price: price.money(),
-            })
-            .collect();
-        fixed_prices.sort_by_key(|f| f.variant.as_uuid());
         Self {
             id: l.id(),
             currency: l.currency(),
             adjustment: l.adjustment().value(),
-            fixed_prices,
         }
     }
+}
+
+#[derive(Deserialize)]
+struct SetFixedPricesRequest {
+    fixed_prices: Vec<FixedPriceDto>,
+}
+
+#[derive(Deserialize)]
+struct FixedPriceDto {
+    variant: VariantId,
+    price: Money,
+}
+
+#[derive(Deserialize)]
+struct RemoveFixedPricesRequest {
+    variants: Vec<VariantId>,
 }
 
 async fn create_price_list_handler(
@@ -126,17 +131,41 @@ async fn create_price_list_handler(
     let input = CreatePriceList {
         currency: req.currency,
         adjustment: req.adjustment,
-        fixed_prices: req
-            .fixed_prices
-            .into_iter()
-            .map(|f| FixedPrice {
-                variant: f.variant,
-                price: f.price,
-            })
-            .collect(),
     };
     let list = create_price_list(&ctx, &state.price_lists, &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(PriceListResponse::from(&list))))
+}
+
+async fn set_fixed_prices_handler(
+    State(state): State<SharedState>,
+    PathId(id): PathId<PriceListId>,
+    JsonBody(req): JsonBody<SetFixedPricesRequest>,
+) -> Result<StatusCode, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    let prices = req
+        .fixed_prices
+        .into_iter()
+        .map(|f| FixedPrice {
+            variant: f.variant,
+            price: f.price,
+        })
+        .collect();
+    set_fixed_prices(&ctx, &state.price_lists, id, prices)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn remove_fixed_prices_handler(
+    State(state): State<SharedState>,
+    PathId(id): PathId<PriceListId>,
+    JsonBody(req): JsonBody<RemoveFixedPricesRequest>,
+) -> Result<StatusCode, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    remove_fixed_prices(&ctx, &state.price_lists, id, req.variants)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ---------- catalogs ----------
@@ -144,7 +173,10 @@ async fn create_price_list_handler(
 #[derive(Deserialize)]
 struct CreateCatalogRequest {
     market: MarketId,
-    #[serde(default)]
+}
+
+#[derive(Deserialize)]
+struct CatalogProductsRequest {
     products: Vec<ProductId>,
 }
 
@@ -158,8 +190,6 @@ struct AssignPriceListRequest {
 struct CatalogResponse {
     id: CatalogId,
     market: MarketId,
-    /// Sorted by ID so responses are stable.
-    products: Vec<ProductId>,
     price_list: Option<PriceListId>,
 }
 
@@ -167,12 +197,9 @@ impl From<&Catalog> for CatalogResponse {
     fn from(c: &Catalog) -> Self {
         // Irrefutable while Market is the only context; a new variant makes this a compile error.
         let CatalogContext::Market(market) = c.context();
-        let mut products: Vec<ProductId> = c.products().iter().copied().collect();
-        products.sort_by_key(|p| p.as_uuid());
         Self {
             id: c.id(),
             market,
-            products,
             price_list: c.price_list(),
         }
     }
@@ -183,12 +210,29 @@ async fn create_catalog_handler(
     JsonBody(req): JsonBody<CreateCatalogRequest>,
 ) -> Result<(StatusCode, Json<CatalogResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
-    let input = CreateCatalog {
-        market: req.market,
-        products: req.products,
-    };
+    let input = CreateCatalog { market: req.market };
     let catalog = create_catalog(&ctx, &state.markets, &state.catalogs, &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(CatalogResponse::from(&catalog))))
+}
+
+async fn add_products_handler(
+    State(state): State<SharedState>,
+    PathId(id): PathId<CatalogId>,
+    JsonBody(req): JsonBody<CatalogProductsRequest>,
+) -> Result<StatusCode, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    add_catalog_products(&ctx, &state.catalogs, id, req.products).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn remove_products_handler(
+    State(state): State<SharedState>,
+    PathId(id): PathId<CatalogId>,
+    JsonBody(req): JsonBody<CatalogProductsRequest>,
+) -> Result<StatusCode, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    remove_catalog_products(&ctx, &state.catalogs, id, req.products).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn assign_price_list_handler(

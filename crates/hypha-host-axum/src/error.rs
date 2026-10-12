@@ -51,6 +51,15 @@ impl ApiError {
         )
     }
 
+    /// For routes whose URL names the resource: its "not found" (`code`) is a 404,
+    /// not the 422 used when the same kind of ID arrives in a request body.
+    pub fn not_found_if(mut self, code: &str) -> Self {
+        if self.code == code {
+            self.status = StatusCode::NOT_FOUND;
+        }
+        self
+    }
+
     /// A domain error with the given status. Storage errors never reach clients.
     fn domain<E: ErrorCode + std::fmt::Display>(status: StatusCode, e: E) -> Self {
         Self::new(status, e.code(), e)
@@ -112,8 +121,7 @@ impl From<hypha_markets::CommandError> for ApiError {
             | E::PriceList(_)
             | E::PriceListNotFound(_)
             | E::MarketNotFound(_)
-            | E::CurrencyMismatch { .. }
-            | E::DuplicateFixedPrice(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            | E::CurrencyMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(_) => return Self::internal(e),
         };
         Self::domain(status, e)

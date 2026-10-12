@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use hypha_core::{
     AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, ErrorCode,
     IdGenerator, MarketId, Money, MoneyError, Price, PriceListId, ProductId, RepoError, Scope,
@@ -40,8 +38,6 @@ pub enum CommandError {
         country: CountryCode,
         market: MarketId,
     },
-    #[error("variant {0} has more than one fixed price")]
-    DuplicateFixedPrice(VariantId),
     #[error("market {market} already has catalog {catalog}")]
     CatalogExists {
         market: MarketId,
@@ -63,7 +59,6 @@ impl ErrorCode for CommandError {
             CommandError::MarketNotFound(_) => "market_not_found",
             CommandError::CurrencyMismatch { .. } => "price_list_currency_mismatch",
             CommandError::CountryInOtherMarket { .. } => "country_in_other_market",
-            CommandError::DuplicateFixedPrice(_) => "duplicate_fixed_price",
             CommandError::CatalogExists { .. } => "catalog_exists",
         }
     }
@@ -157,18 +152,13 @@ pub async fn create_market<M: MarketRepo, I: IdGenerator>(
     Ok(market)
 }
 
-pub struct FixedPrice {
-    pub variant: VariantId,
-    pub price: Money,
-}
-
 pub struct CreatePriceList {
     pub currency: Currency,
     /// Basis points: -1000 = 10% off, 500 = 5% markup.
     pub adjustment: i32,
-    pub fixed_prices: Vec<FixedPrice>,
 }
 
+/// Creates an empty price list. Fixed prices are added with `set_fixed_prices`.
 pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
     ctx: &Ctx,
     price_lists: &P,
@@ -178,34 +168,69 @@ pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
     ctx.require(Scope::PricingWrite)?;
 
     let adjustment = BasisPoints::new(input.adjustment)?;
-    let mut fixed_prices = HashMap::with_capacity(input.fixed_prices.len());
-    for fixed in input.fixed_prices {
-        let price = Price::new(fixed.price)?;
-        // Collecting into a map would silently keep the last duplicate.
-        if fixed_prices.insert(fixed.variant, price).is_some() {
-            return Err(CommandError::DuplicateFixedPrice(fixed.variant));
-        }
-    }
-
     let list = PriceList::new(
         PriceListId::from_uuid(ids.new_uuid()),
         input.currency,
         adjustment,
-        fixed_prices,
-    )?;
+    );
     price_lists.save(&list).await?;
     Ok(list)
 }
 
-pub struct CreateCatalog {
-    pub market: MarketId,
-    pub products: Vec<ProductId>,
+pub struct FixedPrice {
+    pub variant: VariantId,
+    pub price: Money,
 }
 
-/// Creates the catalog for a market, without a price list (see `assign_price_list`).
+/// Inserts or replaces fixed prices on a price list.
 ///
-/// Product IDs are not checked against the products crate: markets is a leaf domain
-/// and can't depend on it. Unknown products simply never resolve to a price.
+/// All prices are validated before anything is stored: non-negative, in the list's
+/// currency, each variant once. Variant IDs are not checked against the products crate
+/// (markets is a leaf domain); a price for an unknown variant is simply never used.
+pub async fn set_fixed_prices<P: PriceListRepo>(
+    ctx: &Ctx,
+    price_lists: &P,
+    list_id: PriceListId,
+    prices: Vec<FixedPrice>,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::PricingWrite)?;
+
+    let list = price_lists
+        .get(list_id)
+        .await?
+        .ok_or(CommandError::PriceListNotFound(list_id))?;
+    let prices = prices
+        .into_iter()
+        .map(|p| Ok((p.variant, Price::new(p.price)?)))
+        .collect::<Result<Vec<_>, MoneyError>>()?;
+    list.check_fixed_prices(&prices)?;
+
+    price_lists.set_fixed_prices(list_id, &prices).await?;
+    Ok(())
+}
+
+/// Removes fixed prices from a price list; those variants fall back to the adjustment.
+pub async fn remove_fixed_prices<P: PriceListRepo>(
+    ctx: &Ctx,
+    price_lists: &P,
+    list_id: PriceListId,
+    variants: Vec<VariantId>,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::PricingWrite)?;
+
+    if price_lists.get(list_id).await?.is_none() {
+        return Err(CommandError::PriceListNotFound(list_id));
+    }
+    price_lists.remove_fixed_prices(list_id, &variants).await?;
+    Ok(())
+}
+
+pub struct CreateCatalog {
+    pub market: MarketId,
+}
+
+/// Creates an empty catalog for a market, without a price list.
+/// Add products with `add_catalog_products` and a price list with `assign_price_list`.
 pub async fn create_catalog<M: MarketRepo, C: CatalogRepo, I: IdGenerator>(
     ctx: &Ctx,
     markets: &M,
@@ -227,12 +252,42 @@ pub async fn create_catalog<M: MarketRepo, C: CatalogRepo, I: IdGenerator>(
         });
     }
 
-    let catalog = Catalog::new(
-        CatalogId::from_uuid(ids.new_uuid()),
-        context,
-        input.products.into_iter().collect::<HashSet<_>>(),
-        None,
-    );
+    let catalog = Catalog::new(CatalogId::from_uuid(ids.new_uuid()), context, None);
     catalogs.save(&catalog).await?;
     Ok(catalog)
+}
+
+/// Makes products sellable in the catalog's context. Products already included are ignored.
+///
+/// Product IDs are not checked against the products crate: markets is a leaf domain
+/// and can't depend on it. Unknown products simply never resolve to a price.
+pub async fn add_catalog_products<C: CatalogRepo>(
+    ctx: &Ctx,
+    catalogs: &C,
+    catalog_id: CatalogId,
+    products: Vec<ProductId>,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::MarketsWrite)?;
+
+    if catalogs.get(catalog_id).await?.is_none() {
+        return Err(CommandError::CatalogNotFound(catalog_id));
+    }
+    catalogs.add_products(catalog_id, &products).await?;
+    Ok(())
+}
+
+/// Stops selling products in the catalog's context. Products not included are ignored.
+pub async fn remove_catalog_products<C: CatalogRepo>(
+    ctx: &Ctx,
+    catalogs: &C,
+    catalog_id: CatalogId,
+    products: Vec<ProductId>,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::MarketsWrite)?;
+
+    if catalogs.get(catalog_id).await?.is_none() {
+        return Err(CommandError::CatalogNotFound(catalog_id));
+    }
+    catalogs.remove_products(catalog_id, &products).await?;
+    Ok(())
 }

@@ -229,7 +229,11 @@ impl Product {
 ## 4. Order of work (each step ends green: fmt, clippy, tests, WASM, e2e)
 
 1. **D3 (a):** move catalog products and fixed prices behind narrow port methods,
-   still in memory.
+   still in memory. **Done.** `CatalogRepo::{add_products, remove_products,
+   included_products}` and `PriceListRepo::{set_fixed_prices, remove_fixed_prices,
+   fixed_prices}` take and return batches. Pricing gets them through a plain-data
+   `PricingContext`. Pricing a cart costs a fixed 5 queries, plus one per product until
+   `get_many` in step 2.
 2. Add versions, snapshots and `restore`, the `insert`/`update` split and the typed
    `RepoError`, still in memory. Commands map `Duplicate`/`StaleVersion` to domain
    errors and codes. Add the D6 money cap, and `ProductRepo::get_many` so a cart's
