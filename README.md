@@ -17,10 +17,11 @@ Hypha is an open-source, modular e-commerce API written in Rust. The same core i
 | --- | --- |
 | Core types: money, prices, basis points, prefixed IDs, countries, scopes, actor context | ✅ |
 | Products: handles, options, explicit variants, status transitions, create/get commands | ✅ |
-| Markets aggregate and repository | ✅ (no commands yet) |
+| Markets, catalogs (one per market) and price lists, with `assign_price_list` | ✅ |
 | HTTP host (axum) with in-memory storage | ✅ basic `POST /products`, `GET /products/{id}` |
-| Price lists, catalogs, price resolution | 🚧 in progress |
-| Cart, orders | ⏳ planned |
+| Price resolution: fixed price, else base price adjusted by basis points | ✅ |
+| Cart: create, add line, get at current prices (domain only, no HTTP routes yet) | ✅ |
+| Orders | ⏳ planned |
 | Postgres adapter, API keys / OAuth, MCP tools, Cloudflare / Lambda hosts | ⏳ planned |
 
 ## Architecture
@@ -63,7 +64,7 @@ cargo test --workspace
 Check that the core still builds for WASM:
 
 ```bash
-cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing --target wasm32-unknown-unknown
+cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart --target wasm32-unknown-unknown
 ```
 
 Start the HTTP host on `http://127.0.0.1:3000` (data lives in memory). Set the log level with `RUST_LOG`:

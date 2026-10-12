@@ -19,10 +19,10 @@ Run all four before considering work done:
 cargo fmt --all
 cargo clippy --workspace --all-targets
 cargo test --workspace
-cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing --target wasm32-unknown-unknown
+cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart --target wasm32-unknown-unknown
 ```
 
-Extend the wasm build list as domain crates gain real code (`hypha-cart` is still a `cargo new` stub).
+Extend the wasm build list when a domain crate is added.
 
 - Single crate's tests: `cargo test -p hypha-products`
 - Single test by name: `cargo test -p hypha-products rejects_same_handle_products`
@@ -45,8 +45,8 @@ Domain crates are layered; a crate may only depend on layers below it (Cargo rej
 Leaf functions take the plain values they need (IDs, `Price`), not another leaf's aggregate. E.g. `resolve_price` takes `ProductId`, `VariantId` and the base `Price` rather than `&Product`; the composing command (cart) loads the product and passes them in. Ask before adding a new edge between domain crates.
 
 - `hypha-core`: shared types only — `Money`/`Price`/`BasisPoints` (`money/`), prefixed IDs (`ids.rs`), `CountryCode`, `Scope`, `Ctx`/`Actor`, generic ports (`IdGenerator`, `RepoError` in `ports.rs`). No domain logic, no I/O.
-- Domain crates (`hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-cart`): aggregates with private fields and validated constructors, a repository trait (port) per aggregate in `repo.rs`, error enums in `error.rs`, and commands in `commands.rs` (currently only products has commands — use it as the template).
-- `hypha-testkit`: in-memory repos (`InMemoryProductRepo`, `InMemoryMarketRepo`) and deterministic ports (`SequentialIds`). It depends on domain crates, so domain crates use it only as a dev-dependency from their `tests/` folder.
+- Domain crates (`hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-cart`): aggregates with private fields and validated constructors, a repository trait (port) per aggregate in `repo.rs`, error enums in `error.rs`, and commands in `commands.rs` (`hypha-products` is the simplest template; `hypha-cart` shows a command that composes several domains).
+- `hypha-testkit`: in-memory repos for every port (`InMemoryProductRepo`, `InMemoryCartRepo`, …) and deterministic ports (`SequentialIds`). It depends on domain crates, so domain crates use it only as a dev-dependency from their `tests/` folder.
 - `hypha-host-axum`: the only place with Tokio, HTTP, auth parsing, logging subscribers (`tracing`) and real ID generation (`UuidV7Ids`). It owns its own request/response DTOs and maps `CommandError` → HTTP status in `ApiError`. Currently uses `Ctx::system()` (no auth yet) and the testkit in-memory repo as storage.
 
 Command shape (see `crates/hypha-products/src/commands.rs`): `async fn cmd(ctx: &Ctx, repo: &impl Repo, ids: &impl IdGenerator, input: RawInput) -> Result<_, CommandError>`; first line `ctx.require(Scope::...)?`, then validate raw input through domain constructors. `CommandError` composes lower errors via `#[from]`.
