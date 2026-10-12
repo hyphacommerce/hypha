@@ -11,8 +11,10 @@ pub enum CartError {
     LineNotFound(VariantId),
 }
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum PriceCartError {
+/// Why a line can't be priced. Returned as an error by `price_line` (and so by `add_line`),
+/// and kept as the reason in `LineStatus::Unavailable` when a whole cart is priced.
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+pub enum LineError {
     #[error("product {0} not found")]
     ProductNotFound(ProductId),
     #[error("product {0} is not active")]

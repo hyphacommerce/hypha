@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_cart::{
-    AddLine, CartError, CartPorts, CartRepo, CommandError, PriceCartError, PricedCart, add_line,
-    create_cart, get_cart,
+    AddLine, CartError, CartPorts, CartRepo, CommandError, LineError, LineStatus, PricedCart,
+    add_line, create_cart, get_cart,
 };
 use hypha_core::{
     Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, Ctx, Currency, MarketId, Money,
@@ -33,12 +33,14 @@ fn list_id() -> PriceListId {
     PriceListId::from_uuid(Uuid::from_u128(1002))
 }
 
-/// Mug: active, in the catalog. Poster: active, not in the catalog. Draft: in the catalog, not active.
+/// Mug and cup: active, in the catalog. Poster: active, not in the catalog. Draft: in the catalog, not active.
 fn pid(name: &str) -> ProductId {
     let n = match name {
         "mug" => 1100,
         "poster" => 1101,
-        _ => 1102,
+        "cup" => 1103,
+        "draft" => 1102,
+        _ => 1199,
     };
     ProductId::from_uuid(Uuid::from_u128(n))
 }
@@ -47,7 +49,9 @@ fn vid(name: &str) -> VariantId {
     let n = match name {
         "mug" => 1200,
         "poster" => 1201,
-        _ => 1202,
+        "cup" => 1203,
+        "draft" => 1202,
+        _ => 1299,
     };
     VariantId::from_uuid(Uuid::from_u128(n))
 }
@@ -66,7 +70,7 @@ struct World {
 }
 
 impl World {
-    /// An EUR market whose catalog holds the mug and the draft, with a 0 bp EUR price list.
+    /// An EUR market whose catalog holds the mug, the cup and the draft, with a 0 bp EUR price list.
     fn new() -> Self {
         let world = Self {
             carts: InMemoryCartRepo::default(),
@@ -86,7 +90,12 @@ impl World {
         .unwrap();
         block_on(world.markets.save(&market)).unwrap();
 
-        for (name, active) in [("mug", true), ("poster", true), ("draft", false)] {
+        for (name, active) in [
+            ("mug", true),
+            ("cup", true),
+            ("poster", true),
+            ("draft", false),
+        ] {
             let mut product = Product::new_simple(
                 pid(name),
                 Handle::new(name).unwrap(),
@@ -103,7 +112,7 @@ impl World {
         let catalog = Catalog::new(
             catalog_id(),
             CatalogContext::Market(market_id()),
-            HashSet::from([pid("mug"), pid("draft")]),
+            HashSet::from([pid("mug"), pid("cup"), pid("draft")]),
             Some(list_id()),
         );
         block_on(world.catalogs.save(&catalog)).unwrap();
@@ -140,7 +149,6 @@ impl World {
             self,
             AddLine {
                 cart,
-                product: pid(name),
                 variant: vid(name),
                 quantity,
             },
@@ -149,6 +157,12 @@ impl World {
 
     fn get(&self, cart: CartId) -> Result<PricedCart, CommandError> {
         block_on(get_cart(&Ctx::system(), self, cart))
+    }
+
+    fn archive(&self, name: &str) {
+        let mut product = block_on(self.products.get(pid(name))).unwrap().unwrap();
+        product.set_status(ProductStatus::Archived).unwrap();
+        block_on(self.products.save(&product)).unwrap();
     }
 
     fn stored_line_count(&self, cart: CartId) -> usize {
@@ -200,7 +214,14 @@ fn add_line_returns_priced_cart() {
     let priced = world.add(&Ctx::system(), cart, "mug", 2).unwrap();
 
     assert_eq!(priced.lines.len(), 1);
-    assert_eq!(priced.lines[0].unit_price.money(), eur(1000));
+    assert_eq!(priced.lines[0].product, pid("mug"));
+    assert_eq!(
+        priced.lines[0].status,
+        LineStatus::Priced {
+            unit_price: Price::new(eur(1000)).unwrap(),
+            total: eur(2000),
+        }
+    );
     assert_eq!(priced.total, eur(2000));
 }
 
@@ -234,7 +255,7 @@ fn add_line_rejects_product_not_in_catalog_and_stores_nothing() {
 
     assert_eq!(
         world.add(&Ctx::system(), cart, "poster", 1),
-        Err(CommandError::Price(PriceCartError::Pricing(
+        Err(CommandError::Line(LineError::Pricing(
             PricingError::NotAvailable {
                 product: pid("poster"),
                 market: market_id(),
@@ -251,7 +272,7 @@ fn add_line_rejects_inactive_product() {
 
     assert_eq!(
         world.add(&Ctx::system(), cart, "draft", 1),
-        Err(CommandError::Price(PriceCartError::ProductNotActive(pid(
+        Err(CommandError::Line(LineError::ProductNotActive(pid(
             "draft"
         ))))
     );
@@ -295,4 +316,47 @@ fn add_line_rejects_missing_write_scope_and_stores_nothing() {
         )))
     );
     assert_eq!(world.stored_line_count(cart), 0);
+}
+
+#[test]
+fn add_line_rejects_unknown_variant() {
+    let world = World::new();
+    let cart = world.create_cart();
+
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "unknown", 1),
+        Err(CommandError::VariantNotFound(vid("unknown")))
+    );
+}
+
+#[test]
+fn get_cart_marks_stale_line_unavailable_and_keeps_the_rest() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 2).unwrap();
+    world.add(&Ctx::system(), cart, "cup", 1).unwrap();
+
+    world.archive("mug");
+    let priced = world.get(cart).unwrap();
+
+    assert_eq!(
+        priced.lines[0].status,
+        LineStatus::Unavailable(LineError::ProductNotActive(pid("mug")))
+    );
+    assert!(priced.lines[1].is_available());
+    assert_eq!(priced.total, eur(1000));
+    assert!(!priced.is_fully_available());
+}
+
+#[test]
+fn add_line_still_works_when_another_line_is_stale() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 1).unwrap();
+    world.archive("mug");
+
+    let priced = world.add(&Ctx::system(), cart, "cup", 3).unwrap();
+
+    assert_eq!(priced.lines.len(), 2);
+    assert_eq!(priced.total, eur(3000));
 }

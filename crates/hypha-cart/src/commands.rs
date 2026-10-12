@@ -1,5 +1,5 @@
 use hypha_core::{
-    AuthError, CartId, Ctx, IdGenerator, MarketId, ProductId, RepoError, Scope, VariantId,
+    AuthError, CartId, Ctx, IdGenerator, MarketId, MoneyError, RepoError, Scope, VariantId,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo,
@@ -7,9 +7,7 @@ use hypha_markets::{
 use hypha_products::{Product, ProductRepo};
 use thiserror::Error;
 
-use crate::{
-    Cart, CartError, CartRepo, PriceCartError, PricedCart, Quantity, price_cart, price_line,
-};
+use crate::{Cart, CartError, CartRepo, LineError, PricedCart, Quantity, price_cart, price_line};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -20,11 +18,15 @@ pub enum CommandError {
     #[error(transparent)]
     Cart(#[from] CartError),
     #[error(transparent)]
-    Price(#[from] PriceCartError),
+    Line(#[from] LineError),
+    #[error(transparent)]
+    Money(#[from] MoneyError),
     #[error("cart {0} not found")]
     CartNotFound(CartId),
     #[error("market {0} not found")]
     MarketNotFound(MarketId),
+    #[error("variant {0} not found")]
+    VariantNotFound(VariantId),
 }
 
 /// Every port the cart commands use, implemented once by whoever owns the repos
@@ -66,15 +68,15 @@ pub async fn create_cart<S: CartPorts, I: IdGenerator>(
 
 pub struct AddLine {
     pub cart: CartId,
-    pub product: ProductId,
     pub variant: VariantId,
     pub quantity: u32,
 }
 
 /// Adds a variant to the cart (or increases its quantity) and returns the repriced cart.
 ///
-/// The variant must be sellable in the cart's market right now: the product is active,
-/// owns the variant, and is in the market's catalog with a price in its currency.
+/// Strict about the line being added: its product must be active and in the market's
+/// catalog with a price in its currency. Other lines that went stale don't block it;
+/// they come back marked unavailable.
 pub async fn add_line<S: CartPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -90,16 +92,16 @@ pub async fn add_line<S: CartPorts>(
         .ok_or(CommandError::CartNotFound(input.cart))?;
     let product = ports
         .products()
-        .get(input.product)
+        .get_by_variant(input.variant)
         .await?
-        .ok_or(PriceCartError::ProductNotFound(input.product))?;
+        .ok_or(CommandError::VariantNotFound(input.variant))?;
 
     let (market, catalogs, price_lists) = load_pricing(ports, cart.market()).await?;
 
     price_line(&product, input.variant, &market, &catalogs, &price_lists)?;
-    cart.add_line(input.product, input.variant, quantity)?;
+    cart.add_line(product.id(), input.variant, quantity)?;
 
-    // Price the whole cart before saving, so a failure stores nothing.
+    // Price the whole cart before saving, so a failure (total overflow) stores nothing.
     let cart_products = load_products(ports, &cart).await?;
     let priced = price_cart(&cart, &cart_products, &market, &catalogs, &price_lists)?;
 
@@ -107,7 +109,7 @@ pub async fn add_line<S: CartPorts>(
     Ok(priced)
 }
 
-/// The cart at current prices.
+/// The cart at current prices. Stale lines are marked unavailable, not errors.
 pub async fn get_cart<S: CartPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -158,8 +160,8 @@ async fn load_pricing<S: CartPorts>(
     ))
 }
 
-/// Loads each product in the cart once. Missing products are left out;
-/// `price_cart` reports them as `ProductNotFound`.
+/// Loads each product in the cart once. Missing (deleted) products are left out;
+/// `price_cart` marks their lines unavailable with `ProductNotFound`.
 async fn load_products<S: CartPorts>(ports: &S, cart: &Cart) -> Result<Vec<Product>, CommandError> {
     let mut loaded: Vec<Product> = Vec::new();
     for line in cart.lines() {
