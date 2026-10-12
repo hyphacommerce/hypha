@@ -117,6 +117,8 @@ step "malformed json" 400 malformed_json -X POST "$BASE/markets" -H "$JSON" -d '
 step "missing field" 422 invalid_body -X POST "$BASE/markets" -H "$JSON" -d '{"name":"X"}'
 step "unknown currency" 422 invalid_body -X POST "$BASE/markets" -H "$JSON" \
     -d '{"name":"UK","countries":["GB"],"currency":"GBP"}'
+step "amount beyond 2^53-1" 422 invalid_body -X POST "$BASE/products" -H "$JSON" \
+    -d '{"handle":"huge","title":"Huge","price":{"amount":9007199254740992,"currency":"EUR"}}'
 step "wrong id prefix" 400 invalid_path "$BASE/carts/$MUG"
 step "unknown cart" 404 cart_not_found "$BASE/carts/cart_00000000000000000000000000000063"
 step "duplicate handle" 409 handle_taken -X POST "$BASE/products" -H "$JSON" \

@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn rejects_negative() {
-        let minus_one = Money::new(-1, Currency::Eur);
+        let minus_one = Money::new(-1, Currency::Eur).unwrap();
         assert_eq!(Price::new(minus_one), Err(MoneyError::Negative));
     }
 }

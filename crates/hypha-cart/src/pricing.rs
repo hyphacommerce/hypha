@@ -164,7 +164,7 @@ mod tests {
     }
 
     fn eur(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Eur)).unwrap()
+        Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
     }
 
     fn qty(n: u32) -> Quantity {
@@ -216,7 +216,7 @@ mod tests {
     fn priced(unit: i64, total: i64) -> LineStatus {
         LineStatus::Priced {
             unit_price: eur(unit),
-            total: Money::new(total, Currency::Eur),
+            total: Money::new(total, Currency::Eur).unwrap(),
         }
     }
 
@@ -240,7 +240,7 @@ mod tests {
             statuses(&result),
             vec![priced(1000, 2000), priced(250, 750)]
         );
-        assert_eq!(result.total, Money::new(2750, Currency::Eur));
+        assert_eq!(result.total, Money::new(2750, Currency::Eur).unwrap());
     }
 
     #[test]
@@ -286,7 +286,7 @@ mod tests {
                 LineStatus::Unavailable(LineError::ProductNotActive(pid(2)))
             ]
         );
-        assert_eq!(result.total, Money::new(1000, Currency::Eur));
+        assert_eq!(result.total, Money::new(1000, Currency::Eur).unwrap());
         assert!(!result.is_fully_available());
         assert_eq!(
             result
@@ -311,7 +311,7 @@ mod tests {
     fn line_total_overflow_makes_line_unavailable() {
         let result = price_cart(
             &cart(&[(1, 2)]),
-            &[product(1, eur(i64::MAX))],
+            &[product(1, eur(Money::MAX_AMOUNT))],
             &pricing(&[1]),
         )
         .unwrap();
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn cart_total_overflow_is_an_error() {
-        let products = [product(1, eur(i64::MAX)), product(2, eur(1))];
+        let products = [product(1, eur(Money::MAX_AMOUNT)), product(2, eur(1))];
         assert_eq!(
             price_cart(&cart(&[(1, 1), (2, 1)]), &products, &pricing(&[1, 2])),
             Err(MoneyError::Overflow)

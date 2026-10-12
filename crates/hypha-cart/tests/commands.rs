@@ -55,7 +55,7 @@ fn vid(name: &str) -> VariantId {
 }
 
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur)
+    Money::new(amount, Currency::Eur).unwrap()
 }
 
 struct World {

@@ -79,7 +79,7 @@ mod tests {
     }
 
     fn eur(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Eur)).unwrap()
+        Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
     }
 
     #[test]

@@ -113,11 +113,11 @@ mod tests {
     }
 
     fn eur(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Eur)).unwrap()
+        Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
     }
 
     fn rsd(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Rsd)).unwrap()
+        Price::new(Money::new(amount, Currency::Rsd).unwrap()).unwrap()
     }
 
     fn market(currency: Currency) -> Market {

@@ -146,12 +146,12 @@ fn eur_list(adjustment: i32) -> CreatePriceList {
 fn fixed(variant: u128, amount: i64, currency: Currency) -> FixedPrice {
     FixedPrice {
         variant: vid(variant),
-        price: Money::new(amount, currency),
+        price: Money::new(amount, currency).unwrap(),
     }
 }
 
 fn eur(amount: i64) -> Price {
-    Price::new(Money::new(amount, Currency::Eur)).unwrap()
+    Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
 }
 
 /// A stored EUR price list with no adjustment.

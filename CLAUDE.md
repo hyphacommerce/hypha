@@ -65,7 +65,7 @@ When a command needs more than two or three ports, group them in a `XxxPorts` tr
 
 ## Code standards
 
-- Money: integer minor units (`i64`), never floats. Checked arithmetic returning `Result`; percentages as `BasisPoints` with round-half-away-from-zero; `i128` for intermediates.
+- Money: integer minor units (`i64`), never floats, capped at ±`Money::MAX_AMOUNT` (2⁵³ − 1) so JSON clients and D1 represent every amount exactly; `Money::new` is fallible. Checked arithmetic returning `Result`; percentages as `BasisPoints` with round-half-away-from-zero; `i128` for intermediates.
 - Newtypes with validated constructors for anything with rules (`Handle`, `Price`, `CountryCode`, IDs). Don't derive `Deserialize` on validated types unless via `#[serde(try_from = ...)]`.
 - IDs: `define_id!` macro in `hypha-core/src/ids.rs` — UUID inside, prefixed string at the edges (`prod_…`, `var_…`, `mkt_…`, `pl_…`). Store native UUIDs; UUIDv7 in hosts.
 - Errors: `thiserror` enums with specific variants (no stringly errors). Every error enum implements `hypha_core::ErrorCode` with an exhaustive `match` (no `_` arm): stable snake_case codes, never renamed once released, wrappers delegate to the inner error. Messages use `Display` (`EUR`, `active`), not `{:?}`. No `unwrap`/`expect`/panics in non-test code except documented invariants.

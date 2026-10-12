@@ -224,7 +224,7 @@ mod tests {
     }
 
     fn price() -> Price {
-        Price::new(Money::new(1000, Currency::Eur)).unwrap()
+        Price::new(Money::new(1000, Currency::Eur).unwrap()).unwrap()
     }
 
     fn new_var(id: u128, selections: Vec<OptionValueId>) -> NewVariant {
