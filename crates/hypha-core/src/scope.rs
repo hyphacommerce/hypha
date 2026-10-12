@@ -32,6 +32,10 @@ pub enum Scope {
     CustomersRead,
     #[serde(rename = "customers:write")]
     CustomersWrite,
+    #[serde(rename = "stores:read")]
+    StoresRead,
+    #[serde(rename = "stores:write")]
+    StoresWrite,
 }
 
 impl Scope {
@@ -52,10 +56,12 @@ impl Scope {
             Scope::InventoryWrite => "inventory:write",
             Scope::CustomersRead => "customers:read",
             Scope::CustomersWrite => "customers:write",
+            Scope::StoresRead => "stores:read",
+            Scope::StoresWrite => "stores:write",
         }
     }
 
-    pub const ALL: [Scope; 14] = [
+    pub const ALL: [Scope; 16] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -70,6 +76,8 @@ impl Scope {
         Scope::InventoryWrite,
         Scope::CustomersRead,
         Scope::CustomersWrite,
+        Scope::StoresRead,
+        Scope::StoresWrite,
     ];
 }
 

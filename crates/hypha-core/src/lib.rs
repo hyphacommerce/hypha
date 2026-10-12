@@ -16,8 +16,8 @@ pub use email::{Email, EmailError};
 pub use error_code::ErrorCode;
 pub use ids::{
     AddressId, AgentId, CartId, CatalogId, CustomerId, IdError, InventoryItemId, LocationId,
-    MarketId, OptionId, OptionValueId, PriceListId, ProductId, TaxClassId, TaxRegionId, UserId,
-    VariantId,
+    MarketId, OptionId, OptionValueId, PriceListId, ProductId, StoreId, TaxClassId, TaxRegionId,
+    UserId, VariantId,
 };
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
 pub use ports::{IdGenerator, RepoError};
