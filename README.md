@@ -85,6 +85,12 @@ Then fetch it using the `prod_…` ID from the response:
 curl http://127.0.0.1:3000/products/<id>
 ```
 
+To exercise the whole flow (products, markets, price lists, catalogs, carts and error responses) against a freshly started server:
+
+```bash
+bash scripts/e2e.sh
+```
+
 ## Contributing
 
 Before you open a PR, make sure all of these pass:

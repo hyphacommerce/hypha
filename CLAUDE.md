@@ -31,6 +31,7 @@ Extend the wasm build list when a domain crate is added.
 - Single test by name: `cargo test -p hypha-products rejects_same_handle_products`
 - Only an integration test file: `cargo test -p hypha-products --test commands`
 - Run the HTTP host (binds `127.0.0.1:3000`, `RUST_LOG` respected): `cargo run -p hypha-host-axum`
+- End-to-end check against a freshly started host (Git Bash on Windows): `bash scripts/e2e.sh`. Asserts status + error `code` per step, exits non-zero on failure. Run it after changing routes, DTOs or error mapping, and add a step for new routes.
 
 ## Architecture (hexagonal / ports and adapters)
 
