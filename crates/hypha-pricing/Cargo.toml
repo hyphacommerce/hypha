@@ -6,7 +6,6 @@ license.workspace = true
 
 [dependencies]
 hypha-core.workspace = true
-hypha-products = { path = "../hypha-products" }
 hypha-markets = { path = "../hypha-markets" }
 thiserror.workspace = true
 

@@ -267,7 +267,6 @@ version = "0.1.0"
 dependencies = [
  "hypha-core",
  "hypha-markets",
- "hypha-products",
  "thiserror",
  "uuid",
 ]

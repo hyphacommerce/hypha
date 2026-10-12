@@ -1,39 +1,32 @@
-use hypha_core::{Currency, Price, VariantId};
+use hypha_core::{Currency, Price, ProductId, VariantId};
 use hypha_markets::{Catalog, CatalogContext, Market, PriceList, catalog_for};
-use hypha_products::Product;
 
 use crate::error::PricingError;
 
-/// Price of `variant` in `market`.
+/// Price of `variant` (of `product`, with `base` as its base price) in `market`.
+///
+/// Takes plain values rather than a `Product`, so pricing doesn't depend on the
+/// products crate. The caller looks the variant up and passes its base price.
 ///
 /// 1. The market's catalog must include the product, otherwise it's not available there.
 /// 2. If the catalog has a price list, a fixed price for the variant wins;
-///    otherwise the variant's base price is adjusted by the list's basis points.
+///    otherwise the base price is adjusted by the list's basis points.
 /// 3. Without a price list, the base price is used as is.
 ///
 /// Every returned price is in the market's currency. Base prices in another currency
 /// are an error until exchange rates exist.
 pub fn resolve_price(
-    product: &Product,
+    product: ProductId,
     variant: VariantId,
+    base: Price,
     market: &Market,
     catalogs: &[Catalog],
     price_lists: &[PriceList],
 ) -> Result<Price, PricingError> {
-    let base = product
-        .variants()
-        .iter()
-        .find(|v| v.id() == variant)
-        .ok_or(PricingError::VariantNotFound {
-            product: product.id(),
-            variant,
-        })?
-        .base_price();
-
     let catalog = catalog_for(catalogs, CatalogContext::Market(market.id()))
-        .filter(|c| c.includes(product.id()))
+        .filter(|c| c.includes(product))
         .ok_or(PricingError::NotAvailable {
-            product: product.id(),
+            product,
             market: market.id(),
         })?;
 
@@ -80,7 +73,6 @@ mod tests {
     use hypha_core::{
         BasisPoints, CatalogId, CountryCode, MarketId, Money, PriceListId, ProductId,
     };
-    use hypha_products::Handle;
     use uuid::Uuid;
 
     use super::*;
@@ -108,16 +100,6 @@ mod tests {
 
     fn eur(amount: i64) -> Price {
         Price::new(Money::new(amount, Currency::Eur)).unwrap()
-    }
-
-    fn mug(base: Price) -> Product {
-        Product::new_simple(
-            pid(),
-            Handle::new("mug").unwrap(),
-            "Mug".to_string(),
-            vid(VARIANT),
-            base,
-        )
     }
 
     fn market(currency: Currency) -> Market {
@@ -152,8 +134,9 @@ mod tests {
     #[test]
     fn uses_base_price_without_price_list() {
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Eur),
             &[catalog(&[pid()], None)],
             &[],
@@ -164,8 +147,9 @@ mod tests {
     #[test]
     fn fixed_price_wins_over_adjustment() {
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Eur),
             &[catalog(&[pid()], Some(plid()))],
             &[list(Currency::Eur, -5000, &[(vid(VARIANT), eur(777))])],
@@ -176,8 +160,9 @@ mod tests {
     #[test]
     fn adjusts_base_price_without_fixed_price() {
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Eur),
             &[catalog(&[pid()], Some(plid()))],
             &[list(Currency::Eur, -1000, &[])],
@@ -190,8 +175,9 @@ mod tests {
         // 999 * 0.95 = 949.05 -> 949; 1010 * 0.95 = 959.5 -> 960
         let resolve = |base| {
             resolve_price(
-                &mug(eur(base)),
+                pid(),
                 vid(VARIANT),
+                eur(base),
                 &market(Currency::Eur),
                 &[catalog(&[pid()], Some(plid()))],
                 &[list(Currency::Eur, -500, &[])],
@@ -202,28 +188,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_variant_of_another_product() {
-        let result = resolve_price(
-            &mug(eur(1000)),
-            vid(99),
-            &market(Currency::Eur),
-            &[catalog(&[pid()], None)],
-            &[],
-        );
-        assert_eq!(
-            result,
-            Err(PricingError::VariantNotFound {
-                product: pid(),
-                variant: vid(99),
-            })
-        );
-    }
-
-    #[test]
     fn rejects_market_without_catalog() {
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Eur),
             &[],
             &[],
@@ -240,8 +209,9 @@ mod tests {
     #[test]
     fn rejects_product_missing_from_catalog() {
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Eur),
             &[catalog(&[], None)],
             &[],
@@ -258,8 +228,9 @@ mod tests {
     #[test]
     fn rejects_missing_price_list() {
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Eur),
             &[catalog(&[pid()], Some(plid()))],
             &[],
@@ -270,8 +241,9 @@ mod tests {
     #[test]
     fn rejects_base_price_in_other_currency_without_price_list() {
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Rsd),
             &[catalog(&[pid()], None)],
             &[],
@@ -288,8 +260,9 @@ mod tests {
     #[test]
     fn rejects_base_price_in_other_currency_without_fixed_price() {
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Rsd),
             &[catalog(&[pid()], Some(plid()))],
             &[list(Currency::Rsd, 0, &[])],
@@ -307,8 +280,9 @@ mod tests {
     fn fixed_price_covers_base_price_in_other_currency() {
         let rsd = Price::new(Money::new(117_000, Currency::Rsd)).unwrap();
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Rsd),
             &[catalog(&[pid()], Some(plid()))],
             &[list(Currency::Rsd, 0, &[(vid(VARIANT), rsd)])],
@@ -319,8 +293,9 @@ mod tests {
     #[test]
     fn rejects_price_list_in_other_currency_than_market() {
         let result = resolve_price(
-            &mug(eur(1000)),
+            pid(),
             vid(VARIANT),
+            eur(1000),
             &market(Currency::Rsd),
             &[catalog(&[pid()], Some(plid()))],
             &[list(Currency::Eur, 0, &[(vid(VARIANT), eur(900))])],

@@ -1,12 +1,7 @@
-use hypha_core::{Currency, MarketId, MoneyError, PriceListId, ProductId, VariantId};
+use hypha_core::{Currency, MarketId, MoneyError, PriceListId, ProductId};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum PricingError {
-    #[error("variant {variant} does not belong to product {product}")]
-    VariantNotFound {
-        product: ProductId,
-        variant: VariantId,
-    },
     #[error("product {product} is not available in market {market}")]
     NotAvailable {
         product: ProductId,
