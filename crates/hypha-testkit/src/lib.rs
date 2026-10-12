@@ -1,3 +1,5 @@
+pub mod contract;
+
 mod carts;
 mod catalogs;
 mod ids;

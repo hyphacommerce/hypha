@@ -242,7 +242,10 @@ impl Product {
    racing `Duplicate` to the same error as their pre-check (tested with repos that hide rows
    from the pre-check). Every root has `snapshot()` / `restore()`. Pricing a cart costs 6
    queries whatever its size.
-3. Contract tests in testkit. The in-memory repos pass them.
+3. Contract tests in testkit. The in-memory repos pass them. **Done.** `hypha_testkit::contract`, one
+   `async fn` per repo trait taking an `AsyncFn` factory (any runtime). Checked by injecting
+   three bugs into the in-memory repos (no version check, no unique keys, a no-op remove):
+   each was caught.
 4. **D1 experiment (throwaway, not merged).** A minimal `workers-rs` Worker with one table,
    run with `wrangler dev`. It verifies:
    - `batch()` is atomic through `workers-rs`;
