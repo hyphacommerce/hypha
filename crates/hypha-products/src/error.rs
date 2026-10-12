@@ -1,4 +1,4 @@
-use hypha_core::{OptionId, OptionValueId, VariantId};
+use hypha_core::{ErrorCode, OptionId, OptionValueId, VariantId};
 
 use crate::ProductStatus;
 
@@ -39,4 +39,32 @@ pub enum ProductError {
         from: ProductStatus,
         to: ProductStatus,
     },
+}
+
+impl ErrorCode for HandleError {
+    fn code(&self) -> &'static str {
+        match self {
+            HandleError::Empty
+            | HandleError::InvalidChar(_)
+            | HandleError::EdgeDash
+            | HandleError::DoubleDash => "invalid_handle",
+        }
+    }
+}
+
+impl ErrorCode for ProductError {
+    fn code(&self) -> &'static str {
+        match self {
+            ProductError::InvalidHandle(e) => e.code(),
+            ProductError::DuplicateVariantId(_) => "duplicate_variant",
+            ProductError::SelectionCountMismatch { .. } => "selection_count_mismatch",
+            ProductError::UnknownOptionValue(_) => "unknown_option_value",
+            ProductError::DuplicateCombination => "duplicate_option_combination",
+            ProductError::NoOptions => "no_options",
+            ProductError::EmptyOption(_) => "empty_option",
+            ProductError::DuplicateOptionName(_) => "duplicate_option_name",
+            ProductError::DuplicateOptionValue(_) => "duplicate_option_value",
+            ProductError::InvalidTransition { .. } => "invalid_status_transition",
+        }
+    }
 }

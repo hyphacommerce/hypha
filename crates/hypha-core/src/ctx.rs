@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{AgentId, UserId, scope::Scope};
+use crate::{AgentId, ErrorCode, UserId, scope::Scope};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Actor {
@@ -20,6 +20,14 @@ pub struct Ctx {
 pub enum AuthError {
     #[error("missing scope {0}")]
     MissingScope(Scope),
+}
+
+impl ErrorCode for AuthError {
+    fn code(&self) -> &'static str {
+        match self {
+            AuthError::MissingScope(_) => "missing_scope",
+        }
+    }
 }
 
 impl Ctx {

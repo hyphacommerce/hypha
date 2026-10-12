@@ -1,4 +1,4 @@
-use hypha_core::{Currency, MarketId, MoneyError, PriceListId, ProductId};
+use hypha_core::{Currency, ErrorCode, MarketId, MoneyError, PriceListId, ProductId};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum PricingError {
@@ -14,4 +14,15 @@ pub enum PricingError {
     CurrencyMismatch { expected: Currency, found: Currency },
     #[error(transparent)]
     Money(#[from] MoneyError),
+}
+
+impl ErrorCode for PricingError {
+    fn code(&self) -> &'static str {
+        match self {
+            PricingError::NotAvailable { .. } => "not_available_in_market",
+            PricingError::PriceListNotFound(_) => "price_list_not_found",
+            PricingError::CurrencyMismatch { .. } => "price_currency_mismatch",
+            PricingError::Money(e) => e.code(),
+        }
+    }
 }

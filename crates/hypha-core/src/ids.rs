@@ -12,6 +12,14 @@ pub enum IdError {
     InvalidUuid,
 }
 
+impl crate::ErrorCode for IdError {
+    fn code(&self) -> &'static str {
+        match self {
+            IdError::WrongPrefix { .. } | IdError::InvalidUuid => "invalid_id",
+        }
+    }
+}
+
 macro_rules! define_id {
     ($name:ident, $prefix:literal) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

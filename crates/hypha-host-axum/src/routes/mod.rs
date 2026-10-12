@@ -14,6 +14,6 @@ pub fn router() -> Router<SharedState> {
         .merge(products::router())
         .merge(markets::router())
         .merge(carts::router())
-        .fallback(|| async { ApiError::not_found("no such route") })
+        .fallback(|| async { ApiError::route_not_found() })
         .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
 }

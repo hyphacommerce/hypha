@@ -1,5 +1,6 @@
 pub mod country;
 pub mod ctx;
+pub mod error_code;
 pub mod ids;
 pub mod money;
 pub mod ports;
@@ -7,6 +8,7 @@ pub mod scope;
 
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
+pub use error_code::ErrorCode;
 pub use ids::{
     AgentId, CartId, CatalogId, IdError, MarketId, OptionId, OptionValueId, PriceListId, ProductId,
     UserId, VariantId,

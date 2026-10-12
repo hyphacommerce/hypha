@@ -1,5 +1,6 @@
 use hypha_core::{
-    AuthError, CartId, Ctx, IdGenerator, MarketId, MoneyError, RepoError, Scope, VariantId,
+    AuthError, CartId, Ctx, ErrorCode, IdGenerator, MarketId, MoneyError, RepoError, Scope,
+    VariantId,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo,
@@ -27,6 +28,21 @@ pub enum CommandError {
     MarketNotFound(MarketId),
     #[error("variant {0} not found")]
     VariantNotFound(VariantId),
+}
+
+impl ErrorCode for CommandError {
+    fn code(&self) -> &'static str {
+        match self {
+            CommandError::Auth(e) => e.code(),
+            CommandError::Repo(e) => e.code(),
+            CommandError::Cart(e) => e.code(),
+            CommandError::Line(e) => e.code(),
+            CommandError::Money(e) => e.code(),
+            CommandError::CartNotFound(_) => "cart_not_found",
+            CommandError::MarketNotFound(_) => "market_not_found",
+            CommandError::VariantNotFound(_) => "variant_not_found",
+        }
+    }
 }
 
 /// Every port the cart commands use, implemented once by whoever owns the repos

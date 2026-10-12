@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, IdGenerator,
-    MarketId, Money, MoneyError, Price, PriceListId, ProductId, RepoError, Scope, VariantId,
+    AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, ErrorCode,
+    IdGenerator, MarketId, Money, MoneyError, Price, PriceListId, ProductId, RepoError, Scope,
+    VariantId,
 };
 use thiserror::Error;
 
@@ -46,6 +47,26 @@ pub enum CommandError {
         market: MarketId,
         catalog: CatalogId,
     },
+}
+
+impl ErrorCode for CommandError {
+    fn code(&self) -> &'static str {
+        match self {
+            CommandError::Auth(e) => e.code(),
+            CommandError::Repo(e) => e.code(),
+            CommandError::Country(e) => e.code(),
+            CommandError::Market(e) => e.code(),
+            CommandError::Money(e) => e.code(),
+            CommandError::PriceList(e) => e.code(),
+            CommandError::CatalogNotFound(_) => "catalog_not_found",
+            CommandError::PriceListNotFound(_) => "price_list_not_found",
+            CommandError::MarketNotFound(_) => "market_not_found",
+            CommandError::CurrencyMismatch { .. } => "price_list_currency_mismatch",
+            CommandError::CountryInOtherMarket { .. } => "country_in_other_market",
+            CommandError::DuplicateFixedPrice(_) => "duplicate_fixed_price",
+            CommandError::CatalogExists { .. } => "catalog_exists",
+        }
+    }
 }
 
 /// Attach a price list to a catalog, or detach it with `None`.

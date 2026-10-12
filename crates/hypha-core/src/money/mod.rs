@@ -52,6 +52,17 @@ pub enum MoneyError {
     InvalidBasisPoints(i32),
 }
 
+impl crate::ErrorCode for MoneyError {
+    fn code(&self) -> &'static str {
+        match self {
+            MoneyError::CurrencyMismatch(..) => "currency_mismatch",
+            MoneyError::Overflow => "amount_overflow",
+            MoneyError::Negative => "negative_amount",
+            MoneyError::InvalidBasisPoints(_) => "invalid_basis_points",
+        }
+    }
+}
+
 impl Money {
     pub fn new(amount: i64, currency: Currency) -> Self {
         Self { amount, currency }

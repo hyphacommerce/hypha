@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
 };
 use hypha_cart::{AddLine, LineStatus, PricedCart, add_line, create_cart, get_cart};
-use hypha_core::{CartId, Ctx, MarketId, Money, ProductId, VariantId};
+use hypha_core::{CartId, Ctx, ErrorCode, MarketId, Money, ProductId, VariantId};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -45,8 +45,15 @@ struct CartResponse {
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum LineState {
-    Priced { unit_price: Money, total: Money },
-    Unavailable { reason: String },
+    Priced {
+        unit_price: Money,
+        total: Money,
+    },
+    Unavailable {
+        /// Stable `ErrorCode`, e.g. "product_not_active".
+        reason_code: &'static str,
+        reason: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -77,6 +84,7 @@ impl From<&PricedCart> for CartResponse {
                             total: *total,
                         },
                         LineStatus::Unavailable(reason) => LineState::Unavailable {
+                            reason_code: reason.code(),
                             reason: reason.to_string(),
                         },
                     },

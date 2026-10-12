@@ -15,6 +15,14 @@ pub enum CountryError {
     NotUppercase,
 }
 
+impl crate::ErrorCode for CountryError {
+    fn code(&self) -> &'static str {
+        match self {
+            CountryError::InvalidLength(_) | CountryError::NotUppercase => "invalid_country_code",
+        }
+    }
+}
+
 impl CountryCode {
     pub fn new(s: &str) -> Result<Self, CountryError> {
         if s.len() != 2 {

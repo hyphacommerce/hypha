@@ -1,5 +1,6 @@
 use hypha_core::{
-    AuthError, Ctx, IdGenerator, Money, MoneyError, Price, ProductId, RepoError, Scope, VariantId,
+    AuthError, Ctx, ErrorCode, IdGenerator, Money, MoneyError, Price, ProductId, RepoError, Scope,
+    VariantId,
 };
 use thiserror::Error;
 
@@ -19,6 +20,19 @@ pub enum CommandError {
     HandleTaken(Handle),
     #[error("product {0} not found")]
     NotFound(ProductId),
+}
+
+impl ErrorCode for CommandError {
+    fn code(&self) -> &'static str {
+        match self {
+            CommandError::Auth(e) => e.code(),
+            CommandError::Product(e) => e.code(),
+            CommandError::Money(e) => e.code(),
+            CommandError::Repo(e) => e.code(),
+            CommandError::HandleTaken(_) => "handle_taken",
+            CommandError::NotFound(_) => "product_not_found",
+        }
+    }
 }
 
 pub struct CreateSimpleProduct {

@@ -1,4 +1,4 @@
-use hypha_core::{CountryCode, Currency, VariantId};
+use hypha_core::{CountryCode, Currency, ErrorCode, VariantId};
 
 use crate::catalog::CatalogContext;
 
@@ -35,4 +35,31 @@ pub enum PriceListError {
         /// Sorted by variant ID.
         prices: Vec<MismatchedPrice>,
     },
+}
+
+impl ErrorCode for MarketError {
+    fn code(&self) -> &'static str {
+        match self {
+            MarketError::NoCountries => "no_countries",
+            MarketError::DuplicateCountry(_) => "duplicate_country",
+            MarketError::CountryNotInMarket(_) => "country_not_in_market",
+            MarketError::LastCountry => "last_country",
+        }
+    }
+}
+
+impl ErrorCode for CatalogError {
+    fn code(&self) -> &'static str {
+        match self {
+            CatalogError::DuplicateContext(_) => "duplicate_catalog_context",
+        }
+    }
+}
+
+impl ErrorCode for PriceListError {
+    fn code(&self) -> &'static str {
+        match self {
+            PriceListError::CurrencyMismatch { .. } => "fixed_price_currency_mismatch",
+        }
+    }
 }
