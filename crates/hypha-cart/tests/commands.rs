@@ -810,3 +810,35 @@ fn a_cart_whose_total_overflows_stays_readable() {
     );
     assert_eq!(priced.total, eur(6_000_030_000_000_000));
 }
+
+/// B4: linking copies the customer's email onto the cart and reveals whether a
+/// `cus_…` exists, so it needs `customers:read` too, checked before any lookup.
+#[test]
+fn set_cart_customer_requires_customers_read_to_link() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let id = CustomerId::from_uuid(Uuid::from_u128(1500));
+    let ana = Email::new("ana@example.hr").unwrap();
+    block_on(world.customers.insert(&mut Customer::new(id, ana))).unwrap();
+    let cart_writer = Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
+        vec![Scope::CartsWrite],
+    );
+    let missing = Err(CommandError::Auth(AuthError::MissingScope(
+        Scope::CustomersRead,
+    )));
+
+    assert_eq!(
+        block_on(set_cart_customer(&cart_writer, &world, cart, Some(id))),
+        missing
+    );
+    let unknown = CustomerId::from_uuid(Uuid::from_u128(1599));
+    assert_eq!(
+        block_on(set_cart_customer(&cart_writer, &world, cart, Some(unknown))),
+        missing,
+        "an unknown ID must not be distinguishable from a known one"
+    );
+    assert_eq!(world.get(cart).unwrap().email, None);
+    // Unlinking reveals nothing and stays allowed.
+    assert!(block_on(set_cart_customer(&cart_writer, &world, cart, None)).is_ok());
+}

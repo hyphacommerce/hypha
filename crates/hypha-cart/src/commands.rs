@@ -238,7 +238,7 @@ pub async fn set_cart_email<S: CartPorts>(
 }
 
 /// Links the cart to an existing customer (taking their email), or unlinks it with
-/// `None` (design note 0005, C5).
+/// `None` (design note 0005, C5). Linking needs `customers:read` as well as `carts:write`.
 pub async fn set_cart_customer<S: CartPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -246,6 +246,12 @@ pub async fn set_cart_customer<S: CartPorts>(
     customer: Option<CustomerId>,
 ) -> Result<Cart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
+
+    // Linking copies the customer's email onto the cart and reveals whether the ID
+    // exists, so it needs read access to customers, checked before any lookup.
+    if customer.is_some() {
+        ctx.require(Scope::CustomersRead)?;
+    }
 
     let mut cart = load_cart(ports, id).await?;
     let buyer = match customer {
