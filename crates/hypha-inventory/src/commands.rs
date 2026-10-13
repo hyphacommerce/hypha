@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use hypha_core::{
     AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, LocationId, MarketId, RepoError,
     Scope, VariantId,
@@ -5,7 +7,7 @@ use hypha_core::{
 use thiserror::Error;
 
 use crate::{
-    InventoryError, InventoryItem, Location,
+    InventoryError, InventoryItem, Location, ReservationRef,
     repo::{InventoryItemRepo, LocationRepo, keys},
 };
 
@@ -289,6 +291,152 @@ async fn load_item<R: InventoryItemRepo>(
         .get(id)
         .await?
         .ok_or(CommandError::InventoryItemNotFound(id))
+}
+
+// ---------- reservations ----------
+
+pub struct ReserveStock {
+    /// The buyer's market: only locations serving it supply the stock.
+    pub market: MarketId,
+    pub lines: Vec<ReserveLine>,
+}
+
+pub struct ReserveLine {
+    /// Identifies this reservation (later the order line), so a retry is a no-op (I8).
+    pub reference: String,
+    pub variant: VariantId,
+    pub quantity: u32,
+}
+
+/// Reserves stock for every line, **all or nothing** (design note 0004, section 3).
+///
+/// Reads the items and the market's locations without locks, allocates in domain code,
+/// then writes every changed item in one `update_many`. If another checkout changed one
+/// of them in between, the write fails with `StaleVersion` and the whole attempt runs
+/// again on fresh data, up to `MAX_ATTEMPTS` times. A real shortage then shows up as
+/// `OutOfStock` (listing every short line), not as a conflict.
+///
+/// Variants without an item, or with tracking off, need no stock and reserve nothing.
+pub async fn reserve_stock<R: InventoryItemRepo, L: LocationRepo>(
+    ctx: &Ctx,
+    items: &R,
+    locations: &L,
+    input: ReserveStock,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::InventoryWrite)?;
+
+    let lines = input
+        .lines
+        .iter()
+        .map(|l| {
+            if l.quantity == 0 {
+                return Err(InventoryError::ZeroQuantity);
+            }
+            Ok((ReservationRef::new(&l.reference)?, l.variant, l.quantity))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let variants = distinct(lines.iter().map(|(_, variant, _)| *variant));
+
+    retry_on_conflict(async || {
+        let serving = locations.serving(input.market).await?;
+        let mut stock = by_variant(items.for_variants(&variants).await?);
+        let mut changed = HashSet::new();
+        let mut short = Vec::new();
+        for (reference, variant, quantity) in &lines {
+            let Some(item) = stock.get_mut(variant) else {
+                continue;
+            };
+            match item.reserve(reference, *quantity, &serving) {
+                Ok(true) => {
+                    changed.insert(*variant);
+                }
+                Ok(false) => {}
+                Err(InventoryError::OutOfStock {
+                    requested,
+                    available,
+                }) => short.push(Shortage {
+                    variant: *variant,
+                    requested,
+                    available,
+                }),
+                Err(e) => return Err(e.into()),
+            }
+        }
+        if !short.is_empty() {
+            return Err(CommandError::OutOfStock { lines: short });
+        }
+        write_changed(items, stock, &changed).await
+    })
+    .await
+}
+
+pub struct ReleaseStock {
+    pub lines: Vec<ReleaseLine>,
+}
+
+pub struct ReleaseLine {
+    pub reference: String,
+    pub variant: VariantId,
+}
+
+/// Gives back what `reserve_stock` reserved for each line, all or nothing, retried
+/// like `reserve_stock`. Releasing something that isn't reserved is not an error, so a
+/// retried or duplicate release is harmless.
+pub async fn release_stock<R: InventoryItemRepo>(
+    ctx: &Ctx,
+    items: &R,
+    input: ReleaseStock,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::InventoryWrite)?;
+
+    let lines = input
+        .lines
+        .iter()
+        .map(|l| Ok((ReservationRef::new(&l.reference)?, l.variant)))
+        .collect::<Result<Vec<_>, InventoryError>>()?;
+    let variants = distinct(lines.iter().map(|(_, variant)| *variant));
+
+    retry_on_conflict(async || {
+        let mut stock = by_variant(items.for_variants(&variants).await?);
+        let mut changed = HashSet::new();
+        for (reference, variant) in &lines {
+            if let Some(item) = stock.get_mut(variant)
+                && item.release(reference)
+            {
+                changed.insert(*variant);
+            }
+        }
+        write_changed(items, stock, &changed).await
+    })
+    .await
+}
+
+fn distinct(variants: impl Iterator<Item = VariantId>) -> Vec<VariantId> {
+    let mut seen = HashSet::new();
+    variants.filter(|v| seen.insert(*v)).collect()
+}
+
+fn by_variant(items: Vec<InventoryItem>) -> HashMap<VariantId, InventoryItem> {
+    items.into_iter().map(|i| (i.variant(), i)).collect()
+}
+
+/// One atomic write of the items that changed (none: no write at all).
+async fn write_changed<R: InventoryItemRepo>(
+    items: &R,
+    stock: HashMap<VariantId, InventoryItem>,
+    changed: &HashSet<VariantId>,
+) -> Result<(), CommandError> {
+    let mut write: Vec<InventoryItem> = stock
+        .into_values()
+        .filter(|i| changed.contains(&i.variant()))
+        .collect();
+    if write.is_empty() {
+        return Ok(());
+    }
+    // A stable order, so adapters always touch rows in the same sequence.
+    write.sort_by_key(|i| i.id().as_uuid());
+    items.update_many(&mut write).await?;
+    Ok(())
 }
 
 /// How many times a stock write is tried before a conflict is reported.
