@@ -171,6 +171,38 @@ impl From<hypha_tax::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_inventory::CommandError> for ApiError {
+    fn from(e: hypha_inventory::CommandError) -> Self {
+        use hypha_inventory::{CommandError as E, InventoryError as I};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Item IDs only ever arrive in URLs; locations can come in either, so routes
+            // that name one in the URL turn its 422 into a 404 (`not_found_if`).
+            E::InventoryItemNotFound(_) => StatusCode::NOT_FOUND,
+            E::LocationNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::InventoryItemExists { .. }
+            | E::OutOfStock { .. }
+            | E::Inventory(I::OnHandChanged { .. } | I::ReferenceInUse(_) | I::OutOfStock { .. }) => {
+                StatusCode::CONFLICT
+            }
+            E::Inventory(
+                I::EmptyLocationName
+                | I::DuplicateMarket(_)
+                | I::StockOutOfRange(_)
+                | I::ZeroQuantity
+                | I::InvalidReference,
+            ) => StatusCode::UNPROCESSABLE_ENTITY,
+            // Only ever produced when rebuilding stored data.
+            E::Inventory(I::DuplicateLevel(_) | I::DuplicateReservation { .. }) => {
+                return Self::internal(e);
+            }
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hypha_core::{AuthError, CartId, Scope};
@@ -202,6 +234,29 @@ mod tests {
         let e = ApiError::from(hypha_cart::CommandError::Repo(RepoError::StaleVersion));
         assert_eq!(e.status, StatusCode::CONFLICT);
         assert_eq!(e.code, "concurrent_modification");
+    }
+
+    #[test]
+    fn moved_stock_count_is_a_conflict() {
+        let e = ApiError::from(hypha_inventory::CommandError::Inventory(
+            hypha_inventory::InventoryError::OnHandChanged {
+                expected: 5,
+                actual: 4,
+            },
+        ));
+        assert_eq!(e.status, StatusCode::CONFLICT);
+        assert_eq!(e.code, "on_hand_changed");
+    }
+
+    #[test]
+    fn location_in_a_body_is_invalid_input_and_in_a_url_not_found() {
+        let id = hypha_core::LocationId::from_uuid(Uuid::from_u128(1));
+        let e = ApiError::from(hypha_inventory::CommandError::LocationNotFound(id));
+        assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            e.not_found_if("location_not_found").status,
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[test]

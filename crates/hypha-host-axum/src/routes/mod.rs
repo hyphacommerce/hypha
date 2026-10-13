@@ -2,6 +2,7 @@
 //! separate from domain types) and thin handlers that call one domain command.
 
 mod carts;
+mod inventory;
 mod markets;
 mod products;
 mod taxes;
@@ -73,6 +74,33 @@ macro_rules! router {
                 "/tax-regions/{id}/class-rates/{class_id}",
                 put(taxes::set_region_class_rate::<$storage>)
                     .delete(taxes::remove_region_class_rate::<$storage>),
+            )
+            // inventory
+            .route(
+                "/locations",
+                post(inventory::create_location_handler::<$storage>),
+            )
+            .route(
+                "/locations/{id}",
+                get(inventory::fetch_location::<$storage>)
+                    .patch(inventory::update_location_handler::<$storage>),
+            )
+            .route("/inventory-items", post(inventory::create_item::<$storage>))
+            .route(
+                "/inventory-items/{id}",
+                get(inventory::fetch_item::<$storage>).patch(inventory::update_item::<$storage>),
+            )
+            .route(
+                "/inventory-items/{id}/levels/{location_id}",
+                put(inventory::set_level::<$storage>),
+            )
+            .route(
+                "/inventory-items/{id}/levels/{location_id}/adjustments",
+                post(inventory::adjust_level::<$storage>),
+            )
+            .route(
+                "/variants/{id}/inventory",
+                get(inventory::fetch_variant_inventory::<$storage>),
             )
             // everything else
             .fallback(|| async { ApiError::route_not_found() })

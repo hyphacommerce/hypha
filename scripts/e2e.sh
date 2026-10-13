@@ -152,6 +152,53 @@ step "get taxed cart" 200 - "$BASE/carts/$TAX_CART"
 contains "book pays 13% (1800 x 13/113 = 207.1)" '"tax_total":{"amount":207,"currency":"EUR"}'
 step "back to excluding tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
 
+echo "## inventory"
+step "create lamp" 201 - -X POST "$BASE/products" -H "$JSON" \
+    -d '{"handle":"lamp","title":"Lamp","price":{"amount":1000,"currency":"EUR"}}'
+LAMP=$(id)
+LAMP_VAR=$(variant)
+step "activate lamp" 200 - -X PATCH "$BASE/products/$LAMP/status" -H "$JSON" -d '{"status":"active"}'
+step "add lamp to catalog" 204 - -X POST "$BASE/catalogs/$CATALOG/products" -H "$JSON" \
+    -d "{\"products\":[\"$LAMP\"]}"
+step "lamp has no stock set up" 200 - "$BASE/variants/$LAMP_VAR/inventory"
+contains "so it is untracked" '"id":null,'
+contains "reported as tracked: false" '"tracked":false'
+step "create warehouse for the market" 201 - -X POST "$BASE/locations" -H "$JSON" \
+    -d "{\"name\":\"Zagreb\",\"markets\":[\"$MARKET\"]}"
+WAREHOUSE=$(id)
+step "create lamp inventory" 201 - -X POST "$BASE/inventory-items" -H "$JSON" \
+    -d "{\"variant\":\"$LAMP_VAR\"}"
+LAMP_ITEM=$(id)
+contains "tracked by default" '"tracked":true,"continue_selling":false,"levels":[]'
+step "2 lamps on hand" 200 - -X PUT "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" \
+    -d '{"on_hand":2}'
+contains "level is stored" "\"levels\":[{\"location\":\"$WAREHOUSE\",\"on_hand\":2,\"reserved\":0,\"available\":2}]"
+step "create stock cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+STOCK_CART=$(id)
+step "add 3 lamps" 422 out_of_stock -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":3}"
+step "add 2 lamps" 200 - -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":2}"
+contains "lamps are available" '"fully_available":true'
+step "count with a stale expected" 409 on_hand_changed -X PUT \
+    "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":1,"expected_on_hand":5}'
+step "a lamp broke (1 left)" 200 - -X PUT "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" \
+    -H "$JSON" -d '{"on_hand":1,"expected_on_hand":2}'
+step "get stock cart" 200 - "$BASE/carts/$STOCK_CART"
+contains "lamp line ran out" '"status":"unavailable","reason_code":"out_of_stock"'
+contains "and is left out of the total" '"total":{"amount":0,"currency":"EUR"},"fully_available":false'
+step "delivery of 4" 200 - -X POST "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
+    -H "$JSON" -d '{"delta":4}'
+contains "5 on hand" '"on_hand":5'
+step "get stock cart" 200 - "$BASE/carts/$STOCK_CART"
+contains "lamps are back" '"fully_available":true'
+step "stop tracking lamps" 200 - -X PATCH "$BASE/inventory-items/$LAMP_ITEM" -H "$JSON" -d '{"tracked":false}'
+step "add 100 untracked lamps" 200 - -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":100}"
+step "lower warehouse priority" 200 - -X PATCH "$BASE/locations/$WAREHOUSE" -H "$JSON" -d '{"priority":5}'
+contains "priority is stored" '"priority":5'
+step "get warehouse" 200 - "$BASE/locations/$WAREHOUSE"
+
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
 step "wrong method" 405 method_not_allowed -X DELETE "$BASE/products/$MUG"
@@ -197,6 +244,18 @@ step "remove a rate the class doesn't have" 404 class_rate_not_found -X DELETE \
     "$BASE/tax-regions/$REGION/class-rates/$BOOKS"
 step "assign unknown class" 422 tax_class_not_found -X PUT "$BASE/tax-assignments" -H "$JSON" \
     -d "{\"products\":[\"$BOOK\"],\"tax_class\":\"txc_00000000000000000000000000000063\"}"
+step "second item for a variant" 409 inventory_item_exists -X POST "$BASE/inventory-items" -H "$JSON" \
+    -d "{\"variant\":\"$LAMP_VAR\"}"
+step "unknown inventory item" 404 inventory_item_not_found \
+    "$BASE/inventory-items/invi_00000000000000000000000000000063"
+step "stock at unknown location" 404 location_not_found -X PUT \
+    "$BASE/inventory-items/$LAMP_ITEM/levels/loc_00000000000000000000000000000063" -H "$JSON" -d '{"on_hand":1}'
+step "unknown location" 404 location_not_found "$BASE/locations/loc_00000000000000000000000000000063"
+step "location listing a market twice" 422 duplicate_market -X POST "$BASE/locations" -H "$JSON" \
+    -d "{\"name\":\"Split\",\"markets\":[\"$MARKET\",\"$MARKET\"]}"
+step "blank location name" 422 empty_location_name -X POST "$BASE/locations" -H "$JSON" -d '{"name":" "}'
+step "stock beyond 2^53-1" 422 stock_out_of_range -X PUT \
+    "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":9007199254740992}'
 step "zero quantity" 422 invalid_quantity -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":0}"
 step "create draft product" 201 - -X POST "$BASE/products" -H "$JSON" \
