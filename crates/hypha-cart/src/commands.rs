@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AuthError, CartId, CountryCode, Ctx, ErrorCode, IdGenerator, MarketId, MoneyError, ProductId,
-    RepoError, Scope, VariantId,
+    AuthError, CartId, CountryCode, Ctx, CustomerId, Email, EmailError, ErrorCode, IdGenerator,
+    MarketId, MoneyError, ProductId, RepoError, Scope, VariantId,
 };
+use hypha_customers::CustomerRepo;
 use hypha_inventory::{InventoryItemRepo, LocationRepo, StockContext};
 use hypha_markets::{CatalogContext, CatalogRepo, Market, MarketRepo, PriceListRepo};
 use hypha_pricing::PricingContext;
@@ -27,6 +28,10 @@ pub enum CommandError {
     Line(#[from] LineError),
     #[error(transparent)]
     Money(#[from] MoneyError),
+    #[error(transparent)]
+    Email(#[from] EmailError),
+    #[error("customer {0} not found")]
+    CustomerNotFound(CustomerId),
     #[error("cart {0} not found")]
     CartNotFound(CartId),
     #[error("market {0} not found")]
@@ -45,6 +50,8 @@ impl ErrorCode for CommandError {
             CommandError::Cart(e) => e.code(),
             CommandError::Line(e) => e.code(),
             CommandError::Money(e) => e.code(),
+            CommandError::Email(e) => e.code(),
+            CommandError::CustomerNotFound(_) => "customer_not_found",
             CommandError::CartNotFound(_) => "cart_not_found",
             CommandError::MarketNotFound(_) => "market_not_found",
             CommandError::NoMarketForCountry(_) => "no_market_for_country",
@@ -69,6 +76,7 @@ pub trait CartPorts {
     type TaxRegions: TaxRegionRepo;
     type InventoryItems: InventoryItemRepo;
     type Locations: LocationRepo;
+    type Customers: CustomerRepo;
 
     fn carts(&self) -> &Self::Carts;
     fn products(&self) -> &Self::Products;
@@ -79,6 +87,7 @@ pub trait CartPorts {
     fn tax_regions(&self) -> &Self::TaxRegions;
     fn inventory_items(&self) -> &Self::InventoryItems;
     fn locations(&self) -> &Self::Locations;
+    fn customers(&self) -> &Self::Customers;
 }
 
 /// Borrowed ports are ports too, so a host can lend out `&Storage` per request.
@@ -92,6 +101,7 @@ impl<T: CartPorts + ?Sized> CartPorts for &T {
     type TaxRegions = T::TaxRegions;
     type InventoryItems = T::InventoryItems;
     type Locations = T::Locations;
+    type Customers = T::Customers;
 
     fn carts(&self) -> &Self::Carts {
         (**self).carts()
@@ -119,6 +129,9 @@ impl<T: CartPorts + ?Sized> CartPorts for &T {
     }
     fn locations(&self) -> &Self::Locations {
         (**self).locations()
+    }
+    fn customers(&self) -> &Self::Customers {
+        (**self).customers()
     }
 }
 
@@ -194,6 +207,57 @@ pub async fn add_line<S: CartPorts>(
     // instead of silently dropping that request's line.
     ports.carts().update(&mut cart).await?;
     Ok(priced)
+}
+
+/// Sets who to contact about the order this cart becomes; `None` clears it.
+pub async fn set_cart_email<S: CartPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+    email: Option<String>,
+) -> Result<Cart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+
+    let email = email.as_deref().map(Email::new).transpose()?;
+    let mut cart = load_cart(ports, id).await?;
+    cart.set_email(email);
+    ports.carts().update(&mut cart).await?;
+    Ok(cart)
+}
+
+/// Links the cart to an existing customer (taking their email), or unlinks it with
+/// `None` (design note 0005, C5).
+pub async fn set_cart_customer<S: CartPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+    customer: Option<CustomerId>,
+) -> Result<Cart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+
+    let mut cart = load_cart(ports, id).await?;
+    let buyer = match customer {
+        Some(customer) => {
+            let found = ports
+                .customers()
+                .get(customer)
+                .await?
+                .ok_or(CommandError::CustomerNotFound(customer))?;
+            Some((found.id(), found.email().clone()))
+        }
+        None => None,
+    };
+    cart.set_customer(buyer);
+    ports.carts().update(&mut cart).await?;
+    Ok(cart)
+}
+
+async fn load_cart<S: CartPorts>(ports: &S, id: CartId) -> Result<Cart, CommandError> {
+    ports
+        .carts()
+        .get(id)
+        .await?
+        .ok_or(CommandError::CartNotFound(id))
 }
 
 /// The cart at current prices, tax rates and stock. Stale lines are marked unavailable,

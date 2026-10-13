@@ -404,6 +404,7 @@ name = "hypha-cart"
 version = "0.1.0"
 dependencies = [
  "hypha-core",
+ "hypha-customers",
  "hypha-inventory",
  "hypha-markets",
  "hypha-pricing",

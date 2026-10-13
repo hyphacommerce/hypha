@@ -4,9 +4,9 @@ use hypha_cart::CartPorts;
 use hypha_core::IdGenerator;
 use hypha_store_postgres::{CORE, PgConnection, PgStore, migrate};
 use hypha_testkit::{
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo,
-    InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo, InMemoryTaxClassRepo,
-    InMemoryTaxRegionRepo,
+    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryInventoryItemRepo,
+    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo,
+    InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
 };
 use uuid::Uuid;
 
@@ -57,6 +57,7 @@ pub struct MemoryStorage {
     tax_regions: InMemoryTaxRegionRepo,
     inventory_items: InMemoryInventoryItemRepo,
     locations: InMemoryLocationRepo,
+    customers: InMemoryCustomerRepo,
 }
 
 impl CartPorts for MemoryStorage {
@@ -69,6 +70,7 @@ impl CartPorts for MemoryStorage {
     type TaxRegions = InMemoryTaxRegionRepo;
     type InventoryItems = InMemoryInventoryItemRepo;
     type Locations = InMemoryLocationRepo;
+    type Customers = InMemoryCustomerRepo;
 
     fn carts(&self) -> &Self::Carts {
         &self.carts
@@ -96,6 +98,9 @@ impl CartPorts for MemoryStorage {
     }
     fn locations(&self) -> &Self::Locations {
         &self.locations
+    }
+    fn customers(&self) -> &Self::Customers {
+        &self.customers
     }
 }
 

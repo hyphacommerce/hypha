@@ -1,12 +1,14 @@
 use hypha_cart::{
     AddLine, CartError, CartPorts, CartRepo, CommandError, LineError, LineStatus, PricedCart,
-    add_line, create_cart, get_cart,
+    add_line, create_cart, get_cart, set_cart_customer, set_cart_email,
 };
 use hypha_core::{
     Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, Ctx, Currency, InventoryItemId,
     LocationId, MarketId, Money, Price, PriceListId, ProductId, Scope, TaxClassId, TaxRate,
     TaxRegionId, UserId, VariantId,
 };
+use hypha_core::{CustomerId, Email, EmailError};
+use hypha_customers::{Customer, CustomerRepo};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo,
@@ -15,9 +17,9 @@ use hypha_pricing::PricingError;
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus};
 use hypha_tax::{TaxClass, TaxClassRepo, TaxLine, TaxRegion, TaxRegionRepo, TaxSource};
 use hypha_testkit::{
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo,
-    InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo, InMemoryTaxClassRepo,
-    InMemoryTaxRegionRepo, SequentialIds,
+    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryInventoryItemRepo,
+    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo,
+    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, SequentialIds,
 };
 use pollster::block_on;
 use uuid::Uuid;
@@ -89,6 +91,7 @@ struct World {
     tax_regions: InMemoryTaxRegionRepo,
     inventory_items: InMemoryInventoryItemRepo,
     locations: InMemoryLocationRepo,
+    customers: InMemoryCustomerRepo,
     ids: SequentialIds,
 }
 
@@ -106,6 +109,7 @@ impl World {
             tax_regions: InMemoryTaxRegionRepo::default(),
             inventory_items: InMemoryInventoryItemRepo::default(),
             locations: InMemoryLocationRepo::default(),
+            customers: InMemoryCustomerRepo::default(),
             ids: SequentialIds::default(),
         };
 
@@ -266,6 +270,7 @@ impl CartPorts for World {
     type TaxRegions = InMemoryTaxRegionRepo;
     type InventoryItems = InMemoryInventoryItemRepo;
     type Locations = InMemoryLocationRepo;
+    type Customers = InMemoryCustomerRepo;
 
     fn carts(&self) -> &Self::Carts {
         &self.carts
@@ -293,6 +298,9 @@ impl CartPorts for World {
     }
     fn locations(&self) -> &Self::Locations {
         &self.locations
+    }
+    fn customers(&self) -> &Self::Customers {
+        &self.customers
     }
 }
 
@@ -685,4 +693,80 @@ fn continue_selling_allows_more_than_the_stock() {
     let cart = world.create_cart();
 
     assert!(world.add(&Ctx::system(), cart, "mug", 5).is_ok());
+}
+
+// ---- buyer ----
+
+#[test]
+fn set_cart_email_normalizes_and_clears() {
+    let world = World::new();
+    let cart = world.create_cart();
+
+    let updated = block_on(set_cart_email(
+        &Ctx::system(),
+        &world,
+        cart,
+        Some(" Ana@Example.hr".to_string()),
+    ))
+    .unwrap();
+    assert_eq!(
+        updated.email(),
+        Some(&Email::new("ana@example.hr").unwrap())
+    );
+    assert_eq!(
+        world.get(cart).unwrap().email,
+        Some(Email::new("ana@example.hr").unwrap())
+    );
+
+    let cleared = block_on(set_cart_email(&Ctx::system(), &world, cart, None)).unwrap();
+    assert_eq!(cleared.email(), None);
+}
+
+#[test]
+fn set_cart_email_rejects_an_invalid_email() {
+    let world = World::new();
+    let cart = world.create_cart();
+    assert_eq!(
+        block_on(set_cart_email(
+            &Ctx::system(),
+            &world,
+            cart,
+            Some("nope".to_string())
+        )),
+        Err(CommandError::Email(EmailError::Invalid("nope".to_string())))
+    );
+}
+
+#[test]
+fn set_cart_customer_links_the_customer_and_takes_their_email() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let id = CustomerId::from_uuid(Uuid::from_u128(1500));
+    let ana = Email::new("ana@example.hr").unwrap();
+    block_on(world.customers.insert(&mut Customer::new(id, ana.clone()))).unwrap();
+
+    let updated = block_on(set_cart_customer(&Ctx::system(), &world, cart, Some(id))).unwrap();
+    assert_eq!(
+        (updated.customer(), updated.email()),
+        (Some(id), Some(&ana))
+    );
+
+    let unlinked = block_on(set_cart_customer(&Ctx::system(), &world, cart, None)).unwrap();
+    assert_eq!((unlinked.customer(), unlinked.email()), (None, Some(&ana)));
+}
+
+#[test]
+fn set_cart_customer_rejects_an_unknown_customer() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let unknown = CustomerId::from_uuid(Uuid::from_u128(1599));
+    assert_eq!(
+        block_on(set_cart_customer(
+            &Ctx::system(),
+            &world,
+            cart,
+            Some(unknown)
+        )),
+        Err(CommandError::CustomerNotFound(unknown))
+    );
 }

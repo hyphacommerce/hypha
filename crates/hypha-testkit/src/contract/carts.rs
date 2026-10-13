@@ -1,6 +1,7 @@
 use hypha_cart::{Cart, CartRepo, Quantity, repo::keys};
 use hypha_core::{
-    CartId, CountryCode, MarketId, ProductId, RepoError, VariantId, Version, Versioned,
+    CartId, CountryCode, CustomerId, Email, MarketId, ProductId, RepoError, VariantId, Version,
+    Versioned,
 };
 use uuid::Uuid;
 
@@ -46,8 +47,12 @@ async fn round_trips<R: CartRepo>(repo: &R) {
     assert_eq!(empty.version(), Version::new(1));
     assert_eq!(repo.get(empty.id()).await, Ok(Some(empty)));
 
-    // Line order, quantities and the country must survive.
+    // Line order, quantities, the country and the buyer must survive.
     let mut full = cart_to(2, "DE");
+    full.set_customer(Some((
+        CustomerId::from_uuid(Uuid::from_u128(7)),
+        Email::new("ana@example.hr").unwrap(),
+    )));
     full.add_line(pid(1), vid(12), qty(3)).unwrap();
     full.add_line(pid(1), vid(11), qty(1)).unwrap();
     full.add_line(pid(2), vid(21), qty(u32::MAX)).unwrap();
@@ -69,6 +74,7 @@ async fn update_round_trips<R: CartRepo>(repo: &R) {
     c.set_quantity(vid(11), qty(5)).unwrap();
     c.remove_line(vid(21));
     c.add_line(pid(3), vid(31), qty(2)).unwrap();
+    c.set_email(Some(Email::new("ivo@example.hr").unwrap()));
     repo.update(&mut c).await.unwrap();
 
     assert_eq!(c.version(), Version::new(2));

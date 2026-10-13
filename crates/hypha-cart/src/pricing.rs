@@ -1,4 +1,6 @@
-use hypha_core::{CartId, CountryCode, Money, MoneyError, Price, ProductId, VariantId};
+use hypha_core::{
+    CartId, CountryCode, CustomerId, Email, Money, MoneyError, Price, ProductId, VariantId,
+};
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, resolve_price};
 use hypha_products::{Product, ProductStatus};
@@ -46,6 +48,8 @@ impl PricedLine {
 pub struct PricedCart {
     pub id: CartId,
     pub country: CountryCode,
+    pub email: Option<Email>,
+    pub customer: Option<CustomerId>,
     pub lines: Vec<PricedLine>,
     /// Whether line prices include tax (the market decides).
     pub taxes_included: bool,
@@ -152,6 +156,8 @@ pub fn price_cart(
     Ok(PricedCart {
         id: cart.id(),
         country: cart.country(),
+        email: cart.email().cloned(),
+        customer: cart.customer(),
         lines,
         taxes_included: tax.prices_include_tax,
         subtotal,

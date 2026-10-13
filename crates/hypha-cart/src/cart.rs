@@ -1,4 +1,6 @@
-use hypha_core::{CartId, CountryCode, MarketId, ProductId, VariantId, Version, Versioned};
+use hypha_core::{
+    CartId, CountryCode, CustomerId, Email, MarketId, ProductId, VariantId, Version, Versioned,
+};
 
 use crate::{error::CartError, quantity::Quantity};
 
@@ -27,6 +29,9 @@ impl CartLine {
 
 /// A cart ships to one country, which picked its market (and so its currency) when the
 /// cart was created, and picks its tax rates.
+///
+/// Its buyer is an optional `email` and `customer`, like Shopify's `buyerIdentity`
+/// (design note 0005, C5); checkout needs at least the email.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cart {
     id: CartId,
@@ -34,6 +39,8 @@ pub struct Cart {
     market: MarketId,
     country: CountryCode,
     lines: Vec<CartLine>,
+    email: Option<Email>,
+    customer: Option<CustomerId>,
 }
 
 impl Versioned for Cart {
@@ -54,6 +61,24 @@ impl Cart {
             market,
             country,
             lines: Vec::new(),
+            email: None,
+            customer: None,
+        }
+    }
+
+    pub fn set_email(&mut self, email: Option<Email>) {
+        self.email = email;
+    }
+
+    /// Links the cart to a customer and takes their email; `None` unlinks it and keeps
+    /// the email.
+    pub fn set_customer(&mut self, customer: Option<(CustomerId, Email)>) {
+        match customer {
+            Some((id, email)) => {
+                self.customer = Some(id);
+                self.email = Some(email);
+            }
+            None => self.customer = None,
         }
     }
 
@@ -113,6 +138,14 @@ impl Cart {
         &self.lines
     }
 
+    pub fn email(&self) -> Option<&Email> {
+        self.email.as_ref()
+    }
+
+    pub fn customer(&self) -> Option<CustomerId> {
+        self.customer
+    }
+
     /// The line holding `variant`.
     pub fn line(&self, variant: VariantId) -> Result<CartLine, CartError> {
         self.lines
@@ -131,6 +164,8 @@ pub struct CartSnapshot {
     pub market: MarketId,
     pub country: CountryCode,
     pub lines: Vec<CartLineSnapshot>,
+    pub email: Option<Email>,
+    pub customer: Option<CustomerId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +191,8 @@ impl Cart {
                     quantity: l.quantity.value(),
                 })
                 .collect(),
+            email: self.email.clone(),
+            customer: self.customer,
         }
     }
 
@@ -179,6 +216,8 @@ impl Cart {
             market: s.market,
             country: s.country,
             lines,
+            email: s.email,
+            customer: s.customer,
         })
     }
 }
@@ -230,6 +269,18 @@ mod tests {
         c.add_line(pid(), vid(1), qty(3)).unwrap();
         assert_eq!(c.lines().len(), 1);
         assert_eq!(c.lines()[0].quantity(), qty(5));
+    }
+
+    #[test]
+    fn setting_a_customer_takes_their_email_and_unsetting_keeps_it() {
+        let mut c = cart();
+        let ana = Email::new("ana@example.hr").unwrap();
+        let customer = CustomerId::from_uuid(Uuid::from_u128(5));
+        c.set_email(Some(Email::new("old@example.hr").unwrap()));
+        c.set_customer(Some((customer, ana.clone())));
+        assert_eq!((c.customer(), c.email()), (Some(customer), Some(&ana)));
+        c.set_customer(None);
+        assert_eq!((c.customer(), c.email()), (None, Some(&ana)));
     }
 
     #[test]
