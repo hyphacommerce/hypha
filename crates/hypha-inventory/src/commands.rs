@@ -337,6 +337,11 @@ pub async fn reserve_stock<R: InventoryItemRepo, L: LocationRepo>(
             Ok((ReservationRef::new(&l.reference)?, l.variant, l.quantity))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    reject_duplicate_lines(
+        lines
+            .iter()
+            .map(|(reference, variant, _)| (reference, *variant)),
+    )?;
     let variants = &distinct(lines.iter().map(|(_, variant, _)| *variant));
     let lines = &lines;
     let market = input.market;
@@ -398,6 +403,11 @@ pub async fn release_stock<R: InventoryItemRepo>(
         .iter()
         .map(|l| Ok((ReservationRef::new(&l.reference)?, l.variant)))
         .collect::<Result<Vec<_>, InventoryError>>()?;
+    reject_duplicate_lines(
+        lines
+            .iter()
+            .map(|(reference, variant)| (reference, *variant)),
+    )?;
     let variants = &distinct(lines.iter().map(|(_, variant)| *variant));
     let lines = &lines;
 
@@ -414,6 +424,23 @@ pub async fn release_stock<R: InventoryItemRepo>(
         write_changed(items, stock, &changed).await
     })
     .await
+}
+
+/// A request may name each (reference, variant) once: a second line would be silently
+/// swallowed by the idempotency path (review plan B5).
+fn reject_duplicate_lines<'a>(
+    lines: impl Iterator<Item = (&'a ReservationRef, VariantId)>,
+) -> Result<(), InventoryError> {
+    let mut seen = HashSet::new();
+    for (reference, variant) in lines {
+        if !seen.insert((reference, variant)) {
+            return Err(InventoryError::DuplicateLine {
+                reference: reference.clone(),
+                variant,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn distinct(variants: impl Iterator<Item = VariantId>) -> Vec<VariantId> {

@@ -429,3 +429,33 @@ fn release_retries_a_lost_race() {
 
     assert!(world.held(1).is_empty());
 }
+
+/// B5: the same (reference, variant) twice in one request used to reserve once and
+/// return `Ok` (the second line hit the idempotency path).
+#[test]
+fn the_same_line_twice_in_one_request_is_rejected() {
+    let world = World::new();
+    world.stock(1, &[(1, 5)]);
+    let duplicate = Err(CommandError::Inventory(InventoryError::DuplicateLine {
+        reference: reference("ol-1"),
+        variant: vid(1),
+    }));
+
+    assert_eq!(
+        world.reserve(vec![line("ol-1", 1, 2), line("ol-1", 1, 2)]),
+        duplicate
+    );
+    assert!(world.held(1).is_empty(), "nothing reserved");
+    assert_eq!(world.release(&[("ol-1", 1), ("ol-1", 1)]), duplicate);
+}
+
+#[test]
+fn one_reference_for_two_variants_is_fine() {
+    let world = World::new();
+    world.stock(1, &[(1, 5)]);
+    world.stock(2, &[(1, 5)]);
+    assert_eq!(
+        world.reserve(vec![line("ol-1", 1, 2), line("ol-1", 2, 1)]),
+        Ok(())
+    );
+}

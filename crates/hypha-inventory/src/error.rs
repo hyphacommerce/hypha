@@ -1,4 +1,4 @@
-use hypha_core::{ErrorCode, LocationId, MarketId};
+use hypha_core::{ErrorCode, LocationId, MarketId, VariantId};
 use thiserror::Error;
 
 use crate::{MAX_STOCK, ReservationRef};
@@ -28,6 +28,11 @@ pub enum InventoryError {
         reference: ReservationRef,
         location: LocationId,
     },
+    #[error("{reference} for variant {variant} is listed more than once")]
+    DuplicateLine {
+        reference: ReservationRef,
+        variant: VariantId,
+    },
 }
 
 impl ErrorCode for InventoryError {
@@ -43,6 +48,7 @@ impl ErrorCode for InventoryError {
             InventoryError::OutOfStock { .. } => "out_of_stock",
             InventoryError::DuplicateLevel(_) => "duplicate_stock_level",
             InventoryError::DuplicateReservation { .. } => "duplicate_reservation",
+            InventoryError::DuplicateLine { .. } => "duplicate_reservation_line",
         }
     }
 }
