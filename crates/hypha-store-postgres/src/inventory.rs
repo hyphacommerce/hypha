@@ -224,7 +224,10 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         if items.is_empty() {
             return Ok(());
         }
-        let snapshots: Vec<InventoryItemSnapshot> = items.iter().map(|i| i.snapshot()).collect();
+        // Sorted by ID, so every writer takes its row locks in the same order (below).
+        let mut snapshots: Vec<InventoryItemSnapshot> =
+            items.iter().map(|i| i.snapshot()).collect();
+        snapshots.sort_by_key(|s| s.id.as_uuid());
         let ids: Vec<Uuid> = snapshots.iter().map(|s| s.id.as_uuid()).collect();
         let versions = snapshots
             .iter()
@@ -236,6 +239,15 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
 
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
+        // Lock the rows in ID order first. Two checkouts touching overlapping items then
+        // queue instead of deadlocking, whatever order their callers listed the items in;
+        // the UPDATE below joins through `unnest`, whose lock order the planner picks.
+        tx.query_typed(
+            "SELECT id FROM inventory_items WHERE id = ANY($1) ORDER BY id FOR UPDATE",
+            &[(&ids, Type::UUID_ARRAY)],
+        )
+        .await
+        .map_err(repo_error)?;
         let bumped = tx
             .query_typed(
                 "UPDATE inventory_items AS i
