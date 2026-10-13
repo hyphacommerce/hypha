@@ -194,17 +194,15 @@ impl InventoryItem {
     }
 
     /// `Ok` if `quantity` could be reserved from `locations` right now (always, if
-    /// untracked); otherwise the shortage. Reserves nothing.
-    pub fn can_supply(&self, quantity: u32, locations: &[Location]) -> Result<(), InventoryError> {
+    /// untracked); otherwise `Err` with how many are available. Reserves nothing.
+    ///
+    /// Returns only the shortage, not an `InventoryError`: a shortage is the one way it
+    /// can fail, so callers can match it exhaustively.
+    pub fn can_supply(&self, quantity: u32, locations: &[Location]) -> Result<(), i64> {
         if !self.tracked {
             return Ok(());
         }
-        self.allocate(quantity, locations)
-            .map(|_| ())
-            .map_err(|available| InventoryError::OutOfStock {
-                requested: quantity,
-                available,
-            })
+        self.allocate(quantity, locations).map(|_| ())
     }
 
     /// Reserves `quantity` for `reference` from `locations` (the ones serving the
@@ -613,13 +611,7 @@ mod tests {
     #[test]
     fn can_supply_reports_the_shortage_without_reserving() {
         let i = item(&[(1, 1)]);
-        assert_eq!(
-            i.can_supply(2, &[location(1, 0)]),
-            Err(InventoryError::OutOfStock {
-                requested: 2,
-                available: 1
-            })
-        );
+        assert_eq!(i.can_supply(2, &[location(1, 0)]), Err(1));
         assert_eq!(i.can_supply(1, &[location(1, 0)]), Ok(()));
     }
 

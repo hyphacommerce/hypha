@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use hypha_core::VariantId;
 
-use crate::{InventoryError, InventoryItem, Location};
+use crate::{InventoryItem, Location};
 
 /// Whether a quantity of a variant can be sold in a market right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,11 +37,8 @@ impl StockContext {
             return Availability::Untracked;
         }
         match item.can_supply(quantity, &self.locations) {
-            Err(InventoryError::OutOfStock { available, .. }) => {
-                Availability::OutOfStock { available }
-            }
-            // `can_supply` fails with nothing else; anything that isn't a shortage sells.
-            _ => Availability::Available,
+            Ok(()) => Availability::Available,
+            Err(available) => Availability::OutOfStock { available },
         }
     }
 }
