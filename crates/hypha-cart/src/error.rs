@@ -1,7 +1,7 @@
 use hypha_core::{ErrorCode, MoneyError, ProductId, QuantityError, VariantId};
 use hypha_pricing::PricingError;
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum CartError {
     #[error(transparent)]
     Quantity(#[from] QuantityError),
@@ -39,7 +39,7 @@ pub enum LineError {
 
 /// Why stored data can't be rebuilt into a cart. Only `Cart::restore` returns it and
 /// adapters report it as a backend failure, so it has no API code (review plan D4).
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum RestoreError {
     #[error(transparent)]
     Cart(#[from] CartError),

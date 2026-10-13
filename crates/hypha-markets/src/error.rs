@@ -1,6 +1,6 @@
 use hypha_core::{CountryCode, Currency, ErrorCode, TextError, VariantId};
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum MarketError {
     #[error(transparent)]
     Text(#[from] TextError),
@@ -21,7 +21,7 @@ pub struct MismatchedPrice {
     pub found: Currency,
 }
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum PriceListError {
     #[error("{} fixed price(s) are not in the price list's currency {expected}", prices.len())]
     CurrencyMismatch {

@@ -1,4 +1,11 @@
-use std::{collections::HashMap, hash::Hash, sync::Mutex};
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use hypha_core::{RepoError, Version, Versioned};
 
@@ -8,12 +15,15 @@ use hypha_core::{RepoError, Version, Versioned};
 /// this, so command tests see the same behavior as production.
 pub(crate) struct Table<K, T> {
     rows: Mutex<HashMap<K, T>>,
+    /// How many of the next lookups see no rows (`hide_next_lookups`).
+    hidden: AtomicUsize,
 }
 
 impl<K, T> Default for Table<K, T> {
     fn default() -> Self {
         Self {
             rows: Mutex::new(HashMap::new()),
+            hidden: AtomicUsize::new(0),
         }
     }
 }
@@ -32,7 +42,25 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         ids.iter().filter_map(|id| rows.get(id).cloned()).collect()
     }
 
+    /// Makes the next `n` lookups by something other than the ID (`find`, `all`) see no
+    /// rows, as if another request inserted them right after. Tests use it to lose the
+    /// race between a command's pre-check and its write, which the unique keys must
+    /// still catch.
+    pub(crate) fn hide_next_lookups(&self, n: usize) {
+        self.hidden.store(n, Ordering::SeqCst);
+    }
+
+    /// Whether this lookup is one of the hidden ones (and uses it up).
+    fn hiding(&self) -> bool {
+        self.hidden
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+    }
+
     pub(crate) fn find(&self, matches: impl Fn(&T) -> bool) -> Option<T> {
+        if self.hiding() {
+            return None;
+        }
         self.rows
             .lock()
             .unwrap()
@@ -42,6 +70,9 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
     }
 
     pub(crate) fn all(&self) -> Vec<T> {
+        if self.hiding() {
+            return Vec::new();
+        }
         self.rows.lock().unwrap().values().cloned().collect()
     }
 

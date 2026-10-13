@@ -23,7 +23,37 @@ pub(super) struct CreateProductRequest {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SetStatusRequest {
-    status: ProductStatus,
+    status: StatusDto,
+}
+
+/// `ProductStatus` on the wire: snake_case strings. A DTO of its own, so the domain
+/// enum carries no serde and renaming a variant can't silently change the API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum StatusDto {
+    Draft,
+    Active,
+    Archived,
+}
+
+impl From<StatusDto> for ProductStatus {
+    fn from(s: StatusDto) -> Self {
+        match s {
+            StatusDto::Draft => ProductStatus::Draft,
+            StatusDto::Active => ProductStatus::Active,
+            StatusDto::Archived => ProductStatus::Archived,
+        }
+    }
+}
+
+impl From<ProductStatus> for StatusDto {
+    fn from(s: ProductStatus) -> Self {
+        match s {
+            ProductStatus::Draft => StatusDto::Draft,
+            ProductStatus::Active => StatusDto::Active,
+            ProductStatus::Archived => StatusDto::Archived,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -31,7 +61,7 @@ pub(super) struct ProductResponse {
     id: ProductId,
     handle: String,
     title: String,
-    status: ProductStatus,
+    status: StatusDto,
     variants: Vec<VariantResponse>,
 }
 
@@ -47,7 +77,7 @@ impl From<&Product> for ProductResponse {
             id: p.id(),
             handle: p.handle().as_str().to_string(),
             title: p.title().to_string(),
-            status: p.status(),
+            status: p.status().into(),
             variants: p
                 .variants()
                 .iter()
@@ -92,6 +122,26 @@ pub(super) async fn set_status<S: Storage>(
 ) -> Result<Json<ProductResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
-    let product = set_product_status(&ctx, ports.products(), id, req.status).await?;
+    let product = set_product_status(&ctx, ports.products(), id, req.status.into()).await?;
     Ok(Json(ProductResponse::from(&product)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_is_snake_case_on_the_wire_and_matches_display() {
+        for status in [
+            ProductStatus::Draft,
+            ProductStatus::Active,
+            ProductStatus::Archived,
+        ] {
+            let json = serde_json::to_string(&StatusDto::from(status)).unwrap();
+            assert_eq!(json, format!("\"{status}\""));
+            let back: StatusDto = serde_json::from_str(&json).unwrap();
+            assert_eq!(ProductStatus::from(back), status);
+        }
+        assert!(serde_json::from_str::<StatusDto>("\"Active\"").is_err());
+    }
 }

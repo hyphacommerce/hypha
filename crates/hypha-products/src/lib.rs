@@ -4,7 +4,6 @@ pub mod handle;
 pub mod option;
 pub mod product;
 pub mod repo;
-pub mod snapshot;
 pub mod variant;
 
 pub use commands::{
@@ -13,7 +12,8 @@ pub use commands::{
 pub use error::{HandleError, ProductError};
 pub use handle::Handle;
 pub use option::{OptionValue, ProductOption};
-pub use product::{Product, ProductStatus};
+pub use product::{
+    OptionSnapshot, OptionValueSnapshot, Product, ProductSnapshot, ProductStatus, VariantSnapshot,
+};
 pub use repo::{HasProducts, ProductRepo};
-pub use snapshot::{OptionSnapshot, OptionValueSnapshot, ProductSnapshot, VariantSnapshot};
 pub use variant::{NewVariant, Variant};

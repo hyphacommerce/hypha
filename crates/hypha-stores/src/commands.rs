@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::{Store, StoreError, StoreRepo};
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
     #[error(transparent)]
     Auth(#[from] AuthError),
@@ -12,7 +12,7 @@ pub enum CommandError {
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error("store {0} not found")]
-    NotFound(StoreId),
+    StoreNotFound(StoreId),
     /// One store per deployment (design note 0006, model A) found more than one.
     #[error("expected exactly one store in this deployment, found {0}")]
     MultipleStores(usize),
@@ -24,7 +24,7 @@ impl ErrorCode for CommandError {
             CommandError::Auth(e) => e.code(),
             CommandError::Repo(e) => e.code(),
             CommandError::Store(e) => e.code(),
-            CommandError::NotFound(_) => "store_not_found",
+            CommandError::StoreNotFound(_) => "store_not_found",
             CommandError::MultipleStores(_) => "multiple_stores",
         }
     }
@@ -48,7 +48,7 @@ pub async fn get_store<R: StoreRepo>(
     id: StoreId,
 ) -> Result<Store, CommandError> {
     ctx.require(Scope::StoresRead)?;
-    repo.get(id).await?.ok_or(CommandError::NotFound(id))
+    repo.get(id).await?.ok_or(CommandError::StoreNotFound(id))
 }
 
 pub async fn rename_store<R: StoreRepo>(
@@ -58,7 +58,7 @@ pub async fn rename_store<R: StoreRepo>(
     name: &str,
 ) -> Result<Store, CommandError> {
     ctx.require(Scope::StoresWrite)?;
-    let mut store = repo.get(id).await?.ok_or(CommandError::NotFound(id))?;
+    let mut store = repo.get(id).await?.ok_or(CommandError::StoreNotFound(id))?;
     store.rename(name)?;
     repo.update(&mut store).await?;
     Ok(store)

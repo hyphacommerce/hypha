@@ -20,6 +20,15 @@ fn unique(new: &Catalog, other: &Catalog) -> Option<&'static str> {
     (new.context() == other.context()).then_some(keys::CATALOG_CONTEXT)
 }
 
+impl InMemoryCatalogRepo {
+    /// The next `n` lookups by a unique key (and `list_all`, where there is one) find
+    /// nothing, as if another request inserted the row right after: for testing a
+    /// command that loses the race between its pre-check and its write.
+    pub fn hide_next_lookups(&self, n: usize) {
+        self.catalogs.hide_next_lookups(n);
+    }
+}
+
 impl CatalogRepo for InMemoryCatalogRepo {
     async fn get(&self, id: CatalogId) -> Result<Option<Catalog>, RepoError> {
         Ok(self.catalogs.get(&id))

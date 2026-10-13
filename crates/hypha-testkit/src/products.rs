@@ -23,6 +23,15 @@ fn unique(new: &Product, other: &Product) -> Option<&'static str> {
     shares_variant.then_some(keys::VARIANT_ID)
 }
 
+impl InMemoryProductRepo {
+    /// The next `n` lookups by a unique key (and `list_all`, where there is one) find
+    /// nothing, as if another request inserted the row right after: for testing a
+    /// command that loses the race between its pre-check and its write.
+    pub fn hide_next_lookups(&self, n: usize) {
+        self.products.hide_next_lookups(n);
+    }
+}
+
 impl ProductRepo for InMemoryProductRepo {
     async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError> {
         Ok(self.products.get(&id))

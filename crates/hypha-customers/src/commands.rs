@@ -1,6 +1,6 @@
 use hypha_core::{
     Address, AddressError, AddressId, AddressParts, AuthError, Ctx, CustomerId, Email, EmailError,
-    ErrorCode, IdGenerator, RepoError, Scope,
+    ErrorCode, IdGenerator, RepoError, Scope, report_duplicate,
 };
 use thiserror::Error;
 
@@ -9,7 +9,7 @@ use crate::{
     repo::{CustomerRepo, keys},
 };
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
     #[error(transparent)]
     Auth(#[from] AuthError),
@@ -62,11 +62,12 @@ pub async fn create_customer<R: CustomerRepo, I: IdGenerator>(
     customer.set_last_name(input.last_name)?;
     customer.set_phone(input.phone)?;
 
-    if let Some(existing) = customers.get_by_email(&email).await? {
-        return Err(customer_exists(&existing));
+    if let Some(taken) = email_taken(customers, &email, customer.id()).await? {
+        return Err(taken);
     }
-    let result = customers.insert(&mut customer).await;
-    map_duplicate_email(customers, &email, result).await?;
+    let written = customers.insert(&mut customer).await;
+    let race = email_taken(customers, &email, customer.id());
+    report_duplicate(written, keys::CUSTOMER_EMAIL, race).await?;
     Ok(customer)
 }
 
@@ -139,14 +140,17 @@ pub async fn update_customer<R: CustomerRepo>(
     };
 
     let email = Email::new(&email)?;
-    if let Some(existing) = customers.get_by_email(&email).await?
-        && existing.id() != id
-    {
-        return Err(customer_exists(&existing));
+    if let Some(taken) = email_taken(customers, &email, id).await? {
+        return Err(taken);
     }
     customer.set_email(email.clone());
-    let result = customers.update(&mut customer).await;
-    map_duplicate_email(customers, &email, result).await?;
+    let written = customers.update(&mut customer).await;
+    report_duplicate(
+        written,
+        keys::CUSTOMER_EMAIL,
+        email_taken(customers, &email, id),
+    )
+    .await?;
     Ok(customer)
 }
 
@@ -221,27 +225,18 @@ async fn load<R: CustomerRepo>(customers: &R, id: CustomerId) -> Result<Customer
         .ok_or(CommandError::CustomerNotFound(id))
 }
 
-fn customer_exists(existing: &Customer) -> CommandError {
-    CommandError::CustomerExists {
-        email: existing.email().clone(),
-        customer: existing.id(),
-    }
-}
-
-/// A write that lost a race for `email` reports the winner, like the pre-check would.
-async fn map_duplicate_email<R: CustomerRepo>(
+/// `CustomerExists` naming the customer other than `except` who has `email`, if any.
+async fn email_taken<R: CustomerRepo>(
     customers: &R,
     email: &Email,
-    result: Result<(), RepoError>,
-) -> Result<(), CommandError> {
-    match result {
-        Ok(()) => Ok(()),
-        Err(RepoError::Duplicate(keys::CUSTOMER_EMAIL)) => {
-            match customers.get_by_email(email).await? {
-                Some(existing) => Err(customer_exists(&existing)),
-                None => Err(RepoError::Duplicate(keys::CUSTOMER_EMAIL).into()),
-            }
-        }
-        Err(e) => Err(e.into()),
-    }
+    except: CustomerId,
+) -> Result<Option<CommandError>, CommandError> {
+    Ok(customers
+        .get_by_email(email)
+        .await?
+        .filter(|existing| existing.id() != except)
+        .map(|existing| CommandError::CustomerExists {
+            email: email.clone(),
+            customer: existing.id(),
+        }))
 }

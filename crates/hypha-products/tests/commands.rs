@@ -1,9 +1,6 @@
-use hypha_core::{
-    Actor, AuthError, Ctx, Currency, Money, MoneyError, ProductId, RepoError, Scope, UserId,
-    VariantId,
-};
+use hypha_core::{Actor, AuthError, Ctx, Currency, Money, MoneyError, ProductId, Scope, UserId};
 use hypha_products::{
-    CommandError, CreateSimpleProduct, Handle, HandleError, Product, ProductError, ProductStatus,
+    CommandError, CreateSimpleProduct, Handle, HandleError, ProductError, ProductStatus,
     create_simple_product, get_product, repo::ProductRepo, set_product_status,
 };
 use hypha_testkit::{InMemoryProductRepo, SequentialIds};
@@ -43,7 +40,13 @@ fn rejects_same_handle_products() {
     let mug_1 = pollster::block_on(create_simple_product(&ctx, &repo, &ids, mug())).unwrap();
     let mug_2 = pollster::block_on(create_simple_product(&ctx, &repo, &ids, mug()));
 
-    assert_eq!(mug_2, Err(CommandError::HandleTaken(handle("mug"))));
+    assert_eq!(
+        mug_2,
+        Err(CommandError::HandleTaken {
+            handle: handle("mug"),
+            product: mug_1.id(),
+        })
+    );
     assert_eq!(
         block_on(repo.get_by_handle(&handle("mug"))),
         Ok(Some(mug_1))
@@ -110,7 +113,7 @@ fn get_unknown_product_is_not_found() {
 
     let result = block_on(get_product(&Ctx::system(), &repo, id));
 
-    assert_eq!(result, Err(CommandError::NotFound(id)));
+    assert_eq!(result, Err(CommandError::ProductNotFound(id)));
 }
 
 #[test]
@@ -170,42 +173,25 @@ fn set_status_rejects_unknown_product() {
             id,
             ProductStatus::Active
         )),
-        Err(CommandError::NotFound(id))
+        Err(CommandError::ProductNotFound(id))
     );
-}
-
-/// Simulates a race: its lookups never see existing products, as if another request
-/// inserted one between the command's pre-check and its insert.
-struct RacingRepo(InMemoryProductRepo);
-
-impl ProductRepo for RacingRepo {
-    async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError> {
-        self.0.get(id).await
-    }
-    async fn get_many(&self, ids: &[ProductId]) -> Result<Vec<Product>, RepoError> {
-        self.0.get_many(ids).await
-    }
-    async fn get_by_handle(&self, _: &Handle) -> Result<Option<Product>, RepoError> {
-        Ok(None)
-    }
-    async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError> {
-        self.0.get_by_variant(variant).await
-    }
-    async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
-        self.0.insert(product).await
-    }
-    async fn update(&self, product: &mut Product) -> Result<(), RepoError> {
-        self.0.update(product).await
-    }
 }
 
 #[test]
 fn handle_taken_by_a_concurrent_insert_is_still_handle_taken() {
-    let repo = RacingRepo(InMemoryProductRepo::default());
+    let repo = InMemoryProductRepo::default();
     let ids = SequentialIds::default();
-    block_on(create_simple_product(&Ctx::system(), &repo, &ids, mug())).unwrap();
+    let first = block_on(create_simple_product(&Ctx::system(), &repo, &ids, mug())).unwrap();
 
+    // The pre-check misses the first mug, as if it was inserted right after.
+    repo.hide_next_lookups(1);
     let result = block_on(create_simple_product(&Ctx::system(), &repo, &ids, mug()));
 
-    assert_eq!(result, Err(CommandError::HandleTaken(handle("mug"))));
+    assert_eq!(
+        result,
+        Err(CommandError::HandleTaken {
+            handle: handle("mug"),
+            product: first.id(),
+        })
+    );
 }

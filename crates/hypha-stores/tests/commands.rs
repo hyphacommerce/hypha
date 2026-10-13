@@ -85,7 +85,7 @@ fn get_unknown_store_is_not_found() {
     let id = StoreId::from_uuid(Uuid::from_u128(99));
     assert_eq!(
         block_on(get_store(&Ctx::system(), &InMemoryStoreRepo::default(), id)),
-        Err(CommandError::NotFound(id))
+        Err(CommandError::StoreNotFound(id))
     );
 }
 

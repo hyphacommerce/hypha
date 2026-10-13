@@ -1,8 +1,5 @@
-use std::cell::Cell;
-
 use hypha_core::{
-    Actor, AuthError, Ctx, InventoryItemId, LocationId, MarketId, RepoError, Scope, UserId,
-    VariantId,
+    Actor, AuthError, Ctx, InventoryItemId, LocationId, MarketId, Scope, UserId, VariantId,
 };
 use hypha_inventory::{
     AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, InventoryError, InventoryItem,
@@ -235,53 +232,19 @@ fn a_variant_has_at_most_one_item() {
     );
 }
 
-/// Hides the existing item from the command's first lookup, as if another request
-/// inserted it between the command's check and its write.
-#[derive(Default)]
-struct RacingInsert {
-    inner: InMemoryInventoryItemRepo,
-    looked_up: Cell<bool>,
-}
-
-impl InventoryItemRepo for RacingInsert {
-    async fn get(&self, id: InventoryItemId) -> Result<Option<InventoryItem>, RepoError> {
-        self.inner.get(id).await
-    }
-    async fn get_by_variant(&self, variant: VariantId) -> Result<Option<InventoryItem>, RepoError> {
-        if !self.looked_up.replace(true) {
-            return Ok(None);
-        }
-        self.inner.get_by_variant(variant).await
-    }
-    async fn for_variants(&self, variants: &[VariantId]) -> Result<Vec<InventoryItem>, RepoError> {
-        self.inner.for_variants(variants).await
-    }
-    async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
-        self.inner.insert(item).await
-    }
-    async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
-        self.inner.update(item).await
-    }
-    async fn update_many(&self, items: &mut [InventoryItem]) -> Result<(), RepoError> {
-        self.inner.update_many(items).await
-    }
-}
-
 #[test]
 fn losing_the_race_for_a_variant_reports_the_existing_item() {
-    let repo = RacingInsert::default();
+    let repo = InMemoryInventoryItemRepo::default();
     let other = InventoryItemId::from_uuid(Uuid::from_u128(77));
-    block_on(
-        repo.inner
-            .insert(&mut InventoryItem::new(other, vid(1), true, false)),
-    )
-    .unwrap();
+    block_on(repo.insert(&mut InventoryItem::new(other, vid(1), true, false))).unwrap();
 
     let input = CreateInventoryItem {
         variant: vid(1),
         tracked: true,
         continue_selling: false,
     };
+    // The pre-check misses it, as if it was inserted right after.
+    repo.hide_next_lookups(1);
     assert_eq!(
         block_on(create_inventory_item(
             &Ctx::system(),

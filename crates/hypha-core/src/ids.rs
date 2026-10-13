@@ -4,7 +4,7 @@ use std::str::FromStr;
 use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum IdError {
     #[error("expected prefix `{expected}_`")]
     WrongPrefix { expected: &'static str },

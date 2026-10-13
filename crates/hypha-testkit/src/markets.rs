@@ -16,6 +16,15 @@ fn unique(new: &Market, other: &Market) -> Option<&'static str> {
         .then_some(keys::COUNTRY)
 }
 
+impl InMemoryMarketRepo {
+    /// The next `n` lookups by a unique key (and `list_all`, where there is one) find
+    /// nothing, as if another request inserted the row right after: for testing a
+    /// command that loses the race between its pre-check and its write.
+    pub fn hide_next_lookups(&self, n: usize) {
+        self.markets.hide_next_lookups(n);
+    }
+}
+
 impl MarketRepo for InMemoryMarketRepo {
     async fn get(&self, id: MarketId) -> Result<Option<Market>, RepoError> {
         Ok(self.markets.get(&id))

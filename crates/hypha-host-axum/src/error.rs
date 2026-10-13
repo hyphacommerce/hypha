@@ -100,8 +100,8 @@ impl From<hypha_products::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::Product(_) | E::Money(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            E::HandleTaken(_) => StatusCode::CONFLICT,
-            E::NotFound(_) => StatusCode::NOT_FOUND,
+            E::HandleTaken { .. } => StatusCode::CONFLICT,
+            E::ProductNotFound(_) => StatusCode::NOT_FOUND,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
@@ -135,7 +135,7 @@ impl From<hypha_stores::CommandError> for ApiError {
         use hypha_stores::CommandError as E;
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
-            E::NotFound(_) => StatusCode::NOT_FOUND,
+            E::StoreNotFound(_) => StatusCode::NOT_FOUND,
             E::Store(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
             // Only possible at startup, and a deployment problem rather than a request one.

@@ -1,7 +1,7 @@
 use hypha_core::{
     AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, ErrorCode,
     IdGenerator, MarketId, Money, MoneyError, Price, PriceListId, ProductId, RepoError, Scope,
-    VariantId,
+    VariantId, report_duplicate,
 };
 use thiserror::Error;
 
@@ -10,7 +10,7 @@ use crate::{
     PriceListError, PriceListRepo, repo::keys,
 };
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
     #[error(transparent)]
     Auth(#[from] AuthError),
@@ -146,13 +146,9 @@ pub async fn create_market<M: MarketRepo, I: IdGenerator>(
         return Err(conflict);
     }
 
-    match markets.insert(&mut market).await {
-        Ok(()) => Ok(market),
-        Err(RepoError::Duplicate(keys::COUNTRY)) => Err(country_conflict(markets, &market)
-            .await?
-            .unwrap_or(CommandError::Repo(RepoError::Duplicate(keys::COUNTRY)))),
-        Err(e) => Err(e.into()),
-    }
+    let written = markets.insert(&mut market).await;
+    report_duplicate(written, keys::COUNTRY, country_conflict(markets, &market)).await?;
+    Ok(market)
 }
 
 /// Changes the fields that are `Some`; the rest keep their values.
@@ -194,13 +190,9 @@ pub async fn add_market_country<M: MarketRepo>(
         return Err(conflict);
     }
 
-    match markets.update(&mut market).await {
-        Ok(()) => Ok(market),
-        Err(RepoError::Duplicate(keys::COUNTRY)) => Err(country_conflict(markets, &market)
-            .await?
-            .unwrap_or(CommandError::Repo(RepoError::Duplicate(keys::COUNTRY)))),
-        Err(e) => Err(e.into()),
-    }
+    let written = markets.update(&mut market).await;
+    report_duplicate(written, keys::COUNTRY, country_conflict(markets, &market)).await?;
+    Ok(market)
 }
 
 /// Stops selling to `country` in this market. Its last country can't be removed.
@@ -340,27 +332,32 @@ pub async fn create_catalog<M: MarketRepo, C: CatalogRepo, I: IdGenerator>(
 
     let context = CatalogContext::Market(input.market);
     // Precise error in the normal case; the repo's unique key catches a concurrent insert.
-    if let Some(existing) = catalogs.get_by_context(context).await? {
-        return Err(CommandError::CatalogExists {
-            market: input.market,
-            catalog: existing.id(),
-        });
+    if let Some(exists) = catalog_exists(catalogs, input.market).await? {
+        return Err(exists);
     }
-
     let mut catalog = Catalog::new(CatalogId::from_uuid(ids.new_uuid()), context, None);
-    match catalogs.insert(&mut catalog).await {
-        Ok(()) => Ok(catalog),
-        Err(RepoError::Duplicate(keys::CATALOG_CONTEXT)) => {
-            match catalogs.get_by_context(context).await? {
-                Some(existing) => Err(CommandError::CatalogExists {
-                    market: input.market,
-                    catalog: existing.id(),
-                }),
-                None => Err(RepoError::Duplicate(keys::CATALOG_CONTEXT).into()),
-            }
-        }
-        Err(e) => Err(e.into()),
-    }
+    let written = catalogs.insert(&mut catalog).await;
+    report_duplicate(
+        written,
+        keys::CATALOG_CONTEXT,
+        catalog_exists(catalogs, input.market),
+    )
+    .await?;
+    Ok(catalog)
+}
+
+/// `CatalogExists` naming `market`'s catalog, if it has one.
+async fn catalog_exists<C: CatalogRepo>(
+    catalogs: &C,
+    market: MarketId,
+) -> Result<Option<CommandError>, CommandError> {
+    Ok(catalogs
+        .get_by_context(CatalogContext::Market(market))
+        .await?
+        .map(|existing| CommandError::CatalogExists {
+            market,
+            catalog: existing.id(),
+        }))
 }
 
 /// Makes products sellable in the catalog's context. Products already included are ignored.

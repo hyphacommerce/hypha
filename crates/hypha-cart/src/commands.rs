@@ -23,7 +23,7 @@ use crate::{
     price_cart, price_line,
 };
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
     #[error(transparent)]
     Auth(#[from] AuthError),

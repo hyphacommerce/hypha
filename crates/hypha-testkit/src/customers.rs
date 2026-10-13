@@ -13,6 +13,15 @@ fn unique(new: &Customer, other: &Customer) -> Option<&'static str> {
     (new.email() == other.email()).then_some(keys::CUSTOMER_EMAIL)
 }
 
+impl InMemoryCustomerRepo {
+    /// The next `n` lookups by a unique key (and `list_all`, where there is one) find
+    /// nothing, as if another request inserted the row right after: for testing a
+    /// command that loses the race between its pre-check and its write.
+    pub fn hide_next_lookups(&self, n: usize) {
+        self.customers.hide_next_lookups(n);
+    }
+}
+
 impl CustomerRepo for InMemoryCustomerRepo {
     async fn get(&self, id: CustomerId) -> Result<Option<Customer>, RepoError> {
         Ok(self.customers.get(&id))

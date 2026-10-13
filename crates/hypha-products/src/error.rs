@@ -2,7 +2,7 @@ use hypha_core::{ErrorCode, MoneyError, OptionId, OptionValueId, TextError, Vari
 
 use crate::ProductStatus;
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum HandleError {
     #[error("handle is empty")]
     Empty,
@@ -14,7 +14,7 @@ pub enum HandleError {
     DoubleDash,
 }
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum ProductError {
     #[error("invalid handle: {0}")]
     InvalidHandle(HandleError),

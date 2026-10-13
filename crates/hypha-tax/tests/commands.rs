@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    Actor, AuthError, CountryCode, CountryError, Ctx, MoneyError, ProductId, RepoError, Scope,
-    TaxClassId, TaxRate, TaxRegionId, UserId,
+    Actor, AuthError, CountryCode, CountryError, Ctx, MoneyError, ProductId, Scope, TaxClassId,
+    TaxRate, TaxRegionId, UserId,
 };
 use hypha_tax::{
     AssignTaxClass, ClassRate, CommandError, CreateTaxClass, CreateTaxRegion, TaxClassRepo,
@@ -300,50 +300,23 @@ fn remove_class_rate_removes_it_once() {
 
 // ---------- races: pre-check passes, the repo's unique key catches it ----------
 
-/// Its country lookup never finds anything on the first call (the command's pre-check),
-/// as if another request inserted the region right after it.
-#[derive(Default)]
-struct RacingRegions {
-    inner: InMemoryTaxRegionRepo,
-    looked_up: std::sync::atomic::AtomicBool,
-}
-
-impl TaxRegionRepo for RacingRegions {
-    async fn get(&self, id: TaxRegionId) -> Result<Option<TaxRegion>, RepoError> {
-        self.inner.get(id).await
-    }
-    async fn get_by_country(&self, country: CountryCode) -> Result<Option<TaxRegion>, RepoError> {
-        if !self
-            .looked_up
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            return Ok(None);
-        }
-        self.inner.get_by_country(country).await
-    }
-    async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
-        self.inner.insert(region).await
-    }
-    async fn update(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
-        self.inner.update(region).await
-    }
-}
-
 #[test]
 fn region_taken_by_a_concurrent_insert_names_the_owner() {
-    let regions = RacingRegions::default();
+    let regions = InMemoryTaxRegionRepo::default();
     let ids = SequentialIds::default();
     let mut first = TaxRegion::new(
         TaxRegionId::from_uuid(Uuid::from_u128(500)),
         CountryCode::new("HR").unwrap(),
         rate(250_000),
     );
-    block_on(regions.inner.insert(&mut first)).unwrap();
+    block_on(regions.insert(&mut first)).unwrap();
 
     let input = CreateTaxRegion {
         country: "HR".to_string(),
         default_rate: 130_000,
     };
+    // The pre-check misses it, as if it was inserted right after.
+    regions.hide_next_lookups(1);
     assert_eq!(
         block_on(create_tax_region(&Ctx::system(), &regions, &ids, input)),
         Err(CommandError::TaxRegionExists {

@@ -1,6 +1,6 @@
 use hypha_core::{
     AuthError, CountryCode, CountryError, Ctx, ErrorCode, IdGenerator, MoneyError, ProductId,
-    RepoError, Scope, TaxClassId, TaxRate, TaxRegionId, TextError,
+    RepoError, Scope, TaxClassId, TaxRate, TaxRegionId, TextError, report_duplicate,
 };
 use thiserror::Error;
 
@@ -9,7 +9,7 @@ use crate::{
     repo::{TaxClassRepo, TaxRegionRepo, keys},
 };
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
     #[error(transparent)]
     Auth(#[from] AuthError),
@@ -104,8 +104,8 @@ pub async fn create_tax_region<R: TaxRegionRepo, I: IdGenerator>(
     let country = CountryCode::new(&input.country)?;
     let default_rate = TaxRate::new(input.default_rate)?;
 
-    if let Some(existing) = regions.get_by_country(country).await? {
-        return Err(region_exists(&existing));
+    if let Some(exists) = region_exists(regions, country).await? {
+        return Err(exists);
     }
 
     let mut region = TaxRegion::new(
@@ -113,23 +113,28 @@ pub async fn create_tax_region<R: TaxRegionRepo, I: IdGenerator>(
         country,
         default_rate,
     );
-    match regions.insert(&mut region).await {
-        Ok(()) => Ok(region),
-        Err(RepoError::Duplicate(keys::TAX_REGION_COUNTRY)) => {
-            match regions.get_by_country(country).await? {
-                Some(existing) => Err(region_exists(&existing)),
-                None => Err(RepoError::Duplicate(keys::TAX_REGION_COUNTRY).into()),
-            }
-        }
-        Err(e) => Err(e.into()),
-    }
+    let written = regions.insert(&mut region).await;
+    report_duplicate(
+        written,
+        keys::TAX_REGION_COUNTRY,
+        region_exists(regions, country),
+    )
+    .await?;
+    Ok(region)
 }
 
-fn region_exists(existing: &TaxRegion) -> CommandError {
-    CommandError::TaxRegionExists {
-        country: existing.country(),
-        region: existing.id(),
-    }
+/// `TaxRegionExists` naming `country`'s region, if it has one.
+async fn region_exists<R: TaxRegionRepo>(
+    regions: &R,
+    country: CountryCode,
+) -> Result<Option<CommandError>, CommandError> {
+    Ok(regions
+        .get_by_country(country)
+        .await?
+        .map(|existing| CommandError::TaxRegionExists {
+            country,
+            region: existing.id(),
+        }))
 }
 
 pub async fn get_tax_region<R: TaxRegionRepo>(

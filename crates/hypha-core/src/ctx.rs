@@ -15,7 +15,7 @@ pub struct Ctx {
     scopes: Vec<Scope>,
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 
 pub enum AuthError {
     #[error("missing scope {0}")]

@@ -13,6 +13,15 @@ fn unique(new: &InventoryItem, other: &InventoryItem) -> Option<&'static str> {
     (new.variant() == other.variant()).then_some(keys::INVENTORY_ITEM_VARIANT)
 }
 
+impl InMemoryInventoryItemRepo {
+    /// The next `n` lookups by a unique key (and `list_all`, where there is one) find
+    /// nothing, as if another request inserted the row right after: for testing a
+    /// command that loses the race between its pre-check and its write.
+    pub fn hide_next_lookups(&self, n: usize) {
+        self.items.hide_next_lookups(n);
+    }
+}
+
 impl InventoryItemRepo for InMemoryInventoryItemRepo {
     async fn get(&self, id: InventoryItemId) -> Result<Option<InventoryItem>, RepoError> {
         Ok(self.items.get(&id))

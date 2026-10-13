@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
     AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, LocationId, MarketId, Quantity,
-    RepoError, Scope, VariantId,
+    RepoError, Scope, VariantId, report_duplicate,
 };
 use thiserror::Error;
 
@@ -11,7 +11,7 @@ use crate::{
     repo::{InventoryItemRepo, LocationRepo, keys},
 };
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
     #[error(transparent)]
     Auth(#[from] AuthError),
@@ -153,8 +153,8 @@ pub async fn create_inventory_item<R: InventoryItemRepo, I: IdGenerator>(
 ) -> Result<InventoryItem, CommandError> {
     ctx.require(Scope::InventoryWrite)?;
 
-    if let Some(existing) = items.get_by_variant(input.variant).await? {
-        return Err(item_exists(&existing));
+    if let Some(exists) = item_exists(items, input.variant).await? {
+        return Err(exists);
     }
     let mut item = InventoryItem::new(
         InventoryItemId::from_uuid(ids.new_uuid()),
@@ -162,24 +162,28 @@ pub async fn create_inventory_item<R: InventoryItemRepo, I: IdGenerator>(
         input.tracked,
         input.continue_selling,
     );
-    match items.insert(&mut item).await {
-        Ok(()) => Ok(item),
-        // Lost a race with another request for the same variant: report it the same way.
-        Err(RepoError::Duplicate(keys::INVENTORY_ITEM_VARIANT)) => {
-            match items.get_by_variant(input.variant).await? {
-                Some(existing) => Err(item_exists(&existing)),
-                None => Err(RepoError::Duplicate(keys::INVENTORY_ITEM_VARIANT).into()),
-            }
-        }
-        Err(e) => Err(e.into()),
-    }
+    let written = items.insert(&mut item).await;
+    report_duplicate(
+        written,
+        keys::INVENTORY_ITEM_VARIANT,
+        item_exists(items, input.variant),
+    )
+    .await?;
+    Ok(item)
 }
 
-fn item_exists(existing: &InventoryItem) -> CommandError {
-    CommandError::InventoryItemExists {
-        variant: existing.variant(),
-        item: existing.id(),
-    }
+/// `InventoryItemExists` naming `variant`'s item, if it has one.
+async fn item_exists<R: InventoryItemRepo>(
+    items: &R,
+    variant: VariantId,
+) -> Result<Option<CommandError>, CommandError> {
+    Ok(items
+        .get_by_variant(variant)
+        .await?
+        .map(|existing| CommandError::InventoryItemExists {
+            variant,
+            item: existing.id(),
+        }))
 }
 
 pub async fn get_inventory_item<R: InventoryItemRepo>(

@@ -1,12 +1,12 @@
 use hypha_core::{
     AuthError, Ctx, ErrorCode, IdGenerator, Money, MoneyError, Price, ProductId, RepoError, Scope,
-    VariantId,
+    VariantId, report_duplicate,
 };
 use thiserror::Error;
 
 use crate::{Handle, Product, ProductError, ProductRepo, ProductStatus, repo::keys};
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
     #[error(transparent)]
     Auth(#[from] AuthError),
@@ -16,10 +16,10 @@ pub enum CommandError {
     Money(#[from] MoneyError),
     #[error(transparent)]
     Repo(#[from] RepoError),
-    #[error("handle {0} is already taken")]
-    HandleTaken(Handle),
+    #[error("handle {handle} is already taken by product {product}")]
+    HandleTaken { handle: Handle, product: ProductId },
     #[error("product {0} not found")]
-    NotFound(ProductId),
+    ProductNotFound(ProductId),
 }
 
 impl ErrorCode for CommandError {
@@ -29,8 +29,8 @@ impl ErrorCode for CommandError {
             CommandError::Product(e) => e.code(),
             CommandError::Money(e) => e.code(),
             CommandError::Repo(e) => e.code(),
-            CommandError::HandleTaken(_) => "handle_taken",
-            CommandError::NotFound(_) => "product_not_found",
+            CommandError::HandleTaken { .. } => "handle_taken",
+            CommandError::ProductNotFound(_) => "product_not_found",
         }
     }
 }
@@ -62,15 +62,26 @@ pub async fn create_simple_product<R: ProductRepo, I: IdGenerator>(
     )?;
 
     // Precise error in the normal case; the repo's unique key catches a concurrent insert.
-    if repo.get_by_handle(product.handle()).await?.is_some() {
-        return Err(CommandError::HandleTaken(product.handle().clone()));
+    if let Some(taken) = handle_taken(repo, product.handle()).await? {
+        return Err(taken);
     }
-
-    repo.insert(&mut product).await.map_err(|e| match e {
-        RepoError::Duplicate(keys::HANDLE) => CommandError::HandleTaken(product.handle().clone()),
-        e => e.into(),
-    })?;
+    let written = repo.insert(&mut product).await;
+    report_duplicate(written, keys::HANDLE, handle_taken(repo, product.handle())).await?;
     Ok(product)
+}
+
+/// `HandleTaken` naming the product that has `handle`, if one does.
+async fn handle_taken<R: ProductRepo>(
+    repo: &R,
+    handle: &Handle,
+) -> Result<Option<CommandError>, CommandError> {
+    Ok(repo
+        .get_by_handle(handle)
+        .await?
+        .map(|existing| CommandError::HandleTaken {
+            handle: handle.clone(),
+            product: existing.id(),
+        }))
 }
 
 pub async fn get_product<R: ProductRepo>(
@@ -79,7 +90,7 @@ pub async fn get_product<R: ProductRepo>(
     id: ProductId,
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsRead)?;
-    repo.get(id).await?.ok_or(CommandError::NotFound(id))
+    repo.get(id).await?.ok_or(CommandError::ProductNotFound(id))
 }
 
 /// Moves a product to `status`, following the allowed transitions
@@ -92,7 +103,10 @@ pub async fn set_product_status<R: ProductRepo>(
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsWrite)?;
 
-    let mut product = repo.get(id).await?.ok_or(CommandError::NotFound(id))?;
+    let mut product = repo
+        .get(id)
+        .await?
+        .ok_or(CommandError::ProductNotFound(id))?;
     product.set_status(status)?;
     repo.update(&mut product).await?;
     Ok(product)

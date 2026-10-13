@@ -1,8 +1,6 @@
-use std::cell::Cell;
-
 use hypha_core::{
     Actor, AddressError, AddressId, AddressParts, AuthError, Ctx, CustomerId, Email, EmailError,
-    ErrorCode, RepoError, Scope, UserId,
+    ErrorCode, Scope, UserId,
 };
 use hypha_customers::{
     CommandError, CreateCustomer, Customer, CustomerError, CustomerRepo, SaveAddress,
@@ -148,47 +146,19 @@ fn create_requires_write_scope() {
     );
 }
 
-/// Hides an existing customer from the command's first email lookup, as if another
-/// request created them between the command's check and its write.
-#[derive(Default)]
-struct RacingInsert {
-    inner: InMemoryCustomerRepo,
-    looked_up: Cell<bool>,
-}
-
-impl CustomerRepo for RacingInsert {
-    async fn get(&self, id: CustomerId) -> Result<Option<Customer>, RepoError> {
-        self.inner.get(id).await
-    }
-    async fn get_by_email(&self, email: &Email) -> Result<Option<Customer>, RepoError> {
-        if !self.looked_up.replace(true) {
-            return Ok(None);
-        }
-        self.inner.get_by_email(email).await
-    }
-    async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError> {
-        self.inner.insert(customer).await
-    }
-    async fn update(&self, customer: &mut Customer) -> Result<(), RepoError> {
-        self.inner.update(customer).await
-    }
-}
-
 #[test]
 fn losing_the_race_for_an_email_reports_the_existing_customer() {
-    let repo = RacingInsert::default();
+    let repo = InMemoryCustomerRepo::default();
     let other = CustomerId::from_uuid(Uuid::from_u128(77));
-    block_on(
-        repo.inner
-            .insert(&mut Customer::new(other, email("ana@example.hr"))),
-    )
-    .unwrap();
+    block_on(repo.insert(&mut Customer::new(other, email("ana@example.hr")))).unwrap();
     let input = CreateCustomer {
         email: "ana@example.hr".to_string(),
         first_name: None,
         last_name: None,
         phone: None,
     };
+    // The pre-check misses it, as if it was inserted right after.
+    repo.hide_next_lookups(1);
     assert_eq!(
         block_on(create_customer(
             &Ctx::system(),
@@ -244,10 +214,12 @@ fn find_or_create_finds_an_existing_customer() {
 
 #[test]
 fn find_or_create_losing_a_race_returns_the_winner() {
-    let repo = RacingInsert::default();
+    let repo = InMemoryCustomerRepo::default();
     let other = CustomerId::from_uuid(Uuid::from_u128(77));
     let mut winner = Customer::new(other, email("ana@example.hr"));
-    block_on(repo.inner.insert(&mut winner)).unwrap();
+    block_on(repo.insert(&mut winner)).unwrap();
+    // The pre-check misses it, as if it was inserted right after.
+    repo.hide_next_lookups(1);
     assert_eq!(
         block_on(find_or_create_customer(
             &Ctx::system(),
