@@ -20,12 +20,14 @@
 //! collection methods.
 
 mod carts;
+mod customers;
 mod inventory;
 mod markets;
 mod products;
 mod tax;
 
 pub use carts::cart_repo;
+pub use customers::customer_repo;
 pub use inventory::{inventory_item_repo, location_repo};
 pub use markets::{catalog_repo, market_repo, price_list_repo};
 pub use products::product_repo;

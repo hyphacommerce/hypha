@@ -1,9 +1,9 @@
 //! The in-memory repos must pass the same contract as every storage adapter.
 
 use hypha_testkit::{
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo,
-    InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo, InMemoryTaxClassRepo,
-    InMemoryTaxRegionRepo, contract,
+    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryInventoryItemRepo,
+    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo,
+    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
 };
 use pollster::block_on;
 
@@ -65,5 +65,12 @@ fn location_repo() {
 fn inventory_item_repo() {
     block_on(contract::inventory_item_repo(async || {
         InMemoryInventoryItemRepo::default()
+    }));
+}
+
+#[test]
+fn customer_repo() {
+    block_on(contract::customer_repo(async || {
+        InMemoryCustomerRepo::default()
     }));
 }

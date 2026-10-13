@@ -426,6 +426,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-customers"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-host-axum"
 version = "0.1.0"
 dependencies = [
@@ -528,6 +539,7 @@ version = "0.1.0"
 dependencies = [
  "hypha-cart",
  "hypha-core",
+ "hypha-customers",
  "hypha-inventory",
  "hypha-markets",
  "hypha-products",
