@@ -24,7 +24,7 @@ pub enum ProductError {
     SelectionCountMismatch { expected: usize, got: usize },
     #[error("option value {0} doesn't belong to the option in its position")]
     UnknownOptionValue(OptionValueId),
-    #[error("a variant with this option combintion already exists")]
+    #[error("a variant with this option combination already exists")]
     DuplicateCombination,
     #[error("a configurable product needs at least one option")]
     NoOptions,

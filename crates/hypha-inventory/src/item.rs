@@ -153,6 +153,9 @@ impl InventoryItem {
     ) -> Result<Vec<(LocationId, u32)>, i64> {
         let mut ordered: Vec<&Location> = locations.iter().collect();
         ordered.sort_by_key(|l| (l.priority(), l.id().as_uuid()));
+        // A location listed twice must not count its stock twice; keep its first entry.
+        let mut seen = HashSet::new();
+        ordered.retain(|l| seen.insert(l.id()));
         // Clamped to u32: a location with more than u32::MAX free covers any request,
         // and the total below is summed in u64, so no decision changes.
         let free: Vec<(LocationId, u32)> = ordered
@@ -606,6 +609,13 @@ mod tests {
         assert_eq!(i.can_supply(1000, &[]), Ok(()));
         assert_eq!(i.reserve(&reference("a"), 1000, &[]), Ok(false));
         assert!(i.reservations().is_empty());
+    }
+
+    /// Review plan B9: a location listed twice must not count its stock twice.
+    #[test]
+    fn a_location_listed_twice_counts_once() {
+        let i = item(&[(1, 1)]);
+        assert_eq!(i.can_supply(2, &[location(1, 0), location(1, 0)]), Err(1));
     }
 
     #[test]

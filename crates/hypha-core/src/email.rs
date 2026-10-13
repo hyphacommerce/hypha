@@ -27,14 +27,13 @@ impl crate::ErrorCode for EmailError {
 }
 
 impl Email {
-    /// The longest address SMTP allows.
+    /// The longest address SMTP allows, in bytes (UTF-8), not characters.
     pub const MAX_LEN: usize = 254;
 
     pub fn new(s: &str) -> Result<Self, EmailError> {
         let email = s.trim().to_lowercase();
         let invalid = || EmailError::Invalid(s.to_string());
-        if email.chars().count() > Self::MAX_LEN
-            || email.chars().any(|c| c.is_whitespace() || c.is_control())
+        if email.len() > Self::MAX_LEN || email.chars().any(|c| c.is_whitespace() || c.is_control())
         {
             return Err(invalid());
         }
@@ -78,6 +77,19 @@ impl From<Email> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review plan B9: SMTP's 254 is bytes, not characters.
+    #[test]
+    fn max_length_counts_bytes() {
+        let ascii = format!("{}@example.hr", "a".repeat(254 - "@example.hr".len()));
+        assert_eq!(ascii.len(), 254);
+        assert!(Email::new(&ascii).is_ok());
+
+        // 130 two-byte characters: 135 characters but 265 bytes.
+        let wide = format!("{}@x.hr", "ž".repeat(130));
+        assert!(wide.chars().count() <= 254 && wide.len() > 254);
+        assert_eq!(Email::new(&wide), Err(EmailError::Invalid(wide.clone())));
+    }
 
     fn invalid(s: &str) -> Result<Email, EmailError> {
         Err(EmailError::Invalid(s.to_string()))
