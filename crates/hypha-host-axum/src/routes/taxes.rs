@@ -1,7 +1,7 @@
 //! Tax classes, their products, and tax regions (all live in `hypha-tax`).
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{CountryCode, Ctx, ProductId, TaxClassId, TaxRate, TaxRegionId};
+use hypha_core::{CountryCode, ProductId, TaxClassId, TaxRate, TaxRegionId};
 use hypha_tax::{
     AssignTaxClass, CreateTaxClass, CreateTaxRegion, HasTaxClasses, HasTaxRegions, TaxClass,
     TaxRegion, assign_tax_class, create_tax_class, create_tax_region, get_tax_region,
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    extract::{JsonBody, PathId},
+    extract::{Caller, JsonBody, PathId},
     patch,
     state::{SharedState, Storage},
 };
@@ -49,9 +49,9 @@ pub(super) struct AssignTaxClassRequest {
 
 pub(super) async fn create_class<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<CreateTaxClassRequest>,
 ) -> Result<(StatusCode, Json<TaxClassResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = CreateTaxClass { name: req.name };
     let class = create_tax_class(&ctx, ports.tax_classes(), &state.ids, input).await?;
@@ -60,9 +60,9 @@ pub(super) async fn create_class<S: Storage>(
 
 pub(super) async fn assign_class<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<AssignTaxClassRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = AssignTaxClass {
         products: req.products,
@@ -129,9 +129,9 @@ impl From<&TaxRegion> for TaxRegionResponse {
 
 pub(super) async fn create_region<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<CreateTaxRegionRequest>,
 ) -> Result<(StatusCode, Json<TaxRegionResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = CreateTaxRegion {
         country: req.country,
@@ -143,9 +143,9 @@ pub(super) async fn create_region<S: Storage>(
 
 pub(super) async fn fetch_region<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<TaxRegionId>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let region = get_tax_region(&ctx, ports.tax_regions(), id).await?;
     Ok(Json(TaxRegionResponse::from(&region)))
@@ -153,10 +153,10 @@ pub(super) async fn fetch_region<S: Storage>(
 
 pub(super) async fn update_region<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<TaxRegionId>,
     JsonBody(req): JsonBody<UpdateTaxRegionRequest>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let region = match req.default_rate_ppm {
         Some(rate) => set_default_rate(&ctx, ports.tax_regions(), id, rate).await?,
@@ -167,10 +167,10 @@ pub(super) async fn update_region<S: Storage>(
 
 pub(super) async fn set_region_class_rate<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId((id, class)): PathId<(TaxRegionId, TaxClassId)>,
     JsonBody(req): JsonBody<SetClassRateRequest>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let region = set_class_rate(
         &ctx,
@@ -187,9 +187,9 @@ pub(super) async fn set_region_class_rate<S: Storage>(
 
 pub(super) async fn remove_region_class_rate<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId((id, class)): PathId<(TaxRegionId, TaxClassId)>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let region = remove_class_rate(&ctx, ports.tax_regions(), id, class).await?;
     Ok(Json(TaxRegionResponse::from(&region)))

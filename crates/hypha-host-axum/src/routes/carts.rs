@@ -4,7 +4,7 @@ use hypha_cart::{
     remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
 };
 use hypha_core::{
-    CartId, CountryCode, Ctx, CustomerId, Email, ErrorCode, Money, ProductId, TaxClassId, TaxRate,
+    CartId, CountryCode, CustomerId, Email, ErrorCode, Money, ProductId, TaxClassId, TaxRate,
     VariantId,
 };
 use hypha_tax::TaxLine;
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    extract::{JsonBody, PathId},
+    extract::{Caller, JsonBody, PathId},
     state::{SharedState, Storage},
 };
 
@@ -150,9 +150,9 @@ impl From<&PricedCart> for CartResponse {
 
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<CreateCartRequest>,
 ) -> Result<(StatusCode, Json<CartResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let priced = create_cart(&ctx, &ports, &state.ids, &req.country).await?;
     Ok((StatusCode::CREATED, Json(CartResponse::from(&priced))))
@@ -160,9 +160,9 @@ pub(super) async fn create<S: Storage>(
 
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CartId>,
 ) -> Result<Json<CartResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let priced = get_cart(&ctx, &ports, id).await?;
     Ok(Json(CartResponse::from(&priced)))
@@ -170,10 +170,10 @@ pub(super) async fn fetch<S: Storage>(
 
 pub(super) async fn add<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CartId>,
     JsonBody(req): JsonBody<AddLineRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = AddLine {
         cart: id,
@@ -186,10 +186,10 @@ pub(super) async fn add<S: Storage>(
 
 pub(super) async fn set_email<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CartId>,
     JsonBody(req): JsonBody<SetEmailRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let priced = set_cart_email(&ctx, &ports, id, req.email).await?;
     Ok(Json(CartResponse::from(&priced)))
@@ -197,10 +197,10 @@ pub(super) async fn set_email<S: Storage>(
 
 pub(super) async fn set_customer<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CartId>,
     JsonBody(req): JsonBody<SetCustomerRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
     Ok(Json(CartResponse::from(&priced)))
@@ -215,10 +215,10 @@ pub(super) struct SetQuantityRequest {
 
 pub(super) async fn set_quantity<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
     JsonBody(req): JsonBody<SetQuantityRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = SetLineQuantity {
         cart: id,
@@ -233,9 +233,9 @@ pub(super) async fn set_quantity<S: Storage>(
 
 pub(super) async fn remove_line<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
 ) -> Result<Json<CartResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let priced = remove_cart_line(&ctx, &ports, id, variant)
         .await

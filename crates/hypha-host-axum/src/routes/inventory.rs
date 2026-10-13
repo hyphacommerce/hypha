@@ -1,7 +1,7 @@
 //! Locations, inventory items and their stock (all live in `hypha-inventory`).
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{Ctx, InventoryItemId, LocationId, MarketId, VariantId};
+use hypha_core::{InventoryItemId, LocationId, MarketId, VariantId};
 use hypha_inventory::{
     AdjustOnHand, CreateInventoryItem, CreateLocation, HasInventoryItems, HasLocations,
     InventoryItem, Location, SetOnHand, UpdateInventoryItem, UpdateLocation, adjust_on_hand,
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    extract::{JsonBody, PathId},
+    extract::{Caller, JsonBody, PathId},
     patch,
     state::{SharedState, Storage},
 };
@@ -64,9 +64,9 @@ impl From<&Location> for LocationResponse {
 
 pub(super) async fn create_location_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<CreateLocationRequest>,
 ) -> Result<(StatusCode, Json<LocationResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = CreateLocation {
         name: req.name,
@@ -79,9 +79,9 @@ pub(super) async fn create_location_handler<S: Storage>(
 
 pub(super) async fn fetch_location<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<LocationId>,
 ) -> Result<Json<LocationResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let location = get_location(&ctx, ports.locations(), id)
         .await
@@ -91,10 +91,10 @@ pub(super) async fn fetch_location<S: Storage>(
 
 pub(super) async fn update_location_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<LocationId>,
     JsonBody(req): JsonBody<UpdateLocationRequest>,
 ) -> Result<Json<LocationResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = UpdateLocation {
         name: req.name,
@@ -213,9 +213,9 @@ impl InventoryResponse {
 
 pub(super) async fn create_item<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<CreateInventoryItemRequest>,
 ) -> Result<(StatusCode, Json<InventoryResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = CreateInventoryItem {
         variant: req.variant,
@@ -228,9 +228,9 @@ pub(super) async fn create_item<S: Storage>(
 
 pub(super) async fn fetch_item<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<InventoryItemId>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let item = get_inventory_item(&ctx, ports.inventory_items(), id).await?;
     Ok(Json(InventoryResponse::from(&item)))
@@ -238,10 +238,10 @@ pub(super) async fn fetch_item<S: Storage>(
 
 pub(super) async fn update_item<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<InventoryItemId>,
     JsonBody(req): JsonBody<UpdateInventoryItemRequest>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = UpdateInventoryItem {
         tracked: req.tracked,
@@ -253,10 +253,10 @@ pub(super) async fn update_item<S: Storage>(
 
 pub(super) async fn set_level<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId((item, location)): PathId<(InventoryItemId, LocationId)>,
     JsonBody(req): JsonBody<SetOnHandRequest>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = SetOnHand {
         item,
@@ -272,10 +272,10 @@ pub(super) async fn set_level<S: Storage>(
 
 pub(super) async fn adjust_level<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId((item, location)): PathId<(InventoryItemId, LocationId)>,
     JsonBody(req): JsonBody<AdjustOnHandRequest>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = AdjustOnHand {
         item,
@@ -291,9 +291,9 @@ pub(super) async fn adjust_level<S: Storage>(
 /// A variant's stock, whether or not it has an item (design note 0004, I3).
 pub(super) async fn fetch_variant_inventory<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(variant): PathId<VariantId>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let response = match get_variant_inventory(&ctx, ports.inventory_items(), variant).await? {
         Some(item) => InventoryResponse::from(&item),

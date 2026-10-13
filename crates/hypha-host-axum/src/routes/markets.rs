@@ -2,7 +2,7 @@
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{
-    CatalogId, CountryCode, Ctx, Currency, MarketId, Money, PriceListId, ProductId, VariantId,
+    CatalogId, CountryCode, Currency, MarketId, Money, PriceListId, ProductId, VariantId,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CreateCatalog, CreateMarket, CreatePriceList, FixedPrice, HasCatalogs,
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    extract::{JsonBody, PathId},
+    extract::{Caller, JsonBody, PathId},
     patch,
     state::{SharedState, Storage},
 };
@@ -62,9 +62,9 @@ impl From<&Market> for MarketResponse {
 
 pub(super) async fn create_market_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<CreateMarketRequest>,
 ) -> Result<(StatusCode, Json<MarketResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = CreateMarket {
         name: req.name,
@@ -78,10 +78,10 @@ pub(super) async fn create_market_handler<S: Storage>(
 
 pub(super) async fn update_market_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<MarketId>,
     JsonBody(req): JsonBody<UpdateMarketRequest>,
 ) -> Result<Json<MarketResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = UpdateMarket {
         prices_include_tax: req.prices_include_tax,
@@ -100,10 +100,10 @@ pub(super) struct AddCountryRequest {
 
 pub(super) async fn add_country_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<MarketId>,
     JsonBody(req): JsonBody<AddCountryRequest>,
 ) -> Result<Json<MarketResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let market = add_market_country(&ctx, ports.markets(), id, &req.country)
         .await
@@ -113,9 +113,9 @@ pub(super) async fn add_country_handler<S: Storage>(
 
 pub(super) async fn remove_country_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId((id, country)): PathId<(MarketId, String)>,
 ) -> Result<Json<MarketResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let market = remove_market_country(&ctx, ports.markets(), id, &country)
         .await
@@ -176,9 +176,9 @@ pub(super) struct RemoveFixedPricesRequest {
 
 pub(super) async fn create_price_list_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<CreatePriceListRequest>,
 ) -> Result<(StatusCode, Json<PriceListResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = CreatePriceList {
         currency: req.currency,
@@ -190,10 +190,10 @@ pub(super) async fn create_price_list_handler<S: Storage>(
 
 pub(super) async fn set_fixed_prices_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<PriceListId>,
     JsonBody(req): JsonBody<SetFixedPricesRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let prices = req
         .fixed_prices
@@ -211,10 +211,10 @@ pub(super) async fn set_fixed_prices_handler<S: Storage>(
 
 pub(super) async fn remove_fixed_prices_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<PriceListId>,
     JsonBody(req): JsonBody<RemoveFixedPricesRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     remove_fixed_prices(&ctx, ports.price_lists(), id, req.variants)
         .await
@@ -264,9 +264,9 @@ impl From<&Catalog> for CatalogResponse {
 
 pub(super) async fn create_catalog_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<CreateCatalogRequest>,
 ) -> Result<(StatusCode, Json<CatalogResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = CreateCatalog { market: req.market };
     let catalog =
@@ -276,10 +276,10 @@ pub(super) async fn create_catalog_handler<S: Storage>(
 
 pub(super) async fn add_products_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CatalogId>,
     JsonBody(req): JsonBody<CatalogProductsRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     add_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -287,10 +287,10 @@ pub(super) async fn add_products_handler<S: Storage>(
 
 pub(super) async fn remove_products_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CatalogId>,
     JsonBody(req): JsonBody<CatalogProductsRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     remove_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -298,10 +298,10 @@ pub(super) async fn remove_products_handler<S: Storage>(
 
 pub(super) async fn assign_price_list_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CatalogId>,
     JsonBody(req): JsonBody<AssignPriceListRequest>,
 ) -> Result<Json<CatalogResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let catalog = assign_price_list(
         &ctx,

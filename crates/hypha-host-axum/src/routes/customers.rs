@@ -1,7 +1,7 @@
 //! Customers and their address books (all live in `hypha-customers`).
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AddressId, AddressParts, CountryCode, Ctx, CustomerId, Email};
+use hypha_core::{AddressId, AddressParts, CountryCode, CustomerId, Email};
 use hypha_customers::{
     CreateCustomer, Customer, HasCustomers, SaveAddress, SavedAddress, UpdateCustomer, add_address,
     create_customer, get_customer, remove_address, update_address, update_customer,
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    extract::{JsonBody, PathId},
+    extract::{Caller, JsonBody, PathId},
     patch,
     state::{SharedState, Storage},
 };
@@ -144,9 +144,9 @@ impl From<&Customer> for CustomerResponse {
 
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     JsonBody(req): JsonBody<CreateCustomerRequest>,
 ) -> Result<(StatusCode, Json<CustomerResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = CreateCustomer {
         email: req.email,
@@ -160,9 +160,9 @@ pub(super) async fn create<S: Storage>(
 
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CustomerId>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let customer = get_customer(&ctx, ports.customers(), id).await?;
     Ok(Json(CustomerResponse::from(&customer)))
@@ -170,10 +170,10 @@ pub(super) async fn fetch<S: Storage>(
 
 pub(super) async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CustomerId>,
     JsonBody(req): JsonBody<UpdateCustomerRequest>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let input = UpdateCustomer {
         email: req.email,
@@ -187,10 +187,10 @@ pub(super) async fn update<S: Storage>(
 
 pub(super) async fn add_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId(id): PathId<CustomerId>,
     JsonBody(req): JsonBody<AddressRequest>,
 ) -> Result<(StatusCode, Json<CustomerResponse>), ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let customer = add_address(&ctx, ports.customers(), &state.ids, id, req.into()).await?;
     Ok((StatusCode::CREATED, Json(CustomerResponse::from(&customer))))
@@ -198,10 +198,10 @@ pub(super) async fn add_address_handler<S: Storage>(
 
 pub(super) async fn update_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId((id, address)): PathId<(CustomerId, AddressId)>,
     JsonBody(req): JsonBody<AddressRequest>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let customer = update_address(&ctx, ports.customers(), id, address, req.into()).await?;
     Ok(Json(CustomerResponse::from(&customer)))
@@ -209,9 +209,9 @@ pub(super) async fn update_address_handler<S: Storage>(
 
 pub(super) async fn remove_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    Caller(ctx): Caller,
     PathId((id, address)): PathId<(CustomerId, AddressId)>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
-    let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
     let customer = remove_address(&ctx, ports.customers(), id, address).await?;
     Ok(Json(CustomerResponse::from(&customer)))
