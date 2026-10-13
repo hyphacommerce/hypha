@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use hypha_core::{InventoryItemId, LocationId, VariantId, Version, Versioned};
 
-use crate::{InventoryError, Location, ReservationRef};
+use crate::{InventoryError, Location, ReservationRef, RestoreError};
 
 /// Largest stock count, either way: 2⁵³ − 1, like `Money::MAX_AMOUNT`, so JSON clients
 /// and D1 represent every count exactly.
@@ -324,21 +324,21 @@ impl InventoryItem {
 
     /// Rebuilds an item from storage: one level per location, one reservation per
     /// reference and location, counts in range and reservations of at least 1.
-    pub fn restore(s: InventoryItemSnapshot) -> Result<InventoryItem, InventoryError> {
+    pub fn restore(s: InventoryItemSnapshot) -> Result<InventoryItem, RestoreError> {
         let mut locations = HashSet::new();
         for level in &s.levels {
             check_range(i128::from(level.on_hand))?;
             if !locations.insert(level.location) {
-                return Err(InventoryError::DuplicateLevel(level.location));
+                return Err(RestoreError::DuplicateLevel(level.location));
             }
         }
         let mut held = HashSet::new();
         for r in &s.reservations {
             if r.quantity == 0 {
-                return Err(InventoryError::ZeroQuantity);
+                return Err(InventoryError::ZeroQuantity.into());
             }
             if !held.insert((&r.reference, r.location)) {
-                return Err(InventoryError::DuplicateReservation {
+                return Err(RestoreError::DuplicateReservation {
                     reference: r.reference.clone(),
                     location: r.location,
                 });
@@ -685,7 +685,7 @@ mod tests {
         });
         assert_eq!(
             InventoryItem::restore(s),
-            Err(InventoryError::DuplicateLevel(loc_id(1)))
+            Err(RestoreError::DuplicateLevel(loc_id(1)))
         );
     }
 
@@ -700,7 +700,7 @@ mod tests {
         s.reservations = vec![r.clone(), r];
         assert_eq!(
             InventoryItem::restore(s),
-            Err(InventoryError::DuplicateReservation {
+            Err(RestoreError::DuplicateReservation {
                 reference: reference("a"),
                 location: loc_id(1)
             })

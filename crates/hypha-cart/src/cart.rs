@@ -2,7 +2,10 @@ use hypha_core::{
     CartId, CountryCode, CustomerId, Email, MarketId, ProductId, VariantId, Version, Versioned,
 };
 
-use crate::{error::CartError, quantity::Quantity};
+use crate::{
+    error::{CartError, RestoreError},
+    quantity::Quantity,
+};
 
 /// A variant and how many of it. Prices are not stored: they are resolved on read,
 /// so a cart always reflects current prices. Snapshotting belongs to orders.
@@ -205,14 +208,14 @@ impl Cart {
     /// Rebuilds a cart from storage: quantities must be at least 1 and each variant may
     /// appear on one line only (`add_line` merges, so a second line means bad data).
     /// A cart with a customer has an email.
-    pub fn restore(s: CartSnapshot) -> Result<Cart, CartError> {
+    pub fn restore(s: CartSnapshot) -> Result<Cart, RestoreError> {
         if s.customer.is_some() && s.email.is_none() {
-            return Err(CartError::EmailRequired);
+            return Err(CartError::EmailRequired.into());
         }
         let mut lines: Vec<CartLine> = Vec::with_capacity(s.lines.len());
         for line in s.lines {
             if lines.iter().any(|l| l.variant == line.variant) {
-                return Err(CartError::DuplicateLine(line.variant));
+                return Err(RestoreError::DuplicateLine(line.variant));
             }
             lines.push(CartLine {
                 product: line.product,
@@ -307,7 +310,7 @@ mod tests {
 
         let mut s = c.snapshot();
         s.email = None;
-        assert_eq!(Cart::restore(s), Err(CartError::EmailRequired));
+        assert_eq!(Cart::restore(s), Err(CartError::EmailRequired.into()));
     }
 
     #[test]
@@ -369,7 +372,7 @@ mod tests {
         c.add_line(pid(), vid(1), qty(2)).unwrap();
         let mut s = c.snapshot();
         s.lines[0].quantity = 0;
-        assert_eq!(Cart::restore(s), Err(CartError::ZeroQuantity));
+        assert_eq!(Cart::restore(s), Err(CartError::ZeroQuantity.into()));
     }
 
     #[test]
@@ -378,6 +381,6 @@ mod tests {
         c.add_line(pid(), vid(1), qty(2)).unwrap();
         let mut s = c.snapshot();
         s.lines.push(s.lines[0].clone());
-        assert_eq!(Cart::restore(s), Err(CartError::DuplicateLine(vid(1))));
+        assert_eq!(Cart::restore(s), Err(RestoreError::DuplicateLine(vid(1))));
     }
 }

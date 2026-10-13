@@ -13,5 +13,5 @@ pub use commands::{
     find_or_create_customer, get_customer, remove_address, update_address, update_customer,
 };
 pub use customer::{Customer, CustomerSnapshot, SavedAddress};
-pub use error::CustomerError;
+pub use error::{CustomerError, RestoreError};
 pub use repo::CustomerRepo;

@@ -21,17 +21,26 @@ pub enum InventoryError {
     ReferenceInUse(ReservationRef),
     #[error("only {available} of {requested} in stock")]
     OutOfStock { requested: u32, available: i64 },
+    #[error("{reference} for variant {variant} is listed more than once")]
+    DuplicateLine {
+        reference: ReservationRef,
+        variant: VariantId,
+    },
+}
+
+/// Why stored data can't be rebuilt into an inventory item. Only
+/// `InventoryItem::restore` returns it and adapters report it as a backend failure, so it
+/// has no API code (review plan D4).
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+pub enum RestoreError {
+    #[error(transparent)]
+    Inventory(#[from] InventoryError),
     #[error("location {0} has more than one stock level")]
     DuplicateLevel(LocationId),
     #[error("{reference} has more than one reservation at location {location}")]
     DuplicateReservation {
         reference: ReservationRef,
         location: LocationId,
-    },
-    #[error("{reference} for variant {variant} is listed more than once")]
-    DuplicateLine {
-        reference: ReservationRef,
-        variant: VariantId,
     },
 }
 
@@ -46,8 +55,6 @@ impl ErrorCode for InventoryError {
             InventoryError::InvalidReference => "invalid_reservation_reference",
             InventoryError::ReferenceInUse(_) => "reservation_reference_in_use",
             InventoryError::OutOfStock { .. } => "out_of_stock",
-            InventoryError::DuplicateLevel(_) => "duplicate_stock_level",
-            InventoryError::DuplicateReservation { .. } => "duplicate_reservation",
             InventoryError::DuplicateLine { .. } => "duplicate_reservation_line",
         }
     }

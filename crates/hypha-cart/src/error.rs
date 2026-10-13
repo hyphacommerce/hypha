@@ -9,8 +9,6 @@ pub enum CartError {
     QuantityOverflow,
     #[error("variant {0} is not in the cart")]
     LineNotFound(VariantId),
-    #[error("variant {0} is on more than one line")]
-    DuplicateLine(VariantId),
     #[error("a cart linked to a customer needs an email; unlink the customer first")]
     EmailRequired,
 }
@@ -41,13 +39,22 @@ pub enum LineError {
     Money(#[from] MoneyError),
 }
 
+/// Why stored data can't be rebuilt into a cart. Only `Cart::restore` returns it and
+/// adapters report it as a backend failure, so it has no API code (review plan D4).
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum RestoreError {
+    #[error(transparent)]
+    Cart(#[from] CartError),
+    #[error("variant {0} is on more than one line")]
+    DuplicateLine(VariantId),
+}
+
 impl ErrorCode for CartError {
     fn code(&self) -> &'static str {
         match self {
             CartError::ZeroQuantity => "invalid_quantity",
             CartError::QuantityOverflow => "quantity_overflow",
             CartError::LineNotFound(_) => "line_not_found",
-            CartError::DuplicateLine(_) => "duplicate_line",
             CartError::EmailRequired => "email_required",
         }
     }

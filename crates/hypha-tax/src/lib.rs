@@ -11,7 +11,7 @@ pub use commands::{
     create_tax_class, create_tax_region, get_tax_region, remove_class_rate, set_class_rate,
     set_default_rate,
 };
-pub use error::TaxError;
+pub use error::{RestoreError, TaxError};
 pub use region::{ClassRate, TaxRegion, TaxRegionSnapshot};
 pub use repo::{TaxClassRepo, TaxRegionRepo};
 pub use resolve::{TaxContext, TaxLine, TaxSource, TaxableLine, tax_line};

@@ -178,9 +178,7 @@ impl From<hypha_tax::CommandError> for ApiError {
             E::TaxRegionNotFound(_) | E::Tax(TaxError::ClassRateNotFound(_)) => {
                 StatusCode::NOT_FOUND
             }
-            E::TaxRegionExists { .. } | E::Tax(TaxError::DuplicateClassRate(_)) => {
-                StatusCode::CONFLICT
-            }
+            E::TaxRegionExists { .. } => StatusCode::CONFLICT,
             E::Country(_) | E::Money(_) | E::TaxClassNotFound(_) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
@@ -213,10 +211,6 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 | I::InvalidReference
                 | I::DuplicateLine { .. },
             ) => StatusCode::UNPROCESSABLE_ENTITY,
-            // Only ever produced when rebuilding stored data.
-            E::Inventory(I::DuplicateLevel(_) | I::DuplicateReservation { .. }) => {
-                return Self::internal(e);
-            }
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
@@ -235,10 +229,8 @@ impl From<hypha_customers::CommandError> for ApiError {
             E::Email(_) | E::Address(_) | E::Customer(C::FieldTooLong(_)) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
-            // Only ever produced when rebuilding stored data (address IDs are generated).
-            E::Customer(C::DuplicateAddress(_) | C::UnknownDefaultAddress(_)) => {
-                return Self::internal(e);
-            }
+            // Address IDs are generated, so a clash is a bug, not a bad request.
+            E::Customer(C::DuplicateAddress(_)) => return Self::internal(e),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };

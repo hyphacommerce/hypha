@@ -1,6 +1,6 @@
 use hypha_core::{CountryCode, TaxClassId, TaxRate, TaxRegionId, Version, Versioned};
 
-use crate::TaxError;
+use crate::{RestoreError, TaxError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClassRate {
@@ -102,11 +102,12 @@ impl TaxRegion {
         }
     }
 
-    pub fn restore(s: TaxRegionSnapshot) -> Result<TaxRegion, TaxError> {
+    /// Rebuilds a region from storage: each class has one rate at most.
+    pub fn restore(s: TaxRegionSnapshot) -> Result<TaxRegion, RestoreError> {
         let mut region = TaxRegion::new(s.id, s.country, s.default_rate);
         for rate in s.class_rates {
             if region.class_rates.iter().any(|r| r.class == rate.class) {
-                return Err(TaxError::DuplicateClassRate(rate.class));
+                return Err(RestoreError::DuplicateClassRate(rate.class));
             }
             region.class_rates.push(rate)
         }
@@ -203,7 +204,7 @@ mod tests {
         s.class_rates.push(s.class_rates[0]);
         assert_eq!(
             TaxRegion::restore(s),
-            Err(TaxError::DuplicateClassRate(class(2)))
+            Err(RestoreError::DuplicateClassRate(class(2)))
         );
     }
 }

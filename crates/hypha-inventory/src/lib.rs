@@ -17,7 +17,7 @@ pub use commands::{
     get_location, get_variant_inventory, release_stock, reserve_stock, set_on_hand,
     update_inventory_item, update_location,
 };
-pub use error::InventoryError;
+pub use error::{InventoryError, RestoreError};
 pub use item::{InventoryItem, InventoryItemSnapshot, Level, MAX_STOCK, Reservation};
 pub use location::{Location, LocationSnapshot};
 pub use reference::ReservationRef;

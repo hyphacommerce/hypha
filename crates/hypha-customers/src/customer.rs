@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use hypha_core::{Address, AddressId, CustomerId, Email, Version, Versioned};
 
-use crate::CustomerError;
+use crate::{CustomerError, RestoreError};
 
 /// An address in a customer's address book.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,7 +213,7 @@ impl Customer {
 
     /// Rebuilds a customer from storage, with the same rules as the setters: each
     /// address once, defaults pointing into the address book.
-    pub fn restore(s: CustomerSnapshot) -> Result<Customer, CustomerError> {
+    pub fn restore(s: CustomerSnapshot) -> Result<Customer, RestoreError> {
         let mut customer = Customer::new(s.id, s.email);
         customer.set_first_name(s.first_name)?;
         customer.set_last_name(s.last_name)?;
@@ -221,7 +221,7 @@ impl Customer {
         let mut ids = HashSet::new();
         for saved in &s.addresses {
             if !ids.insert(saved.id) {
-                return Err(CustomerError::DuplicateAddress(saved.id));
+                return Err(CustomerError::DuplicateAddress(saved.id).into());
             }
         }
         for default in [s.default_shipping, s.default_billing]
@@ -229,7 +229,7 @@ impl Customer {
             .flatten()
         {
             if !ids.contains(&default) {
-                return Err(CustomerError::UnknownDefaultAddress(default));
+                return Err(RestoreError::UnknownDefaultAddress(default));
             }
         }
         customer.addresses = s.addresses;
@@ -379,7 +379,7 @@ mod tests {
         s.default_billing = Some(addr_id(7));
         assert_eq!(
             Customer::restore(s),
-            Err(CustomerError::UnknownDefaultAddress(addr_id(7)))
+            Err(RestoreError::UnknownDefaultAddress(addr_id(7)))
         );
     }
 }
