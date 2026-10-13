@@ -1,9 +1,10 @@
 use thiserror::Error;
 
-use crate::CountryCode;
+use crate::{CountryCode, CountryError};
 
 /// The fields of an address as plain data: what callers fill in to build an `Address`,
-/// and what storage and hosts read back out of one.
+/// and what storage and hosts read back out of one. Unvalidated, so the country is a
+/// `String` like every other field: `Address::new` checks it (review plan D6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddressParts {
     pub first_name: Option<String>,
@@ -14,7 +15,7 @@ pub struct AddressParts {
     pub city: String,
     pub province: Option<String>,
     pub postal_code: Option<String>,
-    pub country: CountryCode,
+    pub country: String,
     pub phone: Option<String>,
 }
 
@@ -24,7 +25,10 @@ pub struct AddressParts {
 /// Every text field is trimmed; an empty optional field becomes `None`. Last name, first
 /// address line and city are required. Postal code formats aren't checked yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Address(AddressParts);
+pub struct Address {
+    parts: AddressParts,
+    country: CountryCode,
+}
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum AddressError {
@@ -32,12 +36,15 @@ pub enum AddressError {
     Missing(&'static str),
     #[error("address field {0} is longer than {max} characters", max = Address::MAX_FIELD_LEN)]
     TooLong(&'static str),
+    #[error(transparent)]
+    Country(#[from] CountryError),
 }
 
 impl crate::ErrorCode for AddressError {
     fn code(&self) -> &'static str {
         match self {
             AddressError::Missing(_) | AddressError::TooLong(_) => "invalid_address",
+            AddressError::Country(e) => e.code(),
         }
     }
 }
@@ -46,7 +53,8 @@ impl Address {
     pub const MAX_FIELD_LEN: usize = 255;
 
     pub fn new(parts: AddressParts) -> Result<Self, AddressError> {
-        Ok(Self(AddressParts {
+        let country = CountryCode::new(&parts.country)?;
+        let parts = AddressParts {
             first_name: optional("first_name", parts.first_name)?,
             last_name: required("last_name", parts.last_name)?,
             company: optional("company", parts.company)?,
@@ -55,17 +63,18 @@ impl Address {
             city: required("city", parts.city)?,
             province: optional("province", parts.province)?,
             postal_code: optional("postal_code", parts.postal_code)?,
-            country: parts.country,
+            country: country.as_str().to_string(),
             phone: optional("phone", parts.phone)?,
-        }))
+        };
+        Ok(Self { parts, country })
     }
 
     pub fn parts(&self) -> &AddressParts {
-        &self.0
+        &self.parts
     }
 
     pub fn country(&self) -> CountryCode {
-        self.0.country
+        self.country
     }
 }
 
@@ -96,7 +105,7 @@ mod tests {
             city: "Zagreb".to_string(),
             province: None,
             postal_code: Some("10000".to_string()),
-            country: CountryCode::new("HR").unwrap(),
+            country: "HR".to_string(),
             phone: Some("  ".to_string()),
         }
     }
@@ -156,6 +165,18 @@ mod tests {
             }),
             Err(AddressError::TooLong("line2"))
         );
+    }
+
+    #[test]
+    fn checks_the_country() {
+        assert_eq!(
+            Address::new(AddressParts {
+                country: "Croatia".to_string(),
+                ..parts()
+            }),
+            Err(AddressError::Country(CountryError::InvalidLength(7)))
+        );
+        assert_eq!(Address::new(parts()).unwrap().country().as_str(), "HR");
     }
 
     #[test]

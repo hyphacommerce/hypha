@@ -44,7 +44,7 @@ pub(super) struct AddressRequest {
     city: String,
     province: Option<String>,
     postal_code: Option<String>,
-    country: CountryCode,
+    country: String,
     phone: Option<String>,
     #[serde(default)]
     default_shipping: bool,
@@ -113,7 +113,7 @@ impl From<&SavedAddress> for AddressResponse {
             city: p.city.clone(),
             province: p.province.clone(),
             postal_code: p.postal_code.clone(),
-            country: p.country,
+            country: saved.address.country(),
             phone: p.phone.clone(),
         }
     }

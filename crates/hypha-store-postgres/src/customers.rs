@@ -1,5 +1,5 @@
 use hypha_core::{
-    Address, AddressId, AddressParts, CountryCode, CustomerId, Email, RepoError, Version, Versioned,
+    Address, AddressId, AddressParts, CustomerId, Email, RepoError, Version, Versioned,
 };
 use hypha_customers::{Customer, CustomerRepo, CustomerSnapshot, SavedAddress};
 use tokio_postgres::{GenericClient, Row, types::Type};
@@ -193,7 +193,6 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
 }
 
 fn saved_address(row: &Row) -> Result<SavedAddress, RepoError> {
-    let country: String = row.get(9);
     let address = Address::new(AddressParts {
         first_name: row.get(1),
         last_name: row.get(2),
@@ -203,7 +202,7 @@ fn saved_address(row: &Row) -> Result<SavedAddress, RepoError> {
         city: row.get(6),
         province: row.get(7),
         postal_code: row.get(8),
-        country: CountryCode::new(&country).map_err(corrupt)?,
+        country: row.get(9),
         phone: row.get(10),
     })
     .map_err(corrupt)?;

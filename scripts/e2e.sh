@@ -267,6 +267,8 @@ step "add archived mug" 422 product_not_active -X POST "$BASE/carts/$CART/lines"
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "cart to a country without market" 422 no_market_for_country -X POST "$BASE/carts" -H "$JSON" \
     -d '{"country":"US"}'
+step "cart to a lowercase country" 422 invalid_country_code -X POST "$BASE/carts" -H "$JSON" \
+    -d '{"country":"us"}'
 step "second tax region for a country" 409 tax_region_exists -X POST "$BASE/tax-regions" -H "$JSON" \
     -d '{"country":"HR","default_rate_ppm":250000}'
 step "tax rate above 100%" 422 invalid_tax_rate -X POST "$BASE/tax-regions" -H "$JSON" \

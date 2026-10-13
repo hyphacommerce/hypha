@@ -1,8 +1,8 @@
 use std::cell::Cell;
 
 use hypha_core::{
-    Actor, AddressError, AddressId, AddressParts, AuthError, CountryCode, Ctx, CustomerId, Email,
-    EmailError, RepoError, Scope, UserId,
+    Actor, AddressError, AddressId, AddressParts, AuthError, Ctx, CustomerId, Email, EmailError,
+    ErrorCode, RepoError, Scope, UserId,
 };
 use hypha_customers::{
     CommandError, CreateCustomer, Customer, CustomerError, CustomerRepo, SaveAddress,
@@ -27,7 +27,7 @@ fn parts(city: &str) -> AddressParts {
         city: city.to_string(),
         province: None,
         postal_code: Some("10000".to_string()),
-        country: CountryCode::new("HR").unwrap(),
+        country: "HR".to_string(),
         phone: None,
     }
 }
@@ -375,6 +375,12 @@ fn add_address_rejects_an_invalid_address() {
     assert_eq!(
         world.add(c.id(), save(" ", false, false)),
         Err(CommandError::Address(AddressError::Missing("city")))
+    );
+    let mut lowercase = save("Zagreb", false, false);
+    lowercase.address.country = "hr".to_string();
+    assert_eq!(
+        world.add(c.id(), lowercase).map_err(|e| e.code()),
+        Err("invalid_country_code")
     );
 }
 

@@ -7,7 +7,7 @@
 //! the address book, `restore` would reject it, and the load would fail with
 //! `RepoError::Backend`.
 
-use hypha_core::{Address, AddressId, AddressParts, CountryCode, CustomerId, Email, RepoError};
+use hypha_core::{Address, AddressId, AddressParts, CustomerId, Email, RepoError};
 use hypha_customers::{Customer, CustomerRepo};
 use hypha_store_postgres::{CORE, PgStore, migrate};
 use tokio_postgres::{Client, NoTls};
@@ -38,7 +38,7 @@ fn address(n: u128) -> Address {
         city: "Zagreb".to_string(),
         province: None,
         postal_code: None,
-        country: CountryCode::new("HR").unwrap(),
+        country: "HR".to_string(),
         phone: None,
     })
     .unwrap()

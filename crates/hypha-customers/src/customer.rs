@@ -242,7 +242,7 @@ impl Customer {
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::{AddressParts, CountryCode};
+    use hypha_core::AddressParts;
     use uuid::Uuid;
 
     use super::*;
@@ -261,7 +261,7 @@ mod tests {
             city: city.to_string(),
             province: None,
             postal_code: None,
-            country: CountryCode::new("HR").unwrap(),
+            country: "HR".to_string(),
             phone: None,
         })
         .unwrap()

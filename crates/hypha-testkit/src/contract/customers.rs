@@ -1,5 +1,5 @@
 use hypha_core::{
-    Address, AddressId, AddressParts, CountryCode, CustomerId, Email, RepoError, Version, Versioned,
+    Address, AddressId, AddressParts, CustomerId, Email, RepoError, Version, Versioned,
 };
 use hypha_customers::{Customer, CustomerRepo, repo::keys};
 use uuid::Uuid;
@@ -35,7 +35,7 @@ fn full_address(city: &str) -> Address {
         city: city.to_string(),
         province: Some("Grad Zagreb".to_string()),
         postal_code: Some("10000".to_string()),
-        country: CountryCode::new("HR").unwrap(),
+        country: "HR".to_string(),
         phone: Some("+385 1 234 5678".to_string()),
     })
     .unwrap()
@@ -52,7 +52,7 @@ fn bare_address(city: &str) -> Address {
         city: city.to_string(),
         province: None,
         postal_code: None,
-        country: CountryCode::new("HR").unwrap(),
+        country: "HR".to_string(),
         phone: None,
     })
     .unwrap()

@@ -7,7 +7,7 @@ use thiserror::Error;
 #[serde(try_from = "String", into = "String")]
 pub struct CountryCode([u8; 2]);
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CountryError {
     #[error("country code must be 2 bytes, got {0}")]
     InvalidLength(usize),

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AuthError, CartId, CountryCode, Ctx, CustomerId, Email, EmailError, ErrorCode, IdGenerator,
-    MarketId, MoneyError, ProductId, RepoError, Scope, VariantId,
+    AuthError, CartId, CountryCode, CountryError, Ctx, CustomerId, Email, EmailError, ErrorCode,
+    IdGenerator, MarketId, MoneyError, ProductId, RepoError, Scope, VariantId,
 };
 use hypha_customers::CustomerRepo;
 use hypha_inventory::{InventoryItemRepo, LocationRepo, StockContext};
@@ -31,6 +31,8 @@ pub enum CommandError {
     Money(#[from] MoneyError),
     #[error(transparent)]
     Email(#[from] EmailError),
+    #[error(transparent)]
+    Country(#[from] CountryError),
     #[error("customer {0} not found")]
     CustomerNotFound(CustomerId),
     #[error("cart {0} not found")]
@@ -52,6 +54,7 @@ impl ErrorCode for CommandError {
             CommandError::Line(e) => e.code(),
             CommandError::Money(e) => e.code(),
             CommandError::Email(e) => e.code(),
+            CommandError::Country(e) => e.code(),
             CommandError::CustomerNotFound(_) => "customer_not_found",
             CommandError::CartNotFound(_) => "cart_not_found",
             CommandError::MarketNotFound(_) => "market_not_found",
@@ -137,15 +140,17 @@ impl<T: CartPorts + ?Sized> CartPorts for &T {
 }
 
 /// Creates an empty cart shipping to `country`, in the market that sells there
-/// (like Shopify, the buyer's country picks the market).
+/// (like Shopify, the buyer's country picks the market). `country` is an ISO 3166-1
+/// alpha-2 code, checked here.
 pub async fn create_cart<S: CartPorts, I: IdGenerator>(
     ctx: &Ctx,
     ports: &S,
     ids: &I,
-    country: CountryCode,
+    country: &str,
 ) -> Result<Cart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
 
+    let country = CountryCode::new(country)?;
     let market = ports
         .markets()
         .get_by_country(country)

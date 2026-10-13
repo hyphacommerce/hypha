@@ -19,7 +19,7 @@ use crate::{
 #[derive(Deserialize)]
 pub(super) struct CreateCartRequest {
     /// Where the cart ships to; picks the market and the tax rates.
-    country: CountryCode,
+    country: String,
 }
 
 #[derive(Deserialize)]
@@ -150,7 +150,7 @@ pub(super) async fn create<S: Storage>(
 ) -> Result<(StatusCode, Json<CartResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
-    let cart = create_cart(&ctx, &ports, &state.ids, req.country).await?;
+    let cart = create_cart(&ctx, &ports, &state.ids, &req.country).await?;
     // A new cart is empty, so pricing it can't fail; return the same shape as GET.
     let priced = get_cart(&ctx, &ports, cart.id()).await?;
     Ok((StatusCode::CREATED, Json(CartResponse::from(&priced))))

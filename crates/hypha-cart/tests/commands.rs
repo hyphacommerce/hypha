@@ -3,9 +3,9 @@ use hypha_cart::{
     add_line, create_cart, get_cart, set_cart_customer, set_cart_email,
 };
 use hypha_core::{
-    Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, Ctx, Currency, InventoryItemId,
-    LocationId, MarketId, Money, Price, PriceListId, ProductId, Scope, TaxClassId, TaxRate,
-    TaxRegionId, UserId, VariantId,
+    Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, CountryError, Ctx, Currency,
+    InventoryItemId, LocationId, MarketId, Money, Price, PriceListId, ProductId, Scope, TaxClassId,
+    TaxRate, TaxRegionId, UserId, VariantId,
 };
 use hypha_core::{CustomerId, Email, EmailError, MoneyError};
 use hypha_customers::{Customer, CustomerRepo};
@@ -218,7 +218,7 @@ impl World {
     }
 
     fn create_cart(&self) -> CartId {
-        block_on(create_cart(&Ctx::system(), self, &self.ids, hr()))
+        block_on(create_cart(&Ctx::system(), self, &self.ids, "HR"))
             .unwrap()
             .id()
     }
@@ -307,7 +307,7 @@ impl CartPorts for World {
 #[test]
 fn create_cart_picks_the_market_of_its_country() {
     let world = World::new();
-    let cart = block_on(create_cart(&Ctx::system(), &world, &world.ids, hr())).unwrap();
+    let cart = block_on(create_cart(&Ctx::system(), &world, &world.ids, "HR")).unwrap();
     assert_eq!((cart.market(), cart.country()), (market_id(), hr()));
     assert_eq!(block_on(world.carts.get(cart.id())), Ok(Some(cart)));
 }
@@ -316,8 +316,18 @@ fn create_cart_picks_the_market_of_its_country() {
 fn create_cart_rejects_country_without_market() {
     let world = World::new();
     let de = CountryCode::new("DE").unwrap();
-    let result = block_on(create_cart(&Ctx::system(), &world, &world.ids, de));
+    let result = block_on(create_cart(&Ctx::system(), &world, &world.ids, "DE"));
     assert_eq!(result, Err(CommandError::NoMarketForCountry(de)));
+}
+
+#[test]
+fn create_cart_rejects_an_invalid_country() {
+    let world = World::new();
+    let result = block_on(create_cart(&Ctx::system(), &world, &world.ids, "hr"));
+    assert_eq!(
+        result,
+        Err(CommandError::Country(CountryError::NotUppercase))
+    );
 }
 
 #[test]
