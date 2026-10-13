@@ -17,19 +17,21 @@ WASM, Postgres contract, e2e on both storages).
 
 Each fix starts with a failing test.
 
-- [ ] **B1. `add_line` saves a line whose total overflows.**
+- [x] **B1. `add_line` saves a line whose total overflows.**
   `crates/hypha-cart/src/commands.rs:194-208`. It checks the unit price (`price_line`)
   and stock, but `unit × quantity` only overflows inside `price_cart`, which marks the
   line unavailable instead of failing; then the cart is saved.
   Repro: price list +100 000 000 bp, add 1 000 000 000 mugs → `Ok`, line stored.
   Fix: after `price_line`, compute `unit.money().checked_mul(line.quantity())?`, or fail
   if the new line comes back `Unavailable` from `price_cart`.
-- [ ] **B2. One overflowing cart total makes the cart unreadable.**
+- [x] **B2. One overflowing cart total makes the cart unreadable.**
   `crates/hypha-cart/src/pricing.rs:148-154`. `Money::sum` overflowing fails `get_cart`
   and every later `add_line`, and there is no command to remove a line.
   Fix (decide): cap line quantity (e.g. 1 000 000) so a total can't reach 2⁵³ − 1, or
   mark lines unavailable instead of failing the cart. Capping is simpler.
-- [ ] **B3. Postgres reads can mix two versions of an aggregate → 500.**
+  Done: lines are marked unavailable. A cap can't stop totals overflowing after a
+  later price rise, so the cart has to tolerate it anyway.
+- [x] **B3. Postgres reads can mix two versions of an aggregate → 500.**
   Multi-query loads run outside a transaction (READ COMMITTED): `customers.rs:141-190`,
   `products.rs:189-263`, `carts.rs:19-60`, `markets.rs:125-145`, `inventory.rs:345-391`,
   `tax.rs:211-237`. A write between the root query and the children query can produce
@@ -37,27 +39,27 @@ Each fix starts with a failing test.
   `corrupt()` turns it into a 500.
   Fix: run each multi-query load in `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`
   (a shared helper). D1 equivalent later: a read-only `batch()`.
-- [ ] **B4. `set_cart_customer` leaks customer emails.**
+- [x] **B4. `set_cart_customer` leaks customer emails.**
   `crates/hypha-cart/src/commands.rs:230-250` requires only `carts:write`, then copies
   the customer's email onto the cart (visible in `GET /carts/{id}`) and reveals whether
   a `cus_…` exists. Fix: also `ctx.require(Scope::CustomersRead)?` when linking.
-- [ ] **B5. `reserve_stock` accepts the same reference twice for one variant.**
+- [x] **B5. `reserve_stock` accepts the same reference twice for one variant.**
   `crates/hypha-inventory/src/commands.rs` (input validation). Two lines
   `("ol-1", v, 2)` reserve 2, not 4, and return `Ok` (the second hits the idempotency
   path). Fix: reject duplicate `(reference, variant)` pairs with a typed error; same in
   `release_stock`.
-- [ ] **B6. Wildcard arm in `StockContext::availability`.**
+- [x] **B6. Wildcard arm in `StockContext::availability`.**
   `crates/hypha-inventory/src/stock.rs:44` (`_ => Available`): a future error would
   count as sellable. Fix: make `can_supply` return `Result<(), i64>` (it only ever fails
   with a shortage) and match it exhaustively.
-- [ ] **B7. Map Postgres serialization failures.** `crates/hypha-store-postgres/src/error.rs`:
+- [x] **B7. Map Postgres serialization failures.** `crates/hypha-store-postgres/src/error.rs`:
   SQLSTATE 40001 → `StaleVersion`, next to the deadlock mapping (needed once B3 adds
   REPEATABLE READ).
-- [ ] **B8. Migration bootstrap isn't safe when two hosts start at once.**
+- [x] **B8. Migration bootstrap isn't safe when two hosts start at once.**
   `crates/hypha-store-postgres/src/migrate.rs:147-173`: `CREATE TABLE IF NOT EXISTS
   schema_migrations` and the upgrade block run before any lock. Fix: one transaction
   that takes `pg_advisory_xact_lock(<const>)` first.
-- [ ] **B9. Small correctness fixes.**
+- [x] **B9. Small correctness fixes.**
   - `Email::MAX_LEN` counts characters; SMTP's 254 is bytes (`hypha-core/src/email.rs:36`).
   - `allocate` assumes distinct location IDs (`hypha-inventory/src/item.rs:149`): dedupe.
   - `update_many` lock order relies on the caller sorting: sort by ID inside the
