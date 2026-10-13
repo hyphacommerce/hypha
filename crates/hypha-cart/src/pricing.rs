@@ -1,6 +1,6 @@
 use hypha_core::{
     CartId, CountryCode, Currency, CustomerId, Email, Money, MoneyError, Price, ProductId,
-    VariantId,
+    Quantity, VariantId,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, resolve_price};
@@ -10,7 +10,6 @@ use hypha_tax::{TaxContext, TaxLine, TaxableLine, tax_line};
 use crate::{
     cart::{Cart, CartLine},
     error::LineError,
-    quantity::Quantity,
 };
 
 /// Whether a line can be bought right now.
@@ -231,7 +230,7 @@ pub fn check_stock(
     variant: VariantId,
     quantity: Quantity,
 ) -> Result<(), LineError> {
-    match stock.availability(variant, quantity.value()) {
+    match stock.availability(variant, quantity) {
         Availability::Untracked | Availability::Available => Ok(()),
         Availability::OutOfStock { available } => Err(LineError::OutOfStock {
             variant,

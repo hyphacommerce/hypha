@@ -4,8 +4,8 @@
 use std::cell::Cell;
 
 use hypha_core::{
-    Actor, AuthError, Ctx, InventoryItemId, LocationId, MarketId, RepoError, Scope, UserId,
-    VariantId, Versioned,
+    Actor, AuthError, Ctx, InventoryItemId, LocationId, MarketId, Quantity, QuantityError,
+    RepoError, Scope, UserId, VariantId, Versioned,
 };
 use hypha_inventory::{
     CommandError, InventoryError, InventoryItem, InventoryItemRepo, Location, LocationRepo,
@@ -84,7 +84,11 @@ impl InventoryItemRepo for Racing {
             if self.rival_quantity > 0 {
                 let r = reference(&format!("rival-{}", self.writes.get()));
                 rival
-                    .reserve(&r, self.rival_quantity, &self.serving)
+                    .reserve(
+                        &r,
+                        Quantity::new(self.rival_quantity).unwrap(),
+                        &self.serving,
+                    )
                     .unwrap();
             }
             self.inner.update(&mut rival).await?;
@@ -173,7 +177,7 @@ impl World {
         self.stored(n)
             .reservations()
             .iter()
-            .map(|r| (r.reference.to_string(), r.location, r.quantity))
+            .map(|r| (r.reference.to_string(), r.location, r.quantity.value()))
             .collect()
     }
 }
@@ -315,7 +319,9 @@ fn input_is_checked_before_anything_is_read() {
     let world = World::new();
     assert_eq!(
         world.reserve(vec![line("ol-1", 1, 0)]),
-        Err(CommandError::Inventory(InventoryError::ZeroQuantity))
+        Err(CommandError::Inventory(InventoryError::Quantity(
+            QuantityError::Zero
+        )))
     );
     assert_eq!(
         world.reserve(vec![line("", 1, 1)]),

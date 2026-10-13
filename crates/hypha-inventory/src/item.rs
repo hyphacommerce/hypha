@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use hypha_core::{InventoryItemId, LocationId, VariantId, Version, Versioned};
+use hypha_core::{InventoryItemId, LocationId, Quantity, VariantId, Version, Versioned};
 
 use crate::{InventoryError, Location, ReservationRef, RestoreError};
 
@@ -21,7 +21,7 @@ pub struct Level {
 pub struct Reservation {
     pub reference: ReservationRef,
     pub location: LocationId,
-    pub quantity: u32,
+    pub quantity: Quantity,
 }
 
 /// The stock of one variant across locations (design note 0004).
@@ -90,7 +90,7 @@ impl InventoryItem {
         self.reservations
             .iter()
             .filter(|r| r.location == location)
-            .map(|r| i64::from(r.quantity))
+            .map(|r| i64::from(r.quantity.value()))
             .sum()
     }
 
@@ -201,11 +201,11 @@ impl InventoryItem {
     ///
     /// Returns only the shortage, not an `InventoryError`: a shortage is the one way it
     /// can fail, so callers can match it exhaustively.
-    pub fn can_supply(&self, quantity: u32, locations: &[Location]) -> Result<(), i64> {
+    pub fn can_supply(&self, quantity: Quantity, locations: &[Location]) -> Result<(), i64> {
         if !self.tracked {
             return Ok(());
         }
-        self.allocate(quantity, locations).map(|_| ())
+        self.allocate(quantity.value(), locations).map(|_| ())
     }
 
     /// Reserves `quantity` for `reference` from `locations` (the ones serving the
@@ -217,12 +217,9 @@ impl InventoryItem {
     pub fn reserve(
         &mut self,
         reference: &ReservationRef,
-        quantity: u32,
+        quantity: Quantity,
         locations: &[Location],
     ) -> Result<bool, InventoryError> {
-        if quantity == 0 {
-            return Err(InventoryError::ZeroQuantity);
-        }
         if !self.tracked {
             return Ok(false);
         }
@@ -230,23 +227,27 @@ impl InventoryItem {
             .reservations
             .iter()
             .filter(|r| r.reference == *reference)
-            .map(|r| u64::from(r.quantity))
+            .map(|r| u64::from(r.quantity.value()))
             .sum();
         if held > 0 {
-            return if held == u64::from(quantity) {
+            return if held == u64::from(quantity.value()) {
                 Ok(false)
             } else {
                 Err(InventoryError::ReferenceInUse(reference.clone()))
             };
         }
 
-        let allocation =
-            self.allocate(quantity, locations)
-                .map_err(|available| InventoryError::OutOfStock {
-                    requested: quantity,
-                    available,
-                })?;
-        for (location, quantity) in allocation {
+        let allocation = self
+            .allocate(quantity.value(), locations)
+            .map_err(|available| InventoryError::OutOfStock {
+                requested: quantity.value(),
+                available,
+            })?;
+        for (location, share) in allocation {
+            // `allocate` never hands out an empty share.
+            let Ok(quantity) = Quantity::new(share) else {
+                continue;
+            };
             self.reservations.push(Reservation {
                 reference: reference.clone(),
                 location,
@@ -323,7 +324,7 @@ impl InventoryItem {
     }
 
     /// Rebuilds an item from storage: one level per location, one reservation per
-    /// reference and location, counts in range and reservations of at least 1.
+    /// reference and location, counts in range.
     pub fn restore(s: InventoryItemSnapshot) -> Result<InventoryItem, RestoreError> {
         let mut locations = HashSet::new();
         for level in &s.levels {
@@ -334,9 +335,6 @@ impl InventoryItem {
         }
         let mut held = HashSet::new();
         for r in &s.reservations {
-            if r.quantity == 0 {
-                return Err(InventoryError::ZeroQuantity.into());
-            }
             if !held.insert((&r.reference, r.location)) {
                 return Err(RestoreError::DuplicateReservation {
                     reference: r.reference.clone(),
@@ -382,6 +380,10 @@ mod tests {
         ReservationRef::new(s).unwrap()
     }
 
+    fn qty(n: u32) -> Quantity {
+        Quantity::new(n).unwrap()
+    }
+
     /// A tracked item with `stock` (location, on hand) pairs.
     fn item(stock: &[(u128, i64)]) -> InventoryItem {
         let mut item = InventoryItem::new(
@@ -399,7 +401,7 @@ mod tests {
     fn held(item: &InventoryItem) -> Vec<(LocationId, u32)> {
         item.reservations()
             .iter()
-            .map(|r| (r.location, r.quantity))
+            .map(|r| (r.location, r.quantity.value()))
             .collect()
     }
 
@@ -485,7 +487,7 @@ mod tests {
     fn takes_the_whole_line_from_the_first_location_that_has_it() {
         // Priority 0 has 2, priority 1 has 5: 3 units come from priority 1 alone.
         let mut i = item(&[(1, 2), (2, 5)]);
-        i.reserve(&reference("a"), 3, &[location(2, 1), location(1, 0)])
+        i.reserve(&reference("a"), qty(3), &[location(2, 1), location(1, 0)])
             .unwrap();
         assert_eq!(held(&i), vec![(loc_id(2), 3)]);
     }
@@ -493,7 +495,7 @@ mod tests {
     #[test]
     fn prefers_higher_priority_when_both_have_enough() {
         let mut i = item(&[(1, 5), (2, 5)]);
-        i.reserve(&reference("a"), 3, &[location(1, 9), location(2, 0)])
+        i.reserve(&reference("a"), qty(3), &[location(1, 9), location(2, 0)])
             .unwrap();
         assert_eq!(held(&i), vec![(loc_id(2), 3)]);
     }
@@ -503,7 +505,7 @@ mod tests {
         let mut i = item(&[(1, 2), (2, 1), (3, 4)]);
         i.reserve(
             &reference("a"),
-            5,
+            qty(5),
             &[location(1, 0), location(2, 1), location(3, 2)],
         )
         .unwrap();
@@ -516,7 +518,7 @@ mod tests {
     #[test]
     fn equal_priorities_are_ordered_by_location_id() {
         let mut i = item(&[(1, 5), (2, 5)]);
-        i.reserve(&reference("a"), 1, &[location(2, 0), location(1, 0)])
+        i.reserve(&reference("a"), qty(1), &[location(2, 0), location(1, 0)])
             .unwrap();
         assert_eq!(held(&i), vec![(loc_id(1), 1)]);
     }
@@ -526,7 +528,7 @@ mod tests {
         // Location 2 has stock but doesn't serve this market.
         let mut i = item(&[(1, 1), (2, 10)]);
         assert_eq!(
-            i.reserve(&reference("a"), 2, &[location(1, 0)]),
+            i.reserve(&reference("a"), qty(2), &[location(1, 0)]),
             Err(InventoryError::OutOfStock {
                 requested: 2,
                 available: 1
@@ -537,10 +539,11 @@ mod tests {
     #[test]
     fn reservations_reduce_what_is_available() {
         let mut i = item(&[(1, 3)]);
-        i.reserve(&reference("a"), 2, &[location(1, 0)]).unwrap();
+        i.reserve(&reference("a"), qty(2), &[location(1, 0)])
+            .unwrap();
         assert_eq!(i.available(loc_id(1)), 1);
         assert_eq!(
-            i.reserve(&reference("b"), 2, &[location(1, 0)]),
+            i.reserve(&reference("b"), qty(2), &[location(1, 0)]),
             Err(InventoryError::OutOfStock {
                 requested: 2,
                 available: 1
@@ -551,7 +554,10 @@ mod tests {
     #[test]
     fn exactly_the_available_quantity_can_be_reserved() {
         let mut i = item(&[(1, 2)]);
-        assert_eq!(i.reserve(&reference("a"), 2, &[location(1, 0)]), Ok(true));
+        assert_eq!(
+            i.reserve(&reference("a"), qty(2), &[location(1, 0)]),
+            Ok(true)
+        );
         assert_eq!(i.available(loc_id(1)), 0);
     }
 
@@ -559,7 +565,7 @@ mod tests {
     fn negative_stock_counts_as_none_available() {
         let mut i = item(&[(1, -3), (2, 1)]);
         assert_eq!(
-            i.reserve(&reference("a"), 2, &[location(1, 0), location(2, 1)]),
+            i.reserve(&reference("a"), qty(2), &[location(1, 0), location(2, 1)]),
             Err(InventoryError::OutOfStock {
                 requested: 2,
                 available: 1
@@ -572,7 +578,7 @@ mod tests {
         let mut i = item(&[(1, 5)]);
         i.set_continue_selling(true);
         assert_eq!(
-            i.reserve(&reference("a"), 1, &[]),
+            i.reserve(&reference("a"), qty(1), &[]),
             Err(InventoryError::OutOfStock {
                 requested: 1,
                 available: 0
@@ -586,7 +592,7 @@ mod tests {
     fn continue_selling_puts_the_shortfall_on_the_first_location() {
         let mut i = item(&[(1, 0), (2, 2)]);
         i.set_continue_selling(true);
-        i.reserve(&reference("a"), 5, &[location(1, 0), location(2, 1)])
+        i.reserve(&reference("a"), qty(5), &[location(1, 0), location(2, 1)])
             .unwrap();
         assert_eq!(held(&i), vec![(loc_id(1), 3), (loc_id(2), 2)]);
         assert_eq!(i.available(loc_id(1)), -3);
@@ -596,7 +602,8 @@ mod tests {
     fn continue_selling_adds_the_shortfall_to_a_location_already_used() {
         let mut i = item(&[(1, 1)]);
         i.set_continue_selling(true);
-        i.reserve(&reference("a"), 4, &[location(1, 0)]).unwrap();
+        i.reserve(&reference("a"), qty(4), &[location(1, 0)])
+            .unwrap();
         assert_eq!(held(&i), vec![(loc_id(1), 4)]);
     }
 
@@ -606,8 +613,8 @@ mod tests {
     fn untracked_items_reserve_nothing_and_never_run_out() {
         let mut i = item(&[]);
         i.set_tracked(false);
-        assert_eq!(i.can_supply(1000, &[]), Ok(()));
-        assert_eq!(i.reserve(&reference("a"), 1000, &[]), Ok(false));
+        assert_eq!(i.can_supply(qty(1000), &[]), Ok(()));
+        assert_eq!(i.reserve(&reference("a"), qty(1000), &[]), Ok(false));
         assert!(i.reservations().is_empty());
     }
 
@@ -615,14 +622,17 @@ mod tests {
     #[test]
     fn a_location_listed_twice_counts_once() {
         let i = item(&[(1, 1)]);
-        assert_eq!(i.can_supply(2, &[location(1, 0), location(1, 0)]), Err(1));
+        assert_eq!(
+            i.can_supply(qty(2), &[location(1, 0), location(1, 0)]),
+            Err(1)
+        );
     }
 
     #[test]
     fn can_supply_reports_the_shortage_without_reserving() {
         let i = item(&[(1, 1)]);
-        assert_eq!(i.can_supply(2, &[location(1, 0)]), Err(1));
-        assert_eq!(i.can_supply(1, &[location(1, 0)]), Ok(()));
+        assert_eq!(i.can_supply(qty(2), &[location(1, 0)]), Err(1));
+        assert_eq!(i.can_supply(qty(1), &[location(1, 0)]), Ok(()));
     }
 
     // ---- idempotency (I8) ----
@@ -631,27 +641,20 @@ mod tests {
     fn reserving_the_same_reference_again_changes_nothing() {
         let mut i = item(&[(1, 2), (2, 2)]);
         let locations = [location(1, 0), location(2, 1)];
-        assert_eq!(i.reserve(&reference("a"), 3, &locations), Ok(true));
+        assert_eq!(i.reserve(&reference("a"), qty(3), &locations), Ok(true));
         let before = i.clone();
-        assert_eq!(i.reserve(&reference("a"), 3, &locations), Ok(false));
+        assert_eq!(i.reserve(&reference("a"), qty(3), &locations), Ok(false));
         assert_eq!(i, before);
     }
 
     #[test]
     fn the_same_reference_for_another_quantity_is_refused() {
         let mut i = item(&[(1, 5)]);
-        i.reserve(&reference("a"), 2, &[location(1, 0)]).unwrap();
+        i.reserve(&reference("a"), qty(2), &[location(1, 0)])
+            .unwrap();
         assert_eq!(
-            i.reserve(&reference("a"), 3, &[location(1, 0)]),
+            i.reserve(&reference("a"), qty(3), &[location(1, 0)]),
             Err(InventoryError::ReferenceInUse(reference("a")))
-        );
-    }
-
-    #[test]
-    fn reserving_zero_is_refused() {
-        assert_eq!(
-            item(&[(1, 5)]).reserve(&reference("a"), 0, &[location(1, 0)]),
-            Err(InventoryError::ZeroQuantity)
         );
     }
 
@@ -659,7 +662,7 @@ mod tests {
     fn release_gives_back_every_location_of_a_reference() {
         let mut i = item(&[(1, 1), (2, 1)]);
         let locations = [location(1, 0), location(2, 1)];
-        i.reserve(&reference("a"), 2, &locations).unwrap();
+        i.reserve(&reference("a"), qty(2), &locations).unwrap();
         assert!(i.release(&reference("a")));
         assert_eq!(i.available(loc_id(1)), 1);
         assert_eq!(i.available(loc_id(2)), 1);
@@ -671,7 +674,8 @@ mod tests {
     #[test]
     fn restore_round_trips() {
         let mut i = item(&[(1, 4), (2, -1)]);
-        i.reserve(&reference("a"), 2, &[location(1, 0)]).unwrap();
+        i.reserve(&reference("a"), qty(2), &[location(1, 0)])
+            .unwrap();
         i.set_version(Version::new(7));
         assert_eq!(InventoryItem::restore(i.snapshot()), Ok(i));
     }
@@ -695,7 +699,7 @@ mod tests {
         let r = Reservation {
             reference: reference("a"),
             location: loc_id(1),
-            quantity: 1,
+            quantity: qty(1),
         };
         s.reservations = vec![r.clone(), r];
         assert_eq!(

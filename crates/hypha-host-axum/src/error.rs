@@ -207,7 +207,7 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 I::EmptyLocationName
                 | I::DuplicateMarket(_)
                 | I::StockOutOfRange(_)
-                | I::ZeroQuantity
+                | I::Quantity(_)
                 | I::InvalidReference
                 | I::DuplicateLine { .. },
             ) => StatusCode::UNPROCESSABLE_ENTITY,

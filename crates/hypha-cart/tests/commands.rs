@@ -8,7 +8,7 @@ use hypha_core::{
     InventoryItemId, LocationId, MarketId, Money, Price, PriceListId, ProductId, Scope, TaxClassId,
     TaxRate, TaxRegionId, UserId, VariantId,
 };
-use hypha_core::{CustomerId, Email, EmailError, MoneyError};
+use hypha_core::{CustomerId, Email, EmailError, MoneyError, Quantity, QuantityError};
 use hypha_customers::{Customer, CustomerRepo};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
 use hypha_markets::{
@@ -61,6 +61,10 @@ fn pid(name: &str) -> ProductId {
         _ => 1199,
     };
     ProductId::from_uuid(Uuid::from_u128(n))
+}
+
+fn qty(n: u32) -> Quantity {
+    Quantity::new(n).unwrap()
 }
 
 fn vid(name: &str) -> VariantId {
@@ -191,7 +195,7 @@ impl World {
         let location = block_on(self.locations.get(warehouse())).unwrap().unwrap();
         item.reserve(
             &ReservationRef::new("elsewhere").unwrap(),
-            quantity,
+            qty(quantity),
             &[location],
         )
         .unwrap();
@@ -365,7 +369,7 @@ fn add_line_rejects_zero_quantity() {
 
     assert_eq!(
         world.add(&Ctx::system(), cart, "mug", 0),
-        Err(CommandError::Cart(CartError::ZeroQuantity))
+        Err(CommandError::Cart(CartError::Quantity(QuantityError::Zero)))
     );
 }
 
@@ -887,7 +891,7 @@ fn set_line_quantity_rejects_zero_and_a_missing_line() {
 
     assert_eq!(
         set_quantity(&world, cart, "mug", 0),
-        Err(CommandError::Cart(CartError::ZeroQuantity))
+        Err(CommandError::Cart(CartError::Quantity(QuantityError::Zero)))
     );
     assert_eq!(
         set_quantity(&world, cart, "cup", 2),

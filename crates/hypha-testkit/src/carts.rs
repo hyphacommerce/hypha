@@ -25,7 +25,7 @@ impl CartRepo for InMemoryCartRepo {
 
 #[cfg(test)]
 mod tests {
-    use hypha_cart::Quantity;
+    use hypha_core::Quantity;
     use hypha_core::{CountryCode, MarketId, ProductId, VariantId, Version, Versioned};
     use pollster::block_on;
     use uuid::Uuid;

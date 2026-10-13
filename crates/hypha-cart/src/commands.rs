@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
     AuthError, CartId, CountryCode, CountryError, Ctx, CustomerId, Email, EmailError, ErrorCode,
-    IdGenerator, MarketId, MoneyError, ProductId, RepoError, Scope, VariantId,
+    IdGenerator, MarketId, MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope,
+    VariantId,
 };
 use hypha_customers::{CustomerRepo, HasCustomers};
 use hypha_inventory::{
@@ -18,7 +19,7 @@ use hypha_tax::{HasTaxClasses, HasTaxRegions, TaxClassRepo, TaxContext, TaxRegio
 use thiserror::Error;
 
 use crate::{
-    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, Quantity, check_stock,
+    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, check_stock,
     price_cart, price_line,
 };
 
@@ -48,6 +49,13 @@ pub enum CommandError {
     NoMarketForCountry(CountryCode),
     #[error("variant {0} not found")]
     VariantNotFound(VariantId),
+}
+
+/// A quantity from the request is part of a cart line, so it reports like the cart's.
+impl From<QuantityError> for CommandError {
+    fn from(e: QuantityError) -> Self {
+        CommandError::Cart(e.into())
+    }
 }
 
 impl ErrorCode for CommandError {

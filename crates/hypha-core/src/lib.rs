@@ -6,6 +6,7 @@ pub mod error_code;
 pub mod ids;
 pub mod money;
 pub mod ports;
+pub mod quantity;
 pub mod scope;
 pub mod version;
 
@@ -21,5 +22,6 @@ pub use ids::{
 };
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
 pub use ports::{IdGenerator, RepoError};
+pub use quantity::{Quantity, QuantityError};
 pub use scope::Scope;
 pub use version::{Version, Versioned};

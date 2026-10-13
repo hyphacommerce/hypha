@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hypha_core::VariantId;
+use hypha_core::{Quantity, VariantId};
 
 use crate::{InventoryItem, Location};
 
@@ -29,7 +29,7 @@ pub struct StockContext {
 }
 
 impl StockContext {
-    pub fn availability(&self, variant: VariantId, quantity: u32) -> Availability {
+    pub fn availability(&self, variant: VariantId, quantity: Quantity) -> Availability {
         let Some(item) = self.items.get(&variant) else {
             return Availability::Untracked;
         };
@@ -49,6 +49,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    fn qty(n: u32) -> Quantity {
+        Quantity::new(n).unwrap()
+    }
 
     fn vid(n: u128) -> VariantId {
         VariantId::from_uuid(Uuid::from_u128(n))
@@ -83,7 +87,7 @@ mod tests {
     #[test]
     fn available_up_to_the_stock() {
         assert_eq!(
-            context(true).availability(vid(1), 2),
+            context(true).availability(vid(1), qty(2)),
             Availability::Available
         );
     }
@@ -91,7 +95,7 @@ mod tests {
     #[test]
     fn out_of_stock_beyond_it() {
         assert_eq!(
-            context(true).availability(vid(1), 3),
+            context(true).availability(vid(1), qty(3)),
             Availability::OutOfStock { available: 2 }
         );
     }
@@ -99,7 +103,7 @@ mod tests {
     #[test]
     fn a_variant_without_an_item_is_untracked() {
         assert_eq!(
-            context(true).availability(vid(2), 99),
+            context(true).availability(vid(2), qty(99)),
             Availability::Untracked
         );
     }
@@ -107,7 +111,7 @@ mod tests {
     #[test]
     fn an_untracked_item_is_untracked() {
         assert_eq!(
-            context(false).availability(vid(1), 99),
+            context(false).availability(vid(1), qty(99)),
             Availability::Untracked
         );
     }

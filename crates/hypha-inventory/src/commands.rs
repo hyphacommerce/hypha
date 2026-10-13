@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, LocationId, MarketId, RepoError,
-    Scope, VariantId,
+    AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, LocationId, MarketId, Quantity,
+    RepoError, Scope, VariantId,
 };
 use thiserror::Error;
 
@@ -331,12 +331,13 @@ pub async fn reserve_stock<R: InventoryItemRepo, L: LocationRepo>(
         .lines
         .iter()
         .map(|l| {
-            if l.quantity == 0 {
-                return Err(InventoryError::ZeroQuantity);
-            }
-            Ok((ReservationRef::new(&l.reference)?, l.variant, l.quantity))
+            Ok((
+                ReservationRef::new(&l.reference)?,
+                l.variant,
+                Quantity::new(l.quantity)?,
+            ))
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, InventoryError>>()?;
     reject_duplicate_lines(
         lines
             .iter()

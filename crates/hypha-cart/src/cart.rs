@@ -1,11 +1,9 @@
 use hypha_core::{
-    CartId, CountryCode, CustomerId, Email, MarketId, ProductId, VariantId, Version, Versioned,
+    CartId, CountryCode, CustomerId, Email, MarketId, ProductId, Quantity, VariantId, Version,
+    Versioned,
 };
 
-use crate::{
-    error::{CartError, RestoreError},
-    quantity::Quantity,
-};
+use crate::error::{CartError, RestoreError};
 
 /// A variant and how many of it. Prices are not stored: they are resolved on read,
 /// so a cart always reflects current prices. Snapshotting belongs to orders.
@@ -220,7 +218,7 @@ impl Cart {
             lines.push(CartLine {
                 product: line.product,
                 variant: line.variant,
-                quantity: Quantity::new(line.quantity)?,
+                quantity: Quantity::new(line.quantity).map_err(CartError::from)?,
             });
         }
         Ok(Cart {
@@ -238,6 +236,8 @@ impl Cart {
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
+
+    use hypha_core::QuantityError;
 
     use super::*;
 
@@ -327,7 +327,7 @@ mod tests {
         c.add_line(pid(), vid(1), qty(u32::MAX)).unwrap();
         assert_eq!(
             c.add_line(pid(), vid(1), qty(1)),
-            Err(CartError::QuantityOverflow)
+            Err(CartError::Quantity(QuantityError::Overflow))
         );
         assert_eq!(c.lines()[0].quantity(), qty(u32::MAX));
     }
@@ -372,7 +372,10 @@ mod tests {
         c.add_line(pid(), vid(1), qty(2)).unwrap();
         let mut s = c.snapshot();
         s.lines[0].quantity = 0;
-        assert_eq!(Cart::restore(s), Err(CartError::ZeroQuantity.into()));
+        assert_eq!(
+            Cart::restore(s),
+            Err(CartError::Quantity(QuantityError::Zero).into())
+        );
     }
 
     #[test]

@@ -1,12 +1,10 @@
-use hypha_core::{ErrorCode, MoneyError, ProductId, VariantId};
+use hypha_core::{ErrorCode, MoneyError, ProductId, QuantityError, VariantId};
 use hypha_pricing::PricingError;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CartError {
-    #[error("quantity must be at least 1")]
-    ZeroQuantity,
-    #[error("quantity is too large")]
-    QuantityOverflow,
+    #[error(transparent)]
+    Quantity(#[from] QuantityError),
     #[error("variant {0} is not in the cart")]
     LineNotFound(VariantId),
     #[error("a cart linked to a customer needs an email; unlink the customer first")]
@@ -52,8 +50,7 @@ pub enum RestoreError {
 impl ErrorCode for CartError {
     fn code(&self) -> &'static str {
         match self {
-            CartError::ZeroQuantity => "invalid_quantity",
-            CartError::QuantityOverflow => "quantity_overflow",
+            CartError::Quantity(e) => e.code(),
             CartError::LineNotFound(_) => "line_not_found",
             CartError::EmailRequired => "email_required",
         }
@@ -94,7 +91,10 @@ mod tests {
 
     #[test]
     fn own_variants_have_their_own_codes() {
-        assert_eq!(CartError::ZeroQuantity.code(), "invalid_quantity");
+        assert_eq!(
+            CartError::Quantity(QuantityError::Zero).code(),
+            "invalid_quantity"
+        );
         assert_eq!(
             LineError::ProductNotActive(ProductId::from_uuid(Uuid::from_u128(1))).code(),
             "product_not_active"

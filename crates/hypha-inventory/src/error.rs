@@ -1,4 +1,4 @@
-use hypha_core::{ErrorCode, LocationId, MarketId, VariantId};
+use hypha_core::{ErrorCode, LocationId, MarketId, QuantityError, VariantId};
 use thiserror::Error;
 
 use crate::{MAX_STOCK, ReservationRef};
@@ -13,8 +13,8 @@ pub enum InventoryError {
     StockOutOfRange(i128),
     #[error("on hand at this location is {actual}, not the expected {expected}")]
     OnHandChanged { expected: i64, actual: i64 },
-    #[error("quantity must be at least 1")]
-    ZeroQuantity,
+    #[error(transparent)]
+    Quantity(#[from] QuantityError),
     #[error("reservation reference must be 1 to {max} characters with no control characters", max = ReservationRef::MAX_LEN)]
     InvalidReference,
     #[error("{0} is already reserved for a different quantity")]
@@ -51,7 +51,7 @@ impl ErrorCode for InventoryError {
             InventoryError::DuplicateMarket(_) => "duplicate_market",
             InventoryError::StockOutOfRange(_) => "stock_out_of_range",
             InventoryError::OnHandChanged { .. } => "on_hand_changed",
-            InventoryError::ZeroQuantity => "invalid_quantity",
+            InventoryError::Quantity(e) => e.code(),
             InventoryError::InvalidReference => "invalid_reservation_reference",
             InventoryError::ReferenceInUse(_) => "reservation_reference_in_use",
             InventoryError::OutOfStock { .. } => "out_of_stock",

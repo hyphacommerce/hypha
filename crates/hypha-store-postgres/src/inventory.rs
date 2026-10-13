@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use hypha_core::{InventoryItemId, LocationId, MarketId, RepoError, VariantId, Version, Versioned};
+use hypha_core::{
+    InventoryItemId, LocationId, MarketId, Quantity, RepoError, VariantId, Version, Versioned,
+};
 use hypha_inventory::{
     InventoryItem, InventoryItemRepo, InventoryItemSnapshot, Level, Location, LocationRepo,
     LocationSnapshot, Reservation, ReservationRef,
@@ -324,7 +326,7 @@ async fn write_children(
             held_positions.push(position);
             references.push(r.reference.as_str());
             held_locations.push(r.location.as_uuid());
-            quantities.push(i64::from(r.quantity));
+            quantities.push(i64::from(r.quantity.value()));
         }
     }
     tx.query_typed(
@@ -406,7 +408,9 @@ async fn load_items(
             reference: ReservationRef::new(&reference).map_err(corrupt)?,
             location: LocationId::from_uuid(r.get(2)),
             quantity: u32::try_from(quantity)
-                .map_err(|_| corrupt(format!("reservation quantity {quantity}")))?,
+                .ok()
+                .and_then(|q| Quantity::new(q).ok())
+                .ok_or_else(|| corrupt(format!("reservation quantity {quantity}")))?,
         });
     }
 

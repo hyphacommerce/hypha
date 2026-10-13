@@ -1,4 +1,6 @@
-use hypha_core::{InventoryItemId, LocationId, MarketId, RepoError, VariantId, Version, Versioned};
+use hypha_core::{
+    InventoryItemId, LocationId, MarketId, Quantity, RepoError, VariantId, Version, Versioned,
+};
 use hypha_inventory::{
     InventoryItem, InventoryItemRepo, Location, LocationRepo, MAX_STOCK, ReservationRef, repo::keys,
 };
@@ -40,6 +42,10 @@ fn item(n: u128, variant: u128) -> InventoryItem {
 
 fn reference(s: &str) -> ReservationRef {
     ReservationRef::new(s).unwrap()
+}
+
+fn qty(n: u32) -> Quantity {
+    Quantity::new(n).unwrap()
 }
 
 // ---------- locations ----------
@@ -159,9 +165,9 @@ fn stocked_item(n: u128, variant: u128) -> InventoryItem {
     // Location 2 has the whole line; then location 1 runs short and continues selling.
     let near = location(2, &[1], 0);
     let small = location(1, &[1], 0);
-    i.reserve(&reference("order-1"), 3, std::slice::from_ref(&near))
+    i.reserve(&reference("order-1"), qty(3), std::slice::from_ref(&near))
         .unwrap();
-    i.reserve(&reference("order-2"), 4, &[small]).unwrap();
+    i.reserve(&reference("order-2"), qty(4), &[small]).unwrap();
     i
 }
 
