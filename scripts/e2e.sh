@@ -209,8 +209,8 @@ step "create customer" 201 - -X POST "$BASE/customers" -H "$JSON" \
 CUSTOMER=$(id)
 contains "email is normalized" '"email":"ana@example.hr","first_name":"Ana"'
 step "rename customer" 200 - -X PATCH "$BASE/customers/$CUSTOMER" -H "$JSON" \
-    -d '{"first_name":"","last_name":"Horvat"}'
-contains "empty clears, others change" '"first_name":null,"last_name":"Horvat"'
+    -d '{"first_name":null,"last_name":"Horvat"}'
+contains "null clears, others change" '"first_name":null,"last_name":"Horvat"'
 step "add shipping address" 201 - -X POST "$BASE/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
 ADDRESS=$(address)
@@ -259,6 +259,11 @@ step "fixed prices on unknown list" 404 price_list_not_found -X PUT \
 step "fixed price in other currency" 422 fixed_price_currency_mismatch -X PUT \
     "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"RSD\"}}]}"
+step "misspelled PATCH field" 422 invalid_body -X PATCH "$BASE/customers/$CUSTOMER" -H "$JSON" \
+    -d '{"frist_name":"Ana"}'
+step "null for a field that can't be cleared" 422 invalid_body -X PATCH \
+    "$BASE/customers/$CUSTOMER" -H "$JSON" -d '{"email":null}'
+step "empty PATCH changes nothing" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{}'
 step "update unknown market" 404 market_not_found -X PATCH \
     "$BASE/markets/mkt_00000000000000000000000000000063" -H "$JSON" -d '{"prices_include_tax":true}'
 step "products for unknown catalog" 404 catalog_not_found -X POST \

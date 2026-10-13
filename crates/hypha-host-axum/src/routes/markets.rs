@@ -7,21 +7,23 @@ use hypha_core::{
 };
 use hypha_markets::{
     Catalog, CatalogContext, CreateCatalog, CreateMarket, CreatePriceList, FixedPrice, Market,
-    PriceList, add_catalog_products, assign_price_list, create_catalog, create_market,
-    create_price_list, remove_catalog_products, remove_fixed_prices, set_fixed_prices,
-    set_prices_include_tax,
+    PriceList, UpdateMarket, add_catalog_products, assign_price_list, create_catalog,
+    create_market, create_price_list, remove_catalog_products, remove_fixed_prices,
+    set_fixed_prices, update_market,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
     extract::{JsonBody, PathId},
+    patch,
     state::{SharedState, Storage},
 };
 
 // ---------- markets ----------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreateMarketRequest {
     name: String,
     countries: Vec<String>,
@@ -31,8 +33,10 @@ pub(super) struct CreateMarketRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct UpdateMarketRequest {
-    prices_include_tax: bool,
+    #[serde(default, deserialize_with = "patch::non_null")]
+    prices_include_tax: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -79,7 +83,10 @@ pub(super) async fn update_market_handler<S: Storage>(
 ) -> Result<Json<MarketResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
-    let market = set_prices_include_tax(&ctx, ports.markets(), id, req.prices_include_tax)
+    let input = UpdateMarket {
+        prices_include_tax: req.prices_include_tax,
+    };
+    let market = update_market(&ctx, ports.markets(), id, input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
     Ok(Json(MarketResponse::from(&market)))
@@ -88,6 +95,7 @@ pub(super) async fn update_market_handler<S: Storage>(
 // ---------- price lists ----------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreatePriceListRequest {
     currency: Currency,
     /// Basis points: -1000 = 10% off. Defaults to 0.
@@ -113,17 +121,20 @@ impl From<&PriceList> for PriceListResponse {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct SetFixedPricesRequest {
     fixed_prices: Vec<FixedPriceDto>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct FixedPriceDto {
     variant: VariantId,
     price: Money,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct RemoveFixedPricesRequest {
     variants: Vec<VariantId>,
 }
@@ -179,16 +190,19 @@ pub(super) async fn remove_fixed_prices_handler<S: Storage>(
 // ---------- catalogs ----------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreateCatalogRequest {
     market: MarketId,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CatalogProductsRequest {
     products: Vec<ProductId>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct AssignPriceListRequest {
     /// `null` detaches the current price list.
     price_list: Option<PriceListId>,

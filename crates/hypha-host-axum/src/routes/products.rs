@@ -14,6 +14,7 @@ use crate::{
 };
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreateProductRequest {
     handle: String,
     title: String,
@@ -21,6 +22,7 @@ pub(super) struct CreateProductRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct SetStatusRequest {
     status: ProductStatus,
 }

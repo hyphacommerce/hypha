@@ -17,24 +17,28 @@ use crate::{
 };
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreateCartRequest {
     /// Where the cart ships to; picks the market and the tax rates.
     country: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct AddLineRequest {
     variant: VariantId,
     quantity: u32,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct SetEmailRequest {
     /// `null` clears it.
     email: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct SetCustomerRequest {
     /// `null` unlinks the customer (the cart keeps their email).
     customer: Option<CustomerId>,

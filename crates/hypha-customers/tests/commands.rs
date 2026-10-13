@@ -281,21 +281,33 @@ fn get_unknown_customer_fails() {
 }
 
 #[test]
-fn update_changes_given_fields_and_empty_clears() {
+fn update_changes_given_fields_and_none_or_blank_clears() {
     let world = World::new();
     let c = world.create("ana@example.hr").unwrap();
+    world
+        .update(
+            c.id(),
+            UpdateCustomer {
+                first_name: Some(Some("Ana".to_string())),
+                phone: Some(Some("+385 1 234".to_string())),
+                ..UpdateCustomer::default()
+            },
+        )
+        .unwrap();
     let updated = world
         .update(
             c.id(),
             UpdateCustomer {
-                first_name: Some(String::new()),
-                last_name: Some("Horvat".to_string()),
+                first_name: Some(None),
+                last_name: Some(Some("Horvat".to_string())),
+                phone: Some(Some(" ".to_string())),
                 ..UpdateCustomer::default()
             },
         )
         .unwrap();
     assert_eq!(updated.first_name(), None);
     assert_eq!(updated.last_name(), Some("Horvat"));
+    assert_eq!(updated.phone(), None);
     assert_eq!(updated.email(), &email("ana@example.hr"));
     assert_eq!(world.stored(c.id()), updated);
 }

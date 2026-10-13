@@ -13,12 +13,14 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::ApiError,
     extract::{JsonBody, PathId},
+    patch,
     state::{SharedState, Storage},
 };
 
 // ---------- classes ----------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreateTaxClassRequest {
     name: String,
 }
@@ -39,6 +41,7 @@ impl From<&TaxClass> for TaxClassResponse {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct AssignTaxClassRequest {
     products: Vec<ProductId>,
     /// `null` puts the products back on each country's default rate.
@@ -73,6 +76,7 @@ pub(super) async fn assign_class<S: Storage>(
 // ---------- regions ----------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreateTaxRegionRequest {
     country: String,
     /// Parts per million: 250000 = 25%.
@@ -80,11 +84,14 @@ pub(super) struct CreateTaxRegionRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct UpdateTaxRegionRequest {
-    default_rate_ppm: u32,
+    #[serde(default, deserialize_with = "patch::non_null")]
+    default_rate_ppm: Option<u32>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct SetClassRateRequest {
     rate_ppm: u32,
 }
@@ -152,7 +159,10 @@ pub(super) async fn update_region<S: Storage>(
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
-    let region = set_default_rate(&ctx, ports.tax_regions(), id, req.default_rate_ppm).await?;
+    let region = match req.default_rate_ppm {
+        Some(rate) => set_default_rate(&ctx, ports.tax_regions(), id, rate).await?,
+        None => get_tax_region(&ctx, ports.tax_regions(), id).await?,
+    };
     Ok(Json(TaxRegionResponse::from(&region)))
 }
 

@@ -155,11 +155,17 @@ pub async fn create_market<M: MarketRepo, I: IdGenerator>(
     }
 }
 
-pub async fn set_prices_include_tax<M: MarketRepo>(
+/// Changes the fields that are `Some`; the rest keep their values.
+#[derive(Debug, Default)]
+pub struct UpdateMarket {
+    pub prices_include_tax: Option<bool>,
+}
+
+pub async fn update_market<M: MarketRepo>(
     ctx: &Ctx,
     markets: &M,
     id: MarketId,
-    include: bool,
+    input: UpdateMarket,
 ) -> Result<Market, CommandError> {
     ctx.require(Scope::MarketsWrite)?;
 
@@ -167,7 +173,9 @@ pub async fn set_prices_include_tax<M: MarketRepo>(
         .get(id)
         .await?
         .ok_or(CommandError::MarketNotFound(id))?;
-    market.set_prices_include_tax(include);
+    if let Some(include) = input.prices_include_tax {
+        market.set_prices_include_tax(include);
+    }
     markets.update(&mut market).await?;
     Ok(market)
 }

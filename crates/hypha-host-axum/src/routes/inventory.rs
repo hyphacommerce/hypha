@@ -14,12 +14,14 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::ApiError,
     extract::{JsonBody, PathId},
+    patch,
     state::{SharedState, Storage},
 };
 
 // ---------- locations ----------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreateLocationRequest {
     name: String,
     /// The markets whose buyers this location's stock is sold to.
@@ -32,9 +34,13 @@ pub(super) struct CreateLocationRequest {
 
 /// Every field optional: only the ones sent change.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct UpdateLocationRequest {
+    #[serde(default, deserialize_with = "patch::non_null")]
     name: Option<String>,
+    #[serde(default, deserialize_with = "patch::non_null")]
     markets: Option<Vec<MarketId>>,
+    #[serde(default, deserialize_with = "patch::non_null")]
     priority: Option<u32>,
 }
 
@@ -105,6 +111,7 @@ pub(super) async fn update_location_handler<S: Storage>(
 // ---------- items ----------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreateInventoryItemRequest {
     variant: VariantId,
     /// Defaults to true: creating an item is how stock tracking starts.
@@ -121,12 +128,16 @@ fn yes() -> bool {
 
 /// Every field optional: only the ones sent change.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct UpdateInventoryItemRequest {
+    #[serde(default, deserialize_with = "patch::non_null")]
     tracked: Option<bool>,
+    #[serde(default, deserialize_with = "patch::non_null")]
     continue_selling: Option<bool>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct SetOnHandRequest {
     on_hand: i64,
     /// The count last seen. If it moved since (a sale, another count), the request
@@ -135,6 +146,7 @@ pub(super) struct SetOnHandRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct AdjustOnHandRequest {
     /// Negative to remove stock.
     delta: i64,

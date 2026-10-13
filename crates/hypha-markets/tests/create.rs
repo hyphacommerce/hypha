@@ -10,8 +10,8 @@ use hypha_core::{
 use hypha_markets::{
     CatalogContext, CatalogRepo, CommandError, CreateCatalog, CreateMarket, CreatePriceList,
     FixedPrice, Market, MarketError, MarketRepo, MismatchedPrice, PriceListError, PriceListRepo,
-    add_catalog_products, create_catalog, create_market, create_price_list,
-    remove_catalog_products, remove_fixed_prices, set_fixed_prices, set_prices_include_tax,
+    UpdateMarket, add_catalog_products, create_catalog, create_market, create_price_list,
+    remove_catalog_products, remove_fixed_prices, set_fixed_prices, update_market,
 };
 use hypha_testkit::{
     InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo, SequentialIds,
@@ -361,31 +361,54 @@ fn remove_fixed_prices_deletes_them() {
     );
 }
 
-// ---- set_prices_include_tax ----
+// ---- update_market ----
 
 #[test]
-fn set_prices_include_tax_stores_it() {
+fn update_market_stores_prices_include_tax() {
     let markets = InMemoryMarketRepo::default();
     let ids = SequentialIds::default();
     let ctx = Ctx::system();
     let market = block_on(create_market(&ctx, &markets, &ids, balkans(&["RS"]))).unwrap();
 
-    let changed = block_on(set_prices_include_tax(&ctx, &markets, market.id(), false)).unwrap();
+    let changed = block_on(update_market(
+        &ctx,
+        &markets,
+        market.id(),
+        UpdateMarket {
+            prices_include_tax: Some(false),
+        },
+    ))
+    .unwrap();
 
     assert!(!changed.prices_include_tax());
-    assert_eq!(block_on(markets.get(market.id())), Ok(Some(changed)));
+    assert_eq!(
+        block_on(markets.get(market.id())),
+        Ok(Some(changed.clone()))
+    );
+
+    let unchanged = block_on(update_market(
+        &ctx,
+        &markets,
+        market.id(),
+        UpdateMarket::default(),
+    ))
+    .unwrap();
+    assert!(
+        !unchanged.prices_include_tax(),
+        "an absent field keeps its value"
+    );
 }
 
 #[test]
-fn set_prices_include_tax_rejects_unknown_market() {
+fn update_market_rejects_unknown_market() {
     let markets = InMemoryMarketRepo::default();
     let unknown = MarketId::from_uuid(Uuid::from_u128(99));
     assert_eq!(
-        block_on(set_prices_include_tax(
+        block_on(update_market(
             &Ctx::system(),
             &markets,
             unknown,
-            true
+            UpdateMarket::default()
         )),
         Err(CommandError::MarketNotFound(unknown))
     );

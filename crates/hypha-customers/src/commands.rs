@@ -104,13 +104,15 @@ pub async fn get_customer<R: CustomerRepo>(
     load(customers, id).await
 }
 
-/// Changes only the fields that are `Some`; an empty string clears an optional one.
+/// Changes only the fields that are `Some`, like a JSON Merge Patch: `Some(None)` clears
+/// an optional field (so does a blank string, which the setters trim away). The email
+/// can be changed but not cleared.
 #[derive(Default)]
 pub struct UpdateCustomer {
     pub email: Option<String>,
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
-    pub phone: Option<String>,
+    pub first_name: Option<Option<String>>,
+    pub last_name: Option<Option<String>>,
+    pub phone: Option<Option<String>>,
 }
 
 pub async fn update_customer<R: CustomerRepo>(
@@ -123,13 +125,13 @@ pub async fn update_customer<R: CustomerRepo>(
 
     let mut customer = load(customers, id).await?;
     if let Some(first_name) = input.first_name {
-        customer.set_first_name(Some(first_name))?;
+        customer.set_first_name(first_name)?;
     }
     if let Some(last_name) = input.last_name {
-        customer.set_last_name(Some(last_name))?;
+        customer.set_last_name(last_name)?;
     }
     if let Some(phone) = input.phone {
-        customer.set_phone(Some(phone))?;
+        customer.set_phone(phone)?;
     }
     let Some(email) = input.email else {
         customers.update(&mut customer).await?;

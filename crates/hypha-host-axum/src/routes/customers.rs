@@ -12,10 +12,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::ApiError,
     extract::{JsonBody, PathId},
+    patch,
     state::{SharedState, Storage},
 };
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CreateCustomerRequest {
     email: String,
     first_name: Option<String>,
@@ -23,18 +25,25 @@ pub(super) struct CreateCustomerRequest {
     phone: Option<String>,
 }
 
-/// Every field optional: only the ones sent change; `""` clears a name or phone.
+/// JSON Merge Patch (see `patch`): only the fields sent change, `null` clears a name or
+/// phone. The email can be changed but not cleared.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct UpdateCustomerRequest {
+    #[serde(default, deserialize_with = "patch::non_null")]
     email: Option<String>,
-    first_name: Option<String>,
-    last_name: Option<String>,
-    phone: Option<String>,
+    #[serde(default, deserialize_with = "patch::nullable")]
+    first_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "patch::nullable")]
+    last_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "patch::nullable")]
+    phone: Option<Option<String>>,
 }
 
 /// An address for the address book. Sending it again (PUT) replaces it whole,
 /// including whether it is a default.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct AddressRequest {
     first_name: Option<String>,
     last_name: String,
