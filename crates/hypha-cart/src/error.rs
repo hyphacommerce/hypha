@@ -11,6 +11,8 @@ pub enum CartError {
     LineNotFound(VariantId),
     #[error("variant {0} is on more than one line")]
     DuplicateLine(VariantId),
+    #[error("a cart linked to a customer needs an email; unlink the customer first")]
+    EmailRequired,
 }
 
 /// Why a line can't be priced. Returned as an error by `price_line` (and so by `add_line`),
@@ -46,6 +48,7 @@ impl ErrorCode for CartError {
             CartError::QuantityOverflow => "quantity_overflow",
             CartError::LineNotFound(_) => "line_not_found",
             CartError::DuplicateLine(_) => "duplicate_line",
+            CartError::EmailRequired => "email_required",
         }
     }
 }

@@ -66,8 +66,14 @@ impl Cart {
         }
     }
 
-    pub fn set_email(&mut self, email: Option<Email>) {
+    /// A linked customer is who the order is for, so their cart keeps an email: clearing
+    /// it fails until the customer is unlinked.
+    pub fn set_email(&mut self, email: Option<Email>) -> Result<(), CartError> {
+        if email.is_none() && self.customer.is_some() {
+            return Err(CartError::EmailRequired);
+        }
         self.email = email;
+        Ok(())
     }
 
     /// Links the cart to a customer and takes their email; `None` unlinks it and keeps
@@ -198,7 +204,11 @@ impl Cart {
 
     /// Rebuilds a cart from storage: quantities must be at least 1 and each variant may
     /// appear on one line only (`add_line` merges, so a second line means bad data).
+    /// A cart with a customer has an email.
     pub fn restore(s: CartSnapshot) -> Result<Cart, CartError> {
+        if s.customer.is_some() && s.email.is_none() {
+            return Err(CartError::EmailRequired);
+        }
         let mut lines: Vec<CartLine> = Vec::with_capacity(s.lines.len());
         for line in s.lines {
             if lines.iter().any(|l| l.variant == line.variant) {
@@ -276,11 +286,28 @@ mod tests {
         let mut c = cart();
         let ana = Email::new("ana@example.hr").unwrap();
         let customer = CustomerId::from_uuid(Uuid::from_u128(5));
-        c.set_email(Some(Email::new("old@example.hr").unwrap()));
+        c.set_email(Some(Email::new("old@example.hr").unwrap()))
+            .unwrap();
         c.set_customer(Some((customer, ana.clone())));
         assert_eq!((c.customer(), c.email()), (Some(customer), Some(&ana)));
         c.set_customer(None);
         assert_eq!((c.customer(), c.email()), (None, Some(&ana)));
+    }
+
+    #[test]
+    fn a_linked_customer_keeps_the_email() {
+        let mut c = cart();
+        let ana = Email::new("ana@example.hr").unwrap();
+        c.set_customer(Some((
+            CustomerId::from_uuid(Uuid::from_u128(5)),
+            ana.clone(),
+        )));
+        assert_eq!(c.set_email(None), Err(CartError::EmailRequired));
+        assert_eq!(c.email(), Some(&ana));
+
+        let mut s = c.snapshot();
+        s.email = None;
+        assert_eq!(Cart::restore(s), Err(CartError::EmailRequired));
     }
 
     #[test]

@@ -232,7 +232,7 @@ pub async fn set_cart_email<S: CartPorts>(
 
     let email = email.as_deref().map(Email::new).transpose()?;
     let mut cart = load_cart(ports, id).await?;
-    cart.set_email(email);
+    cart.set_email(email)?;
     ports.carts().update(&mut cart).await?;
     Ok(cart)
 }

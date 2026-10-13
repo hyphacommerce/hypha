@@ -17,7 +17,7 @@
 | C2 | **One customer per email** (Shopify), not Medusa's guest + registered pair. Email is a unique key; emails are stored lowercased, so the comparison is case-insensitive |
 | C3 | **No accounts or login yet.** Customer auth needs the auth work on the roadmap; an account state is added then |
 | C4 | Customers own an address book (`addr_…` entries) with an optional default shipping and default billing address. `Address` is a validated value type in `hypha-core`, because orders snapshot addresses too |
-| C5 | A cart has an optional `email` and `customer`, like Shopify's `buyerIdentity`. Setting the customer also sets the cart's email to theirs |
+| C5 | A cart has an optional `email` and `customer`, like Shopify's `buyerIdentity`. Setting the customer also sets the cart's email to theirs; while one is linked the email can be changed but not cleared |
 | C6 | `find_or_create_customer(email)` is the command checkout uses, so a guest becomes a customer on their first order |
 | C7 | `Email` is a validated value type in `hypha-core`: trimmed, lowercased, one `@`, a dot in the domain, no spaces, at most 254 characters |
 

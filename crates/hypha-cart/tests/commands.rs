@@ -842,3 +842,23 @@ fn set_cart_customer_requires_customers_read_to_link() {
     // Unlinking reveals nothing and stays allowed.
     assert!(block_on(set_cart_customer(&cart_writer, &world, cart, None)).is_ok());
 }
+
+#[test]
+fn a_linked_cart_keeps_its_email_until_the_customer_is_unlinked() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let id = CustomerId::from_uuid(Uuid::from_u128(1501));
+    let ana = Email::new("ana@example.hr").unwrap();
+    block_on(world.customers.insert(&mut Customer::new(id, ana.clone()))).unwrap();
+    block_on(set_cart_customer(&Ctx::system(), &world, cart, Some(id))).unwrap();
+
+    assert_eq!(
+        block_on(set_cart_email(&Ctx::system(), &world, cart, None)),
+        Err(CommandError::Cart(CartError::EmailRequired))
+    );
+    assert_eq!(world.get(cart).unwrap().email, Some(ana));
+
+    block_on(set_cart_customer(&Ctx::system(), &world, cart, None)).unwrap();
+    let cleared = block_on(set_cart_email(&Ctx::system(), &world, cart, None)).unwrap();
+    assert_eq!(cleared.email(), None);
+}

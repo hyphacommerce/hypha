@@ -74,7 +74,8 @@ async fn update_round_trips<R: CartRepo>(repo: &R) {
     c.set_quantity(vid(11), qty(5)).unwrap();
     c.remove_line(vid(21));
     c.add_line(pid(3), vid(31), qty(2)).unwrap();
-    c.set_email(Some(Email::new("ivo@example.hr").unwrap()));
+    c.set_email(Some(Email::new("ivo@example.hr").unwrap()))
+        .unwrap();
     repo.update(&mut c).await.unwrap();
 
     assert_eq!(c.version(), Version::new(2));
