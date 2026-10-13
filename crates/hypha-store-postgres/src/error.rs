@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use hypha_cart::repo::keys as cart_keys;
 use hypha_core::RepoError;
+use hypha_customers::repo::keys as customer_keys;
 use hypha_inventory::repo::keys as inventory_keys;
 use hypha_markets::repo::keys as market_keys;
 use hypha_products::repo::keys as product_keys;
@@ -29,6 +30,8 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
         "inventory_item_variant",
         inventory_keys::INVENTORY_ITEM_VARIANT,
     ),
+    ("customers_pkey", customer_keys::CUSTOMER_ID),
+    ("customer_email", customer_keys::CUSTOMER_EMAIL),
 ];
 
 /// Maps a driver error to the repo error the ports promise.

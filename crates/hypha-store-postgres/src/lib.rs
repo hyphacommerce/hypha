@@ -14,6 +14,7 @@
 
 mod carts;
 mod columns;
+mod customers;
 mod error;
 mod inventory;
 mod markets;
