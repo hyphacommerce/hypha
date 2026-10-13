@@ -70,7 +70,7 @@ Each fix starts with a failing test.
 
 Decide first; each is easier now than after orders build on it.
 
-- [ ] **D1. Split `CartPorts` into per-domain accessor traits.**
+- [x] **D1. Split `CartPorts` into per-domain accessor traits.**
   Today every host route reaches its repos through `hypha_cart::CartPorts`
   (`hypha-host-axum/src/state.rs:40`), and the 10-port plumbing is written out 4 times
   (trait + `&T` impl, `MemoryStorage`, `PgStore`, the cart test world). Orders would
@@ -80,26 +80,32 @@ Decide first; each is easier now than after orders build on it.
   bound only what they use; hosts bound the union. Testkit ships one `InMemoryStore`
   used by the host and the tests. Static dispatch, no `Send` change.
   *Recommendation: yes, before orders.*
-- [ ] **D2. One status for `out_of_stock`.** 422 from `add_line`
+  Done. Named `InMemoryPorts` (not `InMemoryStore`: "store" means a tenant here); a
+  `PricingPorts` union covers what pricing reads.
+- [x] **D2. One status for `out_of_stock`.** 422 from `add_line`
   (`host-axum/src/error.rs:140`), 409 from inventory (`:186-187`). *Recommendation: 409*
   (depends on current stock, not on bad input).
-- [ ] **D3. One PATCH convention.** Customers clear with `""`
+- [x] **D3. One PATCH convention.** Customers clear with `""`
   (`routes/customers.rs:26`), cart routes with `null`, `PATCH /markets/{id}` and
   `PATCH /tax-regions/{id}` require every field. *Recommendation: JSON Merge Patch
   everywhere* (absent = keep, `null` = clear; a double `Option` in the DTOs) and
   `#[serde(deny_unknown_fields)]` on request DTOs, so a typo isn't a silent 200.
-- [ ] **D4. Restore-only errors.** `DuplicateClassRate` maps to 409
+- [x] **D4. Restore-only errors.** `DuplicateClassRate` maps to 409
   (`host-axum/src/error.rs:163`), inventory's and customers' to 500; all are unreachable
   because adapters wrap `restore` failures as `Backend`. Option: a separate error type
   for `restore`, so `CommandError` and the host don't carry dead arms.
-- [ ] **D5. Units in field names.** `adjustment` is basis points, `rate` and
+  Done: a `RestoreError` in cart, customers, inventory and tax, wrapping the domain
+  error. Restores that only re-run constructor rules keep the domain error.
+- [x] **D5. Units in field names.** `adjustment` is basis points, `rate` and
   `default_rate` are parts per million. Rename to `adjustment_bps` / `rate_ppm`? (Breaking
   for the API, which has no users yet.)
-- [ ] **D6. Country input.** Carts and addresses take `CountryCode` in the DTO (bad input
+  Done: `adjustment_bps`, `rate_ppm`, `default_rate_ppm`.
+- [x] **D6. Country input.** Carts and addresses take `CountryCode` in the DTO (bad input
   → `invalid_body`), markets and tax regions take `String` (→ `invalid_country_code`).
   *Recommendation: take `String`, validate in the command.*
-- [ ] **D7. Clearing a cart's email while a customer is linked** leaves `customer` set and
+- [x] **D7. Clearing a cart's email while a customer is linked** leaves `customer` set and
   `email` empty (`hypha-cart/src/cart.rs:69`). Unlink, refuse, or allow?
+  Done: refuse (`email_required`); unlink first. Changing the email stays allowed.
 
 ## Phase 3: cleanup (branch `chore/cleanup`)
 
