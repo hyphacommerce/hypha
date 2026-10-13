@@ -488,6 +488,7 @@ dependencies = [
  "hypha-core",
  "hypha-markets",
  "hypha-products",
+ "hypha-tax",
  "hypha-testkit",
  "tokio",
  "tokio-postgres",

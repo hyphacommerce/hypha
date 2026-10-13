@@ -4,6 +4,7 @@ use hypha_cart::repo::keys as cart_keys;
 use hypha_core::RepoError;
 use hypha_markets::repo::keys as market_keys;
 use hypha_products::repo::keys as product_keys;
+use hypha_tax::repo::keys as tax_keys;
 use tokio_postgres::error::SqlState;
 
 /// Unique constraint names (see `migrations/`) and the repo key each one reports.
@@ -18,6 +19,9 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("catalog_context", market_keys::CATALOG_CONTEXT),
     ("price_lists_pkey", market_keys::PRICE_LIST_ID),
     ("carts_pkey", cart_keys::CART_ID),
+    ("tax_classes_pkey", tax_keys::TAX_CLASS_ID),
+    ("tax_regions_pkey", tax_keys::TAX_REGION_ID),
+    ("tax_region_country", tax_keys::TAX_REGION_COUNTRY),
 ];
 
 /// Maps a driver error to the repo error the ports promise.

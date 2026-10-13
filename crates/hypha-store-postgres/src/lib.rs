@@ -19,6 +19,7 @@ mod markets;
 mod migrate;
 mod products;
 mod store;
+mod tax;
 
 pub use migrate::{CORE, MigrateError, Migration, MigrationSet, migrate};
 pub use store::{PgConnection, PgStore};
