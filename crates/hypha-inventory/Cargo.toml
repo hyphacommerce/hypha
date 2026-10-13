@@ -1,0 +1,17 @@
+[package]
+name = "hypha-inventory"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "0.4"
+
+[lints]
+workspace = true

@@ -87,6 +87,36 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         rows.insert(id, row.clone());
         Ok(())
     }
+
+    /// Updates every row or none: all versions are checked (and unique keys too) before
+    /// anything is written, like one database transaction.
+    pub(crate) fn update_many(
+        &self,
+        rows_to_write: &mut [T],
+        id_of: impl Fn(&T) -> K,
+        unique: UniqueCheck<'_, T>,
+    ) -> Result<(), RepoError> {
+        let mut rows = self.rows.lock().unwrap();
+        for row in rows_to_write.iter() {
+            let id = id_of(row);
+            match rows.get(&id) {
+                Some(stored) if stored.version() == row.version() => {}
+                _ => return Err(RepoError::StaleVersion),
+            }
+            if let Some(key) = rows
+                .iter()
+                .filter(|(other_id, _)| **other_id != id)
+                .find_map(|(_, other)| unique(row, other))
+            {
+                return Err(RepoError::Duplicate(key));
+            }
+        }
+        for row in rows_to_write.iter_mut() {
+            row.set_version(row.version().next());
+            rows.insert(id_of(row), row.clone());
+        }
+        Ok(())
+    }
 }
 
 /// For tables with no unique keys besides the ID.

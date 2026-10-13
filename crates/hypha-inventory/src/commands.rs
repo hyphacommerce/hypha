@@ -1,0 +1,312 @@
+use hypha_core::{
+    AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, LocationId, MarketId, RepoError,
+    Scope, VariantId,
+};
+use thiserror::Error;
+
+use crate::{
+    InventoryError, InventoryItem, Location,
+    repo::{InventoryItemRepo, LocationRepo, keys},
+};
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum CommandError {
+    #[error(transparent)]
+    Auth(#[from] AuthError),
+    #[error(transparent)]
+    Repo(#[from] RepoError),
+    #[error(transparent)]
+    Inventory(#[from] InventoryError),
+    #[error("location {0} not found")]
+    LocationNotFound(LocationId),
+    #[error("inventory item {0} not found")]
+    InventoryItemNotFound(InventoryItemId),
+    #[error("variant {variant} already has inventory item {item}")]
+    InventoryItemExists {
+        variant: VariantId,
+        item: InventoryItemId,
+    },
+    /// Every line that couldn't be reserved, so a buyer sees all of them at once.
+    #[error("not enough stock for {} line(s)", lines.len())]
+    OutOfStock { lines: Vec<Shortage> },
+}
+
+impl ErrorCode for CommandError {
+    fn code(&self) -> &'static str {
+        match self {
+            CommandError::Auth(e) => e.code(),
+            CommandError::Repo(e) => e.code(),
+            CommandError::Inventory(e) => e.code(),
+            CommandError::LocationNotFound(_) => "location_not_found",
+            CommandError::InventoryItemNotFound(_) => "inventory_item_not_found",
+            CommandError::InventoryItemExists { .. } => "inventory_item_exists",
+            CommandError::OutOfStock { .. } => "out_of_stock",
+        }
+    }
+}
+
+/// One line that couldn't be reserved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shortage {
+    pub variant: VariantId,
+    pub requested: u32,
+    /// Total available in the market's locations.
+    pub available: i64,
+}
+
+// ---------- locations ----------
+
+pub struct CreateLocation {
+    pub name: String,
+    /// The markets whose buyers this location's stock is sold to. Markets are linked by
+    /// ID only (a leaf crate can't depend on `hypha-markets`); an unknown one never
+    /// matches a cart.
+    pub markets: Vec<MarketId>,
+    /// Lower goes first when several locations could fill a line.
+    pub priority: u32,
+}
+
+pub async fn create_location<L: LocationRepo, I: IdGenerator>(
+    ctx: &Ctx,
+    locations: &L,
+    ids: &I,
+    input: CreateLocation,
+) -> Result<Location, CommandError> {
+    ctx.require(Scope::InventoryWrite)?;
+
+    let mut location = Location::new(
+        LocationId::from_uuid(ids.new_uuid()),
+        input.name,
+        input.markets,
+        input.priority,
+    )?;
+    locations.insert(&mut location).await?;
+    Ok(location)
+}
+
+pub async fn get_location<L: LocationRepo>(
+    ctx: &Ctx,
+    locations: &L,
+    id: LocationId,
+) -> Result<Location, CommandError> {
+    ctx.require(Scope::InventoryRead)?;
+    load_location(locations, id).await
+}
+
+/// Changes only the fields that are `Some`.
+#[derive(Default)]
+pub struct UpdateLocation {
+    pub name: Option<String>,
+    pub markets: Option<Vec<MarketId>>,
+    pub priority: Option<u32>,
+}
+
+pub async fn update_location<L: LocationRepo>(
+    ctx: &Ctx,
+    locations: &L,
+    id: LocationId,
+    input: UpdateLocation,
+) -> Result<Location, CommandError> {
+    ctx.require(Scope::InventoryWrite)?;
+
+    let mut location = load_location(locations, id).await?;
+    if let Some(name) = input.name {
+        location.set_name(name)?;
+    }
+    if let Some(markets) = input.markets {
+        location.set_markets(markets)?;
+    }
+    if let Some(priority) = input.priority {
+        location.set_priority(priority);
+    }
+    locations.update(&mut location).await?;
+    Ok(location)
+}
+
+async fn load_location<L: LocationRepo>(
+    locations: &L,
+    id: LocationId,
+) -> Result<Location, CommandError> {
+    locations
+        .get(id)
+        .await?
+        .ok_or(CommandError::LocationNotFound(id))
+}
+
+// ---------- items ----------
+
+pub struct CreateInventoryItem {
+    /// Linked by ID only, like tax classes link to products: the inventory crate can't
+    /// check that the variant exists.
+    pub variant: VariantId,
+    pub tracked: bool,
+    pub continue_selling: bool,
+}
+
+pub async fn create_inventory_item<R: InventoryItemRepo, I: IdGenerator>(
+    ctx: &Ctx,
+    items: &R,
+    ids: &I,
+    input: CreateInventoryItem,
+) -> Result<InventoryItem, CommandError> {
+    ctx.require(Scope::InventoryWrite)?;
+
+    if let Some(existing) = items.get_by_variant(input.variant).await? {
+        return Err(item_exists(&existing));
+    }
+    let mut item = InventoryItem::new(
+        InventoryItemId::from_uuid(ids.new_uuid()),
+        input.variant,
+        input.tracked,
+        input.continue_selling,
+    );
+    match items.insert(&mut item).await {
+        Ok(()) => Ok(item),
+        // Lost a race with another request for the same variant: report it the same way.
+        Err(RepoError::Duplicate(keys::INVENTORY_ITEM_VARIANT)) => {
+            match items.get_by_variant(input.variant).await? {
+                Some(existing) => Err(item_exists(&existing)),
+                None => Err(RepoError::Duplicate(keys::INVENTORY_ITEM_VARIANT).into()),
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn item_exists(existing: &InventoryItem) -> CommandError {
+    CommandError::InventoryItemExists {
+        variant: existing.variant(),
+        item: existing.id(),
+    }
+}
+
+pub async fn get_inventory_item<R: InventoryItemRepo>(
+    ctx: &Ctx,
+    items: &R,
+    id: InventoryItemId,
+) -> Result<InventoryItem, CommandError> {
+    ctx.require(Scope::InventoryRead)?;
+    load_item(items, id).await
+}
+
+/// The variant's item, or `None` if stock was never set up for it, which means
+/// untracked (design note 0004, I3).
+pub async fn get_variant_inventory<R: InventoryItemRepo>(
+    ctx: &Ctx,
+    items: &R,
+    variant: VariantId,
+) -> Result<Option<InventoryItem>, CommandError> {
+    ctx.require(Scope::InventoryRead)?;
+    Ok(items.get_by_variant(variant).await?)
+}
+
+/// Changes only the fields that are `Some`.
+#[derive(Default)]
+pub struct UpdateInventoryItem {
+    pub tracked: Option<bool>,
+    pub continue_selling: Option<bool>,
+}
+
+pub async fn update_inventory_item<R: InventoryItemRepo>(
+    ctx: &Ctx,
+    items: &R,
+    id: InventoryItemId,
+    input: UpdateInventoryItem,
+) -> Result<InventoryItem, CommandError> {
+    ctx.require(Scope::InventoryWrite)?;
+
+    let mut item = load_item(items, id).await?;
+    if let Some(tracked) = input.tracked {
+        item.set_tracked(tracked);
+    }
+    if let Some(continue_selling) = input.continue_selling {
+        item.set_continue_selling(continue_selling);
+    }
+    items.update(&mut item).await?;
+    Ok(item)
+}
+
+pub struct SetOnHand {
+    pub item: InventoryItemId,
+    pub location: LocationId,
+    pub quantity: i64,
+    /// The count the caller last saw; the change is refused if it moved since (I10).
+    pub expected: Option<i64>,
+}
+
+/// Sets the count at a location. Retried on a concurrent change (a checkout reserving
+/// the same item), re-checking `expected` against fresh data each time.
+pub async fn set_on_hand<R: InventoryItemRepo, L: LocationRepo>(
+    ctx: &Ctx,
+    items: &R,
+    locations: &L,
+    input: SetOnHand,
+) -> Result<InventoryItem, CommandError> {
+    ctx.require(Scope::InventoryWrite)?;
+
+    load_location(locations, input.location).await?;
+    retry_on_conflict(async || {
+        let mut item = load_item(items, input.item).await?;
+        item.set_on_hand(input.location, input.quantity, input.expected)?;
+        items.update(&mut item).await?;
+        Ok(item)
+    })
+    .await
+}
+
+pub struct AdjustOnHand {
+    pub item: InventoryItemId,
+    pub location: LocationId,
+    /// Negative to remove stock.
+    pub delta: i64,
+}
+
+/// Adds to (or removes from) the count at a location, e.g. a delivery arrived.
+/// Retried on a concurrent change; adding is safe to repeat on fresh data.
+pub async fn adjust_on_hand<R: InventoryItemRepo, L: LocationRepo>(
+    ctx: &Ctx,
+    items: &R,
+    locations: &L,
+    input: AdjustOnHand,
+) -> Result<InventoryItem, CommandError> {
+    ctx.require(Scope::InventoryWrite)?;
+
+    load_location(locations, input.location).await?;
+    retry_on_conflict(async || {
+        let mut item = load_item(items, input.item).await?;
+        item.adjust_on_hand(input.location, input.delta)?;
+        items.update(&mut item).await?;
+        Ok(item)
+    })
+    .await
+}
+
+async fn load_item<R: InventoryItemRepo>(
+    items: &R,
+    id: InventoryItemId,
+) -> Result<InventoryItem, CommandError> {
+    items
+        .get(id)
+        .await?
+        .ok_or(CommandError::InventoryItemNotFound(id))
+}
+
+/// How many times a stock write is tried before a conflict is reported.
+pub const MAX_ATTEMPTS: u32 = 3;
+
+/// Runs `attempt` again (it re-reads everything) when its write lost a race, up to
+/// `MAX_ATTEMPTS` times in total (design note 0004, section 3). Any other result,
+/// including a real shortage found on fresh data, is returned as is.
+async fn retry_on_conflict<T>(
+    attempt: impl AsyncFn() -> Result<T, CommandError>,
+) -> Result<T, CommandError> {
+    let mut tries = 1;
+    loop {
+        match attempt().await {
+            Err(CommandError::Repo(RepoError::StaleVersion)) if tries < MAX_ATTEMPTS => {
+                tries += 1;
+            }
+            result => return result,
+        }
+    }
+}

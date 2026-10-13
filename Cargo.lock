@@ -448,6 +448,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-inventory"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-markets"
 version = "0.1.0"
 dependencies = [
@@ -514,6 +525,7 @@ version = "0.1.0"
 dependencies = [
  "hypha-cart",
  "hypha-core",
+ "hypha-inventory",
  "hypha-markets",
  "hypha-products",
  "hypha-tax",

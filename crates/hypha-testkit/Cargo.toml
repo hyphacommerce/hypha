@@ -10,6 +10,7 @@ hypha-products = { path = "../hypha-products" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-cart = { path = "../hypha-cart" }
 hypha-tax = { path = "../hypha-tax" }
+hypha-inventory = { path = "../hypha-inventory" }
 uuid.workspace = true
 
 [dev-dependencies]
