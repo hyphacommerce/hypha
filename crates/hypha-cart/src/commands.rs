@@ -13,7 +13,8 @@ use hypha_tax::{TaxClassRepo, TaxContext, TaxRegionRepo};
 use thiserror::Error;
 
 use crate::{
-    Cart, CartError, CartRepo, LineError, PricedCart, Quantity, check_stock, price_cart, price_line,
+    Cart, CartError, CartRepo, LineError, LineStatus, PricedCart, Quantity, check_stock,
+    price_cart, price_line,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -201,7 +202,18 @@ pub async fn add_line<S: CartPorts>(
 
     let tax = load_tax(ports, &cart, &pricing.market).await?;
     let cart_products = load_products(ports, &cart).await?;
-    let priced = price_cart(&cart, &cart_products, &pricing, &tax, &stock)?;
+    let priced = price_cart(&cart, &cart_products, &pricing, &tax, &stock);
+
+    // The strict checks above passed, so if the new line still comes back unavailable,
+    // its total (or the cart's with it) doesn't fit: refuse it rather than store it.
+    if let Some(LineStatus::Unavailable(reason)) = priced
+        .lines
+        .iter()
+        .find(|l| l.variant == input.variant)
+        .map(|l| &l.status)
+    {
+        return Err(CommandError::Line(reason.clone()));
+    }
 
     // Fails with StaleVersion (409) if another request changed the cart meanwhile,
     // instead of silently dropping that request's line.
@@ -279,7 +291,7 @@ pub async fn get_cart<S: CartPorts>(
     let stock = load_stock(ports, &cart).await?;
     let cart_products = load_products(ports, &cart).await?;
 
-    Ok(price_cart(&cart, &cart_products, &pricing, &tax, &stock)?)
+    Ok(price_cart(&cart, &cart_products, &pricing, &tax, &stock))
 }
 
 /// Everything needed to price the cart's lines, with a fixed number of queries

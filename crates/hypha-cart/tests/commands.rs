@@ -7,7 +7,7 @@ use hypha_core::{
     LocationId, MarketId, Money, Price, PriceListId, ProductId, Scope, TaxClassId, TaxRate,
     TaxRegionId, UserId, VariantId,
 };
-use hypha_core::{CustomerId, Email, EmailError};
+use hypha_core::{CustomerId, Email, EmailError, MoneyError};
 use hypha_customers::{Customer, CustomerRepo};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
 use hypha_markets::{
@@ -769,4 +769,44 @@ fn set_cart_customer_rejects_an_unknown_customer() {
         )),
         Err(CommandError::CustomerNotFound(unknown))
     );
+}
+
+// ---- review fixes (docs/plans/2026-10-14-review-cleanup.md) ----
+
+/// B1: a line whose total overflows used to be stored (and then shown as unavailable).
+#[test]
+fn add_line_refuses_a_line_whose_total_overflows_and_stores_nothing() {
+    let world = World::new();
+    let cart = world.create_cart();
+    // +100 000 000 bp: a mug costs 1000 × 10 001 = 10 001 000 cents.
+    world.set_adjustment(100_000_000);
+
+    // 10 001 000 × 1 000 000 000 is above Money::MAX_AMOUNT.
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "mug", 1_000_000_000),
+        Err(CommandError::Line(LineError::Money(MoneyError::Overflow)))
+    );
+    assert_eq!(world.stored_line_count(cart), 0);
+}
+
+/// B2: lines that each fit can stop fitting together after a price change; the cart
+/// must stay readable, with the line that doesn't fit marked unavailable.
+#[test]
+fn a_cart_whose_total_overflows_stays_readable() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 30_000_000).unwrap();
+    world.add(&Ctx::system(), cart, "cup", 30_000_000).unwrap();
+
+    // +2 000 000 000 bp: 200 001 000 cents each, so each line is 6.00003 × 10^15
+    // (fits) but both together are 1.2 × 10^16 (doesn't).
+    world.set_adjustment(2_000_000_000);
+    let priced = world.get(cart).unwrap();
+
+    assert!(priced.lines[0].is_available());
+    assert_eq!(
+        priced.lines[1].status,
+        LineStatus::Unavailable(LineError::Money(MoneyError::Overflow))
+    );
+    assert_eq!(priced.total, eur(6_000_030_000_000_000));
 }
