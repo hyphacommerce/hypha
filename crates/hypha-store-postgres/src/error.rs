@@ -53,7 +53,11 @@ pub(crate) fn repo_error(e: tokio_postgres::Error) -> RepoError {
         // Two transactions locking the same rows in different orders (`update_many` on
         // overlapping items): Postgres aborts one. That is a concurrent change, safe to
         // retry like any other stale write.
-        if *db.code() == SqlState::T_R_DEADLOCK_DETECTED {
+        // A REPEATABLE READ transaction that can't be serialized with a concurrent write
+        // (the read-only loads in `store.rs`) is the same situation: retry on fresh data.
+        if *db.code() == SqlState::T_R_DEADLOCK_DETECTED
+            || *db.code() == SqlState::T_R_SERIALIZATION_FAILURE
+        {
             return RepoError::StaleVersion;
         }
         // `tokio_postgres::Error` only displays "db error"; the server's message is in here.
