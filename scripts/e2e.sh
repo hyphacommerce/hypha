@@ -83,6 +83,10 @@ contains "prices exclude tax by default" '"prices_include_tax":false'
 step "prices include tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
 contains "market now includes tax" '"prices_include_tax":true'
 step "back to excluding tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
+step "sell to Slovenia too" 200 - -X POST "$BASE/markets/$MARKET/countries" -H "$JSON" -d '{"country":"SI"}'
+contains "Slovenia added" '"countries":["HR","DE","SI"]'
+step "stop selling to Slovenia" 200 - -X DELETE "$BASE/markets/$MARKET/countries/SI"
+contains "Slovenia removed" '"countries":["HR","DE"]'
 step "create price list (-10%)" 201 - -X POST "$BASE/price-lists" -H "$JSON" \
     -d '{"currency":"EUR","adjustment_bps":-1000}'
 LIST=$(id)
@@ -248,6 +252,14 @@ step "duplicate handle" 409 handle_taken -X POST "$BASE/products" -H "$JSON" \
     -d '{"handle":"mug","title":"Mug 2","price":{"amount":1,"currency":"EUR"}}'
 step "country in other market" 409 country_in_other_market -X POST "$BASE/markets" -H "$JSON" \
     -d '{"name":"DACH","countries":["AT","DE"],"currency":"EUR"}'
+step "create Serbia market" 201 - -X POST "$BASE/markets" -H "$JSON" \
+    -d '{"name":"Serbia","countries":["RS"],"currency":"RSD"}'
+SERBIA=$(id)
+step "add a country another market has" 409 country_in_other_market -X POST \
+    "$BASE/markets/$MARKET/countries" -H "$JSON" -d '{"country":"RS"}'
+step "remove a market's last country" 422 last_country -X DELETE "$BASE/markets/$SERBIA/countries/RS"
+step "remove a country the market lacks" 404 country_not_in_market -X DELETE \
+    "$BASE/markets/$MARKET/countries/FR"
 step "second catalog for market" 409 catalog_exists -X POST "$BASE/catalogs" -H "$JSON" \
     -d "{\"market\":\"$MARKET\"}"
 step "create RSD price list" 201 - -X POST "$BASE/price-lists" -H "$JSON" -d '{"currency":"RSD"}'

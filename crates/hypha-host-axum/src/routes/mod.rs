@@ -11,7 +11,7 @@ mod taxes;
 
 use axum::{
     Router,
-    routing::{get, patch, post, put},
+    routing::{delete, get, patch, post, put},
 };
 
 use crate::{
@@ -39,6 +39,14 @@ macro_rules! router {
             .route(
                 "/markets/{id}",
                 patch(markets::update_market_handler::<$storage>),
+            )
+            .route(
+                "/markets/{id}/countries",
+                post(markets::add_country_handler::<$storage>),
+            )
+            .route(
+                "/markets/{id}/countries/{country}",
+                delete(markets::remove_country_handler::<$storage>),
             )
             .route(
                 "/price-lists",

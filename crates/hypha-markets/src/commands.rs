@@ -169,15 +169,62 @@ pub async fn update_market<M: MarketRepo>(
 ) -> Result<Market, CommandError> {
     ctx.require(Scope::MarketsWrite)?;
 
-    let mut market = markets
-        .get(id)
-        .await?
-        .ok_or(CommandError::MarketNotFound(id))?;
+    let mut market = load_market(markets, id).await?;
     if let Some(include) = input.prices_include_tax {
         market.set_prices_include_tax(include);
     }
     markets.update(&mut market).await?;
     Ok(market)
+}
+
+/// Starts selling to `country` (ISO 3166-1 alpha-2) in this market. A country belongs to
+/// one market, so one that another market sells to is `CountryInOtherMarket`.
+pub async fn add_market_country<M: MarketRepo>(
+    ctx: &Ctx,
+    markets: &M,
+    id: MarketId,
+    country: &str,
+) -> Result<Market, CommandError> {
+    ctx.require(Scope::MarketsWrite)?;
+
+    let country = CountryCode::new(country)?;
+    let mut market = load_market(markets, id).await?;
+    market.add_country(country)?;
+    if let Some(conflict) = country_conflict(markets, &market).await? {
+        return Err(conflict);
+    }
+
+    match markets.update(&mut market).await {
+        Ok(()) => Ok(market),
+        Err(RepoError::Duplicate(keys::COUNTRY)) => Err(country_conflict(markets, &market)
+            .await?
+            .unwrap_or(CommandError::Repo(RepoError::Duplicate(keys::COUNTRY)))),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Stops selling to `country` in this market. Its last country can't be removed.
+/// Existing carts keep the market they were created in.
+pub async fn remove_market_country<M: MarketRepo>(
+    ctx: &Ctx,
+    markets: &M,
+    id: MarketId,
+    country: &str,
+) -> Result<Market, CommandError> {
+    ctx.require(Scope::MarketsWrite)?;
+
+    let country = CountryCode::new(country)?;
+    let mut market = load_market(markets, id).await?;
+    market.remove_country(country)?;
+    markets.update(&mut market).await?;
+    Ok(market)
+}
+
+async fn load_market<M: MarketRepo>(markets: &M, id: MarketId) -> Result<Market, CommandError> {
+    markets
+        .get(id)
+        .await?
+        .ok_or(CommandError::MarketNotFound(id))
 }
 
 /// `CountryInOtherMarket` for the first of `market`'s countries another market owns.

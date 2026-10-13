@@ -7,8 +7,9 @@ use hypha_core::{
 use hypha_markets::{
     Catalog, CatalogContext, CreateCatalog, CreateMarket, CreatePriceList, FixedPrice, HasCatalogs,
     HasMarkets, HasPriceLists, Market, PriceList, UpdateMarket, add_catalog_products,
-    assign_price_list, create_catalog, create_market, create_price_list, remove_catalog_products,
-    remove_fixed_prices, set_fixed_prices, update_market,
+    add_market_country, assign_price_list, create_catalog, create_market, create_price_list,
+    remove_catalog_products, remove_fixed_prices, remove_market_country, set_fixed_prices,
+    update_market,
 };
 use serde::{Deserialize, Serialize};
 
@@ -88,6 +89,41 @@ pub(super) async fn update_market_handler<S: Storage>(
     let market = update_market(&ctx, ports.markets(), id, input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
+    Ok(Json(MarketResponse::from(&market)))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AddCountryRequest {
+    country: String,
+}
+
+pub(super) async fn add_country_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    PathId(id): PathId<MarketId>,
+    JsonBody(req): JsonBody<AddCountryRequest>,
+) -> Result<Json<MarketResponse>, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.ports().await?;
+    let market = add_market_country(&ctx, ports.markets(), id, &req.country)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
+    Ok(Json(MarketResponse::from(&market)))
+}
+
+pub(super) async fn remove_country_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    PathId((id, country)): PathId<(MarketId, String)>,
+) -> Result<Json<MarketResponse>, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.ports().await?;
+    let market = remove_market_country(&ctx, ports.markets(), id, &country)
+        .await
+        .map_err(|e| {
+            ApiError::from(e)
+                .not_found_if("market_not_found")
+                .not_found_if("country_not_in_market")
+        })?;
     Ok(Json(MarketResponse::from(&market)))
 }
 

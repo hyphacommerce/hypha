@@ -10,8 +10,9 @@ use hypha_core::{
 use hypha_markets::{
     CatalogContext, CatalogRepo, CommandError, CreateCatalog, CreateMarket, CreatePriceList,
     FixedPrice, Market, MarketError, MarketRepo, MismatchedPrice, PriceListError, PriceListRepo,
-    UpdateMarket, add_catalog_products, create_catalog, create_market, create_price_list,
-    remove_catalog_products, remove_fixed_prices, set_fixed_prices, update_market,
+    UpdateMarket, add_catalog_products, add_market_country, create_catalog, create_market,
+    create_price_list, remove_catalog_products, remove_fixed_prices, remove_market_country,
+    set_fixed_prices, update_market,
 };
 use hypha_testkit::{
     InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo, SequentialIds,
@@ -411,6 +412,67 @@ fn update_market_rejects_unknown_market() {
             UpdateMarket::default()
         )),
         Err(CommandError::MarketNotFound(unknown))
+    );
+}
+
+// ---- market countries ----
+
+#[test]
+fn add_market_country_sells_there_too() {
+    let markets = InMemoryMarketRepo::default();
+    let ids = SequentialIds::default();
+    let ctx = Ctx::system();
+    let market = block_on(create_market(&ctx, &markets, &ids, balkans(&["RS"]))).unwrap();
+
+    let changed = block_on(add_market_country(&ctx, &markets, market.id(), "BA")).unwrap();
+
+    assert_eq!(changed.countries(), &[cc("RS"), cc("BA")]);
+    assert_eq!(
+        block_on(markets.get_by_country(cc("BA"))),
+        Ok(Some(changed))
+    );
+}
+
+#[test]
+fn add_market_country_rejects_a_country_another_market_sells_to() {
+    let markets = InMemoryMarketRepo::default();
+    let ids = SequentialIds::default();
+    let ctx = Ctx::system();
+    let serbia = block_on(create_market(&ctx, &markets, &ids, balkans(&["RS"]))).unwrap();
+    let bosnia = block_on(create_market(&ctx, &markets, &ids, balkans(&["BA"]))).unwrap();
+
+    assert_eq!(
+        block_on(add_market_country(&ctx, &markets, bosnia.id(), "RS")),
+        Err(CommandError::CountryInOtherMarket {
+            country: cc("RS"),
+            market: serbia.id(),
+        })
+    );
+    assert_eq!(
+        block_on(add_market_country(&ctx, &markets, bosnia.id(), "BA")),
+        Err(CommandError::Market(MarketError::DuplicateCountry(cc(
+            "BA"
+        ))))
+    );
+    assert_eq!(
+        block_on(add_market_country(&ctx, &markets, bosnia.id(), "ba")),
+        Err(CommandError::Country(CountryError::NotUppercase))
+    );
+}
+
+#[test]
+fn remove_market_country_keeps_at_least_one() {
+    let markets = InMemoryMarketRepo::default();
+    let ids = SequentialIds::default();
+    let ctx = Ctx::system();
+    let market = block_on(create_market(&ctx, &markets, &ids, balkans(&["RS", "BA"]))).unwrap();
+
+    let changed = block_on(remove_market_country(&ctx, &markets, market.id(), "BA")).unwrap();
+    assert_eq!(changed.countries(), &[cc("RS")]);
+    assert_eq!(block_on(markets.get_by_country(cc("BA"))), Ok(None));
+    assert_eq!(
+        block_on(remove_market_country(&ctx, &markets, market.id(), "RS")),
+        Err(CommandError::Market(MarketError::LastCountry))
     );
 }
 
