@@ -170,6 +170,19 @@ thing keeping them in sync. D keeps every rule in Rust, and the adapters only ne
 version check they already have. **If a hot item ever shows up in practice, C can be
 added for that path later** without changing the domain model.
 
+**Measured on Postgres (2026-10-13,
+`crates/hypha-store-postgres/tests/inventory_race.rs`).** 8 buyers on separate
+connections each reserve 1 of 3 units at the same moment. In every run exactly 3 win,
+and nothing is ever oversold. But **the 5 losers all get `409 concurrent_modification`,
+not `out_of_stock`**: they retry in lockstep, each round only one write can win, so 3
+attempts run out before they see that the stock is gone. Contention between a few
+buyers resolves within the retries. A hot item (a drop, a flash sale) doesn't; its
+buyers see a retryable 409 instead of a precise answer. Options when that matters,
+none built yet:
+- jittered backoff between attempts (needs a sleep port: hosts differ, Workers included);
+- more attempts (cheap, but each one is a full round of queries);
+- option C above for hot items only.
+
 **What the cart checks are for (I6).** `add_line` refuses a quantity that isn't there,
 so buyers find out at once. Stock can still run out after a line was added (someone
 else bought the last one, or the cart sat for days), so the priced cart also marks such

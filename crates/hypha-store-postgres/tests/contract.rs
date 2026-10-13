@@ -78,3 +78,16 @@ async fn tax_region_repo() {
     let Some(url) = database_url() else { return };
     contract::tax_region_repo(async || fresh_store(&url, "contract_tax_regions").await).await;
 }
+
+#[tokio::test]
+async fn location_repo() {
+    let Some(url) = database_url() else { return };
+    contract::location_repo(async || fresh_store(&url, "contract_locations").await).await;
+}
+
+#[tokio::test]
+async fn inventory_item_repo() {
+    let Some(url) = database_url() else { return };
+    contract::inventory_item_repo(async || fresh_store(&url, "contract_inventory_items").await)
+        .await;
+}

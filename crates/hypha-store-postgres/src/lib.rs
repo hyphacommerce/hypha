@@ -15,6 +15,7 @@
 mod carts;
 mod columns;
 mod error;
+mod inventory;
 mod markets;
 mod migrate;
 mod products;

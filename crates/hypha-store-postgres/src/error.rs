@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use hypha_cart::repo::keys as cart_keys;
 use hypha_core::RepoError;
+use hypha_inventory::repo::keys as inventory_keys;
 use hypha_markets::repo::keys as market_keys;
 use hypha_products::repo::keys as product_keys;
 use hypha_tax::repo::keys as tax_keys;
@@ -22,6 +23,12 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("tax_classes_pkey", tax_keys::TAX_CLASS_ID),
     ("tax_regions_pkey", tax_keys::TAX_REGION_ID),
     ("tax_region_country", tax_keys::TAX_REGION_COUNTRY),
+    ("locations_pkey", inventory_keys::LOCATION_ID),
+    ("inventory_items_pkey", inventory_keys::INVENTORY_ITEM_ID),
+    (
+        "inventory_item_variant",
+        inventory_keys::INVENTORY_ITEM_VARIANT,
+    ),
 ];
 
 /// Maps a driver error to the repo error the ports promise.
@@ -37,6 +44,12 @@ pub(crate) fn repo_error(e: tokio_postgres::Error) -> RepoError {
             if let Some(key) = key {
                 return RepoError::Duplicate(key);
             }
+        }
+        // Two transactions locking the same rows in different orders (`update_many` on
+        // overlapping items): Postgres aborts one. That is a concurrent change, safe to
+        // retry like any other stale write.
+        if *db.code() == SqlState::T_R_DEADLOCK_DETECTED {
+            return RepoError::StaleVersion;
         }
         // `tokio_postgres::Error` only displays "db error"; the server's message is in here.
         return RepoError::Backend(db.to_string());
