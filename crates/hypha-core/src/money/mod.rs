@@ -5,9 +5,11 @@ use thiserror::Error;
 
 mod basis_points;
 mod price;
+mod tax_rate;
 
 pub use basis_points::BasisPoints;
 pub use price::Price;
+pub use tax_rate::TaxRate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -88,6 +90,8 @@ pub enum MoneyError {
     Negative,
     #[error("basis points must be at least -10000, got {0}")]
     InvalidBasisPoints(i32),
+    #[error("tax rate must be at most 1000000 (100%), got {0}")]
+    InvalidTaxRate(u32),
 }
 
 impl crate::ErrorCode for MoneyError {
@@ -97,6 +101,7 @@ impl crate::ErrorCode for MoneyError {
             MoneyError::Overflow => "amount_overflow",
             MoneyError::Negative => "negative_amount",
             MoneyError::InvalidBasisPoints(_) => "invalid_basis_points",
+            MoneyError::InvalidTaxRate(_) => "invalid_tax_rate",
         }
     }
 }

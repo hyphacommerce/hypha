@@ -86,6 +86,9 @@ define_id!(PriceListId, "pl");
 define_id!(UserId, "user");
 define_id!(AgentId, "agent");
 
+define_id!(TaxClassId, "txc");
+define_id!(TaxRegionId, "txreg");
+
 #[cfg(test)]
 mod tests {
     use super::*;
