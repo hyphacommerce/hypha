@@ -31,6 +31,10 @@ macro_rules! router {
             // markets, price lists, catalogs
             .route("/markets", post(markets::create_market_handler::<$storage>))
             .route(
+                "/markets/{id}",
+                patch(markets::update_market_handler::<$storage>),
+            )
+            .route(
                 "/price-lists",
                 post(markets::create_price_list_handler::<$storage>),
             )

@@ -9,6 +9,7 @@ use hypha_markets::{
     Catalog, CatalogContext, CreateCatalog, CreateMarket, CreatePriceList, FixedPrice, Market,
     PriceList, add_catalog_products, assign_price_list, create_catalog, create_market,
     create_price_list, remove_catalog_products, remove_fixed_prices, set_fixed_prices,
+    set_prices_include_tax,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +26,13 @@ pub(super) struct CreateMarketRequest {
     name: String,
     countries: Vec<String>,
     currency: Currency,
+    #[serde(default)]
+    prices_include_tax: bool,
+}
+
+#[derive(Deserialize)]
+pub(super) struct UpdateMarketRequest {
+    prices_include_tax: bool,
 }
 
 #[derive(Serialize)]
@@ -33,6 +41,7 @@ pub(super) struct MarketResponse {
     name: String,
     countries: Vec<CountryCode>,
     currency: Currency,
+    prices_include_tax: bool,
 }
 
 impl From<&Market> for MarketResponse {
@@ -42,6 +51,7 @@ impl From<&Market> for MarketResponse {
             name: m.name().to_string(),
             countries: m.countries().to_vec(),
             currency: m.currency(),
+            prices_include_tax: m.prices_include_tax(),
         }
     }
 }
@@ -56,9 +66,23 @@ pub(super) async fn create_market_handler<S: Storage>(
         name: req.name,
         countries: req.countries,
         currency: req.currency,
+        prices_include_tax: req.prices_include_tax,
     };
     let market = create_market(&ctx, ports.markets(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(MarketResponse::from(&market))))
+}
+
+pub(super) async fn update_market_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    PathId(id): PathId<MarketId>,
+    JsonBody(req): JsonBody<UpdateMarketRequest>,
+) -> Result<Json<MarketResponse>, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.storage.ports().await?;
+    let market = set_prices_include_tax(&ctx, ports.markets(), id, req.prices_include_tax)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
+    Ok(Json(MarketResponse::from(&market)))
 }
 
 // ---------- price lists ----------

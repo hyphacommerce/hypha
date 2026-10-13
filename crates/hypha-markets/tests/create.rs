@@ -11,7 +11,7 @@ use hypha_markets::{
     CatalogContext, CatalogRepo, CommandError, CreateCatalog, CreateMarket, CreatePriceList,
     FixedPrice, Market, MarketError, MarketRepo, MismatchedPrice, PriceListError, PriceListRepo,
     add_catalog_products, create_catalog, create_market, create_price_list,
-    remove_catalog_products, remove_fixed_prices, set_fixed_prices,
+    remove_catalog_products, remove_fixed_prices, set_fixed_prices, set_prices_include_tax,
 };
 use hypha_testkit::{
     InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo, SequentialIds,
@@ -32,6 +32,7 @@ fn balkans(countries: &[&str]) -> CreateMarket {
         name: "Balkans".to_string(),
         countries: countries.iter().map(|c| c.to_string()).collect(),
         currency: Currency::Rsd,
+        prices_include_tax: true,
     }
 }
 
@@ -55,6 +56,7 @@ fn create_market_stores_market() {
     .unwrap();
 
     assert_eq!(market.countries(), &[cc("RS"), cc("BA")]);
+    assert!(market.prices_include_tax());
     assert_eq!(block_on(markets.get(market.id())), Ok(Some(market)));
 }
 
@@ -359,6 +361,36 @@ fn remove_fixed_prices_deletes_them() {
     );
 }
 
+// ---- set_prices_include_tax ----
+
+#[test]
+fn set_prices_include_tax_stores_it() {
+    let markets = InMemoryMarketRepo::default();
+    let ids = SequentialIds::default();
+    let ctx = Ctx::system();
+    let market = block_on(create_market(&ctx, &markets, &ids, balkans(&["RS"]))).unwrap();
+
+    let changed = block_on(set_prices_include_tax(&ctx, &markets, market.id(), false)).unwrap();
+
+    assert!(!changed.prices_include_tax());
+    assert_eq!(block_on(markets.get(market.id())), Ok(Some(changed)));
+}
+
+#[test]
+fn set_prices_include_tax_rejects_unknown_market() {
+    let markets = InMemoryMarketRepo::default();
+    let unknown = MarketId::from_uuid(Uuid::from_u128(99));
+    assert_eq!(
+        block_on(set_prices_include_tax(
+            &Ctx::system(),
+            &markets,
+            unknown,
+            true
+        )),
+        Err(CommandError::MarketNotFound(unknown))
+    );
+}
+
 // ---- catalogs and their products ----
 
 fn pid(n: u128) -> ProductId {
@@ -558,6 +590,10 @@ impl MarketRepo for RacingMarkets {
             return Ok(vec![]);
         }
         self.inner.list_all().await
+    }
+
+    async fn get_by_country(&self, country: CountryCode) -> Result<Option<Market>, RepoError> {
+        self.inner.get_by_country(country).await
     }
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {
         self.inner.insert(market).await

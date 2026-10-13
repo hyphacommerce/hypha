@@ -75,6 +75,10 @@ step "activate cup" 200 - -X PATCH "$BASE/products/$CUP/status" -H "$JSON" -d '{
 step "create market" 201 - -X POST "$BASE/markets" -H "$JSON" \
     -d '{"name":"Eurozone","countries":["HR","DE"],"currency":"EUR"}'
 MARKET=$(id)
+contains "prices exclude tax by default" '"prices_include_tax":false'
+step "prices include tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
+contains "market now includes tax" '"prices_include_tax":true'
+step "back to excluding tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
 step "create price list (-10%)" 201 - -X POST "$BASE/price-lists" -H "$JSON" \
     -d '{"currency":"EUR","adjustment":-1000}'
 LIST=$(id)
@@ -136,6 +140,8 @@ step "fixed prices on unknown list" 404 price_list_not_found -X PUT \
 step "fixed price in other currency" 422 fixed_price_currency_mismatch -X PUT \
     "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"RSD\"}}]}"
+step "update unknown market" 404 market_not_found -X PATCH \
+    "$BASE/markets/mkt_00000000000000000000000000000063" -H "$JSON" -d '{"prices_include_tax":true}'
 step "products for unknown catalog" 404 catalog_not_found -X POST \
     "$BASE/catalogs/cat_00000000000000000000000000000063/products" -H "$JSON" -d '{"products":[]}'
 step "add archived mug" 422 product_not_active -X POST "$BASE/carts/$CART/lines" -H "$JSON" \

@@ -1,4 +1,4 @@
-use hypha_core::{MarketId, RepoError};
+use hypha_core::{CountryCode, MarketId, RepoError};
 use hypha_markets::{Market, MarketRepo, repo::keys};
 
 use crate::table::Table;
@@ -19,6 +19,10 @@ fn unique(new: &Market, other: &Market) -> Option<&'static str> {
 impl MarketRepo for InMemoryMarketRepo {
     async fn get(&self, id: MarketId) -> Result<Option<Market>, RepoError> {
         Ok(self.markets.get(&id))
+    }
+
+    async fn get_by_country(&self, country: CountryCode) -> Result<Option<Market>, RepoError> {
+        Ok(self.markets.find(|m| m.covers(country)))
     }
 
     async fn list_all(&self) -> Result<Vec<Market>, RepoError> {

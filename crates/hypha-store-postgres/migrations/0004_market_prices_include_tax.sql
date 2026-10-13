@@ -1,0 +1,1 @@
+ALTER TABLE markets ADD COLUMN prices_include_tax boolean NOT NULL DEFAULT false;

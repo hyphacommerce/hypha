@@ -80,9 +80,11 @@ pub async fn market_repo<R: MarketRepo>(make: impl AsyncFn() -> R) {
 async fn market_round_trips<R: MarketRepo>(repo: &R) {
     // Country order is part of the market and must survive.
     let mut m = market(1, &["HR", "DE", "AT"]);
+    m.set_prices_include_tax(true);
     repo.insert(&mut m).await.unwrap();
     assert_eq!(m.version(), Version::new(1));
     assert_eq!(repo.get(m.id()).await, Ok(Some(m.clone())));
+    assert_eq!(repo.get_by_country(cc("DE")).await, Ok(Some(m.clone())));
 
     let mut other = market(2, &["RS"]);
     repo.insert(&mut other).await.unwrap();
@@ -93,6 +95,7 @@ async fn market_round_trips<R: MarketRepo>(repo: &R) {
 
 async fn market_unknown<R: MarketRepo>(repo: &R) {
     assert_eq!(repo.get(mid(99)).await, Ok(None));
+    assert_eq!(repo.get_by_country(cc("RS")).await, Ok(None));
     assert_eq!(repo.list_all().await, Ok(vec![]));
 }
 
@@ -102,10 +105,13 @@ async fn market_update<R: MarketRepo>(repo: &R) {
 
     m.add_country(cc("AT")).unwrap();
     m.remove_country(cc("HR")).unwrap();
+    m.set_prices_include_tax(true);
     repo.update(&mut m).await.unwrap();
 
     assert_eq!(m.version(), Version::new(2));
-    assert_eq!(repo.get(m.id()).await, Ok(Some(m)));
+    assert_eq!(repo.get(m.id()).await, Ok(Some(m.clone())));
+    assert_eq!(repo.get_by_country(cc("AT")).await, Ok(Some(m)));
+    assert_eq!(repo.get_by_country(cc("HR")).await, Ok(None));
 }
 
 async fn market_country_key<R: MarketRepo>(repo: &R) {

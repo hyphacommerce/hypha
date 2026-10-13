@@ -34,10 +34,9 @@ async fn applied(client: &Client) -> Vec<(String, i32, String)> {
 }
 
 fn core_rows() -> Vec<(String, i32, String)> {
-    ["products", "markets", "carts"]
+    CORE.migrations
         .iter()
-        .zip(1..)
-        .map(|(name, v)| ("core".to_string(), v, name.to_string()))
+        .map(|m| ("core".to_string(), m.version, m.name.to_string()))
         .collect()
 }
 
@@ -82,6 +81,9 @@ async fn upgrades_a_table_from_before_modules() {
         return;
     };
     // The old shape: version alone was the key; all rows were core's.
+    for m in &CORE.migrations[..3] {
+        client.batch_execute(m.sql).await.unwrap();
+    }
     client
         .batch_execute(
             "CREATE TABLE schema_migrations (version integer PRIMARY KEY, name text NOT NULL,

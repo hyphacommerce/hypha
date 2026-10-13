@@ -11,7 +11,7 @@ pub use catalog::{
 pub use commands::{
     CommandError, CreateCatalog, CreateMarket, CreatePriceList, FixedPrice, add_catalog_products,
     assign_price_list, create_catalog, create_market, create_price_list, remove_catalog_products,
-    remove_fixed_prices, set_fixed_prices,
+    remove_fixed_prices, set_fixed_prices, set_prices_include_tax,
 };
 pub use error::{CatalogError, MarketError, MismatchedPrice, PriceListError};
 pub use market::{Market, MarketSnapshot, check_no_overlap, market_for};

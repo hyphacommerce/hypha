@@ -116,6 +116,7 @@ pub struct CreateMarket {
     /// ISO 3166-1 alpha-2 codes, e.g. "RS".
     pub countries: Vec<String>,
     pub currency: Currency,
+    pub prices_include_tax: bool,
 }
 
 /// Creates a market. A country can belong to only one market.
@@ -138,6 +139,7 @@ pub async fn create_market<M: MarketRepo, I: IdGenerator>(
         countries,
         input.currency,
     )?;
+    market.set_prices_include_tax(input.prices_include_tax);
 
     // Precise error in the normal case; the repo's unique key catches a concurrent insert.
     if let Some(conflict) = country_conflict(markets, &market).await? {
@@ -151,6 +153,23 @@ pub async fn create_market<M: MarketRepo, I: IdGenerator>(
             .unwrap_or(CommandError::Repo(RepoError::Duplicate(keys::COUNTRY)))),
         Err(e) => Err(e.into()),
     }
+}
+
+pub async fn set_prices_include_tax<M: MarketRepo>(
+    ctx: &Ctx,
+    markets: &M,
+    id: MarketId,
+    include: bool,
+) -> Result<Market, CommandError> {
+    ctx.require(Scope::MarketsWrite)?;
+
+    let mut market = markets
+        .get(id)
+        .await?
+        .ok_or(CommandError::MarketNotFound(id))?;
+    market.set_prices_include_tax(include);
+    markets.update(&mut market).await?;
+    Ok(market)
 }
 
 /// `CountryInOtherMarket` for the first of `market`'s countries another market owns.

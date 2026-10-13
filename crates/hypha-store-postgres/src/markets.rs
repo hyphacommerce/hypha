@@ -30,16 +30,33 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
         load_markets(conn.client(), None).await
     }
 
+    async fn get_by_country(&self, country: CountryCode) -> Result<Option<Market>, RepoError> {
+        let mut conn = self.conn().await;
+        let client = conn.client();
+        let row = client
+            .query_typed_opt(
+                "SELECT market_id FROM market_countries WHERE country = $1",
+                &[(&country.as_str(), Type::TEXT)],
+            )
+            .await
+            .map_err(repo_error)?;
+        match row {
+            Some(row) => Ok(load_markets(client, Some(row.get(0))).await?.pop()),
+            None => Ok(None),
+        }
+    }
+
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {
         let s = market.snapshot();
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
         tx.query_typed(
-            "INSERT INTO markets (id, version, name, currency) VALUES ($1, 1, $2, $3)",
+            "INSERT INTO markets (id, version, name, currency, prices_include_tax) VALUES ($1, 1, $2, $3, $4)",
             &[
                 (&s.id.as_uuid(), Type::UUID),
                 (&s.name, Type::TEXT),
                 (&s.currency.as_str(), Type::TEXT),
+                (&s.prices_include_tax, Type::BOOL)
             ],
         )
         .await
@@ -56,13 +73,14 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
         let tx = conn.client().transaction().await.map_err(repo_error)?;
         let bumped = tx
             .query_typed_opt(
-                "UPDATE markets SET version = version + 1, name = $3, currency = $4
+                "UPDATE markets SET version = version + 1, name = $3, currency = $4, prices_include_tax = $5
                  WHERE id = $1 AND version = $2 RETURNING version",
                 &[
                     (&s.id.as_uuid(), Type::UUID),
                     (&version_to_db(s.version)?, Type::INT8),
                     (&s.name, Type::TEXT),
                     (&s.currency.as_str(), Type::TEXT),
+                    (&s.prices_include_tax, Type::BOOL)
                 ],
             )
             .await
@@ -106,7 +124,7 @@ async fn load_markets(client: &Client, id: Option<Uuid>) -> Result<Vec<Market>, 
     )];
     let rows = client
         .query_typed(
-            "SELECT id, version, name, currency FROM markets WHERE $1::uuid IS NULL OR id = $1",
+            "SELECT id, version, name, currency, prices_include_tax FROM markets WHERE $1::uuid IS NULL OR id = $1",
             &filter,
         )
         .await
@@ -134,6 +152,7 @@ async fn load_markets(client: &Client, id: Option<Uuid>) -> Result<Vec<Market>, 
                 name: row.get(2),
                 countries: countries.remove(&id).unwrap_or_default(),
                 currency: currency_from_db(row.get(3))?,
+                prices_include_tax: row.get(4),
             };
             Market::restore(snapshot).map_err(|e| corrupt(format!("market {id}: {e}")))
         })

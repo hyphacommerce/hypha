@@ -11,6 +11,7 @@ pub struct Market {
     name: String,
     countries: Vec<CountryCode>,
     currency: Currency,
+    prices_include_tax: bool,
 }
 
 impl Versioned for Market {
@@ -47,7 +48,12 @@ impl Market {
             name,
             countries,
             currency,
+            prices_include_tax: false,
         })
+    }
+
+    pub fn set_prices_include_tax(&mut self, include: bool) {
+        self.prices_include_tax = include;
     }
 
     pub fn covers(&self, country: CountryCode) -> bool {
@@ -92,6 +98,10 @@ impl Market {
     pub fn currency(&self) -> Currency {
         self.currency
     }
+
+    pub fn prices_include_tax(&self) -> bool {
+        self.prices_include_tax
+    }
 }
 
 pub fn market_for(markets: &[Market], country: CountryCode) -> Option<&Market> {
@@ -118,6 +128,7 @@ pub struct MarketSnapshot {
     pub name: String,
     pub countries: Vec<CountryCode>,
     pub currency: Currency,
+    pub prices_include_tax: bool,
 }
 
 impl Market {
@@ -128,12 +139,14 @@ impl Market {
             name: self.name.clone(),
             countries: self.countries.clone(),
             currency: self.currency,
+            prices_include_tax: self.prices_include_tax,
         }
     }
 
     /// Rebuilds a market from storage through `Market::new`, so its rules still hold.
     pub fn restore(s: MarketSnapshot) -> Result<Market, MarketError> {
         let mut market = Market::new(s.id, s.name, s.countries, s.currency)?;
+        market.prices_include_tax = s.prices_include_tax;
         market.version = s.version;
         Ok(market)
     }
@@ -249,6 +262,7 @@ mod tests {
     #[test]
     fn restore_round_trips() {
         let mut m = market(1, &["RS", "HR"]).unwrap();
+        m.set_prices_include_tax(true);
         m.set_version(Version::new(3));
         assert_eq!(Market::restore(m.snapshot()), Ok(m));
     }
@@ -261,5 +275,13 @@ mod tests {
             Market::restore(s),
             Err(MarketError::DuplicateCountry(cc("RS")))
         );
+    }
+
+    #[test]
+    fn prices_exclude_tax_until_set() {
+        let mut m = market(1, &["RS"]).unwrap();
+        assert!(!m.prices_include_tax());
+        m.set_prices_include_tax(true);
+        assert!(m.prices_include_tax());
     }
 }

@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use hypha_core::{CatalogId, MarketId, Price, PriceListId, ProductId, RepoError, VariantId};
+use hypha_core::{
+    CatalogId, CountryCode, MarketId, Price, PriceListId, ProductId, RepoError, VariantId,
+};
 
 use crate::{
     catalog::{Catalog, CatalogContext},
@@ -23,6 +25,7 @@ pub mod keys {
 #[allow(async_fn_in_trait)]
 pub trait MarketRepo {
     async fn get(&self, id: MarketId) -> Result<Option<Market>, RepoError>;
+    async fn get_by_country(&self, country: CountryCode) -> Result<Option<Market>, RepoError>;
     /// Stores a new market (version 1). Enforces `MARKET_ID` and `COUNTRY`.
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError>;
     /// Stores changes and bumps the version, or fails with `StaleVersion`. Enforces `COUNTRY`.
