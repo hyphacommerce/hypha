@@ -23,7 +23,7 @@ fn pid(n: u128) -> ProductId {
 }
 
 fn class(n: u128) -> TaxClass {
-    TaxClass::new(class_id(n), format!("Class {n}"))
+    TaxClass::new(class_id(n), format!("Class {n}")).unwrap()
 }
 
 fn rate(ppm: u32) -> TaxRate {

@@ -52,18 +52,19 @@ pub async fn create_simple_product<R: ProductRepo, I: IdGenerator>(
     let handle = Handle::new(&input.handle)?;
     let price = Price::new(input.price)?;
 
-    // Precise error in the normal case; the repo's unique key catches a concurrent insert.
-    if repo.get_by_handle(&handle).await?.is_some() {
-        return Err(CommandError::HandleTaken(handle));
-    }
-
+    // All input is checked before anything is read.
     let mut product = Product::new_simple(
         ProductId::from_uuid(ids.new_uuid()),
         handle,
         input.title,
         VariantId::from_uuid(ids.new_uuid()),
         price,
-    );
+    )?;
+
+    // Precise error in the normal case; the repo's unique key catches a concurrent insert.
+    if repo.get_by_handle(product.handle()).await?.is_some() {
+        return Err(CommandError::HandleTaken(product.handle().clone()));
+    }
 
     repo.insert(&mut product).await.map_err(|e| match e {
         RepoError::Duplicate(keys::HANDLE) => CommandError::HandleTaken(product.handle().clone()),

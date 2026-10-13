@@ -1,12 +1,10 @@
-use hypha_core::{AddressId, ErrorCode};
+use hypha_core::{AddressId, ErrorCode, TextError};
 use thiserror::Error;
-
-use crate::Customer;
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CustomerError {
-    #[error("{0} is longer than {max} characters", max = Customer::MAX_FIELD_LEN)]
-    FieldTooLong(&'static str),
+    #[error(transparent)]
+    Text(#[from] TextError),
     #[error("address {0} not found")]
     AddressNotFound(AddressId),
     #[error("address {0} is in the address book more than once")]
@@ -26,7 +24,7 @@ pub enum RestoreError {
 impl ErrorCode for CustomerError {
     fn code(&self) -> &'static str {
         match self {
-            CustomerError::FieldTooLong(_) => "field_too_long",
+            CustomerError::Text(e) => e.code(),
             CustomerError::AddressNotFound(_) => "address_not_found",
             CustomerError::DuplicateAddress(_) => "duplicate_address",
         }

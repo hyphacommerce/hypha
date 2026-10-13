@@ -1,12 +1,12 @@
-use hypha_core::{ErrorCode, LocationId, MarketId, QuantityError, VariantId};
+use hypha_core::{ErrorCode, LocationId, MarketId, QuantityError, TextError, VariantId};
 use thiserror::Error;
 
 use crate::{MAX_STOCK, ReservationRef};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum InventoryError {
-    #[error("location name must not be empty")]
-    EmptyLocationName,
+    #[error(transparent)]
+    Text(#[from] TextError),
     #[error("market {0} is listed more than once")]
     DuplicateMarket(MarketId),
     #[error("stock must be between -{MAX_STOCK} and {MAX_STOCK}, got {0}")]
@@ -47,7 +47,7 @@ pub enum RestoreError {
 impl ErrorCode for InventoryError {
     fn code(&self) -> &'static str {
         match self {
-            InventoryError::EmptyLocationName => "empty_location_name",
+            InventoryError::Text(e) => e.code(),
             InventoryError::DuplicateMarket(_) => "duplicate_market",
             InventoryError::StockOutOfRange(_) => "stock_out_of_range",
             InventoryError::OnHandChanged { .. } => "on_hand_changed",

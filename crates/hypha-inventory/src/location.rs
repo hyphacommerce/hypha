@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use hypha_core::{LocationId, MarketId, Version, Versioned};
+use hypha_core::{LocationId, MarketId, Version, Versioned, required_text};
 
 use crate::InventoryError;
 
@@ -49,10 +49,7 @@ impl Location {
     }
 
     pub fn set_name(&mut self, name: String) -> Result<(), InventoryError> {
-        if name.trim().is_empty() {
-            return Err(InventoryError::EmptyLocationName);
-        }
-        self.name = name;
+        self.name = required_text("name", &name)?;
         Ok(())
     }
 
@@ -124,6 +121,8 @@ impl Location {
 mod tests {
     use uuid::Uuid;
 
+    use hypha_core::TextError;
+
     use super::*;
 
     fn market(n: u128) -> MarketId {
@@ -164,7 +163,7 @@ mod tests {
         let mut l = location(vec![]).unwrap();
         assert_eq!(
             l.set_name("  ".to_string()),
-            Err(InventoryError::EmptyLocationName)
+            Err(InventoryError::Text(TextError::Missing("name")))
         );
         assert_eq!(l.name(), "Zagreb");
     }

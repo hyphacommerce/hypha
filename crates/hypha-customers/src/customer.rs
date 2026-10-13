@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use hypha_core::{Address, AddressId, CustomerId, Email, Version, Versioned};
+use hypha_core::{Address, AddressId, CustomerId, Email, Version, Versioned, optional_text};
 
 use crate::{CustomerError, RestoreError};
 
@@ -40,7 +40,7 @@ impl Versioned for Customer {
 }
 
 impl Customer {
-    pub const MAX_FIELD_LEN: usize = 255;
+    pub const MAX_FIELD_LEN: usize = hypha_core::MAX_TEXT_LEN;
 
     pub fn new(id: CustomerId, email: Email) -> Self {
         Self {
@@ -62,19 +62,19 @@ impl Customer {
 
     /// Trimmed; empty clears it.
     pub fn set_first_name(&mut self, name: Option<String>) -> Result<(), CustomerError> {
-        self.first_name = text("first_name", name)?;
+        self.first_name = optional_text("first_name", name)?;
         Ok(())
     }
 
     /// Trimmed; empty clears it.
     pub fn set_last_name(&mut self, name: Option<String>) -> Result<(), CustomerError> {
-        self.last_name = text("last_name", name)?;
+        self.last_name = optional_text("last_name", name)?;
         Ok(())
     }
 
     /// Trimmed; empty clears it. Free text for now (no E.164 check).
     pub fn set_phone(&mut self, phone: Option<String>) -> Result<(), CustomerError> {
-        self.phone = text("phone", phone)?;
+        self.phone = optional_text("phone", phone)?;
         Ok(())
     }
 
@@ -173,15 +173,6 @@ impl Customer {
     }
 }
 
-fn text(field: &'static str, value: Option<String>) -> Result<Option<String>, CustomerError> {
-    let Some(value) = value else { return Ok(None) };
-    let value = value.trim();
-    if value.chars().count() > Customer::MAX_FIELD_LEN {
-        return Err(CustomerError::FieldTooLong(field));
-    }
-    Ok((!value.is_empty()).then(|| value.to_string()))
-}
-
 /// Plain-data form of a `Customer` for storage adapters (design note 0001, 3.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomerSnapshot {
@@ -242,7 +233,7 @@ impl Customer {
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::AddressParts;
+    use hypha_core::{AddressParts, TextError};
     use uuid::Uuid;
 
     use super::*;
@@ -290,7 +281,7 @@ mod tests {
         assert_eq!(c.set_phone(Some(max.clone())), Ok(()));
         assert_eq!(
             c.set_phone(Some(format!("{max}x"))),
-            Err(CustomerError::FieldTooLong("phone"))
+            Err(CustomerError::Text(TextError::TooLong("phone")))
         );
     }
 

@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{CountryCode, CountryError};
+use crate::{CountryCode, CountryError, TextError, optional_text, required_text};
 
 /// The fields of an address as plain data: what callers fill in to build an `Address`,
 /// and what storage and hosts read back out of one. Unvalidated, so the country is a
@@ -50,7 +50,7 @@ impl crate::ErrorCode for AddressError {
 }
 
 impl Address {
-    pub const MAX_FIELD_LEN: usize = 255;
+    pub const MAX_FIELD_LEN: usize = crate::MAX_TEXT_LEN;
 
     pub fn new(parts: AddressParts) -> Result<Self, AddressError> {
         let country = CountryCode::new(&parts.country)?;
@@ -79,16 +79,21 @@ impl Address {
 }
 
 fn required(field: &'static str, value: String) -> Result<String, AddressError> {
-    optional(field, Some(value))?.ok_or(AddressError::Missing(field))
+    Ok(required_text(field, &value)?)
 }
 
 fn optional(field: &'static str, value: Option<String>) -> Result<Option<String>, AddressError> {
-    let Some(value) = value else { return Ok(None) };
-    let value = value.trim();
-    if value.chars().count() > Address::MAX_FIELD_LEN {
-        return Err(AddressError::TooLong(field));
+    Ok(optional_text(field, value)?)
+}
+
+/// Address fields follow the shared text rule but report as `invalid_address`.
+impl From<TextError> for AddressError {
+    fn from(e: TextError) -> Self {
+        match e {
+            TextError::Missing(field) => AddressError::Missing(field),
+            TextError::TooLong(field) => AddressError::TooLong(field),
+        }
     }
-    Ok((!value.is_empty()).then(|| value.to_string()))
 }
 
 #[cfg(test)]

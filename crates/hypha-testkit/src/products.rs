@@ -69,6 +69,7 @@ mod tests {
             VariantId::from_uuid(Uuid::from_u128(n + 1000)),
             Price::new(Money::new(1000, Currency::Eur).unwrap()).unwrap(),
         )
+        .unwrap()
     }
 
     #[test]
@@ -146,7 +147,8 @@ mod tests {
             "Cup".to_string(),
             VariantId::from_uuid(Uuid::from_u128(1001)),
             Price::new(Money::new(1, Currency::Eur).unwrap()).unwrap(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             block_on(repo.insert(&mut reused_variant.clone())),
             Err(RepoError::Duplicate(keys::VARIANT_ID))

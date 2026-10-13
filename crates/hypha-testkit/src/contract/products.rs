@@ -60,6 +60,7 @@ fn simple_with_variant(n: u128, handle: &str, variant: VariantId) -> Product {
         variant,
         eur(1000),
     )
+    .unwrap()
 }
 
 /// Simple product `n`; its variant is `n * 100 + 1`.

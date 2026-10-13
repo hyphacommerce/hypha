@@ -1,6 +1,6 @@
 use hypha_core::{
     AuthError, CountryCode, CountryError, Ctx, ErrorCode, IdGenerator, MoneyError, ProductId,
-    RepoError, Scope, TaxClassId, TaxRate, TaxRegionId,
+    RepoError, Scope, TaxClassId, TaxRate, TaxRegionId, TextError,
 };
 use thiserror::Error;
 
@@ -21,6 +21,8 @@ pub enum CommandError {
     Money(#[from] MoneyError),
     #[error(transparent)]
     Tax(#[from] TaxError),
+    #[error(transparent)]
+    Text(#[from] TextError),
     #[error("tax class {0} not found")]
     TaxClassNotFound(TaxClassId),
     #[error("tax region {0} not found")]
@@ -40,6 +42,7 @@ impl ErrorCode for CommandError {
             CommandError::Country(e) => e.code(),
             CommandError::Money(e) => e.code(),
             CommandError::Tax(e) => e.code(),
+            CommandError::Text(e) => e.code(),
             CommandError::TaxClassNotFound(_) => "tax_class_not_found",
             CommandError::TaxRegionNotFound(_) => "tax_region_not_found",
             CommandError::TaxRegionExists { .. } => "tax_region_exists",
@@ -59,7 +62,7 @@ pub async fn create_tax_class<C: TaxClassRepo, I: IdGenerator>(
 ) -> Result<TaxClass, CommandError> {
     ctx.require(Scope::TaxesWrite)?;
 
-    let mut class = TaxClass::new(TaxClassId::from_uuid(ids.new_uuid()), input.name);
+    let mut class = TaxClass::new(TaxClassId::from_uuid(ids.new_uuid()), input.name)?;
     classes.insert(&mut class).await?;
     Ok(class)
 }

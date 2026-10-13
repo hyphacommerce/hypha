@@ -1,4 +1,4 @@
-use hypha_core::{TaxClassId, Version, Versioned};
+use hypha_core::{TaxClassId, TextError, Version, Versioned, required_text};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaxClass {
@@ -18,12 +18,12 @@ impl Versioned for TaxClass {
 }
 
 impl TaxClass {
-    pub fn new(id: TaxClassId, name: String) -> Self {
-        Self {
+    pub fn new(id: TaxClassId, name: String) -> Result<Self, TextError> {
+        Ok(Self {
             id,
             version: Version::NEW,
-            name,
-        }
+            name: required_text("name", &name)?,
+        })
     }
 
     pub fn id(&self) -> TaxClassId {
@@ -51,12 +51,13 @@ impl TaxClass {
         }
     }
 
-    pub fn restore(s: TaxClassSnapshot) -> Self {
-        Self {
+    /// Rebuilds a class from storage, re-checking its name.
+    pub fn restore(s: TaxClassSnapshot) -> Result<Self, TextError> {
+        Ok(Self {
             id: s.id,
             version: s.version,
-            name: s.name,
-        }
+            name: required_text("name", &s.name)?,
+        })
     }
 }
 
@@ -67,12 +68,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_class_needs_a_name() {
+        assert_eq!(
+            TaxClass::new(TaxClassId::from_uuid(Uuid::from_u128(1)), " ".to_string()),
+            Err(TextError::Missing("name"))
+        );
+    }
+
+    #[test]
     fn restore_round_trips() {
         let mut class = TaxClass::new(
             TaxClassId::from_uuid(Uuid::from_u128(1)),
             "Books".to_string(),
-        );
+        )
+        .unwrap();
         class.set_version(Version::new(2));
-        assert_eq!(TaxClass::restore(class.snapshot()), class);
+        assert_eq!(TaxClass::restore(class.snapshot()), Ok(class));
     }
 }

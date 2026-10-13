@@ -313,7 +313,7 @@ step "stock at unknown location" 404 location_not_found -X PUT \
 step "unknown location" 404 location_not_found "$BASE/locations/loc_00000000000000000000000000000063"
 step "location listing a market twice" 422 duplicate_market -X POST "$BASE/locations" -H "$JSON" \
     -d "{\"name\":\"Split\",\"markets\":[\"$MARKET\",\"$MARKET\"]}"
-step "blank location name" 422 empty_location_name -X POST "$BASE/locations" -H "$JSON" -d '{"name":" "}'
+step "blank location name" 422 field_required -X POST "$BASE/locations" -H "$JSON" -d '{"name":" "}'
 step "stock beyond 2^53-1" 422 stock_out_of_range -X PUT \
     "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":9007199254740992}'
 step "same email in another case" 409 customer_exists -X POST "$BASE/customers" -H "$JSON" \

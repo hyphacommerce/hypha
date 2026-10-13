@@ -125,7 +125,8 @@ impl World {
                 name.to_string(),
                 vid(name),
                 Price::new(eur(1000)).unwrap(),
-            );
+            )
+            .unwrap();
             if active {
                 product.set_status(ProductStatus::Active).unwrap();
             }
@@ -164,7 +165,7 @@ impl World {
 
     /// Croatia: 25% by default, books (the mug, here) 5%.
     fn tax_croatia(&self) {
-        let mut class = TaxClass::new(books(), "Books".to_string());
+        let mut class = TaxClass::new(books(), "Books".to_string()).unwrap();
         block_on(self.tax_classes.insert(&mut class)).unwrap();
         block_on(self.tax_classes.assign(&[pid("mug")], Some(books()))).unwrap();
 

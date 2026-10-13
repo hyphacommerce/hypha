@@ -1,7 +1,9 @@
-use hypha_core::{CountryCode, Currency, ErrorCode, VariantId};
+use hypha_core::{CountryCode, Currency, ErrorCode, TextError, VariantId};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum MarketError {
+    #[error(transparent)]
+    Text(#[from] TextError),
     #[error("a market needs at least one country")]
     NoCountries,
     #[error("country {0} is listed twice")]
@@ -34,6 +36,7 @@ pub enum PriceListError {
 impl ErrorCode for MarketError {
     fn code(&self) -> &'static str {
         match self {
+            MarketError::Text(e) => e.code(),
             MarketError::NoCountries => "no_countries",
             MarketError::DuplicateCountry(_) => "duplicate_country",
             MarketError::CountryNotInMarket(_) => "country_not_in_market",

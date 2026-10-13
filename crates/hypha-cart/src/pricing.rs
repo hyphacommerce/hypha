@@ -285,7 +285,8 @@ mod tests {
             format!("Product {n}"),
             vid(n + 10),
             base,
-        );
+        )
+        .unwrap();
         p.set_status(ProductStatus::Active).unwrap();
         p
     }
@@ -580,7 +581,8 @@ mod tests {
             "Draft".to_string(),
             vid(11),
             eur(1000),
-        );
+        )
+        .unwrap();
         assert_eq!(
             price_line(&draft, vid(11), &pricing(&[1])),
             Err(LineError::ProductNotActive(pid(1)))

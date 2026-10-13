@@ -1,4 +1,4 @@
-use hypha_core::{ErrorCode, MoneyError, OptionId, OptionValueId, VariantId};
+use hypha_core::{ErrorCode, MoneyError, OptionId, OptionValueId, TextError, VariantId};
 
 use crate::ProductStatus;
 
@@ -18,6 +18,8 @@ pub enum HandleError {
 pub enum ProductError {
     #[error("invalid handle: {0}")]
     InvalidHandle(HandleError),
+    #[error(transparent)]
+    Text(#[from] TextError),
     #[error("variant {0} already exists")]
     DuplicateVariantId(VariantId),
     #[error("expected {expected} option selections, got {got}")]
@@ -60,6 +62,7 @@ impl ErrorCode for ProductError {
     fn code(&self) -> &'static str {
         match self {
             ProductError::InvalidHandle(e) => e.code(),
+            ProductError::Text(e) => e.code(),
             ProductError::DuplicateVariantId(_) => "duplicate_variant",
             ProductError::SelectionCountMismatch { .. } => "selection_count_mismatch",
             ProductError::UnknownOptionValue(_) => "unknown_option_value",

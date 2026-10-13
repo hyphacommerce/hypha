@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use hypha_core::{CountryCode, Currency, MarketId, Version, Versioned};
+use hypha_core::{CountryCode, Currency, MarketId, Version, Versioned, required_text};
 
 use crate::error::MarketError;
 
@@ -45,7 +45,7 @@ impl Market {
         Ok(Self {
             id,
             version: Version::NEW,
-            name,
+            name: required_text("name", &name)?,
             countries,
             currency,
             prices_include_tax: false,
@@ -157,6 +157,15 @@ mod tests {
             countries.iter().map(|s| cc(s)).collect(),
             Currency::Eur,
         )
+    }
+
+    #[test]
+    fn a_market_needs_a_name() {
+        let unnamed = Market::new(mid(1), " ".to_string(), vec![cc("HR")], Currency::Eur);
+        assert_eq!(
+            unnamed,
+            Err(MarketError::Text(hypha_core::TextError::Missing("name")))
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
-use hypha_core::{Price, ProductId, VariantId, Version, Versioned};
+use hypha_core::{Price, ProductId, VariantId, Version, Versioned, required_text};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -81,16 +81,16 @@ impl Product {
         title: String,
         variant_id: VariantId,
         price: Price,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ProductError> {
+        Ok(Self {
             id,
             version: Version::NEW,
             handle,
-            title,
+            title: required_text("title", &title)?,
             status: ProductStatus::Draft,
             options: Vec::new(),
             variants: vec![Variant::new(variant_id, None, price, Vec::new())],
-        }
+        })
     }
 
     pub fn new_configurable(
@@ -109,7 +109,7 @@ impl Product {
             id,
             version: Version::NEW,
             handle,
-            title,
+            title: required_text("title", &title)?,
             status: ProductStatus::Draft,
             options,
             variants: Vec::new(),
@@ -280,7 +280,7 @@ impl Product {
             id: s.id,
             version: s.version,
             handle,
-            title: s.title,
+            title: required_text("title", &s.title)?,
             status: s.status,
             options,
             variants: Vec::with_capacity(s.variants.len()),
@@ -418,6 +418,7 @@ mod tests {
             var(1),
             price(),
         )
+        .unwrap()
     }
 
     // ---- new_simple ----
@@ -428,6 +429,27 @@ mod tests {
         assert_eq!(p.variants().len(), 1);
         assert!(p.options().is_empty());
         assert_eq!(p.status(), ProductStatus::Draft);
+    }
+
+    #[test]
+    fn the_title_is_trimmed_and_required() {
+        let titled = |title: &str| {
+            Product::new_simple(
+                ProductId::from_uuid(Uuid::from_u128(200)),
+                Handle::new("mug").unwrap(),
+                title.to_string(),
+                var(1),
+                price(),
+            )
+        };
+        assert_eq!(
+            titled(" Mug ").map(|p| p.title().to_string()),
+            Ok("Mug".to_string())
+        );
+        assert_eq!(
+            titled("  "),
+            Err(ProductError::Text(hypha_core::TextError::Missing("title")))
+        );
     }
 
     #[test]

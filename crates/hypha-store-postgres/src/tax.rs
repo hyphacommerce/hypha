@@ -28,11 +28,13 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
             .await
             .map_err(repo_error)?;
         let Some(row) = row else { return Ok(None) };
-        Ok(Some(TaxClass::restore(TaxClassSnapshot {
+        TaxClass::restore(TaxClassSnapshot {
             id,
             version: version_from_db(row.get(0))?,
             name: row.get(1),
-        })))
+        })
+        .map(Some)
+        .map_err(|e| corrupt(format!("tax class {id}: {e}")))
     }
 
     async fn insert(&self, class: &mut TaxClass) -> Result<(), RepoError> {

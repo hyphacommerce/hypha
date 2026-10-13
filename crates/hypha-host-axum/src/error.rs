@@ -179,7 +179,7 @@ impl From<hypha_tax::CommandError> for ApiError {
                 StatusCode::NOT_FOUND
             }
             E::TaxRegionExists { .. } => StatusCode::CONFLICT,
-            E::Country(_) | E::Money(_) | E::TaxClassNotFound(_) => {
+            E::Country(_) | E::Money(_) | E::Text(_) | E::TaxClassNotFound(_) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
@@ -204,7 +204,7 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 StatusCode::CONFLICT
             }
             E::Inventory(
-                I::EmptyLocationName
+                I::Text(_)
                 | I::DuplicateMarket(_)
                 | I::StockOutOfRange(_)
                 | I::Quantity(_)
@@ -226,7 +226,7 @@ impl From<hypha_customers::CommandError> for ApiError {
             // Customer and address IDs only ever arrive in URLs.
             E::CustomerNotFound(_) | E::Customer(C::AddressNotFound(_)) => StatusCode::NOT_FOUND,
             E::CustomerExists { .. } => StatusCode::CONFLICT,
-            E::Email(_) | E::Address(_) | E::Customer(C::FieldTooLong(_)) => {
+            E::Email(_) | E::Address(_) | E::Customer(C::Text(_)) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
             // Address IDs are generated, so a clash is a bug, not a bad request.
