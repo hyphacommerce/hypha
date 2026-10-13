@@ -247,7 +247,8 @@ pub async fn set_on_hand<R: InventoryItemRepo, L: LocationRepo>(
     ctx.require(Scope::InventoryWrite)?;
 
     load_location(locations, input.location).await?;
-    retry_on_conflict(async || {
+    let input = &input;
+    retry_on_conflict(move || async move {
         let mut item = load_item(items, input.item).await?;
         item.set_on_hand(input.location, input.quantity, input.expected)?;
         items.update(&mut item).await?;
@@ -274,7 +275,8 @@ pub async fn adjust_on_hand<R: InventoryItemRepo, L: LocationRepo>(
     ctx.require(Scope::InventoryWrite)?;
 
     load_location(locations, input.location).await?;
-    retry_on_conflict(async || {
+    let input = &input;
+    retry_on_conflict(move || async move {
         let mut item = load_item(items, input.item).await?;
         item.adjust_on_hand(input.location, input.delta)?;
         items.update(&mut item).await?;
@@ -335,14 +337,16 @@ pub async fn reserve_stock<R: InventoryItemRepo, L: LocationRepo>(
             Ok((ReservationRef::new(&l.reference)?, l.variant, l.quantity))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let variants = distinct(lines.iter().map(|(_, variant, _)| *variant));
+    let variants = &distinct(lines.iter().map(|(_, variant, _)| *variant));
+    let lines = &lines;
+    let market = input.market;
 
-    retry_on_conflict(async || {
-        let serving = locations.serving(input.market).await?;
-        let mut stock = by_variant(items.for_variants(&variants).await?);
+    retry_on_conflict(move || async move {
+        let serving = locations.serving(market).await?;
+        let mut stock = by_variant(items.for_variants(variants).await?);
         let mut changed = HashSet::new();
         let mut short = Vec::new();
-        for (reference, variant, quantity) in &lines {
+        for (reference, variant, quantity) in lines {
             let Some(item) = stock.get_mut(variant) else {
                 continue;
             };
@@ -394,12 +398,13 @@ pub async fn release_stock<R: InventoryItemRepo>(
         .iter()
         .map(|l| Ok((ReservationRef::new(&l.reference)?, l.variant)))
         .collect::<Result<Vec<_>, InventoryError>>()?;
-    let variants = distinct(lines.iter().map(|(_, variant)| *variant));
+    let variants = &distinct(lines.iter().map(|(_, variant)| *variant));
+    let lines = &lines;
 
-    retry_on_conflict(async || {
-        let mut stock = by_variant(items.for_variants(&variants).await?);
+    retry_on_conflict(move || async move {
+        let mut stock = by_variant(items.for_variants(variants).await?);
         let mut changed = HashSet::new();
-        for (reference, variant) in &lines {
+        for (reference, variant) in lines {
             if let Some(item) = stock.get_mut(variant)
                 && item.release(reference)
             {
@@ -445,9 +450,16 @@ pub const MAX_ATTEMPTS: u32 = 3;
 /// Runs `attempt` again (it re-reads everything) when its write lost a race, up to
 /// `MAX_ATTEMPTS` times in total (design note 0004, section 3). Any other result,
 /// including a real shortage found on fresh data, is returned as is.
-async fn retry_on_conflict<T>(
-    attempt: impl AsyncFn() -> Result<T, CommandError>,
-) -> Result<T, CommandError> {
+///
+/// Takes a closure returning a future rather than an `async` closure (`AsyncFn`): the
+/// latter's future borrows from the closure through a higher-ranked lifetime, and the
+/// compiler can't yet prove such futures `Send`, which hosts like axum need. Callers
+/// move `Copy` references into each attempt instead.
+async fn retry_on_conflict<T, F, Fut>(attempt: F) -> Result<T, CommandError>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<T, CommandError>>,
+{
     let mut tries = 1;
     loop {
         match attempt().await {
