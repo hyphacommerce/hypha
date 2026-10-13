@@ -11,8 +11,8 @@ pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
 pub use error_code::ErrorCode;
 pub use ids::{
-    AgentId, CartId, CatalogId, IdError, MarketId, OptionId, OptionValueId, PriceListId, ProductId,
-    TaxClassId, TaxRegionId, UserId, VariantId,
+    AgentId, CartId, CatalogId, IdError, InventoryItemId, LocationId, MarketId, OptionId,
+    OptionValueId, PriceListId, ProductId, TaxClassId, TaxRegionId, UserId, VariantId,
 };
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
 pub use ports::{IdGenerator, RepoError};

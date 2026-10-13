@@ -89,6 +89,9 @@ define_id!(AgentId, "agent");
 define_id!(TaxClassId, "txc");
 define_id!(TaxRegionId, "txreg");
 
+define_id!(LocationId, "loc");
+define_id!(InventoryItemId, "invi");
+
 #[cfg(test)]
 mod tests {
     use super::*;
