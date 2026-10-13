@@ -4,16 +4,17 @@ use hypha_cart::{
 };
 use hypha_core::{
     Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, Ctx, Currency, MarketId, Money,
-    Price, PriceListId, ProductId, Scope, UserId, VariantId,
+    Price, PriceListId, ProductId, Scope, TaxClassId, TaxRate, TaxRegionId, UserId, VariantId,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo,
 };
 use hypha_pricing::PricingError;
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus};
+use hypha_tax::{TaxClass, TaxClassRepo, TaxLine, TaxRegion, TaxRegionRepo, TaxSource};
 use hypha_testkit::{
     InMemoryCartRepo, InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo,
-    InMemoryProductRepo, SequentialIds,
+    InMemoryProductRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, SequentialIds,
 };
 use pollster::block_on;
 use uuid::Uuid;
@@ -29,6 +30,18 @@ fn catalog_id() -> CatalogId {
 
 fn list_id() -> PriceListId {
     PriceListId::from_uuid(Uuid::from_u128(1002))
+}
+
+fn region_id() -> TaxRegionId {
+    TaxRegionId::from_uuid(Uuid::from_u128(1003))
+}
+
+fn books() -> TaxClassId {
+    TaxClassId::from_uuid(Uuid::from_u128(1004))
+}
+
+fn hr() -> CountryCode {
+    CountryCode::new("HR").unwrap()
 }
 
 /// Mug and cup: active, in the catalog. Poster: active, not in the catalog. Draft: in the catalog, not active.
@@ -64,11 +77,14 @@ struct World {
     markets: InMemoryMarketRepo,
     catalogs: InMemoryCatalogRepo,
     price_lists: InMemoryPriceListRepo,
+    tax_classes: InMemoryTaxClassRepo,
+    tax_regions: InMemoryTaxRegionRepo,
     ids: SequentialIds,
 }
 
 impl World {
-    /// An EUR market whose catalog holds the mug, the cup and the draft, with a 0 bp EUR price list.
+    /// An EUR market for Croatia whose catalog holds the mug, the cup and the draft, with a
+    /// 0 bp EUR price list. No tax region yet, so nothing is taxed until `tax_croatia`.
     fn new() -> Self {
         let world = Self {
             carts: InMemoryCartRepo::default(),
@@ -76,13 +92,15 @@ impl World {
             markets: InMemoryMarketRepo::default(),
             catalogs: InMemoryCatalogRepo::default(),
             price_lists: InMemoryPriceListRepo::default(),
+            tax_classes: InMemoryTaxClassRepo::default(),
+            tax_regions: InMemoryTaxRegionRepo::default(),
             ids: SequentialIds::default(),
         };
 
         let mut market = Market::new(
             market_id(),
             "Eurozone".to_string(),
-            vec![CountryCode::new("HR").unwrap()],
+            vec![hr()],
             Currency::Eur,
         )
         .unwrap();
@@ -137,8 +155,25 @@ impl World {
         }
     }
 
+    /// Croatia: 25% by default, books (the mug, here) 5%.
+    fn tax_croatia(&self) {
+        let mut class = TaxClass::new(books(), "Books".to_string());
+        block_on(self.tax_classes.insert(&mut class)).unwrap();
+        block_on(self.tax_classes.assign(&[pid("mug")], Some(books()))).unwrap();
+
+        let mut region = TaxRegion::new(region_id(), hr(), TaxRate::new(250_000).unwrap());
+        region.set_class_rate(books(), TaxRate::new(50_000).unwrap());
+        block_on(self.tax_regions.insert(&mut region)).unwrap();
+    }
+
+    fn set_prices_include_tax(&self) {
+        let mut market = block_on(self.markets.get(market_id())).unwrap().unwrap();
+        market.set_prices_include_tax(true);
+        block_on(self.markets.update(&mut market)).unwrap();
+    }
+
     fn create_cart(&self) -> CartId {
-        block_on(create_cart(&Ctx::system(), self, &self.ids, market_id()))
+        block_on(create_cart(&Ctx::system(), self, &self.ids, hr()))
             .unwrap()
             .id()
     }
@@ -186,6 +221,8 @@ impl CartPorts for World {
     type Markets = InMemoryMarketRepo;
     type Catalogs = InMemoryCatalogRepo;
     type PriceLists = InMemoryPriceListRepo;
+    type TaxClasses = InMemoryTaxClassRepo;
+    type TaxRegions = InMemoryTaxRegionRepo;
 
     fn carts(&self) -> &Self::Carts {
         &self.carts
@@ -202,14 +239,28 @@ impl CartPorts for World {
     fn price_lists(&self) -> &Self::PriceLists {
         &self.price_lists
     }
+    fn tax_classes(&self) -> &Self::TaxClasses {
+        &self.tax_classes
+    }
+    fn tax_regions(&self) -> &Self::TaxRegions {
+        &self.tax_regions
+    }
 }
 
 #[test]
-fn create_cart_rejects_unknown_market() {
+fn create_cart_picks_the_market_of_its_country() {
     let world = World::new();
-    let unknown = MarketId::from_uuid(Uuid::from_u128(9999));
-    let result = block_on(create_cart(&Ctx::system(), &world, &world.ids, unknown));
-    assert_eq!(result, Err(CommandError::MarketNotFound(unknown)));
+    let cart = block_on(create_cart(&Ctx::system(), &world, &world.ids, hr())).unwrap();
+    assert_eq!((cart.market(), cart.country()), (market_id(), hr()));
+    assert_eq!(block_on(world.carts.get(cart.id())), Ok(Some(cart)));
+}
+
+#[test]
+fn create_cart_rejects_country_without_market() {
+    let world = World::new();
+    let de = CountryCode::new("DE").unwrap();
+    let result = block_on(create_cart(&Ctx::system(), &world, &world.ids, de));
+    assert_eq!(result, Err(CommandError::NoMarketForCountry(de)));
 }
 
 #[test]
@@ -226,6 +277,7 @@ fn add_line_returns_priced_cart() {
         LineStatus::Priced {
             unit_price: Price::new(eur(1000)).unwrap(),
             total: eur(2000),
+            tax: None,
         }
     );
     assert_eq!(priced.total, eur(2000));
@@ -401,4 +453,69 @@ fn line_becomes_unavailable_when_product_leaves_catalog() {
         }))
     );
     assert_eq!(priced.total, eur(0));
+}
+
+// ---- tax ----
+
+fn line_tax(priced: &PricedCart, line: usize) -> Option<TaxLine> {
+    match &priced.lines[line].status {
+        LineStatus::Priced { tax, .. } => *tax,
+        LineStatus::Unavailable(_) => None,
+    }
+}
+
+#[test]
+fn tax_is_added_per_line_at_the_class_or_default_rate() {
+    let world = World::new();
+    world.tax_croatia();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 2).unwrap();
+
+    let priced = world.add(&Ctx::system(), cart, "cup", 1).unwrap();
+
+    // The mug is a book: 2000 × 5% = 100. The cup pays the default: 1000 × 25% = 250.
+    assert_eq!(
+        line_tax(&priced, 0),
+        Some(TaxLine {
+            rate: TaxRate::new(50_000).unwrap(),
+            class: Some(books()),
+            amount: eur(100),
+            source: TaxSource::RateTable {
+                region: region_id()
+            },
+        })
+    );
+    assert_eq!(line_tax(&priced, 1).map(|t| t.amount), Some(eur(250)));
+    assert_eq!(
+        (priced.subtotal, priced.tax_total, priced.total),
+        (eur(3000), eur(350), eur(3350))
+    );
+}
+
+#[test]
+fn tax_is_extracted_when_the_market_includes_it() {
+    let world = World::new();
+    world.tax_croatia();
+    world.set_prices_include_tax();
+    let cart = world.create_cart();
+
+    let priced = world.add(&Ctx::system(), cart, "cup", 1).unwrap();
+
+    // 1000 includes 25%: 200 of it is tax, and the buyer pays 1000.
+    assert!(priced.taxes_included);
+    assert_eq!(
+        (priced.subtotal, priced.tax_total, priced.total),
+        (eur(1000), eur(200), eur(1000))
+    );
+}
+
+#[test]
+fn country_without_tax_region_is_not_taxed() {
+    let world = World::new();
+    let cart = world.create_cart();
+
+    let priced = world.add(&Ctx::system(), cart, "cup", 1).unwrap();
+
+    assert_eq!(line_tax(&priced, 0), None);
+    assert_eq!((priced.tax_total, priced.total), (eur(0), eur(1000)));
 }

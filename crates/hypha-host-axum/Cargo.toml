@@ -10,6 +10,7 @@ hypha-core.workspace = true
 hypha-products = { path = "../hypha-products" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-cart = { path = "../hypha-cart" }
+hypha-tax = { path = "../hypha-tax" }
 hypha-testkit = { path = "../hypha-testkit" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
 deadpool-postgres = "0.14.2"

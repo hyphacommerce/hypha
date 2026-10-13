@@ -1,5 +1,7 @@
 use hypha_cart::{Cart, CartRepo, Quantity, repo::keys};
-use hypha_core::{CartId, MarketId, ProductId, RepoError, VariantId, Version, Versioned};
+use hypha_core::{
+    CartId, CountryCode, MarketId, ProductId, RepoError, VariantId, Version, Versioned,
+};
 use uuid::Uuid;
 
 use super::scenario;
@@ -15,9 +17,14 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
 }
 
 fn cart(n: u128) -> Cart {
+    cart_to(n, "HR")
+}
+
+fn cart_to(n: u128, country: &str) -> Cart {
     Cart::new(
         CartId::from_uuid(Uuid::from_u128(n)),
         MarketId::from_uuid(Uuid::from_u128(1000 + n)),
+        CountryCode::new(country).unwrap(),
     )
 }
 
@@ -39,8 +46,8 @@ async fn round_trips<R: CartRepo>(repo: &R) {
     assert_eq!(empty.version(), Version::new(1));
     assert_eq!(repo.get(empty.id()).await, Ok(Some(empty)));
 
-    // Line order and quantities must survive.
-    let mut full = cart(2);
+    // Line order, quantities and the country must survive.
+    let mut full = cart_to(2, "DE");
     full.add_line(pid(1), vid(12), qty(3)).unwrap();
     full.add_line(pid(1), vid(11), qty(1)).unwrap();
     full.add_line(pid(2), vid(21), qty(u32::MAX)).unwrap();

@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AuthError, CartId, Ctx, ErrorCode, IdGenerator, MarketId, MoneyError, ProductId, RepoError,
-    Scope, VariantId,
+    AuthError, CartId, CountryCode, Ctx, ErrorCode, IdGenerator, MarketId, MoneyError, ProductId,
+    RepoError, Scope, VariantId,
 };
-use hypha_markets::{CatalogContext, CatalogRepo, MarketRepo, PriceListRepo};
+use hypha_markets::{CatalogContext, CatalogRepo, Market, MarketRepo, PriceListRepo};
 use hypha_pricing::PricingContext;
 use hypha_products::{Product, ProductRepo};
+use hypha_tax::{TaxClassRepo, TaxContext, TaxRegionRepo};
 use thiserror::Error;
 
 use crate::{Cart, CartError, CartRepo, LineError, PricedCart, Quantity, price_cart, price_line};
@@ -27,6 +28,8 @@ pub enum CommandError {
     CartNotFound(CartId),
     #[error("market {0} not found")]
     MarketNotFound(MarketId),
+    #[error("no market sells to {0}")]
+    NoMarketForCountry(CountryCode),
     #[error("variant {0} not found")]
     VariantNotFound(VariantId),
 }
@@ -41,6 +44,7 @@ impl ErrorCode for CommandError {
             CommandError::Money(e) => e.code(),
             CommandError::CartNotFound(_) => "cart_not_found",
             CommandError::MarketNotFound(_) => "market_not_found",
+            CommandError::NoMarketForCountry(_) => "no_market_for_country",
             CommandError::VariantNotFound(_) => "variant_not_found",
         }
     }
@@ -58,12 +62,16 @@ pub trait CartPorts {
     type Markets: MarketRepo;
     type Catalogs: CatalogRepo;
     type PriceLists: PriceListRepo;
+    type TaxClasses: TaxClassRepo;
+    type TaxRegions: TaxRegionRepo;
 
     fn carts(&self) -> &Self::Carts;
     fn products(&self) -> &Self::Products;
     fn markets(&self) -> &Self::Markets;
     fn catalogs(&self) -> &Self::Catalogs;
     fn price_lists(&self) -> &Self::PriceLists;
+    fn tax_classes(&self) -> &Self::TaxClasses;
+    fn tax_regions(&self) -> &Self::TaxRegions;
 }
 
 /// Borrowed ports are ports too, so a host can lend out `&Storage` per request.
@@ -73,6 +81,8 @@ impl<T: CartPorts + ?Sized> CartPorts for &T {
     type Markets = T::Markets;
     type Catalogs = T::Catalogs;
     type PriceLists = T::PriceLists;
+    type TaxClasses = T::TaxClasses;
+    type TaxRegions = T::TaxRegions;
 
     fn carts(&self) -> &Self::Carts {
         (**self).carts()
@@ -89,21 +99,31 @@ impl<T: CartPorts + ?Sized> CartPorts for &T {
     fn price_lists(&self) -> &Self::PriceLists {
         (**self).price_lists()
     }
+    fn tax_classes(&self) -> &Self::TaxClasses {
+        (**self).tax_classes()
+    }
+    fn tax_regions(&self) -> &Self::TaxRegions {
+        (**self).tax_regions()
+    }
 }
 
+/// Creates an empty cart shipping to `country`, in the market that sells there
+/// (like Shopify, the buyer's country picks the market).
 pub async fn create_cart<S: CartPorts, I: IdGenerator>(
     ctx: &Ctx,
     ports: &S,
     ids: &I,
-    market: MarketId,
+    country: CountryCode,
 ) -> Result<Cart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
 
-    if ports.markets().get(market).await?.is_none() {
-        return Err(CommandError::MarketNotFound(market));
-    }
+    let market = ports
+        .markets()
+        .get_by_country(country)
+        .await?
+        .ok_or(CommandError::NoMarketForCountry(country))?;
 
-    let mut cart = Cart::new(CartId::from_uuid(ids.new_uuid()), market);
+    let mut cart = Cart::new(CartId::from_uuid(ids.new_uuid()), market.id(), country);
     ports.carts().insert(&mut cart).await?;
     Ok(cart)
 }
@@ -144,8 +164,9 @@ pub async fn add_line<S: CartPorts>(
     let pricing = load_pricing(ports, &cart).await?;
     price_line(&product, input.variant, &pricing)?;
 
+    let tax = load_tax(ports, &cart, &pricing.market).await?;
     let cart_products = load_products(ports, &cart).await?;
-    let priced = price_cart(&cart, &cart_products, &pricing)?;
+    let priced = price_cart(&cart, &cart_products, &pricing, &tax)?;
 
     // Fails with StaleVersion (409) if another request changed the cart meanwhile,
     // instead of silently dropping that request's line.
@@ -153,7 +174,7 @@ pub async fn add_line<S: CartPorts>(
     Ok(priced)
 }
 
-/// The cart at current prices. Stale lines are marked unavailable, not errors.
+/// The cart at current prices and tax rates. Stale lines are marked unavailable, not errors.
 pub async fn get_cart<S: CartPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -167,14 +188,15 @@ pub async fn get_cart<S: CartPorts>(
         .await?
         .ok_or(CommandError::CartNotFound(id))?;
     let pricing = load_pricing(ports, &cart).await?;
+    let tax = load_tax(ports, &cart, &pricing.market).await?;
     let cart_products = load_products(ports, &cart).await?;
 
-    Ok(price_cart(&cart, &cart_products, &pricing)?)
+    Ok(price_cart(&cart, &cart_products, &pricing, &tax)?)
 }
 
 /// Everything needed to price the cart's lines, with a fixed number of queries
 /// however many lines there are: membership and fixed prices are fetched in batches.
-/// With `load_products`, pricing a cart costs 6 queries in total.
+/// With `load_tax` and `load_products`, pricing a cart costs 8 queries in total.
 ///
 /// A missing catalog or price list is left out rather than reported here:
 /// `resolve_price` turns it into a precise per-line reason.
@@ -220,6 +242,20 @@ async fn load_pricing<S: CartPorts>(
         price_list,
         included_products,
         fixed_prices,
+    })
+}
+
+/// The tax rates of the cart's country and its products' tax classes, in 2 queries.
+/// The market says whether its prices already include tax.
+async fn load_tax<S: CartPorts>(
+    ports: &S,
+    cart: &Cart,
+    market: &Market,
+) -> Result<TaxContext, CommandError> {
+    Ok(TaxContext {
+        region: ports.tax_regions().get_by_country(cart.country()).await?,
+        prices_include_tax: market.prices_include_tax(),
+        product_classes: ports.tax_classes().classes_for(&product_ids(cart)).await?,
     })
 }
 

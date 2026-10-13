@@ -5,7 +5,7 @@ use hypha_core::IdGenerator;
 use hypha_store_postgres::{CORE, PgConnection, PgStore, migrate};
 use hypha_testkit::{
     InMemoryCartRepo, InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo,
-    InMemoryProductRepo,
+    InMemoryProductRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
 };
 use uuid::Uuid;
 
@@ -52,6 +52,8 @@ pub struct MemoryStorage {
     catalogs: InMemoryCatalogRepo,
     price_lists: InMemoryPriceListRepo,
     carts: InMemoryCartRepo,
+    tax_classes: InMemoryTaxClassRepo,
+    tax_regions: InMemoryTaxRegionRepo,
 }
 
 impl CartPorts for MemoryStorage {
@@ -60,6 +62,8 @@ impl CartPorts for MemoryStorage {
     type Markets = InMemoryMarketRepo;
     type Catalogs = InMemoryCatalogRepo;
     type PriceLists = InMemoryPriceListRepo;
+    type TaxClasses = InMemoryTaxClassRepo;
+    type TaxRegions = InMemoryTaxRegionRepo;
 
     fn carts(&self) -> &Self::Carts {
         &self.carts
@@ -75,6 +79,12 @@ impl CartPorts for MemoryStorage {
     }
     fn price_lists(&self) -> &Self::PriceLists {
         &self.price_lists
+    }
+    fn tax_classes(&self) -> &Self::TaxClasses {
+        &self.tax_classes
+    }
+    fn tax_regions(&self) -> &Self::TaxRegions {
+        &self.tax_regions
     }
 }
 

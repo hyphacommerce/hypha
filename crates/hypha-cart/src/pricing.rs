@@ -1,6 +1,7 @@
-use hypha_core::{CartId, Money, MoneyError, Price, ProductId, VariantId};
+use hypha_core::{CartId, CountryCode, Money, MoneyError, Price, ProductId, VariantId};
 use hypha_pricing::{PricingContext, resolve_price};
 use hypha_products::{Product, ProductStatus};
+use hypha_tax::{TaxContext, TaxLine, TaxableLine, tax_line};
 
 use crate::{
     cart::{Cart, CartLine},
@@ -16,7 +17,12 @@ use crate::{
 /// reason to a `messages` entry pointing at the line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineStatus {
-    Priced { unit_price: Price, total: Money },
+    Priced {
+        unit_price: Price,
+        total: Money,
+        /// `None` when the cart's country has no tax region.
+        tax: Option<TaxLine>,
+    },
     Unavailable(LineError),
 }
 
@@ -38,8 +44,17 @@ impl PricedLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PricedCart {
     pub id: CartId,
+    pub country: CountryCode,
     pub lines: Vec<PricedLine>,
-    /// Sum of the available lines only, in the market's currency.
+    /// Whether line prices include tax (the market decides).
+    pub taxes_included: bool,
+    /// Sum of the available lines' totals, as priced. All amounts are in the market's
+    /// currency and count the available lines only.
+    pub subtotal: Money,
+    /// Tax on the available lines: already in `subtotal` if `taxes_included`, otherwise
+    /// added on top of it.
+    pub tax_total: Money,
+    /// What the buyer pays.
     pub total: Money,
 }
 
@@ -81,23 +96,29 @@ pub fn price_line(
     Ok(resolve_price(pricing, product.id(), variant, base)?)
 }
 
-/// Prices every line at current prices. Lines that can't be priced are marked
-/// unavailable and left out of the total; only overflowing the cart total is an error.
+/// Prices and taxes every line at current prices and rates. Lines that can't be priced
+/// are marked unavailable and left out of the totals; only overflowing a cart total is
+/// an error.
 ///
 /// `products` should contain every product in the cart; a missing one makes its
-/// lines unavailable with `ProductNotFound`. `pricing` must have been built for all
-/// of the cart's products and variants.
+/// lines unavailable with `ProductNotFound`. `pricing` and `tax` must have been built
+/// for all of the cart's products and variants.
 pub fn price_cart(
     cart: &Cart,
     products: &[Product],
     pricing: &PricingContext,
+    tax: &TaxContext,
 ) -> Result<PricedCart, MoneyError> {
     let lines: Vec<PricedLine> = cart
         .lines()
         .iter()
         .map(|line| {
-            let status = match line_total(line, products, pricing) {
-                Ok((unit_price, total)) => LineStatus::Priced { unit_price, total },
+            let status = match line_total(line, products, pricing, tax) {
+                Ok((unit_price, total, tax)) => LineStatus::Priced {
+                    unit_price,
+                    total,
+                    tax,
+                },
                 Err(reason) => LineStatus::Unavailable(reason),
             };
             PricedLine {
@@ -109,18 +130,30 @@ pub fn price_cart(
         })
         .collect();
 
-    let totals: Vec<Money> = lines
-        .iter()
-        .filter_map(|l| match l.status {
-            LineStatus::Priced { total, .. } => Some(total),
-            LineStatus::Unavailable(_) => None,
-        })
-        .collect();
-    let total = Money::sum(&totals, pricing.market.currency())?;
+    let mut totals = Vec::new();
+    let mut taxes = Vec::new();
+    for line in &lines {
+        if let LineStatus::Priced { total, tax, .. } = &line.status {
+            totals.push(*total);
+            taxes.extend(tax.map(|t| t.amount));
+        }
+    }
+    let currency = pricing.market.currency();
+    let subtotal = Money::sum(&totals, currency)?;
+    let tax_total = Money::sum(&taxes, currency)?;
+    let total = if tax.prices_include_tax {
+        subtotal
+    } else {
+        subtotal.checked_add(tax_total)?
+    };
 
     Ok(PricedCart {
         id: cart.id(),
+        country: cart.country(),
         lines,
+        taxes_included: tax.prices_include_tax,
+        subtotal,
+        tax_total,
         total,
     })
 }
@@ -129,24 +162,32 @@ fn line_total(
     line: &CartLine,
     products: &[Product],
     pricing: &PricingContext,
-) -> Result<(Price, Money), LineError> {
+    tax: &TaxContext,
+) -> Result<(Price, Money, Option<TaxLine>), LineError> {
     let product = products
         .iter()
         .find(|p| p.id() == line.product())
         .ok_or(LineError::ProductNotFound(line.product()))?;
     let unit_price = price_line(product, line.variant(), pricing)?;
     let total = unit_price.money().checked_mul(line.quantity().value())?;
-    Ok((unit_price, total))
+    let taxable = TaxableLine {
+        product: line.product(),
+        amount: total,
+    };
+    Ok((unit_price, total, tax_line(tax, &taxable)?))
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use hypha_core::{BasisPoints, CatalogId, CountryCode, Currency, MarketId, PriceListId};
+    use hypha_core::{
+        BasisPoints, CatalogId, Currency, MarketId, PriceListId, TaxClassId, TaxRate, TaxRegionId,
+    };
     use hypha_markets::{Catalog, CatalogContext, Market, PriceList};
     use hypha_pricing::PricingError;
     use hypha_products::Handle;
+    use hypha_tax::{TaxRegion, TaxSource};
     use uuid::Uuid;
 
     use super::*;
@@ -187,13 +228,7 @@ mod tests {
     /// An EUR market whose catalog (no price list) includes `products`.
     fn pricing(products: &[u128]) -> PricingContext {
         PricingContext {
-            market: Market::new(
-                mid(),
-                "Eurozone".to_string(),
-                vec![CountryCode::new("HR").unwrap()],
-                Currency::Eur,
-            )
-            .unwrap(),
+            market: Market::new(mid(), "Eurozone".to_string(), vec![hr()], Currency::Eur).unwrap(),
             catalog: Some(Catalog::new(
                 CatalogId::from_uuid(Uuid::from_u128(200)),
                 CatalogContext::Market(mid()),
@@ -205,18 +240,52 @@ mod tests {
         }
     }
 
+    fn hr() -> CountryCode {
+        CountryCode::new("HR").unwrap()
+    }
+
+    fn no_tax() -> TaxContext {
+        TaxContext {
+            region: None,
+            prices_include_tax: false,
+            product_classes: HashMap::new(),
+        }
+    }
+
+    fn region_id() -> TaxRegionId {
+        TaxRegionId::from_uuid(Uuid::from_u128(500))
+    }
+
+    /// Croatia at 25%.
+    fn croatia(prices_include_tax: bool) -> TaxContext {
+        TaxContext {
+            region: Some(TaxRegion::new(
+                region_id(),
+                hr(),
+                TaxRate::new(250_000).unwrap(),
+            )),
+            prices_include_tax,
+            product_classes: HashMap::new(),
+        }
+    }
+
     fn cart(lines: &[(u128, u32)]) -> Cart {
-        let mut c = Cart::new(CartId::from_uuid(Uuid::from_u128(300)), mid());
+        let mut c = Cart::new(CartId::from_uuid(Uuid::from_u128(300)), mid(), hr());
         for (n, q) in lines {
             c.add_line(pid(*n), vid(n + 10), qty(*q)).unwrap();
         }
         c
     }
 
+    fn money(amount: i64) -> Money {
+        Money::new(amount, Currency::Eur).unwrap()
+    }
+
     fn priced(unit: i64, total: i64) -> LineStatus {
         LineStatus::Priced {
             unit_price: eur(unit),
-            total: Money::new(total, Currency::Eur).unwrap(),
+            total: money(total),
+            tax: None,
         }
     }
 
@@ -226,7 +295,7 @@ mod tests {
 
     #[test]
     fn empty_cart_totals_zero_in_market_currency() {
-        let priced = price_cart(&cart(&[]), &[], &pricing(&[])).unwrap();
+        let priced = price_cart(&cart(&[]), &[], &pricing(&[]), &no_tax()).unwrap();
         assert_eq!(priced.total, Money::zero(Currency::Eur));
         assert!(priced.lines.is_empty());
         assert!(priced.is_fully_available());
@@ -235,12 +304,20 @@ mod tests {
     #[test]
     fn multiplies_unit_price_and_sums_lines() {
         let products = [product(1, eur(1000)), product(2, eur(250))];
-        let result = price_cart(&cart(&[(1, 2), (2, 3)]), &products, &pricing(&[1, 2])).unwrap();
+        let result = price_cart(
+            &cart(&[(1, 2), (2, 3)]),
+            &products,
+            &pricing(&[1, 2]),
+            &no_tax(),
+        )
+        .unwrap();
         assert_eq!(
             statuses(&result),
             vec![priced(1000, 2000), priced(250, 750)]
         );
-        assert_eq!(result.total, Money::new(2750, Currency::Eur).unwrap());
+        assert_eq!(result.subtotal, money(2750));
+        assert_eq!(result.tax_total, money(0));
+        assert_eq!(result.total, money(2750));
     }
 
     #[test]
@@ -262,6 +339,7 @@ mod tests {
             &cart(&[(1, 1), (2, 1)]),
             &[product(1, eur(1000)), product(2, eur(250))],
             &ctx,
+            &no_tax(),
         )
         .unwrap();
 
@@ -277,6 +355,7 @@ mod tests {
             &cart(&[(1, 1), (2, 1)]),
             &[product(1, eur(1000)), archived],
             &pricing(&[1, 2]),
+            &no_tax(),
         )
         .unwrap();
         assert_eq!(
@@ -299,7 +378,7 @@ mod tests {
 
     #[test]
     fn missing_product_makes_line_unavailable() {
-        let result = price_cart(&cart(&[(1, 1)]), &[], &pricing(&[1])).unwrap();
+        let result = price_cart(&cart(&[(1, 1)]), &[], &pricing(&[1]), &no_tax()).unwrap();
         assert_eq!(
             statuses(&result),
             vec![LineStatus::Unavailable(LineError::ProductNotFound(pid(1)))]
@@ -313,6 +392,7 @@ mod tests {
             &cart(&[(1, 2)]),
             &[product(1, eur(Money::MAX_AMOUNT))],
             &pricing(&[1]),
+            &no_tax(),
         )
         .unwrap();
         assert_eq!(
@@ -327,9 +407,84 @@ mod tests {
     fn cart_total_overflow_is_an_error() {
         let products = [product(1, eur(Money::MAX_AMOUNT)), product(2, eur(1))];
         assert_eq!(
-            price_cart(&cart(&[(1, 1), (2, 1)]), &products, &pricing(&[1, 2])),
+            price_cart(
+                &cart(&[(1, 1), (2, 1)]),
+                &products,
+                &pricing(&[1, 2]),
+                &no_tax()
+            ),
             Err(MoneyError::Overflow)
         );
+    }
+
+    // ---- tax ----
+
+    fn taxed(unit: i64, total: i64, tax: i64, class: Option<TaxClassId>) -> LineStatus {
+        LineStatus::Priced {
+            unit_price: eur(unit),
+            total: money(total),
+            tax: Some(TaxLine {
+                rate: TaxRate::new(250_000).unwrap(),
+                class,
+                amount: money(tax),
+                source: TaxSource::RateTable {
+                    region: region_id(),
+                },
+            }),
+        }
+    }
+
+    #[test]
+    fn tax_is_added_on_top_when_prices_exclude_it() {
+        let products = [product(1, eur(1000)), product(2, eur(250))];
+        let result = price_cart(
+            &cart(&[(1, 2), (2, 3)]),
+            &products,
+            &pricing(&[1, 2]),
+            &croatia(false),
+        )
+        .unwrap();
+
+        // Per line: 2000 × 25% = 500, 750 × 25% = 187.5 -> 188.
+        assert_eq!(
+            statuses(&result),
+            vec![taxed(1000, 2000, 500, None), taxed(250, 750, 188, None)]
+        );
+        assert!(!result.taxes_included);
+        assert_eq!(result.subtotal, money(2750));
+        assert_eq!(result.tax_total, money(688));
+        assert_eq!(result.total, money(3438));
+    }
+
+    #[test]
+    fn tax_is_extracted_when_prices_include_it() {
+        let result = price_cart(
+            &cart(&[(1, 2)]),
+            &[product(1, eur(1000))],
+            &pricing(&[1]),
+            &croatia(true),
+        )
+        .unwrap();
+
+        // 2000 includes 25%: 2000 × 0.25 / 1.25 = 400.
+        assert_eq!(statuses(&result), vec![taxed(1000, 2000, 400, None)]);
+        assert!(result.taxes_included);
+        assert_eq!(result.subtotal, money(2000));
+        assert_eq!(result.tax_total, money(400));
+        assert_eq!(result.total, money(2000));
+    }
+
+    #[test]
+    fn unavailable_line_is_not_taxed() {
+        let result = price_cart(
+            &cart(&[(1, 1), (2, 1)]),
+            &[product(1, eur(1000))],
+            &pricing(&[1, 2]),
+            &croatia(false),
+        )
+        .unwrap();
+        assert_eq!(result.tax_total, money(250));
+        assert_eq!(result.total, money(1250));
     }
 
     #[test]

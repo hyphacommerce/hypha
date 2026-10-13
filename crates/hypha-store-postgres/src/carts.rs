@@ -1,5 +1,7 @@
 use hypha_cart::{Cart, CartLineSnapshot, CartRepo, CartSnapshot};
-use hypha_core::{CartId, MarketId, ProductId, RepoError, VariantId, Version, Versioned};
+use hypha_core::{
+    CartId, CountryCode, MarketId, ProductId, RepoError, VariantId, Version, Versioned,
+};
 use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
@@ -15,7 +17,7 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
         let client = conn.client();
         let Some(row) = client
             .query_typed_opt(
-                "SELECT version, market_id FROM carts WHERE id = $1",
+                "SELECT version, market_id, country FROM carts WHERE id = $1",
                 &[(&id.as_uuid(), Type::UUID)],
             )
             .await
@@ -42,10 +44,12 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
                 })
             })
             .collect::<Result<Vec<_>, RepoError>>()?;
+        let country: String = row.get(2);
         let snapshot = CartSnapshot {
             id,
             version: version_from_db(row.get(0))?,
             market: MarketId::from_uuid(row.get(1)),
+            country: CountryCode::new(&country).map_err(corrupt)?,
             lines,
         };
         Cart::restore(snapshot)
@@ -58,10 +62,11 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
         tx.query_typed(
-            "INSERT INTO carts (id, version, market_id) VALUES ($1, 1, $2)",
+            "INSERT INTO carts (id, version, market_id, country) VALUES ($1, 1, $2, $3)",
             &[
                 (&s.id.as_uuid(), Type::UUID),
                 (&s.market.as_uuid(), Type::UUID),
+                (&s.country.as_str(), Type::TEXT),
             ],
         )
         .await
@@ -79,12 +84,13 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
         // The version check comes first; the lines are only replaced if it passes.
         let bumped = tx
             .query_typed_opt(
-                "UPDATE carts SET version = version + 1, market_id = $3
+                "UPDATE carts SET version = version + 1, market_id = $3, country = $4
                  WHERE id = $1 AND version = $2 RETURNING version",
                 &[
                     (&s.id.as_uuid(), Type::UUID),
                     (&version_to_db(s.version)?, Type::INT8),
                     (&s.market.as_uuid(), Type::UUID),
+                    (&s.country.as_str(), Type::TEXT),
                 ],
             )
             .await

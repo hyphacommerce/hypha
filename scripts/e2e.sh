@@ -91,7 +91,8 @@ step "add mug and cup to catalog" 204 - -X POST "$BASE/catalogs/$CATALOG/product
 step "assign price list" 200 - -X PUT "$BASE/catalogs/$CATALOG/price-list" -H "$JSON" \
     -d "{\"price_list\":\"$LIST\"}"
 
-step "create cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d "{\"market\":\"$MARKET\"}"
+step "create cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+contains "cart ships to Croatia" '"country":"HR"'
 CART=$(id)
 step "add 2 mugs" 200 - -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
@@ -146,6 +147,8 @@ step "products for unknown catalog" 404 catalog_not_found -X POST \
     "$BASE/catalogs/cat_00000000000000000000000000000063/products" -H "$JSON" -d '{"products":[]}'
 step "add archived mug" 422 product_not_active -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+step "cart to a country without market" 422 no_market_for_country -X POST "$BASE/carts" -H "$JSON" \
+    -d '{"country":"US"}'
 step "zero quantity" 422 invalid_quantity -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":0}"
 step "create draft product" 201 - -X POST "$BASE/products" -H "$JSON" \

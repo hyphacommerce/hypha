@@ -140,6 +140,7 @@ impl From<hypha_cart::CommandError> for ApiError {
             | E::Line(_)
             | E::Money(_)
             | E::MarketNotFound(_)
+            | E::NoMarketForCountry(_)
             | E::VariantNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,

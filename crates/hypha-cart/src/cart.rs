@@ -1,4 +1,4 @@
-use hypha_core::{CartId, MarketId, ProductId, VariantId, Version, Versioned};
+use hypha_core::{CartId, CountryCode, MarketId, ProductId, VariantId, Version, Versioned};
 
 use crate::{error::CartError, quantity::Quantity};
 
@@ -25,12 +25,14 @@ impl CartLine {
     }
 }
 
-/// A cart belongs to one market, which fixes its currency.
+/// A cart ships to one country, which picked its market (and so its currency) when the
+/// cart was created, and picks its tax rates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cart {
     id: CartId,
     version: Version,
     market: MarketId,
+    country: CountryCode,
     lines: Vec<CartLine>,
 }
 
@@ -45,11 +47,12 @@ impl Versioned for Cart {
 }
 
 impl Cart {
-    pub fn new(id: CartId, market: MarketId) -> Self {
+    pub fn new(id: CartId, market: MarketId, country: CountryCode) -> Self {
         Self {
             id,
             version: Version::NEW,
             market,
+            country,
             lines: Vec::new(),
         }
     }
@@ -102,6 +105,10 @@ impl Cart {
         self.market
     }
 
+    pub fn country(&self) -> CountryCode {
+        self.country
+    }
+
     pub fn lines(&self) -> &[CartLine] {
         &self.lines
     }
@@ -113,6 +120,7 @@ pub struct CartSnapshot {
     pub id: CartId,
     pub version: Version,
     pub market: MarketId,
+    pub country: CountryCode,
     pub lines: Vec<CartLineSnapshot>,
 }
 
@@ -129,6 +137,7 @@ impl Cart {
             id: self.id,
             version: self.version,
             market: self.market,
+            country: self.country,
             lines: self
                 .lines
                 .iter()
@@ -159,6 +168,7 @@ impl Cart {
             id: s.id,
             version: s.version,
             market: s.market,
+            country: s.country,
             lines,
         })
     }
@@ -174,6 +184,7 @@ mod tests {
         Cart::new(
             CartId::from_uuid(Uuid::from_u128(1)),
             MarketId::from_uuid(Uuid::from_u128(2)),
+            CountryCode::new("HR").unwrap(),
         )
     }
 

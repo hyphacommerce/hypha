@@ -1,6 +1,9 @@
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_cart::{AddLine, LineStatus, PricedCart, add_line, create_cart, get_cart};
-use hypha_core::{CartId, Ctx, ErrorCode, MarketId, Money, ProductId, VariantId};
+use hypha_core::{
+    CartId, CountryCode, Ctx, ErrorCode, Money, ProductId, TaxClassId, TaxRate, VariantId,
+};
+use hypha_tax::TaxLine;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -11,7 +14,8 @@ use crate::{
 
 #[derive(Deserialize)]
 pub(super) struct CreateCartRequest {
-    market: MarketId,
+    /// Where the cart ships to; picks the market and the tax rates.
+    country: CountryCode,
 }
 
 #[derive(Deserialize)]
@@ -23,7 +27,14 @@ pub(super) struct AddLineRequest {
 #[derive(Serialize)]
 pub(super) struct CartResponse {
     id: CartId,
-    /// Sum of the available lines only.
+    country: CountryCode,
+    /// Whether line prices include tax (set on the market).
+    taxes_included: bool,
+    /// Sum of the available lines, as priced. All totals count available lines only.
+    subtotal: Money,
+    /// Tax on the available lines: part of `subtotal` if `taxes_included`, else on top.
+    tax_total: Money,
+    /// What the buyer pays.
     total: Money,
     /// False when any line is unavailable; checkout should refuse such a cart.
     fully_available: bool,
@@ -36,12 +47,33 @@ pub(super) enum LineState {
     Priced {
         unit_price: Money,
         total: Money,
+        /// `null` when the cart's country has no tax rates.
+        tax: Option<TaxLineResponse>,
     },
     Unavailable {
         /// Stable `ErrorCode`, e.g. "product_not_active".
         reason_code: &'static str,
         reason: String,
     },
+}
+
+#[derive(Serialize)]
+pub(super) struct TaxLineResponse {
+    /// Parts per million: 250000 = 25%.
+    rate: TaxRate,
+    amount: Money,
+    /// The class whose rate applied; `null` for the country's default rate.
+    tax_class: Option<TaxClassId>,
+}
+
+impl From<&TaxLine> for TaxLineResponse {
+    fn from(t: &TaxLine) -> Self {
+        Self {
+            rate: t.rate,
+            amount: t.amount,
+            tax_class: t.class,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -57,6 +89,10 @@ impl From<&PricedCart> for CartResponse {
     fn from(cart: &PricedCart) -> Self {
         Self {
             id: cart.id,
+            country: cart.country,
+            taxes_included: cart.taxes_included,
+            subtotal: cart.subtotal,
+            tax_total: cart.tax_total,
             total: cart.total,
             fully_available: cart.is_fully_available(),
             lines: cart
@@ -67,9 +103,14 @@ impl From<&PricedCart> for CartResponse {
                     variant: l.variant,
                     quantity: l.quantity.value(),
                     state: match &l.status {
-                        LineStatus::Priced { unit_price, total } => LineState::Priced {
+                        LineStatus::Priced {
+                            unit_price,
+                            total,
+                            tax,
+                        } => LineState::Priced {
                             unit_price: unit_price.money(),
                             total: *total,
+                            tax: tax.as_ref().map(TaxLineResponse::from),
                         },
                         LineStatus::Unavailable(reason) => LineState::Unavailable {
                             reason_code: reason.code(),
@@ -88,7 +129,7 @@ pub(super) async fn create<S: Storage>(
 ) -> Result<(StatusCode, Json<CartResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
     let ports = state.storage.ports().await?;
-    let cart = create_cart(&ctx, &ports, &state.ids, req.market).await?;
+    let cart = create_cart(&ctx, &ports, &state.ids, req.country).await?;
     // A new cart is empty, so pricing it can't fail; return the same shape as GET.
     let priced = get_cart(&ctx, &ports, cart.id()).await?;
     Ok((StatusCode::CREATED, Json(CartResponse::from(&priced))))
