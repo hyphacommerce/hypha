@@ -112,6 +112,15 @@ impl Cart {
     pub fn lines(&self) -> &[CartLine] {
         &self.lines
     }
+
+    /// The line holding `variant`.
+    pub fn line(&self, variant: VariantId) -> Result<CartLine, CartError> {
+        self.lines
+            .iter()
+            .find(|l| l.variant == variant)
+            .copied()
+            .ok_or(CartError::LineNotFound(variant))
+    }
 }
 
 /// Plain-data form of a `Cart` for storage adapters (design note 0001, 3.4).
@@ -221,6 +230,14 @@ mod tests {
         c.add_line(pid(), vid(1), qty(3)).unwrap();
         assert_eq!(c.lines().len(), 1);
         assert_eq!(c.lines()[0].quantity(), qty(5));
+    }
+
+    #[test]
+    fn line_finds_the_variant() {
+        let mut c = cart();
+        c.add_line(pid(), vid(1), qty(2)).unwrap();
+        assert_eq!(c.line(vid(1)).map(|l| l.quantity()), Ok(qty(2)));
+        assert_eq!(c.line(vid(2)), Err(CartError::LineNotFound(vid(2))));
     }
 
     #[test]

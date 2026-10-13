@@ -3,9 +3,11 @@ use hypha_cart::{
     add_line, create_cart, get_cart,
 };
 use hypha_core::{
-    Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, Ctx, Currency, MarketId, Money,
-    Price, PriceListId, ProductId, Scope, TaxClassId, TaxRate, TaxRegionId, UserId, VariantId,
+    Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, Ctx, Currency, InventoryItemId,
+    LocationId, MarketId, Money, Price, PriceListId, ProductId, Scope, TaxClassId, TaxRate,
+    TaxRegionId, UserId, VariantId,
 };
+use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo,
 };
@@ -13,8 +15,9 @@ use hypha_pricing::PricingError;
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus};
 use hypha_tax::{TaxClass, TaxClassRepo, TaxLine, TaxRegion, TaxRegionRepo, TaxSource};
 use hypha_testkit::{
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo,
-    InMemoryProductRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, SequentialIds,
+    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo,
+    InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo, InMemoryTaxClassRepo,
+    InMemoryTaxRegionRepo, SequentialIds,
 };
 use pollster::block_on;
 use uuid::Uuid;
@@ -38,6 +41,11 @@ fn region_id() -> TaxRegionId {
 
 fn books() -> TaxClassId {
     TaxClassId::from_uuid(Uuid::from_u128(1004))
+}
+
+/// The warehouse that serves the market (`stock` creates it on first use).
+fn warehouse() -> LocationId {
+    LocationId::from_uuid(Uuid::from_u128(1005))
 }
 
 fn hr() -> CountryCode {
@@ -79,6 +87,8 @@ struct World {
     price_lists: InMemoryPriceListRepo,
     tax_classes: InMemoryTaxClassRepo,
     tax_regions: InMemoryTaxRegionRepo,
+    inventory_items: InMemoryInventoryItemRepo,
+    locations: InMemoryLocationRepo,
     ids: SequentialIds,
 }
 
@@ -94,6 +104,8 @@ impl World {
             price_lists: InMemoryPriceListRepo::default(),
             tax_classes: InMemoryTaxClassRepo::default(),
             tax_regions: InMemoryTaxRegionRepo::default(),
+            inventory_items: InMemoryInventoryItemRepo::default(),
+            locations: InMemoryLocationRepo::default(),
             ids: SequentialIds::default(),
         };
 
@@ -166,6 +178,35 @@ impl World {
         block_on(self.tax_regions.insert(&mut region)).unwrap();
     }
 
+    /// Tracks `name`'s stock: `on_hand` at the warehouse, which serves the market.
+    /// Products without a call to this are untracked and never run out.
+    fn stock(&self, name: &str, on_hand: i64) {
+        if block_on(self.locations.get(warehouse())).unwrap().is_none() {
+            let mut warehouse =
+                Location::new(warehouse(), "Zagreb".to_string(), vec![market_id()], 0).unwrap();
+            block_on(self.locations.insert(&mut warehouse)).unwrap();
+        }
+        let id = InventoryItemId::from_uuid(vid(name).as_uuid());
+        let mut item = InventoryItem::new(id, vid(name), true, false);
+        item.set_on_hand(warehouse(), on_hand, None).unwrap();
+        block_on(self.inventory_items.insert(&mut item)).unwrap();
+    }
+
+    /// Someone else's checkout takes `quantity` of `name`.
+    fn sell_elsewhere(&self, name: &str, quantity: u32) {
+        let mut item = block_on(self.inventory_items.get_by_variant(vid(name)))
+            .unwrap()
+            .unwrap();
+        let location = block_on(self.locations.get(warehouse())).unwrap().unwrap();
+        item.reserve(
+            &ReservationRef::new("elsewhere").unwrap(),
+            quantity,
+            &[location],
+        )
+        .unwrap();
+        block_on(self.inventory_items.update(&mut item)).unwrap();
+    }
+
     fn set_prices_include_tax(&self) {
         let mut market = block_on(self.markets.get(market_id())).unwrap().unwrap();
         market.set_prices_include_tax(true);
@@ -223,6 +264,8 @@ impl CartPorts for World {
     type PriceLists = InMemoryPriceListRepo;
     type TaxClasses = InMemoryTaxClassRepo;
     type TaxRegions = InMemoryTaxRegionRepo;
+    type InventoryItems = InMemoryInventoryItemRepo;
+    type Locations = InMemoryLocationRepo;
 
     fn carts(&self) -> &Self::Carts {
         &self.carts
@@ -244,6 +287,12 @@ impl CartPorts for World {
     }
     fn tax_regions(&self) -> &Self::TaxRegions {
         &self.tax_regions
+    }
+    fn inventory_items(&self) -> &Self::InventoryItems {
+        &self.inventory_items
+    }
+    fn locations(&self) -> &Self::Locations {
+        &self.locations
     }
 }
 
@@ -518,4 +567,122 @@ fn country_without_tax_region_is_not_taxed() {
 
     assert_eq!(line_tax(&priced, 0), None);
     assert_eq!((priced.tax_total, priced.total), (eur(0), eur(1000)));
+}
+
+// ---- stock ----
+
+#[test]
+fn add_line_refuses_more_than_the_market_has_and_stores_nothing() {
+    let world = World::new();
+    world.stock("mug", 2);
+    let cart = world.create_cart();
+
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "mug", 3),
+        Err(CommandError::Line(LineError::OutOfStock {
+            variant: vid("mug"),
+            requested: 3,
+            available: 2
+        }))
+    );
+    assert_eq!(world.stored_line_count(cart), 0);
+}
+
+#[test]
+fn add_line_checks_the_whole_line_not_just_the_added_units() {
+    let world = World::new();
+    world.stock("mug", 2);
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 2).unwrap();
+
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "mug", 1),
+        Err(CommandError::Line(LineError::OutOfStock {
+            variant: vid("mug"),
+            requested: 3,
+            available: 2
+        }))
+    );
+}
+
+#[test]
+fn untracked_products_are_never_out_of_stock() {
+    let world = World::new();
+    world.stock("mug", 0);
+    let cart = world.create_cart();
+
+    // The cup has no inventory item.
+    let priced = world.add(&Ctx::system(), cart, "cup", 500).unwrap();
+    assert!(priced.is_fully_available());
+}
+
+#[test]
+fn a_line_that_ran_out_after_adding_is_marked_and_kept() {
+    let world = World::new();
+    world.stock("mug", 3);
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 2).unwrap();
+    world.add(&Ctx::system(), cart, "cup", 1).unwrap();
+
+    world.sell_elsewhere("mug", 2);
+    let priced = world.get(cart).unwrap();
+
+    assert_eq!(
+        priced.lines[0].status,
+        LineStatus::Unavailable(LineError::OutOfStock {
+            variant: vid("mug"),
+            requested: 2,
+            available: 1
+        })
+    );
+    assert_eq!(priced.total, eur(1000), "only the cup counts");
+    assert_eq!(
+        world.stored_line_count(cart),
+        2,
+        "the line stays in the cart"
+    );
+}
+
+#[test]
+fn stock_at_a_location_serving_another_market_does_not_count() {
+    let world = World::new();
+    world.stock("mug", 0);
+    let elsewhere = MarketId::from_uuid(Uuid::from_u128(1099));
+    let mut far = Location::new(
+        LocationId::from_uuid(Uuid::from_u128(1098)),
+        "Belgrade".to_string(),
+        vec![elsewhere],
+        0,
+    )
+    .unwrap();
+    block_on(world.locations.insert(&mut far)).unwrap();
+    let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
+        .unwrap()
+        .unwrap();
+    item.set_on_hand(far.id(), 50, None).unwrap();
+    block_on(world.inventory_items.update(&mut item)).unwrap();
+    let cart = world.create_cart();
+
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "mug", 1),
+        Err(CommandError::Line(LineError::OutOfStock {
+            variant: vid("mug"),
+            requested: 1,
+            available: 0
+        }))
+    );
+}
+
+#[test]
+fn continue_selling_allows_more_than_the_stock() {
+    let world = World::new();
+    world.stock("mug", 1);
+    let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
+        .unwrap()
+        .unwrap();
+    item.set_continue_selling(true);
+    block_on(world.inventory_items.update(&mut item)).unwrap();
+    let cart = world.create_cart();
+
+    assert!(world.add(&Ctx::system(), cart, "mug", 5).is_ok());
 }

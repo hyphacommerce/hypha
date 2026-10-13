@@ -49,6 +49,8 @@ impl<C: PgConnection> hypha_cart::CartPorts for PgStore<C> {
     type PriceLists = Self;
     type TaxClasses = Self;
     type TaxRegions = Self;
+    type InventoryItems = Self;
+    type Locations = Self;
 
     fn carts(&self) -> &Self {
         self
@@ -69,6 +71,12 @@ impl<C: PgConnection> hypha_cart::CartPorts for PgStore<C> {
         self
     }
     fn tax_regions(&self) -> &Self {
+        self
+    }
+    fn inventory_items(&self) -> &Self {
+        self
+    }
+    fn locations(&self) -> &Self {
         self
     }
 }

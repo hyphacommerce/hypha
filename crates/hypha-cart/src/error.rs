@@ -26,6 +26,13 @@ pub enum LineError {
         product: ProductId,
         variant: VariantId,
     },
+    /// The market's locations can't supply the line's quantity (design note 0004, I6).
+    #[error("variant {variant}: only {available} of {requested} in stock")]
+    OutOfStock {
+        variant: VariantId,
+        requested: u32,
+        available: i64,
+    },
     #[error(transparent)]
     Pricing(#[from] PricingError),
     #[error(transparent)]
@@ -49,6 +56,7 @@ impl ErrorCode for LineError {
             LineError::ProductNotFound(_) => "product_not_found",
             LineError::ProductNotActive(_) => "product_not_active",
             LineError::VariantNotFound { .. } => "variant_not_in_product",
+            LineError::OutOfStock { .. } => "out_of_stock",
             LineError::Pricing(e) => e.code(),
             LineError::Money(e) => e.code(),
         }

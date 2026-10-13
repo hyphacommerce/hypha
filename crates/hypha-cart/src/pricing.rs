@@ -1,4 +1,5 @@
 use hypha_core::{CartId, CountryCode, Money, MoneyError, Price, ProductId, VariantId};
+use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, resolve_price};
 use hypha_products::{Product, ProductStatus};
 use hypha_tax::{TaxContext, TaxLine, TaxableLine, tax_line};
@@ -12,7 +13,7 @@ use crate::{
 /// Whether a line can be bought right now.
 ///
 /// A line can go stale after it was added (product archived or deleted, removed from
-/// the catalog, price list changed currency). That makes only that line unavailable,
+/// the catalog, price list changed currency, stock ran out). That makes only that line unavailable,
 /// with a typed reason, instead of failing the whole cart. A UCP adapter can map each
 /// reason to a `messages` entry pointing at the line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,24 +97,25 @@ pub fn price_line(
     Ok(resolve_price(pricing, product.id(), variant, base)?)
 }
 
-/// Prices and taxes every line at current prices and rates. Lines that can't be priced
-/// are marked unavailable and left out of the totals; only overflowing a cart total is
-/// an error.
+/// Prices and taxes every line at current prices and rates, and checks its stock. Lines
+/// that can't be priced or supplied are marked unavailable and left out of the totals;
+/// only overflowing a cart total is an error.
 ///
 /// `products` should contain every product in the cart; a missing one makes its
-/// lines unavailable with `ProductNotFound`. `pricing` and `tax` must have been built
-/// for all of the cart's products and variants.
+/// lines unavailable with `ProductNotFound`. `pricing`, `tax` and `stock` must have
+/// been built for all of the cart's products and variants.
 pub fn price_cart(
     cart: &Cart,
     products: &[Product],
     pricing: &PricingContext,
     tax: &TaxContext,
+    stock: &StockContext,
 ) -> Result<PricedCart, MoneyError> {
     let lines: Vec<PricedLine> = cart
         .lines()
         .iter()
         .map(|line| {
-            let status = match line_total(line, products, pricing, tax) {
+            let status = match line_total(line, products, pricing, tax, stock) {
                 Ok((unit_price, total, tax)) => LineStatus::Priced {
                     unit_price,
                     total,
@@ -163,12 +165,14 @@ fn line_total(
     products: &[Product],
     pricing: &PricingContext,
     tax: &TaxContext,
+    stock: &StockContext,
 ) -> Result<(Price, Money, Option<TaxLine>), LineError> {
     let product = products
         .iter()
         .find(|p| p.id() == line.product())
         .ok_or(LineError::ProductNotFound(line.product()))?;
     let unit_price = price_line(product, line.variant(), pricing)?;
+    check_stock(stock, line.variant(), line.quantity())?;
     let total = unit_price.money().checked_mul(line.quantity().value())?;
     let taxable = TaxableLine {
         product: line.product(),
@@ -177,13 +181,32 @@ fn line_total(
     Ok((unit_price, total, tax_line(tax, &taxable)?))
 }
 
+/// Whether the market's locations can supply `quantity` of `variant` right now.
+/// Untracked stock always can.
+pub fn check_stock(
+    stock: &StockContext,
+    variant: VariantId,
+    quantity: Quantity,
+) -> Result<(), LineError> {
+    match stock.availability(variant, quantity.value()) {
+        Availability::Untracked | Availability::Available => Ok(()),
+        Availability::OutOfStock { available } => Err(LineError::OutOfStock {
+            variant,
+            requested: quantity.value(),
+            available,
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
 
     use hypha_core::{
-        BasisPoints, CatalogId, Currency, MarketId, PriceListId, TaxClassId, TaxRate, TaxRegionId,
+        BasisPoints, CatalogId, Currency, InventoryItemId, LocationId, MarketId, PriceListId,
+        TaxClassId, TaxRate, TaxRegionId,
     };
+    use hypha_inventory::{InventoryItem, Location};
     use hypha_markets::{Catalog, CatalogContext, Market, PriceList};
     use hypha_pricing::PricingError;
     use hypha_products::Handle;
@@ -244,6 +267,11 @@ mod tests {
         CountryCode::new("HR").unwrap()
     }
 
+    /// No inventory items: every variant is untracked, so stock never limits a line.
+    fn no_stock() -> StockContext {
+        StockContext::default()
+    }
+
     fn no_tax() -> TaxContext {
         TaxContext {
             region: None,
@@ -295,7 +323,7 @@ mod tests {
 
     #[test]
     fn empty_cart_totals_zero_in_market_currency() {
-        let priced = price_cart(&cart(&[]), &[], &pricing(&[]), &no_tax()).unwrap();
+        let priced = price_cart(&cart(&[]), &[], &pricing(&[]), &no_tax(), &no_stock()).unwrap();
         assert_eq!(priced.total, Money::zero(Currency::Eur));
         assert!(priced.lines.is_empty());
         assert!(priced.is_fully_available());
@@ -309,6 +337,7 @@ mod tests {
             &products,
             &pricing(&[1, 2]),
             &no_tax(),
+            &no_stock(),
         )
         .unwrap();
         assert_eq!(
@@ -340,6 +369,7 @@ mod tests {
             &[product(1, eur(1000)), product(2, eur(250))],
             &ctx,
             &no_tax(),
+            &no_stock(),
         )
         .unwrap();
 
@@ -356,6 +386,7 @@ mod tests {
             &[product(1, eur(1000)), archived],
             &pricing(&[1, 2]),
             &no_tax(),
+            &no_stock(),
         )
         .unwrap();
         assert_eq!(
@@ -378,7 +409,14 @@ mod tests {
 
     #[test]
     fn missing_product_makes_line_unavailable() {
-        let result = price_cart(&cart(&[(1, 1)]), &[], &pricing(&[1]), &no_tax()).unwrap();
+        let result = price_cart(
+            &cart(&[(1, 1)]),
+            &[],
+            &pricing(&[1]),
+            &no_tax(),
+            &no_stock(),
+        )
+        .unwrap();
         assert_eq!(
             statuses(&result),
             vec![LineStatus::Unavailable(LineError::ProductNotFound(pid(1)))]
@@ -393,6 +431,7 @@ mod tests {
             &[product(1, eur(Money::MAX_AMOUNT))],
             &pricing(&[1]),
             &no_tax(),
+            &no_stock(),
         )
         .unwrap();
         assert_eq!(
@@ -411,7 +450,8 @@ mod tests {
                 &cart(&[(1, 1), (2, 1)]),
                 &products,
                 &pricing(&[1, 2]),
-                &no_tax()
+                &no_tax(),
+                &no_stock()
             ),
             Err(MoneyError::Overflow)
         );
@@ -442,6 +482,7 @@ mod tests {
             &products,
             &pricing(&[1, 2]),
             &croatia(false),
+            &no_stock(),
         )
         .unwrap();
 
@@ -463,6 +504,7 @@ mod tests {
             &[product(1, eur(1000))],
             &pricing(&[1]),
             &croatia(true),
+            &no_stock(),
         )
         .unwrap();
 
@@ -481,6 +523,7 @@ mod tests {
             &[product(1, eur(1000))],
             &pricing(&[1, 2]),
             &croatia(false),
+            &no_stock(),
         )
         .unwrap();
         assert_eq!(result.tax_total, money(250));
@@ -522,5 +565,81 @@ mod tests {
                 market: mid(),
             }))
         );
+    }
+
+    // ---- stock ----
+
+    /// Variant 11 (product 1) has `on_hand` at the market's one location.
+    fn stock(on_hand: i64) -> StockContext {
+        let location = LocationId::from_uuid(Uuid::from_u128(600));
+        let mut item = InventoryItem::new(
+            InventoryItemId::from_uuid(Uuid::from_u128(601)),
+            vid(11),
+            true,
+            false,
+        );
+        item.set_on_hand(location, on_hand, None).unwrap();
+        StockContext {
+            items: HashMap::from([(vid(11), item)]),
+            locations: vec![Location::new(location, "Zagreb".to_string(), vec![mid()], 0).unwrap()],
+        }
+    }
+
+    #[test]
+    fn a_line_beyond_the_stock_is_unavailable_and_left_out_of_the_totals() {
+        let products = [product(1, eur(1000)), product(2, eur(250))];
+        let result = price_cart(
+            &cart(&[(1, 3), (2, 1)]),
+            &products,
+            &pricing(&[1, 2]),
+            &no_tax(),
+            &stock(2),
+        )
+        .unwrap();
+        assert_eq!(
+            statuses(&result),
+            vec![
+                LineStatus::Unavailable(LineError::OutOfStock {
+                    variant: vid(11),
+                    requested: 3,
+                    available: 2
+                }),
+                priced(250, 250)
+            ]
+        );
+        assert_eq!(result.total, money(250));
+        assert!(!result.is_fully_available());
+    }
+
+    #[test]
+    fn a_line_within_the_stock_is_priced() {
+        let products = [product(1, eur(1000))];
+        let result = price_cart(
+            &cart(&[(1, 2)]),
+            &products,
+            &pricing(&[1]),
+            &no_tax(),
+            &stock(2),
+        )
+        .unwrap();
+        assert_eq!(statuses(&result), vec![priced(1000, 2000)]);
+    }
+
+    #[test]
+    fn a_pricing_problem_is_reported_before_a_stock_problem() {
+        // Not in the catalog and out of stock: the catalog reason wins.
+        let products = [product(1, eur(1000))];
+        let result = price_cart(
+            &cart(&[(1, 5)]),
+            &products,
+            &pricing(&[]),
+            &no_tax(),
+            &stock(0),
+        )
+        .unwrap();
+        assert!(matches!(
+            &result.lines[0].status,
+            LineStatus::Unavailable(LineError::Pricing(_))
+        ));
     }
 }

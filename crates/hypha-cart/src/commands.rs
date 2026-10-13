@@ -4,13 +4,16 @@ use hypha_core::{
     AuthError, CartId, CountryCode, Ctx, ErrorCode, IdGenerator, MarketId, MoneyError, ProductId,
     RepoError, Scope, VariantId,
 };
+use hypha_inventory::{InventoryItemRepo, LocationRepo, StockContext};
 use hypha_markets::{CatalogContext, CatalogRepo, Market, MarketRepo, PriceListRepo};
 use hypha_pricing::PricingContext;
 use hypha_products::{Product, ProductRepo};
 use hypha_tax::{TaxClassRepo, TaxContext, TaxRegionRepo};
 use thiserror::Error;
 
-use crate::{Cart, CartError, CartRepo, LineError, PricedCart, Quantity, price_cart, price_line};
+use crate::{
+    Cart, CartError, CartRepo, LineError, PricedCart, Quantity, check_stock, price_cart, price_line,
+};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -64,6 +67,8 @@ pub trait CartPorts {
     type PriceLists: PriceListRepo;
     type TaxClasses: TaxClassRepo;
     type TaxRegions: TaxRegionRepo;
+    type InventoryItems: InventoryItemRepo;
+    type Locations: LocationRepo;
 
     fn carts(&self) -> &Self::Carts;
     fn products(&self) -> &Self::Products;
@@ -72,6 +77,8 @@ pub trait CartPorts {
     fn price_lists(&self) -> &Self::PriceLists;
     fn tax_classes(&self) -> &Self::TaxClasses;
     fn tax_regions(&self) -> &Self::TaxRegions;
+    fn inventory_items(&self) -> &Self::InventoryItems;
+    fn locations(&self) -> &Self::Locations;
 }
 
 /// Borrowed ports are ports too, so a host can lend out `&Storage` per request.
@@ -83,6 +90,8 @@ impl<T: CartPorts + ?Sized> CartPorts for &T {
     type PriceLists = T::PriceLists;
     type TaxClasses = T::TaxClasses;
     type TaxRegions = T::TaxRegions;
+    type InventoryItems = T::InventoryItems;
+    type Locations = T::Locations;
 
     fn carts(&self) -> &Self::Carts {
         (**self).carts()
@@ -104,6 +113,12 @@ impl<T: CartPorts + ?Sized> CartPorts for &T {
     }
     fn tax_regions(&self) -> &Self::TaxRegions {
         (**self).tax_regions()
+    }
+    fn inventory_items(&self) -> &Self::InventoryItems {
+        (**self).inventory_items()
+    }
+    fn locations(&self) -> &Self::Locations {
+        (**self).locations()
     }
 }
 
@@ -137,8 +152,9 @@ pub struct AddLine {
 /// Adds a variant to the cart (or increases its quantity) and returns the repriced cart.
 ///
 /// Strict about the line being added: its product must be active and in the market's
-/// catalog with a price in its currency. Other lines that went stale don't block it;
-/// they come back marked unavailable.
+/// catalog with a price in its currency, and the market's locations must have stock
+/// for the line's new quantity (design note 0004, I6). Other lines that went stale
+/// don't block it; they come back marked unavailable.
 pub async fn add_line<S: CartPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -164,9 +180,15 @@ pub async fn add_line<S: CartPorts>(
     let pricing = load_pricing(ports, &cart).await?;
     price_line(&product, input.variant, &pricing)?;
 
+    // The whole line counts: adding 1 to a line of 2 needs 3 in stock. Nothing is
+    // reserved; stock is only taken at checkout.
+    let stock = load_stock(ports, &cart).await?;
+    let line = cart.line(input.variant)?;
+    check_stock(&stock, input.variant, line.quantity())?;
+
     let tax = load_tax(ports, &cart, &pricing.market).await?;
     let cart_products = load_products(ports, &cart).await?;
-    let priced = price_cart(&cart, &cart_products, &pricing, &tax)?;
+    let priced = price_cart(&cart, &cart_products, &pricing, &tax, &stock)?;
 
     // Fails with StaleVersion (409) if another request changed the cart meanwhile,
     // instead of silently dropping that request's line.
@@ -174,7 +196,8 @@ pub async fn add_line<S: CartPorts>(
     Ok(priced)
 }
 
-/// The cart at current prices and tax rates. Stale lines are marked unavailable, not errors.
+/// The cart at current prices, tax rates and stock. Stale lines are marked unavailable,
+/// not errors.
 pub async fn get_cart<S: CartPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -189,14 +212,16 @@ pub async fn get_cart<S: CartPorts>(
         .ok_or(CommandError::CartNotFound(id))?;
     let pricing = load_pricing(ports, &cart).await?;
     let tax = load_tax(ports, &cart, &pricing.market).await?;
+    let stock = load_stock(ports, &cart).await?;
     let cart_products = load_products(ports, &cart).await?;
 
-    Ok(price_cart(&cart, &cart_products, &pricing, &tax)?)
+    Ok(price_cart(&cart, &cart_products, &pricing, &tax, &stock)?)
 }
 
 /// Everything needed to price the cart's lines, with a fixed number of queries
 /// however many lines there are: membership and fixed prices are fetched in batches.
-/// With `load_tax` and `load_products`, pricing a cart costs 8 queries in total.
+/// With `load_tax`, `load_stock` and `load_products`, pricing a cart costs 10 queries
+/// in total.
 ///
 /// A missing catalog or price list is left out rather than reported here:
 /// `resolve_price` turns it into a precise per-line reason.
@@ -256,6 +281,16 @@ async fn load_tax<S: CartPorts>(
         region: ports.tax_regions().get_by_country(cart.country()).await?,
         prices_include_tax: market.prices_include_tax(),
         product_classes: ports.tax_classes().classes_for(&product_ids(cart)).await?,
+    })
+}
+
+/// The stock of the cart's variants in the locations serving its market, in 2 queries.
+async fn load_stock<S: CartPorts>(ports: &S, cart: &Cart) -> Result<StockContext, CommandError> {
+    let variants: Vec<VariantId> = cart.lines().iter().map(|l| l.variant()).collect();
+    let items = ports.inventory_items().for_variants(&variants).await?;
+    Ok(StockContext {
+        items: items.into_iter().map(|i| (i.variant(), i)).collect(),
+        locations: ports.locations().serving(cart.market()).await?,
     })
 }
 
