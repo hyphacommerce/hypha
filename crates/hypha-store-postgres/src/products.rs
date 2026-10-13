@@ -128,54 +128,89 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     }
 }
 
+/// Writes options, option values and variants in 3 statements however many there are:
+/// each column goes in as an array, `unnest` turns them back into rows, and `WITH
+/// ORDINALITY` numbers them, which is the position.
 async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<(), RepoError> {
     let product_id = s.id.as_uuid();
-    for (position, option) in (0i32..).zip(&s.options) {
-        tx.query_typed(
-            "INSERT INTO product_options (id, product_id, position, name) VALUES ($1, $2, $3, $4)",
-            &[
-                (&option.id.as_uuid(), Type::UUID),
-                (&product_id, Type::UUID),
-                (&position, Type::INT4),
-                (&option.name, Type::TEXT),
-            ],
-        )
-        .await
-        .map_err(repo_error)?;
+
+    let option_ids: Vec<Uuid> = s.options.iter().map(|o| o.id.as_uuid()).collect();
+    let option_names: Vec<&str> = s.options.iter().map(|o| o.name.as_str()).collect();
+    tx.query_typed(
+        "INSERT INTO product_options (id, product_id, position, name)
+         SELECT o.id, $1, o.ord - 1, o.name
+         FROM unnest($2::uuid[], $3::text[]) WITH ORDINALITY AS o(id, name, ord)",
+        &[
+            (&product_id, Type::UUID),
+            (&option_ids, Type::UUID_ARRAY),
+            (&option_names, Type::TEXT_ARRAY),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+
+    // Values are numbered within their option, so their positions are computed here.
+    let mut value_ids = Vec::new();
+    let mut value_options = Vec::new();
+    let mut value_positions = Vec::new();
+    let mut value_labels = Vec::new();
+    for option in &s.options {
         for (position, value) in (0i32..).zip(&option.values) {
-            tx.query_typed(
-                "INSERT INTO product_option_values (id, option_id, position, label)
-                 VALUES ($1, $2, $3, $4)",
-                &[
-                    (&value.id.as_uuid(), Type::UUID),
-                    (&option.id.as_uuid(), Type::UUID),
-                    (&position, Type::INT4),
-                    (&value.label, Type::TEXT),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
+            value_ids.push(value.id.as_uuid());
+            value_options.push(option.id.as_uuid());
+            value_positions.push(position);
+            value_labels.push(value.label.as_str());
         }
     }
-    for (position, variant) in (0i32..).zip(&s.variants) {
-        let selections: Vec<Uuid> = variant.selections.iter().map(|v| v.as_uuid()).collect();
-        tx.query_typed(
-            "INSERT INTO variants
-                (id, product_id, position, sku, price_amount, price_currency, selections)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            &[
-                (&variant.id.as_uuid(), Type::UUID),
-                (&product_id, Type::UUID),
-                (&position, Type::INT4),
-                (&variant.sku, Type::TEXT),
-                (&variant.base_price.amount(), Type::INT8),
-                (&variant.base_price.currency().as_str(), Type::TEXT),
-                (&selections, Type::UUID_ARRAY),
-            ],
-        )
-        .await
-        .map_err(repo_error)?;
-    }
+    tx.query_typed(
+        "INSERT INTO product_option_values (id, option_id, position, label)
+         SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::int4[], $4::text[])",
+        &[
+            (&value_ids, Type::UUID_ARRAY),
+            (&value_options, Type::UUID_ARRAY),
+            (&value_positions, Type::INT4_ARRAY),
+            (&value_labels, Type::TEXT_ARRAY),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+
+    // Every variant selects one value per option, so all selections fit one flat array
+    // that each row slices: variant n (from 1) takes elements (n-1)*k+1 ..= n*k. With no
+    // options k is 0 and every slice is empty.
+    let per_variant = i64::try_from(s.options.len()).map_err(corrupt)?;
+    let variant_ids: Vec<Uuid> = s.variants.iter().map(|v| v.id.as_uuid()).collect();
+    let skus: Vec<Option<&str>> = s.variants.iter().map(|v| v.sku.as_deref()).collect();
+    let amounts: Vec<i64> = s.variants.iter().map(|v| v.base_price.amount()).collect();
+    let currencies: Vec<&str> = s
+        .variants
+        .iter()
+        .map(|v| v.base_price.currency().as_str())
+        .collect();
+    let selections: Vec<Uuid> = s
+        .variants
+        .iter()
+        .flat_map(|v| v.selections.iter().map(|id| id.as_uuid()))
+        .collect();
+    tx.query_typed(
+        "INSERT INTO variants
+            (id, product_id, position, sku, price_amount, price_currency, selections)
+         SELECT v.id, $1, v.ord - 1, v.sku, v.amount, v.currency,
+                ($7::uuid[])[(v.ord - 1) * $6 + 1 : v.ord * $6]
+         FROM unnest($2::uuid[], $3::text[], $4::int8[], $5::text[])
+              WITH ORDINALITY AS v(id, sku, amount, currency, ord)",
+        &[
+            (&product_id, Type::UUID),
+            (&variant_ids, Type::UUID_ARRAY),
+            (&skus, Type::TEXT_ARRAY),
+            (&amounts, Type::INT8_ARRAY),
+            (&currencies, Type::TEXT_ARRAY),
+            (&per_variant, Type::INT8),
+            (&selections, Type::UUID_ARRAY),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
     Ok(())
 }
 
