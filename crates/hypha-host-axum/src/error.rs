@@ -205,6 +205,28 @@ impl From<hypha_inventory::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_customers::CommandError> for ApiError {
+    fn from(e: hypha_customers::CommandError) -> Self {
+        use hypha_customers::{CommandError as E, CustomerError as C};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Customer and address IDs only ever arrive in URLs.
+            E::CustomerNotFound(_) | E::Customer(C::AddressNotFound(_)) => StatusCode::NOT_FOUND,
+            E::CustomerExists { .. } => StatusCode::CONFLICT,
+            E::Email(_) | E::Address(_) | E::Customer(C::FieldTooLong(_)) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            // Only ever produced when rebuilding stored data (address IDs are generated).
+            E::Customer(C::DuplicateAddress(_) | C::UnknownDefaultAddress(_)) => {
+                return Self::internal(e);
+            }
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hypha_core::{AuthError, CartId, Scope};
@@ -259,6 +281,21 @@ mod tests {
             e.not_found_if("location_not_found").status,
             StatusCode::NOT_FOUND
         );
+    }
+
+    #[test]
+    fn taken_email_is_a_conflict_and_unknown_customer_not_found() {
+        let id = hypha_core::CustomerId::from_uuid(Uuid::from_u128(1));
+        let e = ApiError::from(hypha_customers::CommandError::CustomerExists {
+            email: hypha_core::Email::new("ana@example.hr").unwrap(),
+            customer: id,
+        });
+        assert_eq!(
+            (e.status, e.code),
+            (StatusCode::CONFLICT, "customer_exists")
+        );
+        let e = ApiError::from(hypha_customers::CommandError::CustomerNotFound(id));
+        assert_eq!(e.status, StatusCode::NOT_FOUND);
     }
 
     #[test]

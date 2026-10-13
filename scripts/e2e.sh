@@ -47,6 +47,8 @@ contains() {
 
 # The top-level "id" of the last response (always the first "id" key).
 id() { sed -E 's/^[^"]*"id":"([^"]+)".*/\1/' <<<"$BODY"; }
+# The first address id of the last customer response.
+address() { sed -E 's/.*"addresses":\[\{"id":"(addr_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 # The first variant's id of the last product response.
 variant() { sed -E 's/.*"variants":\[[^]]*"id":"(var_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 
@@ -199,6 +201,36 @@ step "lower warehouse priority" 200 - -X PATCH "$BASE/locations/$WAREHOUSE" -H "
 contains "priority is stored" '"priority":5'
 step "get warehouse" 200 - "$BASE/locations/$WAREHOUSE"
 
+echo "## customers"
+step "create customer" 201 - -X POST "$BASE/customers" -H "$JSON" \
+    -d '{"email":" Ana@Example.HR ","first_name":"Ana"}'
+CUSTOMER=$(id)
+contains "email is normalized" '"email":"ana@example.hr","first_name":"Ana"'
+step "rename customer" 200 - -X PATCH "$BASE/customers/$CUSTOMER" -H "$JSON" \
+    -d '{"first_name":"","last_name":"Horvat"}'
+contains "empty clears, others change" '"first_name":null,"last_name":"Horvat"'
+step "add shipping address" 201 - -X POST "$BASE/customers/$CUSTOMER/addresses" -H "$JSON" \
+    -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
+ADDRESS=$(address)
+contains "it is the default shipping address" "\"default_shipping_address\":\"$ADDRESS\",\"default_billing_address\":null"
+step "move it to Split, billing only" 200 - -X PUT "$BASE/customers/$CUSTOMER/addresses/$ADDRESS" -H "$JSON" \
+    -d '{"last_name":"Horvat","line1":"Riva 2","city":"Split","country":"HR","default_billing":true}'
+contains "defaults follow the request" "\"default_shipping_address\":null,\"default_billing_address\":\"$ADDRESS\""
+contains "address is replaced" '"city":"Split"'
+step "get customer" 200 - "$BASE/customers/$CUSTOMER"
+step "create buyer cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+BUYER_CART=$(id)
+contains "no buyer yet" '"email":null,"customer":null'
+step "set cart email" 200 - -X PUT "$BASE/carts/$BUYER_CART/email" -H "$JSON" -d '{"email":"Ivo@Example.hr"}'
+contains "cart email is normalized" '"email":"ivo@example.hr","customer":null'
+step "link the customer" 200 - -X PUT "$BASE/carts/$BUYER_CART/customer" -H "$JSON" \
+    -d "{\"customer\":\"$CUSTOMER\"}"
+contains "cart takes the customer's email" "\"email\":\"ana@example.hr\",\"customer\":\"$CUSTOMER\""
+step "unlink the customer" 200 - -X PUT "$BASE/carts/$BUYER_CART/customer" -H "$JSON" -d '{"customer":null}'
+contains "email stays" '"email":"ana@example.hr","customer":null'
+step "remove the address" 200 - -X DELETE "$BASE/customers/$CUSTOMER/addresses/$ADDRESS"
+contains "address book is empty, defaults cleared" '"default_billing_address":null,"addresses":[]'
+
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
 step "wrong method" 405 method_not_allowed -X DELETE "$BASE/products/$MUG"
@@ -256,6 +288,18 @@ step "location listing a market twice" 422 duplicate_market -X POST "$BASE/locat
 step "blank location name" 422 empty_location_name -X POST "$BASE/locations" -H "$JSON" -d '{"name":" "}'
 step "stock beyond 2^53-1" 422 stock_out_of_range -X PUT \
     "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":9007199254740992}'
+step "same email in another case" 409 customer_exists -X POST "$BASE/customers" -H "$JSON" \
+    -d '{"email":"ANA@example.hr"}'
+step "invalid customer email" 422 invalid_email -X POST "$BASE/customers" -H "$JSON" -d '{"email":"ana"}'
+step "address without a city" 422 invalid_address -X POST "$BASE/customers/$CUSTOMER/addresses" \
+    -H "$JSON" -d '{"last_name":"Horvat","line1":"Ilica 1","city":" ","country":"HR"}'
+step "unknown customer" 404 customer_not_found "$BASE/customers/cus_00000000000000000000000000000063"
+step "remove unknown address" 404 address_not_found -X DELETE \
+    "$BASE/customers/$CUSTOMER/addresses/addr_00000000000000000000000000000063"
+step "link unknown customer to cart" 422 customer_not_found -X PUT "$BASE/carts/$BUYER_CART/customer" \
+    -H "$JSON" -d '{"customer":"cus_00000000000000000000000000000063"}'
+step "invalid cart email" 422 invalid_email -X PUT "$BASE/carts/$BUYER_CART/email" -H "$JSON" \
+    -d '{"email":"nope"}'
 step "zero quantity" 422 invalid_quantity -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":0}"
 step "create draft product" 201 - -X POST "$BASE/products" -H "$JSON" \

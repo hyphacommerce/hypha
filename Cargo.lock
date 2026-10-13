@@ -445,6 +445,7 @@ dependencies = [
  "deadpool-postgres",
  "hypha-cart",
  "hypha-core",
+ "hypha-customers",
  "hypha-inventory",
  "hypha-markets",
  "hypha-products",

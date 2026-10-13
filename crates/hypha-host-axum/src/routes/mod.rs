@@ -2,6 +2,7 @@
 //! separate from domain types) and thin handlers that call one domain command.
 
 mod carts;
+mod customers;
 mod inventory;
 mod markets;
 mod products;
@@ -62,6 +63,23 @@ macro_rules! router {
             .route("/carts", post(carts::create::<$storage>))
             .route("/carts/{id}", get(carts::fetch::<$storage>))
             .route("/carts/{id}/lines", post(carts::add::<$storage>))
+            .route("/carts/{id}/email", put(carts::set_email::<$storage>))
+            .route("/carts/{id}/customer", put(carts::set_customer::<$storage>))
+            // customers
+            .route("/customers", post(customers::create::<$storage>))
+            .route(
+                "/customers/{id}",
+                get(customers::fetch::<$storage>).patch(customers::update::<$storage>),
+            )
+            .route(
+                "/customers/{id}/addresses",
+                post(customers::add_address_handler::<$storage>),
+            )
+            .route(
+                "/customers/{id}/addresses/{address_id}",
+                put(customers::update_address_handler::<$storage>)
+                    .delete(customers::remove_address_handler::<$storage>),
+            )
             // taxes
             .route("/tax-classes", post(taxes::create_class::<$storage>))
             .route("/tax-assignments", put(taxes::assign_class::<$storage>))

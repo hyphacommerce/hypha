@@ -1,7 +1,11 @@
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_cart::{AddLine, LineStatus, PricedCart, add_line, create_cart, get_cart};
+use hypha_cart::{
+    AddLine, LineStatus, PricedCart, add_line, create_cart, get_cart, set_cart_customer,
+    set_cart_email,
+};
 use hypha_core::{
-    CartId, CountryCode, Ctx, ErrorCode, Money, ProductId, TaxClassId, TaxRate, VariantId,
+    CartId, CountryCode, Ctx, CustomerId, Email, ErrorCode, Money, ProductId, TaxClassId, TaxRate,
+    VariantId,
 };
 use hypha_tax::TaxLine;
 use serde::{Deserialize, Serialize};
@@ -24,10 +28,25 @@ pub(super) struct AddLineRequest {
     quantity: u32,
 }
 
+#[derive(Deserialize)]
+pub(super) struct SetEmailRequest {
+    /// `null` clears it.
+    email: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct SetCustomerRequest {
+    /// `null` unlinks the customer (the cart keeps their email).
+    customer: Option<CustomerId>,
+}
+
 #[derive(Serialize)]
 pub(super) struct CartResponse {
     id: CartId,
     country: CountryCode,
+    /// Who to contact about the order; required at checkout.
+    email: Option<Email>,
+    customer: Option<CustomerId>,
     /// Whether line prices include tax (set on the market).
     taxes_included: bool,
     /// Sum of the available lines, as priced. All totals count available lines only.
@@ -90,6 +109,8 @@ impl From<&PricedCart> for CartResponse {
         Self {
             id: cart.id,
             country: cart.country,
+            email: cart.email.clone(),
+            customer: cart.customer,
             taxes_included: cart.taxes_included,
             subtotal: cart.subtotal,
             tax_total: cart.tax_total,
@@ -158,5 +179,29 @@ pub(super) async fn add<S: Storage>(
         quantity: req.quantity,
     };
     let priced = add_line(&ctx, &ports, input).await?;
+    Ok(Json(CartResponse::from(&priced)))
+}
+
+pub(super) async fn set_email<S: Storage>(
+    State(state): State<SharedState<S>>,
+    PathId(id): PathId<CartId>,
+    JsonBody(req): JsonBody<SetEmailRequest>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.storage.ports().await?;
+    set_cart_email(&ctx, &ports, id, req.email).await?;
+    let priced = get_cart(&ctx, &ports, id).await?;
+    Ok(Json(CartResponse::from(&priced)))
+}
+
+pub(super) async fn set_customer<S: Storage>(
+    State(state): State<SharedState<S>>,
+    PathId(id): PathId<CartId>,
+    JsonBody(req): JsonBody<SetCustomerRequest>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.storage.ports().await?;
+    set_cart_customer(&ctx, &ports, id, req.customer).await?;
+    let priced = get_cart(&ctx, &ports, id).await?;
     Ok(Json(CartResponse::from(&priced)))
 }
