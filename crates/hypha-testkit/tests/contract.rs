@@ -2,7 +2,7 @@
 
 use hypha_testkit::{
     InMemoryCartRepo, InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo,
-    InMemoryProductRepo, contract,
+    InMemoryProductRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
 };
 use pollster::block_on;
 
@@ -37,4 +37,18 @@ fn price_list_repo() {
 #[test]
 fn cart_repo() {
     block_on(contract::cart_repo(async || InMemoryCartRepo::default()));
+}
+
+#[test]
+fn tax_class_repo() {
+    block_on(contract::tax_class_repo(async || {
+        InMemoryTaxClassRepo::default()
+    }));
+}
+
+#[test]
+fn tax_region_repo() {
+    block_on(contract::tax_region_repo(async || {
+        InMemoryTaxRegionRepo::default()
+    }));
 }
