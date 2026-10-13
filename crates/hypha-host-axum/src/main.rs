@@ -44,7 +44,7 @@ async fn main() {
 
 async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S) {
     let ids = UuidV7Ids;
-    // One store per deployment (design note 0003, model A): created on first start.
+    // One store per deployment (design note 0006, model A): created on first start.
     let name = std::env::var("HYPHA_STORE_NAME").unwrap_or_else(|_| "My store".to_string());
     let store = match storage.directory().await {
         Ok(directory) => ensure_single_store(&Ctx::system(), &directory, &ids, &name)

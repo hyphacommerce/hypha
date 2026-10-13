@@ -172,7 +172,7 @@ Decide first; each is easier now than after orders build on it.
   "`continue_selling` items are always Available" (not with zero serving locations).
 - [ ] `hypha-cart/src/commands.rs:287` query count; `scripts/e2e.sh:2` says in-memory only.
 
-## Before orders (goes into design note 0006, not this cleanup)
+## Before orders (goes into design note 0007, not this cleanup)
 
 - **A `Clock` port**: orders need `placed_at`; core and domain crates can't read time.
 - **Cart status** (open / completed, link to its order), so a cart can't be checked out

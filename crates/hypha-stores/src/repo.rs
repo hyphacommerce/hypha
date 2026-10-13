@@ -7,7 +7,7 @@ pub mod keys {
     pub const STORE_ID: &str = "store_id";
 }
 
-/// The stores a deployment knows. With one store per deployment (design note 0003,
+/// The stores a deployment knows. With one store per deployment (design note 0006,
 /// model A) there is exactly one; with a database per store (model C) this would live
 /// in a control plane.
 #[allow(async_fn_in_trait)]

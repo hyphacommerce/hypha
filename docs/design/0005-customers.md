@@ -4,7 +4,7 @@
   were proposed and not objected to.
 - **Scope:** customer records, their address book, and the buyer on a cart. Customer
   login (accounts, auth), groups, marketing consent and tax exemption come later.
-  Orders (note 0006) use what this note adds: they find or create the customer by email
+  Orders (note 0007) use what this note adds: they find or create the customer by email
   at checkout.
 - **Related:** 0002 (closed aggregates, link by ID), 0003 and 0004 (the same leaf-crate
   shape).

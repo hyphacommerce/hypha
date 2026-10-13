@@ -26,7 +26,7 @@ impl IdGenerator for UuidV7Ids {
 pub struct AppState<S> {
     pub storage: S,
     pub ids: UuidV7Ids,
-    /// The one store this deployment serves (design note 0003, model A), set at startup.
+    /// The one store this deployment serves (design note 0006, model A), set at startup.
     pub store: StoreId,
 }
 
@@ -56,7 +56,7 @@ pub trait Storage: Send + Sync + 'static {
     where
         Self: 'a;
 
-    /// Repositories that only see `store`'s data (design note 0003). With one store per
+    /// Repositories that only see `store`'s data (design note 0006). With one store per
     /// deployment (model A) the database *is* the store, so implementations ignore it;
     /// shared tables (B) would filter by it, a database per store (C) would pick by it.
     async fn ports(&self, store: StoreId) -> Result<Self::Ports<'_>, ApiError>;

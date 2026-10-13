@@ -1,4 +1,4 @@
-# 0003: Multi-tenancy
+# 0006: Multi-tenancy
 
 - **Status:** Accepted (2026-10-13). T1–T4 are decided as recommended (section 4).
 - **Question:** how does one Hypha deployment relate to stores (merchants)? This affects

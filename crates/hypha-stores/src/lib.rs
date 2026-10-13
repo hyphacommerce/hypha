@@ -1,6 +1,6 @@
 //! The store (merchant) a deployment serves, and its store-wide settings.
 //!
-//! Domain code never filters by store (design note 0003): the host resolves the store and
+//! Domain code never filters by store (design note 0006): the host resolves the store and
 //! asks for ports scoped to it. This crate only describes the store itself.
 
 pub mod commands;

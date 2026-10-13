@@ -13,7 +13,7 @@ pub enum CommandError {
     Store(#[from] StoreError),
     #[error("store {0} not found")]
     NotFound(StoreId),
-    /// One store per deployment (design note 0003, model A) found more than one.
+    /// One store per deployment (design note 0006, model A) found more than one.
     #[error("expected exactly one store in this deployment, found {0}")]
     MultipleStores(usize),
 }
@@ -64,7 +64,7 @@ pub async fn rename_store<R: StoreRepo>(
     Ok(store)
 }
 
-/// Startup rule for one store per deployment (design note 0003, model A): returns the
+/// Startup rule for one store per deployment (design note 0006, model A): returns the
 /// deployment's store, creating it with `default_name` on first start. More than one
 /// store means the deployment isn't model A: an error, not something to guess about.
 pub async fn ensure_single_store<R: StoreRepo, I: IdGenerator>(
