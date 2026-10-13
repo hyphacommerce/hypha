@@ -92,6 +92,9 @@ define_id!(TaxRegionId, "txreg");
 define_id!(LocationId, "loc");
 define_id!(InventoryItemId, "invi");
 
+define_id!(CustomerId, "cus");
+define_id!(AddressId, "addr");
+
 #[cfg(test)]
 mod tests {
     use super::*;
