@@ -76,31 +76,31 @@ pub(super) async fn assign_class<S: Storage>(
 pub(super) struct CreateTaxRegionRequest {
     country: String,
     /// Parts per million: 250000 = 25%.
-    default_rate: u32,
+    default_rate_ppm: u32,
 }
 
 #[derive(Deserialize)]
 pub(super) struct UpdateTaxRegionRequest {
-    default_rate: u32,
+    default_rate_ppm: u32,
 }
 
 #[derive(Deserialize)]
 pub(super) struct SetClassRateRequest {
-    rate: u32,
+    rate_ppm: u32,
 }
 
 #[derive(Serialize)]
 pub(super) struct TaxRegionResponse {
     id: TaxRegionId,
     country: CountryCode,
-    default_rate: TaxRate,
+    default_rate_ppm: TaxRate,
     class_rates: Vec<ClassRateResponse>,
 }
 
 #[derive(Serialize)]
 pub(super) struct ClassRateResponse {
     tax_class: TaxClassId,
-    rate: TaxRate,
+    rate_ppm: TaxRate,
 }
 
 impl From<&TaxRegion> for TaxRegionResponse {
@@ -108,13 +108,13 @@ impl From<&TaxRegion> for TaxRegionResponse {
         Self {
             id: r.id(),
             country: r.country(),
-            default_rate: r.default_rate(),
+            default_rate_ppm: r.default_rate(),
             class_rates: r
                 .class_rates()
                 .iter()
                 .map(|c| ClassRateResponse {
                     tax_class: c.class,
-                    rate: c.rate,
+                    rate_ppm: c.rate,
                 })
                 .collect(),
         }
@@ -129,7 +129,7 @@ pub(super) async fn create_region<S: Storage>(
     let ports = state.ports().await?;
     let input = CreateTaxRegion {
         country: req.country,
-        default_rate: req.default_rate,
+        default_rate: req.default_rate_ppm,
     };
     let region = create_tax_region(&ctx, ports.tax_regions(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(TaxRegionResponse::from(&region))))
@@ -152,7 +152,7 @@ pub(super) async fn update_region<S: Storage>(
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
-    let region = set_default_rate(&ctx, ports.tax_regions(), id, req.default_rate).await?;
+    let region = set_default_rate(&ctx, ports.tax_regions(), id, req.default_rate_ppm).await?;
     Ok(Json(TaxRegionResponse::from(&region)))
 }
 
@@ -169,7 +169,7 @@ pub(super) async fn set_region_class_rate<S: Storage>(
         ports.tax_classes(),
         id,
         class,
-        req.rate,
+        req.rate_ppm,
     )
     .await
     .map_err(|e| ApiError::from(e).not_found_if("tax_class_not_found"))?;

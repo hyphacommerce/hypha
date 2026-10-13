@@ -79,7 +79,7 @@ pub(super) enum LineState {
 #[derive(Serialize)]
 pub(super) struct TaxLineResponse {
     /// Parts per million: 250000 = 25%.
-    rate: TaxRate,
+    rate_ppm: TaxRate,
     amount: Money,
     /// The class whose rate applied; `null` for the country's default rate.
     tax_class: Option<TaxClassId>,
@@ -88,7 +88,7 @@ pub(super) struct TaxLineResponse {
 impl From<&TaxLine> for TaxLineResponse {
     fn from(t: &TaxLine) -> Self {
         Self {
-            rate: t.rate,
+            rate_ppm: t.rate,
             amount: t.amount,
             tax_class: t.class,
         }

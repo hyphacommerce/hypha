@@ -92,14 +92,14 @@ pub(super) struct CreatePriceListRequest {
     currency: Currency,
     /// Basis points: -1000 = 10% off. Defaults to 0.
     #[serde(default)]
-    adjustment: i32,
+    adjustment_bps: i32,
 }
 
 #[derive(Serialize)]
 pub(super) struct PriceListResponse {
     id: PriceListId,
     currency: Currency,
-    adjustment: i32,
+    adjustment_bps: i32,
 }
 
 impl From<&PriceList> for PriceListResponse {
@@ -107,7 +107,7 @@ impl From<&PriceList> for PriceListResponse {
         Self {
             id: l.id(),
             currency: l.currency(),
-            adjustment: l.adjustment().value(),
+            adjustment_bps: l.adjustment().value(),
         }
     }
 }
@@ -136,7 +136,7 @@ pub(super) async fn create_price_list_handler<S: Storage>(
     let ports = state.ports().await?;
     let input = CreatePriceList {
         currency: req.currency,
-        adjustment: req.adjustment,
+        adjustment: req.adjustment_bps,
     };
     let list = create_price_list(&ctx, ports.price_lists(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(PriceListResponse::from(&list))))
