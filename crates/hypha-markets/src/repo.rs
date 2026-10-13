@@ -41,7 +41,7 @@ pub trait MarketRepo {
 #[allow(async_fn_in_trait)]
 pub trait CatalogRepo {
     async fn get(&self, id: CatalogId) -> Result<Option<Catalog>, RepoError>;
-    /// At most one catalog per context, see `check_one_catalog_per_context`.
+    /// At most one catalog per context (`keys::CATALOG_CONTEXT`).
     async fn get_by_context(&self, context: CatalogContext) -> Result<Option<Catalog>, RepoError>;
     /// Stores a new catalog (version 1). Enforces `CATALOG_ID` and `CATALOG_CONTEXT`.
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError>;

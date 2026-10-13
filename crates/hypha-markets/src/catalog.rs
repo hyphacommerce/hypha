@@ -1,8 +1,6 @@
-use std::{collections::HashSet, fmt};
+use std::fmt;
 
 use hypha_core::{CatalogId, MarketId, PriceListId, Version, Versioned};
-
-use crate::error::CatalogError;
 
 /// Where a catalog applies. An enum so other contexts (e.g. B2B companies) can be added later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,21 +66,6 @@ impl Catalog {
     }
 }
 
-pub fn catalog_for(catalogs: &[Catalog], context: CatalogContext) -> Option<&Catalog> {
-    catalogs.iter().find(|c| c.context() == context)
-}
-
-/// For now each context has at most one catalog, so resolution is unambiguous.
-pub fn check_one_catalog_per_context(catalogs: &[Catalog]) -> Result<(), CatalogError> {
-    let mut seen = HashSet::new();
-    for catalog in catalogs {
-        if !seen.insert(catalog.context()) {
-            return Err(CatalogError::DuplicateContext(catalog.context()));
-        }
-    }
-    Ok(())
-}
-
 /// Plain-data form of a `Catalog` for storage adapters (design note 0001, 3.4).
 /// Its products are stored separately (see `CatalogRepo`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,31 +119,6 @@ mod tests {
         assert_eq!(c.price_list(), Some(pl));
         c.set_price_list(None);
         assert_eq!(c.price_list(), None);
-    }
-
-    #[test]
-    fn catalog_for_finds_catalog_by_context() {
-        let catalogs = [catalog(1, in_market(1)), catalog(2, in_market(2))];
-        assert_eq!(
-            catalog_for(&catalogs, in_market(2)).map(|c| c.id()),
-            Some(CatalogId::from_uuid(Uuid::from_u128(2)))
-        );
-        assert!(catalog_for(&catalogs, in_market(3)).is_none());
-    }
-
-    #[test]
-    fn one_catalog_per_context_passes_for_distinct_contexts() {
-        let catalogs = [catalog(1, in_market(1)), catalog(2, in_market(2))];
-        assert_eq!(check_one_catalog_per_context(&catalogs), Ok(()));
-    }
-
-    #[test]
-    fn one_catalog_per_context_rejects_shared_context() {
-        let catalogs = [catalog(1, in_market(1)), catalog(2, in_market(1))];
-        assert_eq!(
-            check_one_catalog_per_context(&catalogs),
-            Err(CatalogError::DuplicateContext(in_market(1)))
-        );
     }
 
     #[test]

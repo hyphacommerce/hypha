@@ -1,7 +1,5 @@
 use hypha_core::{CountryCode, Currency, ErrorCode, VariantId};
 
-use crate::catalog::CatalogContext;
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum MarketError {
     #[error("a market needs at least one country")]
@@ -12,12 +10,6 @@ pub enum MarketError {
     CountryNotInMarket(CountryCode),
     #[error("can't remove the last country of a market")]
     LastCountry,
-}
-
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum CatalogError {
-    #[error("more than one catalog for {0}")]
-    DuplicateContext(CatalogContext),
 }
 
 /// One fixed price whose currency doesn't match its price list.
@@ -46,14 +38,6 @@ impl ErrorCode for MarketError {
             MarketError::DuplicateCountry(_) => "duplicate_country",
             MarketError::CountryNotInMarket(_) => "country_not_in_market",
             MarketError::LastCountry => "last_country",
-        }
-    }
-}
-
-impl ErrorCode for CatalogError {
-    fn code(&self) -> &'static str {
-        match self {
-            CatalogError::DuplicateContext(_) => "duplicate_catalog_context",
         }
     }
 }

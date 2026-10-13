@@ -104,22 +104,6 @@ impl Market {
     }
 }
 
-pub fn market_for(markets: &[Market], country: CountryCode) -> Option<&Market> {
-    markets.iter().find(|m| m.covers(country))
-}
-
-pub fn check_no_overlap(markets: &[Market]) -> Result<(), MarketError> {
-    let mut seen = HashSet::new();
-    for market in markets {
-        for country in market.countries() {
-            if !seen.insert(*country) {
-                return Err(MarketError::DuplicateCountry(*country));
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Plain-data form of a `Market` for storage adapters (design note 0001, 3.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketSnapshot {
@@ -218,13 +202,6 @@ mod tests {
     }
 
     #[test]
-    fn market_for_finds_the_right_market() {
-        let markets = [market(1, &["RS"]).unwrap(), market(2, &["HR"]).unwrap()];
-        assert_eq!(market_for(&markets, cc("HR")).map(|m| m.id()), Some(mid(2)));
-        assert!(market_for(&markets, cc("DE")).is_none());
-    }
-
-    #[test]
     fn add_country_adds_new_and_rejects_duplicate() {
         let mut m = market(1, &["RS"]).unwrap();
         assert_eq!(m.add_country(cc("HR")), Ok(()));
@@ -239,24 +216,6 @@ mod tests {
         let mut m = market(1, &["RS", "HR"]).unwrap();
         assert_eq!(m.remove_country(cc("HR")), Ok(()));
         assert!(m.countries.len() == 1)
-    }
-
-    #[test]
-    fn no_overlap_passes_for_disjoint_markets() {
-        let markets = [market(1, &["RS"]).unwrap(), market(2, &["HR"]).unwrap()];
-        assert_eq!(check_no_overlap(&markets), Ok(()));
-    }
-
-    #[test]
-    fn no_overlap_rejects_shared_country() {
-        let markets = [
-            market(1, &["RS", "HR"]).unwrap(),
-            market(2, &["HR"]).unwrap(),
-        ];
-        assert_eq!(
-            check_no_overlap(&markets),
-            Err(MarketError::DuplicateCountry(cc("HR")))
-        );
     }
 
     #[test]
