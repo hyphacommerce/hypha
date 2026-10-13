@@ -2,7 +2,7 @@ use crate::error::CartError;
 
 /// How many units of a variant a cart line holds. Always at least 1:
 /// removing a line is its own operation, not "set quantity to 0".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Quantity(u32);
 
 impl Quantity {

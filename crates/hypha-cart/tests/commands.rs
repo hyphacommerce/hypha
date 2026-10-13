@@ -1,6 +1,7 @@
 use hypha_cart::{
-    AddLine, CartError, CartRepo, CommandError, LineError, LineStatus, PricedCart, add_line,
-    create_cart, get_cart, set_cart_customer, set_cart_email,
+    AddLine, CartError, CartRepo, CommandError, LineError, LineStatus, PricedCart, SetLineQuantity,
+    add_line, create_cart, get_cart, remove_cart_line, set_cart_customer, set_cart_email,
+    set_line_quantity,
 };
 use hypha_core::{
     Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, CountryError, Ctx, Currency,
@@ -206,7 +207,7 @@ impl World {
     fn create_cart(&self) -> CartId {
         block_on(create_cart(&Ctx::system(), &self.ports, &self.ids, "HR"))
             .unwrap()
-            .id()
+            .id
     }
 
     fn add(
@@ -237,6 +238,16 @@ impl World {
         block_on(self.products.update(&mut product)).unwrap();
     }
 
+    fn stored_quantity(&self, cart: CartId, name: &str) -> u32 {
+        block_on(self.carts.get(cart))
+            .unwrap()
+            .unwrap()
+            .line(vid(name))
+            .unwrap()
+            .quantity()
+            .value()
+    }
+
     fn stored_line_count(&self, cart: CartId) -> usize {
         block_on(self.carts.get(cart))
             .unwrap()
@@ -250,8 +261,10 @@ impl World {
 fn create_cart_picks_the_market_of_its_country() {
     let world = World::new();
     let cart = block_on(create_cart(&Ctx::system(), &world.ports, &world.ids, "HR")).unwrap();
-    assert_eq!((cart.market(), cart.country()), (market_id(), hr()));
-    assert_eq!(block_on(world.carts.get(cart.id())), Ok(Some(cart)));
+    assert_eq!((cart.country, cart.lines.len()), (hr(), 0));
+    let stored = block_on(world.carts.get(cart.id)).unwrap().unwrap();
+    assert_eq!((stored.market(), stored.country()), (market_id(), hr()));
+    assert_eq!(world.get(cart.id), Ok(cart));
 }
 
 #[test]
@@ -661,17 +674,14 @@ fn set_cart_email_normalizes_and_clears() {
         Some(" Ana@Example.hr".to_string()),
     ))
     .unwrap();
-    assert_eq!(
-        updated.email(),
-        Some(&Email::new("ana@example.hr").unwrap())
-    );
+    assert_eq!(updated.email, Some(Email::new("ana@example.hr").unwrap()));
     assert_eq!(
         world.get(cart).unwrap().email,
         Some(Email::new("ana@example.hr").unwrap())
     );
 
     let cleared = block_on(set_cart_email(&Ctx::system(), &world.ports, cart, None)).unwrap();
-    assert_eq!(cleared.email(), None);
+    assert_eq!(cleared.email, None);
 }
 
 #[test]
@@ -705,12 +715,12 @@ fn set_cart_customer_links_the_customer_and_takes_their_email() {
     ))
     .unwrap();
     assert_eq!(
-        (updated.customer(), updated.email()),
-        (Some(id), Some(&ana))
+        (updated.customer, updated.email),
+        (Some(id), Some(ana.clone()))
     );
 
     let unlinked = block_on(set_cart_customer(&Ctx::system(), &world.ports, cart, None)).unwrap();
-    assert_eq!((unlinked.customer(), unlinked.email()), (None, Some(&ana)));
+    assert_eq!((unlinked.customer, unlinked.email), (None, Some(ana)));
 }
 
 #[test]
@@ -834,5 +844,117 @@ fn a_linked_cart_keeps_its_email_until_the_customer_is_unlinked() {
 
     block_on(set_cart_customer(&Ctx::system(), &world.ports, cart, None)).unwrap();
     let cleared = block_on(set_cart_email(&Ctx::system(), &world.ports, cart, None)).unwrap();
-    assert_eq!(cleared.email(), None);
+    assert_eq!(cleared.email, None);
+}
+
+// ---- changing and removing lines ----
+
+fn set_quantity(
+    world: &World,
+    cart: CartId,
+    name: &str,
+    quantity: u32,
+) -> Result<PricedCart, CommandError> {
+    block_on(set_line_quantity(
+        &Ctx::system(),
+        &world.ports,
+        SetLineQuantity {
+            cart,
+            variant: vid(name),
+            quantity,
+        },
+    ))
+}
+
+#[test]
+fn set_line_quantity_replaces_the_quantity_and_reprices() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 1).unwrap();
+
+    let priced = set_quantity(&world, cart, "mug", 3).unwrap();
+
+    assert_eq!(priced.lines[0].quantity.value(), 3);
+    assert_eq!(priced.subtotal, eur(3000));
+    assert_eq!(world.get(cart), Ok(priced));
+}
+
+#[test]
+fn set_line_quantity_rejects_zero_and_a_missing_line() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 1).unwrap();
+
+    assert_eq!(
+        set_quantity(&world, cart, "mug", 0),
+        Err(CommandError::Cart(CartError::ZeroQuantity))
+    );
+    assert_eq!(
+        set_quantity(&world, cart, "cup", 2),
+        Err(CommandError::Cart(CartError::LineNotFound(vid("cup"))))
+    );
+}
+
+#[test]
+fn raising_a_quantity_needs_stock_but_lowering_never_does() {
+    let world = World::new();
+    world.stock("mug", 3);
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 3).unwrap();
+    world.sell_elsewhere("mug", 2);
+
+    assert_eq!(
+        set_quantity(&world, cart, "mug", 4),
+        Err(CommandError::Line(LineError::OutOfStock {
+            variant: vid("mug"),
+            requested: 4,
+            available: 1
+        }))
+    );
+    assert_eq!(world.stored_quantity(cart, "mug"), 3);
+
+    let lowered = set_quantity(&world, cart, "mug", 1).unwrap();
+    assert!(lowered.is_fully_available());
+}
+
+#[test]
+fn raising_the_quantity_of_an_archived_product_is_refused() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 1).unwrap();
+    world.archive("mug");
+
+    assert_eq!(
+        set_quantity(&world, cart, "mug", 2),
+        Err(CommandError::Line(LineError::ProductNotActive(pid("mug"))))
+    );
+    assert!(set_quantity(&world, cart, "mug", 1).is_ok());
+}
+
+#[test]
+fn remove_cart_line_takes_the_variant_out() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 1).unwrap();
+    world.add(&Ctx::system(), cart, "cup", 1).unwrap();
+
+    let priced = block_on(remove_cart_line(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        vid("mug"),
+    ))
+    .unwrap();
+
+    assert_eq!(priced.lines.len(), 1);
+    assert_eq!(world.stored_line_count(cart), 1);
+    assert_eq!(
+        block_on(remove_cart_line(
+            &Ctx::system(),
+            &world.ports,
+            cart,
+            vid("mug")
+        )),
+        Err(CommandError::Cart(CartError::LineNotFound(vid("mug"))))
+    );
 }

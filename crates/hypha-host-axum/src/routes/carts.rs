@@ -1,7 +1,7 @@
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_cart::{
-    AddLine, LineStatus, PricedCart, add_line, create_cart, get_cart, set_cart_customer,
-    set_cart_email,
+    AddLine, LineStatus, PricedCart, SetLineQuantity, add_line, create_cart, get_cart,
+    remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
 };
 use hypha_core::{
     CartId, CountryCode, Ctx, CustomerId, Email, ErrorCode, Money, ProductId, TaxClassId, TaxRate,
@@ -154,9 +154,7 @@ pub(super) async fn create<S: Storage>(
 ) -> Result<(StatusCode, Json<CartResponse>), ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
-    let cart = create_cart(&ctx, &ports, &state.ids, &req.country).await?;
-    // A new cart is empty, so pricing it can't fail; return the same shape as GET.
-    let priced = get_cart(&ctx, &ports, cart.id()).await?;
+    let priced = create_cart(&ctx, &ports, &state.ids, &req.country).await?;
     Ok((StatusCode::CREATED, Json(CartResponse::from(&priced))))
 }
 
@@ -193,8 +191,7 @@ pub(super) async fn set_email<S: Storage>(
 ) -> Result<Json<CartResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
-    set_cart_email(&ctx, &ports, id, req.email).await?;
-    let priced = get_cart(&ctx, &ports, id).await?;
+    let priced = set_cart_email(&ctx, &ports, id, req.email).await?;
     Ok(Json(CartResponse::from(&priced)))
 }
 
@@ -205,7 +202,43 @@ pub(super) async fn set_customer<S: Storage>(
 ) -> Result<Json<CartResponse>, ApiError> {
     let ctx = Ctx::system(); // TODO: real auth
     let ports = state.ports().await?;
-    set_cart_customer(&ctx, &ports, id, req.customer).await?;
-    let priced = get_cart(&ctx, &ports, id).await?;
+    let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
+    Ok(Json(CartResponse::from(&priced)))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SetQuantityRequest {
+    /// At least 1; `DELETE` the line to take it out.
+    quantity: u32,
+}
+
+pub(super) async fn set_quantity<S: Storage>(
+    State(state): State<SharedState<S>>,
+    PathId((id, variant)): PathId<(CartId, VariantId)>,
+    JsonBody(req): JsonBody<SetQuantityRequest>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.ports().await?;
+    let input = SetLineQuantity {
+        cart: id,
+        variant,
+        quantity: req.quantity,
+    };
+    let priced = set_line_quantity(&ctx, &ports, input)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
+    Ok(Json(CartResponse::from(&priced)))
+}
+
+pub(super) async fn remove_line<S: Storage>(
+    State(state): State<SharedState<S>>,
+    PathId((id, variant)): PathId<(CartId, VariantId)>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let ctx = Ctx::system(); // TODO: real auth
+    let ports = state.ports().await?;
+    let priced = remove_cart_line(&ctx, &ports, id, variant)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
     Ok(Json(CartResponse::from(&priced)))
 }

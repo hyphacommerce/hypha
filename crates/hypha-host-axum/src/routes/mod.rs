@@ -74,6 +74,10 @@ macro_rules! router {
             .route("/carts", post(carts::create::<$storage>))
             .route("/carts/{id}", get(carts::fetch::<$storage>))
             .route("/carts/{id}/lines", post(carts::add::<$storage>))
+            .route(
+                "/carts/{id}/lines/{variant}",
+                put(carts::set_quantity::<$storage>).delete(carts::remove_line::<$storage>),
+            )
             .route("/carts/{id}/email", put(carts::set_email::<$storage>))
             .route("/carts/{id}/customer", put(carts::set_customer::<$storage>))
             // customers

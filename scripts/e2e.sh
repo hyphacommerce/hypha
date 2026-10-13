@@ -200,9 +200,16 @@ step "delivery of 4" 200 - -X POST "$BASE/inventory-items/$LAMP_ITEM/levels/$WAR
 contains "5 on hand" '"on_hand":5'
 step "get stock cart" 200 - "$BASE/carts/$STOCK_CART"
 contains "lamps are back" '"fully_available":true'
+step "raise lamps beyond stock" 409 out_of_stock -X PUT "$BASE/carts/$STOCK_CART/lines/$LAMP_VAR" \
+    -H "$JSON" -d '{"quantity":6}'
+step "set lamps to 3" 200 - -X PUT "$BASE/carts/$STOCK_CART/lines/$LAMP_VAR" -H "$JSON" -d '{"quantity":3}'
+contains "line holds 3" '"quantity":3'
 step "stop tracking lamps" 200 - -X PATCH "$BASE/inventory-items/$LAMP_ITEM" -H "$JSON" -d '{"tracked":false}'
 step "add 100 untracked lamps" 200 - -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":100}"
+step "remove the lamp line" 200 - -X DELETE "$BASE/carts/$STOCK_CART/lines/$LAMP_VAR"
+contains "cart is empty again" '"lines":[]'
+step "remove it again" 404 line_not_found -X DELETE "$BASE/carts/$STOCK_CART/lines/$LAMP_VAR"
 step "lower warehouse priority" 200 - -X PATCH "$BASE/locations/$WAREHOUSE" -H "$JSON" -d '{"priority":5}'
 contains "priority is stored" '"priority":5'
 step "get warehouse" 200 - "$BASE/locations/$WAREHOUSE"

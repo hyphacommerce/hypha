@@ -132,14 +132,14 @@ impl<T> PricingPorts for T where
 }
 
 /// Creates an empty cart shipping to `country`, in the market that sells there
-/// (like Shopify, the buyer's country picks the market). `country` is an ISO 3166-1
-/// alpha-2 code, checked here.
-pub async fn create_cart<S: HasMarkets + HasCarts, I: IdGenerator>(
+/// (like Shopify, the buyer's country picks the market), and returns it priced like
+/// `get_cart`. `country` is an ISO 3166-1 alpha-2 code, checked here.
+pub async fn create_cart<S: HasCarts + PricingPorts, I: IdGenerator>(
     ctx: &Ctx,
     ports: &S,
     ids: &I,
     country: &str,
-) -> Result<Cart, CommandError> {
+) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
 
     let country = CountryCode::new(country)?;
@@ -150,8 +150,9 @@ pub async fn create_cart<S: HasMarkets + HasCarts, I: IdGenerator>(
         .ok_or(CommandError::NoMarketForCountry(country))?;
 
     let mut cart = Cart::new(CartId::from_uuid(ids.new_uuid()), market.id(), country);
+    let priced = reprice(ports, &cart).await?;
     ports.carts().insert(&mut cart).await?;
-    Ok(cart)
+    Ok(priced)
 }
 
 pub struct AddLine {
@@ -201,16 +202,7 @@ pub async fn add_line<S: HasCarts + PricingPorts>(
     let cart_products = load_products(ports, &cart).await?;
     let priced = price_cart(&cart, &cart_products, &pricing, &tax, &stock);
 
-    // The strict checks above passed, so if the new line still comes back unavailable,
-    // its total (or the cart's with it) doesn't fit: refuse it rather than store it.
-    if let Some(LineStatus::Unavailable(reason)) = priced
-        .lines
-        .iter()
-        .find(|l| l.variant == input.variant)
-        .map(|l| &l.status)
-    {
-        return Err(CommandError::Line(reason.clone()));
-    }
+    refuse_unavailable(&priced, input.variant)?;
 
     // Fails with StaleVersion (409) if another request changed the cart meanwhile,
     // instead of silently dropping that request's line.
@@ -219,29 +211,30 @@ pub async fn add_line<S: HasCarts + PricingPorts>(
 }
 
 /// Sets who to contact about the order this cart becomes; `None` clears it.
-pub async fn set_cart_email<S: HasCarts>(
+pub async fn set_cart_email<S: HasCarts + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
     id: CartId,
     email: Option<String>,
-) -> Result<Cart, CommandError> {
+) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
 
     let email = email.as_deref().map(Email::new).transpose()?;
     let mut cart = load_cart(ports, id).await?;
     cart.set_email(email)?;
+    let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
-    Ok(cart)
+    Ok(priced)
 }
 
 /// Links the cart to an existing customer (taking their email), or unlinks it with
 /// `None` (design note 0005, C5). Linking needs `customers:read` as well as `carts:write`.
-pub async fn set_cart_customer<S: HasCarts + HasCustomers>(
+pub async fn set_cart_customer<S: CartPorts>(
     ctx: &Ctx,
     ports: &S,
     id: CartId,
     customer: Option<CustomerId>,
-) -> Result<Cart, CommandError> {
+) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
 
     // Linking copies the customer's email onto the cart and reveals whether the ID
@@ -263,8 +256,87 @@ pub async fn set_cart_customer<S: HasCarts + HasCustomers>(
         None => None,
     };
     cart.set_customer(buyer);
+    let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
-    Ok(cart)
+    Ok(priced)
+}
+
+pub struct SetLineQuantity {
+    pub cart: CartId,
+    pub variant: VariantId,
+    /// At least 1; `remove_cart_line` takes a line out.
+    pub quantity: u32,
+}
+
+/// Changes how many of a variant the cart holds and returns the repriced cart.
+///
+/// Raising the quantity is as strict as `add_line` (the line must be sellable and in
+/// stock for its new quantity); lowering it is always allowed, so a buyer can shrink a
+/// line that went out of stock.
+pub async fn set_line_quantity<S: HasCarts + PricingPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    input: SetLineQuantity,
+) -> Result<PricedCart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+
+    let quantity = Quantity::new(input.quantity)?;
+    let mut cart = load_cart(ports, input.cart).await?;
+    let raised = quantity > cart.line(input.variant)?.quantity();
+    cart.set_quantity(input.variant, quantity)?;
+
+    let priced = if raised {
+        let line = cart.line(input.variant)?;
+        let product = ports
+            .products()
+            .get(line.product())
+            .await?
+            .ok_or(LineError::ProductNotFound(line.product()))?;
+        let pricing = load_pricing(ports, &cart).await?;
+        price_line(&product, input.variant, &pricing)?;
+        let stock = load_stock(ports, &cart).await?;
+        check_stock(&stock, input.variant, quantity)?;
+        let priced = reprice(ports, &cart).await?;
+        refuse_unavailable(&priced, input.variant)?;
+        priced
+    } else {
+        reprice(ports, &cart).await?
+    };
+
+    ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
+/// Takes a variant out of the cart and returns the repriced cart.
+pub async fn remove_cart_line<S: HasCarts + PricingPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    cart: CartId,
+    variant: VariantId,
+) -> Result<PricedCart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+
+    let mut cart = load_cart(ports, cart).await?;
+    if !cart.remove_line(variant) {
+        return Err(CartError::LineNotFound(variant).into());
+    }
+    let priced = reprice(ports, &cart).await?;
+    ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
+/// The strict checks passed, so if `variant`'s line still comes back unavailable, its
+/// total (or the cart's with it) doesn't fit: refuse it rather than store it.
+fn refuse_unavailable(priced: &PricedCart, variant: VariantId) -> Result<(), CommandError> {
+    match priced
+        .lines
+        .iter()
+        .find(|l| l.variant == variant)
+        .map(|l| &l.status)
+    {
+        Some(LineStatus::Unavailable(reason)) => Err(CommandError::Line(reason.clone())),
+        _ => Ok(()),
+    }
 }
 
 async fn load_cart<S: HasCarts>(ports: &S, id: CartId) -> Result<Cart, CommandError> {
@@ -284,17 +356,18 @@ pub async fn get_cart<S: HasCarts + PricingPorts>(
 ) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsRead)?;
 
-    let cart = ports
-        .carts()
-        .get(id)
-        .await?
-        .ok_or(CommandError::CartNotFound(id))?;
-    let pricing = load_pricing(ports, &cart).await?;
-    let tax = load_tax(ports, &cart, &pricing.market).await?;
-    let stock = load_stock(ports, &cart).await?;
-    let cart_products = load_products(ports, &cart).await?;
+    let cart = load_cart(ports, id).await?;
+    reprice(ports, &cart).await
+}
 
-    Ok(price_cart(&cart, &cart_products, &pricing, &tax, &stock))
+/// `cart` at current prices, tax rates and stock, in a fixed number of queries. Commands
+/// that change a cart return this, so callers get the same shape as `get_cart`.
+async fn reprice<S: PricingPorts>(ports: &S, cart: &Cart) -> Result<PricedCart, CommandError> {
+    let pricing = load_pricing(ports, cart).await?;
+    let tax = load_tax(ports, cart, &pricing.market).await?;
+    let stock = load_stock(ports, cart).await?;
+    let cart_products = load_products(ports, cart).await?;
+    Ok(price_cart(cart, &cart_products, &pricing, &tax, &stock))
 }
 
 /// Everything needed to price the cart's lines, with a fixed number of queries
