@@ -1,5 +1,8 @@
 use futures_util::lock::{Mutex, MutexGuard};
-use tokio_postgres::Client;
+use hypha_core::RepoError;
+use tokio_postgres::{Client, IsolationLevel, Transaction};
+
+use crate::error::repo_error;
 
 /// Something that holds a connected `tokio_postgres::Client`: the client itself, a
 /// borrowed one, or (in a host) a connection checked out of a pool.
@@ -83,4 +86,47 @@ impl<C: PgConnection> hypha_cart::CartPorts for PgStore<C> {
     fn customers(&self) -> &Self {
         self
     }
+}
+
+/// Runs a load that takes several queries (a root row, then its children) in one
+/// consistent snapshot: `REPEATABLE READ READ ONLY`. Without it, a write committing
+/// between the queries could pair a new root with old children, `restore` would reject
+/// the mix, and the reader would get a 500 (review plan B3). One query is consistent on
+/// its own; single-query reads don't need this.
+///
+/// `consistent_read!(client, |tx| body)` runs `body` (which returns
+/// `Result<_, RepoError>`) with `tx: &Transaction`, then commits. A macro rather than a
+/// function taking an async closure: the compiler can't yet prove such futures `Send`
+/// ("`AsyncFnOnce` is not general enough"), and hosts like axum need them `Send`.
+macro_rules! consistent_read {
+    ($client:expr, |$tx:ident| $body:expr) => {{
+        let read = $crate::store::begin_consistent_read($client).await?;
+        let $tx = &read;
+        let value: Result<_, hypha_core::RepoError> = async { $body }.await;
+        $crate::store::end_consistent_read(read, value).await
+    }};
+}
+pub(crate) use consistent_read;
+
+pub(crate) async fn begin_consistent_read(
+    client: &mut Client,
+) -> Result<Transaction<'_>, RepoError> {
+    client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .read_only(true)
+        .start()
+        .await
+        .map_err(repo_error)
+}
+
+/// Commits the read if it succeeded; on error the transaction is dropped, which rolls
+/// it back.
+pub(crate) async fn end_consistent_read<T>(
+    read: Transaction<'_>,
+    value: Result<T, RepoError>,
+) -> Result<T, RepoError> {
+    let value = value?;
+    read.commit().await.map_err(repo_error)?;
+    Ok(value)
 }

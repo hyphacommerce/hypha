@@ -8,13 +8,13 @@ use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, Market, MarketRepo, MarketSnapshot,
     PriceList, PriceListRepo, PriceListSnapshot,
 };
-use tokio_postgres::{Client, GenericClient, Row, types::Type};
+use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, consistent_read},
 };
 
 // ---------- markets ----------
@@ -22,28 +22,31 @@ use crate::{
 impl<C: PgConnection> MarketRepo for PgStore<C> {
     async fn get(&self, id: MarketId) -> Result<Option<Market>, RepoError> {
         let mut conn = self.conn().await;
-        Ok(load_markets(conn.client(), Some(id.as_uuid())).await?.pop())
+        consistent_read!(conn.client(), |tx| {
+            Ok(load_markets(tx, Some(id.as_uuid())).await?.pop())
+        })
     }
 
     async fn list_all(&self) -> Result<Vec<Market>, RepoError> {
         let mut conn = self.conn().await;
-        load_markets(conn.client(), None).await
+        consistent_read!(conn.client(), |tx| load_markets(tx, None).await)
     }
 
     async fn get_by_country(&self, country: CountryCode) -> Result<Option<Market>, RepoError> {
         let mut conn = self.conn().await;
-        let client = conn.client();
-        let row = client
-            .query_typed_opt(
-                "SELECT market_id FROM market_countries WHERE country = $1",
-                &[(&country.as_str(), Type::TEXT)],
-            )
-            .await
-            .map_err(repo_error)?;
-        match row {
-            Some(row) => Ok(load_markets(client, Some(row.get(0))).await?.pop()),
-            None => Ok(None),
-        }
+        consistent_read!(conn.client(), |tx| {
+            let row = tx
+                .query_typed_opt(
+                    "SELECT market_id FROM market_countries WHERE country = $1",
+                    &[(&country.as_str(), Type::TEXT)],
+                )
+                .await
+                .map_err(repo_error)?;
+            match row {
+                Some(row) => Ok(load_markets(tx, Some(row.get(0))).await?.pop()),
+                None => Ok(None),
+            }
+        })
     }
 
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {
@@ -117,7 +120,10 @@ async fn write_countries(tx: &impl GenericClient, s: &MarketSnapshot) -> Result<
 }
 
 /// One market (`Some(id)`) or all of them, in 2 queries.
-async fn load_markets(client: &Client, id: Option<Uuid>) -> Result<Vec<Market>, RepoError> {
+async fn load_markets(
+    client: &impl GenericClient,
+    id: Option<Uuid>,
+) -> Result<Vec<Market>, RepoError> {
     let filter = [(
         &id as &(dyn tokio_postgres::types::ToSql + Sync),
         Type::UUID,

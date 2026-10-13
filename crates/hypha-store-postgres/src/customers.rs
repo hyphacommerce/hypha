@@ -2,24 +2,28 @@ use hypha_core::{
     Address, AddressId, AddressParts, CountryCode, CustomerId, Email, RepoError, Version, Versioned,
 };
 use hypha_customers::{Customer, CustomerRepo, CustomerSnapshot, SavedAddress};
-use tokio_postgres::{Client, GenericClient, Row, types::Type};
+use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, consistent_read},
 };
 
 impl<C: PgConnection> CustomerRepo for PgStore<C> {
     async fn get(&self, id: CustomerId) -> Result<Option<Customer>, RepoError> {
         let mut conn = self.conn().await;
-        load(conn.client(), "id = $1", &id.as_uuid(), Type::UUID).await
+        consistent_read!(conn.client(), |tx| {
+            load(tx, "id = $1", &id.as_uuid(), Type::UUID).await
+        })
     }
 
     async fn get_by_email(&self, email: &Email) -> Result<Option<Customer>, RepoError> {
         let mut conn = self.conn().await;
-        load(conn.client(), "email = $1", &email.as_str(), Type::TEXT).await
+        consistent_read!(conn.client(), |tx| {
+            load(tx, "email = $1", &email.as_str(), Type::TEXT).await
+        })
     }
 
     async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError> {
@@ -139,7 +143,7 @@ async fn write_addresses(
 
 /// One customer found by `filter` (a condition on `$1`), with its addresses, in 2 queries.
 async fn load<T: tokio_postgres::types::ToSql + Sync>(
-    client: &Client,
+    client: &impl GenericClient,
     filter: &'static str,
     value: &T,
     value_type: Type,

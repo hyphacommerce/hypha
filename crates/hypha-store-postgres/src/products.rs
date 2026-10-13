@@ -7,57 +7,61 @@ use hypha_products::{
     Handle, OptionSnapshot, OptionValueSnapshot, Product, ProductRepo, ProductSnapshot,
     VariantSnapshot,
 };
-use tokio_postgres::{Client, GenericClient, types::Type};
+use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, consistent_read},
 };
 
 impl<C: PgConnection> ProductRepo for PgStore<C> {
     async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
-        Ok(load(conn.client(), &[id.as_uuid()]).await?.pop())
+        consistent_read!(conn.client(), |tx| {
+            Ok(load(tx, &[id.as_uuid()]).await?.pop())
+        })
     }
 
     async fn get_many(&self, ids: &[ProductId]) -> Result<Vec<Product>, RepoError> {
         let mut conn = self.conn().await;
         let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
-        load(conn.client(), &ids).await
+        consistent_read!(conn.client(), |tx| load(tx, &ids).await)
     }
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
-        let client = conn.client();
-        let row = client
-            .query_typed_opt(
-                "SELECT id FROM products WHERE handle = $1",
-                &[(&handle.as_str(), Type::TEXT)],
-            )
-            .await
-            .map_err(repo_error)?;
-        match row {
-            Some(row) => Ok(load(client, &[row.get(0)]).await?.pop()),
-            None => Ok(None),
-        }
+        consistent_read!(conn.client(), |tx| {
+            let row = tx
+                .query_typed_opt(
+                    "SELECT id FROM products WHERE handle = $1",
+                    &[(&handle.as_str(), Type::TEXT)],
+                )
+                .await
+                .map_err(repo_error)?;
+            match row {
+                Some(row) => Ok(load(tx, &[row.get(0)]).await?.pop()),
+                None => Ok(None),
+            }
+        })
     }
 
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
-        let client = conn.client();
-        let row = client
-            .query_typed_opt(
-                "SELECT product_id FROM variants WHERE id = $1",
-                &[(&variant.as_uuid(), Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?;
-        match row {
-            Some(row) => Ok(load(client, &[row.get(0)]).await?.pop()),
-            None => Ok(None),
-        }
+        consistent_read!(conn.client(), |tx| {
+            let row = tx
+                .query_typed_opt(
+                    "SELECT product_id FROM variants WHERE id = $1",
+                    &[(&variant.as_uuid(), Type::UUID)],
+                )
+                .await
+                .map_err(repo_error)?;
+            match row {
+                Some(row) => Ok(load(tx, &[row.get(0)]).await?.pop()),
+                None => Ok(None),
+            }
+        })
     }
 
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
@@ -176,7 +180,7 @@ async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<
 }
 
 /// Loads the products with these IDs (missing ones are skipped), in 4 queries.
-async fn load(client: &Client, ids: &[Uuid]) -> Result<Vec<Product>, RepoError> {
+async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>, RepoError> {
     if ids.is_empty() {
         return Ok(vec![]);
     }

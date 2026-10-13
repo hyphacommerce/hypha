@@ -9,60 +9,13 @@ use uuid::Uuid;
 use crate::{
     columns::{version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, consistent_read},
 };
 
 impl<C: PgConnection> CartRepo for PgStore<C> {
     async fn get(&self, id: CartId) -> Result<Option<Cart>, RepoError> {
         let mut conn = self.conn().await;
-        let client = conn.client();
-        let Some(row) = client
-            .query_typed_opt(
-                "SELECT version, market_id, country, email, customer_id FROM carts WHERE id = $1",
-                &[(&id.as_uuid(), Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?
-        else {
-            return Ok(None);
-        };
-        let lines = client
-            .query_typed(
-                "SELECT product_id, variant_id, quantity FROM cart_lines
-                 WHERE cart_id = $1 ORDER BY position",
-                &[(&id.as_uuid(), Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?
-            .iter()
-            .map(|line| {
-                let quantity: i64 = line.get(2);
-                Ok(CartLineSnapshot {
-                    product: ProductId::from_uuid(line.get(0)),
-                    variant: VariantId::from_uuid(line.get(1)),
-                    quantity: u32::try_from(quantity)
-                        .map_err(|_| corrupt(format!("cart quantity {quantity}")))?,
-                })
-            })
-            .collect::<Result<Vec<_>, RepoError>>()?;
-        let country: String = row.get(2);
-        let email: Option<String> = row.get(3);
-        let snapshot = CartSnapshot {
-            id,
-            version: version_from_db(row.get(0))?,
-            market: MarketId::from_uuid(row.get(1)),
-            country: CountryCode::new(&country).map_err(corrupt)?,
-            lines,
-            email: email
-                .as_deref()
-                .map(Email::new)
-                .transpose()
-                .map_err(corrupt)?,
-            customer: row.get::<_, Option<Uuid>>(4).map(CustomerId::from_uuid),
-        };
-        Cart::restore(snapshot)
-            .map(Some)
-            .map_err(|e| corrupt(format!("cart {id}: {e}")))
+        consistent_read!(conn.client(), |tx| load_cart(tx, id).await)
     }
 
     async fn insert(&self, cart: &mut Cart) -> Result<(), RepoError> {
@@ -150,4 +103,55 @@ async fn write_lines(
     .await
     .map_err(repo_error)?;
     Ok(())
+}
+
+/// A cart and its lines, in 2 queries (run inside `consistent_read`).
+async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Cart>, RepoError> {
+    let Some(row) = client
+        .query_typed_opt(
+            "SELECT version, market_id, country, email, customer_id FROM carts WHERE id = $1",
+            &[(&id.as_uuid(), Type::UUID)],
+        )
+        .await
+        .map_err(repo_error)?
+    else {
+        return Ok(None);
+    };
+    let lines = client
+        .query_typed(
+            "SELECT product_id, variant_id, quantity FROM cart_lines
+             WHERE cart_id = $1 ORDER BY position",
+            &[(&id.as_uuid(), Type::UUID)],
+        )
+        .await
+        .map_err(repo_error)?
+        .iter()
+        .map(|line| {
+            let quantity: i64 = line.get(2);
+            Ok(CartLineSnapshot {
+                product: ProductId::from_uuid(line.get(0)),
+                variant: VariantId::from_uuid(line.get(1)),
+                quantity: u32::try_from(quantity)
+                    .map_err(|_| corrupt(format!("cart quantity {quantity}")))?,
+            })
+        })
+        .collect::<Result<Vec<_>, RepoError>>()?;
+    let country: String = row.get(2);
+    let email: Option<String> = row.get(3);
+    let snapshot = CartSnapshot {
+        id,
+        version: version_from_db(row.get(0))?,
+        market: MarketId::from_uuid(row.get(1)),
+        country: CountryCode::new(&country).map_err(corrupt)?,
+        lines,
+        email: email
+            .as_deref()
+            .map(Email::new)
+            .transpose()
+            .map_err(corrupt)?,
+        customer: row.get::<_, Option<Uuid>>(4).map(CustomerId::from_uuid),
+    };
+    Cart::restore(snapshot)
+        .map(Some)
+        .map_err(|e| corrupt(format!("cart {id}: {e}")))
 }

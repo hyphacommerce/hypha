@@ -5,13 +5,13 @@ use hypha_inventory::{
     InventoryItem, InventoryItemRepo, InventoryItemSnapshot, Level, Location, LocationRepo,
     LocationSnapshot, Reservation, ReservationRef,
 };
-use tokio_postgres::{Client, GenericClient, types::Type};
+use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, consistent_read},
 };
 
 // ---------- locations ----------
@@ -20,23 +20,26 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
     async fn get(&self, id: LocationId) -> Result<Option<Location>, RepoError> {
         let mut conn = self.conn().await;
         let ids = [id.as_uuid()];
-        Ok(load_locations(conn.client(), &ids).await?.pop())
+        consistent_read!(conn.client(), |tx| {
+            Ok(load_locations(tx, &ids).await?.pop())
+        })
     }
 
     async fn serving(&self, market: MarketId) -> Result<Vec<Location>, RepoError> {
         let mut conn = self.conn().await;
-        let client = conn.client();
-        let ids: Vec<Uuid> = client
-            .query_typed(
-                "SELECT location_id FROM location_markets WHERE market_id = $1",
-                &[(&market.as_uuid(), Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?
-            .iter()
-            .map(|r| r.get(0))
-            .collect();
-        load_locations(client, &ids).await
+        consistent_read!(conn.client(), |tx| {
+            let ids: Vec<Uuid> = tx
+                .query_typed(
+                    "SELECT location_id FROM location_markets WHERE market_id = $1",
+                    &[(&market.as_uuid(), Type::UUID)],
+                )
+                .await
+                .map_err(repo_error)?
+                .iter()
+                .map(|r| r.get(0))
+                .collect();
+            load_locations(tx, &ids).await
+        })
     }
 
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError> {
@@ -116,7 +119,10 @@ async fn write_location_markets(
 }
 
 /// The locations with these IDs and their markets, by priority then ID, in 2 queries.
-async fn load_locations(client: &Client, ids: &[Uuid]) -> Result<Vec<Location>, RepoError> {
+async fn load_locations(
+    client: &impl GenericClient,
+    ids: &[Uuid],
+) -> Result<Vec<Location>, RepoError> {
     let rows = client
         .query_typed(
             "SELECT id, version, name, priority FROM locations WHERE id = ANY($1)
@@ -164,24 +170,26 @@ async fn load_locations(client: &Client, ids: &[Uuid]) -> Result<Vec<Location>, 
 impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
     async fn get(&self, id: InventoryItemId) -> Result<Option<InventoryItem>, RepoError> {
         let mut conn = self.conn().await;
-        Ok(load_items(conn.client(), "id", &[id.as_uuid()])
-            .await?
-            .pop())
+        consistent_read!(conn.client(), |tx| {
+            Ok(load_items(tx, "id", &[id.as_uuid()]).await?.pop())
+        })
     }
 
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<InventoryItem>, RepoError> {
         let mut conn = self.conn().await;
-        Ok(
-            load_items(conn.client(), "variant_id", &[variant.as_uuid()])
+        consistent_read!(conn.client(), |tx| {
+            Ok(load_items(tx, "variant_id", &[variant.as_uuid()])
                 .await?
-                .pop(),
-        )
+                .pop())
+        })
     }
 
     async fn for_variants(&self, variants: &[VariantId]) -> Result<Vec<InventoryItem>, RepoError> {
         let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
         let mut conn = self.conn().await;
-        load_items(conn.client(), "variant_id", &ids).await
+        consistent_read!(conn.client(), |tx| {
+            load_items(tx, "variant_id", &ids).await
+        })
     }
 
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
@@ -338,7 +346,7 @@ async fn write_children(
 /// The items whose `column` (`id` or `variant_id`) is in `values`, with their levels
 /// and reservations, in 3 queries.
 async fn load_items(
-    client: &Client,
+    client: &impl GenericClient,
     column: &'static str,
     values: &[Uuid],
 ) -> Result<Vec<InventoryItem>, RepoError> {

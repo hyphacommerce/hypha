@@ -25,7 +25,7 @@ tokio-postgres = { version = "0.7.18", default-features = false, features = ["js
 
 [dev-dependencies]
 hypha-testkit = { path = "../hypha-testkit" }
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 tokio-postgres = { version = "0.7.18" }
 
 [lints]

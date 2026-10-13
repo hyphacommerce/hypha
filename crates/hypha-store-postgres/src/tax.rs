@@ -5,13 +5,13 @@ use hypha_tax::{
     ClassRate, TaxClass, TaxClassRepo, TaxClassSnapshot, TaxRegion, TaxRegionRepo,
     TaxRegionSnapshot,
 };
-use tokio_postgres::{Client, GenericClient, types::Type};
+use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{tax_rate_from_db, tax_rate_to_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, consistent_read},
 };
 
 // ---------- classes ----------
@@ -111,12 +111,16 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
 impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
     async fn get(&self, id: TaxRegionId) -> Result<Option<TaxRegion>, RepoError> {
         let mut conn = self.conn().await;
-        load_region(conn.client(), "id = $1", id.as_uuid(), Type::UUID).await
+        consistent_read!(conn.client(), |tx| {
+            load_region(tx, "id = $1", id.as_uuid(), Type::UUID).await
+        })
     }
 
     async fn get_by_country(&self, country: CountryCode) -> Result<Option<TaxRegion>, RepoError> {
         let mut conn = self.conn().await;
-        load_region(conn.client(), "country = $1", country.as_str(), Type::TEXT).await
+        consistent_read!(conn.client(), |tx| {
+            load_region(tx, "country = $1", country.as_str(), Type::TEXT).await
+        })
     }
 
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
@@ -203,7 +207,7 @@ async fn write_class_rates(
 
 /// One region found by `filter` (a condition on `$1`), with its class rates, in 2 queries.
 async fn load_region<T: tokio_postgres::types::ToSql + Sync>(
-    client: &Client,
+    client: &impl GenericClient,
     filter: &'static str,
     value: T,
     value_type: Type,
