@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt};
 
-use tokio_postgres::{Client, types::Type};
+use tokio_postgres::{Client, Transaction, types::Type};
 
 /// One schema change. Append only: once applied anywhere, never edit, rename or reorder it.
 pub struct Migration {
@@ -122,6 +122,21 @@ impl From<tokio_postgres::Error> for MigrateError {
     }
 }
 
+/// Arbitrary, but the same for every Hypha migration runner (ASCII "hypha-mg").
+const MIGRATION_LOCK: i64 = 0x6879_7068_612d_6d67;
+
+/// Waits for, then holds until the end of `tx`, the lock every migration runner takes, so
+/// concurrent runners (several hosts starting at once) apply migrations one at a time.
+/// An advisory lock needs no table, so it also covers creating `schema_migrations`.
+async fn lock(tx: &Transaction<'_>) -> Result<(), tokio_postgres::Error> {
+    tx.query_typed(
+        "SELECT pg_advisory_xact_lock($1)",
+        &[(&MIGRATION_LOCK, Type::INT8)],
+    )
+    .await?;
+    Ok(())
+}
+
 /// Checks the lists before touching the database.
 fn check_sets(sets: &[MigrationSet]) -> Result<(), MigrateError> {
     let mut modules = HashSet::new();
@@ -150,12 +165,16 @@ fn check_sets(sets: &[MigrationSet]) -> Result<(), MigrateError> {
 /// first, then spores), each in its own transaction.
 ///
 /// Run it from native code (a CLI, host startup), never from a Worker. Safe to run
-/// concurrently: the `schema_migrations` lock makes other runners wait.
+/// concurrently: every step takes the same advisory lock, so other runners wait.
 pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), MigrateError> {
     check_sets(sets)?;
-    client
-        .batch_execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations (
+
+    // Creating or upgrading the bookkeeping table happens under the same lock as every
+    // migration, so two hosts starting at once can't race on it (review plan B8).
+    let tx = client.transaction().await?;
+    lock(&tx).await?;
+    tx.batch_execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (
                 module     text        NOT NULL,
                 version    integer     NOT NULL,
                 name       text        NOT NULL,
@@ -174,14 +193,14 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
                     ALTER TABLE schema_migrations ADD PRIMARY KEY (module, version);
                 END IF;
             END $$;",
-        )
-        .await?;
+    )
+    .await?;
+    tx.commit().await?;
 
     for set in sets {
         for migration in set.migrations {
             let tx = client.transaction().await?;
-            tx.batch_execute("LOCK TABLE schema_migrations IN EXCLUSIVE MODE")
-                .await?;
+            lock(&tx).await?;
             let applied = tx
                 .query_typed_opt(
                     "SELECT name FROM schema_migrations WHERE module = $1 AND version = $2",

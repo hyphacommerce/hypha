@@ -120,3 +120,25 @@ async fn an_edited_migration_is_an_error() {
         "{result:?}"
     );
 }
+
+/// Review plan B8: two hosts starting at once used to race on creating
+/// `schema_migrations` before any lock was taken.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_runners_starting_at_once_both_succeed() {
+    let Some(mut first) = fresh_schema("migrate_concurrent").await else {
+        return;
+    };
+    let url = std::env::var("DATABASE_URL").unwrap();
+    let (mut second, connection) = tokio_postgres::connect(&url, NoTls).await.unwrap();
+    tokio::spawn(connection);
+    second
+        .batch_execute("SET search_path TO migrate_concurrent")
+        .await
+        .unwrap();
+
+    let (a, b) = tokio::join!(migrate(&mut first, &[CORE]), migrate(&mut second, &[CORE]));
+
+    a.unwrap();
+    b.unwrap();
+    assert_eq!(applied(&first).await, core_rows());
+}
