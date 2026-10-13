@@ -179,7 +179,7 @@ step "2 lamps on hand" 200 - -X PUT "$BASE/inventory-items/$LAMP_ITEM/levels/$WA
 contains "level is stored" "\"levels\":[{\"location\":\"$WAREHOUSE\",\"on_hand\":2,\"reserved\":0,\"available\":2}]"
 step "create stock cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
 STOCK_CART=$(id)
-step "add 3 lamps" 422 out_of_stock -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
+step "add 3 lamps" 409 out_of_stock -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":3}"
 step "add 2 lamps" 200 - -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":2}"

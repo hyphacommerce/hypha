@@ -147,10 +147,12 @@ impl From<hypha_stores::CommandError> for ApiError {
 
 impl From<hypha_cart::CommandError> for ApiError {
     fn from(e: hypha_cart::CommandError) -> Self {
-        use hypha_cart::CommandError as E;
+        use hypha_cart::{CommandError as E, LineError};
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::CartNotFound(_) => StatusCode::NOT_FOUND,
+            // Depends on the stock right now, not on the request: 409 like inventory's.
+            E::Line(LineError::OutOfStock { .. }) => StatusCode::CONFLICT,
             E::Cart(_)
             | E::Line(_)
             | E::Money(_)
@@ -286,6 +288,19 @@ mod tests {
         ));
         assert_eq!(e.status, StatusCode::CONFLICT);
         assert_eq!(e.code, "on_hand_changed");
+    }
+
+    #[test]
+    fn out_of_stock_from_a_cart_is_a_conflict() {
+        let variant = hypha_core::VariantId::from_uuid(Uuid::from_u128(1));
+        let e = ApiError::from(hypha_cart::CommandError::Line(
+            hypha_cart::LineError::OutOfStock {
+                variant,
+                requested: 3,
+                available: 2,
+            },
+        ));
+        assert_eq!((e.status, e.code), (StatusCode::CONFLICT, "out_of_stock"));
     }
 
     #[test]
