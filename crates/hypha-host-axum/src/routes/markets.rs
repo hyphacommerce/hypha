@@ -1,15 +1,14 @@
 //! Markets, price lists and catalogs (all live in `hypha-markets`).
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_cart::CartPorts;
 use hypha_core::{
     CatalogId, CountryCode, Ctx, Currency, MarketId, Money, PriceListId, ProductId, VariantId,
 };
 use hypha_markets::{
-    Catalog, CatalogContext, CreateCatalog, CreateMarket, CreatePriceList, FixedPrice, Market,
-    PriceList, UpdateMarket, add_catalog_products, assign_price_list, create_catalog,
-    create_market, create_price_list, remove_catalog_products, remove_fixed_prices,
-    set_fixed_prices, update_market,
+    Catalog, CatalogContext, CreateCatalog, CreateMarket, CreatePriceList, FixedPrice, HasCatalogs,
+    HasMarkets, HasPriceLists, Market, PriceList, UpdateMarket, add_catalog_products,
+    assign_price_list, create_catalog, create_market, create_price_list, remove_catalog_products,
+    remove_fixed_prices, set_fixed_prices, update_market,
 };
 use serde::{Deserialize, Serialize};
 

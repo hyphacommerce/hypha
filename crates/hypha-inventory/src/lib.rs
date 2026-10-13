@@ -21,5 +21,5 @@ pub use error::{InventoryError, RestoreError};
 pub use item::{InventoryItem, InventoryItemSnapshot, Level, MAX_STOCK, Reservation};
 pub use location::{Location, LocationSnapshot};
 pub use reference::ReservationRef;
-pub use repo::{InventoryItemRepo, LocationRepo};
+pub use repo::{HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo};
 pub use stock::{Availability, StockContext};

@@ -1,8 +1,7 @@
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_cart::CartPorts;
 use hypha_core::{Ctx, Money, ProductId, VariantId};
 use hypha_products::{
-    CreateSimpleProduct, Product, ProductStatus, create_simple_product, get_product,
+    CreateSimpleProduct, HasProducts, Product, ProductStatus, create_simple_product, get_product,
     set_product_status,
 };
 use serde::{Deserialize, Serialize};

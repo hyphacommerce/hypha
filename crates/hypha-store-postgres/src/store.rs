@@ -43,49 +43,30 @@ impl<C: PgConnection> PgStore<C> {
     }
 }
 
-/// One `PgStore` implements every repository, so it is all of the cart's ports at once.
-impl<C: PgConnection> hypha_cart::CartPorts for PgStore<C> {
-    type Carts = Self;
-    type Products = Self;
-    type Markets = Self;
-    type Catalogs = Self;
-    type PriceLists = Self;
-    type TaxClasses = Self;
-    type TaxRegions = Self;
-    type InventoryItems = Self;
-    type Locations = Self;
-    type Customers = Self;
+/// One `PgStore` implements every repository, so each accessor returns the store itself
+/// and it is all of the cart's ports (`hypha_cart::CartPorts`) at once.
+macro_rules! accessors {
+    ($($trait:path => $assoc:ident, $method:ident;)*) => {$(
+        impl<C: PgConnection> $trait for PgStore<C> {
+            type $assoc = Self;
+            fn $method(&self) -> &Self {
+                self
+            }
+        }
+    )*};
+}
 
-    fn carts(&self) -> &Self {
-        self
-    }
-    fn products(&self) -> &Self {
-        self
-    }
-    fn markets(&self) -> &Self {
-        self
-    }
-    fn catalogs(&self) -> &Self {
-        self
-    }
-    fn price_lists(&self) -> &Self {
-        self
-    }
-    fn tax_classes(&self) -> &Self {
-        self
-    }
-    fn tax_regions(&self) -> &Self {
-        self
-    }
-    fn inventory_items(&self) -> &Self {
-        self
-    }
-    fn locations(&self) -> &Self {
-        self
-    }
-    fn customers(&self) -> &Self {
-        self
-    }
+accessors! {
+    hypha_cart::HasCarts => Carts, carts;
+    hypha_products::HasProducts => Products, products;
+    hypha_markets::HasMarkets => Markets, markets;
+    hypha_markets::HasCatalogs => Catalogs, catalogs;
+    hypha_markets::HasPriceLists => PriceLists, price_lists;
+    hypha_tax::HasTaxClasses => TaxClasses, tax_classes;
+    hypha_tax::HasTaxRegions => TaxRegions, tax_regions;
+    hypha_inventory::HasInventoryItems => InventoryItems, inventory_items;
+    hypha_inventory::HasLocations => Locations, locations;
+    hypha_customers::HasCustomers => Customers, customers;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

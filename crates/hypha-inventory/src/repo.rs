@@ -31,3 +31,35 @@ pub trait InventoryItemRepo {
     /// stock for all its lines at once (design note 0004, I7). Each item at most once.
     async fn update_many(&self, items: &mut [InventoryItem]) -> Result<(), RepoError>;
 }
+
+/// Whatever holds the `LocationRepo`: a host's per-request ports, a test world. Commands
+/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// the union of all of them.
+pub trait HasLocations {
+    type Locations: LocationRepo;
+    fn locations(&self) -> &Self::Locations;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasLocations + ?Sized> HasLocations for &T {
+    type Locations = T::Locations;
+    fn locations(&self) -> &Self::Locations {
+        (**self).locations()
+    }
+}
+
+/// Whatever holds the `InventoryItemRepo`: a host's per-request ports, a test world. Commands
+/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// the union of all of them.
+pub trait HasInventoryItems {
+    type InventoryItems: InventoryItemRepo;
+    fn inventory_items(&self) -> &Self::InventoryItems;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasInventoryItems + ?Sized> HasInventoryItems for &T {
+    type InventoryItems = T::InventoryItems;
+    fn inventory_items(&self) -> &Self::InventoryItems {
+        (**self).inventory_items()
+    }
+}

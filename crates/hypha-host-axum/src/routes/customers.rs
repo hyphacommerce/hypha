@@ -1,10 +1,9 @@
 //! Customers and their address books (all live in `hypha-customers`).
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_cart::CartPorts;
 use hypha_core::{AddressId, AddressParts, CountryCode, Ctx, CustomerId, Email};
 use hypha_customers::{
-    CreateCustomer, Customer, SaveAddress, SavedAddress, UpdateCustomer, add_address,
+    CreateCustomer, Customer, HasCustomers, SaveAddress, SavedAddress, UpdateCustomer, add_address,
     create_customer, get_customer, remove_address, update_address, update_customer,
 };
 use serde::{Deserialize, Serialize};

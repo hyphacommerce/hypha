@@ -32,3 +32,35 @@ pub trait TaxRegionRepo {
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError>;
     async fn update(&self, region: &mut TaxRegion) -> Result<(), RepoError>;
 }
+
+/// Whatever holds the `TaxClassRepo`: a host's per-request ports, a test world. Commands
+/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// the union of all of them.
+pub trait HasTaxClasses {
+    type TaxClasses: TaxClassRepo;
+    fn tax_classes(&self) -> &Self::TaxClasses;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasTaxClasses + ?Sized> HasTaxClasses for &T {
+    type TaxClasses = T::TaxClasses;
+    fn tax_classes(&self) -> &Self::TaxClasses {
+        (**self).tax_classes()
+    }
+}
+
+/// Whatever holds the `TaxRegionRepo`: a host's per-request ports, a test world. Commands
+/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// the union of all of them.
+pub trait HasTaxRegions {
+    type TaxRegions: TaxRegionRepo;
+    fn tax_regions(&self) -> &Self::TaxRegions;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasTaxRegions + ?Sized> HasTaxRegions for &T {
+    type TaxRegions = T::TaxRegions;
+    fn tax_regions(&self) -> &Self::TaxRegions {
+        (**self).tax_regions()
+    }
+}

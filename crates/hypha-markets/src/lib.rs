@@ -16,4 +16,4 @@ pub use commands::{
 pub use error::{CatalogError, MarketError, MismatchedPrice, PriceListError};
 pub use market::{Market, MarketSnapshot, check_no_overlap, market_for};
 pub use price_list::{PriceList, PriceListSnapshot};
-pub use repo::{CatalogRepo, MarketRepo, PriceListRepo};
+pub use repo::{CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, MarketRepo, PriceListRepo};

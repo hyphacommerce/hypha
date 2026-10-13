@@ -99,3 +99,51 @@ pub trait PriceListRepo {
         variants: &[VariantId],
     ) -> Result<HashMap<VariantId, Price>, RepoError>;
 }
+
+/// Whatever holds the `MarketRepo`: a host's per-request ports, a test world. Commands
+/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// the union of all of them.
+pub trait HasMarkets {
+    type Markets: MarketRepo;
+    fn markets(&self) -> &Self::Markets;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasMarkets + ?Sized> HasMarkets for &T {
+    type Markets = T::Markets;
+    fn markets(&self) -> &Self::Markets {
+        (**self).markets()
+    }
+}
+
+/// Whatever holds the `CatalogRepo`: a host's per-request ports, a test world. Commands
+/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// the union of all of them.
+pub trait HasCatalogs {
+    type Catalogs: CatalogRepo;
+    fn catalogs(&self) -> &Self::Catalogs;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasCatalogs + ?Sized> HasCatalogs for &T {
+    type Catalogs = T::Catalogs;
+    fn catalogs(&self) -> &Self::Catalogs {
+        (**self).catalogs()
+    }
+}
+
+/// Whatever holds the `PriceListRepo`: a host's per-request ports, a test world. Commands
+/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// the union of all of them.
+pub trait HasPriceLists {
+    type PriceLists: PriceListRepo;
+    fn price_lists(&self) -> &Self::PriceLists;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasPriceLists + ?Sized> HasPriceLists for &T {
+    type PriceLists = T::PriceLists;
+    fn price_lists(&self) -> &Self::PriceLists {
+        (**self).price_lists()
+    }
+}

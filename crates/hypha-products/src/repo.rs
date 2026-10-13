@@ -27,3 +27,19 @@ pub trait ProductRepo {
     /// version than `product` (then `StaleVersion`). Also enforces `keys`.
     async fn update(&self, product: &mut Product) -> Result<(), RepoError>;
 }
+
+/// Whatever holds the `ProductRepo`: a host's per-request ports, a test world. Commands
+/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// the union of all of them.
+pub trait HasProducts {
+    type Products: ProductRepo;
+    fn products(&self) -> &Self::Products;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasProducts + ?Sized> HasProducts for &T {
+    type Products = T::Products;
+    fn products(&self) -> &Self::Products {
+        (**self).products()
+    }
+}

@@ -1,6 +1,6 @@
 use hypha_cart::{
-    AddLine, CartError, CartPorts, CartRepo, CommandError, LineError, LineStatus, PricedCart,
-    add_line, create_cart, get_cart, set_cart_customer, set_cart_email,
+    AddLine, CartError, CartRepo, CommandError, LineError, LineStatus, PricedCart, add_line,
+    create_cart, get_cart, set_cart_customer, set_cart_email,
 };
 use hypha_core::{
     Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, CountryError, Ctx, Currency,
@@ -16,11 +16,7 @@ use hypha_markets::{
 use hypha_pricing::PricingError;
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus};
 use hypha_tax::{TaxClass, TaxClassRepo, TaxLine, TaxRegion, TaxRegionRepo, TaxSource};
-use hypha_testkit::{
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryInventoryItemRepo,
-    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo,
-    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, SequentialIds,
-};
+use hypha_testkit::{InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
 
@@ -81,18 +77,17 @@ fn eur(amount: i64) -> Money {
     Money::new(amount, Currency::Eur).unwrap()
 }
 
+/// The repositories (`InMemoryPorts`, reached through `Deref`) and an ID generator.
 struct World {
-    carts: InMemoryCartRepo,
-    products: InMemoryProductRepo,
-    markets: InMemoryMarketRepo,
-    catalogs: InMemoryCatalogRepo,
-    price_lists: InMemoryPriceListRepo,
-    tax_classes: InMemoryTaxClassRepo,
-    tax_regions: InMemoryTaxRegionRepo,
-    inventory_items: InMemoryInventoryItemRepo,
-    locations: InMemoryLocationRepo,
-    customers: InMemoryCustomerRepo,
+    ports: InMemoryPorts,
     ids: SequentialIds,
+}
+
+impl std::ops::Deref for World {
+    type Target = InMemoryPorts;
+    fn deref(&self) -> &InMemoryPorts {
+        &self.ports
+    }
 }
 
 impl World {
@@ -100,16 +95,7 @@ impl World {
     /// 0 bp EUR price list. No tax region yet, so nothing is taxed until `tax_croatia`.
     fn new() -> Self {
         let world = Self {
-            carts: InMemoryCartRepo::default(),
-            products: InMemoryProductRepo::default(),
-            markets: InMemoryMarketRepo::default(),
-            catalogs: InMemoryCatalogRepo::default(),
-            price_lists: InMemoryPriceListRepo::default(),
-            tax_classes: InMemoryTaxClassRepo::default(),
-            tax_regions: InMemoryTaxRegionRepo::default(),
-            inventory_items: InMemoryInventoryItemRepo::default(),
-            locations: InMemoryLocationRepo::default(),
-            customers: InMemoryCustomerRepo::default(),
+            ports: InMemoryPorts::default(),
             ids: SequentialIds::default(),
         };
 
@@ -218,7 +204,7 @@ impl World {
     }
 
     fn create_cart(&self) -> CartId {
-        block_on(create_cart(&Ctx::system(), self, &self.ids, "HR"))
+        block_on(create_cart(&Ctx::system(), &self.ports, &self.ids, "HR"))
             .unwrap()
             .id()
     }
@@ -232,7 +218,7 @@ impl World {
     ) -> Result<PricedCart, CommandError> {
         block_on(add_line(
             ctx,
-            self,
+            &self.ports,
             AddLine {
                 cart,
                 variant: vid(name),
@@ -242,7 +228,7 @@ impl World {
     }
 
     fn get(&self, cart: CartId) -> Result<PricedCart, CommandError> {
-        block_on(get_cart(&Ctx::system(), self, cart))
+        block_on(get_cart(&Ctx::system(), &self.ports, cart))
     }
 
     fn archive(&self, name: &str) {
@@ -260,54 +246,10 @@ impl World {
     }
 }
 
-impl CartPorts for World {
-    type Carts = InMemoryCartRepo;
-    type Products = InMemoryProductRepo;
-    type Markets = InMemoryMarketRepo;
-    type Catalogs = InMemoryCatalogRepo;
-    type PriceLists = InMemoryPriceListRepo;
-    type TaxClasses = InMemoryTaxClassRepo;
-    type TaxRegions = InMemoryTaxRegionRepo;
-    type InventoryItems = InMemoryInventoryItemRepo;
-    type Locations = InMemoryLocationRepo;
-    type Customers = InMemoryCustomerRepo;
-
-    fn carts(&self) -> &Self::Carts {
-        &self.carts
-    }
-    fn products(&self) -> &Self::Products {
-        &self.products
-    }
-    fn markets(&self) -> &Self::Markets {
-        &self.markets
-    }
-    fn catalogs(&self) -> &Self::Catalogs {
-        &self.catalogs
-    }
-    fn price_lists(&self) -> &Self::PriceLists {
-        &self.price_lists
-    }
-    fn tax_classes(&self) -> &Self::TaxClasses {
-        &self.tax_classes
-    }
-    fn tax_regions(&self) -> &Self::TaxRegions {
-        &self.tax_regions
-    }
-    fn inventory_items(&self) -> &Self::InventoryItems {
-        &self.inventory_items
-    }
-    fn locations(&self) -> &Self::Locations {
-        &self.locations
-    }
-    fn customers(&self) -> &Self::Customers {
-        &self.customers
-    }
-}
-
 #[test]
 fn create_cart_picks_the_market_of_its_country() {
     let world = World::new();
-    let cart = block_on(create_cart(&Ctx::system(), &world, &world.ids, "HR")).unwrap();
+    let cart = block_on(create_cart(&Ctx::system(), &world.ports, &world.ids, "HR")).unwrap();
     assert_eq!((cart.market(), cart.country()), (market_id(), hr()));
     assert_eq!(block_on(world.carts.get(cart.id())), Ok(Some(cart)));
 }
@@ -316,14 +258,14 @@ fn create_cart_picks_the_market_of_its_country() {
 fn create_cart_rejects_country_without_market() {
     let world = World::new();
     let de = CountryCode::new("DE").unwrap();
-    let result = block_on(create_cart(&Ctx::system(), &world, &world.ids, "DE"));
+    let result = block_on(create_cart(&Ctx::system(), &world.ports, &world.ids, "DE"));
     assert_eq!(result, Err(CommandError::NoMarketForCountry(de)));
 }
 
 #[test]
 fn create_cart_rejects_an_invalid_country() {
     let world = World::new();
-    let result = block_on(create_cart(&Ctx::system(), &world, &world.ids, "hr"));
+    let result = block_on(create_cart(&Ctx::system(), &world.ports, &world.ids, "hr"));
     assert_eq!(
         result,
         Err(CommandError::Country(CountryError::NotUppercase))
@@ -714,7 +656,7 @@ fn set_cart_email_normalizes_and_clears() {
 
     let updated = block_on(set_cart_email(
         &Ctx::system(),
-        &world,
+        &world.ports,
         cart,
         Some(" Ana@Example.hr".to_string()),
     ))
@@ -728,7 +670,7 @@ fn set_cart_email_normalizes_and_clears() {
         Some(Email::new("ana@example.hr").unwrap())
     );
 
-    let cleared = block_on(set_cart_email(&Ctx::system(), &world, cart, None)).unwrap();
+    let cleared = block_on(set_cart_email(&Ctx::system(), &world.ports, cart, None)).unwrap();
     assert_eq!(cleared.email(), None);
 }
 
@@ -739,7 +681,7 @@ fn set_cart_email_rejects_an_invalid_email() {
     assert_eq!(
         block_on(set_cart_email(
             &Ctx::system(),
-            &world,
+            &world.ports,
             cart,
             Some("nope".to_string())
         )),
@@ -755,13 +697,19 @@ fn set_cart_customer_links_the_customer_and_takes_their_email() {
     let ana = Email::new("ana@example.hr").unwrap();
     block_on(world.customers.insert(&mut Customer::new(id, ana.clone()))).unwrap();
 
-    let updated = block_on(set_cart_customer(&Ctx::system(), &world, cart, Some(id))).unwrap();
+    let updated = block_on(set_cart_customer(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        Some(id),
+    ))
+    .unwrap();
     assert_eq!(
         (updated.customer(), updated.email()),
         (Some(id), Some(&ana))
     );
 
-    let unlinked = block_on(set_cart_customer(&Ctx::system(), &world, cart, None)).unwrap();
+    let unlinked = block_on(set_cart_customer(&Ctx::system(), &world.ports, cart, None)).unwrap();
     assert_eq!((unlinked.customer(), unlinked.email()), (None, Some(&ana)));
 }
 
@@ -773,7 +721,7 @@ fn set_cart_customer_rejects_an_unknown_customer() {
     assert_eq!(
         block_on(set_cart_customer(
             &Ctx::system(),
-            &world,
+            &world.ports,
             cart,
             Some(unknown)
         )),
@@ -839,18 +787,28 @@ fn set_cart_customer_requires_customers_read_to_link() {
     )));
 
     assert_eq!(
-        block_on(set_cart_customer(&cart_writer, &world, cart, Some(id))),
+        block_on(set_cart_customer(
+            &cart_writer,
+            &world.ports,
+            cart,
+            Some(id)
+        )),
         missing
     );
     let unknown = CustomerId::from_uuid(Uuid::from_u128(1599));
     assert_eq!(
-        block_on(set_cart_customer(&cart_writer, &world, cart, Some(unknown))),
+        block_on(set_cart_customer(
+            &cart_writer,
+            &world.ports,
+            cart,
+            Some(unknown)
+        )),
         missing,
         "an unknown ID must not be distinguishable from a known one"
     );
     assert_eq!(world.get(cart).unwrap().email, None);
     // Unlinking reveals nothing and stays allowed.
-    assert!(block_on(set_cart_customer(&cart_writer, &world, cart, None)).is_ok());
+    assert!(block_on(set_cart_customer(&cart_writer, &world.ports, cart, None)).is_ok());
 }
 
 #[test]
@@ -860,15 +818,21 @@ fn a_linked_cart_keeps_its_email_until_the_customer_is_unlinked() {
     let id = CustomerId::from_uuid(Uuid::from_u128(1501));
     let ana = Email::new("ana@example.hr").unwrap();
     block_on(world.customers.insert(&mut Customer::new(id, ana.clone()))).unwrap();
-    block_on(set_cart_customer(&Ctx::system(), &world, cart, Some(id))).unwrap();
+    block_on(set_cart_customer(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        Some(id),
+    ))
+    .unwrap();
 
     assert_eq!(
-        block_on(set_cart_email(&Ctx::system(), &world, cart, None)),
+        block_on(set_cart_email(&Ctx::system(), &world.ports, cart, None)),
         Err(CommandError::Cart(CartError::EmailRequired))
     );
     assert_eq!(world.get(cart).unwrap().email, Some(ana));
 
-    block_on(set_cart_customer(&Ctx::system(), &world, cart, None)).unwrap();
-    let cleared = block_on(set_cart_email(&Ctx::system(), &world, cart, None)).unwrap();
+    block_on(set_cart_customer(&Ctx::system(), &world.ports, cart, None)).unwrap();
+    let cleared = block_on(set_cart_email(&Ctx::system(), &world.ports, cart, None)).unwrap();
     assert_eq!(cleared.email(), None);
 }

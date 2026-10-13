@@ -1,13 +1,12 @@
 //! Locations, inventory items and their stock (all live in `hypha-inventory`).
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_cart::CartPorts;
 use hypha_core::{Ctx, InventoryItemId, LocationId, MarketId, VariantId};
 use hypha_inventory::{
-    AdjustOnHand, CreateInventoryItem, CreateLocation, InventoryItem, Location, SetOnHand,
-    UpdateInventoryItem, UpdateLocation, adjust_on_hand, create_inventory_item, create_location,
-    get_inventory_item, get_location, get_variant_inventory, set_on_hand, update_inventory_item,
-    update_location,
+    AdjustOnHand, CreateInventoryItem, CreateLocation, HasInventoryItems, HasLocations,
+    InventoryItem, Location, SetOnHand, UpdateInventoryItem, UpdateLocation, adjust_on_hand,
+    create_inventory_item, create_location, get_inventory_item, get_location,
+    get_variant_inventory, set_on_hand, update_inventory_item, update_location,
 };
 use serde::{Deserialize, Serialize};
 

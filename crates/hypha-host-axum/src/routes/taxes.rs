@@ -1,12 +1,11 @@
 //! Tax classes, their products, and tax regions (all live in `hypha-tax`).
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_cart::CartPorts;
 use hypha_core::{CountryCode, Ctx, ProductId, TaxClassId, TaxRate, TaxRegionId};
 use hypha_tax::{
-    AssignTaxClass, CreateTaxClass, CreateTaxRegion, TaxClass, TaxRegion, assign_tax_class,
-    create_tax_class, create_tax_region, get_tax_region, remove_class_rate, set_class_rate,
-    set_default_rate,
+    AssignTaxClass, CreateTaxClass, CreateTaxRegion, HasTaxClasses, HasTaxRegions, TaxClass,
+    TaxRegion, assign_tax_class, create_tax_class, create_tax_region, get_tax_region,
+    remove_class_rate, set_class_rate, set_default_rate,
 };
 use serde::{Deserialize, Serialize};
 

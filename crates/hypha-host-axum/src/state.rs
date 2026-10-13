@@ -4,11 +4,7 @@ use hypha_cart::CartPorts;
 use hypha_core::{IdGenerator, StoreId};
 use hypha_store_postgres::{CORE, PgConnection, PgStore, migrate};
 use hypha_stores::StoreRepo;
-use hypha_testkit::{
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryInventoryItemRepo,
-    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo,
-    InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
-};
+use hypha_testkit::{InMemoryPorts, InMemoryStoreRepo};
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -67,71 +63,20 @@ pub trait Storage: Send + Sync + 'static {
 
 // ---------- in memory (default; data is lost on restart) ----------
 
+/// The store directory and one store's repositories (`InMemoryPorts`, shared with the
+/// tests).
 #[derive(Default)]
 pub struct MemoryStorage {
     stores: InMemoryStoreRepo,
-    products: InMemoryProductRepo,
-    markets: InMemoryMarketRepo,
-    catalogs: InMemoryCatalogRepo,
-    price_lists: InMemoryPriceListRepo,
-    carts: InMemoryCartRepo,
-    tax_classes: InMemoryTaxClassRepo,
-    tax_regions: InMemoryTaxRegionRepo,
-    inventory_items: InMemoryInventoryItemRepo,
-    locations: InMemoryLocationRepo,
-    customers: InMemoryCustomerRepo,
-}
-
-impl CartPorts for MemoryStorage {
-    type Carts = InMemoryCartRepo;
-    type Products = InMemoryProductRepo;
-    type Markets = InMemoryMarketRepo;
-    type Catalogs = InMemoryCatalogRepo;
-    type PriceLists = InMemoryPriceListRepo;
-    type TaxClasses = InMemoryTaxClassRepo;
-    type TaxRegions = InMemoryTaxRegionRepo;
-    type InventoryItems = InMemoryInventoryItemRepo;
-    type Locations = InMemoryLocationRepo;
-    type Customers = InMemoryCustomerRepo;
-
-    fn carts(&self) -> &Self::Carts {
-        &self.carts
-    }
-    fn products(&self) -> &Self::Products {
-        &self.products
-    }
-    fn markets(&self) -> &Self::Markets {
-        &self.markets
-    }
-    fn catalogs(&self) -> &Self::Catalogs {
-        &self.catalogs
-    }
-    fn price_lists(&self) -> &Self::PriceLists {
-        &self.price_lists
-    }
-    fn tax_classes(&self) -> &Self::TaxClasses {
-        &self.tax_classes
-    }
-    fn tax_regions(&self) -> &Self::TaxRegions {
-        &self.tax_regions
-    }
-    fn inventory_items(&self) -> &Self::InventoryItems {
-        &self.inventory_items
-    }
-    fn locations(&self) -> &Self::Locations {
-        &self.locations
-    }
-    fn customers(&self) -> &Self::Customers {
-        &self.customers
-    }
+    ports: InMemoryPorts,
 }
 
 impl Storage for MemoryStorage {
-    type Ports<'a> = &'a MemoryStorage;
+    type Ports<'a> = &'a InMemoryPorts;
     type Directory<'a> = &'a InMemoryStoreRepo;
 
-    async fn ports(&self, _store: StoreId) -> Result<&MemoryStorage, ApiError> {
-        Ok(self)
+    async fn ports(&self, _store: StoreId) -> Result<&InMemoryPorts, ApiError> {
+        Ok(&self.ports)
     }
 
     async fn directory(&self) -> Result<&InMemoryStoreRepo, ApiError> {

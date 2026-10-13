@@ -4,16 +4,21 @@ use hypha_core::{
     AuthError, CartId, CountryCode, CountryError, Ctx, CustomerId, Email, EmailError, ErrorCode,
     IdGenerator, MarketId, MoneyError, ProductId, RepoError, Scope, VariantId,
 };
-use hypha_customers::CustomerRepo;
-use hypha_inventory::{InventoryItemRepo, LocationRepo, StockContext};
-use hypha_markets::{CatalogContext, CatalogRepo, Market, MarketRepo, PriceListRepo};
+use hypha_customers::{CustomerRepo, HasCustomers};
+use hypha_inventory::{
+    HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo, StockContext,
+};
+use hypha_markets::{
+    CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo,
+    PriceListRepo,
+};
 use hypha_pricing::PricingContext;
-use hypha_products::{Product, ProductRepo};
-use hypha_tax::{TaxClassRepo, TaxContext, TaxRegionRepo};
+use hypha_products::{HasProducts, Product, ProductRepo};
+use hypha_tax::{HasTaxClasses, HasTaxRegions, TaxClassRepo, TaxContext, TaxRegionRepo};
 use thiserror::Error;
 
 use crate::{
-    Cart, CartError, CartRepo, LineError, LineStatus, PricedCart, Quantity, check_stock,
+    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, Quantity, check_stock,
     price_cart, price_line,
 };
 
@@ -64,85 +69,72 @@ impl ErrorCode for CommandError {
     }
 }
 
-/// Every port the cart commands use, implemented once by whoever owns the repos
-/// (a host's app state, a test world).
+/// Every port the cart commands use, as one bound for hosts and test worlds: anything
+/// with all the accessors is `CartPorts` automatically (the blanket impl below).
 ///
-/// Associated types instead of `&dyn` keep dispatch static, so hosts can still
-/// prove `Send` where they need it. Adding a port later touches this trait and
-/// its impls, not every command signature.
-pub trait CartPorts {
-    type Carts: CartRepo;
-    type Products: ProductRepo;
-    type Markets: MarketRepo;
-    type Catalogs: CatalogRepo;
-    type PriceLists: PriceListRepo;
-    type TaxClasses: TaxClassRepo;
-    type TaxRegions: TaxRegionRepo;
-    type InventoryItems: InventoryItemRepo;
-    type Locations: LocationRepo;
-    type Customers: CustomerRepo;
-
-    fn carts(&self) -> &Self::Carts;
-    fn products(&self) -> &Self::Products;
-    fn markets(&self) -> &Self::Markets;
-    fn catalogs(&self) -> &Self::Catalogs;
-    fn price_lists(&self) -> &Self::PriceLists;
-    fn tax_classes(&self) -> &Self::TaxClasses;
-    fn tax_regions(&self) -> &Self::TaxRegions;
-    fn inventory_items(&self) -> &Self::InventoryItems;
-    fn locations(&self) -> &Self::Locations;
-    fn customers(&self) -> &Self::Customers;
+/// Each command binds only the accessors it uses (`create_cart` needs markets and
+/// carts), so a new port, or a new composing crate like orders, doesn't touch every
+/// signature or implementor. Associated types instead of `&dyn` keep dispatch static,
+/// so hosts can still prove `Send` where they need it.
+pub trait CartPorts:
+    HasCarts
+    + HasProducts
+    + HasMarkets
+    + HasCatalogs
+    + HasPriceLists
+    + HasTaxClasses
+    + HasTaxRegions
+    + HasInventoryItems
+    + HasLocations
+    + HasCustomers
+{
 }
 
-/// Borrowed ports are ports too, so a host can lend out `&Storage` per request.
-impl<T: CartPorts + ?Sized> CartPorts for &T {
-    type Carts = T::Carts;
-    type Products = T::Products;
-    type Markets = T::Markets;
-    type Catalogs = T::Catalogs;
-    type PriceLists = T::PriceLists;
-    type TaxClasses = T::TaxClasses;
-    type TaxRegions = T::TaxRegions;
-    type InventoryItems = T::InventoryItems;
-    type Locations = T::Locations;
-    type Customers = T::Customers;
+impl<T> CartPorts for T where
+    T: HasCarts
+        + HasProducts
+        + HasMarkets
+        + HasCatalogs
+        + HasPriceLists
+        + HasTaxClasses
+        + HasTaxRegions
+        + HasInventoryItems
+        + HasLocations
+        + HasCustomers
+        + ?Sized
+{
+}
 
-    fn carts(&self) -> &Self::Carts {
-        (**self).carts()
-    }
-    fn products(&self) -> &Self::Products {
-        (**self).products()
-    }
-    fn markets(&self) -> &Self::Markets {
-        (**self).markets()
-    }
-    fn catalogs(&self) -> &Self::Catalogs {
-        (**self).catalogs()
-    }
-    fn price_lists(&self) -> &Self::PriceLists {
-        (**self).price_lists()
-    }
-    fn tax_classes(&self) -> &Self::TaxClasses {
-        (**self).tax_classes()
-    }
-    fn tax_regions(&self) -> &Self::TaxRegions {
-        (**self).tax_regions()
-    }
-    fn inventory_items(&self) -> &Self::InventoryItems {
-        (**self).inventory_items()
-    }
-    fn locations(&self) -> &Self::Locations {
-        (**self).locations()
-    }
-    fn customers(&self) -> &Self::Customers {
-        (**self).customers()
-    }
+/// What pricing a cart reads: everything but the carts and customers themselves.
+pub trait PricingPorts:
+    HasProducts
+    + HasMarkets
+    + HasCatalogs
+    + HasPriceLists
+    + HasTaxClasses
+    + HasTaxRegions
+    + HasInventoryItems
+    + HasLocations
+{
+}
+
+impl<T> PricingPorts for T where
+    T: HasProducts
+        + HasMarkets
+        + HasCatalogs
+        + HasPriceLists
+        + HasTaxClasses
+        + HasTaxRegions
+        + HasInventoryItems
+        + HasLocations
+        + ?Sized
+{
 }
 
 /// Creates an empty cart shipping to `country`, in the market that sells there
 /// (like Shopify, the buyer's country picks the market). `country` is an ISO 3166-1
 /// alpha-2 code, checked here.
-pub async fn create_cart<S: CartPorts, I: IdGenerator>(
+pub async fn create_cart<S: HasMarkets + HasCarts, I: IdGenerator>(
     ctx: &Ctx,
     ports: &S,
     ids: &I,
@@ -174,7 +166,7 @@ pub struct AddLine {
 /// catalog with a price in its currency, and the market's locations must have stock
 /// for the line's new quantity (design note 0004, I6). Other lines that went stale
 /// don't block it; they come back marked unavailable.
-pub async fn add_line<S: CartPorts>(
+pub async fn add_line<S: HasCarts + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
     input: AddLine,
@@ -227,7 +219,7 @@ pub async fn add_line<S: CartPorts>(
 }
 
 /// Sets who to contact about the order this cart becomes; `None` clears it.
-pub async fn set_cart_email<S: CartPorts>(
+pub async fn set_cart_email<S: HasCarts>(
     ctx: &Ctx,
     ports: &S,
     id: CartId,
@@ -244,7 +236,7 @@ pub async fn set_cart_email<S: CartPorts>(
 
 /// Links the cart to an existing customer (taking their email), or unlinks it with
 /// `None` (design note 0005, C5). Linking needs `customers:read` as well as `carts:write`.
-pub async fn set_cart_customer<S: CartPorts>(
+pub async fn set_cart_customer<S: HasCarts + HasCustomers>(
     ctx: &Ctx,
     ports: &S,
     id: CartId,
@@ -275,7 +267,7 @@ pub async fn set_cart_customer<S: CartPorts>(
     Ok(cart)
 }
 
-async fn load_cart<S: CartPorts>(ports: &S, id: CartId) -> Result<Cart, CommandError> {
+async fn load_cart<S: HasCarts>(ports: &S, id: CartId) -> Result<Cart, CommandError> {
     ports
         .carts()
         .get(id)
@@ -285,7 +277,7 @@ async fn load_cart<S: CartPorts>(ports: &S, id: CartId) -> Result<Cart, CommandE
 
 /// The cart at current prices, tax rates and stock. Stale lines are marked unavailable,
 /// not errors.
-pub async fn get_cart<S: CartPorts>(
+pub async fn get_cart<S: HasCarts + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
     id: CartId,
@@ -312,7 +304,7 @@ pub async fn get_cart<S: CartPorts>(
 ///
 /// A missing catalog or price list is left out rather than reported here:
 /// `resolve_price` turns it into a precise per-line reason.
-async fn load_pricing<S: CartPorts>(
+async fn load_pricing<S: HasMarkets + HasCatalogs + HasPriceLists>(
     ports: &S,
     cart: &Cart,
 ) -> Result<PricingContext, CommandError> {
@@ -359,7 +351,7 @@ async fn load_pricing<S: CartPorts>(
 
 /// The tax rates of the cart's country and its products' tax classes, in 2 queries.
 /// The market says whether its prices already include tax.
-async fn load_tax<S: CartPorts>(
+async fn load_tax<S: HasTaxClasses + HasTaxRegions>(
     ports: &S,
     cart: &Cart,
     market: &Market,
@@ -372,7 +364,10 @@ async fn load_tax<S: CartPorts>(
 }
 
 /// The stock of the cart's variants in the locations serving its market, in 2 queries.
-async fn load_stock<S: CartPorts>(ports: &S, cart: &Cart) -> Result<StockContext, CommandError> {
+async fn load_stock<S: HasInventoryItems + HasLocations>(
+    ports: &S,
+    cart: &Cart,
+) -> Result<StockContext, CommandError> {
     let variants: Vec<VariantId> = cart.lines().iter().map(|l| l.variant()).collect();
     let items = ports.inventory_items().for_variants(&variants).await?;
     Ok(StockContext {
@@ -383,7 +378,10 @@ async fn load_stock<S: CartPorts>(ports: &S, cart: &Cart) -> Result<StockContext
 
 /// The cart's products, in one query. Missing (deleted) products are left out;
 /// `price_cart` marks their lines unavailable with `ProductNotFound`.
-async fn load_products<S: CartPorts>(ports: &S, cart: &Cart) -> Result<Vec<Product>, CommandError> {
+async fn load_products<S: HasProducts>(
+    ports: &S,
+    cart: &Cart,
+) -> Result<Vec<Product>, CommandError> {
     Ok(ports.products().get_many(&product_ids(cart)).await?)
 }
 
