@@ -149,6 +149,28 @@ impl From<hypha_cart::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_tax::CommandError> for ApiError {
+    fn from(e: hypha_tax::CommandError) -> Self {
+        use hypha_tax::{CommandError as E, TaxError};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Region IDs only ever arrive in URLs; a class rate is addressed by its URL too.
+            E::TaxRegionNotFound(_) | E::Tax(TaxError::ClassRateNotFound(_)) => {
+                StatusCode::NOT_FOUND
+            }
+            E::TaxRegionExists { .. } | E::Tax(TaxError::DuplicateClassRate(_)) => {
+                StatusCode::CONFLICT
+            }
+            E::Country(_) | E::Money(_) | E::TaxClassNotFound(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hypha_core::{AuthError, CartId, Scope};

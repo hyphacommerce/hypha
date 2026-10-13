@@ -4,6 +4,7 @@
 mod carts;
 mod markets;
 mod products;
+mod taxes;
 
 use axum::{
     Router,
@@ -60,6 +61,19 @@ macro_rules! router {
             .route("/carts", post(carts::create::<$storage>))
             .route("/carts/{id}", get(carts::fetch::<$storage>))
             .route("/carts/{id}/lines", post(carts::add::<$storage>))
+            // taxes
+            .route("/tax-classes", post(taxes::create_class::<$storage>))
+            .route("/tax-assignments", put(taxes::assign_class::<$storage>))
+            .route("/tax-regions", post(taxes::create_region::<$storage>))
+            .route(
+                "/tax-regions/{id}",
+                get(taxes::fetch_region::<$storage>).patch(taxes::update_region::<$storage>),
+            )
+            .route(
+                "/tax-regions/{id}/class-rates/{class_id}",
+                put(taxes::set_region_class_rate::<$storage>)
+                    .delete(taxes::remove_region_class_rate::<$storage>),
+            )
             // everything else
             .fallback(|| async { ApiError::route_not_found() })
             .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })

@@ -115,6 +115,43 @@ step "remove cup from catalog" 204 - -X DELETE "$BASE/catalogs/$CATALOG/products
 step "get cart" 200 - "$BASE/carts/$CART"
 contains "cup line is unavailable" '"status":"unavailable","reason_code":"not_available_in_market"'
 
+echo "## tax"
+step "create book" 201 - -X POST "$BASE/products" -H "$JSON" \
+    -d '{"handle":"book","title":"Book","price":{"amount":1000,"currency":"EUR"}}'
+BOOK=$(id)
+BOOK_VAR=$(variant)
+step "activate book" 200 - -X PATCH "$BASE/products/$BOOK/status" -H "$JSON" -d '{"status":"active"}'
+step "add book to catalog" 204 - -X POST "$BASE/catalogs/$CATALOG/products" -H "$JSON" \
+    -d "{\"products\":[\"$BOOK\"]}"
+step "create tax class" 201 - -X POST "$BASE/tax-classes" -H "$JSON" -d '{"name":"Books"}'
+BOOKS=$(id)
+step "put book in it" 204 - -X PUT "$BASE/tax-assignments" -H "$JSON" \
+    -d "{\"products\":[\"$BOOK\"],\"tax_class\":\"$BOOKS\"}"
+step "create Croatian tax region (25%)" 201 - -X POST "$BASE/tax-regions" -H "$JSON" \
+    -d '{"country":"HR","default_rate":250000}'
+REGION=$(id)
+step "books pay 5% in Croatia" 200 - -X PUT "$BASE/tax-regions/$REGION/class-rates/$BOOKS" \
+    -H "$JSON" -d '{"rate":50000}'
+contains "class rate is stored" "\"class_rates\":[{\"tax_class\":\"$BOOKS\",\"rate\":50000}]"
+step "get tax region" 200 - "$BASE/tax-regions/$REGION"
+step "create taxed cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+TAX_CART=$(id)
+step "add 2 books" 200 - -X POST "$BASE/carts/$TAX_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$BOOK_VAR\",\"quantity\":2}"
+contains "book line pays 5% of 1800" "\"tax\":{\"rate\":50000,\"amount\":{\"amount\":90,\"currency\":\"EUR\"},\"tax_class\":\"$BOOKS\"}"
+contains "tax is added on top" '"taxes_included":false,"subtotal":{"amount":1800,"currency":"EUR"},"tax_total":{"amount":90,"currency":"EUR"},"total":{"amount":1890'
+step "prices include tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
+step "get taxed cart" 200 - "$BASE/carts/$TAX_CART"
+contains "tax is extracted (1800 x 5/105 = 85.7)" '"taxes_included":true,"subtotal":{"amount":1800,"currency":"EUR"},"tax_total":{"amount":86,"currency":"EUR"},"total":{"amount":1800'
+step "remove books rate" 200 - -X DELETE "$BASE/tax-regions/$REGION/class-rates/$BOOKS"
+contains "no class rates left" '"class_rates":[]'
+step "get taxed cart" 200 - "$BASE/carts/$TAX_CART"
+contains "book pays the 25% default (1800 x 25/125)" '"tax_total":{"amount":360,"currency":"EUR"}'
+step "lower the default to 13%" 200 - -X PATCH "$BASE/tax-regions/$REGION" -H "$JSON" -d '{"default_rate":130000}'
+step "get taxed cart" 200 - "$BASE/carts/$TAX_CART"
+contains "book pays 13% (1800 x 13/113 = 207.1)" '"tax_total":{"amount":207,"currency":"EUR"}'
+step "back to excluding tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
+
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
 step "wrong method" 405 method_not_allowed -X DELETE "$BASE/products/$MUG"
@@ -149,6 +186,17 @@ step "add archived mug" 422 product_not_active -X POST "$BASE/carts/$CART/lines"
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "cart to a country without market" 422 no_market_for_country -X POST "$BASE/carts" -H "$JSON" \
     -d '{"country":"US"}'
+step "second tax region for a country" 409 tax_region_exists -X POST "$BASE/tax-regions" -H "$JSON" \
+    -d '{"country":"HR","default_rate":250000}'
+step "tax rate above 100%" 422 invalid_tax_rate -X POST "$BASE/tax-regions" -H "$JSON" \
+    -d '{"country":"DE","default_rate":1000001}'
+step "unknown tax region" 404 tax_region_not_found "$BASE/tax-regions/txreg_00000000000000000000000000000063"
+step "rate for unknown class" 404 tax_class_not_found -X PUT \
+    "$BASE/tax-regions/$REGION/class-rates/txc_00000000000000000000000000000063" -H "$JSON" -d '{"rate":0}'
+step "remove a rate the class doesn't have" 404 class_rate_not_found -X DELETE \
+    "$BASE/tax-regions/$REGION/class-rates/$BOOKS"
+step "assign unknown class" 422 tax_class_not_found -X PUT "$BASE/tax-assignments" -H "$JSON" \
+    -d "{\"products\":[\"$BOOK\"],\"tax_class\":\"txc_00000000000000000000000000000063\"}"
 step "zero quantity" 422 invalid_quantity -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":0}"
 step "create draft product" 201 - -X POST "$BASE/products" -H "$JSON" \
