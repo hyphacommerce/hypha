@@ -1,0 +1,24 @@
+{
+  "name": "@hypha/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed clients for the Hypha admin and storefront APIs, generated from openapi/ (design note 0011, P5).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./admin": "./src/admin.ts",
+    "./storefront": "./src/storefront.ts"
+  },
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "check": "node scripts/generate.mjs --check",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

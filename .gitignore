@@ -1,1 +1,12 @@
 /target
+# TypeScript apps and packages (design note 0011)
+node_modules/
+dist/
+.next/
+.cloudflare/
+.wrangler/
+.vinext/
+*.tsbuildinfo
+.env*.local
+.dev.vars
+next-env.d.ts

@@ -1,0 +1,39 @@
+# The TypeScript side of the repository (design note 0011): apps and shared packages.
+# The Rust side is the Cargo workspace in Cargo.toml.
+packages:
+  - "apps/*"
+  - "packages/*"
+# pnpm holds back packages published very recently (a supply-chain guard). These exact
+# versions are the ones design note 0011 pins, newer than that window when chosen;
+# listing them is a deliberate exception, to drop as they age.
+minimumReleaseAgeExclude:
+  - '@cloudflare/build-output-utils@0.9.2'
+  - '@cloudflare/config@0.26.0'
+  - '@cloudflare/runtime-types@0.1.11'
+  - '@cloudflare/vite-plugin@2.0.0-beta.sha-67fa336fd'
+  - '@cloudflare/workers-response-store@1.1.1'
+  - '@next/env@16.4.1'
+  - '@next/swc-darwin-arm64@16.4.1'
+  - '@next/swc-darwin-x64@16.4.1'
+  - '@next/swc-linux-arm64-gnu@16.4.1'
+  - '@next/swc-linux-arm64-musl@16.4.1'
+  - '@next/swc-linux-x64-gnu@16.4.1'
+  - '@next/swc-linux-x64-musl@16.4.1'
+  - '@next/swc-win32-arm64-msvc@16.4.1'
+  - '@next/swc-win32-x64-msvc@16.4.1'
+  - '@vinext/cloudflare@1.1.1'
+  - cf@1.0.0-beta.17
+  - miniflare@5.20261012.0-beta
+  - next@16.4.1
+  - react-dom@19.3.1
+  - react-server-dom-webpack@19.3.1
+  - react@19.3.1
+  - vinext@1.2.0
+
+# Dependency install scripts run only when listed here (pnpm blocks them by default).
+# workerd fetches the Workers runtime binary the dev server runs in. Astryx's scripts
+# only print a setup hint, so they stay off.
+allowBuilds:
+  workerd: true
+  "@astryxdesign/core": false
+  "@astryxdesign/cli": false
