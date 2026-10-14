@@ -156,8 +156,8 @@ These are cheap now and expensive to retrofit:
 | Per-module migrations | Spore tables need their own version lists | **Done** (`MigrationSet`, 0001) |
 | Aggregates record domain events; repos write them to an `outbox` in the same transaction | Retrofitting means touching every aggregate, repo and contract test | **With orders**, the first aggregate whose events matter externally |
 | A policy check point in commands (after domain validation, before the write) | Adding it to every command later is tedious | When the first policy is needed; keep commands shaped "load → validate → write" so it slots in |
-| API DTOs that can derive OpenAPI schemas | The generated TS client is the main developer experience | With the next routes; one derive per DTO |
-| API keys with scopes → a real `Ctx` | External apps need them before anything else | Next, with users and auth |
+| API DTOs that can derive OpenAPI schemas | The generated TS client is the main developer experience | *Slipped* (review, 2026-10-14). Now: before the first external app. DTOs are already API-only types (`StatusDto`, Merge Patch helpers), so what's left is one derive per DTO |
+| API keys with scopes → a real `Ctx` | External apps need them before anything else | *Slipped.* Now: right after orders. `Caller` (`extract.rs`) is the one place it lands |
 | No foreign keys from extension tables into core | Keeps tiers and tenancy independent | Already the rule |
 
 ## 8. Not decided here
@@ -166,5 +166,5 @@ These are cheap now and expensive to retrofit:
 - Rate limits and quotas per app.
 - An admin UI extension model (embedded app pages, like Shopify).
 - Loadable plugins (WASM components).
-- Multi-tenancy (still open from 0001) affects namespacing of definitions, apps and
-  webhooks.
+- Multi-tenancy (decided in 0006: one store per deployment) affects namespacing of
+  definitions, apps and webhooks once more models are supported.

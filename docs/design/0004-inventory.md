@@ -101,7 +101,8 @@
   `reserved` at a location is the sum of its reservations.
 - It owns its levels and reservations the way a product owns its variants: one row
   group, one version, one write.
-- Commands: `create_inventory_item`, `set_tracked`, `set_continue_selling`,
+- Commands: `create_inventory_item`, `update_inventory_item` (`tracked`,
+  `continue_selling`),
   `set_on_hand` (with an optional `expected` quantity, I10), `adjust_on_hand(delta)`.
 
 **Link `variant → item`**
@@ -121,7 +122,8 @@
 - `available` is the **sum** over the market's locations, which is what splitting (I9)
   can actually deliver. Without splitting it would be the largest single location's
   stock, and a buyer could see 3 in stock and still be refused 3.
-- `continue_selling` items are always `Available`.
+- `continue_selling` items are `Available` as long as at least one location serves the
+  market; with none, there is nowhere to sell from, so they are out of stock too.
 
 **Allocation (I9)**
 - For each line: the highest-priority serving location that covers the whole quantity.
@@ -203,8 +205,8 @@ the same reference finds its reservation already there and changes nothing.
   `out_of_stock`; `PricedCart` lines gain `out_of_stock`. That is a new edge `hypha-cart → hypha-inventory`, which the layer
   table allows (composing domain → leaf).
 - **`hypha-store-postgres`:** migration 0007 with `locations`, `location_markets`,
-  `inventory_items`, `inventory_levels`, `inventory_reservations`,
-  `variant_inventory_items`.
+  `inventory_items`, `inventory_levels`, `inventory_reservations`. (No
+  `variant_inventory_items`: the item stores its variant, unique per variant.)
 - **`hypha-host-axum`:** routes for locations, items, levels and the variant link; the
   e2e script gets an `## inventory` section.
 

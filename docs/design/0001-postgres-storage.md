@@ -1,7 +1,7 @@
 # 0001: Postgres storage, and how commands stay consistent
 
 - **Status:** Accepted (2026-10-12). Decisions D1–D6 are recorded in the summary below and in place.
-- **Scope:** the first real storage adapter (`hypha-store-postgres`, via sqlx), and the
+- **Scope:** the first real storage adapter (`hypha-store-postgres`, via `tokio-postgres` since D4 changed), and the
   changes to ports and commands it forces. D1 is not built here, but nothing below may
   rule it out.
 
@@ -61,8 +61,8 @@ read 2026-10.
     (relevant to D3).
   - **2 MB per row or string.** Rules out one JSON document per large aggregate.
   - **1000 queries per Worker invocation (50 on Free).** Ports will need batch reads
-    such as `get_many(ids)`. For example, `load_products` runs one query per cart line
-    today.
+    such as `get_many(ids)`. For example, `load_products` ran one query per cart line
+    (since fixed: carts load with a fixed number of batched queries).
   - **10 GB per database, not raisable, but 50,000 databases per account.** D1 is built
     for one database per store or tenant. Multi-tenancy is out of scope here, but it
     must stay possible.
@@ -201,8 +201,9 @@ impl Product {
 
 ### 3.7 Writing several aggregates at once (not built now)
 
-- **Rule for now:** a command writes at most one aggregate. Every command today already
-  does.
+- **Rule for now:** a command writes at most one aggregate. One exception arrived with
+  inventory: `reserve_stock` writes every item of a checkout through
+  `InventoryItemRepo::update_many`, all or nothing (design note 0004, I7).
 - **When checkout needs more:** add a `WriteBatch` port. It collects
   `insert`/`update(expected_version)` operations and commits them atomically: one
   Postgres transaction, or one D1 `batch()`.
@@ -212,8 +213,9 @@ impl Product {
 ### 3.8 Crate and tooling
 
 - New crate `crates/hypha-store-postgres`, in the hosts layer (Tokio, not WASM). It
-  depends on the domain crates and sqlx, and implements every repo trait on
-  `PgStore { pool }`. Migrations live in `migrations/` and run with `sqlx::migrate!`.
+  depends on the domain crates and `tokio-postgres` (section 7; sqlx was the first
+  plan), and implements every repo trait on `PgStore`. Migrations live in `migrations/`
+  and run with the crate's own runner (`migrate`, per module, checksummed).
 - `hypha-host-axum` picks its storage at startup: `DATABASE_URL` set means Postgres,
   otherwise in memory.
 - **Decided: D4, sqlx query style.** *Superseded by section 7: `tokio-postgres`.*
@@ -264,11 +266,11 @@ impl Product {
    **Done (2026-10-12)**, with `worker` 0.8.7, `wrangler` 4 and local D1. Results are in
    section 6.
 5. `hypha-store-postgres`: schema, migrations, the repo impls. The contract tests pass
-   against Postgres. **Done (2026-10-13)** on `tokio-postgres` (section 7): all five
-   contracts pass against Docker Postgres 18.6, and injected bugs (missing version checks,
+   against Postgres. **Done (2026-10-13)** on `tokio-postgres` (section 7): all the
+   contracts (five then, ten now) pass against Docker Postgres 18.6, and injected bugs (missing version checks,
    missing key mappings) make them fail. It also builds for `wasm32`. Batched writes use
-   `unnest` (`WITH ORDINALITY` to keep order). Product children are still inserted row by
-   row; batch them if large products make saves slow. `uuid[]` for variant selections is
+   `unnest` (`WITH ORDINALITY` to keep order). Product children were inserted row by row
+   at first; they are batched too since the review cleanup. `uuid[]` for variant selections is
    Postgres-only, which is acceptable now that D1 is optional.
 6. The host chooses storage from `DATABASE_URL`. `scripts/e2e.sh` passes against
    Postgres. **Done (2026-10-13).** Handlers are generic over a host `Storage` trait
@@ -281,15 +283,17 @@ Steps 1–3 involve no database at all, and they're where most of the design ris
 
 ## 5. Not decided here
 
-- Retrying on `StaleVersion`. *Proposal:* return 409 and let the client retry. Revisit
-  whether commands should retry internally once there's real traffic.
+- Retrying on `StaleVersion`. Most commands return 409 and let the client retry.
+  `reserve_stock` already retries internally (design note 0004), since a checkout
+  losing to another one on fresh data should report the real shortage, not a conflict.
 - Exposing versions over HTTP (`ETag` / `If-Match`) so admin edits can't overwrite each
   other. Useful for the admin panel later.
 - Soft deletes versus hard deletes, and audit history.
 - Stock and inventory, which bring their own concurrency rules.
 - **Multi-tenancy:** shared tables with a `store_id` column, or one database per store.
   D1's 10 GB cap and 50k databases per account point towards one database per store,
-  at least on Cloudflare. It needs its own note before customers and orders arrive.
+  at least on Cloudflare. *Decided in design note 0006 (model A: one store per
+  deployment).*
 - **Durable Objects SQLite** for coordination within a single object (for example a
   per-store sequence of order numbers). D1 docs say its limits and pricing are identical
   to D1. Not a replacement for the storage ports.
