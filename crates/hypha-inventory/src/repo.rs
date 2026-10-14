@@ -28,7 +28,10 @@ pub trait InventoryItemRepo {
     async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError>;
     /// Updates several items **all or nothing**: if any of them is stale (or gone),
     /// nothing is written and the result is `StaleVersion`. How one checkout reserves
-    /// stock for all its lines at once (design note 0004, I7). Each item at most once.
+    /// stock for all its lines at once (design note 0004, I7).
+    ///
+    /// Precondition: each item at most once. Two copies of one item fail (`Backend` or
+    /// `StaleVersion`, depending on the adapter) and write nothing.
     async fn update_many(&self, items: &mut [InventoryItem]) -> Result<(), RepoError>;
 }
 

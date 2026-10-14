@@ -114,6 +114,8 @@ Decide first; each is easier now than after orders build on it.
   `hypha-inventory/tests/commands.rs:241`, `hypha-inventory/tests/reserve.rs:55`,
   `hypha-customers/tests/commands.rs:154`): replace with a "hide the next lookup" switch
   in testkit.
+  Done for the five lookup-hiding fakes (`hide_next_lookups`). The reserve fake plays a
+  rival write instead and stays.
 - [x] **Shared duplicate-key helper** for the "pre-check, map `Duplicate`, look up again"
   block (products, markets ×2, tax, inventory, customers).
 - [x] **`Quantity` to core**; inventory uses it instead of a bare `u32` with its own zero
@@ -141,46 +143,49 @@ Decide first; each is easier now than after orders build on it.
   product twice.
   Done, and `set_line_quantity` no longer loads pricing, stock and products twice when
   it raises a quantity (it shares `reprice_grown_line` with `add_line`).
-- [ ] **CHECK constraints** (new migration): currency on `variants`, `markets`,
+- [x] **CHECK constraints** (new migration): currency on `variants`, `markets`,
   `price_lists`, `price_list_prices`; money amounts `≤ 9007199254740991`;
   `customers.email = lower(email)`.
-- [ ] **Migration checksums**: store a hash of each migration's SQL and fail on mismatch
+- [x] **Migration checksums**: store a hash of each migration's SQL and fail on mismatch
   or on unknown applied versions (`migrate.rs:186-197`).
-- [ ] **In-memory vs Postgres differences** for batch methods (missing parent, duplicate
+- [x] **In-memory vs Postgres differences** for batch methods (missing parent, duplicate
   fixed prices, duplicate items in `update_many`, option IDs reused across products):
   define them in the contract or document them as caller preconditions.
-- [ ] **Contract gaps:** unique keys on update (`HANDLE`, `TAX_REGION_COUNTRY`,
+  Done: in-memory now fails like Postgres, the ports state the preconditions and the
+  contract checks them. Reused option IDs are documented only (IDs are generated).
+- [x] **Contract gaps:** unique keys on update (`HANDLE`, `TAX_REGION_COUNTRY`,
   `INVENTORY_ITEM_VARIANT`); clearing cart email/customer; product updates that remove
   or reorder options/variants.
-- [ ] **Host:** route-level tests with `tower::ServiceExt::oneshot` against
+  Done, except the last: the domain can't remove or reorder them yet.
+- [x] **Host:** route-level tests with `tower::ServiceExt::oneshot` against
   `memory_router()`; feature-gate `hypha_testkit::contract` (it ships in the binary);
   `PORT`/`BIND` env and graceful shutdown; a health route.
-- [ ] **e2e gaps:** `GET /products/{id}` (200 and `product_not_found`),
+- [x] **e2e gaps:** `GET /products/{id}` (200 and `product_not_found`),
   `GET /inventory-items/{id}` 200, and ~20 unexercised error codes (`invalid_handle`,
   `no_countries`, `duplicate_country`, `invalid_basis_points`, `duplicate_fixed_price`,
   `missing_content_type`, 422 `price_list_not_found` / `market_not_found` from bodies,
   `variant_not_found`, `quantity_overflow`, `field_too_long`, …).
-- [ ] **Unknown IDs in bodies** are accepted on 5 routes (leaf crates can't check other
+- [x] **Unknown IDs in bodies** are accepted on 5 routes (leaf crates can't check other
   domains: fixed prices, catalog products, tax assignments, location markets, inventory
   item variant). Document the exception in CLAUDE.md and error.rs, or validate in a
   composing layer.
 
 ### Docs
 
-- [ ] CLAUDE.md: the `update_many` exception to "a command writes at most one aggregate";
+- [x] CLAUDE.md: the `update_many` exception to "a command writes at most one aggregate";
   tracing is no longer deferred; a rule for quoting raw input with `{:?}` in error
   messages (`email.rs:17`, `money/mod.rs:41`, `products/src/error.rs:9,33`) or switch
   them to `'{0}'`.
-- [ ] 0001: sqlx → tokio-postgres (line 4, §3.8), "every command writes one aggregate"
+- [x] 0001: sqlx → tokio-postgres (line 4, §3.8), "every command writes one aggregate"
   (§3.7), "all five contracts" (now 10), "`load_products` runs one query per line",
   multi-tenancy note "before customers", "retrying on StaleVersion → 409" (inventory
   retries).
-- [ ] 0002 §7: OpenAPI-derivable DTOs and API keys slipped; move the dates or do them.
-- [ ] 0003: `duplicate_class_rate` mapping; customer tax exemptions are deferred in 0005.
-- [ ] 0004: commands are `update_inventory_item`, not `set_tracked` /
+- [x] 0002 §7: OpenAPI-derivable DTOs and API keys slipped; move the dates or do them.
+- [x] 0003: `duplicate_class_rate` mapping; customer tax exemptions are deferred in 0005.
+- [x] 0004: commands are `update_inventory_item`, not `set_tracked` /
   `set_continue_selling`; there is no `variant_inventory_items` table;
   "`continue_selling` items are always Available" (not with zero serving locations).
-- [ ] `hypha-cart/src/commands.rs:287` query count; `scripts/e2e.sh:2` says in-memory only.
+- [x] `hypha-cart/src/commands.rs:287` query count; `scripts/e2e.sh:2` says in-memory only.
 
 ## Before orders (now in design note 0007)
 

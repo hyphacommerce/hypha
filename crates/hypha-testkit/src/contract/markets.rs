@@ -186,6 +186,8 @@ pub async fn catalog_repo<R: CatalogRepo>(make: impl AsyncFn() -> R) {
     catalog_stale(&make().await).await;
     scenario("catalog: products are added, removed and queried in batches");
     catalog_products(&make().await).await;
+    scenario("catalog: adding products to a missing catalog fails");
+    catalog_products_need_the_catalog(&make().await).await;
 }
 
 async fn catalog_round_trips<R: CatalogRepo>(repo: &R) {
@@ -306,6 +308,8 @@ pub async fn price_list_repo<R: PriceListRepo>(make: impl AsyncFn() -> R) {
     price_list_keys_and_stale(&make().await).await;
     scenario("price list: fixed prices are set, removed and queried in batches");
     price_list_fixed_prices(&make().await).await;
+    scenario("price list: fixed prices need the list and each variant once");
+    fixed_prices_preconditions(&make().await).await;
 }
 
 async fn price_list_round_trips<R: PriceListRepo>(repo: &R) {
@@ -398,5 +402,33 @@ async fn price_list_fixed_prices<R: PriceListRepo>(repo: &R) {
     assert_eq!(
         repo.fixed_prices(a.id(), &[vid(1)]).await,
         Ok(HashMap::from([(vid(1), eur(150))]))
+    );
+}
+
+/// Caller precondition (the command loads the catalog first): adapters fail rather
+/// than store membership of a catalog that doesn't exist.
+async fn catalog_products_need_the_catalog<R: CatalogRepo>(repo: &R) {
+    assert!(repo.add_products(cid(99), &[pid(1)]).await.is_err());
+}
+
+/// Caller preconditions (`PriceList::check_fixed_prices` runs first): the list exists
+/// and each variant appears once. Breaking either fails and stores nothing.
+async fn fixed_prices_preconditions<R: PriceListRepo>(repo: &R) {
+    assert!(
+        repo.set_fixed_prices(plid(99), &[(vid(1), eur(100))])
+            .await
+            .is_err()
+    );
+
+    let mut list = price_list(1, Currency::Eur, 0);
+    repo.insert(&mut list).await.unwrap();
+    assert!(
+        repo.set_fixed_prices(list.id(), &[(vid(1), eur(100)), (vid(1), eur(200))])
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        repo.fixed_prices(list.id(), &[vid(1)]).await,
+        Ok(HashMap::new())
     );
 }

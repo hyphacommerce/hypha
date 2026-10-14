@@ -21,7 +21,7 @@ hypha-checkout = { path = "../hypha-checkout" }
 deadpool-postgres = "0.14.2"
 tokio-postgres = "0.7.18"
 axum = { version = "0.8", features = ["macros"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 serde.workspace = true
 serde_json.workspace = true
 uuid = { workspace = true, features = ["v7"] }
@@ -30,6 +30,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.11"
 jiff = "0.2"
 tower-http = { version = "0.6", features = ["trace"] }
+
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }
 
 [lints]
 workspace = true

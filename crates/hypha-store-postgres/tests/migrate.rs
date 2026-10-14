@@ -8,7 +8,11 @@ async fn fresh_schema(schema: &str) -> Option<Client> {
         eprintln!("DATABASE_URL not set: skipping the migration tests");
         return None;
     };
-    let (client, connection) = tokio_postgres::connect(&url, NoTls).await.expect("connect");
+    let (client, connection) = hypha_store_postgres::database_config(&url)
+        .expect("DATABASE_URL")
+        .connect(NoTls)
+        .await
+        .expect("connect");
     tokio::spawn(connection);
     client
         .batch_execute(&format!(
@@ -129,7 +133,11 @@ async fn two_runners_starting_at_once_both_succeed() {
         return;
     };
     let url = std::env::var("DATABASE_URL").unwrap();
-    let (mut second, connection) = tokio_postgres::connect(&url, NoTls).await.unwrap();
+    let (mut second, connection) = hypha_store_postgres::database_config(&url)
+        .expect("DATABASE_URL")
+        .connect(NoTls)
+        .await
+        .unwrap();
     tokio::spawn(connection);
     second
         .batch_execute("SET search_path TO migrate_concurrent")
@@ -141,4 +149,93 @@ async fn two_runners_starting_at_once_both_succeed() {
     a.unwrap();
     b.unwrap();
     assert_eq!(applied(&first).await, core_rows());
+}
+
+/// The schema rejects what `restore` would, even from a manual edit.
+#[tokio::test]
+async fn checks_reject_data_the_domain_never_writes() {
+    let Some(mut client) = fresh_schema("migrate_checks").await else {
+        return;
+    };
+    migrate(&mut client, &[CORE]).await.unwrap();
+    client
+        .batch_execute(
+            "INSERT INTO markets (id, version, name, currency)
+             VALUES ('00000000-0000-0000-0000-000000000001', 1, 'EU', 'EUR')",
+        )
+        .await
+        .unwrap();
+
+    for bad in [
+        "INSERT INTO markets (id, version, name, currency)
+         VALUES ('00000000-0000-0000-0000-000000000002', 1, 'EU', 'eur')",
+        "INSERT INTO market_countries (country, market_id, position)
+         VALUES ('hr', '00000000-0000-0000-0000-000000000001', 0)",
+        "INSERT INTO customers (id, version, email) VALUES
+         ('00000000-0000-0000-0000-000000000003', 1, 'Ana@example.hr')",
+    ] {
+        let err = client.batch_execute(bad).await.unwrap_err();
+        let code = err.as_db_error().map(|e| e.code().clone());
+        assert_eq!(
+            code,
+            Some(tokio_postgres::error::SqlState::CHECK_VIOLATION),
+            "{bad}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn edited_sql_is_an_error_and_old_rows_get_a_checksum() {
+    let Some(mut client) = fresh_schema("migrate_checksum").await else {
+        return;
+    };
+    migrate(&mut client, &[CORE]).await.unwrap();
+
+    // Rows from before checksums: the next run fills them in instead of failing.
+    client
+        .batch_execute("UPDATE schema_migrations SET checksum = NULL")
+        .await
+        .unwrap();
+    migrate(&mut client, &[CORE]).await.unwrap();
+    let missing: i64 = client
+        .query_one(
+            "SELECT count(*) FROM schema_migrations WHERE checksum IS NULL",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(missing, 0);
+
+    // What an edited migration file looks like from the database's side.
+    client
+        .batch_execute("UPDATE schema_migrations SET checksum = 'edited' WHERE version = 3")
+        .await
+        .unwrap();
+    let result = migrate(&mut client, &[CORE]).await;
+    assert!(
+        matches!(&result, Err(MigrateError::Edited { module, version: 3 }) if module == "core"),
+        "{result:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_database_from_a_newer_hypha_is_refused() {
+    let Some(mut client) = fresh_schema("migrate_unknown").await else {
+        return;
+    };
+    migrate(&mut client, &[CORE]).await.unwrap();
+    client
+        .batch_execute(
+            "INSERT INTO schema_migrations (module, version, name, checksum)
+             VALUES ('core', 999, 'from_the_future', 'x')",
+        )
+        .await
+        .unwrap();
+
+    let result = migrate(&mut client, &[CORE]).await;
+    assert!(
+        matches!(&result, Err(MigrateError::Unknown { module, version: 999 }) if module == "core"),
+        "{result:?}"
+    );
 }

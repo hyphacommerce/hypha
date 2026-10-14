@@ -23,6 +23,8 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     unique_keys_on_insert(&make().await).await;
     scenario("product: variant IDs stay unique on update");
     variant_key_on_update(&make().await).await;
+    scenario("product: handles stay unique on update");
+    handle_key_on_update(&make().await).await;
     scenario("product: update from a stale copy fails");
     stale_update(&make().await).await;
     scenario("product: update of a missing product is stale");
@@ -253,4 +255,22 @@ async fn missing_update<R: ProductRepo>(repo: &R) {
         repo.update(&mut simple(1, "mug")).await,
         Err(RepoError::StaleVersion)
     );
+}
+
+/// No command renames a handle yet, but a restored snapshot can carry another one, and
+/// the adapter must still refuse to store a taken handle.
+async fn handle_key_on_update<R: ProductRepo>(repo: &R) {
+    repo.insert(&mut simple(1, "mug")).await.unwrap();
+    let mut cup = simple(2, "cup");
+    repo.insert(&mut cup).await.unwrap();
+
+    let mut renamed = cup.snapshot();
+    renamed.handle = "mug".to_string();
+    let mut renamed = Product::restore(renamed).unwrap();
+
+    assert_eq!(
+        repo.update(&mut renamed).await,
+        Err(RepoError::Duplicate(keys::HANDLE))
+    );
+    assert_eq!(repo.get(pid(2)).await, Ok(Some(cup)));
 }

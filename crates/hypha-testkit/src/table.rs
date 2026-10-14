@@ -109,6 +109,13 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         id_of: impl Fn(&T) -> K,
         unique: UniqueCheck<'_, T>,
     ) -> Result<(), RepoError> {
+        let mut seen = std::collections::HashSet::new();
+        if rows_to_write.iter().any(|row| !seen.insert(id_of(row))) {
+            // Two versions of one row in one write: no database would pick one quietly.
+            return Err(RepoError::Backend(
+                "the same row twice in one update_many".to_string(),
+            ));
+        }
         let mut rows = self.rows.lock().unwrap();
         for row in rows_to_write.iter() {
             let id = id_of(row);
@@ -173,6 +180,12 @@ pub(crate) fn update_row<K: Eq + Hash, T: Clone + Versioned>(
     row.set_version(row.version().next());
     rows.insert(id, row.clone());
     Ok(())
+}
+
+/// A batch write naming a parent that doesn't exist: a broken caller precondition,
+/// which a database reports as a foreign key violation (`Backend`).
+pub(crate) fn missing(what: &str, id: impl std::fmt::Display) -> RepoError {
+    RepoError::Backend(format!("{what} {id} does not exist"))
 }
 
 /// For tables with no unique keys besides the ID.

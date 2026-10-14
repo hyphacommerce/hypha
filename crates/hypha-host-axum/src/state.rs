@@ -5,7 +5,7 @@ use std::{
 
 use hypha_checkout::CheckoutPorts;
 use hypha_core::{Clock, IdGenerator, StoreId, Timestamp};
-use hypha_store_postgres::{CORE, PgConnection, PgStore, migrate};
+use hypha_store_postgres::{CORE, PgConnection, PgStore, database_config, migrate};
 use hypha_stores::StoreRepo;
 use hypha_testkit::{InMemoryPorts, InMemoryStoreRepo};
 use uuid::Uuid;
@@ -117,6 +117,9 @@ impl PgConnection for PooledClient {
     }
 }
 
+/// How long a request waits for a pooled connection (or for a new one to open).
+const POOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub struct PgStorage {
     pool: deadpool_postgres::Pool,
 }
@@ -124,14 +127,26 @@ pub struct PgStorage {
 impl PgStorage {
     /// Opens a connection pool and applies pending migrations.
     pub async fn connect(url: &str) -> Result<Self, String> {
-        let mut config = deadpool_postgres::Config::new();
-        config.url = Some(url.to_string());
-        let pool = config
-            .create_pool(
-                Some(deadpool_postgres::Runtime::Tokio1),
-                tokio_postgres::NoTls,
-            )
-            .map_err(|e| format!("invalid DATABASE_URL: {e}"))?;
+        use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Runtime};
+
+        let config = database_config(url).map_err(|e| format!("invalid DATABASE_URL: {e}"))?;
+        let manager = Manager::from_config(
+            config,
+            tokio_postgres::NoTls,
+            ManagerConfig {
+                recycling_method: RecyclingMethod::Fast,
+            },
+        );
+        // A request waits at most this long for a free connection or a new one, then
+        // fails with a 500 instead of hanging while the pool is exhausted or Postgres
+        // is down.
+        let pool = Pool::builder(manager)
+            .runtime(Runtime::Tokio1)
+            .wait_timeout(Some(POOL_TIMEOUT))
+            .create_timeout(Some(POOL_TIMEOUT))
+            .recycle_timeout(Some(POOL_TIMEOUT))
+            .build()
+            .map_err(|e| format!("cannot build the connection pool: {e}"))?;
         let mut conn = pool
             .get()
             .await

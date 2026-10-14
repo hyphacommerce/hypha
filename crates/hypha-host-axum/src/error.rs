@@ -1,3 +1,14 @@
+//! Maps every crate's errors to HTTP statuses. An unknown ID in a body is 422 and one
+//! in the URL is 404 (`not_found_if`).
+//!
+//! Exception: five routes store IDs from *another* domain without checking them, because
+//! a leaf crate can't see other domains: variants in fixed prices
+//! (`PUT /price-lists/{id}/fixed-prices`), products in catalogs (`POST
+//! /catalogs/{id}/products`), products in tax assignments (`PUT /tax-assignments`), markets
+//! of a location, and the variant of a new inventory item. An unknown one is stored and
+//! simply never matches. Checking them belongs in a composing layer (like `hypha-cart`),
+//! not in these crates.
+
 use axum::{
     Json,
     extract::rejection::{JsonRejection, PathRejection},

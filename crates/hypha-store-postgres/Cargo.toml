@@ -27,7 +27,7 @@ tokio-postgres = { version = "0.7.18", default-features = false, features = ["js
 [dev-dependencies]
 # Workflows sit above this adapter; only the race tests drive one.
 hypha-checkout = { path = "../hypha-checkout" }
-hypha-testkit = { path = "../hypha-testkit" }
+hypha-testkit = { path = "../hypha-testkit", features = ["contract"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 tokio-postgres = { version = "0.7.18" }
 

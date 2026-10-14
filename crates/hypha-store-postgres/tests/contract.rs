@@ -22,7 +22,9 @@ fn database_url() -> Option<String> {
 /// A store on a fresh, fully migrated schema. Each test uses its own schema name, so
 /// tests running in parallel never see each other's rows.
 async fn fresh_store(url: &str, schema: &str) -> PgStore<Client> {
-    let (mut client, connection) = tokio_postgres::connect(url, NoTls)
+    let (mut client, connection) = hypha_store_postgres::database_config(url)
+        .expect("DATABASE_URL")
+        .connect(NoTls)
         .await
         .expect("connect to DATABASE_URL");
     tokio::spawn(connection);

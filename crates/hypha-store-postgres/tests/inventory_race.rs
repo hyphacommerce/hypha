@@ -16,7 +16,9 @@ use uuid::Uuid;
 const SCHEMA: &str = "inventory_race";
 
 async fn connect(url: &str) -> Client {
-    let (client, connection) = tokio_postgres::connect(url, NoTls)
+    let (client, connection) = hypha_store_postgres::database_config(url)
+        .expect("DATABASE_URL")
+        .connect(NoTls)
         .await
         .expect("connect to DATABASE_URL");
     tokio::spawn(connection);

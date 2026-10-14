@@ -6,7 +6,7 @@ use std::{
 use hypha_core::{CatalogId, ProductId, RepoError};
 use hypha_markets::{Catalog, CatalogContext, CatalogRepo, repo::keys};
 
-use crate::table::Table;
+use crate::table::{Table, missing};
 
 #[derive(Default)]
 pub struct InMemoryCatalogRepo {
@@ -52,6 +52,9 @@ impl CatalogRepo for InMemoryCatalogRepo {
         catalog: CatalogId,
         products: &[ProductId],
     ) -> Result<(), RepoError> {
+        if self.catalogs.get(&catalog).is_none() {
+            return Err(missing("catalog", catalog));
+        }
         let mut all = self.products.lock().unwrap();
         all.entry(catalog)
             .or_default()
@@ -145,6 +148,7 @@ mod tests {
     fn included_products_returns_only_members_that_were_asked_for() {
         let repo = InMemoryCatalogRepo::default();
         let id = CatalogId::from_uuid(Uuid::from_u128(1));
+        block_on(repo.insert(&mut catalog(1, in_market(1)))).unwrap();
         block_on(repo.add_products(id, &[pid(1), pid(2), pid(3)])).unwrap();
 
         let included = block_on(repo.included_products(id, &[pid(2), pid(3), pid(9)])).unwrap();
@@ -156,6 +160,7 @@ mod tests {
     fn add_products_ignores_duplicates_and_remove_ignores_missing() {
         let repo = InMemoryCatalogRepo::default();
         let id = CatalogId::from_uuid(Uuid::from_u128(1));
+        block_on(repo.insert(&mut catalog(1, in_market(1)))).unwrap();
         block_on(repo.add_products(id, &[pid(1)])).unwrap();
         block_on(repo.add_products(id, &[pid(1), pid(2)])).unwrap();
         block_on(repo.remove_products(id, &[pid(1), pid(9)])).unwrap();

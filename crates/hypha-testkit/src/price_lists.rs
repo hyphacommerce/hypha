@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Mutex};
 use hypha_core::{Price, PriceListId, RepoError, VariantId};
 use hypha_markets::{PriceList, PriceListRepo, repo::keys};
 
-use crate::table::{Table, no_unique_keys};
+use crate::table::{Table, missing, no_unique_keys};
 
 #[derive(Default)]
 pub struct InMemoryPriceListRepo {
@@ -36,6 +36,16 @@ impl PriceListRepo for InMemoryPriceListRepo {
         list: PriceListId,
         prices: &[(VariantId, Price)],
     ) -> Result<(), RepoError> {
+        if self.price_lists.get(&list).is_none() {
+            return Err(missing("price list", list));
+        }
+        let mut seen = std::collections::HashSet::new();
+        if let Some((variant, _)) = prices.iter().find(|(v, _)| !seen.insert(*v)) {
+            // Like a database statement that would update the same row twice.
+            return Err(RepoError::Backend(format!(
+                "variant {variant} is listed twice; callers check_fixed_prices first"
+            )));
+        }
         let mut all = self.fixed_prices.lock().unwrap();
         all.entry(list).or_default().extend(prices.iter().copied());
         Ok(())
@@ -91,6 +101,14 @@ mod tests {
         Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
     }
 
+    /// A repo holding the price list `list_id()`.
+    fn with_list() -> InMemoryPriceListRepo {
+        let repo = InMemoryPriceListRepo::default();
+        let mut list = PriceList::new(list_id(), Currency::Eur, BasisPoints::ZERO);
+        block_on(repo.insert(&mut list)).unwrap();
+        repo
+    }
+
     #[test]
     fn saves_and_loads_price_lists() {
         let repo = InMemoryPriceListRepo::default();
@@ -108,7 +126,7 @@ mod tests {
 
     #[test]
     fn fixed_prices_returns_only_requested_variants_that_have_one() {
-        let repo = InMemoryPriceListRepo::default();
+        let repo = with_list();
         block_on(repo.set_fixed_prices(list_id(), &[(vid(1), eur(100)), (vid(2), eur(200))]))
             .unwrap();
 
@@ -119,7 +137,7 @@ mod tests {
 
     #[test]
     fn set_replaces_and_remove_deletes() {
-        let repo = InMemoryPriceListRepo::default();
+        let repo = with_list();
         block_on(repo.set_fixed_prices(list_id(), &[(vid(1), eur(100)), (vid(2), eur(200))]))
             .unwrap();
         block_on(repo.set_fixed_prices(list_id(), &[(vid(1), eur(150))])).unwrap();

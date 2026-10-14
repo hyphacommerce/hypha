@@ -11,6 +11,9 @@ pub mod keys {
     pub const VARIANT_ID: &str = "variant_id";
 }
 
+/// Option and option value IDs are generated, so they are assumed unique across products
+/// and have no key: an adapter may report a reused one as `Backend` (Postgres) or accept
+/// it (in memory). Commands never reuse them.
 #[allow(async_fn_in_trait)]
 pub trait ProductRepo {
     async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError>;
