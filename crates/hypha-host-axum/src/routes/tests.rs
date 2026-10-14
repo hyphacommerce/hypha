@@ -450,7 +450,20 @@ fn totp_code(secret: &str) -> String {
 async fn two_factor_setup_and_login_over_http() {
     let app = app().await;
     let session = owner_session(&app).await;
-    let (status, setup) = send_as(&app, &session, "POST", "/me/mfa/totp", None).await;
+    let (status, body) = send_as(
+        &app,
+        &session,
+        "POST",
+        "/me/mfa/totp",
+        Some(r#"{"password":"nope"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "wrong_password")
+    );
+    let password = json!({ "password": OWNER_PASSWORD }).to_string();
+    let (status, setup) = send_as(&app, &session, "POST", "/me/mfa/totp", Some(&password)).await;
     assert_eq!(status, StatusCode::CREATED);
     assert!(
         setup["uri"]

@@ -58,6 +58,7 @@ fn enable_mfa(ports: &InMemoryPorts, env: &TestEnv) -> (String, Vec<String>) {
         &ports.identities,
         env,
         identity_id(),
+        PASSWORD,
         "Shop",
         "ana@example.com",
     ))
@@ -320,6 +321,7 @@ fn confirming_needs_the_code_from_the_app() {
         &ports.identities,
         &env,
         identity_id(),
+        PASSWORD,
         "Shop",
         "ana",
     ))
@@ -343,6 +345,7 @@ fn the_setup_secret_is_stored_sealed() {
         &ports.identities,
         &env,
         identity_id(),
+        PASSWORD,
         "Shop",
         "ana",
     ))
@@ -355,6 +358,99 @@ fn the_setup_secret_is_stored_sealed() {
 }
 
 #[test]
+fn starting_a_setup_needs_the_password() {
+    let (ports, env) = world();
+    assert_eq!(
+        block_on(start_totp(
+            &ports.identities,
+            &env,
+            identity_id(),
+            "wrong",
+            "Shop",
+            "ana"
+        )),
+        Err(CommandError::WrongPassword)
+    );
+    assert_eq!(identity(&ports).totp(), None);
+}
+
+#[test]
+fn five_wrong_codes_lock_the_second_factor_across_challenges() {
+    let (ports, env) = world();
+    let (secret, codes) = enable_mfa(&ports, &env);
+    let first = token_of(&login(&ports, &env));
+    for _ in 0..4 {
+        assert_eq!(
+            block_on(finish_login(&ports, &env, &first, "000000")).map(|(s, _)| s.id()),
+            Err(CommandError::InvalidMfaCode)
+        );
+    }
+    // A new challenge doesn't start the count again: it is the identity's.
+    let second = token_of(&login(&ports, &env));
+    assert_eq!(
+        block_on(finish_login(&ports, &env, &second, "000000")).map(|(s, _)| s.id()),
+        Err(CommandError::InvalidMfaCode)
+    );
+    let until = env.now().plus_secs(Identity::MFA_LOCK_SECS);
+    for code in [code(&secret, env.now(), 0), codes[0].clone()] {
+        assert_eq!(
+            block_on(finish_login(&ports, &env, &second, &code)).map(|(s, _)| s.id()),
+            Err(CommandError::MfaLocked { until })
+        );
+    }
+    // The lock also covers the routes for someone already logged in.
+    assert_eq!(
+        block_on(disable_mfa(
+            &ports.identities,
+            &env,
+            identity_id(),
+            &codes[0]
+        )),
+        Err(CommandError::MfaLocked { until })
+    );
+
+    env.advance(Identity::MFA_LOCK_SECS);
+    let third = token_of(&login(&ports, &env));
+    assert!(
+        block_on(finish_login(
+            &ports,
+            &env,
+            &third,
+            &code(&secret, env.now(), 0)
+        ))
+        .is_ok()
+    );
+}
+
+#[test]
+fn wrong_codes_while_logged_in_count_too() {
+    let (ports, env) = world();
+    let (_, codes) = enable_mfa(&ports, &env);
+    for _ in 0..5 {
+        assert_eq!(
+            block_on(regenerate_recovery_codes(
+                &ports.identities,
+                &env,
+                identity_id(),
+                "000000"
+            )),
+            Err(CommandError::InvalidMfaCode)
+        );
+    }
+    let until = env.now().plus_secs(Identity::MFA_LOCK_SECS);
+    assert_eq!(
+        block_on(regenerate_recovery_codes(
+            &ports.identities,
+            &env,
+            identity_id(),
+            &codes[0]
+        )),
+        Err(CommandError::MfaLocked { until })
+    );
+    assert!(identity(&ports).mfa_enabled());
+}
+
+#[test]
 fn starting_again_once_enabled_is_refused() {
     let (ports, env) = world();
     enable_mfa(&ports, &env);
@@ -363,6 +459,7 @@ fn starting_again_once_enabled_is_refused() {
             &ports.identities,
             &env,
             identity_id(),
+            PASSWORD,
             "Shop",
             "ana"
         )),

@@ -7,7 +7,7 @@
 
 use hypha_core::{
     Actor, ApiKeyId, AuthError, Clock, Ctx, Email, ErrorCode, HasBatch, IdGenerator, IdentityId,
-    PasswordResetId, Random, RepoError, Scope, SessionId,
+    PasswordResetId, Random, RepoError, Scope, SessionId, Timestamp,
 };
 use thiserror::Error;
 
@@ -56,6 +56,9 @@ pub enum CommandError {
     InvalidToken,
     #[error("wrong or already used code")]
     InvalidMfaCode,
+    /// Too many wrong second-factor codes; no code is checked until `until`.
+    #[error("too many wrong codes; try again after {until:?}")]
+    MfaLocked { until: Timestamp },
     #[error("the current password is wrong")]
     WrongPassword,
     #[error("api key {0} not found")]
@@ -81,6 +84,7 @@ impl ErrorCode for CommandError {
             CommandError::InvalidCredentials => "invalid_credentials",
             CommandError::InvalidToken => "invalid_token",
             CommandError::InvalidMfaCode => "invalid_mfa_code",
+            CommandError::MfaLocked { .. } => "mfa_locked",
             CommandError::WrongPassword => "wrong_password",
             CommandError::ApiKeyNotFound(_) => "api_key_not_found",
             CommandError::ApiKeyRevoked(_) => "api_key_revoked",
@@ -232,33 +236,58 @@ pub fn new_active_session(identity: &Identity, env: &impl AuthEnv) -> (Session, 
     (session, token)
 }
 
+/// How often a second-factor check reloads and tries again when a concurrent request
+/// changed the identity or session first. Each round commits before answering, so a
+/// round that runs out reports `concurrent_modification` without revealing the code's
+/// result.
+const MAX_ROUNDS: usize = 10;
+
 /// Checks a second-factor `code` against `identity` and uses it up: a 6-digit TOTP
-/// code (its step is recorded) or a recovery code (removed). `false` if neither.
+/// code (its step is recorded) or a recovery code (removed). A wrong code is counted on
+/// the identity (`record_mfa_failure`), and while checks are locked no code is even
+/// looked at. The caller must commit `identity` before answering either way: that is
+/// what makes every guess count, even many sent at once (each would otherwise read the
+/// same count).
 fn use_second_factor(
     identity: &mut Identity,
     env: &impl AuthEnv,
     code: &str,
 ) -> Result<bool, CommandError> {
-    let code = code.trim();
-    if code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()) {
-        let Some((sealed, true, last_step)) = identity.totp() else {
-            return Ok(false);
-        };
-        let secret = env.open(sealed, identity.id().to_string().as_bytes())?;
-        return match totp::verify(&secret, code, env.now(), last_step) {
-            Some(step) => {
-                identity.record_totp_step(step)?;
-                Ok(true)
-            }
-            None => Ok(false),
-        };
+    let now = env.now();
+    if let Some(until) = identity.mfa_locked_until(now) {
+        return Err(CommandError::MfaLocked { until });
     }
-    Ok(recovery::hash(code).is_some_and(|hash| identity.use_recovery_code(hash)))
+    let code = code.trim();
+    let right = if code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()) {
+        match identity.totp() {
+            Some((sealed, true, last_step)) => {
+                let secret = env.open(sealed, identity.id().to_string().as_bytes())?;
+                match totp::verify(&secret, code, now, last_step) {
+                    Some(step) => {
+                        identity.record_totp_step(step)?;
+                        true
+                    }
+                    None => false,
+                }
+            }
+            _ => false,
+        }
+    } else {
+        recovery::hash(code).is_some_and(|hash| identity.use_recovery_code(hash))
+    };
+    if !right {
+        identity.record_mfa_failure(now);
+    }
+    Ok(right)
 }
 
 /// Finishes a login that owes a second factor: `challenge` is the pending session's
-/// token, `code` a TOTP or recovery code. Returns the session under a new token. Each
-/// wrong code counts, and the fifth ends the pending session.
+/// token, `code` a TOTP or recovery code. Returns the session under a new token.
+///
+/// A wrong code counts twice: on the session (the fifth ends it) and on the identity
+/// (the fifth locks checks for a while, across every challenge). Both counts are
+/// committed before the answer; when a concurrent request changed either first, the
+/// round starts again on fresh data, so guesses sent in parallel can't share a count.
 pub async fn finish_login<S>(
     ports: &S,
     env: &impl AuthEnv,
@@ -268,36 +297,70 @@ pub async fn finish_login<S>(
 where
     S: HasIdentities + HasSessions + HasBatch<Batch: StageIdentities + StageSessions>,
 {
-    let now = env.now();
     if TokenKind::of(challenge) != Some(TokenKind::Session) {
         return Err(CommandError::InvalidToken);
     }
-    let mut session = ports
-        .sessions()
-        .get_by_token(TokenHash::of(challenge))
-        .await?
-        .filter(|s| s.is_pending(now))
-        .ok_or(CommandError::InvalidToken)?;
-    let mut identity = ports
-        .identities()
-        .get(session.identity())
-        .await?
-        .ok_or(CommandError::IdentityNotFound(session.identity()))?;
+    for _ in 0..MAX_ROUNDS {
+        let now = env.now();
+        let mut session = ports
+            .sessions()
+            .get_by_token(TokenHash::of(challenge))
+            .await?
+            .filter(|s| s.is_pending(now))
+            .ok_or(CommandError::InvalidToken)?;
+        let mut identity = ports
+            .identities()
+            .get(session.identity())
+            .await?
+            .ok_or(CommandError::IdentityNotFound(session.identity()))?;
 
-    if !use_second_factor(&mut identity, env, code)? {
-        session.record_failed_attempt(now);
-        ports.sessions().update(&mut session).await?;
-        return Err(CommandError::InvalidMfaCode);
+        let right = use_second_factor(&mut identity, env, code)?;
+        let token = NewToken::generate(TokenKind::Session, env);
+        if right {
+            session.activate(token.hash(), now);
+        } else {
+            session.record_failed_attempt(now);
+        }
+        let mut batch = ports.batch();
+        batch.update_identity(&mut identity);
+        batch.update_session(&mut session);
+        match ports.commit(batch).await {
+            Ok(()) if right => return Ok((session, token)),
+            Ok(()) => return Err(CommandError::InvalidMfaCode),
+            Err(RepoError::StaleVersion) => continue,
+            Err(e) => return Err(e.into()),
+        }
     }
-    let token = NewToken::generate(TokenKind::Session, env);
-    session.activate(token.hash(), now);
-    let mut batch = ports.batch();
-    batch.update_identity(&mut identity);
-    batch.update_session(&mut session);
-    // A `StaleVersion` here means another request used a code on this identity or
-    // session at the same moment; the client logs in again.
-    ports.commit(batch).await?;
-    Ok((session, token))
+    Err(RepoError::StaleVersion.into())
+}
+
+/// Checks `code` on `identity`'s second factor and, if it is right, applies `change`;
+/// then commits, wrong code or not (see `use_second_factor`), retrying on concurrent
+/// changes like `finish_login`.
+async fn with_second_factor<R: IdentityRepo, T>(
+    identities: &R,
+    env: &impl AuthEnv,
+    id: IdentityId,
+    code: &str,
+    mut change: impl FnMut(&mut Identity) -> Result<T, CommandError>,
+) -> Result<T, CommandError> {
+    for _ in 0..MAX_ROUNDS {
+        let mut identity = load_identity(identities, id).await?;
+        if !identity.mfa_enabled() {
+            return Err(IdentityError::MfaNotEnabled.into());
+        }
+        let result = if use_second_factor(&mut identity, env, code)? {
+            Some(change(&mut identity)?)
+        } else {
+            None
+        };
+        match identities.update(&mut identity).await {
+            Ok(()) => return result.ok_or(CommandError::InvalidMfaCode),
+            Err(RepoError::StaleVersion) => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(RepoError::StaleVersion.into())
 }
 
 /// The active session behind `token`, or `InvalidToken`.
@@ -339,6 +402,24 @@ async fn load_identity<R: IdentityRepo>(
         .ok_or(CommandError::IdentityNotFound(id))
 }
 
+/// `WrongPassword` unless `password` is the identity's current one.
+async fn verify_current_password(
+    env: &impl AuthEnv,
+    identity: &Identity,
+    password: &str,
+) -> Result<(), CommandError> {
+    let hash = identity
+        .password()
+        .map(|(_, hash)| hash.clone())
+        .ok_or(IdentityError::NoPassword)?;
+    let password = Password::attempt(password).ok_or(CommandError::WrongPassword)?;
+    if env.verify_password(&password, &hash).await? {
+        Ok(())
+    } else {
+        Err(CommandError::WrongPassword)
+    }
+}
+
 /// Changes the password of `session`'s identity and logs out its other sessions.
 pub async fn change_password<S>(
     ports: &S,
@@ -352,14 +433,7 @@ where
 {
     let new = Password::new(new)?;
     let mut identity = load_identity(ports.identities(), session.identity()).await?;
-    let hash = identity
-        .password()
-        .map(|(_, hash)| hash.clone())
-        .ok_or(IdentityError::NoPassword)?;
-    let current = Password::attempt(current).ok_or(CommandError::WrongPassword)?;
-    if !env.verify_password(&current, &hash).await? {
-        return Err(CommandError::WrongPassword);
-    }
+    verify_current_password(env, &identity, current).await?;
     identity.set_password_hash(hash_new_password(env, &new).await?)?;
     let mut batch = ports.batch();
     batch.update_identity(&mut identity);
@@ -447,14 +521,19 @@ pub struct TotpSetup {
 
 /// Starts setting up an authenticator for `identity` (replacing an unconfirmed setup).
 /// `issuer` and `account` label the entry in the app: the store name and the email.
+///
+/// Needs the current `password`: otherwise a stolen session could put the thief's
+/// authenticator on the account and lock its owner out (a password reset keeps 2FA).
 pub async fn start_totp<R: IdentityRepo>(
     identities: &R,
     env: &impl AuthEnv,
     identity: IdentityId,
+    password: &str,
     issuer: &str,
     account: &str,
 ) -> Result<TotpSetup, CommandError> {
     let mut identity = load_identity(identities, identity).await?;
+    verify_current_password(env, &identity, password).await?;
     let mut secret = [0u8; totp::SECRET_BYTES];
     env.fill(&mut secret);
     let mut nonce = [0u8; 24];
@@ -491,43 +570,31 @@ pub async fn confirm_totp<R: IdentityRepo>(
     Ok(codes.codes)
 }
 
-/// Turns the second factor off. Needs a current TOTP or recovery code.
+/// Turns the second factor off. Needs a current TOTP or recovery code; wrong ones
+/// count toward the lockout like at login.
 pub async fn disable_mfa<R: IdentityRepo>(
     identities: &R,
     env: &impl AuthEnv,
     identity: IdentityId,
     code: &str,
 ) -> Result<(), CommandError> {
-    let mut identity = load_identity(identities, identity).await?;
-    if !identity.mfa_enabled() {
-        return Err(IdentityError::MfaNotEnabled.into());
-    }
-    if !use_second_factor(&mut identity, env, code)? {
-        return Err(CommandError::InvalidMfaCode);
-    }
-    identity.disable_mfa()?;
-    identities.update(&mut identity).await?;
-    Ok(())
+    with_second_factor(identities, env, identity, code, |i| Ok(i.disable_mfa()?)).await
 }
 
-/// Replaces the recovery codes. Needs a current TOTP or recovery code.
+/// Replaces the recovery codes. Needs a current TOTP or recovery code; wrong ones
+/// count toward the lockout like at login.
 pub async fn regenerate_recovery_codes<R: IdentityRepo>(
     identities: &R,
     env: &impl AuthEnv,
     identity: IdentityId,
     code: &str,
 ) -> Result<Vec<String>, CommandError> {
-    let mut identity = load_identity(identities, identity).await?;
-    if !identity.mfa_enabled() {
-        return Err(IdentityError::MfaNotEnabled.into());
-    }
-    if !use_second_factor(&mut identity, env, code)? {
-        return Err(CommandError::InvalidMfaCode);
-    }
-    let codes = recovery::generate(env);
-    identity.set_recovery_codes(codes.hashes)?;
-    identities.update(&mut identity).await?;
-    Ok(codes.codes)
+    with_second_factor(identities, env, identity, code, |i| {
+        let codes = recovery::generate(env);
+        i.set_recovery_codes(codes.hashes)?;
+        Ok(codes.codes)
+    })
+    .await
 }
 
 // ---------- API keys ----------

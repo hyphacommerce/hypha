@@ -29,6 +29,7 @@ use serde_json::{Value, json};
 /// - `cart_unavailable`: `{"lines": ["var_…"]}`, the lines `GET /carts/{id}` explains
 /// - `total_changed`: `{"expected": Money, "actual": Money}`
 /// - `cart_completed`: `{"order": "ord_…"}`
+/// - `mfa_locked`: `{"locked_until": "<RFC 3339>"}`
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 403
 /// missing scope, or granting a scope the caller lacks; 404 when the resource in the URL
@@ -400,7 +401,8 @@ impl From<hypha_auth::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) | E::CannotGrant(_) => StatusCode::FORBIDDEN,
             E::InvalidCredentials | E::InvalidToken | E::InvalidMfaCode => StatusCode::UNAUTHORIZED,
-            // Only `/me/password`, by someone logged in.
+            E::MfaLocked { .. } => StatusCode::TOO_MANY_REQUESTS,
+            // Only on `/me` routes, by someone logged in.
             E::WrongPassword => StatusCode::UNPROCESSABLE_ENTITY,
             // Key IDs only ever arrive in URLs.
             E::ApiKeyNotFound(_) => StatusCode::NOT_FOUND,
@@ -417,7 +419,13 @@ impl From<hypha_auth::CommandError> for ApiError {
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::MfaLocked { until } => crate::routes::rfc3339(*until)
+                .ok()
+                .map(|until| json!({ "locked_until": until })),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 

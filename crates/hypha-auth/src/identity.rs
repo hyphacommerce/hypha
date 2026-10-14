@@ -1,7 +1,7 @@
 //! An identity and its credentials (design note 0008, A2): how one principal (a staff
 //! member; later a customer) can prove who they are.
 
-use hypha_core::{Email, IdentityId, UserId, Version, Versioned};
+use hypha_core::{Email, IdentityId, Timestamp, UserId, Version, Versioned};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -60,6 +60,11 @@ pub enum Credential {
         confirmed: bool,
         /// The last step a code was accepted for; earlier ones are refused (replay).
         last_step: Option<u64>,
+        /// Wrong second-factor codes (TOTP or recovery) since the last right one or
+        /// the last lockout.
+        failed_attempts: u32,
+        /// While set and in the future, no second-factor code is even checked.
+        locked_until: Option<Timestamp>,
     },
     /// The unused recovery codes, hashed.
     RecoveryCodes { hashes: Vec<TokenHash> },
@@ -196,8 +201,54 @@ impl Identity {
                 secret,
                 confirmed,
                 last_step,
+                ..
             }) => Some((secret, *confirmed, *last_step)),
             _ => None,
+        }
+    }
+
+    /// Wrong second-factor codes in a row before checks stop for `MFA_LOCK_SECS`.
+    pub const MAX_MFA_FAILURES: u32 = 5;
+    pub const MFA_LOCK_SECS: i64 = 15 * 60;
+
+    /// Until when second-factor checks are locked, if they are at `now`.
+    pub fn mfa_locked_until(&self, now: Timestamp) -> Option<Timestamp> {
+        match self.find(CredentialKind::Totp) {
+            Some(Credential::Totp {
+                locked_until: Some(until),
+                ..
+            }) if now < *until => Some(*until),
+            _ => None,
+        }
+    }
+
+    /// Counts a wrong second-factor code. The `MAX_MFA_FAILURES`th locks checks for
+    /// `MFA_LOCK_SECS` and starts the count again. Without an authenticator there is
+    /// nothing to count against (and nothing to guess).
+    pub fn record_mfa_failure(&mut self, now: Timestamp) {
+        if let Some(Credential::Totp {
+            failed_attempts,
+            locked_until,
+            ..
+        }) = self.find_mut(CredentialKind::Totp)
+        {
+            *failed_attempts += 1;
+            if *failed_attempts >= Self::MAX_MFA_FAILURES {
+                *failed_attempts = 0;
+                *locked_until = Some(now.plus_secs(Self::MFA_LOCK_SECS));
+            }
+        }
+    }
+
+    fn clear_mfa_failures(&mut self) {
+        if let Some(Credential::Totp {
+            failed_attempts,
+            locked_until,
+            ..
+        }) = self.find_mut(CredentialKind::Totp)
+        {
+            *failed_attempts = 0;
+            *locked_until = None;
         }
     }
 
@@ -212,6 +263,8 @@ impl Identity {
             secret,
             confirmed: false,
             last_step: None,
+            failed_attempts: 0,
+            locked_until: None,
         });
         Ok(())
     }
@@ -230,17 +283,22 @@ impl Identity {
             Some(Credential::Totp {
                 confirmed,
                 last_step,
+                failed_attempts,
+                locked_until,
                 ..
             }) => {
                 *confirmed = true;
                 *last_step = Some(step);
+                *failed_attempts = 0;
+                *locked_until = None;
             }
             _ => return Err(IdentityError::MfaSetupNotStarted),
         }
         self.set_recovery_codes(recovery_codes)
     }
 
-    /// Records that a code for `step` was accepted, so it can't be used again.
+    /// Records that a code for `step` was accepted, so it can't be used again, and
+    /// clears the count of wrong codes.
     pub fn record_totp_step(&mut self, step: u64) -> Result<(), IdentityError> {
         match self.find_mut(CredentialKind::Totp) {
             Some(Credential::Totp {
@@ -249,10 +307,11 @@ impl Identity {
                 ..
             }) => {
                 *last_step = Some(step);
-                Ok(())
             }
-            _ => Err(IdentityError::MfaNotEnabled),
+            _ => return Err(IdentityError::MfaNotEnabled),
         }
+        self.clear_mfa_failures();
+        Ok(())
     }
 
     /// Uses up a recovery code. `false` if it isn't one of the unused codes.
@@ -264,7 +323,11 @@ impl Identity {
         };
         let before = hashes.len();
         hashes.retain(|h| *h != code);
-        hashes.len() < before
+        let used = hashes.len() < before;
+        if used {
+            self.clear_mfa_failures();
+        }
+        used
     }
 
     /// How many recovery codes are left.
@@ -334,6 +397,11 @@ struct TotpData {
     secret: String,
     confirmed: bool,
     last_step: Option<u64>,
+    #[serde(default)]
+    failed_attempts: u32,
+    /// Microseconds since the epoch.
+    #[serde(default)]
+    locked_until: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -354,10 +422,14 @@ impl Credential {
                 secret,
                 confirmed,
                 last_step,
+                failed_attempts,
+                locked_until,
             } => serde_json::json!(TotpData {
                 secret: hex(secret.as_bytes()),
                 confirmed: *confirmed,
                 last_step: *last_step,
+                failed_attempts: *failed_attempts,
+                locked_until: locked_until.map(Timestamp::unix_micros),
             }),
             Credential::RecoveryCodes { hashes } => serde_json::json!(RecoveryCodesData {
                 hashes: hashes.iter().map(|h| hex(h.as_bytes())).collect(),
@@ -397,6 +469,8 @@ impl Credential {
                     secret: Sealed::from_bytes(unhex(&data.secret).ok_or_else(|| bad("secret"))?),
                     confirmed: data.confirmed,
                     last_step: data.last_step,
+                    failed_attempts: data.failed_attempts,
+                    locked_until: data.locked_until.map(Timestamp::from_unix_micros),
                 })
             }
             "recovery_codes" => {
@@ -544,6 +618,61 @@ mod tests {
             with_mfa().start_totp(Sealed::from_bytes(vec![])),
             Err(IdentityError::MfaAlreadyEnabled)
         );
+    }
+
+    #[test]
+    fn the_fifth_wrong_code_locks_checks_for_a_while() {
+        let now = Timestamp::UNIX_EPOCH;
+        let mut i = with_mfa();
+        for _ in 0..4 {
+            i.record_mfa_failure(now);
+        }
+        assert_eq!(i.mfa_locked_until(now), None);
+        i.record_mfa_failure(now);
+        let until = now.plus_secs(Identity::MFA_LOCK_SECS);
+        assert_eq!(i.mfa_locked_until(now), Some(until));
+        assert_eq!(i.mfa_locked_until(until), None);
+    }
+
+    #[test]
+    fn a_right_code_clears_the_count() {
+        let now = Timestamp::UNIX_EPOCH;
+        let mut i = with_mfa();
+        for _ in 0..4 {
+            i.record_mfa_failure(now);
+        }
+        assert!(i.use_recovery_code(h(1)));
+        for _ in 0..4 {
+            i.record_mfa_failure(now);
+        }
+        assert_eq!(i.mfa_locked_until(now), None);
+        i.record_totp_step(11).unwrap();
+        for _ in 0..4 {
+            i.record_mfa_failure(now);
+        }
+        assert_eq!(i.mfa_locked_until(now), None);
+    }
+
+    #[test]
+    fn the_lockout_survives_storage() {
+        let now = Timestamp::UNIX_EPOCH;
+        let mut i = with_mfa();
+        for _ in 0..7 {
+            i.record_mfa_failure(now);
+        }
+        let back = Identity::restore(i.snapshot()).unwrap();
+        assert_eq!(back.mfa_locked_until(now), i.mfa_locked_until(now));
+        assert_eq!(back, i);
+    }
+
+    #[test]
+    fn totp_data_from_before_the_lockout_still_reads() {
+        let mut s = with_mfa().snapshot();
+        let totp = s.credentials.iter_mut().find(|c| c.kind == "totp").unwrap();
+        let data = totp.data.as_object_mut().unwrap();
+        data.remove("failed_attempts");
+        data.remove("locked_until");
+        assert!(Identity::restore(s).is_ok());
     }
 
     #[test]

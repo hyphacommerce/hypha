@@ -87,10 +87,19 @@ pub(super) struct TotpSetupResponse {
     uri: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct StartTotpRequest {
+    /// The current password: a stolen session alone can't put an authenticator on the
+    /// account.
+    password: String,
+}
+
 /// Starts the authenticator setup; confirm with a code to turn 2FA on.
 pub(super) async fn start_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     StaffCaller(staff): StaffCaller,
+    JsonBody(req): JsonBody<StartTotpRequest>,
 ) -> Result<(StatusCode, Json<TotpSetupResponse>), ApiError> {
     let ports = state.ports().await?;
     // The store's name labels the entry in the authenticator app. Read as the system:
@@ -101,6 +110,7 @@ pub(super) async fn start_totp_handler<S: Storage>(
         ports.identities(),
         &state.env,
         staff.session.identity(),
+        &req.password,
         store.name(),
         staff.user.email().as_str(),
     )

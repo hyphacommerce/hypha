@@ -28,7 +28,7 @@ use crate::{
 };
 
 /// A `Timestamp` as RFC 3339 in UTC, e.g. "2026-10-14T09:30:00.123456Z".
-fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
+pub(crate) fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
     jiff::Timestamp::from_microsecond(at.unix_micros())
         .map(|t| t.to_string())
         .map_err(ApiError::internal)
