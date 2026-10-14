@@ -4,21 +4,31 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use hypha_core::{ErrorCode, RepoError};
+use hypha_core::{ErrorCode, OrderId, RepoError, VariantId};
+use serde_json::{Value, json};
 
-/// Every error the API returns, as `{"code": "<stable_code>", "error": "<message>"}`.
+/// Every error the API returns, as
+/// `{"code": "<stable_code>", "error": "<message>", "details": {…} | null}`.
 ///
 /// `code` comes from the domain's `ErrorCode` impls (shared with future MCP/CLI hosts)
 /// and is what clients should match on; `error` is for humans and may change.
+/// `details` carries what a client needs to act without parsing `error`, for the codes
+/// that have any (field names are as stable as codes):
+/// - `out_of_stock`: `{"lines": [{"variant", "requested", "available"}]}`
+/// - `cart_unavailable`: `{"lines": ["var_…"]}`, the lines `GET /carts/{id}` explains
+/// - `total_changed`: `{"expected": Money, "actual": Money}`
+/// - `cart_completed`: `{"order": "ord_…"}`
 ///
 /// Status rules: 403 missing scope; 404 when the resource in the URL doesn't exist;
-/// 409 conflicts with existing data or a concurrent change (`concurrent_modification`); 422 invalid input, including IDs in the body
-/// that don't exist; 500 storage failures (message hidden, logged instead).
+/// 409 conflicts with existing data, the current state of the resource in the URL, or a
+/// concurrent change (`concurrent_modification`); 422 invalid input, including IDs in the
+/// body that don't exist; 500 storage failures (message hidden, logged instead).
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: String,
+    details: Option<serde_json::Value>,
 }
 
 impl ApiError {
@@ -27,7 +37,13 @@ impl ApiError {
             status,
             code,
             message: message.to_string(),
+            details: None,
         }
+    }
+
+    fn with_details(mut self, details: Option<serde_json::Value>) -> Self {
+        self.details = details;
+        self
     }
 
     pub fn body_too_large(limit: usize) -> Self {
@@ -76,9 +92,29 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = Json(serde_json::json!({ "code": self.code, "error": self.message }));
+        let body = Json(json!({
+            "code": self.code,
+            "error": self.message,
+            "details": self.details,
+        }));
         (self.status, body).into_response()
     }
+}
+
+// ---------- details shared by several crates' errors ----------
+
+fn shortages(lines: impl IntoIterator<Item = (VariantId, u32, i64)>) -> Option<Value> {
+    let lines: Vec<_> = lines
+        .into_iter()
+        .map(|(variant, requested, available)| {
+            json!({ "variant": variant, "requested": requested, "available": available })
+        })
+        .collect();
+    Some(json!({ "lines": lines }))
+}
+
+fn completed(order: OrderId) -> Option<Value> {
+    Some(json!({ "order": order }))
 }
 
 // ---------- axum's own rejections (bad JSON, bad path IDs) ----------
@@ -176,7 +212,16 @@ impl From<hypha_cart::CommandError> for ApiError {
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::Line(LineError::OutOfStock {
+                variant,
+                requested,
+                available,
+            }) => shortages([(*variant, *requested, *available)]),
+            E::Cart(CartError::Completed { order }) => completed(*order),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -225,7 +270,13 @@ impl From<hypha_inventory::CommandError> for ApiError {
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::OutOfStock { lines } => {
+                shortages(lines.iter().map(|l| (l.variant, l.requested, l.available)))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -274,19 +325,27 @@ impl From<hypha_checkout::CommandError> for ApiError {
             E::Inventory(inner) => return Self::from(inner.clone()),
             // Checkout builds the order from a priced cart, so a broken order rule is a bug.
             E::Order(_) => return Self::internal(e),
-            E::Idempotency(_) | E::EmptyCart(_) | E::MissingEmail(_) => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
+            E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
             // The cart in the URL.
             E::CartNotFound(_) => StatusCode::NOT_FOUND,
             // The cart's or the shop's state right now, not the request, is the problem.
-            E::CartCompleted { .. } | E::Unavailable { .. } | E::TotalChanged { .. } => {
-                StatusCode::CONFLICT
-            }
+            E::CartCompleted { .. }
+            | E::EmptyCart(_)
+            | E::MissingEmail(_)
+            | E::Unavailable { .. }
+            | E::TotalChanged { .. } => StatusCode::CONFLICT,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::CartCompleted { order, .. } => completed(*order),
+            E::Unavailable { lines } => Some(json!({ "lines": lines })),
+            E::TotalChanged { expected, actual } => {
+                Some(json!({ "expected": expected, "actual": actual }))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -333,6 +392,63 @@ mod tests {
         });
         assert_eq!(e.status, StatusCode::CONFLICT);
         assert_eq!(e.code, "cart_completed");
+        assert_eq!(
+            e.details,
+            Some(json!({ "order": "ord_00000000000000000000000000000002" }))
+        );
+    }
+
+    #[test]
+    fn an_empty_cart_or_one_without_email_is_a_conflict() {
+        let cart = CartId::from_uuid(Uuid::from_u128(1));
+        for e in [
+            hypha_checkout::CommandError::EmptyCart(cart),
+            hypha_checkout::CommandError::MissingEmail(cart),
+        ] {
+            assert_eq!(ApiError::from(e).status, StatusCode::CONFLICT);
+        }
+    }
+
+    #[test]
+    fn checkout_errors_carry_their_data_in_details() {
+        let eur = |n| hypha_core::Money::new(n, hypha_core::Currency::Eur).unwrap();
+        let e = ApiError::from(hypha_checkout::CommandError::TotalChanged {
+            expected: eur(1000),
+            actual: eur(1200),
+        });
+        assert_eq!(
+            e.details,
+            Some(json!({
+                "expected": { "amount": 1000, "currency": "EUR" },
+                "actual": { "amount": 1200, "currency": "EUR" },
+            }))
+        );
+
+        let variant = VariantId::from_uuid(Uuid::from_u128(3));
+        let e = ApiError::from(hypha_checkout::CommandError::Unavailable {
+            lines: vec![variant],
+        });
+        assert_eq!(e.details, Some(json!({ "lines": [variant] })));
+
+        let e = ApiError::from(hypha_checkout::CommandError::Inventory(
+            hypha_inventory::CommandError::OutOfStock {
+                lines: vec![hypha_inventory::Shortage {
+                    variant,
+                    requested: 3,
+                    available: 1,
+                }],
+            },
+        ));
+        assert_eq!(
+            e.details,
+            Some(json!({ "lines": [{ "variant": variant, "requested": 3, "available": 1 }] }))
+        );
+    }
+
+    #[test]
+    fn errors_without_data_have_null_details() {
+        let e = ApiError::route_not_found();
+        assert_eq!(e.details, None);
     }
 
     #[test]
