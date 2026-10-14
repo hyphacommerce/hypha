@@ -18,13 +18,13 @@ use crate::{
 
 // ---------- classes ----------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateTaxClassRequest {
     name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct TaxClassResponse {
     id: TaxClassId,
     name: String,
@@ -39,7 +39,7 @@ impl From<&TaxClass> for TaxClassResponse {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AssignTaxClassRequest {
     products: Vec<ProductId>,
@@ -47,6 +47,14 @@ pub(super) struct AssignTaxClassRequest {
     tax_class: Option<TaxClassId>,
 }
 
+/// Creates a tax class.
+#[utoipa::path(
+    post,
+    path = "/admin/tax-classes",
+    request_body = CreateTaxClassRequest,
+    responses((status = 201, description = "Created", body = TaxClassResponse)),
+    extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
+)]
 pub(super) async fn create_class<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -59,6 +67,14 @@ pub(super) async fn create_class<S: Storage>(
     Ok((StatusCode::CREATED, Json(TaxClassResponse::from(&class))))
 }
 
+/// Assigns products to a tax class.
+#[utoipa::path(
+    put,
+    path = "/admin/tax-assignments",
+    request_body = AssignTaxClassRequest,
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
+)]
 pub(super) async fn assign_class<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -76,7 +92,7 @@ pub(super) async fn assign_class<S: Storage>(
 
 // ---------- regions ----------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateTaxRegionRequest {
     country: String,
@@ -84,20 +100,20 @@ pub(super) struct CreateTaxRegionRequest {
     default_rate_ppm: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateTaxRegionRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     default_rate_ppm: Option<u32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SetClassRateRequest {
     rate_ppm: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct TaxRegionResponse {
     id: TaxRegionId,
     country: CountryCode,
@@ -105,7 +121,7 @@ pub(super) struct TaxRegionResponse {
     class_rates: Vec<ClassRateResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct ClassRateResponse {
     tax_class: TaxClassId,
     rate_ppm: TaxRate,
@@ -129,6 +145,14 @@ impl From<&TaxRegion> for TaxRegionResponse {
     }
 }
 
+/// Creates a tax region for a country.
+#[utoipa::path(
+    post,
+    path = "/admin/tax-regions",
+    request_body = CreateTaxRegionRequest,
+    responses((status = 201, description = "Created", body = TaxRegionResponse)),
+    extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
+)]
 pub(super) async fn create_region<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -144,6 +168,14 @@ pub(super) async fn create_region<S: Storage>(
     Ok((StatusCode::CREATED, Json(TaxRegionResponse::from(&region))))
 }
 
+/// A tax region with its rates.
+#[utoipa::path(
+    get,
+    path = "/admin/tax-regions/{id}",
+    params(("id" = TaxRegionId, Path)),
+    responses((status = 200, description = "OK", body = TaxRegionResponse)),
+    extensions(("x-hypha-scopes" = json!(["taxes:read"]))),
+)]
 pub(super) async fn fetch_region<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -154,6 +186,15 @@ pub(super) async fn fetch_region<S: Storage>(
     Ok(Json(TaxRegionResponse::from(&region)))
 }
 
+/// Changes a tax region's default rate.
+#[utoipa::path(
+    patch,
+    path = "/admin/tax-regions/{id}",
+    params(("id" = TaxRegionId, Path)),
+    request_body = UpdateTaxRegionRequest,
+    responses((status = 200, description = "OK", body = TaxRegionResponse)),
+    extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
+)]
 pub(super) async fn update_region<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -169,6 +210,15 @@ pub(super) async fn update_region<S: Storage>(
     Ok(Json(TaxRegionResponse::from(&region)))
 }
 
+/// Sets the rate a tax class has in a region.
+#[utoipa::path(
+    put,
+    path = "/admin/tax-regions/{id}/class-rates/{class_id}",
+    params(("id" = TaxRegionId, Path), ("class_id" = TaxClassId, Path)),
+    request_body = SetClassRateRequest,
+    responses((status = 200, description = "OK", body = TaxRegionResponse)),
+    extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
+)]
 pub(super) async fn set_region_class_rate<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -190,6 +240,14 @@ pub(super) async fn set_region_class_rate<S: Storage>(
     Ok(Json(TaxRegionResponse::from(&region)))
 }
 
+/// Removes a tax class's own rate in a region.
+#[utoipa::path(
+    delete,
+    path = "/admin/tax-regions/{id}/class-rates/{class_id}",
+    params(("id" = TaxRegionId, Path), ("class_id" = TaxClassId, Path)),
+    responses((status = 200, description = "OK", body = TaxRegionResponse)),
+    extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
+)]
 pub(super) async fn remove_region_class_rate<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,

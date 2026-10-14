@@ -19,7 +19,7 @@ use crate::{
 
 // ---------- locations ----------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateLocationRequest {
     name: String,
@@ -32,7 +32,7 @@ pub(super) struct CreateLocationRequest {
 }
 
 /// Every field optional: only the ones sent change.
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateLocationRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
@@ -43,7 +43,7 @@ pub(super) struct UpdateLocationRequest {
     priority: Option<u32>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct LocationResponse {
     id: LocationId,
     name: String,
@@ -62,6 +62,14 @@ impl From<&Location> for LocationResponse {
     }
 }
 
+/// Creates a stock location.
+#[utoipa::path(
+    post,
+    path = "/admin/locations",
+    request_body = CreateLocationRequest,
+    responses((status = 201, description = "Created", body = LocationResponse)),
+    extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
+)]
 pub(super) async fn create_location_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -78,6 +86,14 @@ pub(super) async fn create_location_handler<S: Storage>(
     Ok((StatusCode::CREATED, Json(LocationResponse::from(&location))))
 }
 
+/// A stock location.
+#[utoipa::path(
+    get,
+    path = "/admin/locations/{id}",
+    params(("id" = LocationId, Path)),
+    responses((status = 200, description = "OK", body = LocationResponse)),
+    extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
+)]
 pub(super) async fn fetch_location<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -90,6 +106,15 @@ pub(super) async fn fetch_location<S: Storage>(
     Ok(Json(LocationResponse::from(&location)))
 }
 
+/// Changes a stock location.
+#[utoipa::path(
+    patch,
+    path = "/admin/locations/{id}",
+    params(("id" = LocationId, Path)),
+    request_body = UpdateLocationRequest,
+    responses((status = 200, description = "OK", body = LocationResponse)),
+    extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
+)]
 pub(super) async fn update_location_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -111,7 +136,7 @@ pub(super) async fn update_location_handler<S: Storage>(
 
 // ---------- items ----------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateInventoryItemRequest {
     variant: VariantId,
@@ -128,7 +153,7 @@ fn yes() -> bool {
 }
 
 /// Every field optional: only the ones sent change.
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateInventoryItemRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
@@ -137,7 +162,7 @@ pub(super) struct UpdateInventoryItemRequest {
     continue_selling: Option<bool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SetOnHandRequest {
     on_hand: i64,
@@ -146,7 +171,7 @@ pub(super) struct SetOnHandRequest {
     expected_on_hand: Option<i64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AdjustOnHandRequest {
     /// Negative to remove stock.
@@ -155,7 +180,7 @@ pub(super) struct AdjustOnHandRequest {
 
 /// A variant's stock. `id` is `null` when stock was never set up for the variant,
 /// which means untracked (always sellable).
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct InventoryResponse {
     id: Option<InventoryItemId>,
     variant: VariantId,
@@ -164,7 +189,7 @@ pub(super) struct InventoryResponse {
     levels: Vec<LevelResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct LevelResponse {
     location: LocationId,
     on_hand: i64,
@@ -213,6 +238,14 @@ impl InventoryResponse {
     }
 }
 
+/// Creates the inventory item that tracks a variant's stock.
+#[utoipa::path(
+    post,
+    path = "/admin/inventory-items",
+    request_body = CreateInventoryItemRequest,
+    responses((status = 201, description = "Created", body = InventoryResponse)),
+    extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
+)]
 pub(super) async fn create_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -229,6 +262,14 @@ pub(super) async fn create_item<S: Storage>(
     Ok((StatusCode::CREATED, Json(InventoryResponse::from(&item))))
 }
 
+/// An inventory item with its levels per location.
+#[utoipa::path(
+    get,
+    path = "/admin/inventory-items/{id}",
+    params(("id" = InventoryItemId, Path)),
+    responses((status = 200, description = "OK", body = InventoryResponse)),
+    extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
+)]
 pub(super) async fn fetch_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -239,6 +280,15 @@ pub(super) async fn fetch_item<S: Storage>(
     Ok(Json(InventoryResponse::from(&item)))
 }
 
+/// Changes how an inventory item is tracked.
+#[utoipa::path(
+    patch,
+    path = "/admin/inventory-items/{id}",
+    params(("id" = InventoryItemId, Path)),
+    request_body = UpdateInventoryItemRequest,
+    responses((status = 200, description = "OK", body = InventoryResponse)),
+    extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
+)]
 pub(super) async fn update_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -255,6 +305,15 @@ pub(super) async fn update_item<S: Storage>(
     Ok(Json(InventoryResponse::from(&item)))
 }
 
+/// Sets the stock on hand at a location.
+#[utoipa::path(
+    put,
+    path = "/admin/inventory-items/{id}/levels/{location_id}",
+    params(("id" = InventoryItemId, Path), ("location_id" = LocationId, Path)),
+    request_body = SetOnHandRequest,
+    responses((status = 200, description = "OK", body = InventoryResponse)),
+    extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
+)]
 pub(super) async fn set_level<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -275,6 +334,15 @@ pub(super) async fn set_level<S: Storage>(
     Ok(Json(InventoryResponse::from(&item)))
 }
 
+/// Adjusts the stock on hand at a location by a delta.
+#[utoipa::path(
+    post,
+    path = "/admin/inventory-items/{id}/levels/{location_id}/adjustments",
+    params(("id" = InventoryItemId, Path), ("location_id" = LocationId, Path)),
+    request_body = AdjustOnHandRequest,
+    responses((status = 200, description = "OK", body = InventoryResponse)),
+    extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
+)]
 pub(super) async fn adjust_level<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -295,6 +363,13 @@ pub(super) async fn adjust_level<S: Storage>(
 }
 
 /// A variant's stock, whether or not it has an item (design note 0004, I3).
+#[utoipa::path(
+    get,
+    path = "/admin/variants/{id}/inventory",
+    params(("id" = VariantId, Path)),
+    responses((status = 200, description = "OK", body = InventoryResponse)),
+    extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
+)]
 pub(super) async fn fetch_variant_inventory<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,

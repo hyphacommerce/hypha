@@ -16,7 +16,7 @@ use crate::{
     state::{SharedState, Storage},
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CheckoutRequest {
     /// The total the buyer saw; if the cart now costs something else, checkout fails
@@ -27,7 +27,7 @@ pub(super) struct CheckoutRequest {
 
 /// `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
 /// serde and renaming a variant can't silently change the API.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum FinancialStatusDto {
     Pending,
@@ -44,7 +44,7 @@ impl From<FinancialStatus> for FinancialStatusDto {
 }
 
 /// `FulfillmentStatus` on the wire.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum FulfillmentStatusDto {
     Unfulfilled,
@@ -58,7 +58,7 @@ impl From<FulfillmentStatus> for FulfillmentStatusDto {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct OrderResponse {
     id: OrderId,
     /// The human number, shown as "#1001".
@@ -82,7 +82,7 @@ pub(super) struct OrderResponse {
     lines: Vec<OrderLineResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct OrderLineResponse {
     id: OrderLineId,
     product: ProductId,
@@ -98,7 +98,7 @@ pub(super) struct OrderLineResponse {
     tax: Option<OrderTaxResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct OrderTaxResponse {
     /// Parts per million: 250000 = 25%.
     rate_ppm: TaxRate,
@@ -153,6 +153,14 @@ impl From<&OrderLine> for OrderLineResponse {
 
 /// Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns
 /// the order the first request placed. The body is `{}` or `{"expected_total": …}`.
+#[utoipa::path(
+    post,
+    path = "/storefront/carts/{id}/checkout",
+    params(("id" = CartId, Path)),
+    request_body = CheckoutRequest,
+    responses((status = 201, description = "Created", body = OrderResponse)),
+    extensions(("x-hypha-scopes" = json!(["checkout"]))),
+)]
 pub(super) async fn checkout_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
@@ -174,6 +182,14 @@ pub(super) async fn checkout_handler<S: Storage>(
     ))
 }
 
+/// An order.
+#[utoipa::path(
+    get,
+    path = "/admin/orders/{id}",
+    params(("id" = OrderId, Path)),
+    responses((status = 200, description = "OK", body = OrderResponse)),
+    extensions(("x-hypha-scopes" = json!(["orders:read"]))),
+)]
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -186,6 +202,13 @@ pub(super) async fn fetch<S: Storage>(
 
 /// Records that the order is paid (e.g. a bank transfer arrived). Marking a paid order
 /// again changes nothing.
+#[utoipa::path(
+    post,
+    path = "/admin/orders/{id}/paid",
+    params(("id" = OrderId, Path)),
+    responses((status = 200, description = "OK", body = OrderResponse)),
+    extensions(("x-hypha-scopes" = json!(["orders:write"]))),
+)]
 pub(super) async fn mark_paid<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,

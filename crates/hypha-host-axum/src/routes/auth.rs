@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::{rfc3339, staff::UserResponse};
 use crate::{
     client_ip::ClientIp,
-    error::ApiError,
+    error::{ApiError, ApiErrorBody},
     extract::{JsonBody, StaffCaller},
     rate_limit::{Rule, enforce, pair_key},
     state::{SharedState, Storage},
@@ -28,14 +28,14 @@ fn limit_email(raw: &str) -> Option<Email> {
     Email::new(raw).ok()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct LoginRequest {
     email: String,
     password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct FinishLoginRequest {
     /// The challenge token from the first step.
@@ -44,7 +44,7 @@ pub(super) struct FinishLoginRequest {
     code: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct SessionResponse {
     /// Send as `Authorization: Bearer <token>`. Shown only now.
     token: String,
@@ -60,7 +60,7 @@ impl SessionResponse {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct ChallengeResponse {
     /// Send back to `POST /auth/login/mfa` with a code.
     token: String,
@@ -70,7 +70,7 @@ pub(super) struct ChallengeResponse {
 
 /// Either `{"status": "authenticated", "session": …}` or `{"status": "mfa_required",
 /// "challenge": …}`: a tagged enum, so a client switches on `status`.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub(super) enum LoginResponse {
     Authenticated { session: SessionResponse },
@@ -79,6 +79,13 @@ pub(super) enum LoginResponse {
 
 /// The first login step. 401 `invalid_credentials` for a wrong email or password (or a
 /// disabled account), deliberately the same answer.
+#[utoipa::path(
+    post,
+    path = "/admin/auth/login",
+    request_body = LoginRequest,
+    responses((status = 200, description = "OK", body = LoginResponse), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    security(()),
+)]
 pub(super) async fn login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
@@ -118,6 +125,13 @@ pub(super) async fn login_handler<S: Storage>(
 
 /// The second step, when the first answered `mfa_required`. A wrong code is 401
 /// `invalid_mfa_code`; the fifth wrong code ends the challenge (then `invalid_token`).
+#[utoipa::path(
+    post,
+    path = "/admin/auth/login/mfa",
+    request_body = FinishLoginRequest,
+    responses((status = 200, description = "OK", body = LoginResponse), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    security(()),
+)]
 pub(super) async fn finish_login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
@@ -133,6 +147,12 @@ pub(super) async fn finish_login_handler<S: Storage>(
 }
 
 /// Ends the caller's session.
+#[utoipa::path(
+    post,
+    path = "/admin/auth/logout",
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
 pub(super) async fn logout_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
@@ -142,7 +162,7 @@ pub(super) async fn logout_handler<S: Storage>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PasswordResetRequest {
     email: String,
@@ -153,6 +173,13 @@ pub(super) struct PasswordResetRequest {
 /// answer nor its timing tells which emails exist. The one other answer is 429
 /// `rate_limited` (design note 0009), which depends on the caller's address and the
 /// email asked about, never on whether the account exists.
+#[utoipa::path(
+    post,
+    path = "/admin/auth/password-reset",
+    request_body = PasswordResetRequest,
+    responses((status = 202, description = "Accepted"), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    security(()),
+)]
 pub(super) async fn request_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
@@ -185,7 +212,7 @@ pub(crate) async fn password_reset_in_background<S: Storage>(state: SharedState<
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ConfirmResetRequest {
     token: String,
@@ -193,6 +220,13 @@ pub(super) struct ConfirmResetRequest {
 }
 
 /// Sets the new password and logs out every session of the account.
+#[utoipa::path(
+    post,
+    path = "/admin/auth/password-reset/confirm",
+    request_body = ConfirmResetRequest,
+    responses((status = 204, description = "No content"), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    security(()),
+)]
 pub(super) async fn confirm_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
@@ -205,7 +239,7 @@ pub(super) async fn confirm_reset_handler<S: Storage>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AcceptInviteRequest {
     token: String,
@@ -213,13 +247,20 @@ pub(super) struct AcceptInviteRequest {
     password: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct AcceptedResponse {
     user: UserResponse,
     session: SessionResponse,
 }
 
 /// Creates the invited user and logs them in.
+#[utoipa::path(
+    post,
+    path = "/admin/invites/accept",
+    request_body = AcceptInviteRequest,
+    responses((status = 201, description = "Created", body = AcceptedResponse), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    security(()),
+)]
 pub(super) async fn accept_invite_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,

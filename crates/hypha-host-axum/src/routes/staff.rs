@@ -18,7 +18,7 @@ use crate::{
 
 // ---------- roles ----------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateRoleRequest {
     name: String,
@@ -26,7 +26,7 @@ pub(super) struct CreateRoleRequest {
 }
 
 /// JSON Merge Patch: only the fields sent change.
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateRoleRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
@@ -35,7 +35,7 @@ pub(super) struct UpdateRoleRequest {
     scopes: Option<Vec<Scope>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct RoleResponse {
     id: RoleId,
     name: String,
@@ -55,6 +55,14 @@ impl From<&Role> for RoleResponse {
     }
 }
 
+/// Creates a role; you can only grant scopes you hold.
+#[utoipa::path(
+    post,
+    path = "/admin/roles",
+    request_body = CreateRoleRequest,
+    responses((status = 201, description = "Created", body = RoleResponse)),
+    extensions(("x-hypha-scopes" = json!(["users:write"]))),
+)]
 pub(super) async fn create_role_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -66,6 +74,14 @@ pub(super) async fn create_role_handler<S: Storage>(
     Ok((StatusCode::CREATED, Json(RoleResponse::from(&role))))
 }
 
+/// A role.
+#[utoipa::path(
+    get,
+    path = "/admin/roles/{id}",
+    params(("id" = RoleId, Path)),
+    responses((status = 200, description = "OK", body = RoleResponse)),
+    extensions(("x-hypha-scopes" = json!(["users:read"]))),
+)]
 pub(super) async fn fetch_role<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -78,6 +94,15 @@ pub(super) async fn fetch_role<S: Storage>(
     Ok(Json(RoleResponse::from(&role)))
 }
 
+/// Changes a role (JSON Merge Patch); the owner role is fixed.
+#[utoipa::path(
+    patch,
+    path = "/admin/roles/{id}",
+    params(("id" = RoleId, Path)),
+    request_body = UpdateRoleRequest,
+    responses((status = 200, description = "OK", body = RoleResponse)),
+    extensions(("x-hypha-scopes" = json!(["users:write"]))),
+)]
 pub(super) async fn update_role_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -98,7 +123,7 @@ pub(super) async fn update_role_handler<S: Storage>(
 
 // ---------- users ----------
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct UserResponse {
     id: UserId,
     email: Email,
@@ -122,7 +147,7 @@ impl UserResponse {
 }
 
 /// JSON Merge Patch: only the fields sent change.
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateUserRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
@@ -133,13 +158,21 @@ pub(super) struct UpdateUserRequest {
     status: Option<StatusRequest>,
 }
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum StatusRequest {
     Active,
     Disabled,
 }
 
+/// A staff user.
+#[utoipa::path(
+    get,
+    path = "/admin/users/{id}",
+    params(("id" = UserId, Path)),
+    responses((status = 200, description = "OK", body = UserResponse)),
+    extensions(("x-hypha-scopes" = json!(["users:read"]))),
+)]
 pub(super) async fn fetch_user<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -151,6 +184,14 @@ pub(super) async fn fetch_user<S: Storage>(
 }
 
 /// A disabled user's sessions stop working on their next request.
+#[utoipa::path(
+    patch,
+    path = "/admin/users/{id}",
+    params(("id" = UserId, Path)),
+    request_body = UpdateUserRequest,
+    responses((status = 200, description = "OK", body = UserResponse)),
+    extensions(("x-hypha-scopes" = json!(["users:write"]))),
+)]
 pub(super) async fn update_user_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -173,14 +214,14 @@ pub(super) async fn update_user_handler<S: Storage>(
 
 // ---------- invites ----------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct InviteRequest {
     email: String,
     role: RoleId,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct InviteResponse {
     id: InviteId,
     email: Email,
@@ -200,6 +241,13 @@ impl InviteResponse {
 }
 
 /// Emails an invite (a new one replaces a pending one). The token is only in the email.
+#[utoipa::path(
+    post,
+    path = "/admin/invites",
+    request_body = InviteRequest,
+    responses((status = 201, description = "Created", body = InviteResponse)),
+    extensions(("x-hypha-scopes" = json!(["users:write"]))),
+)]
 pub(super) async fn invite_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,

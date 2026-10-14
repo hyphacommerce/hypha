@@ -6,7 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-hypha-core.workspace = true
+hypha-core = { workspace = true, features = ["openapi"] }
 hypha-products = { path = "../hypha-products" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-cart = { path = "../hypha-cart" }
@@ -22,6 +22,8 @@ hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
 getrandom = "0.4"
 governor = "0.10"
+utoipa = "6"
+pastey = "0.2"
 ipnet = "2"
 deadpool-postgres = "0.14.2"
 tokio-postgres = "0.7.18"

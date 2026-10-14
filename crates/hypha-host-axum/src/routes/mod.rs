@@ -11,7 +11,6 @@ mod health;
 mod inventory;
 mod markets;
 mod me;
-mod openapi;
 mod orders;
 mod products;
 mod staff;
@@ -139,14 +138,17 @@ macro_rules! route_table {
     };
 }
 
+// After `route_table!`: a `macro_rules!` macro is only visible below its definition.
+pub(crate) mod openapi;
+
 /// Builds the router for one concrete storage from the route table. A macro rather than
 /// a generic function: handlers are generic over the storage, but axum must prove each
 /// handler's future is `Send`, and with our `Send`-free repo traits the compiler can
 /// only do that for a concrete storage type.
 macro_rules! build_router {
-    ($storage:ty $(, [$surface:ident, $method:ident, $path:literal, $($handler:ident)::+])* $(,)?) => {
+    ($storage:ty $(, [$surface:ident, $method:ident, $path:literal, $module:ident::$func:ident])* $(,)?) => {
         Router::new()
-            $(.route($path, on(MethodFilter::$method, $($handler)::+::<$storage>)))*
+            $(.route($path, on(MethodFilter::$method, $module::$func::<$storage>)))*
             .fallback(|| async { ApiError::route_not_found() })
             .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
     };
@@ -173,7 +175,7 @@ pub struct RouteInfo {
 
 #[cfg(test)]
 macro_rules! route_list {
-    ($([$surface:ident, $method:ident, $path:literal, $($handler:ident)::+]),* $(,)?) => {
+    ($([$surface:ident, $method:ident, $path:literal, $module:ident::$func:ident]),* $(,)?) => {
         &[$(RouteInfo {
             surface: route_list!(@surface $surface),
             method: stringify!($method),

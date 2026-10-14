@@ -15,7 +15,7 @@ use crate::{
     state::{SharedState, Storage},
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateCustomerRequest {
     email: String,
@@ -26,7 +26,7 @@ pub(super) struct CreateCustomerRequest {
 
 /// JSON Merge Patch (see `patch`): only the fields sent change, `null` clears a name or
 /// phone. The email can be changed but not cleared.
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateCustomerRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
@@ -41,7 +41,7 @@ pub(super) struct UpdateCustomerRequest {
 
 /// An address for the address book. Sending it again (PUT) replaces it whole,
 /// including whether it is a default.
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AddressRequest {
     first_name: Option<String>,
@@ -81,7 +81,7 @@ impl From<AddressRequest> for SaveAddress {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct CustomerResponse {
     id: CustomerId,
     email: Email,
@@ -93,7 +93,7 @@ pub(super) struct CustomerResponse {
     addresses: Vec<AddressResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct AddressResponse {
     id: AddressId,
     first_name: Option<String>,
@@ -142,6 +142,14 @@ impl From<&Customer> for CustomerResponse {
     }
 }
 
+/// Creates a customer.
+#[utoipa::path(
+    post,
+    path = "/admin/customers",
+    request_body = CreateCustomerRequest,
+    responses((status = 201, description = "Created", body = CustomerResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:write"]))),
+)]
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -159,6 +167,14 @@ pub(super) async fn create<S: Storage>(
     Ok((StatusCode::CREATED, Json(CustomerResponse::from(&customer))))
 }
 
+/// A customer with their address book.
+#[utoipa::path(
+    get,
+    path = "/admin/customers/{id}",
+    params(("id" = CustomerId, Path)),
+    responses((status = 200, description = "OK", body = CustomerResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:read"]))),
+)]
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -169,6 +185,15 @@ pub(super) async fn fetch<S: Storage>(
     Ok(Json(CustomerResponse::from(&customer)))
 }
 
+/// Changes a customer's details (JSON Merge Patch).
+#[utoipa::path(
+    patch,
+    path = "/admin/customers/{id}",
+    params(("id" = CustomerId, Path)),
+    request_body = UpdateCustomerRequest,
+    responses((status = 200, description = "OK", body = CustomerResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:write"]))),
+)]
 pub(super) async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -187,6 +212,15 @@ pub(super) async fn update<S: Storage>(
     Ok(Json(CustomerResponse::from(&customer)))
 }
 
+/// Adds an address to a customer's address book.
+#[utoipa::path(
+    post,
+    path = "/admin/customers/{id}/addresses",
+    params(("id" = CustomerId, Path)),
+    request_body = AddressRequest,
+    responses((status = 201, description = "Created", body = CustomerResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:write"]))),
+)]
 pub(super) async fn add_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -199,6 +233,15 @@ pub(super) async fn add_address_handler<S: Storage>(
     Ok((StatusCode::CREATED, Json(CustomerResponse::from(&customer))))
 }
 
+/// Replaces a saved address.
+#[utoipa::path(
+    put,
+    path = "/admin/customers/{id}/addresses/{address_id}",
+    params(("id" = CustomerId, Path), ("address_id" = AddressId, Path)),
+    request_body = AddressRequest,
+    responses((status = 200, description = "OK", body = CustomerResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:write"]))),
+)]
 pub(super) async fn update_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -211,6 +254,14 @@ pub(super) async fn update_address_handler<S: Storage>(
     Ok(Json(CustomerResponse::from(&customer)))
 }
 
+/// Removes a saved address.
+#[utoipa::path(
+    delete,
+    path = "/admin/customers/{id}/addresses/{address_id}",
+    params(("id" = CustomerId, Path), ("address_id" = AddressId, Path)),
+    responses((status = 200, description = "OK", body = CustomerResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:write"]))),
+)]
 pub(super) async fn remove_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,

@@ -15,14 +15,14 @@ use crate::{
     state::{SharedState, Storage},
 };
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum KindRequest {
     Secret,
     Publishable,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateApiKeyRequest {
     kind: KindRequest,
@@ -31,7 +31,7 @@ pub(super) struct CreateApiKeyRequest {
     scopes: Option<Vec<Scope>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct ApiKeyResponse {
     id: ApiKeyId,
     kind: &'static str,
@@ -57,7 +57,7 @@ impl ApiKeyResponse {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct CreatedApiKeyResponse {
     #[serde(flatten)]
     key: ApiKeyResponse,
@@ -65,6 +65,14 @@ pub(super) struct CreatedApiKeyResponse {
     token: String,
 }
 
+/// Creates an API key; its token is shown only in this response.
+#[utoipa::path(
+    post,
+    path = "/admin/api-keys",
+    request_body = CreateApiKeyRequest,
+    responses((status = 201, description = "Created", body = CreatedApiKeyResponse)),
+    extensions(("x-hypha-scopes" = json!(["api_keys:write"]))),
+)]
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -88,6 +96,14 @@ pub(super) async fn create<S: Storage>(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// An API key, redacted.
+#[utoipa::path(
+    get,
+    path = "/admin/api-keys/{id}",
+    params(("id" = ApiKeyId, Path)),
+    responses((status = 200, description = "OK", body = ApiKeyResponse)),
+    extensions(("x-hypha-scopes" = json!(["api_keys:read"]))),
+)]
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -99,6 +115,13 @@ pub(super) async fn fetch<S: Storage>(
 }
 
 /// Stops the key working from the next request on. 409 if it already was revoked.
+#[utoipa::path(
+    post,
+    path = "/admin/api-keys/{id}/revoke",
+    params(("id" = ApiKeyId, Path)),
+    responses((status = 200, description = "OK", body = ApiKeyResponse)),
+    extensions(("x-hypha-scopes" = json!(["api_keys:write"]))),
+)]
 pub(super) async fn revoke<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,

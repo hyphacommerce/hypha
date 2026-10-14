@@ -16,35 +16,35 @@ use crate::{
     state::{SharedState, Storage},
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateCartRequest {
     /// Where the cart ships to; picks the market and the tax rates.
     country: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AddLineRequest {
     variant: VariantId,
     quantity: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SetEmailRequest {
     /// `null` clears it.
     email: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SetCustomerRequest {
     /// `null` unlinks the customer (the cart keeps their email).
     customer: Option<CustomerId>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct CartResponse {
     id: CartId,
     /// Picked from the country when the cart was created; it sets the currency.
@@ -70,7 +70,7 @@ pub(super) struct CartResponse {
     lines: Vec<LineResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub(super) enum LineState {
     Priced {
@@ -86,7 +86,7 @@ pub(super) enum LineState {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct TaxLineResponse {
     /// Parts per million: 250000 = 25%.
     rate_ppm: TaxRate,
@@ -105,7 +105,7 @@ impl From<&TaxLine> for TaxLineResponse {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct LineResponse {
     product: ProductId,
     variant: VariantId,
@@ -167,6 +167,13 @@ impl From<&PricedCart> for CartResponse {
 }
 
 /// Takes an `Idempotency-Key` header: a retry returns the cart the first request made.
+#[utoipa::path(
+    post,
+    path = "/storefront/carts",
+    request_body = CreateCartRequest,
+    responses((status = 201, description = "Created", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
@@ -186,6 +193,14 @@ pub(super) async fn create<S: Storage>(
     ))
 }
 
+/// A cart, priced for its market and country.
+#[utoipa::path(
+    get,
+    path = "/storefront/carts/{id}",
+    params(("id" = CartId, Path)),
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:read"]))),
+)]
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
@@ -197,6 +212,14 @@ pub(super) async fn fetch<S: Storage>(
 }
 
 /// Takes an `Idempotency-Key` header: a retry returns the cart without adding again.
+#[utoipa::path(
+    post,
+    path = "/storefront/carts/{id}/lines",
+    params(("id" = CartId, Path)),
+    request_body = AddLineRequest,
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
 pub(super) async fn add<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
@@ -219,6 +242,15 @@ pub(super) async fn add<S: Storage>(
     ))
 }
 
+/// Sets the buyer's email; checkout finds or creates the customer from it.
+#[utoipa::path(
+    put,
+    path = "/storefront/carts/{id}/email",
+    params(("id" = CartId, Path)),
+    request_body = SetEmailRequest,
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
 pub(super) async fn set_email<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
@@ -231,6 +263,15 @@ pub(super) async fn set_email<S: Storage>(
     Ok(Json(CartResponse::from(&priced)))
 }
 
+/// Links a cart to a customer, or unlinks it with `null`.
+#[utoipa::path(
+    put,
+    path = "/admin/carts/{id}/customer",
+    params(("id" = CartId, Path)),
+    request_body = SetCustomerRequest,
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write", "customers:read"]))),
+)]
 pub(super) async fn set_customer<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -243,13 +284,22 @@ pub(super) async fn set_customer<S: Storage>(
     Ok(Json(CartResponse::from(&priced)))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SetQuantityRequest {
     /// At least 1; `DELETE` the line to take it out.
     quantity: u32,
 }
 
+/// Sets a line's quantity.
+#[utoipa::path(
+    put,
+    path = "/storefront/carts/{id}/lines/{variant}",
+    params(("id" = CartId, Path), ("variant" = VariantId, Path)),
+    request_body = SetQuantityRequest,
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
 pub(super) async fn set_quantity<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
@@ -269,6 +319,14 @@ pub(super) async fn set_quantity<S: Storage>(
     Ok(Json(CartResponse::from(&priced)))
 }
 
+/// Removes a line.
+#[utoipa::path(
+    delete,
+    path = "/storefront/carts/{id}/lines/{variant}",
+    params(("id" = CartId, Path), ("variant" = VariantId, Path)),
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
 pub(super) async fn remove_line<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,

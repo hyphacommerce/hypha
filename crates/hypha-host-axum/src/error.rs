@@ -40,6 +40,19 @@ use serde_json::{Value, json};
 /// concurrent change (`concurrent_modification`); 422 invalid input, including IDs in the
 /// body that don't exist; 500 storage failures (message hidden, logged instead); 502 an
 /// email that could not be handed over (the write before it stands).
+/// Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`
+/// serializes as this shape.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[schema(as = Error)]
+pub struct ApiErrorBody {
+    /// Stable snake_case code: what clients match on.
+    pub code: String,
+    /// For humans; may change.
+    pub error: String,
+    /// Data a client acts on, for the codes that have any (see each operation).
+    pub details: Option<serde_json::Value>,
+}
+
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,

@@ -21,8 +21,32 @@ use crate::state::{
     AppState, HostEnv, MemoryStorage, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids,
 };
 
+/// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
+/// `openapi`) and exits (design note 0010, S6). Run it after changing routes or DTOs;
+/// a test fails while the committed files are out of date.
+fn write_openapi(dir: &str) -> std::io::Result<()> {
+    use routes::openapi::{Doc, document_json};
+    std::fs::create_dir_all(dir)?;
+    for doc in Doc::ALL {
+        let path = std::path::Path::new(dir).join(doc.file_name());
+        std::fs::write(&path, document_json(doc))?;
+        println!("wrote {}", path.display());
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("openapi") {
+        let dir = args.get(2).map_or("openapi", String::as_str);
+        if let Err(e) = write_openapi(dir) {
+            eprintln!("cannot write the OpenAPI documents: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,tower_http=debug".into()),

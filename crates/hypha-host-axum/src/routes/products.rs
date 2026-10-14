@@ -12,7 +12,7 @@ use crate::{
     state::{SharedState, Storage},
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateProductRequest {
     handle: String,
@@ -20,7 +20,7 @@ pub(super) struct CreateProductRequest {
     price: Money,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SetStatusRequest {
     status: StatusDto,
@@ -28,7 +28,8 @@ pub(super) struct SetStatusRequest {
 
 /// `ProductStatus` on the wire: snake_case strings. A DTO of its own, so the domain
 /// enum carries no serde and renaming a variant can't silently change the API.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = ProductStatus)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum StatusDto {
     Draft,
@@ -56,7 +57,7 @@ impl From<ProductStatus> for StatusDto {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct ProductResponse {
     id: ProductId,
     handle: String,
@@ -65,7 +66,7 @@ pub(super) struct ProductResponse {
     variants: Vec<VariantResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct VariantResponse {
     id: VariantId,
     price: Money,
@@ -90,6 +91,14 @@ impl From<&Product> for ProductResponse {
     }
 }
 
+/// Creates a product with one variant, as a draft.
+#[utoipa::path(
+    post,
+    path = "/admin/products",
+    request_body = CreateProductRequest,
+    responses((status = 201, description = "Created", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -106,6 +115,14 @@ pub(super) async fn create<S: Storage>(
     Ok((StatusCode::CREATED, Json(ProductResponse::from(&product))))
 }
 
+/// A product, in any status.
+#[utoipa::path(
+    get,
+    path = "/admin/products/{id}",
+    params(("id" = ProductId, Path)),
+    responses((status = 200, description = "OK", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:read"]))),
+)]
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -119,7 +136,7 @@ pub(super) async fn fetch<S: Storage>(
 /// A product as a storefront sees it (design note 0010, S5): active products only, without
 /// admin fields. A draft or archived product is `404 product_not_found`, the same as one
 /// that doesn't exist, so a storefront can't tell them apart.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct StorefrontProductResponse {
     id: ProductId,
     handle: String,
@@ -139,6 +156,14 @@ impl From<&Product> for StorefrontProductResponse {
     }
 }
 
+/// An active product; drafts and archived products read as missing.
+#[utoipa::path(
+    get,
+    path = "/storefront/products/{id}",
+    params(("id" = ProductId, Path)),
+    responses((status = 200, description = "OK", body = StorefrontProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:read"]))),
+)]
 pub(super) async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
@@ -152,6 +177,15 @@ pub(super) async fn fetch_storefront<S: Storage>(
     Ok(Json(StorefrontProductResponse::from(&product)))
 }
 
+/// Changes a product's status (draft, active, archived).
+#[utoipa::path(
+    patch,
+    path = "/admin/products/{id}/status",
+    params(("id" = ProductId, Path)),
+    request_body = SetStatusRequest,
+    responses((status = 200, description = "OK", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
 pub(super) async fn set_status<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,

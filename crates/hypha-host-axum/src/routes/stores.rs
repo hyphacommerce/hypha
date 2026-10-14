@@ -9,7 +9,7 @@ use crate::{
     state::{SharedState, Storage},
 };
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct StoreResponse {
     id: StoreId,
     name: String,
@@ -25,6 +25,12 @@ impl From<&Store> for StoreResponse {
 }
 
 /// The store this request is served by.
+#[utoipa::path(
+    get,
+    path = "/admin/store",
+    responses((status = 200, description = "OK", body = StoreResponse)),
+    extensions(("x-hypha-scopes" = json!(["stores:read"]))),
+)]
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
@@ -38,11 +44,18 @@ pub(super) async fn fetch<S: Storage>(
 }
 
 /// What a storefront sees of the store: its name.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct StorefrontStoreResponse {
     name: String,
 }
 
+/// The store's name.
+#[utoipa::path(
+    get,
+    path = "/storefront/store",
+    responses((status = 200, description = "OK", body = StorefrontStoreResponse)),
+    extensions(("x-hypha-scopes" = json!(["stores:read"]))),
+)]
 pub(super) async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,

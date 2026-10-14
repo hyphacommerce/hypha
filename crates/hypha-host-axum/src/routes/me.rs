@@ -16,7 +16,7 @@ use crate::{
     state::{SharedState, Storage},
 };
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct MeResponse {
     user: UserResponse,
     role: MeRole,
@@ -25,12 +25,19 @@ pub(super) struct MeResponse {
     mfa_enabled: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct MeRole {
     id: RoleId,
     name: String,
 }
 
+/// The logged-in staff member: user, role, scopes and whether 2FA is on.
+#[utoipa::path(
+    get,
+    path = "/admin/me",
+    responses((status = 200, description = "OK", body = MeResponse)),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
@@ -53,7 +60,7 @@ pub(super) async fn fetch<S: Storage>(
     }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ChangePasswordRequest {
     current_password: String,
@@ -61,6 +68,13 @@ pub(super) struct ChangePasswordRequest {
 }
 
 /// Changes the password and logs out every other session.
+#[utoipa::path(
+    put,
+    path = "/admin/me/password",
+    request_body = ChangePasswordRequest,
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
 pub(super) async fn change_password_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
@@ -79,7 +93,7 @@ pub(super) async fn change_password_handler<S: Storage>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct TotpSetupResponse {
     /// Base32, for typing into the app.
     secret: String,
@@ -87,7 +101,7 @@ pub(super) struct TotpSetupResponse {
     uri: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct StartTotpRequest {
     /// The current password: a stolen session alone can't put an authenticator on the
@@ -96,6 +110,13 @@ pub(super) struct StartTotpRequest {
 }
 
 /// Starts the authenticator setup; confirm with a code to turn 2FA on.
+#[utoipa::path(
+    post,
+    path = "/admin/me/mfa/totp",
+    request_body = StartTotpRequest,
+    responses((status = 201, description = "Created", body = TotpSetupResponse)),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
 pub(super) async fn start_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
@@ -122,14 +143,14 @@ pub(super) async fn start_totp_handler<S: Storage>(
     ))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CodeRequest {
     /// From the authenticator app, or (to disable or regenerate) a recovery code.
     code: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct RecoveryCodesResponse {
     /// Shown only now: each works once if the authenticator is lost.
     recovery_codes: Vec<String>,
@@ -141,6 +162,14 @@ fn code_error(e: hypha_auth::CommandError) -> ApiError {
     ApiError::from(e).unprocessable_if("invalid_mfa_code")
 }
 
+/// Turns 2FA on with a code from the app; returns the recovery codes once.
+#[utoipa::path(
+    post,
+    path = "/admin/me/mfa/totp/confirm",
+    request_body = CodeRequest,
+    responses((status = 200, description = "OK", body = RecoveryCodesResponse)),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
 pub(super) async fn confirm_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
@@ -161,6 +190,14 @@ pub(super) async fn confirm_totp_handler<S: Storage>(
     }))
 }
 
+/// Turns 2FA off; needs a current second-factor code.
+#[utoipa::path(
+    post,
+    path = "/admin/me/mfa/totp/disable",
+    request_body = CodeRequest,
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
 pub(super) async fn disable_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
@@ -179,6 +216,14 @@ pub(super) async fn disable_totp_handler<S: Storage>(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Replaces the recovery codes; needs a current second-factor code.
+#[utoipa::path(
+    post,
+    path = "/admin/me/mfa/recovery-codes",
+    request_body = CodeRequest,
+    responses((status = 200, description = "OK", body = RecoveryCodesResponse)),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
 pub(super) async fn recovery_codes_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,

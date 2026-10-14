@@ -1,16 +1,406 @@
-//! The OpenAPI documents (design note 0010, S6). Filled in by the next change.
+//! The OpenAPI documents (design note 0010, S6-S10): one per surface, built from the
+//! route table, so every routed handler is documented (a handler without
+//! `#[utoipa::path]` doesn't compile into the table) and nothing unrouted is.
+//!
+//! Each handler's annotation gives what only it knows: its body, its success response,
+//! its path parameters and its scopes (`x-hypha-scopes`). The rest is filled in here
+//! from the table, the same way for every operation: the operation ID
+//! (`admin.products.create`), a tag per module, the surface's security scheme, and the
+//! error responses every route of that shape can give.
+
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use axum::{Json, extract::State};
-use serde_json::{Value, json};
+use serde_json::Value;
+use utoipa::{
+    PartialSchema, ToSchema,
+    openapi::{
+        ContentBuilder, Info, OpenApi, OpenApiBuilder, Paths, Ref, RefOr, ResponseBuilder, Schema,
+        path::{HttpMethod, Operation},
+        security::{
+            ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme,
+        },
+    },
+};
 
-use crate::state::SharedState;
+use crate::{error::ApiErrorBody, state::SharedState};
+
+/// Which document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Doc {
+    Admin,
+    Storefront,
+}
+
+impl Doc {
+    pub const ALL: [Doc; 2] = [Doc::Admin, Doc::Storefront];
+
+    /// The committed file's name (`openapi/<name>.json`).
+    pub fn file_name(self) -> &'static str {
+        match self {
+            Doc::Admin => "admin.json",
+            Doc::Storefront => "storefront.json",
+        }
+    }
+
+    fn security_scheme(self) -> (&'static str, SecurityScheme) {
+        match self {
+            Doc::Admin => (
+                "bearer",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some(
+                            "A staff session (`hypha_sess_…`, from `POST /admin/auth/login`) or a \
+                             secret API key (`hypha_sk_…`).",
+                        ))
+                        .build(),
+                ),
+            ),
+            Doc::Storefront => (
+                "publishable_key",
+                SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+                    "X-Publishable-Key",
+                    "A publishable API key (`hypha_pk_…`); `Authorization: Bearer` works too.",
+                ))),
+            ),
+        }
+    }
+
+    fn info(self) -> Info {
+        let (title, description) = match self {
+            Doc::Admin => (
+                "Hypha Admin API",
+                "Running the store: catalog, markets and pricing, tax, inventory, customers, \
+                 orders, staff and API keys. Staff sessions and secret keys only.",
+            ),
+            Doc::Storefront => (
+                "Hypha Storefront API",
+                "What a shop front needs: the store, active products, carts and checkout. \
+                 Publishable keys only.",
+            ),
+        };
+        let mut info = Info::new(title, env!("CARGO_PKG_VERSION"));
+        info.description = Some(description.to_string());
+        let mut license = utoipa::openapi::License::new(env!("CARGO_PKG_LICENSE"));
+        license.identifier = Some(env!("CARGO_PKG_LICENSE").to_string());
+        info.license = Some(license);
+        info
+    }
+}
+
+/// One route of a document, as the route table and the handler's annotation give it.
+pub(crate) struct Row {
+    pub doc: Doc,
+    pub method: &'static str,
+    pub path: &'static str,
+    pub operation_id: &'static str,
+    pub tag: &'static str,
+    /// What the handler's `#[utoipa::path]` says (checked against `method` and `path`).
+    pub annotated_path: fn() -> String,
+    pub annotated_methods: fn() -> Vec<HttpMethod>,
+    pub operation: fn() -> Operation,
+    pub schemas: fn(&mut Vec<(String, RefOr<Schema>)>),
+}
+
+/// `route_table!` callback: a `Row` per documented route (hidden ones are skipped).
+macro_rules! openapi_rows {
+    ($([$surface:ident, $method:ident, $path:literal, $module:ident::$func:ident]),* $(,)?) => {{
+        let mut rows: Vec<Row> = Vec::new();
+        $( openapi_rows!(@row rows, $surface, $method, $path, $module, $func); )*
+        rows
+    }};
+    (@row $rows:ident, hidden, $($rest:tt)*) => {};
+    (@row $rows:ident, $surface:ident, $method:ident, $path:literal, $module:ident, $func:ident) => {
+        pastey::paste! {
+            $rows.push(Row {
+                doc: openapi_rows!(@doc $surface),
+                method: stringify!($method),
+                path: $path,
+                operation_id: concat!(stringify!($surface), ".", stringify!($module), ".", stringify!($func)),
+                tag: stringify!($module),
+                annotated_path: <super::$module::[<__path_ $func>] as utoipa::Path>::path,
+                annotated_methods: <super::$module::[<__path_ $func>] as utoipa::Path>::methods,
+                operation: <super::$module::[<__path_ $func>] as utoipa::Path>::operation,
+                schemas: <super::$module::[<__path_ $func>] as utoipa::__dev::SchemaReferences>::schemas,
+            });
+        }
+    };
+    (@doc admin) => { Doc::Admin };
+    (@doc storefront) => { Doc::Storefront };
+}
+
+pub(crate) fn rows() -> Vec<Row> {
+    route_table!(openapi_rows!())
+}
+
+fn http_method(method: &str) -> HttpMethod {
+    match method {
+        "GET" => HttpMethod::Get,
+        "POST" => HttpMethod::Post,
+        "PUT" => HttpMethod::Put,
+        "PATCH" => HttpMethod::Patch,
+        "DELETE" => HttpMethod::Delete,
+        // The route table only uses the five above.
+        other => panic!("route table method {other} has no OpenAPI mapping"),
+    }
+}
+
+/// An error response with the shared error body.
+fn error_response(description: &str) -> RefOr<utoipa::openapi::Response> {
+    ResponseBuilder::new()
+        .description(description)
+        .content(
+            "application/json",
+            ContentBuilder::new()
+                .schema(Some(Ref::from_schema_name(ApiErrorBody::name())))
+                .build(),
+        )
+        .build()
+        .into()
+}
+
+/// The error responses every route of this shape can give (design note 0010, S9),
+/// unless its annotation already describes that status.
+fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
+    let has_body = op.request_body.is_some();
+    let has_path_params = row.path.contains('{');
+    let writes = row.method != "GET";
+    let mut errors: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    if has_path_params {
+        errors
+            .entry("400")
+            .or_default()
+            .push("A malformed ID in the path (`invalid_path`).");
+        errors
+            .entry("404")
+            .or_default()
+            .push("The resource in the path doesn't exist (`<resource>_not_found`).");
+    }
+    if has_body {
+        errors
+            .entry("400")
+            .or_default()
+            .push("A body that isn't JSON (`malformed_json`).");
+        errors
+            .entry("413")
+            .or_default()
+            .push("A body over 2 MB (`body_too_large`).");
+        errors
+            .entry("415")
+            .or_default()
+            .push("No `Content-Type: application/json` (`missing_content_type`).");
+        errors.entry("422").or_default().push(
+            "Invalid input: unknown fields (`invalid_body`), values that break a rule \
+             (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+        );
+    }
+    if secured {
+        errors.entry("401").or_default().push(
+            "No credentials (`unauthenticated`), or unknown, expired or revoked ones \
+             (`invalid_token`).",
+        );
+        errors.entry("403").or_default().push(
+            "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the \
+             other API (`admin_credentials_required`, `publishable_key_required`).",
+        );
+    }
+    if writes {
+        errors.entry("409").or_default().push(
+            "Conflicts with existing data or the resource's state, or a concurrent change \
+             (`concurrent_modification`, safe to retry).",
+        );
+    }
+    errors
+        .entry("500")
+        .or_default()
+        .push("A server failure (`internal_error`).");
+    for (status, lines) in errors {
+        op.responses
+            .responses
+            .entry(status.to_string())
+            .or_insert_with(|| error_response(&lines.join(" ")));
+    }
+}
+
+/// Whether the operation needs credentials: annotated `security(())` means none.
+fn secured(op: &Operation) -> bool {
+    match &op.security {
+        None => true,
+        Some(requirements) => requirements
+            .iter()
+            .any(|r| serde_json::to_value(r).is_ok_and(|v| v != serde_json::json!({}))),
+    }
+}
+
+/// The document for `doc`, built from the route table.
+pub fn document(doc: Doc) -> OpenApi {
+    let (scheme_name, scheme) = doc.security_scheme();
+    let mut paths = Paths::new();
+    let mut schemas: Vec<(String, RefOr<Schema>)> =
+        vec![(ApiErrorBody::name().to_string(), ApiErrorBody::schema())];
+    for row in rows().into_iter().filter(|r| r.doc == doc) {
+        // The annotation repeats the table's path; they must agree (also a test).
+        debug_assert_eq!((row.annotated_path)(), row.path, "{}", row.operation_id);
+        debug_assert_eq!((row.annotated_methods)().len(), 1, "{}", row.operation_id);
+        let mut op = (row.operation)();
+        op.operation_id = Some(row.operation_id.to_string());
+        op.tags = Some(vec![row.tag.to_string()]);
+        let secured = secured(&op);
+        if secured {
+            op.security = Some(vec![SecurityRequirement::new(
+                scheme_name,
+                Vec::<String>::new(),
+            )]);
+        }
+        add_standard_errors(&mut op, &row, secured);
+        (row.schemas)(&mut schemas);
+        paths.add_path_operation(row.path, vec![http_method(row.method)], op);
+    }
+    // One schema per name; `tests::schema_names_are_unique` checks two types never
+    // share one.
+    let schemas: BTreeMap<String, RefOr<Schema>> = schemas.into_iter().collect();
+    let mut api = OpenApiBuilder::new()
+        .info(doc.info())
+        // Every deployment has its own host, so paths are relative to wherever it runs.
+        .servers(Some([utoipa::openapi::Server::new("/")]))
+        .paths(paths)
+        .build();
+    let components = api.components.get_or_insert_with(Default::default);
+    components.schemas.extend(schemas);
+    components.add_security_scheme(scheme_name, scheme);
+    api
+}
+
+/// The document as the committed file holds it: pretty JSON and a final newline.
+pub fn document_json(doc: Doc) -> String {
+    // A document is plain data; serializing it can't fail.
+    let mut json = serde_json::to_string_pretty(&document(doc))
+        .unwrap_or_else(|e| panic!("cannot serialize the OpenAPI document: {e}"));
+    json.push('\n');
+    json
+}
+
+fn cached(doc: Doc) -> Value {
+    static ADMIN: OnceLock<Value> = OnceLock::new();
+    static STOREFRONT: OnceLock<Value> = OnceLock::new();
+    let cell = match doc {
+        Doc::Admin => &ADMIN,
+        Doc::Storefront => &STOREFRONT,
+    };
+    cell.get_or_init(|| serde_json::to_value(document(doc)).unwrap_or(Value::Null))
+        .clone()
+}
 
 /// `GET /admin/openapi.json`.
 pub(super) async fn admin_document<S>(State(_): State<SharedState<S>>) -> Json<Value> {
-    Json(json!({}))
+    Json(cached(Doc::Admin))
 }
 
 /// `GET /storefront/openapi.json`.
 pub(super) async fn storefront_document<S>(State(_): State<SharedState<S>>) -> Json<Value> {
-    Json(json!({}))
+    Json(cached(Doc::Storefront))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_annotation_names_its_route_table_row() {
+        for row in rows() {
+            assert_eq!((row.annotated_path)(), row.path, "{}", row.operation_id);
+            let methods = serde_json::to_value((row.annotated_methods)()).unwrap();
+            assert_eq!(
+                methods,
+                serde_json::json!([row.method.to_lowercase()]),
+                "{}",
+                row.operation_id
+            );
+        }
+    }
+
+    #[test]
+    fn schema_names_are_unique() {
+        // Two types with one name would silently replace each other in the document.
+        let mut by_name: BTreeMap<String, Value> = BTreeMap::new();
+        for row in rows() {
+            let mut schemas = Vec::new();
+            (row.schemas)(&mut schemas);
+            for (name, schema) in schemas {
+                let schema = serde_json::to_value(schema).unwrap();
+                if let Some(seen) = by_name.insert(name.clone(), schema.clone()) {
+                    assert_eq!(seen, schema, "two different schemas named {name}");
+                }
+            }
+        }
+    }
+
+    /// Every `$ref` in `value`.
+    fn refs(value: &Value, out: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                for (key, v) in map {
+                    match (key.as_str(), v) {
+                        ("$ref", Value::String(r)) => out.push(r.clone()),
+                        _ => refs(v, out),
+                    }
+                }
+            }
+            Value::Array(items) => items.iter().for_each(|v| refs(v, out)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn every_reference_resolves() {
+        for doc in Doc::ALL {
+            let json = serde_json::to_value(document(doc)).unwrap();
+            let mut found = Vec::new();
+            refs(&json, &mut found);
+            assert!(!found.is_empty());
+            for r in found {
+                let name = r.strip_prefix("#/components/schemas/").unwrap_or(&r);
+                assert!(
+                    json["components"]["schemas"].get(name).is_some(),
+                    "{doc:?}: {r} points nowhere"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_operation_has_an_id_a_scope_note_and_responses() {
+        for doc in Doc::ALL {
+            let json = serde_json::to_value(document(doc)).unwrap();
+            for (path, item) in json["paths"].as_object().unwrap() {
+                for (method, op) in item.as_object().unwrap() {
+                    let at = format!("{doc:?} {method} {path}");
+                    assert!(op["operationId"].is_string(), "{at}");
+                    assert!(op["responses"]["500"].is_object(), "{at}");
+                    let public = op["security"] == serde_json::json!([{}]);
+                    let staff_only = op["x-hypha-staff-session"] == Value::Bool(true);
+                    assert!(
+                        public || staff_only || op["x-hypha-scopes"].is_array(),
+                        "{at} says nothing about the scope it needs"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_committed_documents_are_up_to_date() {
+        for doc in Doc::ALL {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../openapi")
+                .join(doc.file_name());
+            let committed = std::fs::read_to_string(&path).unwrap_or_default();
+            assert!(
+                committed == document_json(doc),
+                "{} is out of date: run `cargo run -p hypha-host-axum -- openapi`",
+                path.display()
+            );
+        }
+    }
 }
