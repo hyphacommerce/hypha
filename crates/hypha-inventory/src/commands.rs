@@ -354,34 +354,51 @@ pub async fn reserve_stock<R: InventoryItemRepo, L: LocationRepo>(
     retry_on_conflict(move || async move {
         let serving = locations.serving(market).await?;
         let mut stock = by_variant(items.for_variants(variants).await?);
-        let mut changed = HashSet::new();
-        let mut short = Vec::new();
-        for (reference, variant, quantity) in lines {
-            let Some(item) = stock.get_mut(variant) else {
-                continue;
-            };
-            match item.reserve(reference, *quantity, &serving) {
-                Ok(true) => {
-                    changed.insert(*variant);
-                }
-                Ok(false) => {}
-                Err(InventoryError::OutOfStock {
-                    requested,
-                    available,
-                }) => short.push(Shortage {
-                    variant: *variant,
-                    requested,
-                    available,
-                }),
-                Err(e) => return Err(e.into()),
-            }
-        }
-        if !short.is_empty() {
-            return Err(CommandError::OutOfStock { lines: short });
-        }
+        let changed = reserve_lines(&mut stock, &serving, lines)?;
         write_changed(items, stock, &changed).await
     })
     .await
+}
+
+/// Reserves every line on `stock` (items by variant) from the `serving` locations, in
+/// memory, and returns the variants whose items changed; the caller writes those. A
+/// variant without an item is untracked and skipped, and a reference already reserved
+/// changes nothing (I8).
+///
+/// All or nothing for the caller: if any line is short, the result is `OutOfStock`
+/// listing every short line, and `stock` may be partly changed, so the caller discards
+/// it. `reserve_stock` and checkout both reserve through this.
+pub fn reserve_lines(
+    stock: &mut HashMap<VariantId, InventoryItem>,
+    serving: &[Location],
+    lines: &[(ReservationRef, VariantId, Quantity)],
+) -> Result<HashSet<VariantId>, CommandError> {
+    let mut changed = HashSet::new();
+    let mut short = Vec::new();
+    for (reference, variant, quantity) in lines {
+        let Some(item) = stock.get_mut(variant) else {
+            continue;
+        };
+        match item.reserve(reference, *quantity, serving) {
+            Ok(true) => {
+                changed.insert(*variant);
+            }
+            Ok(false) => {}
+            Err(InventoryError::OutOfStock {
+                requested,
+                available,
+            }) => short.push(Shortage {
+                variant: *variant,
+                requested,
+                available,
+            }),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    if !short.is_empty() {
+        return Err(CommandError::OutOfStock { lines: short });
+    }
+    Ok(changed)
 }
 
 pub struct ReleaseStock {
