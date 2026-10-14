@@ -355,7 +355,7 @@ pub async fn set_cart_email<S: HasCarts + PricingPorts>(
 
 /// Links the cart to an existing customer (taking their email), or unlinks it with
 /// `None` (design note 0005, C5). Linking needs `customers:read` as well as `carts:write`.
-pub async fn set_cart_customer<S: CartPorts>(
+pub async fn set_cart_customer<S: HasCarts + HasCustomers + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
     id: CartId,

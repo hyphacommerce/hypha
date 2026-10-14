@@ -2,9 +2,9 @@ use hypha_cart::{
     CartPorts, CartRepo, CartStatus, LineStatus, PricedLine, StageCarts, price_for_checkout,
 };
 use hypha_core::{
-    AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, IdGenerator, IdempotencyError,
-    IdempotencyRecord, IdempotencyRequest, Idempotent, Money, OrderId, OrderLineId, RepoError,
-    Scope, StageIdempotency, VariantId, earlier_result,
+    AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
+    IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Money, OrderId,
+    OrderLineId, RepoError, Scope, StageIdempotency, VariantId, earlier_result,
 };
 use hypha_customers::{Customer, CustomerRepo, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{
@@ -331,7 +331,7 @@ fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandEr
 
 /// The order an earlier request with this key placed, if this caller sent it before;
 /// `KeyReused` if the key was used for something else.
-async fn replay_of<S: CheckoutPorts>(
+async fn replay_of<S: HasIdempotency>(
     ctx: &Ctx,
     ports: &S,
     request: Option<&IdempotencyRequest>,
@@ -346,7 +346,7 @@ async fn replay_of<S: CheckoutPorts>(
 }
 
 /// What a replay returns: the order as it is now.
-async fn replay<S: CheckoutPorts>(
+async fn replay<S: HasOrders>(
     ports: &S,
     order: OrderId,
 ) -> Result<Idempotent<Order>, CommandError> {
