@@ -18,6 +18,11 @@ use crate::{
     state::{SharedState, Storage},
 };
 
+/// An entry of `HYPHA_TRUSTED_PROXIES` that isn't an address or a range.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0:?} is not an IP address or CIDR range")]
+pub struct ProxyListError(pub String);
+
 /// The proxies whose `X-Forwarded-For` is believed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrustedProxies(Vec<IpNet>);
@@ -25,14 +30,14 @@ pub struct TrustedProxies(Vec<IpNet>);
 impl TrustedProxies {
     /// A comma-separated list of CIDR ranges (`10.0.0.0/8,fd00::/8`); a bare address
     /// means just that address.
-    pub fn parse(list: &str) -> Result<Self, String> {
+    pub fn parse(list: &str) -> Result<Self, ProxyListError> {
         list.split(',')
             .map(str::trim)
             .filter(|part| !part.is_empty())
             .map(|part| {
                 part.parse::<IpNet>()
                     .or_else(|_| part.parse::<IpAddr>().map(IpNet::from))
-                    .map_err(|_| format!("{part:?} is not an IP address or CIDR range"))
+                    .map_err(|_| ProxyListError(part.to_string()))
             })
             .collect::<Result<Vec<_>, _>>()
             .map(Self)
@@ -181,10 +186,29 @@ mod tests {
     }
 
     #[test]
-    fn parse_takes_ranges_and_bare_addresses_and_refuses_junk() {
-        assert_eq!(proxies(" 10.0.0.0/8 , fd00::/8,127.0.0.1 ").0.len(), 3);
-        assert!(proxies("").is_empty());
-        assert!(TrustedProxies::parse("10.0.0.0/8,nope").is_err());
+    fn parse_takes_ranges_and_bare_addresses() {
+        let net = |s: &str| s.parse::<IpNet>().unwrap();
+        assert_eq!(
+            TrustedProxies::parse(" 10.0.0.0/8 , fd00::/8,127.0.0.1 "),
+            Ok(TrustedProxies(vec![
+                net("10.0.0.0/8"),
+                net("fd00::/8"),
+                net("127.0.0.1/32"),
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_of_nothing_trusts_nobody() {
+        assert_eq!(TrustedProxies::parse(" , "), Ok(TrustedProxies::default()));
+    }
+
+    #[test]
+    fn parse_refuses_junk_naming_it() {
+        assert_eq!(
+            TrustedProxies::parse("10.0.0.0/8,nope"),
+            Err(ProxyListError("nope".to_string()))
+        );
     }
 
     #[test]

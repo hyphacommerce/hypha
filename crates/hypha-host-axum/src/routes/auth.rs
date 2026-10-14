@@ -7,6 +7,7 @@ use axum::{Json, extract::State, http::StatusCode};
 use hypha_auth::{
     HasSessions, LoginStep, MfaMethod, NewToken, Session, finish_login, logout, reset_password,
 };
+use hypha_core::Email;
 use hypha_users::{AcceptInvite, accept_invite, login, request_password_reset};
 use serde::{Deserialize, Serialize};
 
@@ -15,14 +16,16 @@ use crate::{
     client_ip::ClientIp,
     error::ApiError,
     extract::{JsonBody, StaffCaller},
-    rate_limit::{Rule, enforce},
+    rate_limit::{Rule, enforce, pair_key},
     state::{SharedState, Storage},
 };
 
-/// An email as a rate-limit key: trimmed and lowercased, like a login (design note
-/// 0009, section 3). Not validated: junk is just another key.
-fn email_key(email: &str) -> String {
-    email.trim().to_lowercase()
+/// The email as rate limits key it: `Email`'s own normalisation (so one account is one
+/// key, the same as at login) and its length cap (so a key can't be megabytes). `None`
+/// for something that isn't an email: it can't match an account, so no email limit
+/// applies, while the address limit still does.
+fn limit_email(raw: &str) -> Option<Email> {
+    Email::new(raw).ok()
 }
 
 #[derive(Deserialize)]
@@ -84,7 +87,15 @@ pub(super) async fn login_handler<S: Storage>(
     enforce(&state.limiter, Rule::LoginIp, &ip).await?;
     // Parsed before taking a pooled connection: a malformed body costs none.
     let req = body.parse()?;
-    enforce(&state.limiter, Rule::LoginEmail, &email_key(&req.email)).await?;
+    if let Some(email) = limit_email(&req.email) {
+        enforce(
+            &state.limiter,
+            Rule::LoginEmailFromIp,
+            &pair_key(&email, &ip),
+        )
+        .await?;
+        enforce(&state.limiter, Rule::LoginEmail, email.as_str()).await?;
+    }
     let ports = state.public_ports().await?;
     let step = login(&ports, &state.env, &req.email, &req.password).await?;
     Ok(Json(match step {
@@ -137,9 +148,11 @@ pub(super) struct PasswordResetRequest {
     email: String,
 }
 
-/// Always 202, at once, whether or not the email belongs to anyone: the work (finding
-/// the account, storing the reset, sending the email) runs on its own task, so neither
-/// the answer nor its timing tells which emails exist.
+/// 202 at once, whether or not the email belongs to anyone: the work (finding the
+/// account, storing the reset, sending the email) runs on its own task, so neither the
+/// answer nor its timing tells which emails exist. The one other answer is 429
+/// `rate_limited` (design note 0009), which depends on the caller's address and the
+/// email asked about, never on whether the account exists.
 pub(super) async fn request_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
@@ -147,7 +160,14 @@ pub(super) async fn request_reset_handler<S: Storage>(
 ) -> Result<StatusCode, ApiError> {
     enforce(&state.limiter, Rule::ResetIp, &ip).await?;
     let req = body.parse()?;
-    enforce(&state.limiter, Rule::ResetEmail, &email_key(&req.email)).await?;
+    if let Some(email) = limit_email(&req.email) {
+        enforce(
+            &state.limiter,
+            Rule::ResetEmailFromIp,
+            &pair_key(&email, &ip),
+        )
+        .await?;
+    }
     S::spawn_password_reset(state, req.email);
     Ok(StatusCode::ACCEPTED)
 }
@@ -178,7 +198,7 @@ pub(super) async fn confirm_reset_handler<S: Storage>(
     ClientIp(ip): ClientIp,
     body: JsonBody<ConfirmResetRequest>,
 ) -> Result<StatusCode, ApiError> {
-    enforce(&state.limiter, Rule::ResetIp, &ip).await?;
+    enforce(&state.limiter, Rule::ResetConfirmIp, &ip).await?;
     let req = body.parse()?;
     let ports = state.public_ports().await?;
     reset_password(&ports, &state.env, &req.token, &req.password).await?;
@@ -219,4 +239,24 @@ pub(super) async fn accept_invite_handler<S: Storage>(
         session: SessionResponse::new(&session, &token)?,
     };
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_email_key_is_normalised_like_a_login() {
+        assert_eq!(
+            limit_email(" Ana@Example.COM ").map(|e| e.as_str().to_string()),
+            Some("ana@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn nothing_longer_than_an_email_becomes_a_key() {
+        let long = format!("{}@example.com", "x".repeat(Email::MAX_LEN));
+        assert_eq!(limit_email(&long), None);
+        assert_eq!(limit_email("not an email"), None);
+    }
 }

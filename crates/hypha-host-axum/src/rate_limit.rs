@@ -16,43 +16,59 @@ use governor::{
 
 /// Every limit, with its quota in `quota`: a closed list, so a handler can't invent a
 /// limit and all of them are in one place (0009, section 3).
+///
+/// Strict limits by email are keyed by email *and* address (`pair_key`): keyed by the
+/// email alone, one stranger sending a request per refill period would keep a real
+/// user locked out for as long as they liked (third review of 0009).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Rule {
-    /// `POST /auth/login`, per client IP.
+    /// `POST /auth/login`, per client address.
     LoginIp,
-    /// `POST /auth/login`, per email: bounds guesses at one account from any number of
-    /// addresses.
+    /// `POST /auth/login`, per email and address: guesses at one account from one place.
+    LoginEmailFromIp,
+    /// `POST /auth/login`, per email from anywhere, loose: bounds guessing spread over
+    /// many addresses, while locking someone out takes a great many of them.
     LoginEmail,
-    /// `POST /auth/login/mfa`, per client IP. Per account, the second-factor lockout
-    /// already counts (0008).
+    /// `POST /auth/login/mfa`, per client address. Per account, the second-factor
+    /// lockout already counts (0008).
     MfaIp,
-    /// `POST /auth/password-reset` and `/confirm`, per client IP.
+    /// `POST /auth/password-reset`, per client address.
     ResetIp,
-    /// `POST /auth/password-reset`, per email. The domain also sends at most one email
-    /// per account every few minutes; this stops the work before that.
-    ResetEmail,
-    /// `POST /invites/accept`, per client IP.
+    /// `POST /auth/password-reset`, per email and address. No limit by email alone: the
+    /// domain sends at most one email per account every few minutes, and a stranger
+    /// asking only sends the owner a valid link.
+    ResetEmailFromIp,
+    /// `POST /auth/password-reset/confirm`, per client address. Its own bucket, so
+    /// asking for a few links doesn't block using one.
+    ResetConfirmIp,
+    /// `POST /invites/accept`, per client address.
     InviteIp,
 }
 
 impl Rule {
-    pub const ALL: [Rule; 6] = [
+    /// In declaration order: `MemoryRateLimiter` indexes by `rule as usize`.
+    pub const ALL: [Rule; 8] = [
         Rule::LoginIp,
+        Rule::LoginEmailFromIp,
         Rule::LoginEmail,
         Rule::MfaIp,
         Rule::ResetIp,
-        Rule::ResetEmail,
+        Rule::ResetEmailFromIp,
+        Rule::ResetConfirmIp,
         Rule::InviteIp,
     ];
 
     /// `(burst, one more every)`: the starting numbers from 0009, section 3.
     pub fn quota(self) -> (u32, Duration) {
         match self {
-            Rule::LoginIp | Rule::LoginEmail | Rule::MfaIp | Rule::InviteIp => {
+            Rule::LoginIp | Rule::MfaIp | Rule::ResetConfirmIp | Rule::InviteIp => {
                 (10, Duration::from_secs(30))
             }
+            Rule::LoginEmailFromIp => (5, Duration::from_secs(60)),
+            // About 50 an hour.
+            Rule::LoginEmail => (50, Duration::from_secs(72)),
             Rule::ResetIp => (5, Duration::from_secs(60)),
-            Rule::ResetEmail => (3, Duration::from_secs(5 * 60)),
+            Rule::ResetEmailFromIp => (3, Duration::from_secs(5 * 60)),
         }
     }
 
@@ -64,6 +80,11 @@ impl Rule {
             .and_then(|q| NonZeroU32::new(burst).map(|b| q.allow_burst(b)))
             .unwrap_or_else(|| panic!("invalid quota for {self:?}"))
     }
+}
+
+/// The key for a rule on an email and an address together.
+pub fn pair_key(email: &hypha_core::Email, ip: &str) -> String {
+    format!("{email}|{ip}")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,7 +105,8 @@ pub async fn enforce(
     match limiter.check(rule, key).await {
         Decision::Allowed => Ok(()),
         Decision::Limited { retry_after } => {
-            tracing::info!(?rule, "rate limited");
+            // Debug, not info: a flood would otherwise write a line per refused request.
+            tracing::debug!(?rule, "rate limited");
             Err(crate::error::ApiError::rate_limited(retry_after))
         }
     }
@@ -104,7 +126,8 @@ type Keyed<C> =
 /// does it once a minute); otherwise rotating addresses would grow memory without bound.
 pub struct MemoryRateLimiter<C: Clock = DefaultClock> {
     clock: C,
-    limiters: Vec<(Rule, Keyed<C>)>,
+    /// One per rule, at `rule as usize`.
+    limiters: [Keyed<C>; Rule::ALL.len()],
 }
 
 impl Default for MemoryRateLimiter {
@@ -117,30 +140,17 @@ impl<C: Clock + Clone> MemoryRateLimiter<C> {
     /// With another clock: tests use `governor::clock::FakeRelativeClock` and step it.
     pub fn with_clock(clock: C) -> Self {
         let limiters = Rule::ALL
-            .into_iter()
-            .map(|rule| {
-                (
-                    rule,
-                    Governor::dashmap_with_clock(rule.governor_quota(), clock.clone()),
-                )
-            })
-            .collect();
+            .map(|rule| Governor::dashmap_with_clock(rule.governor_quota(), clock.clone()));
         Self { clock, limiters }
     }
 
     fn limiter(&self, rule: Rule) -> &Keyed<C> {
-        // `with_clock` makes one per rule in `Rule::ALL`, so this always finds one.
-        &self
-            .limiters
-            .iter()
-            .find(|(r, _)| *r == rule)
-            .unwrap_or_else(|| panic!("no limiter for {rule:?}"))
-            .1
+        &self.limiters[rule as usize]
     }
 
     /// Drops the keys whose state is back to fresh, and frees the memory they held.
     pub fn forget_idle(&self) {
-        for (_, limiter) in &self.limiters {
+        for limiter in &self.limiters {
             limiter.retain_recent();
             limiter.shrink_to_fit();
         }
@@ -186,6 +196,13 @@ mod tests {
     }
 
     #[test]
+    fn all_lists_every_rule_at_its_index() {
+        for (i, rule) in Rule::ALL.into_iter().enumerate() {
+            assert_eq!(rule as usize, i, "{rule:?}");
+        }
+    }
+
+    #[test]
     fn every_rule_has_a_valid_quota() {
         for rule in Rule::ALL {
             let _ = rule.governor_quota();
@@ -214,16 +231,16 @@ mod tests {
     #[test]
     fn keys_and_rules_count_separately() {
         let (l, _) = limiter();
-        let (burst, _) = Rule::ResetEmail.quota();
+        let (burst, _) = Rule::ResetEmailFromIp.quota();
         for _ in 0..burst {
-            check(&l, Rule::ResetEmail, "ana@example.com");
+            check(&l, Rule::ResetEmailFromIp, "ana@example.com");
         }
         assert!(matches!(
-            check(&l, Rule::ResetEmail, "ana@example.com"),
+            check(&l, Rule::ResetEmailFromIp, "ana@example.com"),
             Decision::Limited { .. }
         ));
         assert_eq!(
-            check(&l, Rule::ResetEmail, "bob@example.com"),
+            check(&l, Rule::ResetEmailFromIp, "bob@example.com"),
             Decision::Allowed
         );
         assert_eq!(

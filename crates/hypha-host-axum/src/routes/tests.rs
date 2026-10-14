@@ -711,7 +711,7 @@ async fn one_email_is_limited_however_many_addresses_try_it() {
     let (burst, _) = crate::rate_limit::Rule::LoginEmail.quota();
     let body = login_body(OWNER_EMAIL);
     for n in 0..burst {
-        let client = format!("203.0.113.{n}");
+        let client = format!("203.0.{}.{}", n / 250, n % 250);
         let headers = [("x-forwarded-for", client.as_str())];
         let (status, _) = send_with(&app, &headers, "POST", "/auth/login", Some(&body)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{client}");
@@ -726,6 +726,64 @@ async fn one_email_is_limited_however_many_addresses_try_it() {
     let other = login_body("someone@example.com");
     let (status, _) = send_with(&app, &headers, "POST", "/auth/login", Some(&other)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn hammering_an_email_from_one_address_does_not_lock_its_owner_out() {
+    let app = app_with(TrustedProxies::parse("127.0.0.1").unwrap()).await;
+    let (burst, _) = crate::rate_limit::Rule::LoginEmailFromIp.quota();
+    let attacker = [("x-forwarded-for", "203.0.113.66")];
+    let wrong = login_body(OWNER_EMAIL);
+    for _ in 0..burst {
+        send_with(&app, &attacker, "POST", "/auth/login", Some(&wrong)).await;
+    }
+    let (status, _) = send_with(&app, &attacker, "POST", "/auth/login", Some(&wrong)).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    // The owner, elsewhere, logs in as usual.
+    let owner = [("x-forwarded-for", "198.51.100.7")];
+    let right = json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string();
+    let (status, json) = send_with(&app, &owner, "POST", "/auth/login", Some(&right)).await;
+    assert_eq!(
+        (status, json["status"].as_str()),
+        (StatusCode::OK, Some("authenticated"))
+    );
+}
+
+#[tokio::test]
+async fn something_that_is_not_an_email_still_gets_its_answer() {
+    // A huge "email" isn't an email, so no email limit keys it (`auth::limit_email`,
+    // tested there); the request is just a wrong login.
+    let app = app().await;
+    let huge = "x".repeat(100_000);
+    let body = json!({ "email": huge, "password": "guess" }).to_string();
+    let (status, json) = send_with(&app, &[], "POST", "/auth/login", Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_credentials")
+    );
+}
+
+#[tokio::test]
+async fn asking_for_reset_links_does_not_block_using_one() {
+    let app = app().await;
+    let (burst, _) = crate::rate_limit::Rule::ResetIp.quota();
+    for n in 0..burst {
+        let body = json!({ "email": format!("user{n}@example.com") }).to_string();
+        send_with(&app, &[], "POST", "/auth/password-reset", Some(&body)).await;
+    }
+    let confirm = json!({ "token": "hypha_rst_nope", "password": "new password" }).to_string();
+    let (status, json) = send_with(
+        &app,
+        &[],
+        "POST",
+        "/auth/password-reset/confirm",
+        Some(&confirm),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_token")
+    );
 }
 
 #[tokio::test]
@@ -746,24 +804,24 @@ async fn a_forged_forwarded_for_does_not_escape_the_limit() {
 }
 
 #[tokio::test]
-async fn reset_requests_are_limited_per_email_and_still_202_until_then() {
+async fn reset_requests_for_one_email_are_limited_per_address() {
     let app = app_with(TrustedProxies::parse("127.0.0.1").unwrap()).await;
-    let (burst, _) = crate::rate_limit::Rule::ResetEmail.quota();
+    let (burst, _) = crate::rate_limit::Rule::ResetEmailFromIp.quota();
     let body = json!({ "email": OWNER_EMAIL }).to_string();
-    for n in 0..burst {
-        let client = format!("203.0.113.{n}");
-        let headers = [("x-forwarded-for", client.as_str())];
-        let (status, _) =
-            send_with(&app, &headers, "POST", "/auth/password-reset", Some(&body)).await;
+    let here = [("x-forwarded-for", "203.0.113.1")];
+    for _ in 0..burst {
+        let (status, _) = send_with(&app, &here, "POST", "/auth/password-reset", Some(&body)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
     }
-    let headers = [("x-forwarded-for", "198.51.100.1")];
-    let (status, json) =
-        send_with(&app, &headers, "POST", "/auth/password-reset", Some(&body)).await;
+    let (status, json) = send_with(&app, &here, "POST", "/auth/password-reset", Some(&body)).await;
     assert_eq!(
         (status, code(&json)),
         (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
     );
+    // From elsewhere the same email still gets its 202.
+    let there = [("x-forwarded-for", "198.51.100.1")];
+    let (status, _) = send_with(&app, &there, "POST", "/auth/password-reset", Some(&body)).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
 }
 
 #[tokio::test]
