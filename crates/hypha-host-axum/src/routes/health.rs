@@ -13,6 +13,6 @@ use crate::{
 pub(super) async fn check<S: Storage>(
     State(state): State<SharedState<S>>,
 ) -> Result<Json<Value>, ApiError> {
-    state.ports().await?;
+    state.public_ports().await?;
     Ok(Json(json!({ "status": "ok" })))
 }

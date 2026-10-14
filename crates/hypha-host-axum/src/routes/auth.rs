@@ -68,9 +68,10 @@ pub(super) enum LoginResponse {
 /// disabled account), deliberately the same answer.
 pub(super) async fn login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    JsonBody(req): JsonBody<LoginRequest>,
+    body: JsonBody<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    let ports = state.ports().await?;
+    let ports = state.public_ports().await?;
+    let req = body.parse()?;
     let step = login(&ports, &state.env, &req.email, &req.password).await?;
     Ok(Json(match step {
         LoginStep::Authenticated { session, token } => LoginResponse::Authenticated {
@@ -94,9 +95,10 @@ pub(super) async fn login_handler<S: Storage>(
 /// `invalid_mfa_code`; the fifth wrong code ends the challenge (then `invalid_token`).
 pub(super) async fn finish_login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    JsonBody(req): JsonBody<FinishLoginRequest>,
+    body: JsonBody<FinishLoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    let ports = state.ports().await?;
+    let ports = state.public_ports().await?;
+    let req = body.parse()?;
     let (session, token) = finish_login(&ports, &state.env, &req.challenge, &req.code).await?;
     Ok(Json(LoginResponse::Authenticated {
         session: SessionResponse::new(&session, &token)?,
@@ -108,8 +110,7 @@ pub(super) async fn logout_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
 ) -> Result<StatusCode, ApiError> {
-    let ports = state.ports().await?;
-    let staff = staff.authenticate(&ports, &state.clock).await?;
+    let (ports, staff) = staff.authenticate(&state).await?;
     logout(ports.sessions(), &state.clock, staff.session).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -125,15 +126,16 @@ pub(super) struct PasswordResetRequest {
 /// the answer nor its timing tells which emails exist.
 pub(super) async fn request_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    JsonBody(req): JsonBody<PasswordResetRequest>,
-) -> StatusCode {
+    body: JsonBody<PasswordResetRequest>,
+) -> Result<StatusCode, ApiError> {
+    let req = body.parse()?;
     S::spawn_password_reset(state, req.email);
-    StatusCode::ACCEPTED
+    Ok(StatusCode::ACCEPTED)
 }
 
 /// The work behind `request_reset_handler`; failures can only be logged.
 pub(crate) async fn password_reset_in_background<S: Storage>(state: SharedState<S>, email: String) {
-    let result = match state.ports().await {
+    let result = match state.public_ports().await {
         Ok(ports) => request_password_reset(&ports, &state.env, &email)
             .await
             .map_err(|e| e.to_string()),
@@ -154,9 +156,10 @@ pub(super) struct ConfirmResetRequest {
 /// Sets the new password and logs out every session of the account.
 pub(super) async fn confirm_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    JsonBody(req): JsonBody<ConfirmResetRequest>,
+    body: JsonBody<ConfirmResetRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ports = state.ports().await?;
+    let ports = state.public_ports().await?;
+    let req = body.parse()?;
     reset_password(&ports, &state.env, &req.token, &req.password).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -178,9 +181,10 @@ pub(super) struct AcceptedResponse {
 /// Creates the invited user and logs them in.
 pub(super) async fn accept_invite_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    JsonBody(req): JsonBody<AcceptInviteRequest>,
+    body: JsonBody<AcceptInviteRequest>,
 ) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
-    let ports = state.ports().await?;
+    let ports = state.public_ports().await?;
+    let req = body.parse()?;
     let input = AcceptInvite {
         token: req.token,
         name: req.name,

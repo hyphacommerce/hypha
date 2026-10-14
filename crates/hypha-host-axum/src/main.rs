@@ -93,7 +93,10 @@ fn parse_key(hex: &str) -> Result<[u8; 32], String> {
 /// optionally `HYPHA_OWNER_NAME`) create the owner (design note 0008, A11). Ignored once
 /// anyone exists.
 async fn ensure_owner<S: Storage>(state: &AppState<S>) -> Result<(), String> {
-    let ports = state.ports().await.map_err(|_| "cannot reach storage")?;
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "cannot reach storage")?;
     let email = std::env::var("HYPHA_OWNER_EMAIL").ok();
     let password = std::env::var("HYPHA_OWNER_PASSWORD").ok();
     let (Some(email), Some(password)) = (email, password) else {

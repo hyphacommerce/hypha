@@ -50,10 +50,10 @@ pub(super) struct AssignTaxClassRequest {
 pub(super) async fn create_class<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    JsonBody(req): JsonBody<CreateTaxClassRequest>,
+    body: JsonBody<CreateTaxClassRequest>,
 ) -> Result<(StatusCode, Json<TaxClassResponse>), ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = CreateTaxClass { name: req.name };
     let class = create_tax_class(&ctx, ports.tax_classes(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(TaxClassResponse::from(&class))))
@@ -62,10 +62,10 @@ pub(super) async fn create_class<S: Storage>(
 pub(super) async fn assign_class<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    JsonBody(req): JsonBody<AssignTaxClassRequest>,
+    body: JsonBody<AssignTaxClassRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = AssignTaxClass {
         products: req.products,
         class: req.tax_class,
@@ -132,10 +132,10 @@ impl From<&TaxRegion> for TaxRegionResponse {
 pub(super) async fn create_region<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    JsonBody(req): JsonBody<CreateTaxRegionRequest>,
+    body: JsonBody<CreateTaxRegionRequest>,
 ) -> Result<(StatusCode, Json<TaxRegionResponse>), ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = CreateTaxRegion {
         country: req.country,
         default_rate: req.default_rate_ppm,
@@ -149,8 +149,7 @@ pub(super) async fn fetch_region<S: Storage>(
     caller: Caller,
     PathId(id): PathId<TaxRegionId>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let region = get_tax_region(&ctx, ports.tax_regions(), id).await?;
     Ok(Json(TaxRegionResponse::from(&region)))
 }
@@ -159,10 +158,10 @@ pub(super) async fn update_region<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<TaxRegionId>,
-    JsonBody(req): JsonBody<UpdateTaxRegionRequest>,
+    body: JsonBody<UpdateTaxRegionRequest>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let region = match req.default_rate_ppm {
         Some(rate) => set_default_rate(&ctx, ports.tax_regions(), id, rate).await?,
         None => get_tax_region(&ctx, ports.tax_regions(), id).await?,
@@ -174,10 +173,10 @@ pub(super) async fn set_region_class_rate<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, class)): PathId<(TaxRegionId, TaxClassId)>,
-    JsonBody(req): JsonBody<SetClassRateRequest>,
+    body: JsonBody<SetClassRateRequest>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let region = set_class_rate(
         &ctx,
         ports.tax_regions(),
@@ -196,8 +195,7 @@ pub(super) async fn remove_region_class_rate<S: Storage>(
     caller: Caller,
     PathId((id, class)): PathId<(TaxRegionId, TaxClassId)>,
 ) -> Result<Json<TaxRegionResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let region = remove_class_rate(&ctx, ports.tax_regions(), id, class).await?;
     Ok(Json(TaxRegionResponse::from(&region)))
 }

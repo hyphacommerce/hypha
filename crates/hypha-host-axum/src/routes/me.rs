@@ -36,8 +36,7 @@ pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
 ) -> Result<Json<MeResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let staff = staff.authenticate(&ports, &state.clock).await?;
+    let (ports, staff) = staff.authenticate(&state).await?;
     let identity = ports
         .identities()
         .get(staff.session.identity())
@@ -66,10 +65,10 @@ pub(super) struct ChangePasswordRequest {
 pub(super) async fn change_password_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
-    JsonBody(req): JsonBody<ChangePasswordRequest>,
+    body: JsonBody<ChangePasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ports = state.ports().await?;
-    let staff = staff.authenticate(&ports, &state.clock).await?;
+    let (ports, staff) = staff.authenticate(&state).await?;
+    let req = body.parse()?;
     change_password(
         &ports,
         &state.env,
@@ -101,20 +100,24 @@ pub(super) struct StartTotpRequest {
 pub(super) async fn start_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
-    JsonBody(req): JsonBody<StartTotpRequest>,
+    body: JsonBody<StartTotpRequest>,
 ) -> Result<(StatusCode, Json<TotpSetupResponse>), ApiError> {
-    let ports = state.ports().await?;
-    let staff = staff.authenticate(&ports, &state.clock).await?;
-    // The store's name labels the entry in the authenticator app. Read as the system:
-    // labelling your own 2FA entry shouldn't need `stores:read`.
-    let directory = state.storage.directory().await?;
-    let store = get_store(&hypha_core::Ctx::system(), &directory, state.store).await?;
+    // The store's name labels the entry in the authenticator app. Read as the system
+    // (labelling your own 2FA entry shouldn't need `stores:read`), and first, so the
+    // directory's connection is back in the pool before the request's ports take one.
+    let issuer = {
+        let directory = state.storage.directory().await?;
+        let store = get_store(&hypha_core::Ctx::system(), &directory, state.store).await?;
+        store.name().to_string()
+    };
+    let (ports, staff) = staff.authenticate(&state).await?;
+    let req = body.parse()?;
     let setup = start_totp(
         ports.identities(),
         &state.env,
         staff.session.identity(),
         &req.password,
-        store.name(),
+        &issuer,
         staff.user.email().as_str(),
     )
     .await?;
@@ -149,10 +152,10 @@ fn code_error(e: hypha_auth::CommandError) -> ApiError {
 pub(super) async fn confirm_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
-    JsonBody(req): JsonBody<CodeRequest>,
+    body: JsonBody<CodeRequest>,
 ) -> Result<Json<RecoveryCodesResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let staff = staff.authenticate(&ports, &state.clock).await?;
+    let (ports, staff) = staff.authenticate(&state).await?;
+    let req = body.parse()?;
     let codes = confirm_totp(
         ports.identities(),
         &state.env,
@@ -169,10 +172,10 @@ pub(super) async fn confirm_totp_handler<S: Storage>(
 pub(super) async fn disable_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
-    JsonBody(req): JsonBody<CodeRequest>,
+    body: JsonBody<CodeRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ports = state.ports().await?;
-    let staff = staff.authenticate(&ports, &state.clock).await?;
+    let (ports, staff) = staff.authenticate(&state).await?;
+    let req = body.parse()?;
     disable_mfa(
         ports.identities(),
         &state.env,
@@ -187,10 +190,10 @@ pub(super) async fn disable_totp_handler<S: Storage>(
 pub(super) async fn recovery_codes_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
-    JsonBody(req): JsonBody<CodeRequest>,
+    body: JsonBody<CodeRequest>,
 ) -> Result<Json<RecoveryCodesResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let staff = staff.authenticate(&ports, &state.clock).await?;
+    let (ports, staff) = staff.authenticate(&state).await?;
+    let req = body.parse()?;
     let codes = regenerate_recovery_codes(
         ports.identities(),
         &state.env,

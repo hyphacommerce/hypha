@@ -145,10 +145,10 @@ impl From<&Customer> for CustomerResponse {
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    JsonBody(req): JsonBody<CreateCustomerRequest>,
+    body: JsonBody<CreateCustomerRequest>,
 ) -> Result<(StatusCode, Json<CustomerResponse>), ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = CreateCustomer {
         email: req.email,
         first_name: req.first_name,
@@ -164,8 +164,7 @@ pub(super) async fn fetch<S: Storage>(
     caller: Caller,
     PathId(id): PathId<CustomerId>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = get_customer(&ctx, ports.customers(), id).await?;
     Ok(Json(CustomerResponse::from(&customer)))
 }
@@ -174,10 +173,10 @@ pub(super) async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CustomerId>,
-    JsonBody(req): JsonBody<UpdateCustomerRequest>,
+    body: JsonBody<UpdateCustomerRequest>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = UpdateCustomer {
         email: req.email,
         first_name: req.first_name,
@@ -192,10 +191,10 @@ pub(super) async fn add_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CustomerId>,
-    JsonBody(req): JsonBody<AddressRequest>,
+    body: JsonBody<AddressRequest>,
 ) -> Result<(StatusCode, Json<CustomerResponse>), ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let customer = add_address(&ctx, ports.customers(), &state.ids, id, req.into()).await?;
     Ok((StatusCode::CREATED, Json(CustomerResponse::from(&customer))))
 }
@@ -204,10 +203,10 @@ pub(super) async fn update_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, address)): PathId<(CustomerId, AddressId)>,
-    JsonBody(req): JsonBody<AddressRequest>,
+    body: JsonBody<AddressRequest>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let customer = update_address(&ctx, ports.customers(), id, address, req.into()).await?;
     Ok(Json(CustomerResponse::from(&customer)))
 }
@@ -217,8 +216,7 @@ pub(super) async fn remove_address_handler<S: Storage>(
     caller: Caller,
     PathId((id, address)): PathId<(CustomerId, AddressId)>,
 ) -> Result<Json<CustomerResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = remove_address(&ctx, ports.customers(), id, address).await?;
     Ok(Json(CustomerResponse::from(&customer)))
 }

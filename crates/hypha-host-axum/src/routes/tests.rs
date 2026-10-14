@@ -50,7 +50,7 @@ async fn app() -> TestApp {
         env,
         store: store.id(),
     });
-    let ports = state.ports().await.unwrap();
+    let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {
         email: OWNER_EMAIL.to_string(),
         name: "Owner".to_string(),
@@ -616,4 +616,38 @@ async fn the_last_owner_cannot_be_disabled_over_http() {
     )
     .await;
     assert_eq!((status, code(&body)), (StatusCode::CONFLICT, "last_owner"));
+}
+
+#[tokio::test]
+async fn a_bad_token_is_refused_before_the_body_is_looked_at() {
+    let app = app().await;
+    let fake = format!("Bearer hypha_sk_{}", "0".repeat(64));
+    for body in ["{", r#"{"titel":"x"}"#] {
+        let (status, json) = send_with(
+            &app,
+            &[("authorization", &fake)],
+            "POST",
+            "/products",
+            Some(body),
+        )
+        .await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::UNAUTHORIZED, "invalid_token"),
+            "{body}"
+        );
+    }
+    // Keyed routes too: nothing is parsed or fingerprinted for a stranger.
+    let (status, json) = send_with(
+        &app,
+        &[("authorization", &fake), ("idempotency-key", "k1")],
+        "POST",
+        "/carts",
+        Some("{"),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_token")
+    );
 }

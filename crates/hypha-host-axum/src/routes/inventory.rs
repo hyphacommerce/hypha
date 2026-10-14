@@ -65,10 +65,10 @@ impl From<&Location> for LocationResponse {
 pub(super) async fn create_location_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    JsonBody(req): JsonBody<CreateLocationRequest>,
+    body: JsonBody<CreateLocationRequest>,
 ) -> Result<(StatusCode, Json<LocationResponse>), ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = CreateLocation {
         name: req.name,
         markets: req.markets,
@@ -83,8 +83,7 @@ pub(super) async fn fetch_location<S: Storage>(
     caller: Caller,
     PathId(id): PathId<LocationId>,
 ) -> Result<Json<LocationResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let location = get_location(&ctx, ports.locations(), id)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("location_not_found"))?;
@@ -95,10 +94,10 @@ pub(super) async fn update_location_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<LocationId>,
-    JsonBody(req): JsonBody<UpdateLocationRequest>,
+    body: JsonBody<UpdateLocationRequest>,
 ) -> Result<Json<LocationResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = UpdateLocation {
         name: req.name,
         markets: req.markets,
@@ -217,10 +216,10 @@ impl InventoryResponse {
 pub(super) async fn create_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    JsonBody(req): JsonBody<CreateInventoryItemRequest>,
+    body: JsonBody<CreateInventoryItemRequest>,
 ) -> Result<(StatusCode, Json<InventoryResponse>), ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = CreateInventoryItem {
         variant: req.variant,
         tracked: req.tracked,
@@ -235,8 +234,7 @@ pub(super) async fn fetch_item<S: Storage>(
     caller: Caller,
     PathId(id): PathId<InventoryItemId>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let item = get_inventory_item(&ctx, ports.inventory_items(), id).await?;
     Ok(Json(InventoryResponse::from(&item)))
 }
@@ -245,10 +243,10 @@ pub(super) async fn update_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<InventoryItemId>,
-    JsonBody(req): JsonBody<UpdateInventoryItemRequest>,
+    body: JsonBody<UpdateInventoryItemRequest>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = UpdateInventoryItem {
         tracked: req.tracked,
         continue_selling: req.continue_selling,
@@ -261,10 +259,10 @@ pub(super) async fn set_level<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((item, location)): PathId<(InventoryItemId, LocationId)>,
-    JsonBody(req): JsonBody<SetOnHandRequest>,
+    body: JsonBody<SetOnHandRequest>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = SetOnHand {
         item,
         location,
@@ -281,10 +279,10 @@ pub(super) async fn adjust_level<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((item, location)): PathId<(InventoryItemId, LocationId)>,
-    JsonBody(req): JsonBody<AdjustOnHandRequest>,
+    body: JsonBody<AdjustOnHandRequest>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = AdjustOnHand {
         item,
         location,
@@ -302,8 +300,7 @@ pub(super) async fn fetch_variant_inventory<S: Storage>(
     caller: Caller,
     PathId(variant): PathId<VariantId>,
 ) -> Result<Json<InventoryResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let response = match get_variant_inventory(&ctx, ports.inventory_items(), variant).await? {
         Some(item) => InventoryResponse::from(&item),
         None => InventoryResponse::untracked(variant),

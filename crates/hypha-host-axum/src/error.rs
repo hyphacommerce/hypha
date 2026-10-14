@@ -96,6 +96,14 @@ impl ApiError {
         self
     }
 
+    pub fn missing_content_type() -> Self {
+        Self::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "missing_content_type",
+            "expected a request with `Content-Type: application/json`",
+        )
+    }
+
     pub fn route_not_found() -> Self {
         Self::new(StatusCode::NOT_FOUND, "route_not_found", "no such route")
     }

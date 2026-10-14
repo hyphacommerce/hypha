@@ -1,11 +1,22 @@
 //! Wrappers around axum's extractors whose rejections are `ApiError`s, so a
 //! malformed body or path ID gets the same `{"error": ...}` JSON as everything else.
+//!
+//! Order matters for security: a handler first turns its `Caller` into ports and a
+//! `Ctx` (`Caller::authenticate`), and only then parses its body (`JsonBody::parse`,
+//! `KeyedJson::parse`). So a request with a bad token gets its 401 before any JSON is
+//! parsed or fingerprinted, and learns nothing about what a valid body looks like.
+
+use std::marker::PhantomData;
 
 use axum::{
     Json,
-    body::Body,
+    body::Bytes,
     extract::{FromRequest, FromRequestParts, Request},
-    http::{HeaderValue, StatusCode, header::AUTHORIZATION, request::Parts},
+    http::{
+        HeaderValue, StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE},
+        request::Parts,
+    },
     response::{IntoResponse, Response},
 };
 use hypha_auth::{HasApiKeys, TokenKind, authenticate_api_key};
@@ -14,22 +25,74 @@ use hypha_users::{StaffPorts, StaffSession, authenticate_staff};
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 
-use crate::error::ApiError;
+use crate::{
+    error::ApiError,
+    state::{AppState, Storage},
+};
 
-#[derive(FromRequest)]
-#[from_request(via(axum::Json), rejection(ApiError))]
-pub struct JsonBody<T>(pub T);
+/// The largest body read: axum's default limit for `Json`.
+const MAX_BODY: usize = 2 * 1024 * 1024;
+
+/// A JSON body, read but not yet parsed: call `parse` after authenticating (see the
+/// module docs). Checks the content type and parses with axum's rules, mapping its
+/// rejections to `ApiError`s like every other error.
+pub struct JsonBody<T> {
+    content_type: Option<HeaderValue>,
+    bytes: Bytes,
+    _body: PhantomData<fn() -> T>,
+}
+
+impl<S: Send + Sync, T> FromRequest<S> for JsonBody<T> {
+    type Rejection = ApiError;
+
+    async fn from_request(req: Request, _state: &S) -> Result<Self, ApiError> {
+        let (parts, body) = req.into_parts();
+        let bytes = axum::body::to_bytes(body, MAX_BODY)
+            .await
+            .map_err(|_| ApiError::body_too_large(MAX_BODY))?;
+        Ok(Self {
+            content_type: parts.headers.get(CONTENT_TYPE).cloned(),
+            bytes,
+            _body: PhantomData,
+        })
+    }
+}
+
+impl<T: DeserializeOwned> JsonBody<T> {
+    pub fn parse(self) -> Result<T, ApiError> {
+        if !is_json(self.content_type.as_ref()) {
+            return Err(ApiError::missing_content_type());
+        }
+        let Json(body) = Json::<T>::from_bytes(&self.bytes)?;
+        Ok(body)
+    }
+}
+
+/// `application/json` or `application/<something>+json`, parameters ignored, as axum's
+/// `Json` accepts.
+fn is_json(content_type: Option<&HeaderValue>) -> bool {
+    let Some(mime) = content_type.and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    let mime = mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    mime == "application/json" || (mime.starts_with("application/") && mime.ends_with("+json"))
+}
 
 #[derive(FromRequestParts)]
 #[from_request(via(axum::extract::Path), rejection(ApiError))]
 pub struct PathId<T>(pub T);
 
 /// Who is calling: the credentials a request carries (design note 0008, section 3).
-/// The extractor only reads headers; the handler then turns them into the `Ctx` every
-/// command checks its scopes against with `authenticate`, on the same ports it uses for
-/// the command (one pooled connection per request, not two). A handler that takes a
-/// `Caller` and never authenticates gets an unused-variable warning, which the
-/// zero-warning rule turns into a failure.
+/// The extractor only reads headers; the handler's first step is `authenticate`, which
+/// opens the request's ports (one pooled connection per request) and resolves the
+/// `Ctx` every command checks its scopes against. Ports come only from there (or from
+/// `AppState::public_ports`, named for the few routes that need no credentials), so a
+/// handler can't reach storage without authenticating.
 ///
 /// - `Authorization: Bearer hypha_sess_…`: a staff session, with the scopes of the
 ///   user's role, read fresh on every request;
@@ -105,28 +168,32 @@ impl Credential {
 }
 
 impl Caller {
-    /// The `Ctx` for these credentials: a staff member's role scopes or a key's.
-    pub async fn authenticate<P: StaffPorts + HasApiKeys>(
+    /// The request's ports and its `Ctx` (a staff member's role scopes or a key's). The
+    /// only way an authenticated handler gets ports: storage is reachable through the
+    /// credentials, so no handler can use it without them.
+    pub async fn authenticate<S: Storage>(
         self,
-        ports: &P,
-        clock: &impl Clock,
-    ) -> Result<Ctx, ApiError> {
-        Ok(match self.0.authenticate(ports, clock).await? {
+        state: &AppState<S>,
+    ) -> Result<(S::Ports<'_>, Ctx), ApiError> {
+        let ports = state.public_ports().await?;
+        let ctx = match self.0.authenticate(&ports, &state.clock).await? {
             Authenticated::Staff(staff) => staff.ctx,
             Authenticated::Key(ctx) => ctx,
-        })
+        };
+        Ok((ports, ctx))
     }
 }
 
 impl StaffCaller {
-    /// The staff session behind these credentials; an API key is `session_required`.
-    pub async fn authenticate<P: StaffPorts + HasApiKeys>(
+    /// The request's ports and the staff session behind these credentials; an API key
+    /// is `session_required`.
+    pub async fn authenticate<S: Storage>(
         self,
-        ports: &P,
-        clock: &impl Clock,
-    ) -> Result<StaffSession, ApiError> {
-        match self.0.authenticate(ports, clock).await? {
-            Authenticated::Staff(staff) => Ok(*staff),
+        state: &AppState<S>,
+    ) -> Result<(S::Ports<'_>, StaffSession), ApiError> {
+        let ports = state.public_ports().await?;
+        match self.0.authenticate(&ports, &state.clock).await? {
+            Authenticated::Staff(staff) => Ok((ports, *staff)),
             Authenticated::Key(_) => Err(ApiError::session_required()),
         }
     }
@@ -148,44 +215,59 @@ impl<S: Send + Sync> FromRequestParts<S> for StaffCaller {
     }
 }
 
-/// The largest body `KeyedJson` reads: axum's default limit for `Json`.
-const MAX_BODY: usize = 2 * 1024 * 1024;
-
 /// A JSON body like `JsonBody`, plus the request's `Idempotency-Key` header (design
-/// note 0007, section 5). The key goes to the command as sent, which checks it; the
-/// fingerprint is SHA-256 over the method, the path (lowercased: IDs are
-/// case-insensitive) with its query string, and the body in canonical JSON, so the same
-/// key with a different request is caught but a retry that re-serialized its body
-/// (other whitespace or key order) is not.
+/// note 0007, section 5); `parse` (after authenticating) returns both. The key goes to
+/// the command as sent, which checks it; the fingerprint is SHA-256 over the method, the
+/// path (lowercased: IDs are case-insensitive) with its query string, and the body in
+/// canonical JSON, so the same key with a different request is caught but a retry that
+/// re-serialized its body (other whitespace or key order) is not.
 pub struct KeyedJson<T> {
+    body: JsonBody<T>,
+    key: Option<String>,
+    method: String,
+    path: String,
+    query: String,
+}
+
+/// A parsed `KeyedJson`.
+pub struct Keyed<T> {
     pub body: T,
     pub idempotency: Option<IdempotencyRequest>,
 }
 
-impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for KeyedJson<T> {
+impl<S: Send + Sync, T> FromRequest<S> for KeyedJson<T> {
     type Rejection = ApiError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, ApiError> {
-        let (parts, body) = req.into_parts();
         // Not checked here: a key that isn't visible ASCII reaches the command, which
         // refuses it with `invalid_idempotency_key` like any other bad key.
-        let key = parts
-            .headers
+        let key = req
+            .headers()
             .get("idempotency-key")
             .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
-        let bytes = axum::body::to_bytes(body, MAX_BODY)
-            .await
-            .map_err(|_| ApiError::body_too_large(MAX_BODY))?;
+        let method = req.method().as_str().to_string();
+        let path = req.uri().path().to_ascii_lowercase();
+        let query = req.uri().query().unwrap_or("").to_string();
+        let body = JsonBody::from_request(req, state).await?;
+        Ok(Self {
+            body,
+            key,
+            method,
+            path,
+            query,
+        })
+    }
+}
 
-        let idempotency = key.map(|key| {
-            let path = parts.uri.path().to_ascii_lowercase();
-            let query = parts.uri.query().unwrap_or("");
-            let body = canonical_json(&bytes);
+impl<T: DeserializeOwned> KeyedJson<T> {
+    pub fn parse(self) -> Result<Keyed<T>, ApiError> {
+        let idempotency = self.key.map(|key| {
+            let body = canonical_json(&self.body.bytes);
             let mut hash = Sha256::new();
             for part in [
-                parts.method.as_str().as_bytes(),
-                path.as_bytes(),
-                query.as_bytes(),
+                self.method.as_bytes(),
+                self.path.as_bytes(),
+                self.query.as_bytes(),
                 &body,
             ] {
                 hash.update(part);
@@ -197,11 +279,10 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for KeyedJson<T> {
                 fingerprint: hash.finalize().into(),
             }
         });
-
-        // `JsonBody` checks the content type and parses, with the usual rejections.
-        let JsonBody(body) =
-            JsonBody::from_request(Request::from_parts(parts, Body::from(bytes)), state).await?;
-        Ok(Self { body, idempotency })
+        Ok(Keyed {
+            body: self.body.parse()?,
+            idempotency,
+        })
     }
 }
 

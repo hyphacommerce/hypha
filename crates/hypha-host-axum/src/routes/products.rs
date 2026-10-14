@@ -93,10 +93,10 @@ impl From<&Product> for ProductResponse {
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    JsonBody(req): JsonBody<CreateProductRequest>,
+    body: JsonBody<CreateProductRequest>,
 ) -> Result<(StatusCode, Json<ProductResponse>), ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = CreateSimpleProduct {
         handle: req.handle,
         title: req.title,
@@ -111,8 +111,7 @@ pub(super) async fn fetch<S: Storage>(
     caller: Caller,
     PathId(id): PathId<ProductId>,
 ) -> Result<Json<ProductResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let product = get_product(&ctx, ports.products(), id).await?;
     Ok(Json(ProductResponse::from(&product)))
 }
@@ -121,10 +120,10 @@ pub(super) async fn set_status<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
-    JsonBody(req): JsonBody<SetStatusRequest>,
+    body: JsonBody<SetStatusRequest>,
 ) -> Result<Json<ProductResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let product = set_product_status(&ctx, ports.products(), id, req.status.into()).await?;
     Ok(Json(ProductResponse::from(&product)))
 }

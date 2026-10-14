@@ -68,10 +68,10 @@ pub(super) struct CreatedApiKeyResponse {
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    JsonBody(req): JsonBody<CreateApiKeyRequest>,
+    body: JsonBody<CreateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<CreatedApiKeyResponse>), ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
     let input = CreateApiKey {
         kind: match req.kind {
             KindRequest::Secret => ApiKeyKind::Secret,
@@ -93,8 +93,7 @@ pub(super) async fn fetch<S: Storage>(
     caller: Caller,
     PathId(id): PathId<ApiKeyId>,
 ) -> Result<Json<ApiKeyResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let key = get_api_key(&ctx, ports.api_keys(), id).await?;
     Ok(Json(ApiKeyResponse::new(&key)?))
 }
@@ -105,8 +104,7 @@ pub(super) async fn revoke<S: Storage>(
     caller: Caller,
     PathId(id): PathId<ApiKeyId>,
 ) -> Result<Json<ApiKeyResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let key = revoke_api_key(&ctx, ports.api_keys(), &state.clock, id).await?;
     Ok(Json(ApiKeyResponse::new(&key)?))
 }

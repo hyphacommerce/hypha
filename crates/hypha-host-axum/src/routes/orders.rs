@@ -159,8 +159,8 @@ pub(super) async fn checkout_handler<S: Storage>(
     PathId(cart): PathId<CartId>,
     req: KeyedJson<CheckoutRequest>,
 ) -> Result<Response, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = req.parse()?;
     let input = Checkout {
         cart,
         expected_total: req.body.expected_total,
@@ -179,8 +179,7 @@ pub(super) async fn fetch<S: Storage>(
     caller: Caller,
     PathId(id): PathId<OrderId>,
 ) -> Result<Json<OrderResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let order = get_order(&ctx, ports.orders(), id).await?;
     Ok(Json(OrderResponse::new(&order)?))
 }
@@ -192,8 +191,7 @@ pub(super) async fn mark_paid<S: Storage>(
     caller: Caller,
     PathId(id): PathId<OrderId>,
 ) -> Result<Json<OrderResponse>, ApiError> {
-    let ports = state.ports().await?;
-    let ctx = caller.authenticate(&ports, &state.clock).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let order = mark_order_paid(&ctx, ports.orders(), id).await?;
     Ok(Json(OrderResponse::new(&order)?))
 }

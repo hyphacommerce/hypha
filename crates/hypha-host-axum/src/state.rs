@@ -171,10 +171,14 @@ pub struct AppState<S> {
 }
 
 impl<S: Storage> AppState<S> {
-    /// Ports scoped to the store this request is for. With one store per deployment
-    /// that's always `self.store`; a multi-store host would resolve it from the request
-    /// (API key, hostname) here, and nothing else would change.
-    pub async fn ports(&self) -> Result<S::Ports<'_>, ApiError> {
+    /// Ports scoped to the store this request is for, without credentials: only for
+    /// the routes that need none (health, login, password reset, invite acceptance) and
+    /// for startup. Every other handler gets its ports from `Caller::authenticate`.
+    ///
+    /// With one store per deployment the store is always `self.store`; a multi-store
+    /// host would resolve it from the request (API key, hostname) here, and nothing else
+    /// would change.
+    pub async fn public_ports(&self) -> Result<S::Ports<'_>, ApiError> {
         self.storage.ports(self.store).await
     }
 }
