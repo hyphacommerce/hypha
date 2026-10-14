@@ -548,3 +548,26 @@ fn an_open_cart_reads_at_current_prices() {
     let now = block_on(hypha_cart::get_cart(&Ctx::system(), &world.ports, cart)).unwrap();
     assert_eq!(view, now);
 }
+
+#[test]
+fn a_linked_customer_who_changed_email_gets_the_order_at_the_new_one() {
+    let world = World::new();
+    let id = CustomerId::from_uuid(Uuid::from_u128(1500));
+    let mut marko = Customer::new(id, Email::new("marko@example.hr").unwrap());
+    block_on(world.customers.insert(&mut marko)).unwrap();
+    let cart = world.cart();
+    block_on(set_cart_customer(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        Some(id),
+    ))
+    .unwrap();
+    // After linking, the customer changes their email; the cart's copy is now stale.
+    let new_email = Email::new("marko@novi.hr").unwrap();
+    marko.set_email(new_email.clone());
+    block_on(world.customers.update(&mut marko)).unwrap();
+
+    let order = world.checkout(cart).unwrap();
+    assert_eq!((order.customer(), order.email()), (id, &new_email));
+}

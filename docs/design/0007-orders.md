@@ -122,6 +122,13 @@ Inside one retry loop (inventory's `retry_on_conflict`, `MAX_ATTEMPTS`):
 Checkout calls domain functions, not the other crates' commands, so their scopes aren't
 checked again.
 
+*Decided while building (2026-10-14):* with only `checkout`, a guest's order joins the
+existing customer with the cart's email, and the response carries that customer's ID.
+Accepted, as Shopify does: the ID reveals nothing else, and every guest order shows an ID
+either way (a new customer's or the existing one's), so it doesn't tell whether the
+email had an account. A linked customer's order uses the email the customer has at
+checkout, not the cart's copy from when it was linked.
+
 ## 3. `WriteBatch` (O1)
 
 0001 §3.7 reserved this. Constraints: static dispatch (so `Send` stays provable), core

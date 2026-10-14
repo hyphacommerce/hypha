@@ -224,18 +224,23 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock>(
         .collect::<Result<Vec<_>, CommandError>>()?;
     let changed = reserve_lines(&mut stock_items, &locations, &reservations)?;
 
-    // The buyer (0007, O10): the linked customer, else the customer with this email,
-    // else a new one created with the order.
+    // The buyer (0007, O10): the linked customer, at the email they have now (the cart
+    // keeps a copy from when it was linked, which goes stale if they change it); else
+    // the customer with the cart's email; else a new one created with the order.
     let mut new_customer = None;
-    let customer = match priced.customer {
-        Some(linked) => linked,
+    let (customer, email) = match priced.customer {
+        Some(linked) => match ports.customers().get(linked).await? {
+            Some(buyer) => (linked, buyer.email().clone()),
+            // Customers aren't deleted, so this is a broken link; the cart's copy will do.
+            None => (linked, email),
+        },
         None => match ports.customers().get_by_email(&email).await? {
-            Some(existing) => existing.id(),
+            Some(existing) => (existing.id(), email),
             None => {
                 let guest = Customer::new(CustomerId::from_uuid(ids.new_uuid()), email.clone());
                 let id = guest.id();
                 new_customer = Some(guest);
-                id
+                (id, email)
             }
         },
     };
