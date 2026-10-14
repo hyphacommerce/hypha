@@ -1,0 +1,10 @@
+/* Astryx's pre-built CSS (design note 0011, P3): reset, components, theme. The order maps
+   to its cascade layers, so keep it. */
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+
+html,
+body {
+  height: 100%;
+}

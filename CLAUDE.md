@@ -35,6 +35,15 @@ Extend the wasm build list when a domain crate or storage adapter is added.
 - End-to-end check against a freshly started host (Git Bash on Windows), started with `HYPHA_OWNER_EMAIL=owner@example.com HYPHA_OWNER_PASSWORD=e2e-owner-password` (the script logs in as that owner): `bash scripts/e2e.sh` (`HYPHA_URL` for another port). Asserts status + error `code` per step, exits non-zero on failure. Run it after changing routes, DTOs or error mapping, and add a step for new routes. Against Postgres, use a fresh database (the script reuses handles and countries): `docker compose exec -T postgres psql -U hypha -c "DROP DATABASE IF EXISTS hypha_e2e" -c "CREATE DATABASE hypha_e2e"`, then start the host with `DATABASE_URL=.../hypha_e2e` and a `HYPHA_SECRET_KEY`.
 - Postgres (Docker Desktop): `docker compose up -d`, then `DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha cargo test -p hypha-store-postgres` runs the repository contract against it (each test gets its own schema). Without `DATABASE_URL` those tests skip themselves.
 
+## TypeScript apps (design note 0011)
+
+The repo is also a pnpm workspace (`pnpm-workspace.yaml`): `apps/admin` (the admin panel: Next.js App Router run with vinext on Vite, Astryx components) and `packages/sdk` (`@hypha/sdk`: types generated from `openapi/*.json` with `openapi-typescript`, clients on `openapi-fetch`).
+
+- `pnpm install`, `pnpm admin:dev` (http://localhost:3001; copy `apps/admin/.env.example` to `apps/admin/.dev.vars` first, and run the API on the URL it names), `pnpm admin:build`, `pnpm typecheck`.
+- After the OpenAPI documents change: `pnpm sdk:generate` (committed; `pnpm sdk:check` fails while stale).
+- The admin is a backend for its own frontend: only its server code (`apps/admin/lib/hypha.ts`) calls the API, and the staff session stays in an httpOnly cookie. Standard Next.js APIs only (no vinext-specific ones), so `pnpm exec next build` keeps working too.
+- Astryx is 0.x: versions are pinned exactly; `pnpm exec astryx component <Name>` / `astryx template --list` document components and page templates.
+
 ## Architecture (hexagonal / ports and adapters)
 
 Dependencies point inward: hosts → domain crates → core. Core and domain crates never depend on storage, HTTP or runtimes.

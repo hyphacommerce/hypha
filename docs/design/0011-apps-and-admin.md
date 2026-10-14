@@ -1,6 +1,6 @@
 # 0011: The TypeScript apps, and the admin
 
-- **Status:** Accepted (2026-10-14). Danilo chose the direction in conversation: one
+- **Status:** Accepted and built (2026-10-15, branch `feat/admin-app`). Danilo chose the direction in conversation: one
   monorepo, Next.js for the apps (run with vinext so they deploy to Cloudflare like the
   API), and Astryx as the design system. Versions are pinned as of this date.
 - **Scope:** how the repository holds the TypeScript apps next to the Rust crates, the
@@ -121,7 +121,33 @@ pnpm --filter admin build       # vinext production build
 pnpm --filter admin typecheck
 ```
 
-## 7. Hard to reverse
+## 7. As built (2026-10-15)
+
+- **Versions pinned:** Next.js 16.4.1 (types and the `next build` fallback), vinext 1.2.0,
+  Vite 8.3.0, React 19.3.1, Astryx 0.7.0 (`core`, `theme-neutral`, `cli`), Heroicons
+  2.2.0 (the Astryx templates' icons), `openapi-typescript` 7.13.0 and `openapi-fetch`
+  0.17.0, pnpm 12.
+- **TypeScript 5.9, not 7:** `openapi-typescript` generates through the TypeScript
+  compiler API, which the native TypeScript 7 doesn't offer.
+- **pnpm's guards, kept on:** dependency install scripts are blocked except `workerd`'s
+  (it fetches the Workers runtime the dev server uses); Astryx's only print a setup hint.
+  pnpm also holds back packages published within its waiting period; the pinned versions
+  newer than that are listed as deliberate exceptions in `pnpm-workspace.yaml`.
+- **No `runWorkerFirst`:** the vinext scaffold sends every request to the Worker first.
+  Under the Cloudflare Vite plugin's dev server that included Vite's own requests (its
+  client, the CSS), so stylesheets came back as pages. Without it, existing static files
+  are served directly and everything else reaches the Worker.
+- **`HYPHA_API_URL`** is declared as a Worker secret (`bindings.secret()` in
+  `cloudflare.config.ts`): read from `.dev.vars` locally, set as a secret per deployment.
+  The newer `cf` config doesn't pick variables up without a declaration.
+- **Screens from Astryx templates:** the login card from `login-split`, the frame from
+  `shell-nav` (`astryx template <id>`).
+- **Checked end to end in a browser:** a wrong password shows the API's message, the
+  right one opens the shell, page scripts can't read the session cookie, sign-out revokes
+  the session, and with 2FA on, login goes through the code page. Both `vite build` and
+  `next build` succeed.
+
+## 8. Hard to reverse
 
 - **P1:** cheap to split later; merging repositories back is not.
 - **P2:** the app is plain Next.js, so leaving vinext means changing how it is built and
