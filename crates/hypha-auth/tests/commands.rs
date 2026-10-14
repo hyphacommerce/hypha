@@ -339,6 +339,64 @@ fn confirming_needs_the_code_from_the_app() {
 }
 
 #[test]
+fn wrong_codes_at_confirmation_count_and_lock() {
+    let (ports, env) = world();
+    let setup = block_on(start_totp(
+        &ports.identities,
+        &env,
+        identity_id(),
+        PASSWORD,
+        "Shop",
+        "ana",
+    ))
+    .unwrap();
+    for _ in 0..5 {
+        assert_eq!(
+            block_on(confirm_totp(
+                &ports.identities,
+                &env,
+                identity_id(),
+                "000000"
+            )),
+            Err(CommandError::InvalidMfaCode)
+        );
+    }
+    let until = env.now().plus_secs(Identity::MFA_LOCK_SECS);
+    assert_eq!(
+        block_on(confirm_totp(
+            &ports.identities,
+            &env,
+            identity_id(),
+            &code(&setup.secret, env.now(), 0)
+        )),
+        Err(CommandError::MfaLocked { until })
+    );
+    assert!(!identity(&ports).mfa_enabled());
+}
+
+#[test]
+fn a_used_code_sent_again_is_refused_without_counting() {
+    let (ports, env) = world();
+    let (secret, _) = enable_mfa(&ports, &env);
+    let used = code(&secret, env.now(), 0);
+    let challenge = token_of(&login(&ports, &env));
+    block_on(finish_login(&ports, &env, &challenge, &used)).unwrap();
+    // Sent again (a double submit) more times than the lockout allows.
+    for _ in 0..6 {
+        assert_eq!(
+            block_on(regenerate_recovery_codes(
+                &ports.identities,
+                &env,
+                identity_id(),
+                &used
+            )),
+            Err(CommandError::InvalidMfaCode)
+        );
+    }
+    assert_eq!(identity(&ports).mfa_locked_until(env.now()), None);
+}
+
+#[test]
 fn the_setup_secret_is_stored_sealed() {
     let (ports, env) = world();
     let setup = block_on(start_totp(

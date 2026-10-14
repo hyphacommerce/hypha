@@ -258,27 +258,32 @@ fn use_second_factor(
         return Err(CommandError::MfaLocked { until });
     }
     let code = code.trim();
-    let right = if code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()) {
+    let check = if code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()) {
         match identity.totp() {
             Some((sealed, true, last_step)) => {
                 let secret = env.open(sealed, identity.id().to_string().as_bytes())?;
-                match totp::verify(&secret, code, now, last_step) {
-                    Some(step) => {
-                        identity.record_totp_step(step)?;
-                        true
-                    }
-                    None => false,
-                }
+                totp::check(&secret, code, now, last_step)
             }
-            _ => false,
+            _ => totp::Check::Wrong,
         }
+    } else if recovery::hash(code).is_some_and(|hash| identity.use_recovery_code(hash)) {
+        return Ok(true);
     } else {
-        recovery::hash(code).is_some_and(|hash| identity.use_recovery_code(hash))
+        totp::Check::Wrong
     };
-    if !right {
-        identity.record_mfa_failure(now);
+    match check {
+        totp::Check::Valid(step) => {
+            identity.record_totp_step(step)?;
+            Ok(true)
+        }
+        // The right code, already used (a double submit, often): refused, but not a
+        // guess, so it doesn't count toward the lockout.
+        totp::Check::Replayed => Ok(false),
+        totp::Check::Wrong => {
+            identity.record_mfa_failure(now);
+            Ok(false)
+        }
     }
-    Ok(right)
 }
 
 /// Finishes a login that owes a second factor: `challenge` is the pending session's
@@ -563,26 +568,47 @@ pub async fn start_totp<R: IdentityRepo>(
 }
 
 /// Turns the second factor on once `code` from the app checks out. Returns the
-/// recovery codes, which are never shown again.
+/// recovery codes, which are never shown again. Wrong codes count toward the lockout
+/// like everywhere else, committed before the answer (see `use_second_factor`):
+/// otherwise a stolen session could guess its way into confirming a pending setup and
+/// walk away with the recovery codes.
 pub async fn confirm_totp<R: IdentityRepo>(
     identities: &R,
     env: &impl AuthEnv,
     identity: IdentityId,
     code: &str,
 ) -> Result<Vec<String>, CommandError> {
-    let mut identity = load_identity(identities, identity).await?;
-    let (sealed, confirmed, last_step) =
-        identity.totp().ok_or(IdentityError::MfaSetupNotStarted)?;
-    if confirmed {
-        return Err(IdentityError::MfaAlreadyEnabled.into());
+    for _ in 0..MAX_ROUNDS {
+        let now = env.now();
+        let mut identity = load_identity(identities, identity).await?;
+        let (sealed, confirmed, last_step) =
+            identity.totp().ok_or(IdentityError::MfaSetupNotStarted)?;
+        if confirmed {
+            return Err(IdentityError::MfaAlreadyEnabled.into());
+        }
+        if let Some(until) = identity.mfa_locked_until(now) {
+            return Err(CommandError::MfaLocked { until });
+        }
+        let secret = env.open(sealed, identity.id().to_string().as_bytes())?;
+        let codes = match totp::check(&secret, code, now, last_step) {
+            totp::Check::Valid(step) => {
+                let codes = recovery::generate(env);
+                identity.confirm_totp(step, codes.hashes)?;
+                Some(codes.codes)
+            }
+            totp::Check::Replayed => None,
+            totp::Check::Wrong => {
+                identity.record_mfa_failure(now);
+                None
+            }
+        };
+        match identities.update(&mut identity).await {
+            Ok(()) => return codes.ok_or(CommandError::InvalidMfaCode),
+            Err(RepoError::StaleVersion) => continue,
+            Err(e) => return Err(e.into()),
+        }
     }
-    let secret = env.open(sealed, identity.id().to_string().as_bytes())?;
-    let step =
-        totp::verify(&secret, code, env.now(), last_step).ok_or(CommandError::InvalidMfaCode)?;
-    let codes = recovery::generate(env);
-    identity.confirm_totp(step, codes.hashes)?;
-    identities.update(&mut identity).await?;
-    Ok(codes.codes)
+    Err(RepoError::StaleVersion.into())
 }
 
 /// Turns the second factor off. Needs a current TOTP or recovery code; wrong ones

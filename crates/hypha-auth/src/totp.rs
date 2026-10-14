@@ -36,24 +36,55 @@ pub fn code_at(secret: &[u8], step: u64) -> u32 {
     value % 10u32.pow(DIGITS)
 }
 
-/// The step `code` is valid for, checking one step either side of `now` for clock
-/// drift, or `None`. A step at or before `last_used` is refused, so a code someone
-/// watched being typed can't be used again.
-pub fn verify(secret: &[u8], code: &str, now: Timestamp, last_used: Option<u64>) -> Option<u64> {
+/// What a code is, checked against the steps around `now`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Check {
+    /// Right, for this step, which hasn't been used yet.
+    Valid(u64),
+    /// Right, but for a step at or before `last_used`: someone (the user, a double
+    /// submit, or whoever watched it typed) already used it. Refused, but not a guess.
+    Replayed,
+    Wrong,
+}
+
+/// Checks `code` against one step either side of `now` (clock drift). A step at or
+/// before `last_used` is `Replayed`, so a code can't be used twice.
+pub fn check(secret: &[u8], code: &str, now: Timestamp, last_used: Option<u64>) -> Check {
     let code = code.trim();
     if code.len() != DIGITS as usize || !code.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
+        return Check::Wrong;
     }
-    let wanted: u32 = code.parse().ok()?;
+    let Ok(wanted) = code.parse::<u32>() else {
+        return Check::Wrong;
+    };
     let current = step_at(now);
-    [
+    let mut replayed = false;
+    for step in [
         current.saturating_sub(1),
         current,
         current.saturating_add(1),
-    ]
-    .into_iter()
-    .filter(|step| last_used.is_none_or(|last| *step > last))
-    .find(|step| constant_time_eq(code_at(secret, *step), wanted))
+    ] {
+        if !constant_time_eq(code_at(secret, step), wanted) {
+            continue;
+        }
+        if last_used.is_none_or(|last| step > last) {
+            return Check::Valid(step);
+        }
+        replayed = true;
+    }
+    if replayed {
+        Check::Replayed
+    } else {
+        Check::Wrong
+    }
+}
+
+/// The step `code` is valid for, or `None` (wrong or replayed); see `check`.
+pub fn verify(secret: &[u8], code: &str, now: Timestamp, last_used: Option<u64>) -> Option<u64> {
+    match check(secret, code, now, last_used) {
+        Check::Valid(step) => Some(step),
+        Check::Replayed | Check::Wrong => None,
+    }
 }
 
 /// Compares without an early exit, so timing doesn't tell how close a guess was.
@@ -175,6 +206,19 @@ mod tests {
         let code = format!("{:06}", code_at(RFC_SECRET, step));
         assert_eq!(verify(RFC_SECRET, &code, now, Some(step - 1)), Some(step));
         assert_eq!(verify(RFC_SECRET, &code, now, Some(step)), None);
+    }
+
+    #[test]
+    fn a_used_code_is_replayed_not_wrong() {
+        let now = at(1_111_111_111);
+        let step = step_at(now);
+        let code = format!("{:06}", code_at(RFC_SECRET, step));
+        assert_eq!(check(RFC_SECRET, &code, now, Some(step)), Check::Replayed);
+        assert_eq!(
+            check(RFC_SECRET, &code, now, Some(step - 1)),
+            Check::Valid(step)
+        );
+        assert_eq!(check(RFC_SECRET, "000000", now, Some(step)), Check::Wrong);
     }
 
     #[test]
