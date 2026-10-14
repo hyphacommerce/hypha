@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end check against a running hypha-host-axum (in-memory storage).
+# End-to-end check against a running hypha-host-axum, on either storage.
 #
 #   cargo run -p hypha-host-axum      # in one terminal
 #   bash scripts/e2e.sh               # in another (Git Bash on Windows)
@@ -331,6 +331,40 @@ step "invalid cart email" 422 invalid_email -X PUT "$BASE/carts/$BUYER_CART/emai
     -d '{"email":"nope"}'
 step "zero quantity" 422 invalid_quantity -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":0}"
+step "get mug" 200 - "$BASE/products/$MUG"
+contains "mug has its handle" '"handle":"mug"'
+step "unknown product" 404 product_not_found "$BASE/products/prod_00000000000000000000000000000063"
+step "get lamp inventory item" 200 - "$BASE/inventory-items/$LAMP_ITEM"
+step "handle with a space" 422 invalid_handle -X POST "$BASE/products" -H "$JSON" \
+    -d '{"handle":"blue mug","title":"Mug","price":{"amount":1,"currency":"EUR"}}'
+step "blank product title" 422 field_required -X POST "$BASE/products" -H "$JSON" \
+    -d '{"handle":"untitled","title":" ","price":{"amount":1,"currency":"EUR"}}'
+step "body without content type" 415 missing_content_type -X POST "$BASE/products" \
+    -d '{"handle":"x","title":"X","price":{"amount":1,"currency":"EUR"}}'
+step "market without countries" 422 no_countries -X POST "$BASE/markets" -H "$JSON" \
+    -d '{"name":"Nowhere","countries":[],"currency":"EUR"}'
+step "market listing a country twice" 422 duplicate_country -X POST "$BASE/markets" -H "$JSON" \
+    -d '{"name":"France","countries":["FR","FR"],"currency":"EUR"}'
+step "discount beyond 100%" 422 invalid_basis_points -X POST "$BASE/price-lists" -H "$JSON" \
+    -d '{"currency":"EUR","adjustment_bps":-10001}'
+step "the same variant twice in fixed prices" 422 duplicate_fixed_price -X PUT \
+    "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":1,\"currency\":\"EUR\"}},{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":2,\"currency\":\"EUR\"}}]}"
+step "unknown price list in a body" 422 price_list_not_found -X PUT "$BASE/catalogs/$CATALOG/price-list" \
+    -H "$JSON" -d '{"price_list":"pl_00000000000000000000000000000063"}'
+step "unknown market in a body" 422 market_not_found -X POST "$BASE/catalogs" -H "$JSON" \
+    -d '{"market":"mkt_00000000000000000000000000000063"}'
+step "unknown variant in a cart line" 422 variant_not_found -X POST "$BASE/carts/$CART/lines" \
+    -H "$JSON" -d '{"variant":"var_00000000000000000000000000000063","quantity":1}'
+step "create overflow cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+OVERFLOW_CART=$(id)
+step "add 4294967295 lamps" 200 - -X POST "$BASE/carts/$OVERFLOW_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":4294967295}"
+step "one lamp too many" 422 quantity_overflow -X POST "$BASE/carts/$OVERFLOW_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":1}"
+LONG=$(printf 'x%.0s' $(seq 1 256))
+step "first name over 255 characters" 422 field_too_long -X PATCH "$BASE/customers/$CUSTOMER" \
+    -H "$JSON" -d "{\"first_name\":\"$LONG\"}"
 step "create draft product" 201 - -X POST "$BASE/products" -H "$JSON" \
     -d '{"handle":"draft","title":"Draft","price":{"amount":1,"currency":"EUR"}}'
 step "draft -> archived" 422 invalid_status_transition -X PATCH "$BASE/products/$(id)/status" \
