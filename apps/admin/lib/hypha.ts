@@ -4,7 +4,7 @@
 
 import { type AdminSchemas, type ApiError, createAdminClient } from "@hypha/sdk/admin";
 import { cookies, headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 const SESSION_COOKIE = "hypha_admin_session";
 /** A pending login's second-factor challenge, for the few minutes it lives. */
@@ -84,6 +84,24 @@ export async function requireStaff(): Promise<AdminSchemas["MeResponse"]> {
   throw new Error(`GET /admin/me failed with ${response.status}`);
 }
 
+/**
+ * The data of an API call a page needs. A session the API no longer accepts goes to the
+ * login page and a missing resource to the 404 page; anything else is a bug or an
+ * outage, so it throws to the error page.
+ */
+export function loaded<T>(result: {
+  data?: T;
+  error?: ApiError;
+  response: Response;
+}): T {
+  if (result.data !== undefined) return result.data;
+  if (result.response.status === 401) redirect("/login");
+  if (result.response.status === 404) notFound();
+  throw new Error(
+    `${result.response.url} failed with ${result.response.status} ${result.error?.code ?? ""}`,
+  );
+}
+
 /** A message for the person at the screen, by the API's stable error code. */
 export function describe(error: ApiError): string {
   switch (error.code) {
@@ -95,6 +113,12 @@ export function describe(error: ApiError): string {
       return "Too many wrong codes. Try again in a few minutes.";
     case "invalid_token":
       return "That sign-in expired. Start again.";
+    case "handle_taken":
+      return "Another product already uses that handle. Pick a different one.";
+    case "missing_scope":
+      return "Your role doesn't allow this. Ask the store owner for access.";
+    case "concurrent_modification":
+      return "Someone else changed this at the same time. Reload and try again.";
     case "rate_limited": {
       const secs = (error.details as { retry_after_secs?: number } | null)?.retry_after_secs;
       return secs ? `Too many attempts. Try again in ${secs} seconds.` : "Too many attempts.";

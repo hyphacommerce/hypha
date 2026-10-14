@@ -26,7 +26,15 @@ pnpm admin:dev
   cookie (`hypha_admin_session`) page scripts can't read.
 - **Login** (`app/login`): email and password, then a code page when 2FA is on.
 - **Signed-in pages** live in `app/(admin)`; its layout checks the session on every
-  request (`requireStaff`).
+  request (`requireStaff`). Pages are server components that read with
+  `loaded(await client.GET(…))` (a dead session goes to login, a missing resource to
+  404); changes go through server actions next to them (`actions.ts`), which return
+  `{error}` with the message from `describe` and revalidate the pages they affect.
+- **Built so far:** products (list with status filter, detail with status changes,
+  add), orders (list, detail, mark as paid), Settings › Store (rename). Lists page
+  forward with the API's opaque cursors (`components/pager.tsx`, design note 0012).
+- **Money and dates** go through `lib/format.ts`: integer minor units, a fixed locale
+  and UTC, so server and browser render the same text.
 - **Screens** start from Astryx templates (`pnpm exec astryx template --list`): the
   login card from `login-split`, the frame from `shell-nav`. `pnpm exec astryx component
   <Name>` prints any component's props and guidance.

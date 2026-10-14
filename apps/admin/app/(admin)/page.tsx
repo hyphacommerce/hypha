@@ -19,7 +19,7 @@ export default async function HomePage() {
             Welcome, {me.user.name}
           </Text>
           <Text type="body" color="secondary">
-            Catalog, orders and customers arrive here as their list endpoints land.
+            Products, orders and store settings are in the menu; customers and markets come next.
           </Text>
         </VStack>
 

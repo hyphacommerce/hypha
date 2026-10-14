@@ -35,8 +35,8 @@ const NAV: {
     title: "Store",
     items: [
       { label: "Home", href: "/", icon: HomeIcon, isReady: true },
-      { label: "Orders", href: "/orders", icon: ShoppingBagIcon, isReady: false },
-      { label: "Products", href: "/products", icon: CubeIcon, isReady: false },
+      { label: "Orders", href: "/orders", icon: ShoppingBagIcon, isReady: true },
+      { label: "Products", href: "/products", icon: CubeIcon, isReady: true },
       { label: "Customers", href: "/customers", icon: UsersIcon, isReady: false },
       { label: "Markets", href: "/markets", icon: GlobeEuropeAfricaIcon, isReady: false },
     ],
@@ -44,12 +44,17 @@ const NAV: {
   {
     title: "Settings",
     items: [
-      { label: "Store", href: "/settings/store", icon: BuildingStorefrontIcon, isReady: false },
+      { label: "Store", href: "/settings/store", icon: BuildingStorefrontIcon, isReady: true },
       { label: "Staff", href: "/settings/staff", icon: UsersIcon, isReady: false },
       { label: "API keys", href: "/settings/api-keys", icon: KeyIcon, isReady: false },
     ],
   },
 ];
+
+/** Whether `href` is the section of `pathname`: itself, or a page under it. */
+function isCurrent(pathname: string, href: string): boolean {
+  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export function AdminShell({
   userName,
@@ -101,7 +106,7 @@ export function AdminShell({
                   label={item.label}
                   href={item.isReady ? item.href : undefined}
                   icon={item.icon}
-                  isSelected={pathname === item.href}
+                  isSelected={isCurrent(pathname, item.href)}
                   isDisabled={!item.isReady}
                 />
               ))}
