@@ -50,6 +50,7 @@ async fn app() -> TestApp {
         env,
         background: Default::default(),
         store: store.id(),
+        store_name: store.name().to_string(),
     });
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {

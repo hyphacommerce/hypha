@@ -70,8 +70,9 @@ pub(super) async fn login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     body: JsonBody<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    let ports = state.public_ports().await?;
+    // Parsed first: a malformed body costs no pooled connection.
     let req = body.parse()?;
+    let ports = state.public_ports().await?;
     let step = login(&ports, &state.env, &req.email, &req.password).await?;
     Ok(Json(match step {
         LoginStep::Authenticated { session, token } => LoginResponse::Authenticated {
@@ -97,8 +98,8 @@ pub(super) async fn finish_login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     body: JsonBody<FinishLoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    let ports = state.public_ports().await?;
     let req = body.parse()?;
+    let ports = state.public_ports().await?;
     let (session, token) = finish_login(&ports, &state.env, &req.challenge, &req.code).await?;
     Ok(Json(LoginResponse::Authenticated {
         session: SessionResponse::new(&session, &token)?,
@@ -158,8 +159,8 @@ pub(super) async fn confirm_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     body: JsonBody<ConfirmResetRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let ports = state.public_ports().await?;
     let req = body.parse()?;
+    let ports = state.public_ports().await?;
     reset_password(&ports, &state.env, &req.token, &req.password).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -183,8 +184,8 @@ pub(super) async fn accept_invite_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     body: JsonBody<AcceptInviteRequest>,
 ) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
-    let ports = state.public_ports().await?;
     let req = body.parse()?;
+    let ports = state.public_ports().await?;
     let input = AcceptInvite {
         token: req.token,
         name: req.name,

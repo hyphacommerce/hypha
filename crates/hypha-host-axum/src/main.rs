@@ -150,6 +150,7 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         env,
         background: Default::default(),
         store: store.id(),
+        store_name: store.name().to_string(),
     });
     if let Err(e) = ensure_owner(&state).await {
         tracing::error!("owner setup failed: {e}");

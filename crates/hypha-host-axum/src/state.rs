@@ -210,6 +210,9 @@ pub struct AppState<S> {
     pub background: Background,
     /// The one store this deployment serves (design note 0006, model A), set at startup.
     pub store: StoreId,
+    /// Its name at startup, for labels that shouldn't cost a query (the entry in an
+    /// authenticator app). A rename shows there after a restart.
+    pub store_name: String,
 }
 
 impl<S: Storage> AppState<S> {

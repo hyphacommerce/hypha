@@ -7,7 +7,6 @@ use hypha_auth::{
     regenerate_recovery_codes, start_totp,
 };
 use hypha_core::{RoleId, Scope};
-use hypha_stores::get_store;
 use serde::{Deserialize, Serialize};
 
 use super::staff::UserResponse;
@@ -102,14 +101,6 @@ pub(super) async fn start_totp_handler<S: Storage>(
     staff: StaffCaller,
     body: JsonBody<StartTotpRequest>,
 ) -> Result<(StatusCode, Json<TotpSetupResponse>), ApiError> {
-    // The store's name labels the entry in the authenticator app. Read as the system
-    // (labelling your own 2FA entry shouldn't need `stores:read`), and first, so the
-    // directory's connection is back in the pool before the request's ports take one.
-    let issuer = {
-        let directory = state.storage.directory().await?;
-        let store = get_store(&hypha_core::Ctx::system(), &directory, state.store).await?;
-        store.name().to_string()
-    };
     let (ports, staff) = staff.authenticate(&state).await?;
     let req = body.parse()?;
     let setup = start_totp(
@@ -117,7 +108,8 @@ pub(super) async fn start_totp_handler<S: Storage>(
         &state.env,
         staff.session.identity(),
         &req.password,
-        &issuer,
+        // Labels the entry in the authenticator app.
+        &state.store_name,
         staff.user.email().as_str(),
     )
     .await?;
