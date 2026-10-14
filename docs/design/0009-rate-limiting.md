@@ -1,8 +1,8 @@
 # 0009: Rate limiting
 
-- **Status:** Accepted (2026-10-14). Danilo accepted the defaults below in conversation
-  ("write 0009 with those defaults"); the numbers in section 3 are starting points,
-  tuned once there is traffic to look at.
+- **Status:** Accepted and built (2026-10-14, branch `feat/rate-limiting`). Danilo
+  accepted the defaults below in conversation ("write 0009 with those defaults"); the
+  numbers in section 3 are starting points, tuned once there is traffic to look at.
 - **Scope:** limits on the routes that need no credentials (login, the second factor,
   password reset, invite acceptance), the client IP behind proxies, and the port that
   lets each host keep the counts where it can.
