@@ -30,8 +30,10 @@ use serde_json::{Value, json};
 /// - `total_changed`: `{"expected": Money, "actual": Money}`
 /// - `cart_completed`: `{"order": "ord_…"}`
 /// - `mfa_locked`: `{"locked_until": "<RFC 3339>"}`
+/// - `rate_limited`: `{"retry_after_secs": n}`, also sent as `Retry-After`
 ///
-/// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 403
+/// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
+/// a rate limit or locked second factor; 403
 /// missing scope, or granting a scope the caller lacks; 404 when the resource in the URL
 /// doesn't exist;
 /// 409 conflicts with existing data, the current state of the resource in the URL, or a
@@ -44,6 +46,8 @@ pub struct ApiError {
     code: &'static str,
     message: String,
     details: Option<serde_json::Value>,
+    /// Seconds for a `Retry-After` header (429 only).
+    retry_after_secs: Option<u64>,
 }
 
 impl ApiError {
@@ -53,7 +57,23 @@ impl ApiError {
             code,
             message: message.to_string(),
             details: None,
+            retry_after_secs: None,
         }
+    }
+
+    /// Over a rate limit (design note 0009, R6). The wait is rounded up to whole
+    /// seconds, at least one, so a client that waits that long gets through.
+    pub fn rate_limited(retry_after: std::time::Duration) -> Self {
+        let secs = retry_after.as_secs() + u64::from(retry_after.subsec_nanos() > 0);
+        let secs = secs.max(1);
+        let mut e = Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            format!("too many requests; try again in {secs} s"),
+        )
+        .with_details(Some(json!({ "retry_after_secs": secs })));
+        e.retry_after_secs = Some(secs);
+        e
     }
 
     fn with_details(mut self, details: Option<serde_json::Value>) -> Self {
@@ -151,6 +171,10 @@ impl IntoResponse for ApiError {
             // RFC 9110: a 401 names the scheme the client should use.
             let challenge = [(axum::http::header::WWW_AUTHENTICATE, "Bearer")];
             return (self.status, challenge, body).into_response();
+        }
+        if let Some(secs) = self.retry_after_secs {
+            let retry = [(axum::http::header::RETRY_AFTER, secs.to_string())];
+            return (self.status, retry, body).into_response();
         }
         (self.status, body).into_response()
     }

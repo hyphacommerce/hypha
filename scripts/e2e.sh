@@ -602,6 +602,18 @@ step "log out" 204 - -X POST "$BASE/auth/logout"
 step "the session is over" 401 invalid_token "$BASE/me"
 
 echo
+echo "## rate limits (design note 0009)"
+# Last on purpose: this uses up the login allowance of the address the script runs from.
+AUTH=()
+for n in $(seq 1 10); do
+    curl -s -o /dev/null -X POST "$BASE/auth/login" -H "$JSON" \
+        -d '{"email":"guess@example.com","password":"guess"}'
+done
+step "the eleventh login try is refused" 429 rate_limited -X POST "$BASE/auth/login" -H "$JSON" \
+    -d '{"email":"guess@example.com","password":"guess"}'
+contains "and says when to come back" '"retry_after_secs":'
+
+echo
 if ((FAILED > 0)); then
     echo "$FAILED step(s) failed"
     exit 1

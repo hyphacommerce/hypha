@@ -1,6 +1,8 @@
+mod client_ip;
 mod error;
 mod extract;
 mod patch;
+mod rate_limit;
 mod routes;
 mod state;
 
@@ -14,6 +16,7 @@ use hypha_core::{Ctx, Random};
 use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
+use crate::client_ip::TrustedProxies;
 use crate::state::{
     AppState, HostEnv, MemoryStorage, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids,
 };
@@ -126,6 +129,28 @@ async fn ensure_owner<S: Storage>(state: &AppState<S>) -> Result<(), String> {
 
 async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: HostEnv) {
     let ids = UuidV7Ids;
+    let trusted_proxies = match std::env::var("HYPHA_TRUSTED_PROXIES") {
+        Ok(list) => match TrustedProxies::parse(&list) {
+            Ok(proxies) => proxies,
+            Err(e) => {
+                tracing::error!("HYPHA_TRUSTED_PROXIES: {e}");
+                std::process::exit(1);
+            }
+        },
+        Err(_) => TrustedProxies::default(),
+    };
+    // The one setting that silently goes wrong behind a proxy (design note 0009, §8).
+    if trusted_proxies.is_empty() {
+        tracing::info!(
+            "rate limits key clients by their socket address; behind a proxy or load \
+             balancer, set HYPHA_TRUSTED_PROXIES or every client shares one limit"
+        );
+    } else {
+        tracing::info!(
+            ?trusted_proxies,
+            "rate limits read X-Forwarded-For from trusted proxies"
+        );
+    }
     // One store per deployment (design note 0006, model A): created on first start.
     let name = std::env::var("HYPHA_STORE_NAME").unwrap_or_else(|_| "My store".to_string());
     let store = match storage.directory().await {
@@ -149,6 +174,8 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         clock: SystemClock,
         env,
         background: Default::default(),
+        limiter: Default::default(),
+        trusted_proxies,
         store: store.id(),
         store_name: store.name().to_string(),
     });
@@ -170,6 +197,17 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         }
     };
     tracing::info!("Hypha listening on http://{addr}");
+    // Drop idle rate-limit keys every minute, so rotating addresses can't grow memory.
+    let sweeper = Arc::clone(&state);
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            every.tick().await;
+            sweeper.limiter.forget_idle();
+        }
+    });
+    // `with_connect_info` records each connection's peer address for `ClientIp`.
+    let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await

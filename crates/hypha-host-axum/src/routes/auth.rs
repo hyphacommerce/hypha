@@ -1,5 +1,7 @@
 //! Logging in and out, password resets and accepting invites (design note 0008,
 //! sections 3 and 5). These routes take no `Caller`: they are how one gets credentials.
+//! So they are rate limited (design note 0009): per client IP before the body is even
+//! parsed, per email right after, and both before any hashing, storage or email.
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_auth::{
@@ -10,10 +12,18 @@ use serde::{Deserialize, Serialize};
 
 use super::{rfc3339, staff::UserResponse};
 use crate::{
+    client_ip::ClientIp,
     error::ApiError,
     extract::{JsonBody, StaffCaller},
+    rate_limit::{Rule, enforce},
     state::{SharedState, Storage},
 };
+
+/// An email as a rate-limit key: trimmed and lowercased, like a login (design note
+/// 0009, section 3). Not validated: junk is just another key.
+fn email_key(email: &str) -> String {
+    email.trim().to_lowercase()
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -68,10 +78,13 @@ pub(super) enum LoginResponse {
 /// disabled account), deliberately the same answer.
 pub(super) async fn login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
     body: JsonBody<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    // Parsed first: a malformed body costs no pooled connection.
+    enforce(&state.limiter, Rule::LoginIp, &ip).await?;
+    // Parsed before taking a pooled connection: a malformed body costs none.
     let req = body.parse()?;
+    enforce(&state.limiter, Rule::LoginEmail, &email_key(&req.email)).await?;
     let ports = state.public_ports().await?;
     let step = login(&ports, &state.env, &req.email, &req.password).await?;
     Ok(Json(match step {
@@ -96,8 +109,10 @@ pub(super) async fn login_handler<S: Storage>(
 /// `invalid_mfa_code`; the fifth wrong code ends the challenge (then `invalid_token`).
 pub(super) async fn finish_login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
     body: JsonBody<FinishLoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
+    enforce(&state.limiter, Rule::MfaIp, &ip).await?;
     let req = body.parse()?;
     let ports = state.public_ports().await?;
     let (session, token) = finish_login(&ports, &state.env, &req.challenge, &req.code).await?;
@@ -127,9 +142,12 @@ pub(super) struct PasswordResetRequest {
 /// the answer nor its timing tells which emails exist.
 pub(super) async fn request_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
     body: JsonBody<PasswordResetRequest>,
 ) -> Result<StatusCode, ApiError> {
+    enforce(&state.limiter, Rule::ResetIp, &ip).await?;
     let req = body.parse()?;
+    enforce(&state.limiter, Rule::ResetEmail, &email_key(&req.email)).await?;
     S::spawn_password_reset(state, req.email);
     Ok(StatusCode::ACCEPTED)
 }
@@ -157,8 +175,10 @@ pub(super) struct ConfirmResetRequest {
 /// Sets the new password and logs out every session of the account.
 pub(super) async fn confirm_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
     body: JsonBody<ConfirmResetRequest>,
 ) -> Result<StatusCode, ApiError> {
+    enforce(&state.limiter, Rule::ResetIp, &ip).await?;
     let req = body.parse()?;
     let ports = state.public_ports().await?;
     reset_password(&ports, &state.env, &req.token, &req.password).await?;
@@ -182,8 +202,10 @@ pub(super) struct AcceptedResponse {
 /// Creates the invited user and logs them in.
 pub(super) async fn accept_invite_handler<S: Storage>(
     State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
     body: JsonBody<AcceptInviteRequest>,
 ) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
+    enforce(&state.limiter, Rule::InviteIp, &ip).await?;
     let req = body.parse()?;
     let ports = state.public_ports().await?;
     let input = AcceptInvite {

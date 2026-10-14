@@ -19,7 +19,12 @@ use hypha_users::{NewOwner, bootstrap_owner};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
+use std::net::SocketAddr;
+
+use axum::extract::connect_info::MockConnectInfo;
+
 use super::memory_router;
+use crate::client_ip::TrustedProxies;
 use crate::state::{AppState, HostEnv, MemoryStorage, Storage, SystemClock, UuidV7Ids};
 
 const OWNER_EMAIL: &str = "owner@example.com";
@@ -33,6 +38,13 @@ struct TestApp {
 }
 
 async fn app() -> TestApp {
+    app_with(TrustedProxies::default()).await
+}
+
+/// Requests in these tests come from this peer (`MockConnectInfo`), as if over a socket.
+const PEER: ([u8; 4], u16) = ([127, 0, 0, 1], 4000);
+
+async fn app_with(trusted_proxies: TrustedProxies) -> TestApp {
     let storage = MemoryStorage::default();
     let store = ensure_single_store(
         &Ctx::system(),
@@ -49,6 +61,8 @@ async fn app() -> TestApp {
         clock: SystemClock,
         env,
         background: Default::default(),
+        limiter: Default::default(),
+        trusted_proxies,
         store: store.id(),
         store_name: store.name().to_string(),
     });
@@ -70,7 +84,9 @@ async fn app() -> TestApp {
         .await
         .unwrap();
     TestApp {
-        router: memory_router().with_state(state.clone()),
+        router: memory_router()
+            .with_state(state.clone())
+            .layer(MockConnectInfo(SocketAddr::from(PEER))),
         admin_key: token.expose().to_string(),
     }
 }
@@ -651,5 +667,115 @@ async fn a_bad_token_is_refused_before_the_body_is_looked_at() {
     assert_eq!(
         (status, code(&json)),
         (StatusCode::UNAUTHORIZED, "invalid_token")
+    );
+}
+
+// ---------- rate limits (design note 0009) ----------
+
+fn login_body(email: &str) -> String {
+    json!({ "email": email, "password": "wrong password" }).to_string()
+}
+
+#[tokio::test]
+async fn too_many_logins_from_one_address_get_429_with_retry_after() {
+    let app = app().await;
+    let (burst, every) = crate::rate_limit::Rule::LoginIp.quota();
+    for n in 0..burst {
+        // Different emails, so only the per-address limit can trip.
+        let body = login_body(&format!("user{n}@example.com"));
+        let (status, _) = send_with(&app, &[], "POST", "/auth/login", Some(&body)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let request = Request::builder()
+        .method("POST")
+        .uri("/auth/login")
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(login_body("again@example.com")))
+        .unwrap();
+    let response = app.router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        response.headers()[axum::http::header::RETRY_AFTER],
+        every.as_secs().to_string()
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(code(&body), "rate_limited");
+    assert_eq!(body["details"]["retry_after_secs"], every.as_secs());
+}
+
+#[tokio::test]
+async fn one_email_is_limited_however_many_addresses_try_it() {
+    // Behind a trusted proxy (the test peer), each request names another client.
+    let app = app_with(TrustedProxies::parse("127.0.0.1").unwrap()).await;
+    let (burst, _) = crate::rate_limit::Rule::LoginEmail.quota();
+    let body = login_body(OWNER_EMAIL);
+    for n in 0..burst {
+        let client = format!("203.0.113.{n}");
+        let headers = [("x-forwarded-for", client.as_str())];
+        let (status, _) = send_with(&app, &headers, "POST", "/auth/login", Some(&body)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{client}");
+    }
+    let headers = [("x-forwarded-for", "198.51.100.1")];
+    let (status, json) = send_with(&app, &headers, "POST", "/auth/login", Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+    // The address itself is fine: another email from it goes through.
+    let other = login_body("someone@example.com");
+    let (status, _) = send_with(&app, &headers, "POST", "/auth/login", Some(&other)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_forged_forwarded_for_does_not_escape_the_limit() {
+    // No trusted proxies: the header is ignored, so all of these are the same client.
+    let app = app().await;
+    let (burst, _) = crate::rate_limit::Rule::LoginIp.quota();
+    let mut last = StatusCode::OK;
+    for n in 0..=burst {
+        let client = format!("203.0.113.{n}");
+        let body = login_body(&format!("user{n}@example.com"));
+        let headers = [("x-forwarded-for", client.as_str())];
+        last = send_with(&app, &headers, "POST", "/auth/login", Some(&body))
+            .await
+            .0;
+    }
+    assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn reset_requests_are_limited_per_email_and_still_202_until_then() {
+    let app = app_with(TrustedProxies::parse("127.0.0.1").unwrap()).await;
+    let (burst, _) = crate::rate_limit::Rule::ResetEmail.quota();
+    let body = json!({ "email": OWNER_EMAIL }).to_string();
+    for n in 0..burst {
+        let client = format!("203.0.113.{n}");
+        let headers = [("x-forwarded-for", client.as_str())];
+        let (status, _) =
+            send_with(&app, &headers, "POST", "/auth/password-reset", Some(&body)).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+    }
+    let headers = [("x-forwarded-for", "198.51.100.1")];
+    let (status, json) =
+        send_with(&app, &headers, "POST", "/auth/password-reset", Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+}
+
+#[tokio::test]
+async fn the_address_limit_comes_before_the_body_is_parsed() {
+    let app = app().await;
+    let (burst, _) = crate::rate_limit::Rule::InviteIp.quota();
+    for _ in 0..burst {
+        send_with(&app, &[], "POST", "/invites/accept", Some("{")).await;
+    }
+    let (status, json) = send_with(&app, &[], "POST", "/invites/accept", Some("{")).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
     );
 }
