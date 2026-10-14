@@ -307,7 +307,6 @@ impl From<hypha_orders::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Every order route names the order in its URL.
             E::OrderNotFound(_) => StatusCode::NOT_FOUND,
-            E::Order(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };

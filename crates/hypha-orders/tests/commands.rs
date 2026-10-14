@@ -113,3 +113,53 @@ fn mark_order_paid_needs_orders_write() {
         )))
     );
 }
+
+/// An order repo whose first `get` returns `stale`: the order as this request loaded it,
+/// before another request changed it.
+struct LoadedBeforeAChange {
+    repo: InMemoryOrderRepo,
+    stale: std::cell::RefCell<Option<Order>>,
+}
+
+impl OrderRepo for LoadedBeforeAChange {
+    async fn get(&self, id: OrderId) -> Result<Option<Order>, hypha_core::RepoError> {
+        // Taken in its own statement: a temporary in a `match` scrutinee lives until the
+        // `match` ends, so the borrow would be held across the `.await` below.
+        let stale = self.stale.borrow_mut().take();
+        match stale {
+            Some(stale) => Ok(Some(stale)),
+            None => self.repo.get(id).await,
+        }
+    }
+    async fn get_by_number(
+        &self,
+        number: OrderNumber,
+    ) -> Result<Option<Order>, hypha_core::RepoError> {
+        self.repo.get_by_number(number).await
+    }
+    async fn insert(&self, order: &mut Order) -> Result<(), hypha_core::RepoError> {
+        self.repo.insert(order).await
+    }
+    async fn update(&self, order: &mut Order) -> Result<(), hypha_core::RepoError> {
+        self.repo.update(order).await
+    }
+    async fn next_number(&self) -> Result<OrderNumber, hypha_core::RepoError> {
+        self.repo.next_number().await
+    }
+}
+
+#[test]
+fn marking_an_order_paid_twice_at_once_succeeds_both_times() {
+    let repo = repo_with_order();
+    let stale = block_on(repo.get(order_id())).unwrap();
+    // The other request wins and marks it paid first.
+    block_on(mark_order_paid(&Ctx::system(), &repo, order_id())).unwrap();
+
+    let racing = LoadedBeforeAChange {
+        repo,
+        stale: std::cell::RefCell::new(stale),
+    };
+    let order = block_on(mark_order_paid(&Ctx::system(), &racing, order_id())).unwrap();
+    assert_eq!(order.financial_status(), FinancialStatus::Paid);
+    assert_eq!(order.version(), Version::new(2));
+}
