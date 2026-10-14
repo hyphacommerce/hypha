@@ -59,10 +59,24 @@ replayed() {
     fi
 }
 
+# fresh NAME CURL_ARGS...: asserts the response does NOT carry `Idempotent-Replayed`.
+fresh() {
+    local name=$1
+    shift
+    if curl -s -o /dev/null -D - "$@" | grep -qi '^idempotent-replayed'; then
+        echo "FAIL $name: unexpected Idempotent-Replayed header"
+        FAILED=$((FAILED + 1))
+    else
+        echo "ok   $name"
+    fi
+}
+
 # The top-level "id" of the last response (always the first "id" key).
 id() { sed -E 's/^[^"]*"id":"([^"]+)".*/\1/' <<<"$BODY"; }
 # The first address id of the last customer response.
 address() { sed -E 's/.*"addresses":\[\{"id":"(addr_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
+# The "customer" of the last order response.
+customer() { sed -E 's/.*"customer":"(cus_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 # The first variant's id of the last product response.
 variant() { sed -E 's/.*"variants":\[[^]]*"id":"(var_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 
@@ -126,6 +140,8 @@ step "add 3 cups" 200 - -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
 contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
 
 echo "## idempotency keys"
+fresh "a first request isn't marked replayed" -X POST "$BASE/carts" -H "$JSON" \
+    -H 'idempotency-key: cart-0' -d '{"country":"HR"}'
 step "create cart with a key" 201 - -X POST "$BASE/carts" -H "$JSON" -H 'idempotency-key: cart-1' \
     -d '{"country":"HR"}'
 KEYED=$(id)
@@ -143,14 +159,21 @@ step "add 2 mugs with a key" 200 - -X POST "$BASE/carts/$KEYED/lines" -H "$JSON"
 step "retry the add" 200 - -X POST "$BASE/carts/$KEYED/lines" -H "$JSON" \
     -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "the retry didn't add the mugs again" '"quantity":2,'
+replayed "the add retry is marked replayed" -X POST "$BASE/carts/$KEYED/lines" -H "$JSON" \
+    -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 
 echo "## checkout"
 CHECKOUT="$BASE/carts/$KEYED/checkout"
+step "checkout an unknown cart" 404 cart_not_found -X POST \
+    "$BASE/carts/cart_00000000000000000000000000000063/checkout" -H "$JSON" -d '{}'
+step "checkout with an unknown field" 422 invalid_body -X POST "$CHECKOUT" -H "$JSON" \
+    -d '{"total":1}'
 step "checkout without an email" 409 cart_email_missing -X POST "$CHECKOUT" -H "$JSON" -d '{}'
 step "give the cart an email" 200 - -X PUT "$BASE/carts/$KEYED/email" -H "$JSON" \
     -d '{"email":"checkout@example.hr"}'
 step "checkout at a stale total" 409 total_changed -X POST "$CHECKOUT" -H "$JSON" \
     -d '{"expected_total":{"amount":1700,"currency":"EUR"}}'
+contains "the error names both totals" '"details":{"actual":{"amount":1800,"currency":"EUR"},"expected":{"amount":1700,"currency":"EUR"}}'
 step "checkout" 201 - -X POST "$CHECKOUT" -H "$JSON" -H 'idempotency-key: order-1' \
     -d '{"expected_total":{"amount":1800,"currency":"EUR"}}'
 ORDER=$(id)
@@ -158,9 +181,20 @@ contains "the order is #1001" '"number":1001'
 contains "it is pending and unfulfilled" '"financial_status":"pending","fulfillment_status":"unfulfilled"'
 contains "it copies the line" '"product_title":"Mug","variant_title":null,"sku":null,"unit_price":{"amount":900,"currency":"EUR"}'
 contains "its total is 1800" '"total":{"amount":1800,"currency":"EUR"},"lines"'
+step "retry the checkout" 201 - -X POST "$CHECKOUT" -H "$JSON" -H 'idempotency-key: order-1' \
+    -d '{"expected_total":{"amount":1800,"currency":"EUR"}}'
+contains "the retry returns the same order" "\"id\":\"$ORDER\""
 replayed "a retried checkout replays the order" -X POST "$CHECKOUT" -H "$JSON" \
     -H 'idempotency-key: order-1' -d '{"expected_total":{"amount":1800,"currency":"EUR"}}'
+step "retry, re-serialized (spaces, key order)" 201 - -X POST "$CHECKOUT" -H "$JSON" \
+    -H 'idempotency-key: order-1' -d '{ "expected_total" : { "currency" : "EUR", "amount" : 1800 } }'
+contains "is the same request" "\"id\":\"$ORDER\""
+step "same key, different total" 422 idempotency_key_reused -X POST "$CHECKOUT" -H "$JSON" \
+    -H 'idempotency-key: order-1' -d '{"expected_total":{"amount":1801,"currency":"EUR"}}'
+step "a cart key reused to add a line" 422 idempotency_key_reused -X POST "$BASE/carts/$CART/lines" \
+    -H "$JSON" -H 'idempotency-key: cart-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "checkout again without the key" 409 cart_completed -X POST "$CHECKOUT" -H "$JSON" -d '{}'
+contains "the error names the order" "\"details\":{\"order\":\"$ORDER\"}"
 step "get the checked-out cart" 200 - "$BASE/carts/$KEYED"
 contains "the cart names its order" "\"order\":\"$ORDER\""
 step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/carts/$KEYED/lines" \
@@ -169,8 +203,12 @@ step "get the order" 200 - "$BASE/orders/$ORDER"
 contains "it has a placed_at" '"placed_at":"20'
 step "mark it paid" 200 - -X POST "$BASE/orders/$ORDER/paid"
 contains "it is paid" '"financial_status":"paid"'
+step "mark it paid again" 200 - -X POST "$BASE/orders/$ORDER/paid"
+contains "still paid" '"financial_status":"paid"'
 step "an unknown order" 404 order_not_found "$BASE/orders/ord_00000000000000000000000000000000"
+step "an order ID of the wrong kind" 400 invalid_path "$BASE/orders/$CART"
 step "a new cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+contains "an open cart has no order" '"order":null'
 step "checkout an empty cart" 409 cart_empty -X POST "$BASE/carts/$(id)/checkout" -H "$JSON" -d '{}'
 
 step "archive mug" 200 - -X PATCH "$BASE/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
@@ -308,6 +346,48 @@ step "unlink the customer" 200 - -X PUT "$BASE/carts/$BUYER_CART/customer" -H "$
 contains "email stays" '"email":"ana@example.hr","customer":null'
 step "remove the address" 200 - -X DELETE "$BASE/customers/$CUSTOMER/addresses/$ADDRESS"
 contains "address book is empty, defaults cleared" '"default_billing_address":null,"addresses":[]'
+
+echo "## checkout with stock and tax"
+# Books and lamps cost 900 (the price list takes 10%) and pay the region's 13% default;
+# lamps are tracked again, 5 on hand.
+step "track lamps again" 200 - -X PATCH "$BASE/inventory-items/$LAMP_ITEM" -H "$JSON" -d '{"tracked":true}'
+step "create shop cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+SHOP_CART=$(id)
+step "add 2 lamps" 200 - -X POST "$BASE/carts/$SHOP_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":2}"
+step "add a book" 200 - -X POST "$BASE/carts/$SHOP_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$BOOK_VAR\",\"quantity\":1}"
+step "a guest's email" 200 - -X PUT "$BASE/carts/$SHOP_CART/email" -H "$JSON" \
+    -d '{"email":"guest@example.hr"}'
+step "checkout" 201 - -X POST "$BASE/carts/$SHOP_CART/checkout" -H "$JSON" -d '{}'
+SHOP_ORDER=$(id)
+GUEST=$(customer)
+contains "the order copies the tax line" '"tax":{"rate_ppm":130000,"amount":{"amount":117,"currency":"EUR"},"tax_class":null}'
+contains "and adds tax on top" '"subtotal":{"amount":2700,"currency":"EUR"},"tax_total":{"amount":351,"currency":"EUR"},"total":{"amount":3051'
+step "the guest became a customer" 200 - "$BASE/customers/$GUEST"
+contains "with the cart's email" '"email":"guest@example.hr"'
+step "the lamps are reserved" 200 - "$BASE/inventory-items/$LAMP_ITEM"
+contains "2 of 5" "\"on_hand\":5,\"reserved\":2,\"available\":3"
+step "the checked-out cart" 200 - "$BASE/carts/$SHOP_CART"
+contains "reads as charged, not out of stock" '"total":{"amount":3051,"currency":"EUR"},"fully_available":true'
+step "a second cart, same guest" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+AGAIN_CART=$(id)
+step "add 3 lamps" 200 - -X POST "$BASE/carts/$AGAIN_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":3}"
+step "same email" 200 - -X PUT "$BASE/carts/$AGAIN_CART/email" -H "$JSON" \
+    -d '{"email":"guest@example.hr"}'
+step "a lamp broke (4 on hand, 2 reserved)" 200 - -X PUT \
+    "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":4,"expected_on_hand":5}'
+step "checkout with too few lamps" 409 cart_unavailable -X POST "$BASE/carts/$AGAIN_CART/checkout" \
+    -H "$JSON" -d '{}'
+contains "the error lists the lamp" "\"details\":{\"lines\":[\"$LAMP_VAR\"]}"
+step "take 2 lamps instead" 200 - -X PUT "$BASE/carts/$AGAIN_CART/lines/$LAMP_VAR" -H "$JSON" \
+    -d '{"quantity":2}'
+step "checkout" 201 - -X POST "$BASE/carts/$AGAIN_CART/checkout" -H "$JSON" -d '{}'
+contains "the same guest customer" "\"customer\":\"$GUEST\""
+step "every lamp is reserved" 200 - "$BASE/inventory-items/$LAMP_ITEM"
+contains "4 of 4" '"on_hand":4,"reserved":4,"available":0'
+step "the first order is unchanged" 200 - "$BASE/orders/$SHOP_ORDER"
 
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
