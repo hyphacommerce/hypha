@@ -8,7 +8,7 @@
   client, and the first admin screens.
 - **Not in scope:** the storefront and docs apps (they follow this layout when they
   start), spores (their own note), client customisation beyond theming, and list
-  endpoints (needed for the first real admin pages; a note of their own).
+  endpoints (0012).
 - **Related:** 0008 (sessions, 2FA, API keys), 0009 (rate limits on login), 0010 (the
   admin API, the OpenAPI documents), 0002 (TS-first external apps, spores).
 
