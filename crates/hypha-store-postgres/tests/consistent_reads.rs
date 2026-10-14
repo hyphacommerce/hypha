@@ -17,7 +17,9 @@ const SCHEMA: &str = "consistent_reads";
 const ROUNDS: u128 = 150;
 
 async fn connect(url: &str) -> Client {
-    let (client, connection) = tokio_postgres::connect(url, NoTls)
+    let (client, connection) = hypha_store_postgres::database_config(url)
+        .expect("DATABASE_URL")
+        .connect(NoTls)
         .await
         .expect("connect to DATABASE_URL");
     tokio::spawn(connection);
@@ -54,7 +56,11 @@ async fn a_load_never_mixes_two_versions_of_a_customer() {
         eprintln!("DATABASE_URL not set: skipping the consistent read test");
         return;
     };
-    let (mut setup, connection) = tokio_postgres::connect(&url, NoTls).await.unwrap();
+    let (mut setup, connection) = hypha_store_postgres::database_config(&url)
+        .expect("DATABASE_URL")
+        .connect(NoTls)
+        .await
+        .unwrap();
     tokio::spawn(connection);
     setup
         .batch_execute(&format!(

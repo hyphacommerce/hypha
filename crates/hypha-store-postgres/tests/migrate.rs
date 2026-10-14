@@ -8,7 +8,11 @@ async fn fresh_schema(schema: &str) -> Option<Client> {
         eprintln!("DATABASE_URL not set: skipping the migration tests");
         return None;
     };
-    let (client, connection) = tokio_postgres::connect(&url, NoTls).await.expect("connect");
+    let (client, connection) = hypha_store_postgres::database_config(&url)
+        .expect("DATABASE_URL")
+        .connect(NoTls)
+        .await
+        .expect("connect");
     tokio::spawn(connection);
     client
         .batch_execute(&format!(
@@ -129,7 +133,11 @@ async fn two_runners_starting_at_once_both_succeed() {
         return;
     };
     let url = std::env::var("DATABASE_URL").unwrap();
-    let (mut second, connection) = tokio_postgres::connect(&url, NoTls).await.unwrap();
+    let (mut second, connection) = hypha_store_postgres::database_config(&url)
+        .expect("DATABASE_URL")
+        .connect(NoTls)
+        .await
+        .unwrap();
     tokio::spawn(connection);
     second
         .batch_execute("SET search_path TO migrate_concurrent")

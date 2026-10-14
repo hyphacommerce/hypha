@@ -14,6 +14,7 @@
 
 mod carts;
 mod columns;
+mod config;
 mod customers;
 mod error;
 mod inventory;
@@ -24,5 +25,6 @@ mod store;
 mod stores;
 mod tax;
 
+pub use config::{DEFAULT_CONNECT_TIMEOUT, database_config};
 pub use migrate::{CORE, MigrateError, Migration, MigrationSet, migrate};
 pub use store::{PgConnection, PgStore};
