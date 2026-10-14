@@ -15,6 +15,8 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
     update_round_trips(&make().await).await;
     scenario("cart: unique ID, stale and missing updates");
     keys_and_stale(&make().await).await;
+    scenario("cart: clearing the buyer stores no email and no customer");
+    buyer_cleared(&make().await).await;
 }
 
 fn cart(n: u128) -> Cart {
@@ -102,4 +104,19 @@ async fn keys_and_stale<R: CartRepo>(repo: &R) {
         repo.update(&mut cart(9)).await,
         Err(RepoError::StaleVersion)
     );
+}
+
+async fn buyer_cleared<R: CartRepo>(repo: &R) {
+    let mut c = cart(1);
+    let ana = CustomerId::from_uuid(Uuid::from_u128(70));
+    c.set_customer(Some((ana, Email::new("ana@example.hr").unwrap())));
+    repo.insert(&mut c).await.unwrap();
+
+    c.set_customer(None);
+    c.set_email(None).unwrap();
+    repo.update(&mut c).await.unwrap();
+
+    let stored = repo.get(c.id()).await.unwrap().unwrap();
+    assert_eq!((stored.customer(), stored.email()), (None, None));
+    assert_eq!(stored, c);
 }

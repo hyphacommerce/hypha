@@ -154,6 +154,8 @@ pub async fn inventory_item_repo<R: InventoryItemRepo>(make: impl AsyncFn() -> R
     item_update_many(&make().await).await;
     scenario("inventory item: update_many with the same item twice fails");
     item_update_many_twice(&make().await).await;
+    scenario("inventory item: one item per variant on update too");
+    item_variant_on_update(&make().await).await;
 }
 
 /// Levels at the stock limits and reservations split across locations.
@@ -305,4 +307,22 @@ async fn item_update_many_twice<R: InventoryItemRepo>(repo: &R) {
 
     assert!(repo.update_many(&mut [first, second]).await.is_err());
     assert_eq!(repo.get(stored.id()).await, Ok(Some(stored)));
+}
+
+/// Items don't move to another variant through a command, but a restored snapshot can,
+/// and the adapter must refuse a variant another item has.
+async fn item_variant_on_update<R: InventoryItemRepo>(repo: &R) {
+    repo.insert(&mut item(1, 1)).await.unwrap();
+    let mut other = item(2, 2);
+    repo.insert(&mut other).await.unwrap();
+
+    let mut moved = other.snapshot();
+    moved.variant = vid(1);
+    let mut moved = InventoryItem::restore(moved).unwrap();
+
+    assert_eq!(
+        repo.update(&mut moved).await,
+        Err(RepoError::Duplicate(keys::INVENTORY_ITEM_VARIANT))
+    );
+    assert_eq!(repo.get(item_id(2)).await, Ok(Some(other)));
 }

@@ -101,6 +101,8 @@ pub async fn tax_region_repo<R: TaxRegionRepo>(make: impl AsyncFn() -> R) {
     region_keys(&make().await).await;
     scenario("tax region: stale and missing updates fail");
     region_stale(&make().await).await;
+    scenario("tax region: countries stay unique on update");
+    region_country_on_update(&make().await).await;
 }
 
 async fn region_round_trips<R: TaxRegionRepo>(repo: &R) {
@@ -169,4 +171,22 @@ async fn region_stale<R: TaxRegionRepo>(repo: &R) {
         repo.update(&mut region(9, "DE")).await,
         Err(RepoError::StaleVersion)
     );
+}
+
+/// Regions don't change country through a command, but a restored snapshot can, and the
+/// adapter must refuse a country another region has.
+async fn region_country_on_update<R: TaxRegionRepo>(repo: &R) {
+    repo.insert(&mut region(1, "HR")).await.unwrap();
+    let mut serbia = region(2, "RS");
+    repo.insert(&mut serbia).await.unwrap();
+
+    let mut moved = serbia.snapshot();
+    moved.country = CountryCode::new("HR").unwrap();
+    let mut moved = TaxRegion::restore(moved).unwrap();
+
+    assert_eq!(
+        repo.update(&mut moved).await,
+        Err(RepoError::Duplicate(keys::TAX_REGION_COUNTRY))
+    );
+    assert_eq!(repo.get(region_id(2)).await, Ok(Some(serbia)));
 }
