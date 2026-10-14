@@ -3,7 +3,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use hypha_cart::CartPorts;
+use hypha_checkout::CheckoutPorts;
 use hypha_core::{Clock, IdGenerator, StoreId, Timestamp};
 use hypha_store_postgres::{CORE, PgConnection, PgStore, migrate};
 use hypha_stores::StoreRepo;
@@ -58,14 +58,15 @@ impl<S: Storage> AppState<S> {
 pub type SharedState<S> = Arc<AppState<S>>;
 
 /// Where the repositories come from. Handlers ask for `ports()` once per request and
-/// pass them to commands; `CartPorts` gives access to every repository.
+/// pass them to commands; `CheckoutPorts` (which includes `CartPorts`) gives access to
+/// every repository and the batch.
 ///
 /// Handlers are generic over this, but axum can only prove their futures are `Send` for
 /// a concrete storage type (the repo traits deliberately have no `Send` bound), so the
 /// router is built per concrete type (see `routes::router!`).
 #[allow(async_fn_in_trait)]
 pub trait Storage: Send + Sync + 'static {
-    type Ports<'a>: CartPorts
+    type Ports<'a>: CheckoutPorts
     where
         Self: 'a;
     type Directory<'a>: StoreRepo

@@ -155,12 +155,14 @@ impl From<hypha_stores::CommandError> for ApiError {
 
 impl From<hypha_cart::CommandError> for ApiError {
     fn from(e: hypha_cart::CommandError) -> Self {
-        use hypha_cart::{CommandError as E, LineError};
+        use hypha_cart::{CartError, CommandError as E, LineError};
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::CartNotFound(_) => StatusCode::NOT_FOUND,
             // Depends on the stock right now, not on the request: 409 like inventory's.
             E::Line(LineError::OutOfStock { .. }) => StatusCode::CONFLICT,
+            // Checked out: the cart's state, not the request, is the problem.
+            E::Cart(CartError::Completed { .. }) => StatusCode::CONFLICT,
             E::Cart(_)
             | E::Line(_)
             | E::Money(_)
@@ -247,6 +249,47 @@ impl From<hypha_customers::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_orders::CommandError> for ApiError {
+    fn from(e: hypha_orders::CommandError) -> Self {
+        use hypha_orders::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Every order route names the order in its URL.
+            E::OrderNotFound(_) => StatusCode::NOT_FOUND,
+            E::Order(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
+impl From<hypha_checkout::CommandError> for ApiError {
+    fn from(e: hypha_checkout::CommandError) -> Self {
+        use hypha_checkout::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Pricing the cart and reserving stock report like their own routes.
+            E::Cart(inner) => return Self::from(inner.clone()),
+            E::Inventory(inner) => return Self::from(inner.clone()),
+            // Checkout builds the order from a priced cart, so a broken order rule is a bug.
+            E::Order(_) => return Self::internal(e),
+            E::Idempotency(_) | E::EmptyCart(_) | E::MissingEmail(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            // The cart in the URL.
+            E::CartNotFound(_) => StatusCode::NOT_FOUND,
+            // The cart's or the shop's state right now, not the request, is the problem.
+            E::CartCompleted { .. } | E::Unavailable { .. } | E::TotalChanged { .. } => {
+                StatusCode::CONFLICT
+            }
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hypha_core::{AuthError, CartId, Scope};
@@ -280,6 +323,33 @@ mod tests {
         ));
         assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(e.code, "idempotency_key_reused");
+    }
+
+    #[test]
+    fn checking_out_twice_is_a_conflict() {
+        let e = ApiError::from(hypha_checkout::CommandError::CartCompleted {
+            cart: CartId::from_uuid(Uuid::from_u128(1)),
+            order: hypha_core::OrderId::from_uuid(Uuid::from_u128(2)),
+        });
+        assert_eq!(e.status, StatusCode::CONFLICT);
+        assert_eq!(e.code, "cart_completed");
+    }
+
+    #[test]
+    fn checkout_reports_a_shortage_like_inventory() {
+        let e = ApiError::from(hypha_checkout::CommandError::Inventory(
+            hypha_inventory::CommandError::OutOfStock { lines: vec![] },
+        ));
+        assert_eq!(e.status, StatusCode::CONFLICT);
+        assert_eq!(e.code, "out_of_stock");
+    }
+
+    #[test]
+    fn an_unknown_order_in_the_url_is_not_found() {
+        let id = hypha_core::OrderId::from_uuid(Uuid::from_u128(1));
+        let e = ApiError::from(hypha_orders::CommandError::OrderNotFound(id));
+        assert_eq!(e.status, StatusCode::NOT_FOUND);
+        assert_eq!(e.code, "order_not_found");
     }
 
     #[test]

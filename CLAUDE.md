@@ -101,4 +101,4 @@ Tenancy (`docs/design/0006-multi-tenancy.md`): one store per deployment (model A
 
 Extensibility direction (custom fields, policies, events/outbox/webhooks, spores, TS-first external apps): `docs/design/0002-extensibility.md`. Its section 7 lists what to reserve while building core features.
 
-Orders and checkout (design note `docs/design/0007-orders.md`, accepted; in progress), API keys then OAuth, structured logging (tracing), combined listings (variants as products), FX rates as a port, MCP tool generation from commands, UCP adapter for agentic shopping (via ucphub.ai), admin AI features as plugins behind a `ModelProvider` port.
+Order follow-ups from `docs/design/0007-orders.md` §10 (addresses and shipping, fulfillment, cancellation and refunds, payment spores, listing orders, the outbox), API keys then OAuth, structured logging (tracing), combined listings (variants as products), FX rates as a port, MCP tool generation from commands, UCP adapter for agentic shopping (via ucphub.ai), admin AI features as plugins behind a `ModelProvider` port.

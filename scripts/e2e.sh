@@ -144,6 +144,35 @@ step "retry the add" 200 - -X POST "$BASE/carts/$KEYED/lines" -H "$JSON" \
     -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "the retry didn't add the mugs again" '"quantity":2,'
 
+echo "## checkout"
+CHECKOUT="$BASE/carts/$KEYED/checkout"
+step "checkout without an email" 422 cart_email_missing -X POST "$CHECKOUT" -H "$JSON" -d '{}'
+step "give the cart an email" 200 - -X PUT "$BASE/carts/$KEYED/email" -H "$JSON" \
+    -d '{"email":"checkout@example.hr"}'
+step "checkout at a stale total" 409 total_changed -X POST "$CHECKOUT" -H "$JSON" \
+    -d '{"expected_total":{"amount":1700,"currency":"EUR"}}'
+step "checkout" 201 - -X POST "$CHECKOUT" -H "$JSON" -H 'idempotency-key: order-1' \
+    -d '{"expected_total":{"amount":1800,"currency":"EUR"}}'
+ORDER=$(id)
+contains "the order is #1001" '"number":1001'
+contains "it is pending and unfulfilled" '"financial_status":"pending","fulfillment_status":"unfulfilled"'
+contains "it copies the line" '"product_title":"Mug","variant_title":null,"sku":null,"unit_price":{"amount":900,"currency":"EUR"}'
+contains "its total is 1800" '"total":{"amount":1800,"currency":"EUR"},"lines"'
+replayed "a retried checkout replays the order" -X POST "$CHECKOUT" -H "$JSON" \
+    -H 'idempotency-key: order-1' -d '{"expected_total":{"amount":1800,"currency":"EUR"}}'
+step "checkout again without the key" 409 cart_completed -X POST "$CHECKOUT" -H "$JSON" -d '{}'
+step "get the checked-out cart" 200 - "$BASE/carts/$KEYED"
+contains "the cart names its order" "\"order\":\"$ORDER\""
+step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/carts/$KEYED/lines" \
+    -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+step "get the order" 200 - "$BASE/orders/$ORDER"
+contains "it has a placed_at" '"placed_at":"20'
+step "mark it paid" 200 - -X POST "$BASE/orders/$ORDER/paid"
+contains "it is paid" '"financial_status":"paid"'
+step "an unknown order" 404 order_not_found "$BASE/orders/ord_00000000000000000000000000000000"
+step "a new cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "checkout an empty cart" 422 cart_empty -X POST "$BASE/carts/$(id)/checkout" -H "$JSON" -d '{}'
+
 step "archive mug" 200 - -X PATCH "$BASE/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
 step "get cart" 200 - "$BASE/carts/$CART"
 contains "mug line is unavailable" '"status":"unavailable","reason_code":"product_not_active"'

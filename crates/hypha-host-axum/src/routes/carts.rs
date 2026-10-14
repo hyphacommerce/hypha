@@ -4,8 +4,8 @@ use hypha_cart::{
     remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
 };
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, ProductId,
-    TaxClassId, TaxRate, VariantId,
+    CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, OrderId,
+    ProductId, TaxClassId, TaxRate, VariantId,
 };
 use hypha_tax::TaxLine;
 use serde::{Deserialize, Serialize};
@@ -55,6 +55,8 @@ pub(super) struct CartResponse {
     /// Who to contact about the order; required at checkout.
     email: Option<Email>,
     customer: Option<CustomerId>,
+    /// The order this cart was checked out as; `null` while it can still change.
+    order: Option<OrderId>,
     /// Whether line prices include tax (set on the market).
     taxes_included: bool,
     /// Sum of the available lines, as priced. All totals count available lines only.
@@ -127,6 +129,7 @@ impl From<&PricedCart> for CartResponse {
             country: cart.country,
             email: cart.email.clone(),
             customer: cart.customer,
+            order: cart.order,
             taxes_included: cart.taxes_included,
             subtotal: cart.subtotal,
             tax_total: cart.tax_total,

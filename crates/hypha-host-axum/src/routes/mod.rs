@@ -5,6 +5,7 @@ mod carts;
 mod customers;
 mod inventory;
 mod markets;
+mod orders;
 mod products;
 mod stores;
 mod taxes;
@@ -80,6 +81,13 @@ macro_rules! router {
             )
             .route("/carts/{id}/email", put(carts::set_email::<$storage>))
             .route("/carts/{id}/customer", put(carts::set_customer::<$storage>))
+            .route(
+                "/carts/{id}/checkout",
+                post(orders::checkout_handler::<$storage>),
+            )
+            // orders
+            .route("/orders/{id}", get(orders::fetch::<$storage>))
+            .route("/orders/{id}/paid", post(orders::mark_paid::<$storage>))
             // customers
             .route("/customers", post(customers::create::<$storage>))
             .route(

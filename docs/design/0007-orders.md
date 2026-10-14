@@ -1,6 +1,7 @@
 # 0007: Orders and checkout
 
-- **Status:** Accepted (2026-10-14). Every decision was settled in conversation.
+- **Status:** Accepted and built (2026-10-14, branch `feat/orders`). Every decision was
+  settled in conversation; changes made while building are marked in place.
   Storage is Postgres only (in memory for tests): D1 was dropped as a target on
   2026-10-14 (0001), so nothing here has to fit D1's `batch()`.
 - **Scope:** the `Order` aggregate, the checkout command that turns a cart into an order,
