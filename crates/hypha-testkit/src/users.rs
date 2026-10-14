@@ -15,6 +15,15 @@ pub(crate) fn unique_user(new: &User, other: &User) -> Option<&'static str> {
     (new.email() == other.email()).then_some(keys::USER_EMAIL)
 }
 
+impl InMemoryUserRepo {
+    /// The next `n` lookups by email (and `any`) find nothing, as if another request
+    /// inserted the user right after: for losing the race between a pre-check and the
+    /// write.
+    pub fn hide_next_lookups(&self, n: usize) {
+        self.users.hide_next_lookups(n);
+    }
+}
+
 impl UserRepo for InMemoryUserRepo {
     async fn get(&self, id: UserId) -> Result<Option<User>, RepoError> {
         Ok(self.users.get(&id))
@@ -103,6 +112,14 @@ pub(crate) fn unique_invite(new: &Invite, other: &Invite) -> Option<&'static str
         return Some(keys::INVITE_EMAIL);
     }
     (new.token_hash() == other.token_hash()).then_some(keys::INVITE_TOKEN)
+}
+
+impl InMemoryInviteRepo {
+    /// The next `n` lookups by email or token find nothing: for losing the race between
+    /// a pre-check and the write.
+    pub fn hide_next_lookups(&self, n: usize) {
+        self.invites.hide_next_lookups(n);
+    }
 }
 
 impl InviteRepo for InMemoryInviteRepo {

@@ -101,6 +101,22 @@ fn the_owner_is_only_created_once() {
 }
 
 #[test]
+fn losing_the_race_to_create_the_owner_is_finding_them() {
+    let (ports, env, _) = world();
+    // Another instance created the owner between this one's check and its write.
+    ports.users.hide_next_lookups(1);
+    let again = NewOwner {
+        email: "ana@example.com".to_string(),
+        name: "Ana".to_string(),
+        password: OWNER_PASSWORD.to_string(),
+    };
+    assert_eq!(
+        block_on(bootstrap_owner(&Ctx::system(), &ports, &env, again)).map(|u| u.is_none()),
+        Ok(true)
+    );
+}
+
+#[test]
 fn the_owner_password_follows_the_rules() {
     let ports = InMemoryPorts::default();
     let input = NewOwner {
@@ -337,6 +353,28 @@ fn inviting_again_replaces_the_token() {
         block_on(accept_invite(&ports, &env, stale)).map(|(u, ..)| u.id()),
         Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
     );
+}
+
+#[test]
+fn losing_the_race_to_invite_renews_the_winner() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let invite = || InviteUser {
+        email: "bob@example.com".to_string(),
+        role: support.id(),
+    };
+    let first = block_on(invite_user(&owner_ctx(&owner), &ports, &env, invite())).unwrap();
+    // The second request's lookup ran before the first one's insert.
+    ports.invites.hide_next_lookups(1);
+    let second = block_on(invite_user(&owner_ctx(&owner), &ports, &env, invite())).unwrap();
+    assert_eq!(second.id(), first.id());
+    // The renewed invite's token is the one in the last email.
+    let accepted = AcceptInvite {
+        token: env.last_token().unwrap(),
+        name: "Bob".to_string(),
+        password: "bob password".to_string(),
+    };
+    assert!(block_on(accept_invite(&ports, &env, accepted)).is_ok());
 }
 
 #[test]

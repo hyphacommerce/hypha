@@ -184,8 +184,13 @@ pub async fn bootstrap_owner<S: StaffPorts>(
     }
     batch.insert_user(&mut user);
     batch.insert_identity(&mut identity);
-    ports.commit(batch).await?;
-    Ok(Some(user))
+    match ports.commit(batch).await {
+        Ok(()) => Ok(Some(user)),
+        // Another instance starting at the same time made the owner first (a rolling
+        // deploy): the same answer as finding them already there.
+        Err(RepoError::Duplicate(_)) if ports.users().any().await? => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 // ---------- roles ----------
@@ -367,29 +372,7 @@ pub async fn invite_user<S: HasUsers + HasRoles + HasInvites>(
         return Err(CommandError::UserExists(email));
     }
     let token = NewToken::generate(TokenKind::Invite, env);
-    let invite = match ports.invites().get_by_email(&email).await? {
-        // Accepted, but the user is gone: can't happen while users can't be deleted.
-        Some(invite) if invite.accepted_at().is_some() => {
-            return Err(CommandError::UserExists(email));
-        }
-        Some(mut invite) => {
-            invite.renew(token.hash(), role.id(), ctx.actor(), env.now());
-            ports.invites().update(&mut invite).await?;
-            invite
-        }
-        None => {
-            let mut invite = Invite::new(
-                InviteId::from_uuid(env.new_uuid()),
-                email.clone(),
-                role.id(),
-                token.hash(),
-                ctx.actor(),
-                env.now(),
-            );
-            ports.invites().insert(&mut invite).await?;
-            invite
-        }
-    };
+    let invite = save_invite(ctx, ports.invites(), env, &email, role.id(), token.hash()).await?;
     env.notify(StaffEmail::Invite {
         to: email,
         token: token.expose().to_string(),
@@ -397,6 +380,50 @@ pub async fn invite_user<S: HasUsers + HasRoles + HasInvites>(
     })
     .await?;
     Ok(invite)
+}
+
+/// Writes the invite for `email`: renews the pending one or inserts a new one. When a
+/// concurrent invite for the same email gets in between (a double click), the insert
+/// fails on `INVITE_EMAIL` or the renewal on the version: look again and renew that
+/// one, so the race answers like a normal re-invite.
+async fn save_invite<R: InviteRepo>(
+    ctx: &Ctx,
+    invites: &R,
+    env: &impl AuthEnv,
+    email: &Email,
+    role: RoleId,
+    token: TokenHash,
+) -> Result<Invite, CommandError> {
+    const ROUNDS: usize = 3;
+    for _ in 0..ROUNDS {
+        let written = match invites.get_by_email(email).await? {
+            // Accepted, but the user is gone: can't happen while users can't be deleted.
+            Some(invite) if invite.accepted_at().is_some() => {
+                return Err(CommandError::UserExists(email.clone()));
+            }
+            Some(mut invite) => {
+                invite.renew(token, role, ctx.actor(), env.now());
+                invites.update(&mut invite).await.map(|()| invite)
+            }
+            None => {
+                let mut invite = Invite::new(
+                    InviteId::from_uuid(env.new_uuid()),
+                    email.clone(),
+                    role,
+                    token,
+                    ctx.actor(),
+                    env.now(),
+                );
+                invites.insert(&mut invite).await.map(|()| invite)
+            }
+        };
+        match written {
+            Ok(invite) => return Ok(invite),
+            Err(RepoError::Duplicate(keys::INVITE_EMAIL) | RepoError::StaleVersion) => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(RepoError::StaleVersion.into())
 }
 
 pub struct AcceptInvite {
