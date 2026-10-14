@@ -13,6 +13,36 @@ pub trait Clock {
     fn now(&self) -> Timestamp;
 }
 
+/// Randomness for secrets: tokens, salts, nonces, recovery codes (design note 0008).
+/// Hosts use the operating system's generator; tests use a deterministic one. Never a
+/// seeded or predictable generator in production: these bytes are what keep a session
+/// token unguessable.
+pub trait Random {
+    fn fill(&self, bytes: &mut [u8]);
+}
+
+/// Sends a domain's messages, e.g. `hypha_users::StaffEmail` (design note 0008, A10).
+/// Domain crates say *what* to tell whom; the host renders and delivers it (email
+/// templates, links to its admin panel), so domain code never sees URLs.
+///
+/// Commands send after their write commits. The outbox (0002) will later stage
+/// messages in the same batch instead.
+#[allow(async_fn_in_trait)]
+pub trait Notifier<M> {
+    async fn notify(&self, message: M) -> Result<(), NotifyError>;
+}
+
+/// A message could not be handed to the delivery service. The text is for logs.
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+#[error("could not send the message: {0}")]
+pub struct NotifyError(pub String);
+
+impl crate::ErrorCode for NotifyError {
+    fn code(&self) -> &'static str {
+        "notification_failed"
+    }
+}
+
 /// Writes to several aggregates that commit together or not at all (design note 0007,
 /// O1): one transaction on Postgres, one locked step in memory.
 ///

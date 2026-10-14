@@ -45,6 +45,15 @@ pub enum Scope {
     /// everything checkout writes underneath (design note 0007).
     #[serde(rename = "checkout")]
     Checkout,
+    /// Staff users, roles and invites (design note 0008).
+    #[serde(rename = "users:read")]
+    UsersRead,
+    #[serde(rename = "users:write")]
+    UsersWrite,
+    #[serde(rename = "api_keys:read")]
+    ApiKeysRead,
+    #[serde(rename = "api_keys:write")]
+    ApiKeysWrite,
 }
 
 impl Scope {
@@ -70,10 +79,56 @@ impl Scope {
             Scope::OrdersRead => "orders:read",
             Scope::OrdersWrite => "orders:write",
             Scope::Checkout => "checkout",
+            Scope::UsersRead => "users:read",
+            Scope::UsersWrite => "users:write",
+            Scope::ApiKeysRead => "api_keys:read",
+            Scope::ApiKeysWrite => "api_keys:write",
         }
     }
 
-    pub const ALL: [Scope; 19] = [
+    /// The scope that also grants this one: a write scope grants its read scope, as in
+    /// Shopify (design note 0008, A7). Roles and keys can then list `products:write`
+    /// alone. `None` for write scopes and `checkout`.
+    pub fn implied_by(self) -> Option<Scope> {
+        match self {
+            Scope::ProductsRead => Some(Scope::ProductsWrite),
+            Scope::MarketsRead => Some(Scope::MarketsWrite),
+            Scope::PricingRead => Some(Scope::PricingWrite),
+            Scope::CartsRead => Some(Scope::CartsWrite),
+            Scope::TaxesRead => Some(Scope::TaxesWrite),
+            Scope::InventoryRead => Some(Scope::InventoryWrite),
+            Scope::CustomersRead => Some(Scope::CustomersWrite),
+            Scope::StoresRead => Some(Scope::StoresWrite),
+            Scope::OrdersRead => Some(Scope::OrdersWrite),
+            Scope::UsersRead => Some(Scope::UsersWrite),
+            Scope::ApiKeysRead => Some(Scope::ApiKeysWrite),
+            Scope::ProductsWrite
+            | Scope::MarketsWrite
+            | Scope::PricingWrite
+            | Scope::CartsWrite
+            | Scope::TaxesWrite
+            | Scope::InventoryWrite
+            | Scope::CustomersWrite
+            | Scope::StoresWrite
+            | Scope::OrdersWrite
+            | Scope::Checkout
+            | Scope::UsersWrite
+            | Scope::ApiKeysWrite => None,
+        }
+    }
+
+    /// What a publishable API key grants: enough for a storefront to show products and
+    /// run a cart through checkout, nothing that changes the catalog, customers or
+    /// orders (design note 0008, section 4). `carts:write` implies `carts:read`.
+    pub const STOREFRONT: [Scope; 5] = [
+        Scope::ProductsRead,
+        Scope::MarketsRead,
+        Scope::StoresRead,
+        Scope::CartsWrite,
+        Scope::Checkout,
+    ];
+
+    pub const ALL: [Scope; 23] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -93,6 +148,10 @@ impl Scope {
         Scope::OrdersRead,
         Scope::OrdersWrite,
         Scope::Checkout,
+        Scope::UsersRead,
+        Scope::UsersWrite,
+        Scope::ApiKeysRead,
+        Scope::ApiKeysWrite,
     ];
 }
 
@@ -113,6 +172,20 @@ mod test {
                 serde_json::to_string(&scope).unwrap(),
                 format!("\"{scope}\"")
             );
+        }
+    }
+
+    #[test]
+    fn every_read_scope_is_implied_by_its_write_scope() {
+        for scope in Scope::ALL {
+            if let Some(read) = scope.as_str().strip_suffix(":read") {
+                assert_eq!(
+                    scope.implied_by().map(|s| s.to_string()),
+                    Some(format!("{read}:write"))
+                );
+            } else {
+                assert_eq!(scope.implied_by(), None, "{scope}");
+            }
         }
     }
 

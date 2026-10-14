@@ -91,5 +91,6 @@ fn actor_to_db(actor: Actor) -> (&'static str, Uuid) {
         Actor::System => ("system", Uuid::nil()),
         Actor::User(id) => ("user", id.as_uuid()),
         Actor::Agent(id) => ("agent", id.as_uuid()),
+        Actor::ApiKey(id) => ("api_key", id.as_uuid()),
     }
 }

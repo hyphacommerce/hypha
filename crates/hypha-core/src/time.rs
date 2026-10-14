@@ -21,6 +21,16 @@ impl Timestamp {
     pub const fn unix_micros(self) -> i64 {
         self.0
     }
+
+    /// Whole seconds since the epoch, rounded down (TOTP counts 30-second steps).
+    pub const fn unix_secs(self) -> i64 {
+        self.0.div_euclid(1_000_000)
+    }
+
+    /// `secs` seconds later (earlier if negative), saturating at the ends of `i64`.
+    pub const fn plus_secs(self, secs: i64) -> Self {
+        Self(self.0.saturating_add(secs.saturating_mul(1_000_000)))
+    }
 }
 
 #[cfg(test)]
@@ -32,6 +42,14 @@ mod tests {
         let earlier = Timestamp::from_unix_micros(-1);
         assert!(earlier < Timestamp::UNIX_EPOCH);
         assert!(Timestamp::UNIX_EPOCH < Timestamp::from_unix_micros(1));
+    }
+
+    #[test]
+    fn plus_secs_moves_by_whole_seconds_and_unix_secs_rounds_down() {
+        let t = Timestamp::from_unix_micros(1_500_000);
+        assert_eq!(t.plus_secs(2), Timestamp::from_unix_micros(3_500_000));
+        assert_eq!(t.unix_secs(), 1);
+        assert_eq!(Timestamp::from_unix_micros(-1).unix_secs(), -1);
     }
 
     #[test]

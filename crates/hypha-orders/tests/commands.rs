@@ -77,7 +77,8 @@ fn get_order_reports_an_unknown_order() {
 #[test]
 fn get_order_needs_orders_read() {
     let repo = repo_with_order();
-    let ctx = user_with(vec![Scope::OrdersWrite]);
+    // Not `orders:write`: that implies `orders:read`.
+    let ctx = user_with(vec![Scope::Checkout]);
     assert_eq!(
         block_on(get_order(&ctx, &repo, order_id())),
         Err(CommandError::Auth(AuthError::MissingScope(

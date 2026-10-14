@@ -99,6 +99,13 @@ define_id!(AddressId, "addr");
 define_id!(OrderId, "ord");
 define_id!(OrderLineId, "ordl");
 
+define_id!(RoleId, "role");
+define_id!(InviteId, "inv");
+define_id!(IdentityId, "idn");
+define_id!(SessionId, "sess");
+define_id!(ApiKeyId, "key");
+define_id!(PasswordResetId, "pwr");
+
 #[cfg(test)]
 mod tests {
     use super::*;

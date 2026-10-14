@@ -23,12 +23,15 @@ pub use idempotency::{
     IdempotencyRequest, Idempotent, StageIdempotency, earlier_result,
 };
 pub use ids::{
-    AddressId, AgentId, CartId, CatalogId, CustomerId, IdError, InventoryItemId, LocationId,
-    MarketId, OptionId, OptionValueId, OrderId, OrderLineId, PriceListId, ProductId, StoreId,
-    TaxClassId, TaxRegionId, UserId, VariantId,
+    AddressId, AgentId, ApiKeyId, CartId, CatalogId, CustomerId, IdError, IdentityId,
+    InventoryItemId, InviteId, LocationId, MarketId, OptionId, OptionValueId, OrderId, OrderLineId,
+    PasswordResetId, PriceListId, ProductId, RoleId, SessionId, StoreId, TaxClassId, TaxRegionId,
+    UserId, VariantId,
 };
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
-pub use ports::{Clock, HasBatch, IdGenerator, RepoError, report_duplicate};
+pub use ports::{
+    Clock, HasBatch, IdGenerator, Notifier, NotifyError, Random, RepoError, report_duplicate,
+};
 pub use quantity::{Quantity, QuantityError};
 pub use scope::Scope;
 pub use text::{MAX_TEXT_LEN, TextError, optional_text, required_text};

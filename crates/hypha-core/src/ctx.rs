@@ -1,11 +1,17 @@
 use thiserror::Error;
 
-use crate::{AgentId, ErrorCode, UserId, scope::Scope};
+use crate::{AgentId, ApiKeyId, ErrorCode, UserId, scope::Scope};
 
+/// Who a command runs for, for audit and idempotency (keys are per actor).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Actor {
+    /// A staff member, through a session (design note 0008).
     User(UserId),
+    /// An admin assistant acting with its own scopes (not built yet).
     Agent(AgentId),
+    /// A script, integration or storefront, through a secret or publishable key.
+    ApiKey(ApiKeyId),
+    /// The host itself: startup tasks and tests.
     System,
 }
 
@@ -43,8 +49,18 @@ impl Ctx {
         self.actor
     }
 
+    /// Whether the caller holds `scope`, directly or through the write scope that
+    /// implies it (`Scope::implied_by`).
     pub fn has_scope(&self, scope: Scope) -> bool {
         self.scopes.contains(&scope)
+            || scope
+                .implied_by()
+                .is_some_and(|wider| self.scopes.contains(&wider))
+    }
+
+    /// The scopes as granted, without the implied ones.
+    pub fn scopes(&self) -> &[Scope] {
+        &self.scopes
     }
 
     pub fn require(&self, scope: Scope) -> Result<(), AuthError> {
@@ -87,6 +103,14 @@ mod tests {
             reader().require(Scope::ProductsWrite),
             Err(AuthError::MissingScope(Scope::ProductsWrite))
         );
+    }
+
+    #[test]
+    fn a_write_scope_grants_its_read_scope_but_not_the_reverse() {
+        let writer = Ctx::new(Actor::System, vec![Scope::ProductsWrite]);
+        assert!(writer.has_scope(Scope::ProductsRead));
+        assert!(!writer.has_scope(Scope::MarketsRead));
+        assert!(!reader().has_scope(Scope::ProductsWrite));
     }
 
     #[test]
