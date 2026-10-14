@@ -34,7 +34,8 @@ fn record(actor: Actor, k: &str, result: u128) -> IdempotencyRecord {
         actor,
         key: key(k),
         operation: "create_cart".to_string(),
-        fingerprint: [result as u8; 32],
+        // Every byte different, so a reordered or truncated fingerprint shows.
+        fingerprint: std::array::from_fn(|i| (result as u8).wrapping_add(i as u8)),
         result: Uuid::from_u128(result),
         // A microsecond after 2026-01-01, so precision is checked too.
         created_at: Timestamp::from_unix_micros(1_767_225_600_000_001),
