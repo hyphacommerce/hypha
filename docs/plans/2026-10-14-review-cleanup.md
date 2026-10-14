@@ -109,36 +109,38 @@ Decide first; each is easier now than after orders build on it.
 
 ## Phase 3: cleanup (branch `chore/cleanup`)
 
-- [ ] **Shared test fakes.** 6 hand-written racing repos (`hypha-products/tests/commands.rs:179`,
+- [x] **Shared test fakes.** 6 hand-written racing repos (`hypha-products/tests/commands.rs:179`,
   `hypha-markets/tests/create.rs:579`, `hypha-tax/tests/commands.rs:306`,
   `hypha-inventory/tests/commands.rs:241`, `hypha-inventory/tests/reserve.rs:55`,
   `hypha-customers/tests/commands.rs:154`): replace with a "hide the next lookup" switch
   in testkit.
-- [ ] **Shared duplicate-key helper** for the "pre-check, map `Duplicate`, look up again"
+- [x] **Shared duplicate-key helper** for the "pre-check, map `Duplicate`, look up again"
   block (products, markets ×2, tax, inventory, customers).
-- [ ] **`Quantity` to core**; inventory uses it instead of a bare `u32` with its own zero
+- [x] **`Quantity` to core**; inventory uses it instead of a bare `u32` with its own zero
   check.
-- [ ] **One text rule** (trim, empty → none, ≤ 255): `hypha-customers/src/customer.rs:176`
+- [x] **One text rule** (trim, empty → none, ≤ 255): `hypha-customers/src/customer.rs:176`
   copies `hypha-core/src/address.rs:76`. Product title, market name and tax class name
   have no checks; location name isn't trimmed or capped.
-- [ ] **Dead code:** `market_for`, `check_no_overlap`, `catalog_for`,
+- [x] **Dead code:** `market_for`, `check_no_overlap`, `catalog_for`,
   `check_one_catalog_per_context`, `CatalogError` (markets). Keep `Market::add_country`,
   `remove_country`, `Cart::set_quantity`, `remove_line` but give them commands and routes
   (cart quantity/remove is on the roadmap anyway).
-- [ ] **Cart handlers** (`routes/carts.rs` create, set_email, set_customer) run a command
+- [x] **Cart handlers** (`routes/carts.rs` create, set_email, set_customer) run a command
   then `get_cart`: make those commands return `PricedCart`, like `add_line`.
-- [ ] **One host extractor** for `(ctx, ports)` instead of 31 copies of
+- [x] **One host extractor** for `(ctx, ports)` instead of 31 copies of
   `Ctx::system(); // TODO: real auth` + `ports().await?`, so auth lands in one place.
-- [ ] **`ProductStatus` in DTOs** (`routes/products.rs:25,33`): map through an API enum
+- [x] **`ProductStatus` in DTOs** (`routes/products.rs:25,33`): map through an API enum
   (CLAUDE.md forbids serializing domain types); then products no longer needs `serde`.
-- [ ] **Products crate drift:** `CommandError::NotFound` → `ProductNotFound`;
+- [x] **Products crate drift:** `CommandError::NotFound` → `ProductNotFound`;
   `HandleTaken` should carry the existing product ID; `uuid` is only a test dependency;
   inline `snapshot.rs` like the other crates. Make older error enums `Clone`.
-- [ ] **Product saves write row by row** (`hypha-store-postgres/src/products.rs:127-176`):
+- [x] **Product saves write row by row** (`hypha-store-postgres/src/products.rs:127-176`):
   use `unnest … WITH ORDINALITY` like the other adapters.
-- [ ] **Fewer queries per request** (`get_cart` ≈ 21, `add_line` ≈ 31 round trips):
+- [x] **Fewer queries per request** (`get_cart` ≈ 21, `add_line` ≈ 31 round trips):
   return early on empty ID lists (`load_items`, `load_locations`); `add_line` loads the
   product twice.
+  Done, and `set_line_quantity` no longer loads pricing, stock and products twice when
+  it raises a quantity (it shares `reprice_grown_line` with `add_line`).
 - [ ] **CHECK constraints** (new migration): currency on `variants`, `markets`,
   `price_lists`, `price_list_prices`; money amounts `≤ 9007199254740991`;
   `customers.email = lower(email)`.
@@ -180,7 +182,7 @@ Decide first; each is easier now than after orders build on it.
   "`continue_selling` items are always Available" (not with zero serving locations).
 - [ ] `hypha-cart/src/commands.rs:287` query count; `scripts/e2e.sh:2` says in-memory only.
 
-## Before orders (goes into design note 0007, not this cleanup)
+## Before orders (now in design note 0007)
 
 - **A `Clock` port**: orders need `placed_at`; core and domain crates can't read time.
 - **Cart status** (open / completed, link to its order), so a cart can't be checked out

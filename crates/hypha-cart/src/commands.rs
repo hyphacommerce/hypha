@@ -196,27 +196,7 @@ pub async fn add_line<S: HasCarts + PricingPorts>(
 
     // Only changes the copy in memory; nothing is saved unless every check below passes.
     cart.add_line(product.id(), input.variant, quantity)?;
-
-    let pricing = load_pricing(ports, &cart).await?;
-    price_line(&product, input.variant, &pricing)?;
-
-    // The whole line counts: adding 1 to a line of 2 needs 3 in stock. Nothing is
-    // reserved; stock is only taken at checkout.
-    let stock = load_stock(ports, &cart).await?;
-    let line = cart.line(input.variant)?;
-    check_stock(&stock, input.variant, line.quantity())?;
-
-    let tax = load_tax(ports, &cart, &pricing.market).await?;
-    // The new line's product is loaded already; fetch only the others.
-    let others: Vec<ProductId> = product_ids(&cart)
-        .into_iter()
-        .filter(|id| *id != product.id())
-        .collect();
-    let mut cart_products = ports.products().get_many(&others).await?;
-    cart_products.push(product);
-    let priced = price_cart(&cart, &cart_products, &pricing, &tax, &stock);
-
-    refuse_unavailable(&priced, input.variant)?;
+    let priced = reprice_grown_line(ports, &cart, product, input.variant).await?;
 
     // Fails with StaleVersion (409) if another request changed the cart meanwhile,
     // instead of silently dropping that request's line.
@@ -306,13 +286,7 @@ pub async fn set_line_quantity<S: HasCarts + PricingPorts>(
             .get(line.product())
             .await?
             .ok_or(LineError::ProductNotFound(line.product()))?;
-        let pricing = load_pricing(ports, &cart).await?;
-        price_line(&product, input.variant, &pricing)?;
-        let stock = load_stock(ports, &cart).await?;
-        check_stock(&stock, input.variant, quantity)?;
-        let priced = reprice(ports, &cart).await?;
-        refuse_unavailable(&priced, input.variant)?;
-        priced
+        reprice_grown_line(ports, &cart, product, input.variant).await?
     } else {
         reprice(ports, &cart).await?
     };
@@ -336,6 +310,37 @@ pub async fn remove_cart_line<S: HasCarts + PricingPorts>(
     }
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
+/// Reprices `cart` after `variant`'s line was added or grew, strictly: unlike `reprice`,
+/// that line must be sellable, in stock for its whole quantity and fit the totals, or
+/// this fails. `product` is the line's product, which the caller loaded already, so
+/// each query runs once.
+async fn reprice_grown_line<S: PricingPorts>(
+    ports: &S,
+    cart: &Cart,
+    product: Product,
+    variant: VariantId,
+) -> Result<PricedCart, CommandError> {
+    let pricing = load_pricing(ports, cart).await?;
+    price_line(&product, variant, &pricing)?;
+
+    // The whole line counts: adding 1 to a line of 2 needs 3 in stock. Nothing is
+    // reserved; stock is only taken at checkout.
+    let stock = load_stock(ports, cart).await?;
+    check_stock(&stock, variant, cart.line(variant)?.quantity())?;
+
+    let tax = load_tax(ports, cart, &pricing.market).await?;
+    let others: Vec<ProductId> = product_ids(cart)
+        .into_iter()
+        .filter(|id| *id != product.id())
+        .collect();
+    let mut cart_products = ports.products().get_many(&others).await?;
+    cart_products.push(product);
+    let priced = price_cart(cart, &cart_products, &pricing, &tax, &stock);
+
+    refuse_unavailable(&priced, variant)?;
     Ok(priced)
 }
 
