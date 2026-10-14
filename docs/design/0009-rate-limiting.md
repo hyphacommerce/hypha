@@ -17,7 +17,7 @@
 | --- | --- |
 | R1 | **Use [`governor`](https://crates.io/crates/governor), don't write a limiter.** GCRA (a smooth token bucket), keyed, in memory. Not `tower_governor`: as middleware it runs before the body is read, so it can't limit per email, and we need different keys per route |
 | R2 | **A `RateLimiter` port in the host.** `check(rule, key)` answers allowed, or limited with a retry delay. The in-memory `governor` version is the only one for now; a shared one (Postgres, or the Workers binding) comes with the first host that runs more than one instance |
-| R3 | **Limit per IP and per email** on the public routes (section 3). Per IP stops one client hammering; per email stops guessing spread over many IPs. The second-factor lockout (0008) already limits per account |
+| R3 | **Limit per address, per email and address, and loosely per email** on the public routes (section 3). Per address stops one client hammering; per email and address stops guessing at one account from one place; the loose email limit bounds guessing spread over many addresses without letting one stranger lock the owner out. The second-factor lockout (0008) already limits per account |
 | R4 | **The client IP comes from the socket**, unless the request came through a proxy listed in `HYPHA_TRUSTED_PROXIES` (CIDR ranges): then from `X-Forwarded-For`, read right to left up to the first address that isn't a trusted proxy. With the variable unset, `X-Forwarded-For` is ignored, so a client can't pick its own key |
 | R5 | **IPv6 addresses are keyed by their /64.** One customer usually gets a whole /64, so keying by full address would let them rotate through billions of keys |
 | R6 | **Over the limit is `429 rate_limited`** with `Retry-After` (seconds) and `details: {"retry_after_secs": n}`, checked before any password hashing, storage or email work |
@@ -37,7 +37,10 @@
 
 ```rust
 // hypha-host-axum
-pub enum Rule { LoginIp, LoginEmail, MfaIp, ResetIp, ResetEmail, InviteIp }
+pub enum Rule {
+    LoginIp, LoginEmailFromIp, LoginEmail, MfaIp,
+    ResetIp, ResetEmailFromIp, ResetConfirmIp, InviteIp,
+}
 
 pub enum Decision { Allowed, Limited { retry_after: Duration } }
 
@@ -68,22 +71,34 @@ GCRA describes a quota as a burst plus a steady rate.
 
 | Rule | Route | Key | Burst | Then |
 | --- | --- | --- | --- | --- |
-| `LoginIp` | `POST /auth/login` | IP | 10 | 1 every 30 s |
-| `LoginEmail` | `POST /auth/login` | email | 10 | 1 every 30 s |
-| `MfaIp` | `POST /auth/login/mfa` | IP | 10 | 1 every 30 s |
-| `ResetIp` | `POST /auth/password-reset` and `/confirm` | IP | 5 | 1 every 60 s |
-| `ResetEmail` | `POST /auth/password-reset` | email | 3 | 1 every 5 min |
-| `InviteIp` | `POST /invites/accept` | IP | 10 | 1 every 30 s |
+| `LoginIp` | `POST /auth/login` | address | 10 | 1 every 30 s |
+| `LoginEmailFromIp` | `POST /auth/login` | email and address | 5 | 1 every 60 s |
+| `LoginEmail` | `POST /auth/login` | email | 50 | 1 every 72 s (about 50 an hour) |
+| `MfaIp` | `POST /auth/login/mfa` | address | 10 | 1 every 30 s |
+| `ResetIp` | `POST /auth/password-reset` | address | 5 | 1 every 60 s |
+| `ResetEmailFromIp` | `POST /auth/password-reset` | email and address | 3 | 1 every 5 min |
+| `ResetConfirmIp` | `POST /auth/password-reset/confirm` | address | 10 | 1 every 30 s |
+| `InviteIp` | `POST /invites/accept` | address | 10 | 1 every 30 s |
 
-- **Order in a handler:** the IP rule first, before the body is parsed; then the
-  body; then the email rule; then the work (hashing, storage, email). A limited request
-  costs almost nothing.
+- **Order in a handler:** the address rule first, before the body is parsed; then the
+  body; then the email rules; then the work (hashing, storage, email). A limited
+  request costs almost nothing.
 - **Every attempt counts**, right or wrong. Counting only failures would need the
   answer first, and the answer costs a password hash.
-- **Emails as keys** are trimmed and lowercased, the same as logins.
-- **Per-email limits can lock a real user out** for a short while if someone else
-  hammers their email (OWASP's warning). The numbers are loose enough that a person
-  typing never meets them, and the lock lasts seconds, not hours.
+- **Emails as keys** go through `Email::new`: the same normalisation as a login, so one
+  account is one key, and at most 254 bytes, so a key can't be megabytes of body.
+  Something that isn't an email gets no email limit (it can't match an account), only
+  the address one.
+- **No lockout by email alone** (*changed after the review, 2026-10-14*): a strict limit
+  keyed by the email alone let one stranger, sending a request each time it refilled,
+  keep the real owner locked out indefinitely. The strict email limit is now per email
+  *and* address, which bounds guessing from one place; the email-only limit is loose
+  (about 50 an hour), which bounds guessing spread over many addresses while locking
+  someone out takes a great many of them. Password reset has no email-only limit at
+  all: the domain already sends at most one email per account every 5 minutes, and a
+  stranger asking only sends the owner a valid link.
+- **Confirming a reset** has its own bucket, so asking for a few links doesn't block
+  using one.
 
 ## 4. The client IP (R4, R5)
 
@@ -108,8 +123,9 @@ GCRA describes a quota as a burst plus a steady rate.
 - **Work before the token check:** authenticated routes are unchanged (their limits
   come with per-key limits later). The public routes now refuse a flood before parsing
   or touching storage.
-- **Password guessing:** `LoginEmail` bounds guesses per account however many
-  addresses are used; `LoginIp` bounds one address trying many accounts.
+- **Password guessing:** `LoginEmailFromIp` bounds guesses at one account from one
+  address, `LoginEmail` (looser) however many addresses are used, and `LoginIp` one
+  address trying many accounts.
 
 ## 6. Why no cache or KV store yet (R7)
 
@@ -130,7 +146,17 @@ GCRA describes a quota as a burst plus a steady rate.
   Medusa keeps it in its cache module and falls back to memory without Redis, which
   breaks logins across instances.
 
-## 7. Later
+## 7. Known limits
+
+- **IPv6 ranges wider than /64** (third review, 2026-10-14): someone holding a /48 gets
+  65,536 separate address keys. On the routes that only have an address limit (the
+  second factor, reset confirmation, invite acceptance) that limit is about load, not
+  guessing: getting through needs a 256-bit token or a valid challenge, and the
+  second-factor lockout counts per account (0008). Login is bounded by the email limits.
+  A coarser /48 bucket can follow if traffic shows such rotation.
+- **One instance's counts** until a shared `RateLimiter` exists (section 2).
+
+## 8. Later
 
 - Limits per API key and per staff member on authenticated routes (Shopify's bucket
   per app), with `RateLimit-*` headers.
@@ -139,7 +165,7 @@ GCRA describes a quota as a burst plus a steady rate.
 - Quotas from configuration rather than constants, once there is traffic to tune by.
 - A dedicated client-IP header option.
 
-## 8. Hard to reverse
+## 9. Hard to reverse
 
 Little: the port, the rules and the 429 shape are internal or additive. The one
 operational trap is R4: a deployment behind a proxy that doesn't set
