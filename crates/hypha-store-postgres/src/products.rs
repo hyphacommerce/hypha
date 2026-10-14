@@ -25,6 +25,9 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     }
 
     async fn get_many(&self, ids: &[ProductId]) -> Result<Vec<Product>, RepoError> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
         let mut conn = self.conn().await;
         let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
         consistent_read!(conn.client(), |tx| load(tx, &ids).await)

@@ -304,6 +304,9 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
         catalog: CatalogId,
         products: &[ProductId],
     ) -> Result<HashSet<ProductId>, RepoError> {
+        if products.is_empty() {
+            return Ok(HashSet::new());
+        }
         let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
         let mut conn = self.conn().await;
         let rows = conn
@@ -436,6 +439,9 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         list: PriceListId,
         variants: &[VariantId],
     ) -> Result<HashMap<VariantId, Price>, RepoError> {
+        if variants.is_empty() {
+            return Ok(HashMap::new());
+        }
         let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
         let mut conn = self.conn().await;
         let rows = conn

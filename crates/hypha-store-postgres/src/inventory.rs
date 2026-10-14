@@ -125,6 +125,9 @@ async fn load_locations(
     client: &impl GenericClient,
     ids: &[Uuid],
 ) -> Result<Vec<Location>, RepoError> {
+    if ids.is_empty() {
+        return Ok(vec![]);
+    }
     let rows = client
         .query_typed(
             "SELECT id, version, name, priority FROM locations WHERE id = ANY($1)
@@ -133,6 +136,9 @@ async fn load_locations(
         )
         .await
         .map_err(repo_error)?;
+    if rows.is_empty() {
+        return Ok(vec![]);
+    }
     let found: Vec<Uuid> = rows.iter().map(|r| r.get(0)).collect();
     let mut markets: HashMap<Uuid, Vec<MarketId>> = HashMap::new();
     for r in client
@@ -187,6 +193,9 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
     }
 
     async fn for_variants(&self, variants: &[VariantId]) -> Result<Vec<InventoryItem>, RepoError> {
+        if variants.is_empty() {
+            return Ok(vec![]);
+        }
         let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
         let mut conn = self.conn().await;
         consistent_read!(conn.client(), |tx| {
@@ -364,6 +373,9 @@ async fn load_items(
     column: &'static str,
     values: &[Uuid],
 ) -> Result<Vec<InventoryItem>, RepoError> {
+    if values.is_empty() {
+        return Ok(vec![]);
+    }
     let rows = client
         .query_typed(
             &format!(
@@ -374,6 +386,9 @@ async fn load_items(
         )
         .await
         .map_err(repo_error)?;
+    if rows.is_empty() {
+        return Ok(vec![]);
+    }
     let ids: Vec<Uuid> = rows.iter().map(|r| r.get(0)).collect();
 
     let mut levels: HashMap<Uuid, Vec<Level>> = HashMap::new();

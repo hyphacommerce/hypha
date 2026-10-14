@@ -85,6 +85,9 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
         &self,
         products: &[ProductId],
     ) -> Result<HashMap<ProductId, TaxClassId>, RepoError> {
+        if products.is_empty() {
+            return Ok(HashMap::new());
+        }
         let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
         let mut conn = self.conn().await;
         let rows = conn

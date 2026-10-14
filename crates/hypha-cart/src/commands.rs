@@ -207,7 +207,13 @@ pub async fn add_line<S: HasCarts + PricingPorts>(
     check_stock(&stock, input.variant, line.quantity())?;
 
     let tax = load_tax(ports, &cart, &pricing.market).await?;
-    let cart_products = load_products(ports, &cart).await?;
+    // The new line's product is loaded already; fetch only the others.
+    let others: Vec<ProductId> = product_ids(&cart)
+        .into_iter()
+        .filter(|id| *id != product.id())
+        .collect();
+    let mut cart_products = ports.products().get_many(&others).await?;
+    cart_products.push(product);
     let priced = price_cart(&cart, &cart_products, &pricing, &tax, &stock);
 
     refuse_unavailable(&priced, input.variant)?;
@@ -380,8 +386,9 @@ async fn reprice<S: PricingPorts>(ports: &S, cart: &Cart) -> Result<PricedCart, 
 
 /// Everything needed to price the cart's lines, with a fixed number of queries
 /// however many lines there are: membership and fixed prices are fetched in batches.
-/// With `load_tax`, `load_stock` and `load_products`, pricing a cart costs 10 queries
-/// in total.
+/// With `load_tax`, `load_stock` and `load_products`, pricing a cart takes the same
+/// number of round trips for 1 line or 100 (on Postgres about 20, counting the
+/// BEGIN/COMMIT of each multi-query load); an empty cart skips the batch lookups.
 ///
 /// A missing catalog or price list is left out rather than reported here:
 /// `resolve_price` turns it into a precise per-line reason.
