@@ -9,7 +9,7 @@
 //! - only `query_typed*` and `batch_execute`: no named prepared statements, which
 //!   Hyperdrive's transaction pooling may not support;
 //! - every write is one short transaction with no reads in it besides its own version
-//!   check, so it maps onto D1's `batch()` too;
+//!   check, so it holds a pooled connection only briefly;
 //! - errors are mapped by SQLSTATE and constraint name (`error.rs`), never by message text.
 
 mod carts;

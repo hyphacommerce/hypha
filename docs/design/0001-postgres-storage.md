@@ -4,6 +4,11 @@
 - **Scope:** the first real storage adapter (`hypha-store-postgres`, via sqlx), and the
   changes to ports and commands it forces. D1 is not built here, but nothing below may
   rule it out.
+- **Changed 2026-10-14: D1 is no longer a target.** Cloudflare Workers use Postgres
+  through Hyperdrive (section 7). Sections 2 and 2.1 stay as history; D1 no longer
+  constrains new designs. The rules it motivated stay because they pay off anyway: short
+  write transactions (Hyperdrive's transaction pooling), money capped at 2⁵³ − 1 (JSON
+  clients), versions instead of locks.
 
 ## Decisions
 
@@ -396,6 +401,7 @@ Docker Postgres 18.6 from `compose.yaml`.
   and a `schema_migrations` table, run from native code (a CLI or host startup), never
   from a Worker.
 - **D1 becomes optional.** It's still viable (section 6), but no longer needed for the
-  Cloudflare host. Revisit it for very cheap per-store databases.
+  Cloudflare host. Revisit it for very cheap per-store databases. *Dropped as a target
+  on 2026-10-14* (see the status at the top).
 - **Still unverified:** production Hyperdrive (transaction pooling, real TLS, latency),
   because it needs a Cloudflare account. Test it before relying on the Workers host.
