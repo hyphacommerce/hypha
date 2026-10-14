@@ -22,7 +22,7 @@ Run all four before considering work done:
 cargo fmt --all
 cargo clippy --workspace --all-targets
 cargo test --workspace
-cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-tax -p hypha-inventory -p hypha-customers -p hypha-stores -p hypha-store-postgres --target wasm32-unknown-unknown
+cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-tax -p hypha-inventory -p hypha-customers -p hypha-stores -p hypha-orders -p hypha-store-postgres --target wasm32-unknown-unknown
 ```
 
 Extend the wasm build list when a domain crate or storage adapter is added.
@@ -45,13 +45,13 @@ Domain crates are layered; a crate may only depend on layers below it (Cargo rej
 | Hosts | `hypha-host-axum` | anything |
 | Storage adapters | `hypha-store-postgres` (tokio-postgres; native and Workers via Hyperdrive) | domain crates, core; never hosts |
 | Composing domains | `hypha-cart` (later orders) | leaf domains, core |
-| Leaf domains | `hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-tax`, `hypha-inventory`, `hypha-customers`, `hypha-stores` | core; `hypha-pricing` → `hypha-markets` only |
+| Leaf domains | `hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-tax`, `hypha-inventory`, `hypha-customers`, `hypha-stores`, `hypha-orders` | core; `hypha-pricing` → `hypha-markets` only |
 | Core | `hypha-core` | nothing internal |
 
 Leaf functions take the plain values they need (IDs, `Price`), not another leaf's aggregate. E.g. `resolve_price` takes `ProductId`, `VariantId` and the base `Price` rather than `&Product`; the composing command (cart) loads the product and passes them in. Ask before adding a new edge between domain crates.
 
 - `hypha-core`: shared types only — `Money`/`Price`/`BasisPoints` (`money/`), prefixed IDs (`ids.rs`), `CountryCode`, `Email`, `Address`, `Scope`, `Ctx`/`Actor`, generic ports (`IdGenerator`, `Clock`, `HasBatch`, `RepoError` in `ports.rs`), `Timestamp` (`time.rs`, µs since the epoch), idempotency keys (`idempotency.rs`: a keyed command checks `earlier_result` first, then stages an `IdempotencyRecord` in the same batch as its write; see `hypha-cart`'s `create_cart`). No domain logic, no I/O.
-- Domain crates (`hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-tax`, `hypha-inventory`, `hypha-customers`, `hypha-cart`): aggregates with private fields and validated constructors, a repository trait (port) per aggregate in `repo.rs`, error enums in `error.rs`, and commands in `commands.rs` (`hypha-products` is the simplest template; `hypha-cart` shows a command that composes several domains).
+- Domain crates (`hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-tax`, `hypha-inventory`, `hypha-customers`, `hypha-orders`, `hypha-cart`): aggregates with private fields and validated constructors, a repository trait (port) per aggregate in `repo.rs`, error enums in `error.rs`, and commands in `commands.rs` (`hypha-products` is the simplest template; `hypha-cart` shows a command that composes several domains).
 - `hypha-testkit`: in-memory repos for every port (`InMemoryProductRepo`, `InMemoryCartRepo`, …) and deterministic ports (`SequentialIds`, `FixedClock`). It depends on domain crates, so domain crates use it only as a dev-dependency from their `tests/` folder.
 - `hypha-host-axum`: the only place with Tokio, HTTP, auth parsing, logging subscribers (`tracing`) and real ID generation (`UuidV7Ids`). `routes/` holds one module per area with its own request/response DTOs (never serialize domain types directly); `error.rs` maps every crate's `CommandError` to a status (403 scope, 404 resource in the URL, 409 conflict, 422 invalid input incl. unknown IDs in the body, 500 storage with the message hidden); `extract.rs` wraps `Json`/`Path` so even axum's rejections return `{"code": …, "error": …}`; routes whose command takes an idempotency key use `KeyedJson` (reads the `Idempotency-Key` header, fingerprints the request) and `idempotent_response`. Request DTOs are `#[serde(deny_unknown_fields)]`; PATCH bodies follow JSON Merge Patch (absent keeps, `null` clears) via the `patch::nullable` / `patch::non_null` field helpers. Storage is chosen at startup (`state.rs`): `MemoryStorage` (testkit's `InMemoryPorts`) or `PgStorage` (deadpool pool; one `PgStore` per request) behind the `Storage` trait; handlers are generic over it and call `state.storage.ports()` once per request. Routes are listed once in the `router!` macro in `routes/mod.rs`, stamped out per concrete storage, because axum can only prove handler futures `Send` for concrete types (add new routes there). Every handler takes a `Caller` (`extract.rs`), the one place a request becomes a `Ctx`; it is `Ctx::system()` until real auth lands there.
 
@@ -82,7 +82,7 @@ When a command needs more than one repository, take `ports: &S` bound on the acc
 - Unit tests in `#[cfg(test)] mod tests` at the bottom of each file; one rule per test; test boundaries (0 vs -1, exact rounding halves); compare expected errors exactly with `assert_eq!(result, Err(...))`, never via `unwrap`.
 - Command tests are integration tests in each crate's `tests/` folder using `hypha-testkit` (avoids duplicate-crate issues with dev-dependencies).
 - Async in tests via `pollster::block_on`; deterministic IDs via `SequentialIds` and `Uuid::from_u128(n)`; time via `FixedClock` (commands take `clock: &impl Clock` like `ids`).
-- Repository contract: `hypha_testkit::contract::{product_repo, market_repo, catalog_repo, price_list_repo, cart_repo, tax_class_repo, tax_region_repo, location_repo, inventory_item_repo, customer_repo, idempotency_repo, batch}` define what every repo adapter must do (round trips, versions, unique keys, batched methods). The in-memory repos run them in `crates/hypha-testkit/tests/contract.rs`, and every new adapter must run them too. When a repo trait gains a method or a unique key, add a contract scenario first.
+- Repository contract: `hypha_testkit::contract::{product_repo, market_repo, catalog_repo, price_list_repo, cart_repo, tax_class_repo, tax_region_repo, location_repo, inventory_item_repo, customer_repo, order_repo, idempotency_repo, batch}` define what every repo adapter must do (round trips, versions, unique keys, batched methods). The in-memory repos run them in `crates/hypha-testkit/tests/contract.rs`, and every new adapter must run them too. When a repo trait gains a method or a unique key, add a contract scenario first.
 
 ## Conventions
 

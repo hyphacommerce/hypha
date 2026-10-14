@@ -1,11 +1,13 @@
 use hypha_cart::{Cart, StageCarts, repo::keys as cart_keys};
 use hypha_core::{HasBatch, IdempotencyRecord, RepoError, StageIdempotency, Version, Versioned};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
+use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
 
 use crate::{
     InMemoryPorts,
     idempotency::insert_record,
     inventory_items,
+    orders::unique as unique_order,
     table::{insert_row, no_unique_keys, update_row},
 };
 
@@ -13,6 +15,7 @@ use crate::{
 /// staged, still carrying the version they were loaded at.
 #[derive(Default)]
 pub struct InMemoryBatch {
+    new_orders: Vec<Order>,
     new_carts: Vec<Cart>,
     carts: Vec<Cart>,
     inventory_items: Vec<InventoryItem>,
@@ -38,6 +41,13 @@ impl StageInventoryItems for InMemoryBatch {
     }
 }
 
+impl StageOrders for InMemoryBatch {
+    fn insert_order(&mut self, order: &mut Order) {
+        self.new_orders.push(order.clone());
+        order.set_version(Version::NEW.next());
+    }
+}
+
 impl StageIdempotency for InMemoryBatch {
     fn record_idempotency(&mut self, record: IdempotencyRecord) {
         self.idempotency.push(record);
@@ -57,12 +67,27 @@ impl HasBatch for InMemoryPorts {
     /// are put back as they were. Readers wait for the locks, so they never see half a
     /// batch. Copying the tables for the rollback is fine at test sizes.
     async fn commit(&self, batch: InMemoryBatch) -> Result<(), RepoError> {
+        let mut orders = self.orders.orders.lock();
         let mut carts = self.carts.carts.lock();
         let mut items = self.inventory_items.items.lock();
         let mut records = self.idempotency.lock();
-        let before = (carts.clone(), items.clone(), records.clone());
+        let before = (
+            orders.clone(),
+            carts.clone(),
+            items.clone(),
+            records.clone(),
+        );
 
         let written = (|| {
+            for mut order in batch.new_orders {
+                insert_row(
+                    &mut orders,
+                    order.id(),
+                    &mut order,
+                    order_keys::ORDER_ID,
+                    &unique_order,
+                )?;
+            }
             for mut cart in batch.new_carts {
                 insert_row(
                     &mut carts,
@@ -84,7 +109,7 @@ impl HasBatch for InMemoryPorts {
             Ok(())
         })();
         if written.is_err() {
-            (*carts, *items, *records) = before;
+            (*orders, *carts, *items, *records) = before;
         }
         written
     }

@@ -96,6 +96,9 @@ define_id!(InventoryItemId, "invi");
 define_id!(CustomerId, "cus");
 define_id!(AddressId, "addr");
 
+define_id!(OrderId, "ord");
+define_id!(OrderLineId, "ordl");
+
 #[cfg(test)]
 mod tests {
     use super::*;

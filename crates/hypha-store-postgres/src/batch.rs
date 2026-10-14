@@ -1,12 +1,14 @@
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_core::{HasBatch, IdempotencyRecord, RepoError, StageIdempotency, Version, Versioned};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
+use hypha_orders::{Order, OrderSnapshot, StageOrders};
 
 use crate::{
     carts::{insert_cart, update_cart},
     error::repo_error,
     idempotency::insert_records,
     inventory::update_items,
+    orders::insert_order,
     store::{PgConnection, PgStore},
 };
 
@@ -14,6 +16,7 @@ use crate::{
 /// carrying the version it was loaded at.
 #[derive(Default)]
 pub struct PgBatch {
+    new_orders: Vec<OrderSnapshot>,
     new_carts: Vec<CartSnapshot>,
     carts: Vec<CartSnapshot>,
     inventory_items: Vec<InventoryItemSnapshot>,
@@ -22,7 +25,8 @@ pub struct PgBatch {
 
 impl PgBatch {
     fn is_empty(&self) -> bool {
-        self.new_carts.is_empty()
+        self.new_orders.is_empty()
+            && self.new_carts.is_empty()
             && self.carts.is_empty()
             && self.inventory_items.is_empty()
             && self.idempotency.is_empty()
@@ -45,6 +49,13 @@ impl StageInventoryItems for PgBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
         self.inventory_items.push(item.snapshot());
         item.set_version(item.version().next());
+    }
+}
+
+impl StageOrders for PgBatch {
+    fn insert_order(&mut self, order: &mut Order) {
+        self.new_orders.push(order.snapshot());
+        order.set_version(Version::NEW.next());
     }
 }
 
@@ -72,6 +83,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
 
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
+        for order in &batch.new_orders {
+            insert_order(&tx, order).await?;
+        }
         for cart in &batch.new_carts {
             insert_cart(&tx, cart).await?;
         }

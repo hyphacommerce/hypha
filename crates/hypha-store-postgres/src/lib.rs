@@ -21,6 +21,7 @@ mod idempotency;
 mod inventory;
 mod markets;
 mod migrate;
+mod orders;
 mod products;
 mod store;
 mod stores;

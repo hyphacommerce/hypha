@@ -36,6 +36,15 @@ pub enum Scope {
     StoresRead,
     #[serde(rename = "stores:write")]
     StoresWrite,
+    #[serde(rename = "orders:read")]
+    OrdersRead,
+    /// Changing orders (marking them paid; later edits and refunds).
+    #[serde(rename = "orders:write")]
+    OrdersWrite,
+    /// Turning a cart into an order: what a storefront needs, without the scopes of
+    /// everything checkout writes underneath (design note 0007).
+    #[serde(rename = "checkout")]
+    Checkout,
 }
 
 impl Scope {
@@ -58,10 +67,13 @@ impl Scope {
             Scope::CustomersWrite => "customers:write",
             Scope::StoresRead => "stores:read",
             Scope::StoresWrite => "stores:write",
+            Scope::OrdersRead => "orders:read",
+            Scope::OrdersWrite => "orders:write",
+            Scope::Checkout => "checkout",
         }
     }
 
-    pub const ALL: [Scope; 16] = [
+    pub const ALL: [Scope; 19] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -78,6 +90,9 @@ impl Scope {
         Scope::CustomersWrite,
         Scope::StoresRead,
         Scope::StoresWrite,
+        Scope::OrdersRead,
+        Scope::OrdersWrite,
+        Scope::Checkout,
     ];
 }
 

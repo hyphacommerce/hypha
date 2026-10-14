@@ -4,16 +4,17 @@ use hypha_core::{
     VariantId, Version, Versioned,
 };
 use hypha_inventory::{HasInventoryItems, InventoryItem, InventoryItemRepo, StageInventoryItems};
+use hypha_orders::{HasOrders, OrderRepo, StageOrders, repo::keys as order_keys};
 use uuid::Uuid;
 
-use super::scenario;
+use super::{orders::order, scenario};
 
 /// Runs every `HasBatch` scenario, each on fresh ports from `make`: writes to several
 /// aggregates commit together, with the versions checked as single writes check them.
 pub async fn batch<S>(make: impl AsyncFn() -> S)
 where
-    S: HasBatch + HasCarts + HasInventoryItems,
-    S::Batch: StageCarts + StageInventoryItems,
+    S: HasBatch + HasCarts + HasInventoryItems + HasOrders,
+    S::Batch: StageCarts + StageInventoryItems + StageOrders,
 {
     scenario("batch: commits every staged write, at the versions staging promised");
     commits_everything(&make().await).await;
@@ -25,6 +26,10 @@ where
     inserts_a_cart(&make().await).await;
     scenario("batch: a duplicate new cart writes nothing");
     duplicate_cart_writes_nothing(&make().await).await;
+    scenario("batch: inserts an order with a cart update");
+    inserts_an_order(&make().await).await;
+    scenario("batch: a duplicate order writes nothing");
+    duplicate_order_writes_nothing(&make().await).await;
     scenario("batch: an empty batch commits");
     empty_batch(&make().await).await;
 }
@@ -171,6 +176,44 @@ where
     );
     assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c)));
     assert_eq!(ports.inventory_items().get(a.id()).await, Ok(Some(a)));
+}
+
+async fn inserts_an_order<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems + HasOrders,
+    S::Batch: StageCarts + StageOrders,
+{
+    let (mut c, _, _) = stored(ports).await;
+    add_mug(&mut c);
+    let mut new = order(1);
+    let mut batch = ports.batch();
+    batch.insert_order(&mut new);
+    batch.update_cart(&mut c);
+    assert_eq!(new.version(), Version::new(1));
+    assert_eq!(ports.commit(batch).await, Ok(()));
+    assert_eq!(ports.orders().get(new.id()).await, Ok(Some(new)));
+    assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c)));
+}
+
+async fn duplicate_order_writes_nothing<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems + HasOrders,
+    S::Batch: StageCarts + StageOrders,
+{
+    let (c, _, _) = stored(ports).await;
+    let mut first = order(1);
+    ports.orders().insert(&mut first).await.unwrap();
+
+    let (mut again, mut changed) = (order(1), c.clone());
+    add_mug(&mut changed);
+    let mut batch = ports.batch();
+    batch.update_cart(&mut changed);
+    batch.insert_order(&mut again);
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Duplicate(order_keys::ORDER_ID))
+    );
+    assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c)));
 }
 
 async fn empty_batch<S: HasBatch>(ports: &S) {

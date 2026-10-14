@@ -1,0 +1,197 @@
+use hypha_core::{
+    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId, OrderLineId, Price,
+    ProductId, Quantity, RepoError, TaxClassId, TaxRate, TaxRegionId, Timestamp, VariantId,
+    Version, Versioned,
+};
+use hypha_orders::{
+    FinancialStatus, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, OrderTax, OrderTaxSource,
+    repo::keys,
+};
+use uuid::Uuid;
+
+use super::scenario;
+
+/// Runs every `OrderRepo` scenario, each on a fresh repo from `make`.
+pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
+    scenario("order: insert stores every field at version 1");
+    round_trips(&make().await).await;
+    scenario("order: lookups by ID and number; unknown ones are None");
+    lookups(&make().await).await;
+    scenario("order: update stores the status and bumps the version; stale and missing fail");
+    updates(&make().await).await;
+    scenario("order: unique ID, number, cart and line IDs");
+    unique_keys(&make().await).await;
+    scenario("order: numbers start at 1001 and increase");
+    numbers(&make().await).await;
+}
+
+fn eur(amount: i64) -> Money {
+    Money::new(amount, Currency::Eur).unwrap()
+}
+
+fn oid(n: u128) -> OrderId {
+    OrderId::from_uuid(Uuid::from_u128(n))
+}
+
+fn number(n: i64) -> OrderNumber {
+    OrderNumber::new(n).unwrap()
+}
+
+/// Order `n` (number `n`, cart `n`) with one plain line `n * 10`: 1 × 5.00, untaxed.
+pub(crate) fn order(n: u128) -> Order {
+    order_with(n, vec![plain_line(n * 10)], false)
+}
+
+fn plain_line(id: u128) -> OrderLine {
+    OrderLine {
+        id: OrderLineId::from_uuid(Uuid::from_u128(id)),
+        product: ProductId::from_uuid(Uuid::from_u128(id + 1)),
+        variant: VariantId::from_uuid(Uuid::from_u128(id + 2)),
+        quantity: Quantity::new(1).unwrap(),
+        product_title: "Mug".to_string(),
+        variant_title: None,
+        sku: None,
+        unit_price: Price::new(eur(500)).unwrap(),
+        total: eur(500),
+        tax: None,
+    }
+}
+
+/// Every optional field set, the largest quantity, a class rate: what a mapping bug
+/// would lose.
+fn full_line(id: u128) -> OrderLine {
+    OrderLine {
+        id: OrderLineId::from_uuid(Uuid::from_u128(id)),
+        product: ProductId::from_uuid(Uuid::from_u128(id + 1)),
+        variant: VariantId::from_uuid(Uuid::from_u128(id + 2)),
+        quantity: Quantity::new(u32::MAX).unwrap(),
+        product_title: "Shirt".to_string(),
+        variant_title: Some("M / Blue".to_string()),
+        sku: Some("SH-M-BL".to_string()),
+        unit_price: Price::new(eur(2)).unwrap(),
+        total: eur(2 * i64::from(u32::MAX)),
+        tax: Some(OrderTax {
+            rate: TaxRate::new(50_000).unwrap(),
+            class: Some(TaxClassId::from_uuid(Uuid::from_u128(id + 3))),
+            amount: eur(7),
+            source: OrderTaxSource::RateTable {
+                region: TaxRegionId::from_uuid(Uuid::from_u128(id + 4)),
+            },
+        }),
+    }
+}
+
+fn order_with(n: u128, lines: Vec<OrderLine>, taxes_included: bool) -> Order {
+    let subtotal = lines
+        .iter()
+        .try_fold(eur(0), |sum, l| sum.checked_add(l.total))
+        .unwrap();
+    let tax_total = lines
+        .iter()
+        .filter_map(|l| l.tax.map(|t| t.amount))
+        .try_fold(eur(0), |sum, t| sum.checked_add(t))
+        .unwrap();
+    let total = if taxes_included {
+        subtotal
+    } else {
+        subtotal.checked_add(tax_total).unwrap()
+    };
+    Order::place(NewOrder {
+        id: oid(n),
+        number: number(n as i64),
+        // A microsecond past a whole second, so precision is checked too.
+        placed_at: Timestamp::from_unix_micros(1_767_225_600_000_001),
+        cart: CartId::from_uuid(Uuid::from_u128(1000 + n)),
+        market: MarketId::from_uuid(Uuid::from_u128(2000 + n)),
+        currency: Currency::Eur,
+        country: CountryCode::new("HR").unwrap(),
+        taxes_included,
+        customer: CustomerId::from_uuid(Uuid::from_u128(3000 + n)),
+        email: Email::new("ana@example.hr").unwrap(),
+        lines,
+        subtotal,
+        tax_total,
+        total,
+    })
+    .unwrap()
+}
+
+async fn round_trips<R: OrderRepo>(repo: &R) {
+    let mut simple = order(1);
+    repo.insert(&mut simple).await.unwrap();
+    assert_eq!(simple.version(), Version::new(1));
+    assert_eq!(repo.get(simple.id()).await, Ok(Some(simple)));
+
+    // Line order, every optional field and taxes included must survive.
+    let mut full = order_with(2, vec![full_line(21), plain_line(22)], true);
+    repo.insert(&mut full).await.unwrap();
+    assert_eq!(repo.get(full.id()).await, Ok(Some(full)));
+}
+
+async fn lookups<R: OrderRepo>(repo: &R) {
+    let mut o = order(1);
+    repo.insert(&mut o).await.unwrap();
+    assert_eq!(repo.get_by_number(number(1)).await, Ok(Some(o)));
+    assert_eq!(repo.get(oid(99)).await, Ok(None));
+    assert_eq!(repo.get_by_number(number(99)).await, Ok(None));
+}
+
+async fn updates<R: OrderRepo>(repo: &R) {
+    let mut o = order(1);
+    repo.insert(&mut o).await.unwrap();
+    let stale = o.clone();
+
+    o.mark_paid();
+    repo.update(&mut o).await.unwrap();
+    assert_eq!(o.version(), Version::new(2));
+    let stored = repo.get(o.id()).await.unwrap().unwrap();
+    assert_eq!(stored.financial_status(), FinancialStatus::Paid);
+    assert_eq!(stored, o);
+
+    let mut stale = stale;
+    assert_eq!(repo.update(&mut stale).await, Err(RepoError::StaleVersion));
+    let mut missing = order(2);
+    assert_eq!(
+        repo.update(&mut missing).await,
+        Err(RepoError::StaleVersion)
+    );
+}
+
+async fn unique_keys<R: OrderRepo>(repo: &R) {
+    let mut first = order(1);
+    repo.insert(&mut first).await.unwrap();
+
+    assert_eq!(
+        repo.insert(&mut order(1)).await,
+        Err(RepoError::Duplicate(keys::ORDER_ID))
+    );
+
+    let snapshot = |n: u128| order(n).snapshot();
+    let mut same_number = snapshot(2);
+    same_number.number = number(1);
+    assert_eq!(
+        repo.insert(&mut Order::restore(same_number).unwrap()).await,
+        Err(RepoError::Duplicate(keys::ORDER_NUMBER))
+    );
+
+    let mut same_cart = snapshot(3);
+    same_cart.cart = first.cart();
+    assert_eq!(
+        repo.insert(&mut Order::restore(same_cart).unwrap()).await,
+        Err(RepoError::Duplicate(keys::ORDER_CART))
+    );
+
+    let mut same_line = snapshot(4);
+    same_line.lines[0].id = first.lines()[0].id;
+    assert_eq!(
+        repo.insert(&mut Order::restore(same_line).unwrap()).await,
+        Err(RepoError::Duplicate(keys::ORDER_LINE_ID))
+    );
+}
+
+async fn numbers<R: OrderRepo>(repo: &R) {
+    let first = repo.next_number().await.unwrap();
+    assert_eq!(first, number(1001));
+    let second = repo.next_number().await.unwrap();
+    assert!(second > first);
+}

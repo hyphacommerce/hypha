@@ -233,8 +233,9 @@ it again). Storing response bodies would mean the domain storing host DTOs.
 
 ## 7. Order numbers (O9)
 
-- `trait OrderNumbers { async fn next(&self) -> Result<OrderNumber, RepoError>; }`,
-  called before the batch.
+- `OrderRepo::next_number()`, called before the batch. *Changed while building:* a
+  method on the order repo rather than a separate `OrderNumbers` port, so hosts and
+  tests wire one accessor less.
 - Postgres: a sequence starting at 1001 (`nextval` is outside any transaction, so it
   never blocks another checkout). Memory: an atomic counter.
 - A failed or retried checkout leaves a gap. Shopify's numbers have gaps too (deleted

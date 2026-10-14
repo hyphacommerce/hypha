@@ -24,8 +24,8 @@ pub use idempotency::{
 };
 pub use ids::{
     AddressId, AgentId, CartId, CatalogId, CustomerId, IdError, InventoryItemId, LocationId,
-    MarketId, OptionId, OptionValueId, PriceListId, ProductId, StoreId, TaxClassId, TaxRegionId,
-    UserId, VariantId,
+    MarketId, OptionId, OptionValueId, OrderId, OrderLineId, PriceListId, ProductId, StoreId,
+    TaxClassId, TaxRegionId, UserId, VariantId,
 };
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
 pub use ports::{Clock, HasBatch, IdGenerator, RepoError, report_duplicate};

@@ -79,6 +79,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "idempotency_keys",
             sql: include_str!("../migrations/0011_idempotency_keys.sql"),
         },
+        Migration {
+            version: 12,
+            name: "orders",
+            sql: include_str!("../migrations/0012_orders.sql"),
+        },
     ],
 };
 
