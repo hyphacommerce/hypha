@@ -175,3 +175,59 @@ async fn checks_reject_data_the_domain_never_writes() {
         );
     }
 }
+
+#[tokio::test]
+async fn edited_sql_is_an_error_and_old_rows_get_a_checksum() {
+    let Some(mut client) = fresh_schema("migrate_checksum").await else {
+        return;
+    };
+    migrate(&mut client, &[CORE]).await.unwrap();
+
+    // Rows from before checksums: the next run fills them in instead of failing.
+    client
+        .batch_execute("UPDATE schema_migrations SET checksum = NULL")
+        .await
+        .unwrap();
+    migrate(&mut client, &[CORE]).await.unwrap();
+    let missing: i64 = client
+        .query_one(
+            "SELECT count(*) FROM schema_migrations WHERE checksum IS NULL",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(missing, 0);
+
+    // What an edited migration file looks like from the database's side.
+    client
+        .batch_execute("UPDATE schema_migrations SET checksum = 'edited' WHERE version = 3")
+        .await
+        .unwrap();
+    let result = migrate(&mut client, &[CORE]).await;
+    assert!(
+        matches!(&result, Err(MigrateError::Edited { module, version: 3 }) if module == "core"),
+        "{result:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_database_from_a_newer_hypha_is_refused() {
+    let Some(mut client) = fresh_schema("migrate_unknown").await else {
+        return;
+    };
+    migrate(&mut client, &[CORE]).await.unwrap();
+    client
+        .batch_execute(
+            "INSERT INTO schema_migrations (module, version, name, checksum)
+             VALUES ('core', 999, 'from_the_future', 'x')",
+        )
+        .await
+        .unwrap();
+
+    let result = migrate(&mut client, &[CORE]).await;
+    assert!(
+        matches!(&result, Err(MigrateError::Unknown { module, version: 999 }) if module == "core"),
+        "{result:?}"
+    );
+}

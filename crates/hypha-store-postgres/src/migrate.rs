@@ -95,6 +95,17 @@ pub enum MigrateError {
         applied: String,
         code: String,
     },
+    /// An applied migration's SQL changed since it ran (its checksum differs).
+    Edited {
+        module: String,
+        version: i32,
+    },
+    /// The database has a migration this code doesn't know: it was migrated by a newer
+    /// version of the code, which this one must not run against.
+    Unknown {
+        module: String,
+        version: i32,
+    },
 }
 
 impl fmt::Display for MigrateError {
@@ -114,6 +125,14 @@ impl fmt::Display for MigrateError {
                 f,
                 "migration {module}/{version} was applied as {applied:?} but the code calls it \
                  {code:?}; applied migrations must never change"
+            ),
+            MigrateError::Edited { module, version } => write!(
+                f,
+                "migration {module}/{version} was edited after it was applied; applied \n                 migrations must never change (add a new one instead)"
+            ),
+            MigrateError::Unknown { module, version } => write!(
+                f,
+                "the database has migration {module}/{version}, which this code doesn't \n                 know: it was migrated by a newer Hypha"
             ),
         }
     }
@@ -166,6 +185,19 @@ fn check_sets(sets: &[MigrationSet]) -> Result<(), MigrateError> {
     Ok(())
 }
 
+/// A fingerprint of a migration's SQL, stored when it is applied so a later edit is
+/// caught. FNV-1a (64-bit): it only has to notice changes, not resist an attacker, so
+/// it needs no dependency. Carriage returns are skipped, so a checkout with CRLF line
+/// endings (Git on Windows) hashes the same as one with LF.
+fn checksum(sql: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in sql.bytes().filter(|b| *b != b'\r') {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("fnv1a64:{hash:016x}")
+}
+
 /// Applies every migration not applied yet, module by module in the given order (core
 /// first, then spores), each in its own transaction.
 ///
@@ -197,9 +229,27 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
                     ALTER TABLE schema_migrations DROP CONSTRAINT schema_migrations_pkey;
                     ALTER TABLE schema_migrations ADD PRIMARY KEY (module, version);
                 END IF;
-            END $$;",
+            END $$;
+            -- Checksums came later; rows from before get theirs on the next run.
+            ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum text;",
     )
     .await?;
+    for set in sets {
+        let known: Vec<i32> = set.migrations.iter().map(|m| m.version).collect();
+        let unknown = tx
+            .query_typed_opt(
+                "SELECT version FROM schema_migrations
+                 WHERE module = $1 AND version <> ALL($2) ORDER BY version LIMIT 1",
+                &[(&set.module, Type::TEXT), (&known, Type::INT4_ARRAY)],
+            )
+            .await?;
+        if let Some(row) = unknown {
+            return Err(MigrateError::Unknown {
+                module: set.module.to_string(),
+                version: row.get(0),
+            });
+        }
+    }
     tx.commit().await?;
 
     for set in sets {
@@ -208,7 +258,7 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
             lock(&tx).await?;
             let applied = tx
                 .query_typed_opt(
-                    "SELECT name FROM schema_migrations WHERE module = $1 AND version = $2",
+                    "SELECT name, checksum FROM schema_migrations WHERE module = $1 AND version = $2",
                     &[(&set.module, Type::TEXT), (&migration.version, Type::INT4)],
                 )
                 .await?;
@@ -223,15 +273,39 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
                             code: migration.name.to_string(),
                         });
                     }
+                    match row.get::<_, Option<String>>(1) {
+                        Some(applied) if applied != checksum(migration.sql) => {
+                            return Err(MigrateError::Edited {
+                                module: set.module.to_string(),
+                                version: migration.version,
+                            });
+                        }
+                        Some(_) => {}
+                        // Applied before checksums existed: trust it and record one now.
+                        None => {
+                            tx.query_typed(
+                                "UPDATE schema_migrations SET checksum = $3
+                                 WHERE module = $1 AND version = $2",
+                                &[
+                                    (&set.module, Type::TEXT),
+                                    (&migration.version, Type::INT4),
+                                    (&checksum(migration.sql), Type::TEXT),
+                                ],
+                            )
+                            .await?;
+                        }
+                    }
                 }
                 None => {
                     tx.batch_execute(migration.sql).await?;
                     tx.query_typed(
-                        "INSERT INTO schema_migrations (module, version, name) VALUES ($1, $2, $3)",
+                        "INSERT INTO schema_migrations (module, version, name, checksum)
+                         VALUES ($1, $2, $3, $4)",
                         &[
                             (&set.module, Type::TEXT),
                             (&migration.version, Type::INT4),
                             (&migration.name, Type::TEXT),
+                            (&checksum(migration.sql), Type::TEXT),
                         ],
                     )
                     .await?;
@@ -246,6 +320,14 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checksum_ignores_carriage_returns_but_not_edits() {
+        assert_eq!(checksum("A;\r\nB;\r\n"), checksum("A;\nB;\n"));
+        assert_ne!(checksum("A;\nB;\n"), checksum("A;\nC;\n"));
+        // FNV-1a of the empty string is its offset basis.
+        assert_eq!(checksum(""), "fnv1a64:cbf29ce484222325");
+    }
 
     const ONE: &[Migration] = &[Migration {
         version: 1,
