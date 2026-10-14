@@ -45,39 +45,48 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
         let s = cart.snapshot();
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
-        // The version check comes first; the lines are only replaced if it passes.
-        let bumped = tx
-            .query_typed_opt(
-                "UPDATE carts SET version = version + 1, market_id = $3, country = $4, email = $5,
-                     customer_id = $6
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.market.as_uuid(), Type::UUID),
-                    (&s.country.as_str(), Type::TEXT),
-                    (&s.email.as_ref().map(Email::as_str), Type::TEXT),
-                    (&s.customer.map(|c| c.as_uuid()), Type::UUID),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            tx.rollback().await.map_err(repo_error)?;
-            return Err(RepoError::StaleVersion);
-        };
-        let new_version = version_from_db(row.get(0))?;
-        tx.query_typed(
-            "DELETE FROM cart_lines WHERE cart_id = $1",
-            &[(&s.id.as_uuid(), Type::UUID)],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_lines(&tx, s.id, &s.lines).await?;
+        let new_version = update_cart(&tx, &s).await?;
         tx.commit().await.map_err(repo_error)?;
         cart.set_version(new_version);
         Ok(())
     }
+}
+
+/// `CartRepo::update` inside the caller's transaction (also used by `PgBatch`). Returns
+/// the new version; on `StaleVersion` the caller drops the transaction, rolling it back.
+pub(crate) async fn update_cart(
+    tx: &impl GenericClient,
+    s: &CartSnapshot,
+) -> Result<Version, RepoError> {
+    // The version check comes first; the lines are only replaced if it passes.
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE carts SET version = version + 1, market_id = $3, country = $4, email = $5,
+                     customer_id = $6
+                 WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.market.as_uuid(), Type::UUID),
+                (&s.country.as_str(), Type::TEXT),
+                (&s.email.as_ref().map(Email::as_str), Type::TEXT),
+                (&s.customer.map(|c| c.as_uuid()), Type::UUID),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let Some(row) = bumped else {
+        return Err(RepoError::StaleVersion);
+    };
+    let new_version = version_from_db(row.get(0))?;
+    tx.query_typed(
+        "DELETE FROM cart_lines WHERE cart_id = $1",
+        &[(&s.id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_lines(tx, s.id, &s.lines).await?;
+    Ok(new_version)
 }
 
 /// All lines in one statement; `WITH ORDINALITY` keeps their order.

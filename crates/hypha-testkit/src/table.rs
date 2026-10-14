@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     hash::Hash,
     sync::{
-        Mutex,
+        Mutex, MutexGuard,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -33,6 +33,12 @@ impl<K, T> Default for Table<K, T> {
 pub(crate) type UniqueCheck<'a, T> = &'a dyn Fn(&T, &T) -> Option<&'static str>;
 
 impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
+    /// The rows, locked, for a batch that writes several tables in one step
+    /// (`InMemoryPorts::commit`).
+    pub(crate) fn lock(&self) -> MutexGuard<'_, HashMap<K, T>> {
+        self.rows.lock().unwrap()
+    }
+
     pub(crate) fn get(&self, id: &K) -> Option<T> {
         self.rows.lock().unwrap().get(id).cloned()
     }
@@ -83,16 +89,7 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         id_key: &'static str,
         unique: UniqueCheck<'_, T>,
     ) -> Result<(), RepoError> {
-        let mut rows = self.rows.lock().unwrap();
-        if rows.contains_key(&id) {
-            return Err(RepoError::Duplicate(id_key));
-        }
-        if let Some(key) = rows.values().find_map(|other| unique(row, other)) {
-            return Err(RepoError::Duplicate(key));
-        }
-        row.set_version(Version::NEW.next());
-        rows.insert(id, row.clone());
-        Ok(())
+        insert_row(&mut self.rows.lock().unwrap(), id, row, id_key, unique)
     }
 
     pub(crate) fn update(
@@ -101,22 +98,7 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         row: &mut T,
         unique: UniqueCheck<'_, T>,
     ) -> Result<(), RepoError> {
-        let mut rows = self.rows.lock().unwrap();
-        match rows.get(&id) {
-            Some(stored) if stored.version() == row.version() => {}
-            // Changed by someone else, or deleted: either way this write is stale.
-            _ => return Err(RepoError::StaleVersion),
-        }
-        if let Some(key) = rows
-            .iter()
-            .filter(|(other_id, _)| **other_id != id)
-            .find_map(|(_, other)| unique(row, other))
-        {
-            return Err(RepoError::Duplicate(key));
-        }
-        row.set_version(row.version().next());
-        rows.insert(id, row.clone());
-        Ok(())
+        update_row(&mut self.rows.lock().unwrap(), id, row, unique)
     }
 
     /// Updates every row or none: all versions are checked (and unique keys too) before
@@ -148,6 +130,49 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         }
         Ok(())
     }
+}
+
+/// `Table::insert` on rows that are already locked.
+pub(crate) fn insert_row<K: Eq + Hash, T: Clone + Versioned>(
+    rows: &mut HashMap<K, T>,
+    id: K,
+    row: &mut T,
+    id_key: &'static str,
+    unique: UniqueCheck<'_, T>,
+) -> Result<(), RepoError> {
+    if rows.contains_key(&id) {
+        return Err(RepoError::Duplicate(id_key));
+    }
+    if let Some(key) = rows.values().find_map(|other| unique(row, other)) {
+        return Err(RepoError::Duplicate(key));
+    }
+    row.set_version(Version::NEW.next());
+    rows.insert(id, row.clone());
+    Ok(())
+}
+
+/// `Table::update` on rows that are already locked.
+pub(crate) fn update_row<K: Eq + Hash, T: Clone + Versioned>(
+    rows: &mut HashMap<K, T>,
+    id: K,
+    row: &mut T,
+    unique: UniqueCheck<'_, T>,
+) -> Result<(), RepoError> {
+    match rows.get(&id) {
+        Some(stored) if stored.version() == row.version() => {}
+        // Changed by someone else, or deleted: either way this write is stale.
+        _ => return Err(RepoError::StaleVersion),
+    }
+    if let Some(key) = rows
+        .iter()
+        .filter(|(other_id, _)| **other_id != id)
+        .find_map(|(_, other)| unique(row, other))
+    {
+        return Err(RepoError::Duplicate(key));
+    }
+    row.set_version(row.version().next());
+    rows.insert(id, row.clone());
+    Ok(())
 }
 
 /// For tables with no unique keys besides the ID.

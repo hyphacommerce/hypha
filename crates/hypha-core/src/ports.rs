@@ -13,6 +13,35 @@ pub trait Clock {
     fn now(&self) -> Timestamp;
 }
 
+/// Writes to several aggregates that commit together or not at all (design note 0007,
+/// O1): one transaction on Postgres, one locked step in memory.
+///
+/// Domain code loads, decides, then stages its writes into a batch through each crate's
+/// `Stage*` trait (`hypha_cart::StageCarts`, …), which the adapter's `Batch` implements;
+/// `commit` is the only point that opens a transaction. A command that writes several
+/// aggregates goes through here; one aggregate still uses its repo's `insert`/`update`.
+#[allow(async_fn_in_trait)]
+pub trait HasBatch {
+    /// The adapter's list of staged writes.
+    type Batch;
+    fn batch(&self) -> Self::Batch;
+    /// Writes everything staged, or nothing. Fails like the single writes would:
+    /// `StaleVersion` if any aggregate changed since it was loaded, `Duplicate(key)` on a
+    /// unique key.
+    async fn commit(&self, batch: Self::Batch) -> Result<(), RepoError>;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasBatch + ?Sized> HasBatch for &T {
+    type Batch = T::Batch;
+    fn batch(&self) -> Self::Batch {
+        (**self).batch()
+    }
+    async fn commit(&self, batch: Self::Batch) -> Result<(), RepoError> {
+        (**self).commit(batch).await
+    }
+}
+
 /// What a repository can report. Adapters (in-memory, Postgres) must map their
 /// failures onto these, so commands behave the same on every backend.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]

@@ -5,11 +5,11 @@ use crate::table::Table;
 
 #[derive(Default)]
 pub struct InMemoryInventoryItemRepo {
-    items: Table<InventoryItemId, InventoryItem>,
+    pub(crate) items: Table<InventoryItemId, InventoryItem>,
 }
 
 /// One item per variant.
-fn unique(new: &InventoryItem, other: &InventoryItem) -> Option<&'static str> {
+pub(crate) fn unique(new: &InventoryItem, other: &InventoryItem) -> Option<&'static str> {
     (new.variant() == other.variant()).then_some(keys::INVENTORY_ITEM_VARIANT)
 }
 

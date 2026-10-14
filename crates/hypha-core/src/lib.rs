@@ -23,7 +23,7 @@ pub use ids::{
     UserId, VariantId,
 };
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
-pub use ports::{Clock, IdGenerator, RepoError, report_duplicate};
+pub use ports::{Clock, HasBatch, IdGenerator, RepoError, report_duplicate};
 pub use quantity::{Quantity, QuantityError};
 pub use scope::Scope;
 pub use text::{MAX_TEXT_LEN, TextError, optional_text, required_text};

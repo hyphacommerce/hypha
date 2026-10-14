@@ -2,7 +2,7 @@
 //!
 //! One function per repo trait runs all its scenarios, each against a fresh repo from
 //! `make`. The in-memory repos in this crate run them, and so must every storage adapter
-//! (Postgres, D1), so command tests and production see the same behavior:
+//! (Postgres), so command tests and production see the same behavior:
 //!
 //! ```ignore
 //! pollster::block_on(contract::product_repo(async || InMemoryProductRepo::default()));
@@ -17,8 +17,9 @@
 //! What they check, per repo: every field survives a round trip (this catches mapping
 //! bugs in SQL adapters), versions (`insert` -> 1, `update` bumps, stale or missing ->
 //! `StaleVersion`), every unique key in the crate's `repo::keys`, and the batched
-//! collection methods.
+//! collection methods. `batch` checks `HasBatch` across aggregates.
 
+mod batch;
 mod carts;
 mod customers;
 mod inventory;
@@ -27,6 +28,7 @@ mod products;
 mod stores;
 mod tax;
 
+pub use batch::batch;
 pub use carts::cart_repo;
 pub use customers::customer_repo;
 pub use inventory::{inventory_item_repo, location_repo};

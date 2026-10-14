@@ -5,7 +5,7 @@ use crate::table::{Table, no_unique_keys};
 
 #[derive(Default)]
 pub struct InMemoryCartRepo {
-    carts: Table<CartId, Cart>,
+    pub(crate) carts: Table<CartId, Cart>,
 }
 
 impl CartRepo for InMemoryCartRepo {

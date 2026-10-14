@@ -1,0 +1,141 @@
+use hypha_cart::{Cart, CartRepo, HasCarts, StageCarts};
+use hypha_core::{
+    CartId, CountryCode, HasBatch, InventoryItemId, MarketId, ProductId, Quantity, RepoError,
+    VariantId, Version, Versioned,
+};
+use hypha_inventory::{HasInventoryItems, InventoryItem, InventoryItemRepo, StageInventoryItems};
+use uuid::Uuid;
+
+use super::scenario;
+
+/// Runs every `HasBatch` scenario, each on fresh ports from `make`: writes to several
+/// aggregates commit together, with the versions checked as single writes check them.
+pub async fn batch<S>(make: impl AsyncFn() -> S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems,
+    S::Batch: StageCarts + StageInventoryItems,
+{
+    scenario("batch: commits every staged write, at the versions staging promised");
+    commits_everything(&make().await).await;
+    scenario("batch: a stale cart writes nothing");
+    stale_cart_writes_nothing(&make().await).await;
+    scenario("batch: a stale inventory item writes nothing");
+    stale_item_writes_nothing(&make().await).await;
+    scenario("batch: an empty batch commits");
+    empty_batch(&make().await).await;
+}
+
+fn cart(n: u128) -> Cart {
+    Cart::new(
+        CartId::from_uuid(Uuid::from_u128(n)),
+        MarketId::from_uuid(Uuid::from_u128(1000 + n)),
+        CountryCode::new("HR").unwrap(),
+    )
+}
+
+fn item(n: u128) -> InventoryItem {
+    InventoryItem::new(
+        InventoryItemId::from_uuid(Uuid::from_u128(n)),
+        VariantId::from_uuid(Uuid::from_u128(2000 + n)),
+        true,
+        false,
+    )
+}
+
+fn add_mug(cart: &mut Cart) {
+    cart.add_line(
+        ProductId::from_uuid(Uuid::from_u128(1)),
+        VariantId::from_uuid(Uuid::from_u128(11)),
+        Quantity::new(2).unwrap(),
+    )
+    .unwrap();
+}
+
+/// A stored cart and two stored items, all at version 1.
+async fn stored<S: HasCarts + HasInventoryItems>(
+    ports: &S,
+) -> (Cart, InventoryItem, InventoryItem) {
+    let (mut c, mut a, mut b) = (cart(1), item(1), item(2));
+    ports.carts().insert(&mut c).await.unwrap();
+    ports.inventory_items().insert(&mut a).await.unwrap();
+    ports.inventory_items().insert(&mut b).await.unwrap();
+    (c, a, b)
+}
+
+async fn commits_everything<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems,
+    S::Batch: StageCarts + StageInventoryItems,
+{
+    let (mut c, mut a, mut b) = stored(ports).await;
+    add_mug(&mut c);
+    a.set_tracked(false);
+    b.set_continue_selling(true);
+
+    let mut batch = ports.batch();
+    batch.update_cart(&mut c);
+    batch.update_inventory_item(&mut a);
+    batch.update_inventory_item(&mut b);
+    assert_eq!(c.version(), Version::new(2));
+    assert_eq!(ports.commit(batch).await, Ok(()));
+
+    // What was staged is what is stored, versions included.
+    assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c)));
+    assert_eq!(ports.inventory_items().get(a.id()).await, Ok(Some(a)));
+    assert_eq!(ports.inventory_items().get(b.id()).await, Ok(Some(b)));
+}
+
+async fn stale_cart_writes_nothing<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems,
+    S::Batch: StageCarts + StageInventoryItems,
+{
+    let (c, a, _) = stored(ports).await;
+    // Someone else changes the cart after this command loaded it.
+    let mut rival = c.clone();
+    add_mug(&mut rival);
+    ports.carts().update(&mut rival).await.unwrap();
+
+    let (mut stale, mut changed) = (c, a.clone());
+    stale.set_email(None).unwrap();
+    changed.set_tracked(false);
+    let mut batch = ports.batch();
+    batch.update_inventory_item(&mut changed);
+    batch.update_cart(&mut stale);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+
+    assert_eq!(ports.carts().get(rival.id()).await, Ok(Some(rival)));
+    assert_eq!(ports.inventory_items().get(a.id()).await, Ok(Some(a)));
+}
+
+async fn stale_item_writes_nothing<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems,
+    S::Batch: StageCarts + StageInventoryItems,
+{
+    let (c, a, b) = stored(ports).await;
+    let mut rival = b.clone();
+    rival.set_tracked(false);
+    ports.inventory_items().update(&mut rival).await.unwrap();
+
+    let (mut changed_cart, mut changed_a, mut stale_b) = (c.clone(), a.clone(), b);
+    add_mug(&mut changed_cart);
+    changed_a.set_tracked(false);
+    stale_b.set_continue_selling(true);
+    let mut batch = ports.batch();
+    batch.update_cart(&mut changed_cart);
+    batch.update_inventory_item(&mut changed_a);
+    batch.update_inventory_item(&mut stale_b);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+
+    assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c)));
+    assert_eq!(ports.inventory_items().get(a.id()).await, Ok(Some(a)));
+    assert_eq!(
+        ports.inventory_items().get(rival.id()).await,
+        Ok(Some(rival))
+    );
+}
+
+async fn empty_batch<S: HasBatch>(ports: &S) {
+    assert_eq!(ports.commit(ports.batch()).await, Ok(()));
+}

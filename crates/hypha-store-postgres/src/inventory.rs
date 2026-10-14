@@ -235,68 +235,10 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         if items.is_empty() {
             return Ok(());
         }
-        // Sorted by ID, so every writer takes its row locks in the same order (below).
-        let mut snapshots: Vec<InventoryItemSnapshot> =
-            items.iter().map(|i| i.snapshot()).collect();
-        snapshots.sort_by_key(|s| s.id.as_uuid());
-        let ids: Vec<Uuid> = snapshots.iter().map(|s| s.id.as_uuid()).collect();
-        let versions = snapshots
-            .iter()
-            .map(|s| version_to_db(s.version))
-            .collect::<Result<Vec<i64>, _>>()?;
-        let variants: Vec<Uuid> = snapshots.iter().map(|s| s.variant.as_uuid()).collect();
-        let tracked: Vec<bool> = snapshots.iter().map(|s| s.tracked).collect();
-        let continue_selling: Vec<bool> = snapshots.iter().map(|s| s.continue_selling).collect();
-
+        let snapshots: Vec<InventoryItemSnapshot> = items.iter().map(|i| i.snapshot()).collect();
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
-        // Lock the rows in ID order first. Two checkouts touching overlapping items then
-        // queue instead of deadlocking, whatever order their callers listed the items in;
-        // the UPDATE below joins through `unnest`, whose lock order the planner picks.
-        tx.query_typed(
-            "SELECT id FROM inventory_items WHERE id = ANY($1) ORDER BY id FOR UPDATE",
-            &[(&ids, Type::UUID_ARRAY)],
-        )
-        .await
-        .map_err(repo_error)?;
-        let bumped = tx
-            .query_typed(
-                "UPDATE inventory_items AS i
-                 SET version = i.version + 1, variant_id = t.variant_id, tracked = t.tracked,
-                     continue_selling = t.continue_selling
-                 FROM unnest($1::uuid[], $2::bigint[], $3::uuid[], $4::boolean[], $5::boolean[])
-                     AS t (id, version, variant_id, tracked, continue_selling)
-                 WHERE i.id = t.id AND i.version = t.version
-                 RETURNING i.id, i.version",
-                &[
-                    (&ids, Type::UUID_ARRAY),
-                    (&versions, Type::INT8_ARRAY),
-                    (&variants, Type::UUID_ARRAY),
-                    (&tracked, Type::BOOL_ARRAY),
-                    (&continue_selling, Type::BOOL_ARRAY),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        if bumped.len() != items.len() {
-            // Some item changed or is gone: write none of them.
-            tx.rollback().await.map_err(repo_error)?;
-            return Err(RepoError::StaleVersion);
-        }
-        let new_versions = bumped
-            .iter()
-            .map(|r| Ok((r.get::<_, Uuid>(0), version_from_db(r.get(1))?)))
-            .collect::<Result<HashMap<Uuid, Version>, RepoError>>()?;
-
-        for table in ["inventory_levels", "inventory_reservations"] {
-            tx.query_typed(
-                &format!("DELETE FROM {table} WHERE item_id = ANY($1)"),
-                &[(&ids, Type::UUID_ARRAY)],
-            )
-            .await
-            .map_err(repo_error)?;
-        }
-        write_children(&tx, &snapshots).await?;
+        let new_versions = update_items(&tx, snapshots).await?;
         tx.commit().await.map_err(repo_error)?;
 
         for item in items.iter_mut() {
@@ -306,6 +248,76 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         }
         Ok(())
     }
+}
+
+/// `InventoryItemRepo::update_many` inside the caller's transaction (also used by
+/// `PgBatch`): every item or none. Returns each item's new version; on `StaleVersion`
+/// the caller drops the transaction, rolling it back.
+pub(crate) async fn update_items(
+    tx: &impl GenericClient,
+    mut snapshots: Vec<InventoryItemSnapshot>,
+) -> Result<HashMap<Uuid, Version>, RepoError> {
+    if snapshots.is_empty() {
+        return Ok(HashMap::new());
+    }
+    // Sorted by ID, so every writer takes its row locks in the same order (below).
+    snapshots.sort_by_key(|s| s.id.as_uuid());
+    let ids: Vec<Uuid> = snapshots.iter().map(|s| s.id.as_uuid()).collect();
+    let versions = snapshots
+        .iter()
+        .map(|s| version_to_db(s.version))
+        .collect::<Result<Vec<i64>, _>>()?;
+    let variants: Vec<Uuid> = snapshots.iter().map(|s| s.variant.as_uuid()).collect();
+    let tracked: Vec<bool> = snapshots.iter().map(|s| s.tracked).collect();
+    let continue_selling: Vec<bool> = snapshots.iter().map(|s| s.continue_selling).collect();
+
+    // Lock the rows in ID order first. Two checkouts touching overlapping items then
+    // queue instead of deadlocking, whatever order their callers listed the items in;
+    // the UPDATE below joins through `unnest`, whose lock order the planner picks.
+    tx.query_typed(
+        "SELECT id FROM inventory_items WHERE id = ANY($1) ORDER BY id FOR UPDATE",
+        &[(&ids, Type::UUID_ARRAY)],
+    )
+    .await
+    .map_err(repo_error)?;
+    let bumped = tx
+        .query_typed(
+            "UPDATE inventory_items AS i
+             SET version = i.version + 1, variant_id = t.variant_id, tracked = t.tracked,
+                 continue_selling = t.continue_selling
+             FROM unnest($1::uuid[], $2::bigint[], $3::uuid[], $4::boolean[], $5::boolean[])
+                 AS t (id, version, variant_id, tracked, continue_selling)
+             WHERE i.id = t.id AND i.version = t.version
+             RETURNING i.id, i.version",
+            &[
+                (&ids, Type::UUID_ARRAY),
+                (&versions, Type::INT8_ARRAY),
+                (&variants, Type::UUID_ARRAY),
+                (&tracked, Type::BOOL_ARRAY),
+                (&continue_selling, Type::BOOL_ARRAY),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    if bumped.len() != snapshots.len() {
+        // Some item changed or is gone: write none of them.
+        return Err(RepoError::StaleVersion);
+    }
+    let new_versions = bumped
+        .iter()
+        .map(|r| Ok((r.get::<_, Uuid>(0), version_from_db(r.get(1))?)))
+        .collect::<Result<HashMap<Uuid, Version>, RepoError>>()?;
+
+    for table in ["inventory_levels", "inventory_reservations"] {
+        tx.query_typed(
+            &format!("DELETE FROM {table} WHERE item_id = ANY($1)"),
+            &[(&ids, Type::UUID_ARRAY)],
+        )
+        .await
+        .map_err(repo_error)?;
+    }
+    write_children(tx, &snapshots).await?;
+    Ok(new_versions)
 }
 
 /// The levels and reservations of `items`, one statement each. Positions are counted

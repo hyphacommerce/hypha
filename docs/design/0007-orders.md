@@ -149,7 +149,7 @@ pub trait StageCarts {
 
 // hypha-checkout
 pub trait CheckoutPorts: CartPorts + HasOrders + HasBatch<Batch: CheckoutBatch> {}
-pub trait CheckoutBatch: StageOrders + StageCarts + StageInventory + StageCustomers
+pub trait CheckoutBatch: StageOrders + StageCarts + StageInventoryItems + StageCustomers
     + StageIdempotency {}
 ```
 
@@ -245,7 +245,7 @@ it again). Storing response bodies would mean the domain storing host DTOs.
 - **`hypha-cart`:** cart status, `StageCarts`, the `PricedCart` fields, keys on
   `create_cart` and `add_line`.
 - **`hypha-products`:** `Product::variant_title`.
-- **`hypha-inventory`:** allocation split out of `reserve_stock`; `StageInventory`.
+- **`hypha-inventory`:** allocation split out of `reserve_stock`; `StageInventoryItems`.
 - **`hypha-customers`:** `StageCustomers` (insert).
 - **`hypha-orders` (new leaf), `hypha-checkout` (new top layer).** CLAUDE.md's layer
   table gains "Workflows: `hypha-checkout` → composing and leaf domains, core".

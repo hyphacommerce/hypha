@@ -1,5 +1,6 @@
 pub mod contract;
 
+mod batch;
 mod carts;
 mod catalogs;
 mod clock;
@@ -16,6 +17,7 @@ mod table;
 mod tax_classes;
 mod tax_regions;
 
+pub use batch::InMemoryBatch;
 pub use carts::InMemoryCartRepo;
 pub use catalogs::InMemoryCatalogRepo;
 pub use clock::FixedClock;

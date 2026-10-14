@@ -2,8 +2,8 @@
 
 use hypha_testkit::{
     InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryInventoryItemRepo,
-    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo,
-    InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
+    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPorts, InMemoryPriceListRepo,
+    InMemoryProductRepo, InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
 };
 use pollster::block_on;
 
@@ -78,4 +78,9 @@ fn customer_repo() {
 #[test]
 fn store_repo() {
     block_on(contract::store_repo(async || InMemoryStoreRepo::default()));
+}
+
+#[test]
+fn batch() {
+    block_on(contract::batch(async || InMemoryPorts::default()));
 }

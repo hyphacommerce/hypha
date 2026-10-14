@@ -32,6 +32,15 @@ pub trait InventoryItemRepo {
     async fn update_many(&self, items: &mut [InventoryItem]) -> Result<(), RepoError>;
 }
 
+/// Stages inventory item writes in a `hypha_core::HasBatch` batch; the adapter's batch
+/// type implements it.
+pub trait StageInventoryItems {
+    /// Stages what `InventoryItemRepo::update` would write, and moves `item` to the
+    /// version it has once the batch commits. If the commit fails, `item` is stale: load
+    /// it again.
+    fn update_inventory_item(&mut self, item: &mut InventoryItem);
+}
+
 /// Whatever holds the `LocationRepo`: a host's per-request ports, a test world. Commands
 /// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
 /// the union of all of them.

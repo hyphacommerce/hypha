@@ -12,6 +12,7 @@
 //!   check, so it holds a pooled connection only briefly;
 //! - errors are mapped by SQLSTATE and constraint name (`error.rs`), never by message text.
 
+mod batch;
 mod carts;
 mod columns;
 mod customers;
@@ -24,5 +25,6 @@ mod store;
 mod stores;
 mod tax;
 
+pub use batch::PgBatch;
 pub use migrate::{CORE, MigrateError, Migration, MigrationSet, migrate};
 pub use store::{PgConnection, PgStore};
