@@ -1,6 +1,6 @@
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, Money, MoneyError, Price, ProductId,
-    Quantity, VariantId,
+    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, MoneyError, Price,
+    ProductId, Quantity, VariantId,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, resolve_price};
@@ -29,12 +29,25 @@ pub enum LineStatus {
     Unavailable(LineError),
 }
 
+/// What a line is called, read from its product as it is now. An order copies it, so
+/// the order still reads the same after the product changes (design note 0007, O4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineDetails {
+    pub product_title: String,
+    /// The variant's option values (`"M / Blue"`); `None` for a simple product.
+    pub variant_title: Option<String>,
+    pub sku: Option<String>,
+}
+
 /// A cart line with its current status. A read model: computed, never stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PricedLine {
     pub product: ProductId,
     pub variant: VariantId,
     pub quantity: Quantity,
+    /// `None` only when the product is gone or no longer has the variant; an
+    /// unavailable line otherwise keeps its name, so a buyer sees what ran out.
+    pub details: Option<LineDetails>,
     pub status: LineStatus,
 }
 
@@ -47,6 +60,10 @@ impl PricedLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PricedCart {
     pub id: CartId,
+    /// The market the cart was created in; it sets the currency.
+    pub market: MarketId,
+    /// The currency of every amount in the cart.
+    pub currency: Currency,
     pub country: CountryCode,
     pub email: Option<Email>,
     pub customer: Option<CustomerId>,
@@ -124,7 +141,8 @@ pub fn price_cart(
     let mut lines = Vec::with_capacity(cart.lines().len());
 
     for line in cart.lines() {
-        let status = match line_total(line, products, pricing, tax, stock) {
+        let product = products.iter().find(|p| p.id() == line.product());
+        let status = match line_total(line, product, pricing, tax, stock) {
             Ok((unit_price, total, line_tax)) => {
                 let line_tax_amount = line_tax.map(|t| t.amount);
                 match totals.add(total, line_tax_amount, tax.prices_include_tax) {
@@ -145,12 +163,15 @@ pub fn price_cart(
             product: line.product(),
             variant: line.variant(),
             quantity: line.quantity(),
+            details: product.and_then(|p| line_details(p, line.variant())),
             status,
         });
     }
 
     PricedCart {
         id: cart.id(),
+        market: pricing.market.id(),
+        currency,
         country: cart.country(),
         email: cart.email().cloned(),
         customer: cart.customer(),
@@ -202,17 +223,23 @@ impl Totals {
     }
 }
 
+fn line_details(product: &Product, variant: VariantId) -> Option<LineDetails> {
+    let found = product.variants().iter().find(|v| v.id() == variant)?;
+    Some(LineDetails {
+        product_title: product.title().to_string(),
+        variant_title: product.variant_title(variant),
+        sku: found.sku().map(str::to_string),
+    })
+}
+
 fn line_total(
     line: &CartLine,
-    products: &[Product],
+    product: Option<&Product>,
     pricing: &PricingContext,
     tax: &TaxContext,
     stock: &StockContext,
 ) -> Result<(Price, Money, Option<TaxLine>), LineError> {
-    let product = products
-        .iter()
-        .find(|p| p.id() == line.product())
-        .ok_or(LineError::ProductNotFound(line.product()))?;
+    let product = product.ok_or(LineError::ProductNotFound(line.product()))?;
     let unit_price = price_line(product, line.variant(), pricing)?;
     check_stock(stock, line.variant(), line.quantity())?;
     let total = unit_price.money().checked_mul(line.quantity().value())?;
@@ -248,10 +275,11 @@ mod tests {
         BasisPoints, CatalogId, Currency, InventoryItemId, LocationId, MarketId, PriceListId,
         TaxClassId, TaxRate, TaxRegionId,
     };
+    use hypha_core::{OptionId, OptionValueId};
     use hypha_inventory::{InventoryItem, Location};
     use hypha_markets::{Catalog, CatalogContext, Market, PriceList};
     use hypha_pricing::PricingError;
-    use hypha_products::Handle;
+    use hypha_products::{Handle, NewVariant, OptionValue, ProductOption};
     use hypha_tax::{TaxRegion, TaxSource};
     use uuid::Uuid;
 
@@ -461,6 +489,92 @@ mod tests {
             vec![LineStatus::Unavailable(LineError::ProductNotFound(pid(1)))]
         );
         assert_eq!(result.total, Money::zero(Currency::Eur));
+    }
+
+    #[test]
+    fn the_cart_names_its_market_and_currency() {
+        let priced = price_cart(&cart(&[]), &[], &pricing(&[]), &no_tax(), &no_stock());
+        assert_eq!(priced.market, mid());
+        assert_eq!(priced.currency, Currency::Eur);
+    }
+
+    /// Active "Shirt" (product 5) with a Size option and variant 15: size M, SKU "SH-M".
+    fn shirt() -> Product {
+        let mut p = Product::new_configurable(
+            pid(5),
+            Handle::new("shirt").unwrap(),
+            "Shirt".to_string(),
+            vec![ProductOption::new(
+                OptionId::from_uuid(Uuid::from_u128(50)),
+                "Size".to_string(),
+                vec![OptionValue::new(
+                    OptionValueId::from_uuid(Uuid::from_u128(51)),
+                    "M".to_string(),
+                )],
+            )],
+            NewVariant {
+                id: vid(15),
+                sku: Some("SH-M".to_string()),
+                price: eur(2000),
+                selections: vec![OptionValueId::from_uuid(Uuid::from_u128(51))],
+            },
+        )
+        .unwrap();
+        p.set_status(ProductStatus::Active).unwrap();
+        p
+    }
+
+    #[test]
+    fn a_line_is_named_after_its_product_and_variant() {
+        let result = price_cart(
+            &cart(&[(5, 1)]),
+            &[shirt()],
+            &pricing(&[5]),
+            &no_tax(),
+            &no_stock(),
+        );
+        assert_eq!(
+            result.lines[0].details,
+            Some(LineDetails {
+                product_title: "Shirt".to_string(),
+                variant_title: Some("M".to_string()),
+                sku: Some("SH-M".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn an_unavailable_line_keeps_its_name() {
+        let mut archived = product(1, eur(1000));
+        archived.set_status(ProductStatus::Archived).unwrap();
+        let result = price_cart(
+            &cart(&[(1, 1)]),
+            &[archived],
+            &pricing(&[1]),
+            &no_tax(),
+            &no_stock(),
+        );
+        assert!(!result.lines[0].is_available());
+        assert_eq!(
+            result.lines[0].details,
+            Some(LineDetails {
+                product_title: "Product 1".to_string(),
+                variant_title: None,
+                sku: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_line_whose_product_is_gone_has_no_name() {
+        let result = price_cart(
+            &cart(&[(1, 1)]),
+            &[],
+            &pricing(&[1]),
+            &no_tax(),
+            &no_stock(),
+        );
+        assert_eq!(result.lines[0].details, None);
     }
 
     #[test]

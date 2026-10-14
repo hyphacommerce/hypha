@@ -10,5 +10,7 @@ pub use commands::{
     get_cart, remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
 };
 pub use error::{CartError, LineError, RestoreError};
-pub use pricing::{LineStatus, PricedCart, PricedLine, check_stock, price_cart, price_line};
+pub use pricing::{
+    LineDetails, LineStatus, PricedCart, PricedLine, check_stock, price_cart, price_line,
+};
 pub use repo::{CartRepo, HasCarts, StageCarts};

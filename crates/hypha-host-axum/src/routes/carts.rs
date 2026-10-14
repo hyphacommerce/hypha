@@ -4,8 +4,8 @@ use hypha_cart::{
     remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
 };
 use hypha_core::{
-    CartId, CountryCode, CustomerId, Email, ErrorCode, Money, ProductId, TaxClassId, TaxRate,
-    VariantId,
+    CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, ProductId,
+    TaxClassId, TaxRate, VariantId,
 };
 use hypha_tax::TaxLine;
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,10 @@ pub(super) struct SetCustomerRequest {
 #[derive(Serialize)]
 pub(super) struct CartResponse {
     id: CartId,
+    /// Picked from the country when the cart was created; it sets the currency.
+    market: MarketId,
+    /// The currency of every amount in the cart.
+    currency: Currency,
     country: CountryCode,
     /// Who to contact about the order; required at checkout.
     email: Option<Email>,
@@ -104,6 +108,12 @@ pub(super) struct LineResponse {
     product: ProductId,
     variant: VariantId,
     quantity: u32,
+    /// The product's title now; `null` only when the product or variant is gone, so an
+    /// unavailable line still says what it was.
+    product_title: Option<String>,
+    /// The variant's option values ("M / Blue"); `null` for a product without options.
+    variant_title: Option<String>,
+    sku: Option<String>,
     #[serde(flatten)]
     state: LineState,
 }
@@ -112,6 +122,8 @@ impl From<&PricedCart> for CartResponse {
     fn from(cart: &PricedCart) -> Self {
         Self {
             id: cart.id,
+            market: cart.market,
+            currency: cart.currency,
             country: cart.country,
             email: cart.email.clone(),
             customer: cart.customer,
@@ -127,6 +139,9 @@ impl From<&PricedCart> for CartResponse {
                     product: l.product,
                     variant: l.variant,
                     quantity: l.quantity.value(),
+                    product_title: l.details.as_ref().map(|d| d.product_title.clone()),
+                    variant_title: l.details.as_ref().and_then(|d| d.variant_title.clone()),
+                    sku: l.details.as_ref().and_then(|d| d.sku.clone()),
                     state: match &l.status {
                         LineStatus::Priced {
                             unit_price,

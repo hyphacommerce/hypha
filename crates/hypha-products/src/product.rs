@@ -190,6 +190,31 @@ impl Product {
     pub fn variants(&self) -> &[Variant] {
         &self.variants
     }
+
+    /// How `variant` is named next to the product title: its option values in option
+    /// order, joined with " / " (`"M / Blue"`), as Shopify does. `None` for a simple
+    /// product's variant, which has no options, and for a variant this product doesn't
+    /// have.
+    pub fn variant_title(&self, variant: VariantId) -> Option<String> {
+        let variant = self.variants.iter().find(|v| v.id() == variant)?;
+        if variant.selections().is_empty() {
+            return None;
+        }
+        // Selections are in option order (`add_variant` checks it), so they pair up.
+        let labels: Vec<&str> = self
+            .options
+            .iter()
+            .zip(variant.selections())
+            .filter_map(|(option, selected)| {
+                option
+                    .values()
+                    .iter()
+                    .find(|value| value.id() == *selected)
+                    .map(|value| value.label())
+            })
+            .collect();
+        Some(labels.join(" / "))
+    }
 }
 
 /// Option rules shared by `new_configurable` and `restore`: every option has values,
@@ -588,6 +613,26 @@ mod tests {
         let mut p = shirt();
         let result = p.add_variant(new_var(1, vec![val(12), val(22)]));
         assert_eq!(result, Err(ProductError::DuplicateVariantId(var(1))));
+    }
+
+    // ---- variant_title ----
+
+    #[test]
+    fn variant_title_joins_option_values_in_option_order() {
+        let mut p = shirt();
+        p.add_variant(new_var(2, vec![val(12), val(22)])).unwrap();
+        assert_eq!(p.variant_title(var(1)), Some("S / Red".to_string()));
+        assert_eq!(p.variant_title(var(2)), Some("M / Blue".to_string()));
+    }
+
+    #[test]
+    fn a_simple_products_variant_has_no_title() {
+        assert_eq!(simple().variant_title(var(1)), None);
+    }
+
+    #[test]
+    fn an_unknown_variant_has_no_title() {
+        assert_eq!(shirt().variant_title(var(99)), None);
     }
 
     // ---- set_status ----

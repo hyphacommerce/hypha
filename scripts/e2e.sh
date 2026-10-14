@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# End-to-end check against a running hypha-host-axum (in-memory storage).
+# End-to-end check against a freshly started hypha-host-axum, in memory or on Postgres
+# (a fresh database; see CLAUDE.md).
 #
-#   cargo run -p hypha-host-axum      # in one terminal
-#   bash scripts/e2e.sh               # in another (Git Bash on Windows)
+#   cargo run -p hypha-host-axum      # in one terminal (PORT=... if 3000 is taken)
+#   bash scripts/e2e.sh               # in another (Git Bash on Windows; HYPHA_URL=...)
 #
 # Every step asserts the HTTP status and, for errors, the stable error code.
 # Exits non-zero if any step fails. Uses only curl, grep and sed (no jq).
@@ -101,10 +102,12 @@ step "assign price list" 200 - -X PUT "$BASE/catalogs/$CATALOG/price-list" -H "$
 
 step "create cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
 contains "cart ships to Croatia" '"country":"HR"'
+contains "cart names its market and currency" "\"market\":\"$MARKET\",\"currency\":\"EUR\""
 CART=$(id)
 step "add 2 mugs" 200 - -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "mug unit price is 900 (1000 - 10%)" '"unit_price":{"amount":900,"currency":"EUR"}'
+contains "mug line is named" '"product_title":"Mug","variant_title":null,"sku":null,"status":"priced"'
 step "add 3 cups" 200 - -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":3}"
 contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
@@ -112,6 +115,7 @@ contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_a
 step "archive mug" 200 - -X PATCH "$BASE/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
 step "get cart" 200 - "$BASE/carts/$CART"
 contains "mug line is unavailable" '"status":"unavailable","reason_code":"product_not_active"'
+contains "unavailable mug keeps its name" '"product_title":"Mug","variant_title":null,"sku":null,"status":"unavailable"'
 contains "total only counts the cup" '"total":{"amount":600,"currency":"EUR"},"fully_available":false'
 
 step "remove cup's fixed price" 204 - -X DELETE "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
