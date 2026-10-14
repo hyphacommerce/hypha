@@ -62,7 +62,7 @@ impl SessionResponse {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct ChallengeResponse {
-    /// Send back to `POST /auth/login/mfa` with a code.
+    /// Send back to `POST /admin/auth/login/mfa` with a code.
     token: String,
     methods: Vec<&'static str>,
     expires_at: String,
@@ -83,7 +83,7 @@ pub(super) enum LoginResponse {
     post,
     path = "/admin/auth/login",
     request_body = LoginRequest,
-    responses((status = 200, description = "OK", body = LoginResponse), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 200, description = "OK", body = LoginResponse), (status = 401, description = "Wrong email or password, or a disabled account: one answer for all (`invalid_credentials`).", body = ApiErrorBody), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     security(()),
 )]
 pub(super) async fn login_handler<S: Storage>(
@@ -129,7 +129,7 @@ pub(super) async fn login_handler<S: Storage>(
     post,
     path = "/admin/auth/login/mfa",
     request_body = FinishLoginRequest,
-    responses((status = 200, description = "OK", body = LoginResponse), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 200, description = "OK", body = LoginResponse), (status = 401, description = "A wrong or used code (`invalid_mfa_code`), or an unknown, expired or ended challenge (`invalid_token`).", body = ApiErrorBody), (status = 429, description = "Over a rate limit (`rate_limited`, see `Retry-After`), or second-factor checks locked after five wrong codes (`mfa_locked`, see `details.locked_until`).", body = ApiErrorBody)),
     security(()),
 )]
 pub(super) async fn finish_login_handler<S: Storage>(
@@ -224,7 +224,7 @@ pub(super) struct ConfirmResetRequest {
     post,
     path = "/admin/auth/password-reset/confirm",
     request_body = ConfirmResetRequest,
-    responses((status = 204, description = "No content"), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 204, description = "No content"), (status = 401, description = "An unknown, expired or used reset token (`invalid_token`).", body = ApiErrorBody), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     security(()),
 )]
 pub(super) async fn confirm_reset_handler<S: Storage>(
@@ -258,7 +258,7 @@ pub(super) struct AcceptedResponse {
     post,
     path = "/admin/invites/accept",
     request_body = AcceptInviteRequest,
-    responses((status = 201, description = "Created", body = AcceptedResponse), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 201, description = "Created", body = AcceptedResponse), (status = 401, description = "An unknown, expired or accepted invite token (`invalid_token`).", body = ApiErrorBody), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     security(()),
 )]
 pub(super) async fn accept_invite_handler<S: Storage>(

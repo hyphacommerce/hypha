@@ -36,6 +36,8 @@ pub(super) struct CreateMarketRequest {
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateMarketRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = bool, required = false)]
     prices_include_tax: Option<bool>,
 }
 

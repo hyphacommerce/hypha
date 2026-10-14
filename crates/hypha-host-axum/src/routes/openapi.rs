@@ -10,8 +10,7 @@
 
 use std::{collections::BTreeMap, sync::OnceLock};
 
-use axum::{Json, extract::State};
-use serde_json::Value;
+use axum::{extract::State, http::header::CONTENT_TYPE, response::IntoResponse};
 use utoipa::{
     PartialSchema, ToSchema,
     openapi::{
@@ -94,7 +93,9 @@ pub(crate) struct Row {
     pub doc: Doc,
     pub method: &'static str,
     pub path: &'static str,
-    pub operation_id: &'static str,
+    /// `<surface>.<module>.<name>` (`admin.products.create`). Part of the API once
+    /// clients generate from the documents: a change shows up in the committed files.
+    pub operation_id: String,
     pub tag: &'static str,
     /// What the handler's `#[utoipa::path]` says (checked against `method` and `path`).
     pub annotated_path: fn() -> String,
@@ -117,7 +118,11 @@ macro_rules! openapi_rows {
                 doc: openapi_rows!(@doc $surface),
                 method: stringify!($method),
                 path: $path,
-                operation_id: concat!(stringify!($surface), ".", stringify!($module), ".", stringify!($func)),
+                operation_id: operation_id(
+                    stringify!($surface),
+                    stringify!($module),
+                    stringify!($func),
+                ),
                 tag: stringify!($module),
                 annotated_path: <super::$module::[<__path_ $func>] as utoipa::Path>::path,
                 annotated_methods: <super::$module::[<__path_ $func>] as utoipa::Path>::methods,
@@ -128,6 +133,15 @@ macro_rules! openapi_rows {
     };
     (@doc admin) => { Doc::Admin };
     (@doc storefront) => { Doc::Storefront };
+}
+
+/// The operation ID for a handler: its surface, module and name, without the
+/// `_handler` and `_storefront` suffixes that only keep Rust names apart
+/// (`storefront.products.fetch`, not `storefront.products.fetch_storefront`).
+fn operation_id(surface: &str, module: &str, func: &str) -> String {
+    let name = func.strip_suffix("_handler").unwrap_or(func);
+    let name = name.strip_suffix("_storefront").unwrap_or(name);
+    format!("{surface}.{module}.{name}")
 }
 
 pub(crate) fn rows() -> Vec<Row> {
@@ -244,7 +258,7 @@ pub fn document(doc: Doc) -> OpenApi {
         debug_assert_eq!((row.annotated_path)(), row.path, "{}", row.operation_id);
         debug_assert_eq!((row.annotated_methods)().len(), 1, "{}", row.operation_id);
         let mut op = (row.operation)();
-        op.operation_id = Some(row.operation_id.to_string());
+        op.operation_id = Some(row.operation_id.clone());
         op.tags = Some(vec![row.tag.to_string()]);
         let secured = secured(&op);
         if secured {
@@ -281,29 +295,35 @@ pub fn document_json(doc: Doc) -> String {
     json
 }
 
-fn cached(doc: Doc) -> Value {
-    static ADMIN: OnceLock<Value> = OnceLock::new();
-    static STOREFRONT: OnceLock<Value> = OnceLock::new();
+/// The document's JSON, built once per process: it only changes with the code.
+fn cached(doc: Doc) -> &'static str {
+    static ADMIN: OnceLock<String> = OnceLock::new();
+    static STOREFRONT: OnceLock<String> = OnceLock::new();
     let cell = match doc {
         Doc::Admin => &ADMIN,
         Doc::Storefront => &STOREFRONT,
     };
-    cell.get_or_init(|| serde_json::to_value(document(doc)).unwrap_or(Value::Null))
-        .clone()
+    cell.get_or_init(|| document_json(doc))
+}
+
+fn serve(doc: Doc) -> impl IntoResponse {
+    ([(CONTENT_TYPE, "application/json")], cached(doc))
 }
 
 /// `GET /admin/openapi.json`.
-pub(super) async fn admin_document<S>(State(_): State<SharedState<S>>) -> Json<Value> {
-    Json(cached(Doc::Admin))
+pub(super) async fn admin_document<S>(State(_): State<SharedState<S>>) -> impl IntoResponse {
+    serve(Doc::Admin)
 }
 
 /// `GET /storefront/openapi.json`.
-pub(super) async fn storefront_document<S>(State(_): State<SharedState<S>>) -> Json<Value> {
-    Json(cached(Doc::Storefront))
+pub(super) async fn storefront_document<S>(State(_): State<SharedState<S>>) -> impl IntoResponse {
+    serve(Doc::Storefront)
 }
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
+
     use super::*;
 
     #[test]
@@ -318,6 +338,34 @@ mod tests {
                 row.operation_id
             );
         }
+    }
+
+    #[test]
+    fn operation_ids_are_unique_and_plain() {
+        let mut seen = std::collections::HashSet::new();
+        for row in rows() {
+            assert!(
+                seen.insert(row.operation_id.clone()),
+                "{} twice",
+                row.operation_id
+            );
+            assert!(
+                !row.operation_id.ends_with("_handler")
+                    && !row.operation_id.ends_with("_storefront"),
+                "{}",
+                row.operation_id
+            );
+        }
+        assert_eq!(
+            operation_id("storefront", "products", "fetch_storefront"),
+            "storefront.products.fetch"
+        );
+    }
+
+    #[test]
+    fn the_document_is_served_as_json_text() {
+        let json: Value = serde_json::from_str(cached(Doc::Storefront)).unwrap();
+        assert_eq!(json["info"]["title"], "Hypha Storefront API");
     }
 
     #[test]

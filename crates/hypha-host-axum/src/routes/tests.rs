@@ -473,6 +473,9 @@ async fn a_storefront_sees_active_products_only_without_admin_fields() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["handle"], "mug");
     assert!(json.get("status").is_none());
+    // No prices: the base price isn't what a shopper in a market pays.
+    assert!(json["variants"][0]["id"].is_string());
+    assert!(json["variants"][0].get("price").is_none());
 }
 
 #[tokio::test]
@@ -949,15 +952,73 @@ async fn the_address_limit_comes_before_the_body_is_parsed() {
 // ---------- the route table (design note 0010) ----------
 
 #[test]
-fn every_route_is_listed_once_under_its_surface() {
-    use super::{ROUTES, Surface};
+fn every_documented_route_is_listed_once_under_its_surface() {
+    use super::openapi::{Doc, rows};
     let mut seen = std::collections::HashSet::new();
-    for route in ROUTES {
-        assert!(seen.insert((route.method, route.path)), "{route:?} twice");
-        match route.surface {
-            Surface::Admin => assert!(route.path.starts_with("/admin/"), "{route:?}"),
-            Surface::Storefront => assert!(route.path.starts_with("/storefront/"), "{route:?}"),
-            Surface::Hidden => {}
+    for row in rows() {
+        assert!(
+            seen.insert((row.method, row.path)),
+            "{} twice",
+            row.operation_id
+        );
+        let prefix = match row.doc {
+            Doc::Admin => "/admin/",
+            Doc::Storefront => "/storefront/",
+        };
+        assert!(row.path.starts_with(prefix), "{}", row.operation_id);
+    }
+}
+
+/// A value matching a path parameter's schema in `doc`: an ID from its prefix pattern
+/// (`^prod_[0-9a-f]{32}$`), or a country code.
+fn example_for(doc: &Value, param: &Value) -> String {
+    let schema = &param["schema"];
+    let schema = match schema["$ref"].as_str() {
+        Some(r) => &doc["components"]["schemas"][r.trim_start_matches("#/components/schemas/")],
+        None => schema,
+    };
+    let pattern = schema["pattern"].as_str().unwrap_or_default();
+    match pattern.strip_prefix('^').and_then(|p| p.split_once('_')) {
+        Some((prefix, _)) => format!("{prefix}_{}", "0".repeat(32)),
+        None if pattern.contains("[A-Z]{2}") => "HR".to_string(),
+        None => panic!("no example for path parameter {param}"),
+    }
+}
+
+#[tokio::test]
+async fn every_route_refuses_the_other_surfaces_credentials() {
+    // The table's surface and the handler's `Caller<A>` must agree; this catches a
+    // storefront route taking admin credentials or the reverse, for every route.
+    use super::openapi::{Doc, document};
+    let app = app().await;
+    let publishable = publishable(&app).await;
+    for which in Doc::ALL {
+        let doc = serde_json::to_value(document(which)).unwrap();
+        let (wrong, expected) = match which {
+            Doc::Admin => (publishable.as_str(), "admin_credentials_required"),
+            Doc::Storefront => (app.admin_key.as_str(), "publishable_key_required"),
+        };
+        for (template, item) in doc["paths"].as_object().unwrap() {
+            for (method, op) in item.as_object().unwrap() {
+                if op["security"] == json!([{}]) {
+                    continue; // needs no credentials at all
+                }
+                let mut path = template.clone();
+                for param in op["parameters"].as_array().into_iter().flatten() {
+                    if param["in"] == "path" {
+                        let name = param["name"].as_str().unwrap();
+                        path = path.replace(&format!("{{{name}}}"), &example_for(&doc, param));
+                    }
+                }
+                let method = method.to_uppercase();
+                let body = (method != "GET").then_some("{}");
+                let (status, json) = send_as(&app, wrong, &method, &path, body).await;
+                assert_eq!(
+                    (status, code(&json)),
+                    (StatusCode::FORBIDDEN, expected),
+                    "{method} {path}"
+                );
+            }
         }
     }
 }

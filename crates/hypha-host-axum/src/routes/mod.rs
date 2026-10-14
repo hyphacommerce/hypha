@@ -38,8 +38,8 @@ pub(crate) fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
 
 /// Every route, once (design note 0010, S7): `[surface, METHOD, "path", handler]`.
 /// `$callback!` gets the whole table: `build_router!` turns it into a router per
-/// storage, `route_list!` into `ROUTES`, which the OpenAPI tests check against the
-/// documents, so a route can't go undocumented or a documented one unrouted.
+/// storage, `openapi_rows!` (in `openapi.rs`) into the documents, so a route can't go
+/// undocumented or a documented one unrouted.
 ///
 /// Surfaces: `admin` (`/admin/*`, staff and secret keys), `storefront`
 /// (`/storefront/*`, publishable keys), `hidden` (health and the documents themselves,
@@ -153,43 +153,6 @@ macro_rules! build_router {
             .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
     };
 }
-
-/// Which document a route belongs in.
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Surface {
-    Admin,
-    Storefront,
-    /// Health checks and the documents themselves.
-    Hidden,
-}
-
-/// One row of the route table, as plain data.
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RouteInfo {
-    pub surface: Surface,
-    pub method: &'static str,
-    pub path: &'static str,
-}
-
-#[cfg(test)]
-macro_rules! route_list {
-    ($([$surface:ident, $method:ident, $path:literal, $module:ident::$func:ident]),* $(,)?) => {
-        &[$(RouteInfo {
-            surface: route_list!(@surface $surface),
-            method: stringify!($method),
-            path: $path,
-        }),*]
-    };
-    (@surface admin) => { Surface::Admin };
-    (@surface storefront) => { Surface::Storefront };
-    (@surface hidden) => { Surface::Hidden };
-}
-
-/// Every route in the table (for the tests that check the documents against it).
-#[cfg(test)]
-pub const ROUTES: &[RouteInfo] = route_table!(route_list!());
 
 pub fn memory_router() -> Router<SharedState<MemoryStorage>> {
     route_table!(build_router!(MemoryStorage,))

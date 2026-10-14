@@ -3,8 +3,9 @@
 //!
 //! Exception: five routes store IDs from *another* domain without checking them, because
 //! a leaf crate can't see other domains: variants in fixed prices
-//! (`PUT /price-lists/{id}/fixed-prices`), products in catalogs (`POST
-//! /catalogs/{id}/products`), products in tax assignments (`PUT /tax-assignments`), markets
+//! (`PUT /admin/price-lists/{id}/fixed-prices`), products in catalogs (`POST
+//! /admin/catalogs/{id}/products`), products in tax assignments (`PUT
+//! /admin/tax-assignments`), markets
 //! of a location, and the variant of a new inventory item. An unknown one is stored and
 //! simply never matches. Checking them belongs in a composing layer (like `hypha-cart`),
 //! not in these crates.
@@ -18,28 +19,6 @@ use axum::{
 use hypha_core::{ErrorCode, OrderId, RepoError, VariantId};
 use serde_json::{Value, json};
 
-/// Every error the API returns, as
-/// `{"code": "<stable_code>", "error": "<message>", "details": {…} | null}`.
-///
-/// `code` comes from the domain's `ErrorCode` impls (shared with future MCP/CLI hosts)
-/// and is what clients should match on; `error` is for humans and may change.
-/// `details` carries what a client needs to act without parsing `error`, for the codes
-/// that have any (field names are as stable as codes):
-/// - `out_of_stock`: `{"lines": [{"variant", "requested", "available"}]}`
-/// - `cart_unavailable`: `{"lines": ["var_…"]}`, the lines `GET /carts/{id}` explains
-/// - `total_changed`: `{"expected": Money, "actual": Money}`
-/// - `cart_completed`: `{"order": "ord_…"}`
-/// - `mfa_locked`: `{"locked_until": "<RFC 3339>"}`
-/// - `rate_limited`: `{"retry_after_secs": n}`, also sent as `Retry-After`
-///
-/// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
-/// a rate limit or locked second factor; 403
-/// missing scope, or granting a scope the caller lacks; 404 when the resource in the URL
-/// doesn't exist;
-/// 409 conflicts with existing data, the current state of the resource in the URL, or a
-/// concurrent change (`concurrent_modification`); 422 invalid input, including IDs in the
-/// body that don't exist; 500 storage failures (message hidden, logged instead); 502 an
-/// email that could not be handed over (the write before it stands).
 /// Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`
 /// serializes as this shape.
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -53,6 +32,28 @@ pub struct ApiErrorBody {
     pub details: Option<serde_json::Value>,
 }
 
+/// Every error the API returns, as
+/// `{"code": "<stable_code>", "error": "<message>", "details": {…} | null}`.
+///
+/// `code` comes from the domain's `ErrorCode` impls (shared with future MCP/CLI hosts)
+/// and is what clients should match on; `error` is for humans and may change.
+/// `details` carries what a client needs to act without parsing `error`, for the codes
+/// that have any (field names are as stable as codes):
+/// - `out_of_stock`: `{"lines": [{"variant", "requested", "available"}]}`
+/// - `cart_unavailable`: `{"lines": ["var_…"]}`, the lines `GET /storefront/carts/{id}` explains
+/// - `total_changed`: `{"expected": Money, "actual": Money}`
+/// - `cart_completed`: `{"order": "ord_…"}`
+/// - `mfa_locked`: `{"locked_until": "<RFC 3339>"}`
+/// - `rate_limited`: `{"retry_after_secs": n}`, also sent as `Retry-After`
+///
+/// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
+/// a rate limit or locked second factor; 403
+/// missing scope, or granting a scope the caller lacks; 404 when the resource in the URL
+/// doesn't exist;
+/// 409 conflicts with existing data, the current state of the resource in the URL, or a
+/// concurrent change (`concurrent_modification`); 422 invalid input, including IDs in the
+/// body that don't exist; 500 storage failures (message hidden, logged instead); 502 an
+/// email that could not be handed over (the write before it stands).
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,

@@ -170,8 +170,9 @@ impl From<&PricedCart> for CartResponse {
 #[utoipa::path(
     post,
     path = "/storefront/carts",
+    params(("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CreateCartRequest,
-    responses((status = 201, description = "Created", body = CartResponse)),
+    responses((status = 201, description = "Created", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub(super) async fn create<S: Storage>(
@@ -215,9 +216,9 @@ pub(super) async fn fetch<S: Storage>(
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/lines",
-    params(("id" = CartId, Path)),
+    params(("id" = CartId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = AddLineRequest,
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub(super) async fn add<S: Storage>(

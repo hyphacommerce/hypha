@@ -22,26 +22,26 @@ use governor::{
 /// user locked out for as long as they liked (third review of 0009).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Rule {
-    /// `POST /auth/login`, per client address.
+    /// `POST /admin/auth/login`, per client address.
     LoginIp,
-    /// `POST /auth/login`, per email and address: guesses at one account from one place.
+    /// `POST /admin/auth/login`, per email and address: guesses at one account from one place.
     LoginEmailFromIp,
-    /// `POST /auth/login`, per email from anywhere, loose: bounds guessing spread over
+    /// `POST /admin/auth/login`, per email from anywhere, loose: bounds guessing spread over
     /// many addresses, while locking someone out takes a great many of them.
     LoginEmail,
-    /// `POST /auth/login/mfa`, per client address. Per account, the second-factor
+    /// `POST /admin/auth/login/mfa`, per client address. Per account, the second-factor
     /// lockout already counts (0008).
     MfaIp,
-    /// `POST /auth/password-reset`, per client address.
+    /// `POST /admin/auth/password-reset`, per client address.
     ResetIp,
-    /// `POST /auth/password-reset`, per email and address. No limit by email alone: the
+    /// `POST /admin/auth/password-reset`, per email and address. No limit by email alone: the
     /// domain sends at most one email per account every few minutes, and a stranger
     /// asking only sends the owner a valid link.
     ResetEmailFromIp,
-    /// `POST /auth/password-reset/confirm`, per client address. Its own bucket, so
+    /// `POST /admin/auth/password-reset/confirm`, per client address. Its own bucket, so
     /// asking for a few links doesn't block using one.
     ResetConfirmIp,
-    /// `POST /invites/accept`, per client address.
+    /// `POST /admin/invites/accept`, per client address.
     InviteIp,
 }
 

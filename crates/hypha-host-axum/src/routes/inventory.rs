@@ -36,10 +36,16 @@ pub(super) struct CreateLocationRequest {
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateLocationRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = String, required = false)]
     name: Option<String>,
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = Vec<MarketId>, required = false)]
     markets: Option<Vec<MarketId>>,
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = u32, required = false)]
     priority: Option<u32>,
 }
 
@@ -157,8 +163,12 @@ fn yes() -> bool {
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateInventoryItemRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = bool, required = false)]
     tracked: Option<bool>,
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = bool, required = false)]
     continue_selling: Option<bool>,
 }
 

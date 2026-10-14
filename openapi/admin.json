@@ -328,7 +328,7 @@
           "auth"
         ],
         "summary": "The first login step. 401 `invalid_credentials` for a wrong email or password (or a\ndisabled account), deliberately the same answer.",
-        "operationId": "admin.auth.login_handler",
+        "operationId": "admin.auth.login",
         "requestBody": {
           "content": {
             "application/json": {
@@ -352,6 +352,16 @@
           },
           "400": {
             "description": "A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Wrong email or password, or a disabled account: one answer for all (`invalid_credentials`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -432,7 +442,7 @@
           "auth"
         ],
         "summary": "The second step, when the first answered `mfa_required`. A wrong code is 401\n`invalid_mfa_code`; the fifth wrong code ends the challenge (then `invalid_token`).",
-        "operationId": "admin.auth.finish_login_handler",
+        "operationId": "admin.auth.finish_login",
         "requestBody": {
           "content": {
             "application/json": {
@@ -456,6 +466,16 @@
           },
           "400": {
             "description": "A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A wrong or used code (`invalid_mfa_code`), or an unknown, expired or ended challenge (`invalid_token`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -505,7 +525,7 @@
             }
           },
           "429": {
-            "description": "Over a rate limit (`rate_limited`); see `Retry-After`",
+            "description": "Over a rate limit (`rate_limited`, see `Retry-After`), or second-factor checks locked after five wrong codes (`mfa_locked`, see `details.locked_until`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -536,7 +556,7 @@
           "auth"
         ],
         "summary": "Ends the caller's session.",
-        "operationId": "admin.auth.logout_handler",
+        "operationId": "admin.auth.logout",
         "responses": {
           "204": {
             "description": "No content"
@@ -596,7 +616,7 @@
           "auth"
         ],
         "summary": "202 at once, whether or not the email belongs to anyone: the work (finding the\naccount, storing the reset, sending the email) runs on its own task, so neither the\nanswer nor its timing tells which emails exist. The one other answer is 429\n`rate_limited` (design note 0009), which depends on the caller's address and the\nemail asked about, never on whether the account exists.",
-        "operationId": "admin.auth.request_reset_handler",
+        "operationId": "admin.auth.request_reset",
         "requestBody": {
           "content": {
             "application/json": {
@@ -693,7 +713,7 @@
           "auth"
         ],
         "summary": "Sets the new password and logs out every session of the account.",
-        "operationId": "admin.auth.confirm_reset_handler",
+        "operationId": "admin.auth.confirm_reset",
         "requestBody": {
           "content": {
             "application/json": {
@@ -710,6 +730,16 @@
           },
           "400": {
             "description": "A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "An unknown, expired or used reset token (`invalid_token`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -930,7 +960,7 @@
           "markets"
         ],
         "summary": "Creates a catalog: which products a market (or all markets) sells.",
-        "operationId": "admin.markets.create_catalog_handler",
+        "operationId": "admin.markets.create_catalog",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1049,7 +1079,7 @@
           "markets"
         ],
         "summary": "Sets or clears a catalog's price list.",
-        "operationId": "admin.markets.assign_price_list_handler",
+        "operationId": "admin.markets.assign_price_list",
         "parameters": [
           {
             "name": "id",
@@ -1188,7 +1218,7 @@
           "markets"
         ],
         "summary": "Adds products to a catalog.",
-        "operationId": "admin.markets.add_products_handler",
+        "operationId": "admin.markets.add_products",
         "parameters": [
           {
             "name": "id",
@@ -1318,7 +1348,7 @@
           "markets"
         ],
         "summary": "Removes products from a catalog.",
-        "operationId": "admin.markets.remove_products_handler",
+        "operationId": "admin.markets.remove_products",
         "parameters": [
           {
             "name": "id",
@@ -1795,7 +1825,7 @@
           "customers"
         ],
         "summary": "Adds an address to a customer's address book.",
-        "operationId": "admin.customers.add_address_handler",
+        "operationId": "admin.customers.add_address",
         "parameters": [
           {
             "name": "id",
@@ -1934,7 +1964,7 @@
           "customers"
         ],
         "summary": "Replaces a saved address.",
-        "operationId": "admin.customers.update_address_handler",
+        "operationId": "admin.customers.update_address",
         "parameters": [
           {
             "name": "id",
@@ -2079,7 +2109,7 @@
           "customers"
         ],
         "summary": "Removes a saved address.",
-        "operationId": "admin.customers.remove_address_handler",
+        "operationId": "admin.customers.remove_address",
         "parameters": [
           {
             "name": "id",
@@ -2825,7 +2855,7 @@
           "staff"
         ],
         "summary": "Emails an invite (a new one replaces a pending one). The token is only in the email.",
-        "operationId": "admin.staff.invite_handler",
+        "operationId": "admin.staff.invite",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2944,7 +2974,7 @@
           "auth"
         ],
         "summary": "Creates the invited user and logs them in.",
-        "operationId": "admin.auth.accept_invite_handler",
+        "operationId": "admin.auth.accept_invite",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2968,6 +2998,16 @@
           },
           "400": {
             "description": "A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "An unknown, expired or accepted invite token (`invalid_token`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3048,7 +3088,7 @@
           "inventory"
         ],
         "summary": "Creates a stock location.",
-        "operationId": "admin.inventory.create_location_handler",
+        "operationId": "admin.inventory.create_location",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3254,7 +3294,7 @@
           "inventory"
         ],
         "summary": "Changes a stock location.",
-        "operationId": "admin.inventory.update_location_handler",
+        "operationId": "admin.inventory.update_location",
         "parameters": [
           {
             "name": "id",
@@ -3393,7 +3433,7 @@
           "markets"
         ],
         "summary": "Creates a market: countries that share a currency.",
-        "operationId": "admin.markets.create_market_handler",
+        "operationId": "admin.markets.create_market",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3512,7 +3552,7 @@
           "markets"
         ],
         "summary": "Changes a market.",
-        "operationId": "admin.markets.update_market_handler",
+        "operationId": "admin.markets.update_market",
         "parameters": [
           {
             "name": "id",
@@ -3651,7 +3691,7 @@
           "markets"
         ],
         "summary": "Adds a country to a market.",
-        "operationId": "admin.markets.add_country_handler",
+        "operationId": "admin.markets.add_country",
         "parameters": [
           {
             "name": "id",
@@ -3790,7 +3830,7 @@
           "markets"
         ],
         "summary": "Removes a country from a market.",
-        "operationId": "admin.markets.remove_country_handler",
+        "operationId": "admin.markets.remove_country",
         "parameters": [
           {
             "name": "id",
@@ -3954,7 +3994,7 @@
           "me"
         ],
         "summary": "Replaces the recovery codes; needs a current second-factor code.",
-        "operationId": "admin.me.recovery_codes_handler",
+        "operationId": "admin.me.recovery_codes",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4071,7 +4111,7 @@
           "me"
         ],
         "summary": "Starts the authenticator setup; confirm with a code to turn 2FA on.",
-        "operationId": "admin.me.start_totp_handler",
+        "operationId": "admin.me.start_totp",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4188,7 +4228,7 @@
           "me"
         ],
         "summary": "Turns 2FA on with a code from the app; returns the recovery codes once.",
-        "operationId": "admin.me.confirm_totp_handler",
+        "operationId": "admin.me.confirm_totp",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4305,7 +4345,7 @@
           "me"
         ],
         "summary": "Turns 2FA off; needs a current second-factor code.",
-        "operationId": "admin.me.disable_totp_handler",
+        "operationId": "admin.me.disable_totp",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4415,7 +4455,7 @@
           "me"
         ],
         "summary": "Changes the password and logs out every other session.",
-        "operationId": "admin.me.change_password_handler",
+        "operationId": "admin.me.change_password",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4713,7 +4753,7 @@
           "markets"
         ],
         "summary": "Creates a price list.",
-        "operationId": "admin.markets.create_price_list_handler",
+        "operationId": "admin.markets.create_price_list",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4832,7 +4872,7 @@
           "markets"
         ],
         "summary": "Sets fixed prices for variants in a price list.",
-        "operationId": "admin.markets.set_fixed_prices_handler",
+        "operationId": "admin.markets.set_fixed_prices",
         "parameters": [
           {
             "name": "id",
@@ -4962,7 +5002,7 @@
           "markets"
         ],
         "summary": "Removes fixed prices from a price list.",
-        "operationId": "admin.markets.remove_fixed_prices_handler",
+        "operationId": "admin.markets.remove_fixed_prices",
         "parameters": [
           {
             "name": "id",
@@ -5441,7 +5481,7 @@
           "staff"
         ],
         "summary": "Creates a role; you can only grant scopes you hold.",
-        "operationId": "admin.staff.create_role_handler",
+        "operationId": "admin.staff.create_role",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5647,7 +5687,7 @@
           "staff"
         ],
         "summary": "Changes a role (JSON Merge Patch); the owner role is fixed.",
-        "operationId": "admin.staff.update_role_handler",
+        "operationId": "admin.staff.update_role",
         "parameters": [
           {
             "name": "id",
@@ -6760,7 +6800,7 @@
           "staff"
         ],
         "summary": "A disabled user's sessions stop working on their next request.",
-        "operationId": "admin.staff.update_user_handler",
+        "operationId": "admin.staff.update_user",
         "parameters": [
           {
             "name": "id",
@@ -7440,7 +7480,7 @@
           },
           "token": {
             "type": "string",
-            "description": "Send back to `POST /auth/login/mfa` with a code."
+            "description": "Send back to `POST /admin/auth/login/mfa` with a code."
           }
         }
       },
@@ -7844,7 +7884,7 @@
       },
       "Error": {
         "type": "object",
-        "description": "Every error the API returns, as\n`{\"code\": \"<stable_code>\", \"error\": \"<message>\", \"details\": {…} | null}`.\n\n`code` comes from the domain's `ErrorCode` impls (shared with future MCP/CLI hosts)\nand is what clients should match on; `error` is for humans and may change.\n`details` carries what a client needs to act without parsing `error`, for the codes\nthat have any (field names are as stable as codes):\n- `out_of_stock`: `{\"lines\": [{\"variant\", \"requested\", \"available\"}]}`\n- `cart_unavailable`: `{\"lines\": [\"var_…\"]}`, the lines `GET /carts/{id}` explains\n- `total_changed`: `{\"expected\": Money, \"actual\": Money}`\n- `cart_completed`: `{\"order\": \"ord_…\"}`\n- `mfa_locked`: `{\"locked_until\": \"<RFC 3339>\"}`\n- `rate_limited`: `{\"retry_after_secs\": n}`, also sent as `Retry-After`\n\nStatus rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over\na rate limit or locked second factor; 403\nmissing scope, or granting a scope the caller lacks; 404 when the resource in the URL\ndoesn't exist;\n409 conflicts with existing data, the current state of the resource in the URL, or a\nconcurrent change (`concurrent_modification`); 422 invalid input, including IDs in the\nbody that don't exist; 500 storage failures (message hidden, logged instead); 502 an\nemail that could not be handed over (the write before it stands).\nEvery error body, for the OpenAPI documents (design note 0010, S9). `ApiError`\nserializes as this shape.",
+        "description": "Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`\nserializes as this shape.",
         "required": [
           "code",
           "error"
@@ -8965,10 +9005,7 @@
         "description": "JSON Merge Patch (see `patch`): only the fields sent change, `null` clears a name or\nphone. The email can be changed but not cleared.",
         "properties": {
           "email": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "first_name": {
             "type": [
@@ -8996,16 +9033,10 @@
         "description": "Every field optional: only the ones sent change.",
         "properties": {
           "continue_selling": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean"
           },
           "tracked": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -9015,25 +9046,16 @@
         "description": "Every field optional: only the ones sent change.",
         "properties": {
           "markets": {
-            "type": [
-              "array",
-              "null"
-            ],
+            "type": "array",
             "items": {
               "$ref": "#/components/schemas/MarketId"
             }
           },
           "name": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "priority": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32",
             "minimum": 0
           }
@@ -9044,10 +9066,7 @@
         "type": "object",
         "properties": {
           "prices_include_tax": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -9057,16 +9076,10 @@
         "description": "JSON Merge Patch: only the fields sent change.",
         "properties": {
           "name": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "scopes": {
-            "type": [
-              "array",
-              "null"
-            ],
+            "type": "array",
             "items": {
               "$ref": "#/components/schemas/Scope"
             }
@@ -9078,10 +9091,7 @@
         "type": "object",
         "properties": {
           "default_rate_ppm": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32",
             "minimum": 0
           }
@@ -9093,30 +9103,13 @@
         "description": "JSON Merge Patch: only the fields sent change.",
         "properties": {
           "name": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "role": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/RoleId"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/RoleId"
           },
           "status": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/StatusRequest"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/StatusRequest"
           }
         },
         "additionalProperties": false

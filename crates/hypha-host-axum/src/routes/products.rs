@@ -136,22 +136,34 @@ pub(super) async fn fetch<S: Storage>(
 /// A product as a storefront sees it (design note 0010, S5): active products only, without
 /// admin fields. A draft or archived product is `404 product_not_found`, the same as one
 /// that doesn't exist, so a storefront can't tell them apart.
+///
+/// No prices: a product's base price isn't what a shopper pays (their market's price
+/// list and currency decide that), so showing it would mislead. Until product listing
+/// brings prices per market, the cart is where a storefront gets them.
 #[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct StorefrontProductResponse {
     id: ProductId,
     handle: String,
     title: String,
-    variants: Vec<VariantResponse>,
+    variants: Vec<StorefrontVariantResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct StorefrontVariantResponse {
+    id: VariantId,
 }
 
 impl From<&Product> for StorefrontProductResponse {
     fn from(p: &Product) -> Self {
-        let admin = ProductResponse::from(p);
         Self {
-            id: admin.id,
-            handle: admin.handle,
-            title: admin.title,
-            variants: admin.variants,
+            id: p.id(),
+            handle: p.handle().as_str().to_string(),
+            title: p.title().to_string(),
+            variants: p
+                .variants()
+                .iter()
+                .map(|v| StorefrontVariantResponse { id: v.id() })
+                .collect(),
         }
     }
 }

@@ -156,9 +156,9 @@ impl From<&OrderLine> for OrderLineResponse {
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/checkout",
-    params(("id" = CartId, Path)),
+    params(("id" = CartId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CheckoutRequest,
-    responses((status = 201, description = "Created", body = OrderResponse)),
+    responses((status = 201, description = "Created", body = OrderResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`.")))),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub(super) async fn checkout_handler<S: Storage>(

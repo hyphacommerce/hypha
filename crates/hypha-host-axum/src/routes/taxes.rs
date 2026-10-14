@@ -104,6 +104,8 @@ pub(super) struct CreateTaxRegionRequest {
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateTaxRegionRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = u32, required = false)]
     default_rate_ppm: Option<u32>,
 }
 

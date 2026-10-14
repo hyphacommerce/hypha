@@ -30,8 +30,12 @@ pub(super) struct CreateRoleRequest {
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateRoleRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = String, required = false)]
     name: Option<String>,
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = Vec<Scope>, required = false)]
     scopes: Option<Vec<Scope>>,
 }
 
@@ -151,10 +155,16 @@ impl UserResponse {
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateUserRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = String, required = false)]
     name: Option<String>,
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = RoleId, required = false)]
     role: Option<RoleId>,
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = StatusRequest, required = false)]
     status: Option<StatusRequest>,
 }
 

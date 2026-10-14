@@ -116,9 +116,9 @@ fi
 echo "## logging in"
 step "health needs no credentials" 200 - "$BASE/health"
 step "nor does the admin API's OpenAPI document" 200 - "$BASE/admin/openapi.json"
-contains "it is OpenAPI 3.1" '"openapi":"3.1.0"'
+contains "it is OpenAPI 3.1" '"openapi": "3.1.0"'
 step "or the storefront's" 200 - "$BASE/storefront/openapi.json"
-contains "with the storefront's title" '"title":"Hypha Storefront API"'
+contains "with the storefront's title" '"title": "Hypha Storefront API"'
 step "anything else does" 401 unauthenticated "$BASE/admin/store"
 step "owner logs in" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"

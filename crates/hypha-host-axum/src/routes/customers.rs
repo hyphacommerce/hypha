@@ -30,6 +30,8 @@ pub(super) struct CreateCustomerRequest {
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateCustomerRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = String, required = false)]
     email: Option<String>,
     #[serde(default, deserialize_with = "patch::nullable")]
     first_name: Option<Option<String>>,

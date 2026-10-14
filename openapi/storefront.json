@@ -22,6 +22,20 @@
         ],
         "summary": "Takes an `Idempotency-Key` header: a retry returns the cart the first request made.",
         "operationId": "storefront.carts.create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -35,6 +49,14 @@
         "responses": {
           "201": {
             "description": "Created",
+            "headers": {
+              "Idempotent-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`."
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -229,7 +251,7 @@
           "orders"
         ],
         "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns\nthe order the first request placed. The body is `{}` or `{\"expected_total\": …}`.",
-        "operationId": "storefront.orders.checkout_handler",
+        "operationId": "storefront.orders.checkout",
         "parameters": [
           {
             "name": "id",
@@ -237,6 +259,18 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/CartId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -253,6 +287,14 @@
         "responses": {
           "201": {
             "description": "Created",
+            "headers": {
+              "Idempotent-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`."
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -516,6 +558,18 @@
             "schema": {
               "$ref": "#/components/schemas/CartId"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -531,6 +585,14 @@
         "responses": {
           "200": {
             "description": "OK",
+            "headers": {
+              "Idempotent-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`."
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -898,7 +960,7 @@
           "products"
         ],
         "summary": "An active product; drafts and archived products read as missing.",
-        "operationId": "storefront.products.fetch_storefront",
+        "operationId": "storefront.products.fetch",
         "parameters": [
           {
             "name": "id",
@@ -987,7 +1049,7 @@
           "stores"
         ],
         "summary": "The store's name.",
-        "operationId": "storefront.stores.fetch_storefront",
+        "operationId": "storefront.stores.fetch",
         "responses": {
           "200": {
             "description": "OK",
@@ -1223,7 +1285,7 @@
       },
       "Error": {
         "type": "object",
-        "description": "Every error the API returns, as\n`{\"code\": \"<stable_code>\", \"error\": \"<message>\", \"details\": {…} | null}`.\n\n`code` comes from the domain's `ErrorCode` impls (shared with future MCP/CLI hosts)\nand is what clients should match on; `error` is for humans and may change.\n`details` carries what a client needs to act without parsing `error`, for the codes\nthat have any (field names are as stable as codes):\n- `out_of_stock`: `{\"lines\": [{\"variant\", \"requested\", \"available\"}]}`\n- `cart_unavailable`: `{\"lines\": [\"var_…\"]}`, the lines `GET /carts/{id}` explains\n- `total_changed`: `{\"expected\": Money, \"actual\": Money}`\n- `cart_completed`: `{\"order\": \"ord_…\"}`\n- `mfa_locked`: `{\"locked_until\": \"<RFC 3339>\"}`\n- `rate_limited`: `{\"retry_after_secs\": n}`, also sent as `Retry-After`\n\nStatus rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over\na rate limit or locked second factor; 403\nmissing scope, or granting a scope the caller lacks; 404 when the resource in the URL\ndoesn't exist;\n409 conflicts with existing data, the current state of the resource in the URL, or a\nconcurrent change (`concurrent_modification`); 422 invalid input, including IDs in the\nbody that don't exist; 500 storage failures (message hidden, logged instead); 502 an\nemail that could not be handed over (the write before it stands).\nEvery error body, for the OpenAPI documents (design note 0010, S9). `ApiError`\nserializes as this shape.",
+        "description": "Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`\nserializes as this shape.",
         "required": [
           "code",
           "error"
@@ -1625,7 +1687,7 @@
       },
       "StorefrontProductResponse": {
         "type": "object",
-        "description": "A product as a storefront sees it (design note 0010, S5): active products only, without\nadmin fields. A draft or archived product is `404 product_not_found`, the same as one\nthat doesn't exist, so a storefront can't tell them apart.",
+        "description": "A product as a storefront sees it (design note 0010, S5): active products only, without\nadmin fields. A draft or archived product is `404 product_not_found`, the same as one\nthat doesn't exist, so a storefront can't tell them apart.\n\nNo prices: a product's base price isn't what a shopper pays (their market's price\nlist and currency decide that), so showing it would mislead. Until product listing\nbrings prices per market, the cart is where a storefront gets them.",
         "required": [
           "id",
           "handle",
@@ -1645,7 +1707,7 @@
           "variants": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VariantResponse"
+              "$ref": "#/components/schemas/StorefrontVariantResponse"
             }
           }
         }
@@ -1659,6 +1721,17 @@
         "properties": {
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "StorefrontVariantResponse": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/VariantId"
           }
         }
       },
@@ -1711,21 +1784,6 @@
           "var_0190f1a2b3c47d8e9f00112233445566"
         ],
         "pattern": "^var_[0-9a-f]{32}$"
-      },
-      "VariantResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "price"
-        ],
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/VariantId"
-          },
-          "price": {
-            "$ref": "#/components/schemas/Money"
-          }
-        }
       }
     },
     "securitySchemes": {
