@@ -190,8 +190,10 @@ not per workflow.
 **Shape (`hypha-core`)**
 - `IdempotencyKey`: a validated newtype (1 to 255 visible ASCII characters).
 - `IdempotencyRequest { key, fingerprint: [u8; 32] }`. The adapter computes the
-  fingerprint over its input (the host: SHA-256 of method, path and body; MCP and CLI
-  hash their own input), because Rust's `Hash` isn't stable across compiler versions.
+  fingerprint over its input, because Rust's `Hash` isn't stable across compiler
+  versions. The host: SHA-256 of the method, the lowercased path, the query string and
+  the body as canonical JSON (keys sorted, no whitespace), so a retry that re-serialized
+  its body still matches. MCP and CLI hash their own input.
 - `IdempotencyRepo::get(actor, key) -> Option<IdempotencyRecord>` and `StageIdempotency`
   to record one in a batch. A record is `{ actor, key, operation, fingerprint, result,
   created_at }`, where `result` is the ID the command produced or changed (`ord_…`,
@@ -204,9 +206,13 @@ not per workflow.
    `idempotency_key_reused` (422).
 2. Otherwise run the command, staging the record with its writes. Because the key
    commits with the effect, a crash between them can't happen.
-3. Two concurrent requests with the same key: one commit wins, the other gets
-   `Duplicate(IDEMPOTENCY_KEY)` and replays through `report_duplicate`, the same pattern
-   as other unique keys.
+3. Two concurrent requests with the same key: both can pass step 1 before either
+   commits. One commit wins; the other fails on whichever of the winner's writes it
+   meets first (the key, a stale cart version, the order's unique cart, …). So after
+   *any* failed keyed write, the command looks the key up again and, if the winner's
+   record is there, replays it. *Changed while building:* first written as "replay on
+   `Duplicate(IDEMPOTENCY_KEY)`", which missed the other failures; the Postgres race
+   tests (`hypha-store-postgres/tests/checkout_race.rs`) caught it.
 
 **Different from Stripe:** a replay returns the resource as it is now, not the first
 response, and failures aren't recorded (a failed command wrote nothing, so a retry runs
@@ -222,6 +228,9 @@ it again). Storing response bodies would mean the domain storing host DTOs.
   fresh keys (UUIDs), so this only matters for storage size.
 - The host's `KeyedJson` extractor (`extract.rs`) reads the `Idempotency-Key` header and
   fingerprints the request; replays carry `Idempotent-Replayed: true`.
+- Routes that honor the header: `POST /carts`, `POST /carts/{id}/lines` and
+  `POST /carts/{id}/checkout`. Every other route ignores it; a key-aware command gets
+  `KeyedJson` when a client needs safe retries for it.
 
 ## 6. `Clock` (O8)
 
@@ -237,8 +246,9 @@ it again). Storing response bodies would mean the domain storing host DTOs.
 - `OrderRepo::next_number()`, called before the batch. *Changed while building:* a
   method on the order repo rather than a separate `OrderNumbers` port, so hosts and
   tests wire one accessor less.
-- Postgres: a sequence starting at 1001 (`nextval` is outside any transaction, so it
-  never blocks another checkout). Memory: an atomic counter.
+- Postgres: a sequence starting at 1001. `nextval` runs in its own short transaction,
+  outside the checkout's batch, so it never blocks another checkout (and no query cache
+  can answer it; 0001 §7). Memory: an atomic counter.
 - A failed or retried checkout leaves a gap. Shopify's numbers have gaps too (deleted
   orders, test orders), and without gaps every checkout would queue on one row.
 - Decided over leaving numbers out until an admin needs them: merchants and buyers

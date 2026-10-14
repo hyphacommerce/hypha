@@ -44,7 +44,8 @@ impl IdempotencyKey {
 /// fingerprint of the request, so a key reused for a different request is caught.
 ///
 /// The adapter computes the fingerprint over its own input (the HTTP host: SHA-256 of
-/// method, path and body), because Rust's `Hash` isn't stable across compiler versions.
+/// method, path, query and canonical JSON body), because Rust's `Hash` isn't stable
+/// across compiler versions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdempotencyRequest {
     pub key: String,
