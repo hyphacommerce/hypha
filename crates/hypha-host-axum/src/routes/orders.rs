@@ -155,11 +155,12 @@ impl From<&OrderLine> for OrderLineResponse {
 /// the order the first request placed. The body is `{}` or `{"expected_total": …}`.
 pub(super) async fn checkout_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(cart): PathId<CartId>,
     req: KeyedJson<CheckoutRequest>,
 ) -> Result<Response, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = Checkout {
         cart,
         expected_total: req.body.expected_total,
@@ -175,10 +176,11 @@ pub(super) async fn checkout_handler<S: Storage>(
 
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<OrderId>,
 ) -> Result<Json<OrderResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let order = get_order(&ctx, ports.orders(), id).await?;
     Ok(Json(OrderResponse::new(&order)?))
 }
@@ -187,10 +189,11 @@ pub(super) async fn fetch<S: Storage>(
 /// again changes nothing.
 pub(super) async fn mark_paid<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<OrderId>,
 ) -> Result<Json<OrderResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let order = mark_order_paid(&ctx, ports.orders(), id).await?;
     Ok(Json(OrderResponse::new(&order)?))
 }

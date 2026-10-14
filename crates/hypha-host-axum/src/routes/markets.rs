@@ -62,10 +62,11 @@ impl From<&Market> for MarketResponse {
 
 pub(super) async fn create_market_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     JsonBody(req): JsonBody<CreateMarketRequest>,
 ) -> Result<(StatusCode, Json<MarketResponse>), ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = CreateMarket {
         name: req.name,
         countries: req.countries,
@@ -78,11 +79,12 @@ pub(super) async fn create_market_handler<S: Storage>(
 
 pub(super) async fn update_market_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<MarketId>,
     JsonBody(req): JsonBody<UpdateMarketRequest>,
 ) -> Result<Json<MarketResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = UpdateMarket {
         prices_include_tax: req.prices_include_tax,
     };
@@ -100,11 +102,12 @@ pub(super) struct AddCountryRequest {
 
 pub(super) async fn add_country_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<MarketId>,
     JsonBody(req): JsonBody<AddCountryRequest>,
 ) -> Result<Json<MarketResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let market = add_market_country(&ctx, ports.markets(), id, &req.country)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
@@ -113,10 +116,11 @@ pub(super) async fn add_country_handler<S: Storage>(
 
 pub(super) async fn remove_country_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId((id, country)): PathId<(MarketId, String)>,
 ) -> Result<Json<MarketResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let market = remove_market_country(&ctx, ports.markets(), id, &country)
         .await
         .map_err(|e| {
@@ -176,10 +180,11 @@ pub(super) struct RemoveFixedPricesRequest {
 
 pub(super) async fn create_price_list_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     JsonBody(req): JsonBody<CreatePriceListRequest>,
 ) -> Result<(StatusCode, Json<PriceListResponse>), ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = CreatePriceList {
         currency: req.currency,
         adjustment: req.adjustment_bps,
@@ -190,11 +195,12 @@ pub(super) async fn create_price_list_handler<S: Storage>(
 
 pub(super) async fn set_fixed_prices_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<PriceListId>,
     JsonBody(req): JsonBody<SetFixedPricesRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let prices = req
         .fixed_prices
         .into_iter()
@@ -211,11 +217,12 @@ pub(super) async fn set_fixed_prices_handler<S: Storage>(
 
 pub(super) async fn remove_fixed_prices_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<PriceListId>,
     JsonBody(req): JsonBody<RemoveFixedPricesRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     remove_fixed_prices(&ctx, ports.price_lists(), id, req.variants)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
@@ -264,10 +271,11 @@ impl From<&Catalog> for CatalogResponse {
 
 pub(super) async fn create_catalog_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     JsonBody(req): JsonBody<CreateCatalogRequest>,
 ) -> Result<(StatusCode, Json<CatalogResponse>), ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = CreateCatalog { market: req.market };
     let catalog =
         create_catalog(&ctx, ports.markets(), ports.catalogs(), &state.ids, input).await?;
@@ -276,33 +284,36 @@ pub(super) async fn create_catalog_handler<S: Storage>(
 
 pub(super) async fn add_products_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<CatalogId>,
     JsonBody(req): JsonBody<CatalogProductsRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     add_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub(super) async fn remove_products_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<CatalogId>,
     JsonBody(req): JsonBody<CatalogProductsRequest>,
 ) -> Result<StatusCode, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     remove_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub(super) async fn assign_price_list_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<CatalogId>,
     JsonBody(req): JsonBody<AssignPriceListRequest>,
 ) -> Result<Json<CatalogResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let catalog = assign_price_list(
         &ctx,
         ports.markets(),

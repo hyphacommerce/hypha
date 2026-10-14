@@ -27,8 +27,11 @@ impl From<&Store> for StoreResponse {
 /// The store this request is served by.
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
 ) -> Result<Json<StoreResponse>, ApiError> {
+    let ctx = caller
+        .authenticate(&state.ports().await?, &state.clock)
+        .await?;
     let directory = state.storage.directory().await?;
     let store = get_store(&ctx, &directory, state.store).await?;
     Ok(Json(StoreResponse::from(&store)))

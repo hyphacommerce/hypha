@@ -169,10 +169,11 @@ impl From<&PricedCart> for CartResponse {
 /// Takes an `Idempotency-Key` header: a retry returns the cart the first request made.
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     req: KeyedJson<CreateCartRequest>,
 ) -> Result<Response, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = CreateCart {
         country: req.body.country,
         idempotency: req.idempotency,
@@ -187,10 +188,11 @@ pub(super) async fn create<S: Storage>(
 
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<CartId>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let priced = hypha_checkout::view_cart(&ctx, &ports, id).await?;
     Ok(Json(CartResponse::from(&priced)))
 }
@@ -198,11 +200,12 @@ pub(super) async fn fetch<S: Storage>(
 /// Takes an `Idempotency-Key` header: a retry returns the cart without adding again.
 pub(super) async fn add<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<CartId>,
     req: KeyedJson<AddLineRequest>,
 ) -> Result<Response, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = AddLine {
         cart: id,
         variant: req.body.variant,
@@ -219,22 +222,24 @@ pub(super) async fn add<S: Storage>(
 
 pub(super) async fn set_email<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<CartId>,
     JsonBody(req): JsonBody<SetEmailRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let priced = set_cart_email(&ctx, &ports, id, req.email).await?;
     Ok(Json(CartResponse::from(&priced)))
 }
 
 pub(super) async fn set_customer<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<CartId>,
     JsonBody(req): JsonBody<SetCustomerRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
     Ok(Json(CartResponse::from(&priced)))
 }
@@ -248,11 +253,12 @@ pub(super) struct SetQuantityRequest {
 
 pub(super) async fn set_quantity<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
     JsonBody(req): JsonBody<SetQuantityRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = SetLineQuantity {
         cart: id,
         variant,
@@ -266,10 +272,11 @@ pub(super) async fn set_quantity<S: Storage>(
 
 pub(super) async fn remove_line<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let priced = remove_cart_line(&ctx, &ports, id, variant)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;

@@ -57,20 +57,22 @@ impl From<&Role> for RoleResponse {
 
 pub(super) async fn create_role_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     JsonBody(req): JsonBody<CreateRoleRequest>,
 ) -> Result<(StatusCode, Json<RoleResponse>), ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let role = create_role(&ctx, ports.roles(), &state.ids, &req.name, &req.scopes).await?;
     Ok((StatusCode::CREATED, Json(RoleResponse::from(&role))))
 }
 
 pub(super) async fn fetch_role<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<RoleId>,
 ) -> Result<Json<RoleResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let role = get_role(&ctx, ports.roles(), id)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("role_not_found"))?;
@@ -79,11 +81,12 @@ pub(super) async fn fetch_role<S: Storage>(
 
 pub(super) async fn update_role_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<RoleId>,
     JsonBody(req): JsonBody<UpdateRoleRequest>,
 ) -> Result<Json<RoleResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = UpdateRole {
         name: req.name,
         scopes: req.scopes,
@@ -140,10 +143,11 @@ pub(super) enum StatusRequest {
 
 pub(super) async fn fetch_user<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<UserId>,
 ) -> Result<Json<UserResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let user = get_user(&ctx, ports.users(), id).await?;
     Ok(Json(UserResponse::new(&user)?))
 }
@@ -151,11 +155,12 @@ pub(super) async fn fetch_user<S: Storage>(
 /// A disabled user's sessions stop working on their next request.
 pub(super) async fn update_user_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<UserId>,
     JsonBody(req): JsonBody<UpdateUserRequest>,
 ) -> Result<Json<UserResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = UpdateUser {
         name: req.name,
         role: req.role,
@@ -199,10 +204,11 @@ impl InviteResponse {
 /// Emails an invite (a new one replaces a pending one). The token is only in the email.
 pub(super) async fn invite_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     JsonBody(req): JsonBody<InviteRequest>,
 ) -> Result<(StatusCode, Json<InviteResponse>), ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = InviteUser {
         email: req.email,
         role: req.role,

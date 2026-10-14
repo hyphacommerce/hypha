@@ -67,10 +67,11 @@ pub(super) struct CreatedApiKeyResponse {
 
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     JsonBody(req): JsonBody<CreateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<CreatedApiKeyResponse>), ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let input = CreateApiKey {
         kind: match req.kind {
             KindRequest::Secret => ApiKeyKind::Secret,
@@ -89,10 +90,11 @@ pub(super) async fn create<S: Storage>(
 
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<ApiKeyId>,
 ) -> Result<Json<ApiKeyResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let key = get_api_key(&ctx, ports.api_keys(), id).await?;
     Ok(Json(ApiKeyResponse::new(&key)?))
 }
@@ -100,10 +102,11 @@ pub(super) async fn fetch<S: Storage>(
 /// Stops the key working from the next request on. 409 if it already was revoked.
 pub(super) async fn revoke<S: Storage>(
     State(state): State<SharedState<S>>,
-    Caller(ctx): Caller,
+    caller: Caller,
     PathId(id): PathId<ApiKeyId>,
 ) -> Result<Json<ApiKeyResponse>, ApiError> {
     let ports = state.ports().await?;
+    let ctx = caller.authenticate(&ports, &state.clock).await?;
     let key = revoke_api_key(&ctx, ports.api_keys(), &state.clock, id).await?;
     Ok(Json(ApiKeyResponse::new(&key)?))
 }

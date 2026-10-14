@@ -9,15 +9,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use hypha_auth::{HasApiKeys, TokenKind, authenticate_api_key};
-use hypha_core::{Ctx, IdempotencyRequest};
-use hypha_users::{StaffSession, authenticate_staff};
+use hypha_core::{Clock, Ctx, IdempotencyRequest};
+use hypha_users::{StaffPorts, StaffSession, authenticate_staff};
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 
-use crate::{
-    error::ApiError,
-    state::{MemoryStorage, PgStorage, SharedState, Storage},
-};
+use crate::error::ApiError;
 
 #[derive(FromRequest)]
 #[from_request(via(axum::Json), rejection(ApiError))]
@@ -27,21 +24,32 @@ pub struct JsonBody<T>(pub T);
 #[from_request(via(axum::extract::Path), rejection(ApiError))]
 pub struct PathId<T>(pub T);
 
-/// Who is calling: the `Ctx` every command checks its scopes against. This is the one
-/// place a request turns into an actor with scopes (design note 0008, section 3):
+/// Who is calling: the credentials a request carries (design note 0008, section 3).
+/// The extractor only reads headers; the handler then turns them into the `Ctx` every
+/// command checks its scopes against with `authenticate`, on the same ports it uses for
+/// the command (one pooled connection per request, not two). A handler that takes a
+/// `Caller` and never authenticates gets an unused-variable warning, which the
+/// zero-warning rule turns into a failure.
+///
 /// - `Authorization: Bearer hypha_sess_…`: a staff session, with the scopes of the
 ///   user's role, read fresh on every request;
 /// - `Authorization: Bearer hypha_sk_…` or `hypha_pk_…`: an API key with its scopes;
 /// - `X-Publishable-Key: hypha_pk_…`: a publishable key, for storefronts that will later
 ///   send a customer's session in `Authorization` beside it.
 ///
-/// Nothing at all is `401 unauthenticated`; anything unknown, expired or revoked is
-/// `401 invalid_token`.
-pub struct Caller(pub Ctx);
+/// Nothing at all is `401 unauthenticated` (from the extractor); anything unknown,
+/// expired or revoked is `401 invalid_token` (from `authenticate`).
+pub struct Caller(Credential);
 
 /// A staff member's session, for the routes about "me" (password, 2FA, logout). An API
-/// key gets `401 session_required`.
-pub struct StaffCaller(pub StaffSession);
+/// key gets `401 session_required`. Authenticated like `Caller`.
+pub struct StaffCaller(Credential);
+
+struct Credential {
+    token: String,
+    /// Sent as `X-Publishable-Key`, where only publishable keys are accepted.
+    publishable_header: bool,
+}
 
 /// What a request authenticated as.
 enum Authenticated {
@@ -49,8 +57,8 @@ enum Authenticated {
     Key(Ctx),
 }
 
-/// The token a request carries, if any, and whether it came as a publishable key.
-fn credential(parts: &Parts) -> Result<Option<(String, bool)>, ApiError> {
+/// The token a request carries; `unauthenticated` if none.
+fn credential(parts: &Parts) -> Result<Credential, ApiError> {
     let invalid = || ApiError::from(hypha_auth::CommandError::InvalidToken);
     if let Some(value) = parts.headers.get(AUTHORIZATION) {
         let value = value.to_str().map_err(|_| invalid())?;
@@ -58,74 +66,87 @@ fn credential(parts: &Parts) -> Result<Option<(String, bool)>, ApiError> {
         if !scheme.eq_ignore_ascii_case("bearer") {
             return Err(invalid());
         }
-        return Ok(Some((token.trim().to_string(), false)));
+        return Ok(Credential {
+            token: token.trim().to_string(),
+            publishable_header: false,
+        });
     }
     if let Some(value) = parts.headers.get("x-publishable-key") {
         let token = value.to_str().map_err(|_| invalid())?.trim().to_string();
-        return Ok(Some((token, true)));
+        return Ok(Credential {
+            token,
+            publishable_header: true,
+        });
     }
-    Ok(None)
+    Err(ApiError::unauthenticated())
 }
 
-async fn authenticate<S: Storage>(
-    parts: &Parts,
-    state: &SharedState<S>,
-) -> Result<Authenticated, ApiError> {
-    let Some((token, publishable_header)) = credential(parts)? else {
-        return Err(ApiError::unauthenticated());
-    };
-    let ports = state.ports().await?;
-    match TokenKind::of(&token) {
-        Some(TokenKind::Session) if !publishable_header => {
-            let staff = authenticate_staff(&ports, &state.clock, &token).await?;
-            Ok(Authenticated::Staff(Box::new(staff)))
+impl Credential {
+    async fn authenticate<P: StaffPorts + HasApiKeys>(
+        &self,
+        ports: &P,
+        clock: &impl Clock,
+    ) -> Result<Authenticated, ApiError> {
+        let token = self.token.as_str();
+        match TokenKind::of(token) {
+            Some(TokenKind::Session) if !self.publishable_header => {
+                let staff = authenticate_staff(ports, clock, token).await?;
+                Ok(Authenticated::Staff(Box::new(staff)))
+            }
+            Some(TokenKind::SecretKey) if !self.publishable_header => Ok(Authenticated::Key(
+                authenticate_api_key(ports.api_keys(), token).await?,
+            )),
+            Some(TokenKind::PublishableKey) => Ok(Authenticated::Key(
+                authenticate_api_key(ports.api_keys(), token).await?,
+            )),
+            _ => Err(hypha_auth::CommandError::InvalidToken.into()),
         }
-        Some(TokenKind::SecretKey) if !publishable_header => Ok(Authenticated::Key(
-            authenticate_api_key(ports.api_keys(), &token).await?,
-        )),
-        Some(TokenKind::PublishableKey) => Ok(Authenticated::Key(
-            authenticate_api_key(ports.api_keys(), &token).await?,
-        )),
-        _ => Err(hypha_auth::CommandError::InvalidToken.into()),
     }
 }
 
-/// The extractors, once per concrete storage. axum needs an extractor's future to be
-/// `Send`, and with our `Send`-free repo traits the compiler can only prove that for a
-/// concrete type (the same reason as `routes::router!`).
-macro_rules! extractors {
-    ($($storage:ty),*) => {$(
-        impl FromRequestParts<SharedState<$storage>> for Caller {
-            type Rejection = ApiError;
-
-            async fn from_request_parts(
-                parts: &mut Parts,
-                state: &SharedState<$storage>,
-            ) -> Result<Self, ApiError> {
-                Ok(match authenticate(parts, state).await? {
-                    Authenticated::Staff(staff) => Caller(staff.ctx),
-                    Authenticated::Key(ctx) => Caller(ctx),
-                })
-            }
-        }
-
-        impl FromRequestParts<SharedState<$storage>> for StaffCaller {
-            type Rejection = ApiError;
-
-            async fn from_request_parts(
-                parts: &mut Parts,
-                state: &SharedState<$storage>,
-            ) -> Result<Self, ApiError> {
-                match authenticate(parts, state).await? {
-                    Authenticated::Staff(staff) => Ok(StaffCaller(*staff)),
-                    Authenticated::Key(_) => Err(ApiError::session_required()),
-                }
-            }
-        }
-    )*};
+impl Caller {
+    /// The `Ctx` for these credentials: a staff member's role scopes or a key's.
+    pub async fn authenticate<P: StaffPorts + HasApiKeys>(
+        self,
+        ports: &P,
+        clock: &impl Clock,
+    ) -> Result<Ctx, ApiError> {
+        Ok(match self.0.authenticate(ports, clock).await? {
+            Authenticated::Staff(staff) => staff.ctx,
+            Authenticated::Key(ctx) => ctx,
+        })
+    }
 }
 
-extractors!(MemoryStorage, PgStorage);
+impl StaffCaller {
+    /// The staff session behind these credentials; an API key is `session_required`.
+    pub async fn authenticate<P: StaffPorts + HasApiKeys>(
+        self,
+        ports: &P,
+        clock: &impl Clock,
+    ) -> Result<StaffSession, ApiError> {
+        match self.0.authenticate(ports, clock).await? {
+            Authenticated::Staff(staff) => Ok(*staff),
+            Authenticated::Key(_) => Err(ApiError::session_required()),
+        }
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for Caller {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, ApiError> {
+        credential(parts).map(Caller)
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for StaffCaller {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, ApiError> {
+        credential(parts).map(StaffCaller)
+    }
+}
 
 /// The largest body `KeyedJson` reads: axum's default limit for `Json`.
 const MAX_BODY: usize = 2 * 1024 * 1024;

@@ -106,9 +106,10 @@ pub(super) async fn finish_login_handler<S: Storage>(
 /// Ends the caller's session.
 pub(super) async fn logout_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    StaffCaller(staff): StaffCaller,
+    staff: StaffCaller,
 ) -> Result<StatusCode, ApiError> {
     let ports = state.ports().await?;
+    let staff = staff.authenticate(&ports, &state.clock).await?;
     logout(ports.sessions(), &state.clock, staff.session).await?;
     Ok(StatusCode::NO_CONTENT)
 }
