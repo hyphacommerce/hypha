@@ -2,13 +2,14 @@ use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_checkout::{Checkout, checkout};
 use hypha_core::{
     CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId, OrderLineId,
-    ProductId, TaxClassId, TaxRate, Timestamp, VariantId,
+    ProductId, TaxClassId, TaxRate, VariantId,
 };
 use hypha_orders::{
     FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, get_order, mark_order_paid,
 };
 use serde::{Deserialize, Serialize};
 
+use super::rfc3339;
 use crate::{
     error::ApiError,
     extract::{Caller, KeyedJson, PathId, idempotent_response},
@@ -148,13 +149,6 @@ impl From<&OrderLine> for OrderLineResponse {
             }),
         }
     }
-}
-
-/// A `Timestamp` as RFC 3339 in UTC, e.g. "2026-10-14T09:30:00.123456Z".
-fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
-    jiff::Timestamp::from_microsecond(at.unix_micros())
-        .map(|t| t.to_string())
-        .map_err(ApiError::internal)
 }
 
 /// Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns

@@ -16,10 +16,19 @@ use axum::{
     routing::{delete, get, patch, post, put},
 };
 
+use hypha_core::Timestamp;
+
 use crate::{
     error::ApiError,
     state::{MemoryStorage, PgStorage, SharedState},
 };
+
+/// A `Timestamp` as RFC 3339 in UTC, e.g. "2026-10-14T09:30:00.123456Z".
+fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
+    jiff::Timestamp::from_microsecond(at.unix_micros())
+        .map(|t| t.to_string())
+        .map_err(ApiError::internal)
+}
 
 /// Every route, once. A macro rather than a generic function: handlers are generic over
 /// the storage, but axum must prove each handler's future is `Send`, and with our
