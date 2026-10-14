@@ -1,6 +1,6 @@
 # 0010: Admin and storefront APIs, and OpenAPI
 
-- **Status:** Accepted (2026-10-14). Danilo chose the recommended option for each of the
+- **Status:** Accepted and built (2026-10-14, branch `feat/api-surfaces`). Danilo chose the recommended option for each of the
   hard-to-reverse decisions (S1 prefixes, S2 no version yet, S3 strict credentials per
   surface, S6 committed spec files with a freshness test); the rest are as recommended.
 - **Scope:** splitting the HTTP API into an admin surface and a storefront surface, who
@@ -77,10 +77,21 @@
   scope), `#[derive(ToSchema)]` on each request and response DTO, and one
   `#[derive(OpenApi)]` per surface listing its paths. Security schemes: `bearer` (session
   or secret key) for admin; `publishable_key` (`X-Publishable-Key`) for storefront.
-- **Why not `utoipa-axum`'s router:** our routes are stamped out per concrete storage by
-  `router!` (axum must prove handler futures `Send`), and generic handlers in its
-  `routes!` macro are awkward. S7's route table gives the same guarantee (docs and
-  routes can't drift) with a test instead.
+- **Why not `utoipa-axum`'s router:** our routes are stamped out per concrete storage
+  (axum must prove handler futures `Send`), and generic handlers in its `routes!` macro
+  are awkward. S7's route table gives the same guarantee. *As built:* the documents are
+  built from the table itself (the `pastey` crate names each handler's generated
+  `__path_<fn>` type), so a routed handler without `#[utoipa::path]` doesn't compile; a
+  test checks each annotation's method and path against its row.
+- **Filled in from the table, not written per handler:** operation IDs, tags (one per
+  module), the security scheme of the surface (a route opts out with `security(())`),
+  and the error responses a route of that shape can give (401/403 when secured, 400/404
+  with path IDs, 400/413/415/422 with a body, 409 on writes, 500 always), all with the
+  shared `Error` schema. Handlers state their success response, body, typed path
+  parameters and `x-hypha-scopes` (`x-hypha-staff-session` for `/admin/me/*`).
+- **Checked:** schema names are unique across the document, every `$ref` resolves,
+  Redocly's recommended lint passes, and `openapi-typescript` generates types from the
+  files.
 - **Committed files:** `openapi/admin.json` and `openapi/storefront.json`. A test
   compares them to the generated documents and fails with "run `cargo run -p
   hypha-host-axum -- openapi` to update". The admin panel and external apps generate
