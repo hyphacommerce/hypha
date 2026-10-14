@@ -1,7 +1,8 @@
 # 0010: Admin and storefront APIs, and OpenAPI
 
-- **Status:** Proposed (2026-10-14). Recommendations below; S1, S2, S3 and S6 are hard to
-  reverse once clients exist and need Danilo's call.
+- **Status:** Accepted (2026-10-14). Danilo chose the recommended option for each of the
+  hard-to-reverse decisions (S1 prefixes, S2 no version yet, S3 strict credentials per
+  surface, S6 committed spec files with a freshness test); the rest are as recommended.
 - **Scope:** splitting the HTTP API into an admin surface and a storefront surface, who
   may call each, which routes go where, and an OpenAPI document per surface.
 - **Not in scope:** new endpoints (product and order listing, storefront markets), customer
