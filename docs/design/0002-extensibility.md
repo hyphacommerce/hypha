@@ -88,7 +88,8 @@ touching core code.
 
 - **Domain events are recorded by the aggregate** when something happens, for example
   `ProductArchived`, `OrderPaid`. The repository writes them to an `outbox` table **in
-  the same transaction** as the aggregate. On D1, that's the same `batch()`. So an event
+  the same transaction** as the aggregate: staged in the command's `HasBatch` commit
+  (0007 §3), like any other write. So an event
   exists if and only if the change committed, and can't be lost or invented.
 - **A dispatcher** reads the outbox and delivers each event to:
   - in-process spore handlers
@@ -154,7 +155,7 @@ These are cheap now and expensive to retrofit:
 | Reserve | Why now | When |
 | --- | --- | --- |
 | Per-module migrations | Spore tables need their own version lists | **Done** (`MigrationSet`, 0001) |
-| Aggregates record domain events; repos write them to an `outbox` in the same transaction | Retrofitting means touching every aggregate, repo and contract test | **With orders**, the first aggregate whose events matter externally |
+| Aggregates record domain events; repos write them to an `outbox` in the same transaction | Retrofitting means touching every aggregate, repo and contract test | Its own note, next after orders (0007 moved it there; the batch it needs is built) |
 | A policy check point in commands (after domain validation, before the write) | Adding it to every command later is tedious | When the first policy is needed; keep commands shaped "load → validate → write" so it slots in |
 | API DTOs that can derive OpenAPI schemas | The generated TS client is the main developer experience | With the next routes; one derive per DTO |
 | API keys with scopes → a real `Ctx` | External apps need them before anything else | Next, with users and auth |

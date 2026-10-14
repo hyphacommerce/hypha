@@ -8,7 +8,7 @@ use hypha_core::{
 
 use crate::OrderError;
 
-/// An order's human number (`#1001`) from the `OrderNumbers` port: unique and
+/// An order's human number (`#1001`) from `OrderRepo::next_number`: unique and
 /// increasing, possibly with gaps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OrderNumber(i64);

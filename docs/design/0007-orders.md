@@ -2,8 +2,10 @@
 
 - **Status:** Accepted and built (2026-10-14, branch `feat/orders`). Every decision was
   settled in conversation; changes made while building are marked in place.
-  Storage is Postgres only (in memory for tests): D1 was dropped as a target on
-  2026-10-14 (0001), so nothing here has to fit D1's `batch()`.
+  Storage is Postgres or in memory (the host runs on either; the e2e passes on both): D1
+  was dropped as a target on 2026-10-14 (0001), so nothing here has to fit D1's
+  `batch()`. A review after building (2026-10-14) changed a few details, marked in
+  place.
 - **Scope:** the `Order` aggregate, the checkout command that turns a cart into an order,
   and what checkout needs underneath: an atomic write across aggregates (`WriteBatch`),
   a `Clock`, idempotency keys, and a richer `PricedCart`.
@@ -26,7 +28,7 @@
 | O6 | **A cart is `open` or `completed`**; completing it records its order. A completed cart can't change or be checked out again |
 | O7 | **Idempotency keys** are a generic core service: a command that takes one records the key in the same batch as its effect, so a retry replays instead of repeating. First users: `checkout`, `create_cart`, `add_line` (section 5) |
 | O8 | **A `Clock` port** in core, like `IdGenerator`; `Timestamp` is a core newtype (section 6) |
-| O9 | **Order numbers from the first order** (`#1001`), from an `OrderNumbers` port (a Postgres sequence) taken before the batch; a failed checkout leaves a gap |
+| O9 | **Order numbers from the first order** (`#1001`), from `OrderRepo::next_number` (a Postgres sequence) taken before the batch; a failed checkout leaves a gap (section 7) |
 | O10 | **The buyer:** `cart.customer` if linked, otherwise `find_or_create` by `cart.email` (0005 C6), staged in the same batch. Checkout needs an email |
 | O11 | **Reservations at checkout**: every line reserves stock with its order line ID as the reference (0004 I8), in the same batch as the order |
 
@@ -79,7 +81,7 @@ the first response (section 5 explains the difference).
 - `product_title`, `variant_title: Option<String>` (option labels joined with " / ",
   `None` for a simple product), `sku: Option<String>`.
 - `unit_price: Price`, `total: Money`, `tax: Option<OrderTax>`.
-- `OrderTax { rate_ppm, class: Option<TaxClassId>, amount: Money, source }`: plain
+- `OrderTax { rate, class: Option<TaxClassId>, amount: Money, source }`: plain
   values copied from the cart's `TaxLine`, so `hypha-orders` doesn't depend on
   `hypha-tax`.
 
@@ -99,23 +101,31 @@ pub struct Checkout {
 
 pub async fn checkout<S: CheckoutPorts, I: IdGenerator, C: Clock>(
     ctx: &Ctx, ports: &S, ids: &I, clock: &C, input: Checkout,
-) -> Result<Order, CommandError>
+) -> Result<Idempotent<Order>, CommandError>
 ```
 
-Inside one retry loop (inventory's `retry_on_conflict`, `MAX_ATTEMPTS`):
+Replay if the idempotency key was used (section 5); otherwise, in a retry loop of its own
+(up to inventory's `MAX_ATTEMPTS`):
 
-1. Replay if the idempotency key was used (section 5).
-2. Load and price the cart. Refuse if it's completed (`cart_completed`, naming the
+1. Load and price the cart. Refuse if it's completed (`cart_completed`, naming the
    order), empty, has no email, has unavailable lines (`cart_unavailable`, listing
    them), or its total isn't `expected_total`.
-3. Take an order number; generate the order and line IDs.
-4. Find the customer, or build a new one from the email (O10).
-5. Allocate stock for every line in memory (inventory's allocation, split out of
-   `reserve_stock` as a function both use).
-6. Stage: insert order, update cart (completed), update changed inventory items, insert
+2. Generate the line IDs and allocate stock for every line in memory (inventory's
+   `reserve_lines`, split out of `reserve_stock`). *Changed while building:* before
+   taking a number, so a shortage doesn't use one up.
+3. Find the customer, or build a new one from the email (O10).
+4. Take an order number; build the order.
+5. Stage: insert order, update cart (completed), update changed inventory items, insert
    the customer if new, record the idempotency key. Commit.
-7. `StaleVersion` (cart, item) or `Duplicate` (customer email, idempotency key) means
-   another request got in between: retry from 1 on fresh data.
+6. On failure, look the key up again: if a request with the same key won, replay its
+   order (section 5). Otherwise `StaleVersion` (cart, item), `Duplicate` of the customer
+   email or of the order's cart means another request got in between: retry from 1 on
+   fresh data (the same cart checked out meanwhile then reports `cart_completed`).
+
+Over HTTP (`POST /carts/{id}/checkout`), refusals are 409 (they describe the cart's or
+the shop's state) and carry a `details` object: `cart_unavailable` lists the lines,
+`total_changed` both totals, `cart_completed` the order. A checked-out cart reads as its
+order charged it (`view_cart`, in `hypha-checkout`), not at today's prices.
 
 **Scope:** a new `checkout` scope. A storefront needs it, but it shouldn't need
 `inventory:write`, `customers:write` or `orders:write` (which will mean editing orders).
@@ -155,10 +165,10 @@ pub trait StageCarts {
     fn update_cart(&mut self, cart: &mut Cart);
 }
 
-// hypha-checkout
-pub trait CheckoutPorts: CartPorts + HasOrders + HasBatch<Batch: CheckoutBatch> {}
-pub trait CheckoutBatch: StageOrders + StageCarts + StageInventoryItems + StageCustomers
-    + StageIdempotency {}
+// hypha-checkout (the batch bounds are written inline; no `CheckoutBatch` trait)
+pub trait CheckoutPorts: CartPorts + HasOrders + HasBatch<
+    Batch: StageCarts + StageOrders + StageInventoryItems + StageCustomers + StageIdempotency,
+> {}
 ```
 
 - **Adapters own the batch type.** `PgStore`'s is an enum of owned snapshots
@@ -166,9 +176,9 @@ pub trait CheckoutBatch: StageOrders + StageCarts + StageInventoryItems + StageC
   transaction and runs the existing write functions in order. The adapter may depend
   on every domain crate, so the enum is allowed there. Memory does the same over its
   tables.
-- **In memory**, every `Table` in an `InMemoryPorts` shares one lock, so a batch checks
-  every version and key, then applies, without another write in between. Today each
-  table has its own mutex.
+- **In memory**, a batch locks every table it may touch, always in the same order, then
+  checks and applies, restoring the tables if any write fails; no other write gets in
+  between. *Changed while building:* planned as one lock shared by every `Table`.
 - `InventoryItemRepo::update_many` stays for `reserve_stock` and `release_stock`; it can
   become a batch later.
 - The rule in CLAUDE.md becomes "a command writes one aggregate, or several through one
@@ -304,4 +314,25 @@ Each step ends green (fmt, clippy, tests, WASM, Postgres contract, e2e).
 - The outbox and domain events (0002 §7), staged in the same batch.
 - Listing and searching orders; order edits.
 - Surfacing the hot-item conflict at checkout: after `MAX_ATTEMPTS` retries checkout
-  returns 409, which a storefront should retry.
+  returns 409, which a storefront should retry. Document which 409 codes are worth
+  retrying (`concurrent_modification`, `conflict`) and which aren't (`cart_completed`,
+  `out_of_stock`, …).
+
+From the review after building (2026-10-14), before the follow-ups above:
+- **Before payment spores and the outbox:** `mark_order_paid` writes through
+  `OrderRepo::update`; spores need it to go through a batch (to stage an `OrderPaid`
+  event and an idempotency key) and to take an input with a payment reference and
+  amount, which gives `POST /orders/{id}/paid` a body. Settle the route style for order
+  actions (`POST …/paid` vs `PATCH …/status`) before cancel and fulfill arrive.
+- **Before listing orders:** indexes on `orders.placed_at` and `orders.customer_id`.
+  Timestamps beside the statuses (`paid_at`, `cancelled_at`) as nullable columns.
+- **Idempotency records:** the cleanup job and a retention rule (24 hours, section 5).
+- **Shared helpers:** `replay_of`/`replay` and "look the key up after a failed write"
+  are written twice (cart, checkout); a core helper generic over the result ID before a
+  third keyed command (refunds, payments) copies them again. One testkit fixture for
+  the shop the cart, checkout and Postgres race tests each build.
+- **Smaller:** `reserve_lines` returns inventory's whole `CommandError` (a small
+  `ReserveError` would do); `order_numbers` isn't `OWNED BY orders.number`; batches
+  don't sort new carts, customers and records by key (harmless while checkout stages
+  one of each); a lock-order race test with two items in opposite line order;
+  `OrderResponse::new` can fail after the commit for a timestamp outside jiff's range.

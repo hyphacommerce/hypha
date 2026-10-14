@@ -204,15 +204,15 @@ impl Product {
   set, and skips it otherwise. `scripts/e2e.sh` then runs unchanged against a host that
   uses Postgres.
 
-### 3.7 Writing several aggregates at once (not built now)
+### 3.7 Writing several aggregates at once
 
-- **Rule for now:** a command writes at most one aggregate. Every command today already
-  does.
-- **When checkout needs more:** add a `WriteBatch` port. It collects
-  `insert`/`update(expected_version)` operations and commits them atomically: one
-  Postgres transaction, or one D1 `batch()`.
-- It is *not* a generic `UnitOfWork` that holds a transaction open. That wouldn't work
-  on D1.
+- **Built with orders (0007 O1, section 3):** `HasBatch` in core, a `StageXxx` trait per
+  crate, and one batch type per adapter. A command writes one aggregate through its repo,
+  or several through one batch commit: one short Postgres transaction, or one locked
+  pass over the in-memory tables.
+- It is *not* a generic `UnitOfWork` that holds a transaction open across domain code:
+  Hyperdrive's transaction pooling would hold a server connection for all of it, and the
+  in-memory store can't hold one at all.
 
 ### 3.8 Crate and tooling
 
@@ -280,7 +280,8 @@ impl Product {
    (in memory or a deadpool pool lending one `PgStore` per request). The route table is a
    macro stamped out per concrete storage, because axum must prove handler futures `Send`.
    The e2e script passes on both, and data and migrations survive a restart.
-7. Later, in its own note: the Cloudflare host and the D1 adapter.
+7. Later, in its own note: the Cloudflare host (Postgres through Hyperdrive; the D1
+   adapter was dropped on 2026-10-14).
 
 Steps 1–3 involve no database at all, and they're where most of the design risk is.
 
