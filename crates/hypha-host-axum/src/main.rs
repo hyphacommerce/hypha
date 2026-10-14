@@ -10,11 +10,12 @@ use axum::Router;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use hypha_core::Ctx;
+use hypha_core::{Ctx, Random};
 use hypha_stores::ensure_single_store;
+use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
 use crate::state::{
-    AppState, MemoryStorage, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids,
+    AppState, HostEnv, MemoryStorage, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids,
 };
 
 #[tokio::main]
@@ -25,9 +26,31 @@ async fn main() {
         )
         .init();
 
+    let admin_url = std::env::var("HYPHA_ADMIN_URL").ok();
+    let secret_key = match std::env::var("HYPHA_SECRET_KEY")
+        .ok()
+        .map(|k| parse_key(&k))
+    {
+        Some(Ok(key)) => Some(key),
+        Some(Err(e)) => {
+            tracing::error!("HYPHA_SECRET_KEY: {e}");
+            std::process::exit(1);
+        }
+        None => None,
+    };
+
     // DATABASE_URL set: Postgres (migrated on startup). Otherwise in memory.
     match std::env::var("DATABASE_URL") {
         Ok(url) => {
+            // Data outlives the process, so the key must too: a new key each start would
+            // make every stored authenticator secret unreadable.
+            let Some(secret_key) = secret_key else {
+                tracing::error!(
+                    "HYPHA_SECRET_KEY is required with DATABASE_URL: 64 hex characters, e.g. \
+                     from `openssl rand -hex 32`. Keep it; it seals 2FA secrets."
+                );
+                std::process::exit(1);
+            };
             let storage = match PgStorage::connect(&url).await {
                 Ok(storage) => storage,
                 Err(e) => {
@@ -36,16 +59,69 @@ async fn main() {
                 }
             };
             tracing::info!("storage: Postgres (migrations applied)");
-            serve(routes::postgres_router(), storage).await;
+            let env = HostEnv::new(secret_key, admin_url);
+            serve(routes::postgres_router(), storage, env).await;
         }
         Err(_) => {
             tracing::info!("storage: in memory (set DATABASE_URL for Postgres)");
-            serve(routes::memory_router(), MemoryStorage::default()).await;
+            let secret_key = secret_key.unwrap_or_else(|| {
+                // Nothing outlives the process in memory, so a throwaway key is fine.
+                let mut key = [0u8; 32];
+                HostEnv::new([0; 32], None).fill(&mut key);
+                key
+            });
+            let env = HostEnv::new(secret_key, admin_url);
+            serve(routes::memory_router(), MemoryStorage::default(), env).await;
         }
     }
 }
 
-async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S) {
+/// A 32-byte key written as 64 hex characters.
+fn parse_key(hex: &str) -> Result<[u8; 32], String> {
+    let hex = hex.trim();
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("expected 64 hex characters (32 bytes)".to_string());
+    }
+    let mut key = [0u8; 32];
+    for (i, byte) in key.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|e| e.to_string())?;
+    }
+    Ok(key)
+}
+
+/// With no staff user yet, `HYPHA_OWNER_EMAIL` and `HYPHA_OWNER_PASSWORD` (and
+/// optionally `HYPHA_OWNER_NAME`) create the owner (design note 0008, A11). Ignored once
+/// anyone exists.
+async fn ensure_owner<S: Storage>(state: &AppState<S>) -> Result<(), String> {
+    let ports = state.ports().await.map_err(|_| "cannot reach storage")?;
+    let email = std::env::var("HYPHA_OWNER_EMAIL").ok();
+    let password = std::env::var("HYPHA_OWNER_PASSWORD").ok();
+    let (Some(email), Some(password)) = (email, password) else {
+        if !ports.users().any().await.map_err(|e| e.to_string())? {
+            tracing::warn!(
+                "no staff user yet: set HYPHA_OWNER_EMAIL and HYPHA_OWNER_PASSWORD to create \
+                 the owner, then restart"
+            );
+        }
+        return Ok(());
+    };
+    let name = std::env::var("HYPHA_OWNER_NAME").unwrap_or_else(|_| "Owner".to_string());
+    let input = NewOwner {
+        email,
+        name,
+        password,
+    };
+    match bootstrap_owner(&Ctx::system(), &ports, &state.env, input).await {
+        Ok(Some(owner)) => {
+            tracing::info!(user = %owner.id(), email = %owner.email(), "created the owner")
+        }
+        Ok(None) => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    Ok(())
+}
+
+async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: HostEnv) {
     let ids = UuidV7Ids;
     // One store per deployment (design note 0006, model A): created on first start.
     let name = std::env::var("HYPHA_STORE_NAME").unwrap_or_else(|_| "My store".to_string());
@@ -68,8 +144,14 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S) {
         storage,
         ids,
         clock: SystemClock,
+        env,
         store: store.id(),
     });
+    if let Err(e) = ensure_owner(&state).await {
+        tracing::error!("owner setup failed: {e}");
+        std::process::exit(1);
+    }
+    tracing::warn!("emails (invites, password resets) are logged, not sent: development only");
     let app = router.layer(TraceLayer::new_for_http()).with_state(state);
 
     let addr = bind_address();
@@ -140,6 +222,14 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_key_is_64_hex_characters() {
+        let key = parse_key(&"0f".repeat(32)).unwrap();
+        assert_eq!(key, [0x0f; 32]);
+        assert!(parse_key(&"0f".repeat(31)).is_err());
+        assert!(parse_key(&format!("{}zz", "0f".repeat(31))).is_err());
+    }
 
     #[test]
     fn bind_address_prefers_hypha_bind_then_port_then_localhost() {

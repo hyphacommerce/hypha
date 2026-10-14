@@ -5,14 +5,19 @@ use axum::{
     Json,
     body::Body,
     extract::{FromRequest, FromRequestParts, Request},
-    http::{HeaderValue, StatusCode, request::Parts},
+    http::{HeaderValue, StatusCode, header::AUTHORIZATION, request::Parts},
     response::{IntoResponse, Response},
 };
+use hypha_auth::{HasApiKeys, TokenKind, authenticate_api_key};
 use hypha_core::{Ctx, IdempotencyRequest};
+use hypha_users::{StaffSession, authenticate_staff};
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 
-use crate::error::ApiError;
+use crate::{
+    error::ApiError,
+    state::{MemoryStorage, PgStorage, SharedState, Storage},
+};
 
 #[derive(FromRequest)]
 #[from_request(via(axum::Json), rejection(ApiError))]
@@ -23,18 +28,104 @@ pub struct JsonBody<T>(pub T);
 pub struct PathId<T>(pub T);
 
 /// Who is calling: the `Ctx` every command checks its scopes against. This is the one
-/// place a request turns into an actor with scopes, so real auth (API keys, sessions)
-/// lands here and nowhere else.
+/// place a request turns into an actor with scopes (design note 0008, section 3):
+/// - `Authorization: Bearer hypha_sess_…`: a staff session, with the scopes of the
+///   user's role, read fresh on every request;
+/// - `Authorization: Bearer hypha_sk_…` or `hypha_pk_…`: an API key with its scopes;
+/// - `X-Publishable-Key: hypha_pk_…`: a publishable key, for storefronts that will later
+///   send a customer's session in `Authorization` beside it.
+///
+/// Nothing at all is `401 unauthenticated`; anything unknown, expired or revoked is
+/// `401 invalid_token`.
 pub struct Caller(pub Ctx);
 
-impl<S: Send + Sync> FromRequestParts<S> for Caller {
-    type Rejection = ApiError;
+/// A staff member's session, for the routes about "me" (password, 2FA, logout). An API
+/// key gets `401 session_required`.
+pub struct StaffCaller(pub StaffSession);
 
-    async fn from_request_parts(_parts: &mut Parts, _state: &S) -> Result<Self, ApiError> {
-        // TODO: real auth. Until then every request acts as the system, with every scope.
-        Ok(Caller(Ctx::system()))
+/// What a request authenticated as.
+enum Authenticated {
+    Staff(Box<StaffSession>),
+    Key(Ctx),
+}
+
+/// The token a request carries, if any, and whether it came as a publishable key.
+fn credential(parts: &Parts) -> Result<Option<(String, bool)>, ApiError> {
+    let invalid = || ApiError::from(hypha_auth::CommandError::InvalidToken);
+    if let Some(value) = parts.headers.get(AUTHORIZATION) {
+        let value = value.to_str().map_err(|_| invalid())?;
+        let (scheme, token) = value.split_once(' ').ok_or_else(invalid)?;
+        if !scheme.eq_ignore_ascii_case("bearer") {
+            return Err(invalid());
+        }
+        return Ok(Some((token.trim().to_string(), false)));
+    }
+    if let Some(value) = parts.headers.get("x-publishable-key") {
+        let token = value.to_str().map_err(|_| invalid())?.trim().to_string();
+        return Ok(Some((token, true)));
+    }
+    Ok(None)
+}
+
+async fn authenticate<S: Storage>(
+    parts: &Parts,
+    state: &SharedState<S>,
+) -> Result<Authenticated, ApiError> {
+    let Some((token, publishable_header)) = credential(parts)? else {
+        return Err(ApiError::unauthenticated());
+    };
+    let ports = state.ports().await?;
+    match TokenKind::of(&token) {
+        Some(TokenKind::Session) if !publishable_header => {
+            let staff = authenticate_staff(&ports, &state.clock, &token).await?;
+            Ok(Authenticated::Staff(Box::new(staff)))
+        }
+        Some(TokenKind::SecretKey) if !publishable_header => Ok(Authenticated::Key(
+            authenticate_api_key(ports.api_keys(), &token).await?,
+        )),
+        Some(TokenKind::PublishableKey) => Ok(Authenticated::Key(
+            authenticate_api_key(ports.api_keys(), &token).await?,
+        )),
+        _ => Err(hypha_auth::CommandError::InvalidToken.into()),
     }
 }
+
+/// The extractors, once per concrete storage. axum needs an extractor's future to be
+/// `Send`, and with our `Send`-free repo traits the compiler can only prove that for a
+/// concrete type (the same reason as `routes::router!`).
+macro_rules! extractors {
+    ($($storage:ty),*) => {$(
+        impl FromRequestParts<SharedState<$storage>> for Caller {
+            type Rejection = ApiError;
+
+            async fn from_request_parts(
+                parts: &mut Parts,
+                state: &SharedState<$storage>,
+            ) -> Result<Self, ApiError> {
+                Ok(match authenticate(parts, state).await? {
+                    Authenticated::Staff(staff) => Caller(staff.ctx),
+                    Authenticated::Key(ctx) => Caller(ctx),
+                })
+            }
+        }
+
+        impl FromRequestParts<SharedState<$storage>> for StaffCaller {
+            type Rejection = ApiError;
+
+            async fn from_request_parts(
+                parts: &mut Parts,
+                state: &SharedState<$storage>,
+            ) -> Result<Self, ApiError> {
+                match authenticate(parts, state).await? {
+                    Authenticated::Staff(staff) => Ok(StaffCaller(*staff)),
+                    Authenticated::Key(_) => Err(ApiError::session_required()),
+                }
+            }
+        }
+    )*};
+}
+
+extractors!(MemoryStorage, PgStorage);
 
 /// The largest body `KeyedJson` reads: axum's default limit for `Json`.
 const MAX_BODY: usize = 2 * 1024 * 1024;

@@ -30,10 +30,13 @@ use serde_json::{Value, json};
 /// - `total_changed`: `{"expected": Money, "actual": Money}`
 /// - `cart_completed`: `{"order": "ord_…"}`
 ///
-/// Status rules: 403 missing scope; 404 when the resource in the URL doesn't exist;
+/// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 403
+/// missing scope, or granting a scope the caller lacks; 404 when the resource in the URL
+/// doesn't exist;
 /// 409 conflicts with existing data, the current state of the resource in the URL, or a
 /// concurrent change (`concurrent_modification`); 422 invalid input, including IDs in the
-/// body that don't exist; 500 storage failures (message hidden, logged instead).
+/// body that don't exist; 500 storage failures (message hidden, logged instead); 502 an
+/// email that could not be handed over (the write before it stands).
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
@@ -63,6 +66,33 @@ impl ApiError {
             "body_too_large",
             format!("the request body is larger than {limit} bytes"),
         )
+    }
+
+    /// No credentials at all (design note 0008, section 3).
+    pub fn unauthenticated() -> Self {
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthenticated",
+            "send a session or API key as `Authorization: Bearer <token>`",
+        )
+    }
+
+    /// A staff-only route called with an API key.
+    pub fn session_required() -> Self {
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "session_required",
+            "this route needs a staff session, not an API key",
+        )
+    }
+
+    /// For routes where a wrong code or password comes from someone already logged in:
+    /// a 401 would tell clients their session died.
+    pub fn unprocessable_if(mut self, code: &str) -> Self {
+        if self.code == code {
+            self.status = StatusCode::UNPROCESSABLE_ENTITY;
+        }
+        self
     }
 
     pub fn route_not_found() -> Self {
@@ -108,6 +138,11 @@ impl IntoResponse for ApiError {
             "error": self.message,
             "details": self.details,
         }));
+        if self.status == StatusCode::UNAUTHORIZED {
+            // RFC 9110: a 401 names the scheme the client should use.
+            let challenge = [(axum::http::header::WWW_AUTHENTICATE, "Bearer")];
+            return (self.status, challenge, body).into_response();
+        }
         (self.status, body).into_response()
     }
 }
@@ -356,6 +391,68 @@ impl From<hypha_checkout::CommandError> for ApiError {
             _ => None,
         };
         Self::domain(status, e).with_details(details)
+    }
+}
+
+impl From<hypha_auth::CommandError> for ApiError {
+    fn from(e: hypha_auth::CommandError) -> Self {
+        use hypha_auth::{ApiKeyError as K, CommandError as E, IdentityError as I};
+        let status = match &e {
+            E::Auth(_) | E::CannotGrant(_) => StatusCode::FORBIDDEN,
+            E::InvalidCredentials | E::InvalidToken | E::InvalidMfaCode => StatusCode::UNAUTHORIZED,
+            // Only `/me/password`, by someone logged in.
+            E::WrongPassword => StatusCode::UNPROCESSABLE_ENTITY,
+            // Key IDs only ever arrive in URLs.
+            E::ApiKeyNotFound(_) => StatusCode::NOT_FOUND,
+            E::ApiKeyRevoked(_)
+            | E::Identity(
+                I::MfaAlreadyEnabled | I::MfaNotEnabled | I::MfaSetupNotStarted | I::NoPassword,
+            ) => StatusCode::CONFLICT,
+            E::Password(_) | E::ApiKey(K::Text(_) | K::NoScopes | K::PublishableScopesFixed) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            // A session whose identity is gone, a sealed secret that won't open, a hasher
+            // failure: all server-side.
+            E::IdentityNotFound(_) | E::Hash(_) | E::Seal(_) => return Self::internal(e),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
+impl From<hypha_users::CommandError> for ApiError {
+    fn from(e: hypha_users::CommandError) -> Self {
+        use hypha_users::{CommandError as E, RoleError as R, UserError as U};
+        let status = match &e {
+            E::Login(inner) => return Self::from(inner.clone()),
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            E::NotStaff => StatusCode::UNAUTHORIZED,
+            // User IDs only ever arrive in URLs; role IDs arrive in either, so routes
+            // naming a role in the URL turn its 422 into a 404 (`not_found_if`).
+            E::UserNotFound(_) => StatusCode::NOT_FOUND,
+            E::RoleNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::UserExists(_) | E::RoleNameTaken(_) | E::LastOwner | E::Role(R::OwnerRoleFixed) => {
+                StatusCode::CONFLICT
+            }
+            E::Role(R::Text(_) | R::NoScopes)
+            | E::User(U::Text(_))
+            | E::Email(_)
+            | E::Password(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Notify(_) => StatusCode::BAD_GATEWAY,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+        };
+        if let E::Notify(inner) = &e {
+            // The provider's error stays in the log; the client learns what to do.
+            tracing::error!(error = %inner, "email not sent");
+            return Self::new(
+                status,
+                e.code(),
+                "saved, but the email could not be sent; try again to resend it",
+            );
+        }
+        Self::domain(status, e)
     }
 }
 

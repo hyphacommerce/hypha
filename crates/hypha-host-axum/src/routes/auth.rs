@@ -1,0 +1,187 @@
+//! Logging in and out, password resets and accepting invites (design note 0008,
+//! sections 3 and 5). These routes take no `Caller`: they are how one gets credentials.
+
+use axum::{Json, extract::State, http::StatusCode};
+use hypha_auth::{
+    HasSessions, LoginStep, MfaMethod, NewToken, Session, finish_login, logout, reset_password,
+};
+use hypha_users::{AcceptInvite, accept_invite, login, request_password_reset};
+use serde::{Deserialize, Serialize};
+
+use super::{rfc3339, staff::UserResponse};
+use crate::{
+    error::ApiError,
+    extract::{JsonBody, StaffCaller},
+    state::{SharedState, Storage},
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LoginRequest {
+    email: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FinishLoginRequest {
+    /// The challenge token from the first step.
+    challenge: String,
+    /// A 6-digit code from the authenticator app, or a recovery code.
+    code: String,
+}
+
+#[derive(Serialize)]
+pub(super) struct SessionResponse {
+    /// Send as `Authorization: Bearer <token>`. Shown only now.
+    token: String,
+    expires_at: String,
+}
+
+impl SessionResponse {
+    fn new(session: &Session, token: &NewToken) -> Result<Self, ApiError> {
+        Ok(Self {
+            token: token.expose().to_string(),
+            expires_at: rfc3339(session.expires_at())?,
+        })
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct ChallengeResponse {
+    /// Send back to `POST /auth/login/mfa` with a code.
+    token: String,
+    methods: Vec<&'static str>,
+    expires_at: String,
+}
+
+/// Either `{"status": "authenticated", "session": …}` or `{"status": "mfa_required",
+/// "challenge": …}`: a tagged enum, so a client switches on `status`.
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub(super) enum LoginResponse {
+    Authenticated { session: SessionResponse },
+    MfaRequired { challenge: ChallengeResponse },
+}
+
+/// The first login step. 401 `invalid_credentials` for a wrong email or password (or a
+/// disabled account), deliberately the same answer.
+pub(super) async fn login_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    JsonBody(req): JsonBody<LoginRequest>,
+) -> Result<Json<LoginResponse>, ApiError> {
+    let ports = state.ports().await?;
+    let step = login(&ports, &state.env, &req.email, &req.password).await?;
+    Ok(Json(match step {
+        LoginStep::Authenticated { session, token } => LoginResponse::Authenticated {
+            session: SessionResponse::new(&session, &token)?,
+        },
+        LoginStep::MfaRequired {
+            session,
+            token,
+            methods,
+        } => LoginResponse::MfaRequired {
+            challenge: ChallengeResponse {
+                token: token.expose().to_string(),
+                methods: methods.iter().map(|m: &MfaMethod| m.as_str()).collect(),
+                expires_at: rfc3339(session.expires_at())?,
+            },
+        },
+    }))
+}
+
+/// The second step, when the first answered `mfa_required`. A wrong code is 401
+/// `invalid_mfa_code`; the fifth wrong code ends the challenge (then `invalid_token`).
+pub(super) async fn finish_login_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    JsonBody(req): JsonBody<FinishLoginRequest>,
+) -> Result<Json<LoginResponse>, ApiError> {
+    let ports = state.ports().await?;
+    let (session, token) = finish_login(&ports, &state.env, &req.challenge, &req.code).await?;
+    Ok(Json(LoginResponse::Authenticated {
+        session: SessionResponse::new(&session, &token)?,
+    }))
+}
+
+/// Ends the caller's session.
+pub(super) async fn logout_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    StaffCaller(staff): StaffCaller,
+) -> Result<StatusCode, ApiError> {
+    let ports = state.ports().await?;
+    logout(ports.sessions(), &state.clock, staff.session).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PasswordResetRequest {
+    email: String,
+}
+
+/// Always 202, whether or not the email belongs to anyone, so nobody can probe for
+/// accounts. A failure to send is logged, not reported.
+pub(super) async fn request_reset_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    JsonBody(req): JsonBody<PasswordResetRequest>,
+) -> Result<StatusCode, ApiError> {
+    let ports = state.ports().await?;
+    match request_password_reset(&ports, &state.env, &req.email).await {
+        Ok(()) => {}
+        Err(hypha_users::CommandError::Notify(e)) => {
+            tracing::error!(error = %e, "password reset email not sent");
+        }
+        Err(e) => return Err(e.into()),
+    }
+    Ok(StatusCode::ACCEPTED)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ConfirmResetRequest {
+    token: String,
+    password: String,
+}
+
+/// Sets the new password and logs out every session of the account.
+pub(super) async fn confirm_reset_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    JsonBody(req): JsonBody<ConfirmResetRequest>,
+) -> Result<StatusCode, ApiError> {
+    let ports = state.ports().await?;
+    reset_password(&ports, &state.env, &req.token, &req.password).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AcceptInviteRequest {
+    token: String,
+    name: String,
+    password: String,
+}
+
+#[derive(Serialize)]
+pub(super) struct AcceptedResponse {
+    user: UserResponse,
+    session: SessionResponse,
+}
+
+/// Creates the invited user and logs them in.
+pub(super) async fn accept_invite_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    JsonBody(req): JsonBody<AcceptInviteRequest>,
+) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
+    let ports = state.ports().await?;
+    let input = AcceptInvite {
+        token: req.token,
+        name: req.name,
+        password: req.password,
+    };
+    let (user, session, token) = accept_invite(&ports, &state.env, input).await?;
+    let response = AcceptedResponse {
+        user: UserResponse::new(&user)?,
+        session: SessionResponse::new(&session, &token)?,
+    };
+    Ok((StatusCode::CREATED, Json(response)))
+}

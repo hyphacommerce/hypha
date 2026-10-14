@@ -2,8 +2,12 @@
 # End-to-end check against a running hypha-host-axum, on either storage (a fresh
 # database for Postgres; see CLAUDE.md).
 #
-#   cargo run -p hypha-host-axum      # in one terminal (PORT=... if 3000 is taken)
+#   HYPHA_OWNER_EMAIL=owner@example.com HYPHA_OWNER_PASSWORD=e2e-owner-password \
+#       cargo run -p hypha-host-axum  # in one terminal (PORT=... if 3000 is taken)
 #   bash scripts/e2e.sh               # in another (Git Bash on Windows; HYPHA_URL=...)
+#
+# The script logs in as that owner (E2E_OWNER_EMAIL / E2E_OWNER_PASSWORD if you chose
+# others) and sends the session with every step; the "auth" section checks the rest.
 #
 # Every step asserts the HTTP status and, for errors, the stable error code.
 # Exits non-zero if any step fails. Uses only curl, grep and sed (no jq).
@@ -12,9 +16,13 @@
 set -u
 
 BASE="${HYPHA_URL:-http://127.0.0.1:3000}"
+OWNER_EMAIL="${E2E_OWNER_EMAIL:-owner@example.com}"
+OWNER_PASSWORD="${E2E_OWNER_PASSWORD:-e2e-owner-password}"
 JSON='content-type: application/json'
 FAILED=0
 BODY=''
+# Credentials every step sends (curl arguments); empty until the owner logs in.
+AUTH=()
 
 # step NAME STATUS CODE_OR_DASH CURL_ARGS...
 # Runs curl, checks the status and (unless "-") the "code" field. Leaves the body in $BODY.
@@ -22,7 +30,7 @@ step() {
     local name=$1 want_status=$2 want_code=$3
     shift 3
     local out status
-    out=$(curl -s -w '\n%{http_code}' "$@")
+    out=$(curl -s -w '\n%{http_code}' ${AUTH[@]+"${AUTH[@]}"} "$@")
     status=${out##*$'\n'}
     BODY=${out%$'\n'*}
     if [[ $status != "$want_status" ]]; then
@@ -51,7 +59,7 @@ contains() {
 replayed() {
     local name=$1
     shift
-    if curl -s -o /dev/null -D - "$@" | grep -qi '^idempotent-replayed: true'; then
+    if curl -s -o /dev/null -D - ${AUTH[@]+"${AUTH[@]}"} "$@" | grep -qi '^idempotent-replayed: true'; then
         echo "ok   $name"
     else
         echo "FAIL $name: no Idempotent-Replayed header"
@@ -63,7 +71,7 @@ replayed() {
 fresh() {
     local name=$1
     shift
-    if curl -s -o /dev/null -D - "$@" | grep -qi '^idempotent-replayed'; then
+    if curl -s -o /dev/null -D - ${AUTH[@]+"${AUTH[@]}"} "$@" | grep -qi '^idempotent-replayed'; then
         echo "FAIL $name: unexpected Idempotent-Replayed header"
         FAILED=$((FAILED + 1))
     else
@@ -77,6 +85,8 @@ id() { sed -E 's/^[^"]*"id":"([^"]+)".*/\1/' <<<"$BODY"; }
 address() { sed -E 's/.*"addresses":\[\{"id":"(addr_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 # The "customer" of the last order response.
 customer() { sed -E 's/.*"customer":"(cus_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
+# The "token" of the last response (a session, a challenge or a new key).
+token() { sed -E 's/.*"token":"(hypha_[a-z]+_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 # The first variant's id of the last product response.
 variant() { sed -E 's/.*"variants":\[[^]]*"id":"(var_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 
@@ -85,6 +95,20 @@ if ! curl -s -o /dev/null "$BASE/"; then
     exit 2
 fi
 
+echo "## logging in"
+step "health needs no credentials" 200 - "$BASE/health"
+step "anything else does" 401 unauthenticated "$BASE/store"
+step "owner logs in" 200 - -X POST "$BASE/auth/login" -H "$JSON" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
+if [[ $BODY != *'"status":"authenticated"'* ]]; then
+    echo "Cannot log in as $OWNER_EMAIL. Start the server with HYPHA_OWNER_EMAIL and"
+    echo "HYPHA_OWNER_PASSWORD set to the same values (see the top of this script)."
+    exit 2
+fi
+SESSION=$(token)
+AUTH=(-H "authorization: Bearer $SESSION")
+
+echo
 echo "## happy path"
 step "health" 200 - "$BASE/health"
 step "the store this deployment serves" 200 - "$BASE/store"
@@ -516,6 +540,66 @@ step "create draft product" 201 - -X POST "$BASE/products" -H "$JSON" \
     -d '{"handle":"draft","title":"Draft","price":{"amount":1,"currency":"EUR"}}'
 step "draft -> archived" 422 invalid_status_transition -X PATCH "$BASE/products/$(id)/status" \
     -H "$JSON" -d '{"status":"archived"}'
+
+echo
+echo "## auth (design note 0008)"
+step "who am I" 200 - "$BASE/me"
+contains "the owner has the owner role" '"name":"Owner"'
+OWNER=$(sed -E 's/.*"user":\{"id":"(user_[0-9a-f]+)".*/\1/' <<<"$BODY")
+step "the last owner can't be disabled" 409 last_owner -X PATCH "$BASE/users/$OWNER" \
+    -H "$JSON" -d '{"status":"disabled"}'
+step "create a read-only key" 201 - -X POST "$BASE/api-keys" -H "$JSON" \
+    -d '{"kind":"secret","name":"Reader","scopes":["products:read"]}'
+contains "the key is shown redacted" '"redacted":"hypha_sk_…'
+READER=$(token)
+READER_ID=$(id)
+SAVED_AUTH=("${AUTH[@]}")
+AUTH=(-H "authorization: Bearer $READER")
+step "the key reads products" 200 - "$BASE/products/$MUG"
+step "but can't write them" 403 missing_scope -X POST "$BASE/products" -H "$JSON" \
+    -d '{"handle":"nope","title":"Nope","price":{"amount":1,"currency":"EUR"}}'
+step "a key is no session" 401 session_required "$BASE/me"
+AUTH=("${SAVED_AUTH[@]}")
+step "revoke the key" 200 - -X POST "$BASE/api-keys/$READER_ID/revoke"
+step "revoking twice" 409 api_key_revoked -X POST "$BASE/api-keys/$READER_ID/revoke"
+AUTH=(-H "authorization: Bearer $READER")
+step "a revoked key stops working" 401 invalid_token "$BASE/products/$MUG"
+AUTH=("${SAVED_AUTH[@]}")
+step "a publishable key's scopes are fixed" 422 api_key_scopes_fixed -X POST \
+    "$BASE/api-keys" -H "$JSON" -d '{"kind":"publishable","name":"Shop","scopes":["orders:read"]}'
+step "create a publishable key" 201 - -X POST "$BASE/api-keys" -H "$JSON" \
+    -d '{"kind":"publishable","name":"Storefront"}'
+PUBLISHABLE=$(token)
+AUTH=(-H "x-publishable-key: $PUBLISHABLE")
+step "a storefront reads the store" 200 - "$BASE/store"
+step "and makes a cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "but can't create customers" 403 missing_scope -X POST "$BASE/customers" -H "$JSON" \
+    -d '{"email":"shop@example.com"}'
+AUTH=("${SAVED_AUTH[@]}")
+step "create a role" 201 - -X POST "$BASE/roles" -H "$JSON" \
+    -d '{"name":"Support","scopes":["orders:write","customers:read"]}'
+ROLE=$(id)
+step "role names are unique ignoring case" 409 role_name_taken -X POST "$BASE/roles" -H "$JSON" \
+    -d '{"name":"SUPPORT","scopes":["orders:read"]}'
+step "the owner role can't change" 409 owner_role_fixed -X PATCH \
+    "$BASE/roles/$(sed -E 's/.*"role":"(role_[0-9a-f]+)".*/\1/' <<<"$(curl -s "${AUTH[@]}" "$BASE/users/$OWNER")")" \
+    -H "$JSON" -d '{"name":"Boss"}'
+step "invite someone" 201 - -X POST "$BASE/invites" -H "$JSON" \
+    -d "{\"email\":\"support@example.com\",\"role\":\"$ROLE\"}"
+step "staff can't be invited" 409 user_exists -X POST "$BASE/invites" -H "$JSON" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"role\":\"$ROLE\"}"
+AUTH=()
+step "a made-up invite token" 401 invalid_token -X POST "$BASE/invites/accept" -H "$JSON" \
+    -d '{"token":"hypha_inv_nope","name":"Eve","password":"eve password"}'
+step "a wrong password" 401 invalid_credentials -X POST "$BASE/auth/login" -H "$JSON" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"wrong password\"}"
+step "a reset for anyone is 202" 202 - -X POST "$BASE/auth/password-reset" -H "$JSON" \
+    -d '{"email":"nobody@example.com"}'
+step "a made-up reset token" 401 invalid_token -X POST "$BASE/auth/password-reset/confirm" \
+    -H "$JSON" -d '{"token":"hypha_rst_nope","password":"new password"}'
+AUTH=(-H "authorization: Bearer $SESSION")
+step "log out" 204 - -X POST "$BASE/auth/logout"
+step "the session is over" 401 invalid_token "$BASE/me"
 
 echo
 if ((FAILED > 0)); then

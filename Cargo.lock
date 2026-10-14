@@ -587,6 +587,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "deadpool-postgres",
+ "getrandom",
+ "hypha-auth",
  "hypha-cart",
  "hypha-checkout",
  "hypha-core",
@@ -599,6 +601,7 @@ dependencies = [
  "hypha-stores",
  "hypha-tax",
  "hypha-testkit",
+ "hypha-users",
  "jiff",
  "serde",
  "serde_json",

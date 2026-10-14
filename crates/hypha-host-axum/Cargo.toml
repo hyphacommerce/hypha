@@ -18,6 +18,9 @@ hypha-store-postgres = { path = "../hypha-store-postgres" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-orders = { path = "../hypha-orders" }
 hypha-checkout = { path = "../hypha-checkout" }
+hypha-auth = { path = "../hypha-auth" }
+hypha-users = { path = "../hypha-users" }
+getrandom = "0.4"
 deadpool-postgres = "0.14.2"
 tokio-postgres = "0.7.18"
 axum = { version = "0.8", features = ["macros"] }

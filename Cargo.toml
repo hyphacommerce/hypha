@@ -19,3 +19,10 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = "warn"
+# Password hashing is slow on purpose, and unoptimized it is many times slower still,
+# which would make logins in dev builds and tests crawl. Optimize just these crates.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

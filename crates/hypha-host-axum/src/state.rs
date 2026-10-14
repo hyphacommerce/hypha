@@ -3,11 +3,16 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use hypha_auth::{
+    Argon2id, HasApiKeys, HashError, Password, PasswordHash, PasswordHasher, SealError, Sealed,
+    SecretBox, XChaChaBox,
+};
 use hypha_checkout::CheckoutPorts;
-use hypha_core::{Clock, IdGenerator, StoreId, Timestamp};
+use hypha_core::{Clock, IdGenerator, Notifier, NotifyError, Random, StoreId, Timestamp};
 use hypha_store_postgres::{CORE, PgConnection, PgStore, database_config, migrate};
 use hypha_stores::StoreRepo;
 use hypha_testkit::{InMemoryPorts, InMemoryStoreRepo};
+use hypha_users::{StaffEmail, StaffPorts};
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -38,10 +43,129 @@ impl Clock for SystemClock {
     }
 }
 
+/// The non-storage ports auth commands use (`hypha_auth::AuthEnv`) and the staff
+/// emails' `Notifier`, for real.
+pub struct HostEnv {
+    secret_box: XChaChaBox,
+    hasher: Argon2id,
+    /// Where the admin panel lives, for links in emails. Unset: the email shows the
+    /// bare token.
+    admin_url: Option<String>,
+}
+
+impl HostEnv {
+    /// `secret_key` seals TOTP secrets (`HYPHA_SECRET_KEY`); losing it makes every
+    /// authenticator unreadable, so it must stay the same across restarts.
+    pub fn new(secret_key: [u8; 32], admin_url: Option<String>) -> Self {
+        Self {
+            secret_box: XChaChaBox::new(secret_key),
+            hasher: Argon2id::OWASP,
+            admin_url: admin_url.map(|url| url.trim_end_matches('/').to_string()),
+        }
+    }
+
+    /// Other Argon2 parameters (tests use cheap ones).
+    #[cfg(test)]
+    pub fn with_hasher(mut self, hasher: Argon2id) -> Self {
+        self.hasher = hasher;
+        self
+    }
+
+    fn link(&self, path: &str, token: &str) -> String {
+        match &self.admin_url {
+            Some(base) => format!("{base}{path}?token={token}"),
+            None => format!("token {token} (set HYPHA_ADMIN_URL for a link)"),
+        }
+    }
+}
+
+impl IdGenerator for HostEnv {
+    fn new_uuid(&self) -> Uuid {
+        UuidV7Ids.new_uuid()
+    }
+}
+
+impl Clock for HostEnv {
+    fn now(&self) -> Timestamp {
+        SystemClock.now()
+    }
+}
+
+impl Random for HostEnv {
+    fn fill(&self, bytes: &mut [u8]) {
+        // Without the OS generator no token or key can be made safely, and there is no
+        // sensible way to continue: stop, like the standard library does when it can't
+        // seed its hash maps.
+        if let Err(e) = getrandom::fill(bytes) {
+            panic!("the operating system's random number generator failed: {e}");
+        }
+    }
+}
+
+/// Argon2id (OWASP's parameters unless a test chose others), on Tokio's blocking
+/// threads: a hash takes tens of milliseconds of CPU, which would otherwise stall every
+/// request on that worker.
+impl PasswordHasher for HostEnv {
+    async fn hash_password(
+        &self,
+        password: &Password,
+        salt: [u8; 16],
+    ) -> Result<PasswordHash, HashError> {
+        let (password, hasher) = (password.clone(), self.hasher);
+        tokio::task::spawn_blocking(move || hasher.hash_now(&password, salt))
+            .await
+            .map_err(|e| HashError(e.to_string()))?
+    }
+
+    async fn verify_password(
+        &self,
+        password: &Password,
+        hash: &PasswordHash,
+    ) -> Result<bool, HashError> {
+        let (password, hash, hasher) = (password.clone(), hash.clone(), self.hasher);
+        tokio::task::spawn_blocking(move || hasher.verify_now(&password, &hash))
+            .await
+            .map_err(|e| HashError(e.to_string()))?
+    }
+}
+
+impl SecretBox for HostEnv {
+    fn seal(&self, plaintext: &[u8], context: &[u8], nonce: [u8; 24]) -> Sealed {
+        self.secret_box.seal(plaintext, context, nonce)
+    }
+
+    fn open(&self, sealed: &Sealed, context: &[u8]) -> Result<Vec<u8>, SealError> {
+        self.secret_box.open(sealed, context)
+    }
+}
+
+/// No email provider yet (design note 0008, A10): the rendered email goes to the log.
+/// That puts invite and reset tokens in the log, which is fine for development only;
+/// startup warns about it.
+impl Notifier<StaffEmail> for HostEnv {
+    async fn notify(&self, message: StaffEmail) -> Result<(), NotifyError> {
+        let (to, subject, body) = match &message {
+            StaffEmail::Invite { to, token, .. } => (
+                to,
+                "You're invited to run the store",
+                self.link("/invite", token),
+            ),
+            StaffEmail::PasswordReset { to, token, .. } => (
+                to,
+                "Reset your password",
+                self.link("/reset-password", token),
+            ),
+        };
+        tracing::info!(%to, subject, body, "email (logged, not sent)");
+        Ok(())
+    }
+}
+
 pub struct AppState<S> {
     pub storage: S,
     pub ids: UuidV7Ids,
     pub clock: SystemClock,
+    pub env: HostEnv,
     /// The one store this deployment serves (design note 0006, model A), set at startup.
     pub store: StoreId,
 }
@@ -58,15 +182,15 @@ impl<S: Storage> AppState<S> {
 pub type SharedState<S> = Arc<AppState<S>>;
 
 /// Where the repositories come from. Handlers ask for `ports()` once per request and
-/// pass them to commands; `CheckoutPorts` (which includes `CartPorts`) gives access to
-/// every repository and the batch.
+/// pass them to commands; `CheckoutPorts` (which includes `CartPorts`), `StaffPorts`
+/// and `HasApiKeys` give access to every repository and the batch.
 ///
 /// Handlers are generic over this, but axum can only prove their futures are `Send` for
 /// a concrete storage type (the repo traits deliberately have no `Send` bound), so the
 /// router is built per concrete type (see `routes::router!`).
 #[allow(async_fn_in_trait)]
 pub trait Storage: Send + Sync + 'static {
-    type Ports<'a>: CheckoutPorts
+    type Ports<'a>: CheckoutPorts + StaffPorts + HasApiKeys
     where
         Self: 'a;
     type Directory<'a>: StoreRepo

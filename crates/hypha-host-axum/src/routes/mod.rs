@@ -1,13 +1,17 @@
 //! HTTP routes. Each module owns its request/response shapes (the API's own types,
 //! separate from domain types) and thin handlers that call one domain command.
 
+mod api_keys;
+mod auth;
 mod carts;
 mod customers;
 mod health;
 mod inventory;
 mod markets;
+mod me;
 mod orders;
 mod products;
+mod staff;
 mod stores;
 mod taxes;
 
@@ -39,6 +43,55 @@ macro_rules! router {
             .route("/health", get(health::check::<$storage>))
             // the store this deployment serves
             .route("/store", get(stores::fetch::<$storage>))
+            // logging in (no credentials needed)
+            .route("/auth/login", post(auth::login_handler::<$storage>))
+            .route(
+                "/auth/login/mfa",
+                post(auth::finish_login_handler::<$storage>),
+            )
+            .route("/auth/logout", post(auth::logout_handler::<$storage>))
+            .route(
+                "/auth/password-reset",
+                post(auth::request_reset_handler::<$storage>),
+            )
+            .route(
+                "/auth/password-reset/confirm",
+                post(auth::confirm_reset_handler::<$storage>),
+            )
+            .route(
+                "/invites/accept",
+                post(auth::accept_invite_handler::<$storage>),
+            )
+            // the logged-in staff member
+            .route("/me", get(me::fetch::<$storage>))
+            .route("/me/password", put(me::change_password_handler::<$storage>))
+            .route("/me/mfa/totp", post(me::start_totp_handler::<$storage>))
+            .route(
+                "/me/mfa/totp/confirm",
+                post(me::confirm_totp_handler::<$storage>),
+            )
+            .route(
+                "/me/mfa/totp/disable",
+                post(me::disable_totp_handler::<$storage>),
+            )
+            .route(
+                "/me/mfa/recovery-codes",
+                post(me::recovery_codes_handler::<$storage>),
+            )
+            // staff, roles, invites, API keys
+            .route("/roles", post(staff::create_role_handler::<$storage>))
+            .route(
+                "/roles/{id}",
+                get(staff::fetch_role::<$storage>).patch(staff::update_role_handler::<$storage>),
+            )
+            .route(
+                "/users/{id}",
+                get(staff::fetch_user::<$storage>).patch(staff::update_user_handler::<$storage>),
+            )
+            .route("/invites", post(staff::invite_handler::<$storage>))
+            .route("/api-keys", post(api_keys::create::<$storage>))
+            .route("/api-keys/{id}", get(api_keys::fetch::<$storage>))
+            .route("/api-keys/{id}/revoke", post(api_keys::revoke::<$storage>))
             // products
             .route("/products", post(products::create::<$storage>))
             .route("/products/{id}", get(products::fetch::<$storage>))
