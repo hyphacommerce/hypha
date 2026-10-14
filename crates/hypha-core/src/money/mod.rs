@@ -12,6 +12,7 @@ pub use price::Price;
 pub use tax_rate::TaxRate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Currency {
     Eur,

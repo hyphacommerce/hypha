@@ -8,6 +8,13 @@ license.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+# Only for hosts that publish OpenAPI documents (design note 0010, S8): domain crates
+# and wasm builds never turn it on.
+utoipa = { version = "6", optional = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+openapi = ["dep:utoipa", "dep:serde_json"]
 
 [dev-dependencies]
 serde_json.workspace = true

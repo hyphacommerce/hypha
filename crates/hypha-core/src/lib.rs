@@ -6,6 +6,8 @@ pub mod error_code;
 pub mod idempotency;
 pub mod ids;
 pub mod money;
+#[cfg(feature = "openapi")]
+mod openapi;
 pub mod ports;
 pub mod quantity;
 pub mod scope;

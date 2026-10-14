@@ -72,6 +72,31 @@ macro_rules! define_id {
                 id.to_string()
             }
         }
+
+        /// A string: the prefix, an underscore and 32 lowercase hex digits.
+        #[cfg(feature = "openapi")]
+        impl utoipa::PartialSchema for $name {
+            fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::Schema> {
+                crate::openapi::string_schema(
+                    concat!("^", $prefix, "_[0-9a-f]{32}$"),
+                    concat!($prefix, "_0190f1a2b3c47d8e9f00112233445566"),
+                    concat!(
+                        "A ",
+                        stringify!($name),
+                        ": `",
+                        $prefix,
+                        "_` and 32 hex digits."
+                    ),
+                )
+            }
+        }
+
+        #[cfg(feature = "openapi")]
+        impl utoipa::ToSchema for $name {
+            fn name() -> std::borrow::Cow<'static, str> {
+                std::borrow::Cow::Borrowed(stringify!($name))
+            }
+        }
     };
 }
 
