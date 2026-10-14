@@ -17,7 +17,7 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     round_trips(&make().await).await;
     scenario("order: lookups by ID and number; unknown ones are None");
     lookups(&make().await).await;
-    scenario("order: update stores the status and bumps the version; stale and missing fail");
+    scenario("order: update stores every field and bumps the version; stale and missing fail");
     updates(&make().await).await;
     scenario("order: unique ID, number, cart and line IDs");
     unique_keys(&make().await).await;
@@ -147,6 +147,17 @@ async fn updates<R: OrderRepo>(repo: &R) {
     let stored = repo.get(o.id()).await.unwrap().unwrap();
     assert_eq!(stored.financial_status(), FinancialStatus::Paid);
     assert_eq!(stored, o);
+
+    // Every field is written, not only what today's commands change: a changed email,
+    // tax mode and lines (no command edits them yet) must round-trip too.
+    let mut snapshot = order_with(1, vec![full_line(31), plain_line(32)], true).snapshot();
+    snapshot.version = o.version();
+    snapshot.email = Email::new("marko@example.hr").unwrap();
+    snapshot.financial_status = FinancialStatus::Paid;
+    let mut edited = Order::restore(snapshot).unwrap();
+    repo.update(&mut edited).await.unwrap();
+    assert_eq!(edited.version(), Version::new(3));
+    assert_eq!(repo.get(o.id()).await, Ok(Some(edited)));
 
     let mut stale = stale;
     assert_eq!(repo.update(&mut stale).await, Err(RepoError::StaleVersion));

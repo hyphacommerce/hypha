@@ -48,20 +48,37 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         Ok(())
     }
 
-    /// Only the statuses can change on an order today (`mark_paid`), so only they are
-    /// written; order edits will widen this.
+    /// Writes the whole order like every other repo, not only what today's commands
+    /// change (the statuses), so the next field that becomes editable can't be dropped
+    /// here while the in-memory repo keeps it. Lines are replaced after the version check.
     async fn update(&self, order: &mut Order) -> Result<(), RepoError> {
         let s = order.snapshot();
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
         let bumped = tx
             .query_typed_opt(
-                "UPDATE orders SET version = version + 1, financial_status = $3,
-                     fulfillment_status = $4
+                "UPDATE orders SET version = version + 1, number = $3,
+                     placed_at = 'epoch'::timestamptz + $4 * interval '1 microsecond',
+                     cart_id = $5, market_id = $6, currency = $7, country = $8,
+                     taxes_included = $9, customer_id = $10, email = $11, subtotal = $12,
+                     tax_total = $13, total = $14, financial_status = $15,
+                     fulfillment_status = $16
                  WHERE id = $1 AND version = $2 RETURNING version",
                 &[
                     (&s.id.as_uuid(), Type::UUID),
                     (&version_to_db(s.version)?, Type::INT8),
+                    (&s.number.value(), Type::INT8),
+                    (&s.placed_at.unix_micros(), Type::INT8),
+                    (&s.cart.as_uuid(), Type::UUID),
+                    (&s.market.as_uuid(), Type::UUID),
+                    (&s.currency.as_str(), Type::TEXT),
+                    (&s.country.as_str(), Type::TEXT),
+                    (&s.taxes_included, Type::BOOL),
+                    (&s.customer.as_uuid(), Type::UUID),
+                    (&s.email.as_str(), Type::TEXT),
+                    (&s.subtotal.amount(), Type::INT8),
+                    (&s.tax_total.amount(), Type::INT8),
+                    (&s.total.amount(), Type::INT8),
                     (&s.financial_status.as_str(), Type::TEXT),
                     (&s.fulfillment_status.as_str(), Type::TEXT),
                 ],
@@ -72,6 +89,13 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
             return Err(RepoError::StaleVersion);
         };
         let new_version = version_from_db(row.get(0))?;
+        tx.query_typed(
+            "DELETE FROM order_lines WHERE order_id = $1",
+            &[(&s.id.as_uuid(), Type::UUID)],
+        )
+        .await
+        .map_err(repo_error)?;
+        insert_lines(&tx, s.id, &s.lines).await?;
         tx.commit().await.map_err(repo_error)?;
         order.set_version(new_version);
         Ok(())
