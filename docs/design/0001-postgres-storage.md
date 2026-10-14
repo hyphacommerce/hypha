@@ -394,9 +394,15 @@ Docker Postgres 18.6 from `compose.yaml`.
   - Keep the D1 save shape: the version step first, then the children, in one short
     transaction with no reads in it.
 - **Hyperdrive's query cache must be off for this database** (`--caching-disabled`). It
-  caches reads for up to 60 s and isn't invalidated by writes, so a command would load old
-  versions and hit avoidable `StaleVersion` conflicts. A separate, cached Hyperdrive
-  config can be added later for storefront reads that don't need to be fresh.
+  caches reads for up to 60 s and isn't invalidated by writes. With it on, a command would
+  load old versions and hit avoidable `StaleVersion` conflicts, and worse, two things
+  would break outright: an idempotency lookup could miss a key committed seconds ago (a
+  retried checkout gets `cart_completed` instead of its order), and a cached
+  `nextval('order_numbers')` would give every checkout the same order number. As a second
+  guard, both of those run inside a transaction (`IdempotencyRepo::get`,
+  `OrderRepo::next_number`); verify on real Hyperdrive that transactional queries are
+  never cached. A separate, cached Hyperdrive config can be added later for storefront
+  reads that don't need to be fresh.
 - **Migrations:** sqlx's migrator is gone. A small runner with `include_str!`'d SQL files
   and a `schema_migrations` table, run from native code (a CLI or host startup), never
   from a Worker.

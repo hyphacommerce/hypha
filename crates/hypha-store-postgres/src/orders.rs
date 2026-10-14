@@ -79,11 +79,14 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
 
     async fn next_number(&self) -> Result<OrderNumber, RepoError> {
         let mut conn = self.conn().await;
-        let row = conn
-            .client()
+        // In a transaction so no query cache (Hyperdrive's) can hand two checkouts the
+        // same number; read-write, because `nextval` writes the sequence.
+        let tx = conn.client().transaction().await.map_err(repo_error)?;
+        let row = tx
             .query_typed_one("SELECT nextval('order_numbers')", &[])
             .await
             .map_err(repo_error)?;
+        tx.commit().await.map_err(repo_error)?;
         OrderNumber::new(row.get(0)).map_err(corrupt)
     }
 }

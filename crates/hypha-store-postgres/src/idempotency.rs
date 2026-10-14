@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, consistent_read},
 };
 
 impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
@@ -15,8 +15,9 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
     ) -> Result<Option<IdempotencyRecord>, RepoError> {
         let (kind, id) = actor_to_db(actor);
         let mut conn = self.conn().await;
-        let row = conn
-            .client()
+        // One query, but inside a transaction anyway: a cached answer here (Hyperdrive's
+        // query cache) would miss a key committed seconds ago and run the command twice.
+        let row = consistent_read!(conn.client(), |tx| tx
             .query_typed_opt(
                 "SELECT operation, fingerprint, result,
                         (extract(epoch FROM created_at) * 1000000)::bigint
@@ -29,7 +30,7 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
                 ],
             )
             .await
-            .map_err(repo_error)?;
+            .map_err(repo_error))?;
         let Some(row) = row else { return Ok(None) };
         let fingerprint: Vec<u8> = row.get(1);
         Ok(Some(IdempotencyRecord {
