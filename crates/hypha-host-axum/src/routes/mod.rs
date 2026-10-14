@@ -3,6 +3,8 @@
 
 mod api_keys;
 mod auth;
+
+pub(crate) use auth::password_reset_in_background;
 mod carts;
 mod customers;
 mod health;

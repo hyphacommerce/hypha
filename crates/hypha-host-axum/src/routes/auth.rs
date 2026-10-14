@@ -120,21 +120,28 @@ pub(super) struct PasswordResetRequest {
     email: String,
 }
 
-/// Always 202, whether or not the email belongs to anyone, so nobody can probe for
-/// accounts. A failure to send is logged, not reported.
+/// Always 202, at once, whether or not the email belongs to anyone: the work (finding
+/// the account, storing the reset, sending the email) runs on its own task, so neither
+/// the answer nor its timing tells which emails exist.
 pub(super) async fn request_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     JsonBody(req): JsonBody<PasswordResetRequest>,
-) -> Result<StatusCode, ApiError> {
-    let ports = state.ports().await?;
-    match request_password_reset(&ports, &state.env, &req.email).await {
-        Ok(()) => {}
-        Err(hypha_users::CommandError::Notify(e)) => {
-            tracing::error!(error = %e, "password reset email not sent");
-        }
-        Err(e) => return Err(e.into()),
+) -> StatusCode {
+    S::spawn_password_reset(state, req.email);
+    StatusCode::ACCEPTED
+}
+
+/// The work behind `request_reset_handler`; failures can only be logged.
+pub(crate) async fn password_reset_in_background<S: Storage>(state: SharedState<S>, email: String) {
+    let result = match state.ports().await {
+        Ok(ports) => request_password_reset(&ports, &state.env, &email)
+            .await
+            .map_err(|e| e.to_string()),
+        Err(_) => Err("cannot reach storage".to_string()),
+    };
+    if let Err(error) = result {
+        tracing::error!(%error, "password reset request failed");
     }
-    Ok(StatusCode::ACCEPTED)
 }
 
 #[derive(Deserialize)]
