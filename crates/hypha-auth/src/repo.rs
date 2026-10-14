@@ -1,0 +1,139 @@
+use hypha_core::{ApiKeyId, IdentityId, RepoError, SessionId, Timestamp};
+
+use crate::{
+    ApiKey, Identity, PasswordReset, Session,
+    identity::{CredentialKind, Principal, PrincipalKind},
+    token::TokenHash,
+};
+
+/// Uniqueness rules the repos enforce, reported as `RepoError::Duplicate(key)`.
+pub mod keys {
+    pub const IDENTITY_ID: &str = "identity_id";
+    /// One identity per principal.
+    pub const IDENTITY_PRINCIPAL: &str = "identity_principal";
+    /// A credential's lookup (a password's email) is unique per principal kind and
+    /// credential kind (design note 0008, A2).
+    pub const IDENTITY_LOGIN: &str = "identity_login";
+    pub const SESSION_ID: &str = "session_id";
+    pub const SESSION_TOKEN: &str = "session_token";
+    pub const API_KEY_ID: &str = "api_key_id";
+    pub const API_KEY_TOKEN: &str = "api_key_token";
+    pub const PASSWORD_RESET_ID: &str = "password_reset_id";
+    pub const PASSWORD_RESET_TOKEN: &str = "password_reset_token";
+}
+
+#[allow(async_fn_in_trait)]
+pub trait IdentityRepo {
+    async fn get(&self, id: IdentityId) -> Result<Option<Identity>, RepoError>;
+    async fn get_by_principal(&self, principal: Principal) -> Result<Option<Identity>, RepoError>;
+    /// The identity of `principal` kind with a `credential` whose lookup is `lookup`
+    /// (for a password, the lowercased email).
+    async fn find_login(
+        &self,
+        principal: PrincipalKind,
+        credential: CredentialKind,
+        lookup: &str,
+    ) -> Result<Option<Identity>, RepoError>;
+    /// Enforces `IDENTITY_ID`, `IDENTITY_PRINCIPAL` and `IDENTITY_LOGIN`.
+    async fn insert(&self, identity: &mut Identity) -> Result<(), RepoError>;
+    /// Replaces the credentials. Enforces `IDENTITY_LOGIN`.
+    async fn update(&self, identity: &mut Identity) -> Result<(), RepoError>;
+}
+
+#[allow(async_fn_in_trait)]
+pub trait SessionRepo {
+    async fn get(&self, id: SessionId) -> Result<Option<Session>, RepoError>;
+    async fn get_by_token(&self, hash: TokenHash) -> Result<Option<Session>, RepoError>;
+    /// Enforces `SESSION_ID` and `SESSION_TOKEN`.
+    async fn insert(&self, session: &mut Session) -> Result<(), RepoError>;
+    /// Enforces `SESSION_TOKEN` (activation swaps the token).
+    async fn update(&self, session: &mut Session) -> Result<(), RepoError>;
+}
+
+#[allow(async_fn_in_trait)]
+pub trait ApiKeyRepo {
+    async fn get(&self, id: ApiKeyId) -> Result<Option<ApiKey>, RepoError>;
+    async fn get_by_token(&self, hash: TokenHash) -> Result<Option<ApiKey>, RepoError>;
+    /// Enforces `API_KEY_ID` and `API_KEY_TOKEN`.
+    async fn insert(&self, key: &mut ApiKey) -> Result<(), RepoError>;
+    async fn update(&self, key: &mut ApiKey) -> Result<(), RepoError>;
+}
+
+#[allow(async_fn_in_trait)]
+pub trait PasswordResetRepo {
+    async fn get_by_token(&self, hash: TokenHash) -> Result<Option<PasswordReset>, RepoError>;
+    /// Enforces `PASSWORD_RESET_ID` and `PASSWORD_RESET_TOKEN`.
+    async fn insert(&self, reset: &mut PasswordReset) -> Result<(), RepoError>;
+}
+
+/// Stages identity writes in a `hypha_core::HasBatch` batch.
+pub trait StageIdentities {
+    /// What `IdentityRepo::insert` would write; same keys on commit.
+    fn insert_identity(&mut self, identity: &mut Identity);
+    /// What `IdentityRepo::update` would write; `StaleVersion` on commit if it moved.
+    fn update_identity(&mut self, identity: &mut Identity);
+}
+
+/// Stages session writes in a `hypha_core::HasBatch` batch.
+pub trait StageSessions {
+    fn insert_session(&mut self, session: &mut Session);
+    fn update_session(&mut self, session: &mut Session);
+    /// Revokes every live session of `identity` except `keep` at `at`, bumping their
+    /// versions (a password change or reset). Sessions already revoked keep their time.
+    fn revoke_sessions(&mut self, identity: IdentityId, keep: Option<SessionId>, at: Timestamp);
+}
+
+/// Stages password reset writes in a `hypha_core::HasBatch` batch.
+pub trait StagePasswordResets {
+    fn update_password_reset(&mut self, reset: &mut PasswordReset);
+}
+
+/// Accessors, like `hypha_customers::HasCustomers`: commands bind the ones they use.
+pub trait HasIdentities {
+    type Identities: IdentityRepo;
+    fn identities(&self) -> &Self::Identities;
+}
+
+pub trait HasSessions {
+    type Sessions: SessionRepo;
+    fn sessions(&self) -> &Self::Sessions;
+}
+
+pub trait HasApiKeys {
+    type ApiKeys: ApiKeyRepo;
+    fn api_keys(&self) -> &Self::ApiKeys;
+}
+
+pub trait HasPasswordResets {
+    type PasswordResets: PasswordResetRepo;
+    fn password_resets(&self) -> &Self::PasswordResets;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasIdentities + ?Sized> HasIdentities for &T {
+    type Identities = T::Identities;
+    fn identities(&self) -> &Self::Identities {
+        (**self).identities()
+    }
+}
+
+impl<T: HasSessions + ?Sized> HasSessions for &T {
+    type Sessions = T::Sessions;
+    fn sessions(&self) -> &Self::Sessions {
+        (**self).sessions()
+    }
+}
+
+impl<T: HasApiKeys + ?Sized> HasApiKeys for &T {
+    type ApiKeys = T::ApiKeys;
+    fn api_keys(&self) -> &Self::ApiKeys {
+        (**self).api_keys()
+    }
+}
+
+impl<T: HasPasswordResets + ?Sized> HasPasswordResets for &T {
+    type PasswordResets = T::PasswordResets;
+    fn password_resets(&self) -> &Self::PasswordResets {
+        (**self).password_resets()
+    }
+}

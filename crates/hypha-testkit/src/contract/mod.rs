@@ -19,6 +19,7 @@
 //! `StaleVersion`), every unique key in the crate's `repo::keys`, and the batched
 //! collection methods. `batch` checks `HasBatch` across aggregates.
 
+mod auth;
 mod batch;
 mod carts;
 mod customers;
@@ -27,9 +28,12 @@ mod inventory;
 mod markets;
 mod orders;
 mod products;
+mod staff_batch;
 mod stores;
 mod tax;
+mod users;
 
+pub use auth::{api_key_repo, identity_repo, password_reset_repo, session_repo};
 pub use batch::batch;
 pub use carts::cart_repo;
 pub use customers::customer_repo;
@@ -38,8 +42,10 @@ pub use inventory::{inventory_item_repo, location_repo};
 pub use markets::{catalog_repo, market_repo, price_list_repo};
 pub use orders::order_repo;
 pub use products::product_repo;
+pub use staff_batch::staff_batch;
 pub use stores::store_repo;
 pub use tax::{tax_class_repo, tax_region_repo};
+pub use users::{invite_repo, role_repo, user_repo};
 
 fn scenario(name: &str) {
     eprintln!("contract scenario: {name}");

@@ -1,0 +1,587 @@
+use hypha_auth::{LoginStep, PasswordError};
+use hypha_core::{Actor, AuthError, Ctx, Email, NotifyError, RoleId, Scope, UserId};
+use hypha_testkit::{InMemoryPorts, TestEnv};
+use hypha_users::{
+    AcceptInvite, CommandError, InviteUser, NewOwner, Role, RoleError, RoleRepo, StaffEmail,
+    UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite, authenticate_staff,
+    bootstrap_owner, create_role, get_user, invite_user, login, request_password_reset,
+    update_role, update_user,
+};
+use pollster::block_on;
+use uuid::Uuid;
+
+const OWNER_PASSWORD: &str = "owner password";
+
+/// A store with its owner (ana@example.com).
+fn world() -> (InMemoryPorts, TestEnv, User) {
+    let ports = InMemoryPorts::default();
+    let env = TestEnv::default();
+    let owner = block_on(bootstrap_owner(
+        &Ctx::system(),
+        &ports,
+        &env,
+        NewOwner {
+            email: "ana@example.com".to_string(),
+            name: "Ana".to_string(),
+            password: OWNER_PASSWORD.to_string(),
+        },
+    ))
+    .unwrap()
+    .unwrap();
+    (ports, env, owner)
+}
+
+fn owner_ctx(owner: &User) -> Ctx {
+    Ctx::new(Actor::User(owner.id()), Scope::ALL.to_vec())
+}
+
+fn session_token(step: LoginStep) -> String {
+    match step {
+        LoginStep::Authenticated { token, .. } => token.expose().to_string(),
+        LoginStep::MfaRequired { .. } => panic!("no MFA in these tests"),
+    }
+}
+
+fn support_role(ports: &InMemoryPorts, env: &TestEnv, owner: &User) -> Role {
+    block_on(create_role(
+        &owner_ctx(owner),
+        &ports.roles,
+        env,
+        "Support",
+        &[Scope::OrdersWrite, Scope::CustomersRead],
+    ))
+    .unwrap()
+}
+
+/// Invites bob@example.com with `role` and accepts; returns the user and their token.
+fn join(ports: &InMemoryPorts, env: &TestEnv, owner: &User, role: RoleId) -> (User, String) {
+    let input = InviteUser {
+        email: "bob@example.com".to_string(),
+        role,
+    };
+    block_on(invite_user(&owner_ctx(owner), ports, env, input)).unwrap();
+    let accepted = AcceptInvite {
+        token: env.last_token().unwrap(),
+        name: "Bob".to_string(),
+        password: "bob password".to_string(),
+    };
+    let (user, _, token) = block_on(accept_invite(ports, env, accepted)).unwrap();
+    (user, token.expose().to_string())
+}
+
+// ---------- first start ----------
+
+#[test]
+fn the_first_start_creates_the_owner_who_can_log_in() {
+    let (ports, env, owner) = world();
+    let role = block_on(ports.roles.get(owner.role())).unwrap().unwrap();
+    assert!(role.is_owner());
+    let token =
+        session_token(block_on(login(&ports, &env, "ana@example.com", OWNER_PASSWORD)).unwrap());
+    let staff = block_on(authenticate_staff(&ports, &env, &token)).unwrap();
+    assert_eq!(staff.user.id(), owner.id());
+    assert_eq!(staff.ctx.actor(), Actor::User(owner.id()));
+    assert!(Scope::ALL.iter().all(|s| staff.ctx.has_scope(*s)));
+}
+
+#[test]
+fn the_owner_is_only_created_once() {
+    let (ports, env, _) = world();
+    let again = NewOwner {
+        email: "eve@example.com".to_string(),
+        name: "Eve".to_string(),
+        password: "eve password".to_string(),
+    };
+    assert_eq!(
+        block_on(bootstrap_owner(&Ctx::system(), &ports, &env, again)).map(|u| u.is_none()),
+        Ok(true)
+    );
+    let eve = Email::new("eve@example.com").unwrap();
+    assert_eq!(block_on(ports.users.get_by_email(&eve)), Ok(None));
+}
+
+#[test]
+fn the_owner_password_follows_the_rules() {
+    let ports = InMemoryPorts::default();
+    let input = NewOwner {
+        email: "ana@example.com".to_string(),
+        name: "Ana".to_string(),
+        password: "short".to_string(),
+    };
+    assert_eq!(
+        block_on(bootstrap_owner(
+            &Ctx::system(),
+            &ports,
+            &TestEnv::default(),
+            input
+        ))
+        .map(|u| u.is_some()),
+        Err(CommandError::Password(PasswordError::TooShort { min: 8 }))
+    );
+    assert_eq!(block_on(ports.users.any()), Ok(false));
+}
+
+// ---------- login and sessions ----------
+
+#[test]
+fn a_wrong_password_is_invalid_credentials() {
+    let (ports, env, _) = world();
+    assert_eq!(
+        block_on(login(&ports, &env, "ana@example.com", "wrong password")).map(|_| ()),
+        Err(CommandError::Login(
+            hypha_auth::CommandError::InvalidCredentials
+        ))
+    );
+}
+
+#[test]
+fn a_disabled_user_can_neither_log_in_nor_use_a_session() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let (bob, token) = join(&ports, &env, &owner, support.id());
+    let disable = UpdateUser {
+        status: Some(UserStatus::Disabled),
+        ..UpdateUser::default()
+    };
+    block_on(update_user(&owner_ctx(&owner), &ports, bob.id(), disable)).unwrap();
+
+    assert_eq!(
+        block_on(authenticate_staff(&ports, &env, &token)).map(|s| s.user.id()),
+        Err(CommandError::NotStaff)
+    );
+    assert_eq!(
+        block_on(login(&ports, &env, "bob@example.com", "bob password")).map(|_| ()),
+        Err(CommandError::Login(
+            hypha_auth::CommandError::InvalidCredentials
+        ))
+    );
+}
+
+#[test]
+fn a_role_change_applies_to_the_next_request() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let (_, token) = join(&ports, &env, &owner, support.id());
+    let before = block_on(authenticate_staff(&ports, &env, &token)).unwrap();
+    assert!(before.ctx.has_scope(Scope::OrdersRead));
+    assert!(!before.ctx.has_scope(Scope::ProductsRead));
+
+    let change = UpdateRole {
+        scopes: Some(vec![Scope::ProductsRead]),
+        ..UpdateRole::default()
+    };
+    block_on(update_role(
+        &owner_ctx(&owner),
+        &ports.roles,
+        support.id(),
+        change,
+    ))
+    .unwrap();
+    let after = block_on(authenticate_staff(&ports, &env, &token)).unwrap();
+    assert!(after.ctx.has_scope(Scope::ProductsRead));
+    assert!(!after.ctx.has_scope(Scope::OrdersRead));
+}
+
+// ---------- invites ----------
+
+#[test]
+fn an_invite_emails_a_token_that_creates_the_user_and_logs_them_in() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let input = InviteUser {
+        email: " Bob@Example.com ".to_string(),
+        role: support.id(),
+    };
+    let invite = block_on(invite_user(&owner_ctx(&owner), &ports, &env, input)).unwrap();
+    assert_eq!(invite.invited_by(), Actor::User(owner.id()));
+    let sent = env.sent();
+    let [
+        StaffEmail::Invite {
+            to,
+            token,
+            expires_at,
+        },
+    ] = sent.as_slice()
+    else {
+        panic!("expected one invite email, got {:?}", env.sent());
+    };
+    assert_eq!(to.as_str(), "bob@example.com");
+    assert!(token.starts_with("hypha_inv_"));
+    assert_eq!(*expires_at, invite.expires_at());
+
+    let accepted = AcceptInvite {
+        token: token.clone(),
+        name: "Bob".to_string(),
+        password: "bob password".to_string(),
+    };
+    let (user, session, session_token) = block_on(accept_invite(&ports, &env, accepted)).unwrap();
+    assert_eq!(user.role(), support.id());
+    let staff = block_on(authenticate_staff(&ports, &env, session_token.expose())).unwrap();
+    assert_eq!(staff.session.id(), session.id());
+    assert!(block_on(login(&ports, &env, "bob@example.com", "bob password")).is_ok());
+}
+
+#[test]
+fn an_invite_token_works_once() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    join(&ports, &env, &owner, support.id());
+    let again = AcceptInvite {
+        token: env.last_token().unwrap(),
+        name: "Bob".to_string(),
+        password: "bob password".to_string(),
+    };
+    assert_eq!(
+        block_on(accept_invite(&ports, &env, again)).map(|(u, ..)| u.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
+    );
+}
+
+#[test]
+fn inviting_again_replaces_the_token() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let invite = |role| InviteUser {
+        email: "bob@example.com".to_string(),
+        role,
+    };
+    let first = block_on(invite_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        invite(support.id()),
+    ))
+    .unwrap();
+    let old_token = env.last_token().unwrap();
+    let owner_role = owner.role();
+    let second = block_on(invite_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        invite(owner_role),
+    ))
+    .unwrap();
+    assert_eq!(first.id(), second.id());
+    assert_eq!(second.role(), owner_role);
+
+    let stale = AcceptInvite {
+        token: old_token,
+        name: "Bob".to_string(),
+        password: "bob password".to_string(),
+    };
+    assert_eq!(
+        block_on(accept_invite(&ports, &env, stale)).map(|(u, ..)| u.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
+    );
+}
+
+#[test]
+fn an_invite_expires_after_a_week() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let input = InviteUser {
+        email: "bob@example.com".to_string(),
+        role: support.id(),
+    };
+    block_on(invite_user(&owner_ctx(&owner), &ports, &env, input)).unwrap();
+    env.advance(hypha_users::Invite::LIFETIME_SECS);
+    let accepted = AcceptInvite {
+        token: env.last_token().unwrap(),
+        name: "Bob".to_string(),
+        password: "bob password".to_string(),
+    };
+    assert_eq!(
+        block_on(accept_invite(&ports, &env, accepted)).map(|(u, ..)| u.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
+    );
+}
+
+#[test]
+fn staff_members_cannot_be_invited() {
+    let (ports, env, owner) = world();
+    let input = InviteUser {
+        email: "ana@example.com".to_string(),
+        role: owner.role(),
+    };
+    assert_eq!(
+        block_on(invite_user(&owner_ctx(&owner), &ports, &env, input)).map(|i| i.id()),
+        Err(CommandError::UserExists(owner.email().clone()))
+    );
+}
+
+#[test]
+fn nobody_invites_with_a_role_stronger_than_their_own() {
+    let (ports, env, owner) = world();
+    let ctx = Ctx::new(Actor::System, vec![Scope::UsersWrite]);
+    let input = InviteUser {
+        email: "bob@example.com".to_string(),
+        role: owner.role(),
+    };
+    assert_eq!(
+        block_on(invite_user(&ctx, &ports, &env, input)).map(|i| i.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::CannotGrant(
+            Scope::ProductsRead
+        )))
+    );
+    assert!(env.sent().is_empty());
+}
+
+#[test]
+fn a_failed_email_keeps_the_invite_and_inviting_again_resends() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let invite = || InviteUser {
+        email: "bob@example.com".to_string(),
+        role: support.id(),
+    };
+    env.fail_sending(true);
+    assert_eq!(
+        block_on(invite_user(&owner_ctx(&owner), &ports, &env, invite())).map(|i| i.id()),
+        Err(CommandError::Notify(NotifyError(
+            "the test made sending fail".to_string()
+        )))
+    );
+    env.fail_sending(false);
+    block_on(invite_user(&owner_ctx(&owner), &ports, &env, invite())).unwrap();
+    assert_eq!(env.sent().len(), 1);
+}
+
+#[test]
+fn accepting_follows_the_password_and_name_rules() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let input = InviteUser {
+        email: "bob@example.com".to_string(),
+        role: support.id(),
+    };
+    block_on(invite_user(&owner_ctx(&owner), &ports, &env, input)).unwrap();
+    let accepted = AcceptInvite {
+        token: env.last_token().unwrap(),
+        name: "Bob".to_string(),
+        password: "short".to_string(),
+    };
+    assert_eq!(
+        block_on(accept_invite(&ports, &env, accepted)).map(|(u, ..)| u.id()),
+        Err(CommandError::Password(PasswordError::TooShort { min: 8 }))
+    );
+    let bob = Email::new("bob@example.com").unwrap();
+    assert_eq!(block_on(ports.users.get_by_email(&bob)), Ok(None));
+}
+
+// ---------- roles ----------
+
+#[test]
+fn role_names_are_unique_ignoring_case() {
+    let (ports, env, owner) = world();
+    support_role(&ports, &env, &owner);
+    assert_eq!(
+        block_on(create_role(
+            &owner_ctx(&owner),
+            &ports.roles,
+            &env,
+            "SUPPORT",
+            &[Scope::OrdersRead]
+        ))
+        .map(|r| r.id()),
+        Err(CommandError::RoleNameTaken("Support".to_string()))
+    );
+}
+
+#[test]
+fn a_race_for_a_role_name_reports_the_winner() {
+    let (ports, env, owner) = world();
+    support_role(&ports, &env, &owner);
+    ports.roles.hide_next_lookups(1);
+    assert_eq!(
+        block_on(create_role(
+            &owner_ctx(&owner),
+            &ports.roles,
+            &env,
+            "support",
+            &[Scope::OrdersRead]
+        ))
+        .map(|r| r.id()),
+        Err(CommandError::RoleNameTaken("Support".to_string()))
+    );
+}
+
+#[test]
+fn the_owner_role_cannot_be_edited() {
+    let (ports, _, owner) = world();
+    let change = UpdateRole {
+        name: Some("Boss".to_string()),
+        ..UpdateRole::default()
+    };
+    assert_eq!(
+        block_on(update_role(
+            &owner_ctx(&owner),
+            &ports.roles,
+            owner.role(),
+            change
+        ))
+        .map(|r| r.id()),
+        Err(CommandError::Role(RoleError::OwnerRoleFixed))
+    );
+}
+
+#[test]
+fn nobody_creates_or_edits_a_role_beyond_their_scopes() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let limited = Ctx::new(Actor::System, vec![Scope::UsersWrite, Scope::OrdersRead]);
+    assert_eq!(
+        block_on(create_role(
+            &limited,
+            &ports.roles,
+            &env,
+            "Writers",
+            &[Scope::OrdersWrite]
+        ))
+        .map(|r| r.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::CannotGrant(
+            Scope::OrdersWrite
+        )))
+    );
+    // Support has scopes `limited` lacks, so it can't touch it at all.
+    let change = UpdateRole {
+        scopes: Some(vec![Scope::OrdersRead]),
+        ..UpdateRole::default()
+    };
+    assert_eq!(
+        block_on(update_role(&limited, &ports.roles, support.id(), change)).map(|r| r.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::CannotGrant(
+            Scope::CustomersRead
+        )))
+    );
+}
+
+// ---------- users ----------
+
+#[test]
+fn the_last_owner_stays_an_active_owner() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    for change in [
+        UpdateUser {
+            status: Some(UserStatus::Disabled),
+            ..UpdateUser::default()
+        },
+        UpdateUser {
+            role: Some(support.id()),
+            ..UpdateUser::default()
+        },
+    ] {
+        assert_eq!(
+            block_on(update_user(&owner_ctx(&owner), &ports, owner.id(), change)).map(|u| u.id()),
+            Err(CommandError::LastOwner)
+        );
+    }
+}
+
+#[test]
+fn an_owner_can_step_down_once_another_exists() {
+    let (ports, env, owner) = world();
+    let (bob, _) = join(&ports, &env, &owner, owner.role());
+    let support = support_role(&ports, &env, &owner);
+    let step_down = UpdateUser {
+        role: Some(support.id()),
+        ..UpdateUser::default()
+    };
+    let ana = block_on(update_user(
+        &owner_ctx(&owner),
+        &ports,
+        owner.id(),
+        step_down,
+    ))
+    .unwrap();
+    assert_eq!(ana.role(), support.id());
+    // Now Bob is the last one.
+    let disable = UpdateUser {
+        status: Some(UserStatus::Disabled),
+        ..UpdateUser::default()
+    };
+    assert_eq!(
+        block_on(update_user(&owner_ctx(&owner), &ports, bob.id(), disable)).map(|u| u.id()),
+        Err(CommandError::LastOwner)
+    );
+}
+
+#[test]
+fn nobody_disables_someone_stronger() {
+    let (ports, _, owner) = world();
+    let limited = Ctx::new(Actor::System, vec![Scope::UsersWrite]);
+    let disable = UpdateUser {
+        status: Some(UserStatus::Disabled),
+        ..UpdateUser::default()
+    };
+    assert_eq!(
+        block_on(update_user(&limited, &ports, owner.id(), disable)).map(|u| u.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::CannotGrant(
+            Scope::ProductsRead
+        )))
+    );
+    // Renaming changes no power, so it is fine.
+    let rename = UpdateUser {
+        name: Some("Ana B.".to_string()),
+        ..UpdateUser::default()
+    };
+    assert_eq!(
+        block_on(update_user(&limited, &ports, owner.id(), rename)).map(|u| u.name().to_string()),
+        Ok("Ana B.".to_string())
+    );
+}
+
+#[test]
+fn reading_a_user_needs_users_read() {
+    let (ports, _, owner) = world();
+    let ctx = Ctx::new(Actor::System, vec![Scope::OrdersRead]);
+    assert_eq!(
+        block_on(get_user(&ctx, &ports.users, owner.id())).map(|u| u.id()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::UsersRead
+        )))
+    );
+    let unknown = UserId::from_uuid(Uuid::from_u128(999));
+    assert_eq!(
+        block_on(get_user(&Ctx::system(), &ports.users, unknown)).map(|u| u.id()),
+        Err(CommandError::UserNotFound(unknown))
+    );
+}
+
+// ---------- password reset ----------
+
+#[test]
+fn a_reset_is_emailed_to_staff_only() {
+    let (ports, env, _) = world();
+    block_on(request_password_reset(&ports, &env, "nobody@example.com")).unwrap();
+    assert!(env.sent().is_empty());
+    block_on(request_password_reset(&ports, &env, "ana@example.com")).unwrap();
+    let sent = env.sent();
+    let [StaffEmail::PasswordReset { to, token, .. }] = sent.as_slice() else {
+        panic!("expected one reset email, got {:?}", env.sent());
+    };
+    assert_eq!(to.as_str(), "ana@example.com");
+    block_on(hypha_auth::reset_password(
+        &ports,
+        &env,
+        token,
+        "brand new pass",
+    ))
+    .unwrap();
+    assert!(block_on(login(&ports, &env, "ana@example.com", "brand new pass")).is_ok());
+}
+
+#[test]
+fn a_disabled_user_gets_no_reset_email() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let (bob, _) = join(&ports, &env, &owner, support.id());
+    let disable = UpdateUser {
+        status: Some(UserStatus::Disabled),
+        ..UpdateUser::default()
+    };
+    block_on(update_user(&owner_ctx(&owner), &ports, bob.id(), disable)).unwrap();
+    let before = env.sent().len();
+    block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
+    assert_eq!(env.sent().len(), before);
+}

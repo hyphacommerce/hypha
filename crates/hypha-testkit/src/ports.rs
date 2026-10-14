@@ -1,3 +1,4 @@
+use hypha_auth::{HasApiKeys, HasIdentities, HasPasswordResets, HasSessions};
 use hypha_cart::HasCarts;
 use hypha_core::HasIdempotency;
 use hypha_customers::HasCustomers;
@@ -6,11 +7,14 @@ use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_orders::HasOrders;
 use hypha_products::HasProducts;
 use hypha_tax::{HasTaxClasses, HasTaxRegions};
+use hypha_users::{HasInvites, HasRoles, HasUsers};
 
 use crate::{
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryIdempotencyRepo,
-    InMemoryInventoryItemRepo, InMemoryLocationRepo, InMemoryMarketRepo, InMemoryOrderRepo,
-    InMemoryPriceListRepo, InMemoryProductRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
+    InMemoryApiKeyRepo, InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo,
+    InMemoryIdempotencyRepo, InMemoryIdentityRepo, InMemoryInventoryItemRepo, InMemoryInviteRepo,
+    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryOrderRepo, InMemoryPasswordResetRepo,
+    InMemoryPriceListRepo, InMemoryProductRepo, InMemoryRoleRepo, InMemorySessionRepo,
+    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
 };
 
 /// Every repository of one store, in memory: the in-memory host's storage and the
@@ -30,6 +34,14 @@ pub struct InMemoryPorts {
     pub customers: InMemoryCustomerRepo,
     pub idempotency: InMemoryIdempotencyRepo,
     pub orders: InMemoryOrderRepo,
+    // Staff and keys live in the store's database (design note 0006, T4).
+    pub identities: InMemoryIdentityRepo,
+    pub sessions: InMemorySessionRepo,
+    pub api_keys: InMemoryApiKeyRepo,
+    pub password_resets: InMemoryPasswordResetRepo,
+    pub users: InMemoryUserRepo,
+    pub roles: InMemoryRoleRepo,
+    pub invites: InMemoryInviteRepo,
 }
 
 impl HasCarts for InMemoryPorts {
@@ -113,5 +125,54 @@ impl HasOrders for InMemoryPorts {
     type Orders = InMemoryOrderRepo;
     fn orders(&self) -> &InMemoryOrderRepo {
         &self.orders
+    }
+}
+
+impl HasIdentities for InMemoryPorts {
+    type Identities = InMemoryIdentityRepo;
+    fn identities(&self) -> &InMemoryIdentityRepo {
+        &self.identities
+    }
+}
+
+impl HasSessions for InMemoryPorts {
+    type Sessions = InMemorySessionRepo;
+    fn sessions(&self) -> &InMemorySessionRepo {
+        &self.sessions
+    }
+}
+
+impl HasApiKeys for InMemoryPorts {
+    type ApiKeys = InMemoryApiKeyRepo;
+    fn api_keys(&self) -> &InMemoryApiKeyRepo {
+        &self.api_keys
+    }
+}
+
+impl HasPasswordResets for InMemoryPorts {
+    type PasswordResets = InMemoryPasswordResetRepo;
+    fn password_resets(&self) -> &InMemoryPasswordResetRepo {
+        &self.password_resets
+    }
+}
+
+impl HasUsers for InMemoryPorts {
+    type Users = InMemoryUserRepo;
+    fn users(&self) -> &InMemoryUserRepo {
+        &self.users
+    }
+}
+
+impl HasRoles for InMemoryPorts {
+    type Roles = InMemoryRoleRepo;
+    fn roles(&self) -> &InMemoryRoleRepo {
+        &self.roles
+    }
+}
+
+impl HasInvites for InMemoryPorts {
+    type Invites = InMemoryInviteRepo;
+    fn invites(&self) -> &InMemoryInviteRepo {
+        &self.invites
     }
 }

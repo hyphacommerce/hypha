@@ -120,11 +120,12 @@ impl Scope {
     /// What a publishable API key grants: enough for a storefront to show products and
     /// run a cart through checkout, nothing that changes the catalog, customers or
     /// orders (design note 0008, section 4). `carts:write` implies `carts:read`.
+    /// In `ALL` order, like every stored scope list.
     pub const STOREFRONT: [Scope; 5] = [
         Scope::ProductsRead,
         Scope::MarketsRead,
-        Scope::StoresRead,
         Scope::CartsWrite,
+        Scope::StoresRead,
         Scope::Checkout,
     ];
 

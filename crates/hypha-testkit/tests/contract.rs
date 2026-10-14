@@ -97,3 +97,57 @@ fn idempotency_repo() {
 fn order_repo() {
     block_on(contract::order_repo(async || InMemoryOrderRepo::default()));
 }
+
+#[test]
+fn identity_repo() {
+    block_on(contract::identity_repo(async || {
+        hypha_testkit::InMemoryIdentityRepo::default()
+    }));
+}
+
+#[test]
+fn session_repo() {
+    block_on(contract::session_repo(async || {
+        hypha_testkit::InMemorySessionRepo::default()
+    }));
+}
+
+#[test]
+fn api_key_repo() {
+    block_on(contract::api_key_repo(async || {
+        hypha_testkit::InMemoryApiKeyRepo::default()
+    }));
+}
+
+#[test]
+fn password_reset_repo() {
+    block_on(contract::password_reset_repo(async || {
+        hypha_testkit::InMemoryPasswordResetRepo::default()
+    }));
+}
+
+#[test]
+fn user_repo() {
+    block_on(contract::user_repo(async || {
+        hypha_testkit::InMemoryUserRepo::default()
+    }));
+}
+
+#[test]
+fn role_repo() {
+    block_on(contract::role_repo(async || {
+        hypha_testkit::InMemoryRoleRepo::default()
+    }));
+}
+
+#[test]
+fn invite_repo() {
+    block_on(contract::invite_repo(async || {
+        hypha_testkit::InMemoryInviteRepo::default()
+    }));
+}
+
+#[test]
+fn staff_batch() {
+    block_on(contract::staff_batch(async || InMemoryPorts::default()));
+}
