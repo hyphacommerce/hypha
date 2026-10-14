@@ -420,7 +420,8 @@ async fn verify_current_password(
     }
 }
 
-/// Changes the password of `session`'s identity and logs out its other sessions.
+/// Changes the password of `session`'s identity, logs out its other sessions and uses
+/// up any open reset links.
 pub async fn change_password<S>(
     ports: &S,
     env: &impl AuthEnv,
@@ -429,7 +430,7 @@ pub async fn change_password<S>(
     new: &str,
 ) -> Result<(), CommandError>
 where
-    S: HasIdentities + HasBatch<Batch: StageIdentities + StageSessions>,
+    S: HasIdentities + HasBatch<Batch: StageIdentities + StageSessions + StagePasswordResets>,
 {
     let new = Password::new(new)?;
     let mut identity = load_identity(ports.identities(), session.identity()).await?;
@@ -438,6 +439,8 @@ where
     let mut batch = ports.batch();
     batch.update_identity(&mut identity);
     batch.revoke_sessions(identity.id(), Some(session.id()), env.now());
+    // A reset link sent before would otherwise undo the change.
+    batch.use_up_password_resets(identity.id(), env.now());
     ports.commit(batch).await?;
     Ok(())
 }
@@ -474,8 +477,8 @@ where
     Ok(Some((identity, reset, token)))
 }
 
-/// Sets a new password with an emailed reset token, uses the token up and logs out
-/// every session of the identity, in one batch.
+/// Sets a new password with an emailed reset token, uses up that token and every other
+/// open one of the identity, and logs out all its sessions, in one batch.
 pub async fn reset_password<S>(
     ports: &S,
     env: &impl AuthEnv,
@@ -504,6 +507,8 @@ where
     let mut batch = ports.batch();
     batch.update_identity(&mut identity);
     batch.update_password_reset(&mut reset);
+    // Any other link that went out (a second request, a leaked email) stops working too.
+    batch.use_up_password_resets(identity.id(), now);
     batch.revoke_sessions(identity.id(), None, now);
     // Two resets with the same token race on the reset's version: one wins.
     ports.commit(batch).await?;

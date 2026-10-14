@@ -86,6 +86,11 @@ pub trait StageSessions {
 /// Stages password reset writes in a `hypha_core::HasBatch` batch.
 pub trait StagePasswordResets {
     fn update_password_reset(&mut self, reset: &mut PasswordReset);
+    /// Marks every unused reset of `identity` as used at `at`, bumping their versions:
+    /// once the password changed, no older reset link may change it again. Runs after
+    /// the batch's single updates, so a reset staged with `update_password_reset` keeps
+    /// its own time.
+    fn use_up_password_resets(&mut self, identity: IdentityId, at: Timestamp);
 }
 
 /// Accessors, like `hypha_customers::HasCustomers`: commands bind the ones they use.

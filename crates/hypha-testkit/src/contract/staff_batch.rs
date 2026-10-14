@@ -44,6 +44,45 @@ where
     revoke_sessions(&make().await).await;
     scenario("staff batch: a reset updates identity and reset; a stale reset writes nothing");
     password_reset(&make().await).await;
+    scenario("staff batch: using up resets spares other identities and used ones");
+    use_up_resets(&make().await).await;
+}
+
+async fn use_up_resets<S>(ports: &S)
+where
+    S: HasBatch + HasPasswordResets,
+    S::Batch: StagePasswordResets,
+{
+    let early = Timestamp::from_unix_micros(1);
+    let at = Timestamp::from_unix_micros(100);
+    let mut presented = reset(1, 1, 1);
+    let mut other = reset(2, 1, 2);
+    let mut used = reset(3, 1, 3);
+    let mut someone_else = reset(4, 2, 4);
+    used.mark_used(early);
+    for r in [&mut presented, &mut other, &mut used, &mut someone_else] {
+        ports.password_resets().insert(r).await.unwrap();
+    }
+    let later = Timestamp::from_unix_micros(50);
+    presented.mark_used(later);
+    let mut batch = ports.batch();
+    batch.update_password_reset(&mut presented);
+    batch.use_up_password_resets(presented.identity(), at);
+    ports.commit(batch).await.unwrap();
+
+    let get = async |n: u8| {
+        ports
+            .password_resets()
+            .get_by_token(TokenHash::from_bytes([n; 32]))
+            .await
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(get(1).await, presented);
+    assert_eq!(get(2).await.used_at(), Some(at));
+    assert_eq!(get(2).await.version(), Version::new(2));
+    assert_eq!(get(3).await, used);
+    assert_eq!(get(4).await, someone_else);
 }
 
 async fn accept_invite<S>(ports: &S)

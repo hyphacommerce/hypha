@@ -610,6 +610,67 @@ fn a_reset_sets_the_password_once_and_logs_everyone_out() {
 }
 
 #[test]
+fn a_reset_uses_up_every_other_reset_link() {
+    let (ports, env) = world();
+    let start = || {
+        block_on(start_password_reset(
+            &ports,
+            &env,
+            PrincipalKind::Staff,
+            "ana@example.com",
+        ))
+        .unwrap()
+        .unwrap()
+        .2
+    };
+    let (first, second) = (start(), start());
+    block_on(reset_password(
+        &ports,
+        &env,
+        first.expose(),
+        "brand new pass",
+    ))
+    .unwrap();
+    assert_eq!(
+        block_on(reset_password(
+            &ports,
+            &env,
+            second.expose(),
+            "another pass"
+        ))
+        .map(|i| i.id()),
+        Err(CommandError::InvalidToken)
+    );
+}
+
+#[test]
+fn changing_the_password_uses_up_open_reset_links() {
+    let (ports, env) = world();
+    let (_, _, link) = block_on(start_password_reset(
+        &ports,
+        &env,
+        PrincipalKind::Staff,
+        "ana@example.com",
+    ))
+    .unwrap()
+    .unwrap();
+    let token = token_of(&login(&ports, &env));
+    let session = block_on(authenticate_session(&ports.sessions, &env, &token)).unwrap();
+    block_on(change_password(
+        &ports,
+        &env,
+        &session,
+        PASSWORD,
+        "new password",
+    ))
+    .unwrap();
+    assert_eq!(
+        block_on(reset_password(&ports, &env, link.expose(), "another pass")).map(|i| i.id()),
+        Err(CommandError::InvalidToken)
+    );
+}
+
+#[test]
 fn a_reset_token_expires_after_an_hour() {
     let (ports, env) = world();
     let (_, _, token) = block_on(start_password_reset(

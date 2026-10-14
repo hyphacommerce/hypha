@@ -623,3 +623,26 @@ pub(crate) async fn update_password_reset(
         .map_err(repo_error)?;
     row.map(|_| ()).ok_or(RepoError::StaleVersion)
 }
+
+/// `StagePasswordResets::use_up_password_resets` inside the batch's transaction.
+pub(crate) async fn use_up_password_resets(
+    client: &impl GenericClient,
+    identity: IdentityId,
+    at: Timestamp,
+) -> Result<(), RepoError> {
+    client
+        .query_typed(
+            &format!(
+                "UPDATE password_resets SET version = version + 1, used_at = {}
+                 WHERE identity_id = $1 AND used_at IS NULL",
+                ts(2)
+            ),
+            &[
+                (&identity.as_uuid(), Type::UUID),
+                (&at.unix_micros(), Type::INT8),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    Ok(())
+}
