@@ -1,4 +1,4 @@
-use hypha_core::{AuthError, Ctx, ErrorCode, OrderId, RepoError, Scope};
+use hypha_core::{AuthError, Ctx, ErrorCode, OrderId, Page, PageRequest, RepoError, Scope};
 use thiserror::Error;
 
 use crate::{FinancialStatus, Order, OrderRepo};
@@ -21,6 +21,16 @@ impl ErrorCode for CommandError {
             CommandError::OrderNotFound(_) => "order_not_found",
         }
     }
+}
+
+/// A page of orders, newest first (design note 0012).
+pub async fn list_orders<R: OrderRepo>(
+    ctx: &Ctx,
+    orders: &R,
+    page: PageRequest<OrderId>,
+) -> Result<Page<Order>, CommandError> {
+    ctx.require(Scope::OrdersRead)?;
+    Ok(orders.list(page).await?)
 }
 
 pub async fn get_order<R: OrderRepo>(

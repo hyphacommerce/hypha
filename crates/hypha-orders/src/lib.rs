@@ -8,7 +8,7 @@ pub mod error;
 pub mod order;
 pub mod repo;
 
-pub use commands::{CommandError, get_order, mark_order_paid};
+pub use commands::{CommandError, get_order, list_orders, mark_order_paid};
 pub use error::OrderError;
 pub use order::{
     FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderLine, OrderNumber, OrderSnapshot,

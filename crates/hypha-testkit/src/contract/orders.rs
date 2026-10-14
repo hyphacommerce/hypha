@@ -1,7 +1,7 @@
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId, OrderLineId, Price,
-    ProductId, Quantity, RepoError, TaxClassId, TaxRate, TaxRegionId, Timestamp, VariantId,
-    Version, Versioned,
+    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId, OrderLineId,
+    PageLimit, PageRequest, Price, ProductId, Quantity, RepoError, TaxClassId, TaxRate,
+    TaxRegionId, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_orders::{
     FinancialStatus, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, OrderTax, OrderTaxSource,
@@ -23,6 +23,8 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     unique_keys(&make().await).await;
     scenario("order: numbers start at 1001 and increase");
     numbers(&make().await).await;
+    scenario("order: list pages newest first, after a cursor");
+    list_pages(&make().await).await;
 }
 
 fn eur(amount: i64) -> Money {
@@ -205,4 +207,52 @@ async fn numbers<R: OrderRepo>(repo: &R) {
     assert_eq!(first, number(1001));
     let second = repo.next_number().await.unwrap();
     assert!(second > first);
+}
+
+async fn listed<R: OrderRepo>(repo: &R, after: Option<u128>, limit: u32) -> (Vec<OrderId>, bool) {
+    let page = repo
+        .list(PageRequest {
+            after: after.map(oid),
+            limit: PageLimit::new(limit).unwrap(),
+        })
+        .await
+        .unwrap();
+    (page.items.iter().map(Order::id).collect(), page.has_more)
+}
+
+async fn list_pages<R: OrderRepo>(repo: &R) {
+    assert_eq!(listed(repo, None, 10).await, (vec![], false));
+
+    // Orders 1 to 3, inserted out of order; 3 has two lines and is paid.
+    let mut full = order_with(3, vec![full_line(31), plain_line(32)], true);
+    full.mark_paid();
+    repo.insert(&mut full).await.unwrap();
+    for n in [1, 2] {
+        repo.insert(&mut order(n)).await.unwrap();
+    }
+
+    // Whole aggregates come back, lines included.
+    let first = repo
+        .list(PageRequest {
+            after: None,
+            limit: PageLimit::new(2).unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        first.items,
+        vec![
+            repo.get(oid(3)).await.unwrap().unwrap(),
+            repo.get(oid(2)).await.unwrap().unwrap(),
+        ]
+    );
+    assert!(first.has_more);
+
+    assert_eq!(listed(repo, Some(2), 2).await, (vec![oid(1)], false));
+    assert_eq!(
+        listed(repo, Some(3), 2).await,
+        (vec![oid(2), oid(1)], false)
+    );
+    assert_eq!(listed(repo, Some(1), 2).await, (vec![], false));
+    assert_eq!(listed(repo, Some(99), 1).await, (vec![oid(3)], true));
 }

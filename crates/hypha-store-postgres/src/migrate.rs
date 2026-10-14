@@ -104,6 +104,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "password_reset_lookups",
             sql: include_str!("../migrations/0016_password_reset_lookups.sql"),
         },
+        Migration {
+            version: 17,
+            name: "list_pages",
+            sql: include_str!("../migrations/0017_list_pages.sql"),
+        },
     ],
 };
 

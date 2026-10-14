@@ -22,7 +22,9 @@ use axum::{
     routing::{MethodFilter, on},
 };
 
-use hypha_core::Timestamp;
+use std::{fmt::Display, str::FromStr};
+
+use hypha_core::{Page, PageLimit, PageRequest, Timestamp};
 
 use crate::{
     error::ApiError,
@@ -34,6 +36,32 @@ pub(crate) fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
     jiff::Timestamp::from_microsecond(at.unix_micros())
         .map(|t| t.to_string())
         .map_err(ApiError::internal)
+}
+
+/// The page a list route's `?cursor=&limit=` asks for (design note 0012). No `limit` is
+/// `PageLimit::DEFAULT`, one out of range is `422 invalid_limit`; a cursor this list
+/// didn't hand out is `400 invalid_cursor`.
+///
+/// Cursors are opaque to clients. Today one is the last item's ID; a list sorted by
+/// something else would encode its sort key too, without changing the API.
+pub(crate) fn page_request<Id: FromStr>(
+    cursor: Option<&str>,
+    limit: Option<u32>,
+) -> Result<PageRequest<Id>, ApiError> {
+    let after = cursor
+        .map(|c| c.parse().map_err(|_| ApiError::invalid_cursor()))
+        .transpose()?;
+    Ok(PageRequest {
+        after,
+        limit: limit.map(PageLimit::new).transpose()?.unwrap_or_default(),
+    })
+}
+
+/// The cursor of the page after `page`, if it has items (see `page_request`).
+pub(crate) fn next_cursor<T, Id: Display>(page: &Page<T>, id: impl Fn(&T) -> Id) -> Option<String> {
+    page.has_more
+        .then(|| page.items.last().map(|item| id(item).to_string()))
+        .flatten()
 }
 
 /// Every route, once (design note 0010, S7): `[surface, METHOD, "path", handler]`.
@@ -53,6 +81,7 @@ macro_rules! route_table {
 
             // ---------- admin ----------
             [admin, GET, "/admin/store", stores::fetch],
+            [admin, PATCH, "/admin/store", stores::update],
             // staff auth (no credentials needed; rate limited, 0009)
             [admin, POST, "/admin/auth/login", auth::login_handler],
             [admin, POST, "/admin/auth/login/mfa", auth::finish_login_handler],
@@ -78,6 +107,7 @@ macro_rules! route_table {
             [admin, GET, "/admin/api-keys/{id}", api_keys::fetch],
             [admin, POST, "/admin/api-keys/{id}/revoke", api_keys::revoke],
             // products
+            [admin, GET, "/admin/products", products::list],
             [admin, POST, "/admin/products", products::create],
             [admin, GET, "/admin/products/{id}", products::fetch],
             [admin, PATCH, "/admin/products/{id}/status", products::set_status],
@@ -96,6 +126,7 @@ macro_rules! route_table {
             // carts: only linking a customer (storefronts set an email; 0010 §2)
             [admin, PUT, "/admin/carts/{id}/customer", carts::set_customer],
             // orders
+            [admin, GET, "/admin/orders", orders::list],
             [admin, GET, "/admin/orders/{id}", orders::fetch],
             [admin, POST, "/admin/orders/{id}/paid", orders::mark_paid],
             // customers

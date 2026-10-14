@@ -15,7 +15,7 @@ use utoipa::{
     PartialSchema, ToSchema,
     openapi::{
         ContentBuilder, Info, OpenApi, OpenApiBuilder, Paths, Ref, RefOr, ResponseBuilder, Schema,
-        path::{HttpMethod, Operation},
+        path::{HttpMethod, Operation, ParameterIn},
         security::{
             ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme,
         },
@@ -179,6 +179,15 @@ fn error_response(description: &str) -> RefOr<utoipa::openapi::Response> {
 fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
     let has_body = op.request_body.is_some();
     let has_path_params = row.path.contains('{');
+    let query: Vec<&str> = op
+        .parameters
+        .iter()
+        .flatten()
+        .filter_map(|p| match p {
+            RefOr::T(p) if p.parameter_in == ParameterIn::Query => Some(p.name.as_str()),
+            _ => None,
+        })
+        .collect();
     let writes = row.method != "GET";
     let mut errors: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     if has_path_params {
@@ -190,6 +199,24 @@ fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
             .entry("404")
             .or_default()
             .push("The resource in the path doesn't exist (`<resource>_not_found`).");
+    }
+    if !query.is_empty() {
+        errors
+            .entry("400")
+            .or_default()
+            .push("An unknown or malformed query parameter (`invalid_query`).");
+    }
+    if query.contains(&"cursor") {
+        errors
+            .entry("400")
+            .or_default()
+            .push("A `cursor` this list didn't return (`invalid_cursor`).");
+    }
+    if query.contains(&"limit") {
+        errors
+            .entry("422")
+            .or_default()
+            .push("A `limit` outside 1 to 100 (`invalid_limit`).");
     }
     if has_body {
         errors

@@ -1,7 +1,9 @@
-use hypha_core::{Actor, AuthError, Ctx, Currency, Money, MoneyError, ProductId, Scope, UserId};
+use hypha_core::{
+    Actor, AuthError, Ctx, Currency, Money, MoneyError, PageRequest, ProductId, Scope, UserId,
+};
 use hypha_products::{
     CommandError, CreateSimpleProduct, Handle, HandleError, ProductError, ProductStatus,
-    create_simple_product, get_product, repo::ProductRepo, set_product_status,
+    create_simple_product, get_product, list_products, repo::ProductRepo, set_product_status,
 };
 use hypha_testkit::{InMemoryProductRepo, SequentialIds};
 use pollster::block_on;
@@ -193,5 +195,49 @@ fn handle_taken_by_a_concurrent_insert_is_still_handle_taken() {
             handle: handle("mug"),
             product: first.id(),
         })
+    );
+}
+
+#[test]
+fn list_products_filters_by_status() {
+    let repo = InMemoryProductRepo::default();
+    let ids = SequentialIds::default();
+    let ctx = Ctx::system();
+    let mug = block_on(create_simple_product(&ctx, &repo, &ids, mug())).unwrap();
+    let mut cup_input = self::mug();
+    cup_input.handle = "cup".to_string();
+    let cup = block_on(create_simple_product(&ctx, &repo, &ids, cup_input)).unwrap();
+    let cup = block_on(set_product_status(
+        &ctx,
+        &repo,
+        cup.id(),
+        ProductStatus::Active,
+    ))
+    .unwrap();
+
+    let all = block_on(list_products(&ctx, &repo, None, PageRequest::default())).unwrap();
+    assert_eq!(all.items, vec![cup.clone(), mug]);
+    let active = block_on(list_products(
+        &ctx,
+        &repo,
+        Some(ProductStatus::Active),
+        PageRequest::default(),
+    ))
+    .unwrap();
+    assert_eq!(active.items, vec![cup]);
+}
+
+#[test]
+fn list_products_needs_products_read() {
+    let repo = InMemoryProductRepo::default();
+    let ctx = Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(9))),
+        vec![Scope::OrdersRead],
+    );
+    assert_eq!(
+        block_on(list_products(&ctx, &repo, None, PageRequest::default())),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::ProductsRead
+        )))
     );
 }

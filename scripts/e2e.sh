@@ -138,6 +138,9 @@ echo "## happy path"
 step "health" 200 - "$BASE/health"
 step "the store this deployment serves" 200 - "$BASE/admin/store"
 contains "store has a store_ ID" '"id":"store_'
+step "rename the store" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"name":"E2E Shop"}'
+contains "store has its new name" '"name":"E2E Shop"'
+step "a blank store name" 422 store_name_empty -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"name":" "}'
 step "create mug" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}'
 if [[ $BODY == *'"code":"handle_taken"'* ]]; then
@@ -153,6 +156,16 @@ CUP_VAR=$(variant)
 step "activate mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"active"}'
 contains "mug is active" '"status":"active"'
 step "activate cup" 200 - -X PATCH "$BASE/admin/products/$CUP/status" -H "$JSON" -d '{"status":"active"}'
+step "list products, one per page" 200 - "$BASE/admin/products?limit=1"
+contains "newest first, with more after it" "\"items\":[{\"id\":\"$CUP\""
+contains "with a cursor for the next page" '"has_more":true,"next_cursor":"'
+NEXT=$(sed -E 's/.*"next_cursor":"([^"]+)".*/\1/' <<<"$BODY")
+step "the next page" 200 - "$BASE/admin/products?limit=1&cursor=$NEXT"
+contains "is the mug" "\"id\":\"$MUG\""
+step "active products" 200 - "$BASE/admin/products?status=active"
+step "a page too large" 422 invalid_limit "$BASE/admin/products?limit=500"
+step "an unknown filter" 400 invalid_query "$BASE/admin/products?sort=title"
+step "a cursor from another list" 400 invalid_cursor "$BASE/admin/products?cursor=ord_00000000000000000000000000000000"
 
 step "create market" 201 - -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"Eurozone","countries":["HR","DE"],"currency":"EUR"}'
@@ -250,6 +263,8 @@ contains "the cart names its order" "\"order\":\"$ORDER\""
 step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/storefront/carts/$KEYED/lines" \
     -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "get the order" 200 - "$BASE/admin/orders/$ORDER"
+step "list orders" 200 - "$BASE/admin/orders?limit=1"
+contains "the order is listed first" "\"items\":[{\"id\":\"$ORDER\""
 contains "it has a placed_at" '"placed_at":"20'
 step "mark it paid" 200 - -X POST "$BASE/admin/orders/$ORDER/paid"
 contains "it is paid" '"financial_status":"paid"'

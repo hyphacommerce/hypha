@@ -1,6 +1,6 @@
-use hypha_core::{ProductId, RepoError, VariantId};
+use hypha_core::{Page, PageRequest, ProductId, RepoError, VariantId};
 use hypha_products::{
-    Handle, Product,
+    Handle, Product, ProductStatus,
     repo::{ProductRepo, keys},
 };
 
@@ -39,6 +39,19 @@ impl ProductRepo for InMemoryProductRepo {
 
     async fn get_many(&self, ids: &[ProductId]) -> Result<Vec<Product>, RepoError> {
         Ok(self.products.get_many(ids))
+    }
+
+    async fn list(
+        &self,
+        status: Option<ProductStatus>,
+        page: PageRequest<ProductId>,
+    ) -> Result<Page<Product>, RepoError> {
+        Ok(self.products.page(
+            |p| p.id().as_uuid(),
+            |p| status.is_none_or(|s| p.status() == s),
+            page.after.map(|id| id.as_uuid()),
+            page.limit,
+        ))
     }
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {

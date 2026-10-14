@@ -1,14 +1,15 @@
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{Money, ProductId, VariantId};
+use hypha_core::{Money, OptionId, OptionValueId, ProductId, VariantId};
 use hypha_products::{
     CreateSimpleProduct, HasProducts, Product, ProductStatus, create_simple_product, get_product,
-    set_product_status,
+    list_products, set_product_status,
 };
 use serde::{Deserialize, Serialize};
 
+use super::{next_cursor, page_request};
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId, Storefront},
+    extract::{Caller, JsonBody, PathId, QueryParams, Storefront},
     state::{SharedState, Storage},
 };
 
@@ -63,13 +64,35 @@ pub(super) struct ProductResponse {
     handle: String,
     title: String,
     status: StatusDto,
+    /// What variants differ by (Size, Color), in display order; empty for a product
+    /// with a single variant.
+    options: Vec<OptionResponse>,
     variants: Vec<VariantResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct OptionResponse {
+    id: OptionId,
+    name: String,
+    values: Vec<OptionValueResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct OptionValueResponse {
+    id: OptionValueId,
+    label: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct VariantResponse {
     id: VariantId,
+    /// The base price, before markets and price lists.
     price: Money,
+    sku: Option<String>,
+    /// Its option values ("M / Blue"); `null` for a product without options.
+    title: Option<String>,
+    /// One value per option, in the order of `options`.
+    selections: Vec<OptionValueId>,
 }
 
 impl From<&Product> for ProductResponse {
@@ -79,16 +102,82 @@ impl From<&Product> for ProductResponse {
             handle: p.handle().as_str().to_string(),
             title: p.title().to_string(),
             status: p.status().into(),
+            options: p
+                .options()
+                .iter()
+                .map(|o| OptionResponse {
+                    id: o.id(),
+                    name: o.name().to_string(),
+                    values: o
+                        .values()
+                        .iter()
+                        .map(|v| OptionValueResponse {
+                            id: v.id(),
+                            label: v.label().to_string(),
+                        })
+                        .collect(),
+                })
+                .collect(),
             variants: p
                 .variants()
                 .iter()
                 .map(|v| VariantResponse {
                     id: v.id(),
                     price: v.base_price().money(),
+                    sku: v.sku().map(str::to_string),
+                    title: p.variant_title(v.id()),
+                    selections: v.selections().to_vec(),
                 })
                 .collect(),
         }
     }
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(super) struct ListProductsQuery {
+    /// Only products in this status.
+    status: Option<StatusDto>,
+    /// The previous page's `next_cursor`; absent for the first page.
+    cursor: Option<String>,
+    /// Products per page, 1 to 100 (default 50).
+    #[param(minimum = 1, maximum = 100)]
+    limit: Option<u32>,
+}
+
+/// A page of products, newest first (design note 0012).
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct ProductPage {
+    items: Vec<ProductResponse>,
+    /// Whether there are more after these.
+    has_more: bool,
+    /// Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.
+    next_cursor: Option<String>,
+}
+
+/// Products in any status, newest first, optionally of one status.
+#[utoipa::path(
+    get,
+    path = "/admin/products",
+    params(ListProductsQuery),
+    responses((status = 200, description = "OK", body = ProductPage)),
+    extensions(("x-hypha-scopes" = json!(["products:read"]))),
+)]
+pub(super) async fn list<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    query: QueryParams<ListProductsQuery>,
+) -> Result<Json<ProductPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let query = query.parse()?;
+    let page = page_request(query.cursor.as_deref(), query.limit)?;
+    let page = list_products(&ctx, ports.products(), query.status.map(Into::into), page).await?;
+    Ok(Json(ProductPage {
+        items: page.items.iter().map(ProductResponse::from).collect(),
+        has_more: page.has_more,
+        next_cursor: next_cursor(&page, Product::id),
+    }))
 }
 
 /// Creates a product with one variant, as a draft.

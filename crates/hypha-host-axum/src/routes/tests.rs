@@ -237,6 +237,163 @@ async fn the_store_is_the_one_created_at_startup() {
     );
 }
 
+#[tokio::test]
+async fn the_store_can_be_renamed() {
+    let app = app().await;
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"name":" Lumen "}"#)).await;
+    assert_eq!(
+        (status, body["name"].as_str()),
+        (StatusCode::OK, Some("Lumen"))
+    );
+    // Absent keeps (JSON Merge Patch); `null` can't clear a required name.
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some("{}")).await;
+    assert_eq!(
+        (status, body["name"].as_str()),
+        (StatusCode::OK, Some("Lumen"))
+    );
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"name":null}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body")
+    );
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"name":"  "}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "store_name_empty")
+    );
+    let (_, body) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(body["name"].as_str(), Some("Lumen"));
+}
+
+// ---------- lists (design note 0012) ----------
+
+async fn create_product(app: &TestApp, handle: &str) -> String {
+    let body = json!({
+        "handle": handle,
+        "title": handle,
+        "price": { "amount": 1000, "currency": "EUR" },
+    });
+    let (status, created) = send(app, "POST", "/admin/products", Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    created["id"].as_str().unwrap().to_string()
+}
+
+fn ids(page: &Value) -> Vec<&str> {
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn products_list_newest_first_in_pages() {
+    let app = app().await;
+    let a = create_product(&app, "a").await;
+    let b = create_product(&app, "b").await;
+    let c = create_product(&app, "c").await;
+
+    let (status, first) = send(&app, "GET", "/admin/products?limit=2", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(ids(&first), [c.as_str(), b.as_str()]);
+    assert_eq!(
+        (&first["has_more"], &first["next_cursor"]),
+        (&json!(true), &json!(b))
+    );
+
+    let uri = format!("/admin/products?limit=2&cursor={b}");
+    let (_, second) = send(&app, "GET", &uri, None).await;
+    assert_eq!(ids(&second), [a.as_str()]);
+    assert_eq!(
+        (&second["has_more"], &second["next_cursor"]),
+        (&json!(false), &Value::Null)
+    );
+
+    let uri = format!("/admin/products/{b}/status");
+    let (status, _) = send(&app, "PATCH", &uri, Some(r#"{"status":"active"}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, active) = send(&app, "GET", "/admin/products?status=active", None).await;
+    assert_eq!(ids(&active), [b.as_str()]);
+    let (_, drafts) = send(&app, "GET", "/admin/products?status=draft", None).await;
+    assert_eq!(ids(&drafts), [c.as_str(), a.as_str()]);
+}
+
+#[tokio::test]
+async fn orders_list_starts_empty() {
+    let app = app().await;
+    let (status, page) = send(&app, "GET", "/admin/orders", None).await;
+    assert_eq!(
+        (status, page),
+        (
+            StatusCode::OK,
+            json!({ "items": [], "has_more": false, "next_cursor": null })
+        )
+    );
+}
+
+#[tokio::test]
+async fn bad_list_queries_are_rejected_with_codes() {
+    let app = app().await;
+    for (uri, expected) in [
+        (
+            "/admin/products?limit=0",
+            (StatusCode::UNPROCESSABLE_ENTITY, "invalid_limit"),
+        ),
+        (
+            "/admin/orders?limit=101",
+            (StatusCode::UNPROCESSABLE_ENTITY, "invalid_limit"),
+        ),
+        (
+            "/admin/products?limit=ten",
+            (StatusCode::BAD_REQUEST, "invalid_query"),
+        ),
+        (
+            "/admin/products?status=Active",
+            (StatusCode::BAD_REQUEST, "invalid_query"),
+        ),
+        (
+            "/admin/products?sort=title",
+            (StatusCode::BAD_REQUEST, "invalid_query"),
+        ),
+        (
+            "/admin/orders?cursor=prod_00000000000000000000000000000063",
+            (StatusCode::BAD_REQUEST, "invalid_cursor"),
+        ),
+        (
+            "/admin/orders?after=x",
+            (StatusCode::BAD_REQUEST, "invalid_query"),
+        ),
+    ] {
+        let (status, body) = send(&app, "GET", uri, None).await;
+        assert_eq!((status, code(&body)), expected, "{uri}");
+    }
+    // Credentials are checked before the query is read.
+    let (status, body) = send_with(&app, &[], "GET", "/admin/products?limit=0", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNAUTHORIZED, "unauthenticated")
+    );
+}
+
+#[tokio::test]
+async fn lists_need_read_scopes() {
+    let app = app().await;
+    let customers = key(
+        &app,
+        json!({ "kind": "secret", "name": "Customers", "scopes": ["customers:read"] }),
+    )
+    .await;
+    for uri in ["/admin/products", "/admin/orders"] {
+        let (status, body) = send_as(&app, &customers, "GET", uri, None).await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::FORBIDDEN, "missing_scope"),
+            "{uri}"
+        );
+    }
+}
+
 // ---------- authentication (design note 0008) ----------
 
 /// Logs the owner in; returns the session token.

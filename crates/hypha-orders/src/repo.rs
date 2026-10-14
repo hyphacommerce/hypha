@@ -1,4 +1,4 @@
-use hypha_core::{OrderId, RepoError};
+use hypha_core::{OrderId, Page, PageRequest, RepoError};
 
 use crate::{Order, OrderNumber};
 
@@ -16,6 +16,8 @@ pub mod keys {
 pub trait OrderRepo {
     async fn get(&self, id: OrderId) -> Result<Option<Order>, RepoError>;
     async fn get_by_number(&self, number: OrderNumber) -> Result<Option<Order>, RepoError>;
+    /// A page of orders, newest first (by ID; design note 0012).
+    async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<Order>, RepoError>;
     /// Stores a new order (version 1). Enforces every key in `keys`. Checkout inserts
     /// through `StageOrders` instead, together with its other writes.
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError>;

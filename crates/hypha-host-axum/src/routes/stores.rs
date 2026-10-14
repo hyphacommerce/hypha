@@ -1,11 +1,12 @@
 use axum::{Json, extract::State};
 use hypha_core::StoreId;
-use hypha_stores::{Store, get_store};
-use serde::Serialize;
+use hypha_stores::{Store, get_store, rename_store};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    extract::{Caller, Storefront},
+    extract::{Caller, JsonBody, Storefront},
+    patch,
     state::{SharedState, Storage},
 };
 
@@ -40,6 +41,41 @@ pub(super) async fn fetch<S: Storage>(
     let (_, ctx) = caller.authenticate(&state).await?;
     let directory = state.storage.directory().await?;
     let store = get_store(&ctx, &directory, state.store).await?;
+    Ok(Json(StoreResponse::from(&store)))
+}
+
+/// A JSON Merge Patch of the store: absent fields stay as they are.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct UpdateStoreRequest {
+    /// 1 to 100 characters, trimmed.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = String, required = false)]
+    name: Option<String>,
+}
+
+/// Changes the store's details.
+#[utoipa::path(
+    patch,
+    path = "/admin/store",
+    request_body = UpdateStoreRequest,
+    responses((status = 200, description = "OK", body = StoreResponse)),
+    extensions(("x-hypha-scopes" = json!(["stores:write"]))),
+)]
+pub(super) async fn update<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    body: JsonBody<UpdateStoreRequest>,
+) -> Result<Json<StoreResponse>, ApiError> {
+    // As in `fetch`: the ports go before the directory takes a connection.
+    let (_, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let directory = state.storage.directory().await?;
+    let store = match req.name {
+        Some(name) => rename_store(&ctx, &directory, state.store, &name).await?,
+        None => get_store(&ctx, &directory, state.store).await?,
+    };
     Ok(Json(StoreResponse::from(&store)))
 }
 

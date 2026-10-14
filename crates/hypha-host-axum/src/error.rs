@@ -12,11 +12,11 @@
 
 use axum::{
     Json,
-    extract::rejection::{JsonRejection, PathRejection},
+    extract::rejection::{JsonRejection, PathRejection, QueryRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use hypha_core::{ErrorCode, OrderId, RepoError, VariantId};
+use hypha_core::{ErrorCode, OrderId, PageError, RepoError, VariantId};
 use serde_json::{Value, json};
 
 /// Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`
@@ -148,6 +148,15 @@ impl ApiError {
         self
     }
 
+    /// A list's `?cursor=` that isn't one the list handed out.
+    pub fn invalid_cursor() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+            "the cursor is not one this list returned",
+        )
+    }
+
     pub fn missing_content_type() -> Self {
         Self::new(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -247,7 +256,25 @@ impl From<PathRejection> for ApiError {
     }
 }
 
+impl From<QueryRejection> for ApiError {
+    fn from(rejection: QueryRejection) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_query",
+            rejection.body_text(),
+        )
+    }
+}
+
 // ---------- domain command errors ----------
+
+/// A page size out of range (`?limit=`): checked by the host, which builds the
+/// `PageLimit` a list command takes.
+impl From<PageError> for ApiError {
+    fn from(e: PageError) -> Self {
+        Self::domain(StatusCode::UNPROCESSABLE_ENTITY, e)
+    }
+}
 
 impl From<hypha_products::CommandError> for ApiError {
     fn from(e: hypha_products::CommandError) -> Self {

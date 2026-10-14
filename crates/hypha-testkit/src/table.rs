@@ -75,6 +75,29 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
             .cloned()
     }
 
+    /// A page of the rows `matches` keeps, newest first by `id_of` (UUIDv7 IDs sort by
+    /// creation time), below `after` when given: what a database does with
+    /// `WHERE id < $after ORDER BY id DESC LIMIT n + 1`.
+    pub(crate) fn page(
+        &self,
+        id_of: impl Fn(&T) -> uuid::Uuid,
+        matches: impl Fn(&T) -> bool,
+        after: Option<uuid::Uuid>,
+        limit: hypha_core::PageLimit,
+    ) -> hypha_core::Page<T> {
+        let mut rows: Vec<T> = self
+            .rows
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|r| matches(r) && after.is_none_or(|a| id_of(r) < a))
+            .cloned()
+            .collect();
+        rows.sort_by_key(|r| std::cmp::Reverse(id_of(r)));
+        rows.truncate(limit.get() as usize + 1);
+        hypha_core::Page::from_overfetch(rows, limit)
+    }
+
     pub(crate) fn all(&self) -> Vec<T> {
         if self.hiding() {
             return Vec::new();

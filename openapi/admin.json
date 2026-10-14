@@ -4559,6 +4559,108 @@
         "x-hypha-staff-session": true
       }
     },
+    "/admin/orders": {
+      "get": {
+        "tags": [
+          "orders"
+        ],
+        "summary": "Orders, newest first.",
+        "operationId": "admin.orders.list",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Orders per page, 1 to 100 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "orders:read"
+        ]
+      }
+    },
     "/admin/orders/{id}": {
       "get": {
         "tags": [
@@ -5129,6 +5231,115 @@
       }
     },
     "/admin/products": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Products in any status, newest first, optionally of one status.",
+        "operationId": "admin.products.list",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only products in this status.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ProductStatus"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Products per page, 1 to 100 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      },
       "post": {
         "tags": [
           "products"
@@ -5876,6 +6087,123 @@
         ],
         "x-hypha-scopes": [
           "stores:read"
+        ]
+      },
+      "patch": {
+        "tags": [
+          "stores"
+        ],
+        "summary": "Changes the store's details.",
+        "operationId": "admin.stores.update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "stores:write"
         ]
       }
     },
@@ -8391,6 +8719,59 @@
           }
         ]
       },
+      "OptionId": {
+        "type": "string",
+        "description": "A OptionId: `opt_` and 32 hex digits.",
+        "examples": [
+          "opt_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^opt_[0-9a-f]{32}$"
+      },
+      "OptionResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "values"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/OptionId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionValueResponse"
+            }
+          }
+        }
+      },
+      "OptionValueId": {
+        "type": "string",
+        "description": "A OptionValueId: `optval_` and 32 hex digits.",
+        "examples": [
+          "optval_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^optval_[0-9a-f]{32}$"
+      },
+      "OptionValueResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/OptionValueId"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
       "OrderId": {
         "type": "string",
         "description": "A OrderId: `ord_` and 32 hex digits.",
@@ -8465,6 +8846,33 @@
               "null"
             ],
             "description": "The variant's option values (\"M / Blue\"); `null` for a product without options."
+          }
+        }
+      },
+      "OrderPage": {
+        "type": "object",
+        "description": "A page of orders, newest first (design note 0012).",
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether there are more after these."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderSummaryResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it."
           }
         }
       },
@@ -8547,6 +8955,60 @@
           }
         }
       },
+      "OrderSummaryResponse": {
+        "type": "object",
+        "description": "An order in a list: what a table of orders shows, without lines.",
+        "required": [
+          "id",
+          "number",
+          "placed_at",
+          "customer",
+          "email",
+          "country",
+          "financial_status",
+          "fulfillment_status",
+          "total",
+          "item_count"
+        ],
+        "properties": {
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "customer": {
+            "$ref": "#/components/schemas/CustomerId"
+          },
+          "email": {
+            "$ref": "#/components/schemas/Email"
+          },
+          "financial_status": {
+            "$ref": "#/components/schemas/FinancialStatusDto"
+          },
+          "fulfillment_status": {
+            "$ref": "#/components/schemas/FulfillmentStatusDto"
+          },
+          "id": {
+            "$ref": "#/components/schemas/OrderId"
+          },
+          "item_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many items, adding up line quantities.",
+            "minimum": 0
+          },
+          "number": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The human number, shown as \"#1001\"."
+          },
+          "placed_at": {
+            "type": "string",
+            "description": "RFC 3339, UTC."
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          }
+        }
+      },
       "OrderTaxResponse": {
         "type": "object",
         "required": [
@@ -8622,6 +9084,33 @@
         ],
         "pattern": "^prod_[0-9a-f]{32}$"
       },
+      "ProductPage": {
+        "type": "object",
+        "description": "A page of products, newest first (design note 0012).",
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether there are more after these."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it."
+          }
+        }
+      },
       "ProductResponse": {
         "type": "object",
         "required": [
@@ -8629,6 +9118,7 @@
           "handle",
           "title",
           "status",
+          "options",
           "variants"
         ],
         "properties": {
@@ -8637,6 +9127,13 @@
           },
           "id": {
             "$ref": "#/components/schemas/ProductId"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionResponse"
+            },
+            "description": "What variants differ by (Size, Color), in display order; empty for a product\nwith a single variant."
           },
           "status": {
             "$ref": "#/components/schemas/ProductStatus"
@@ -9087,6 +9584,17 @@
         },
         "additionalProperties": false
       },
+      "UpdateStoreRequest": {
+        "type": "object",
+        "description": "A JSON Merge Patch of the store: absent fields stay as they are.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "1 to 100 characters, trimmed."
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateTaxRegionRequest": {
         "type": "object",
         "properties": {
@@ -9165,14 +9673,36 @@
         "type": "object",
         "required": [
           "id",
-          "price"
+          "price",
+          "selections"
         ],
         "properties": {
           "id": {
             "$ref": "#/components/schemas/VariantId"
           },
           "price": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "The base price, before markets and price lists."
+          },
+          "selections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionValueId"
+            },
+            "description": "One value per option, in the order of `options`."
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its option values (\"M / Blue\"); `null` for a product without options."
           }
         }
       }

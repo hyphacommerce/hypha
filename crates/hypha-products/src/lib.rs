@@ -7,7 +7,8 @@ pub mod repo;
 pub mod variant;
 
 pub use commands::{
-    CommandError, CreateSimpleProduct, create_simple_product, get_product, set_product_status,
+    CommandError, CreateSimpleProduct, create_simple_product, get_product, list_products,
+    set_product_status,
 };
 pub use error::{HandleError, ProductError};
 pub use handle::Handle;

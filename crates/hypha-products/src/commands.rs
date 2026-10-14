@@ -1,6 +1,6 @@
 use hypha_core::{
-    AuthError, Ctx, ErrorCode, IdGenerator, Money, MoneyError, Price, ProductId, RepoError, Scope,
-    VariantId, report_duplicate,
+    AuthError, Ctx, ErrorCode, IdGenerator, Money, MoneyError, Page, PageRequest, Price, ProductId,
+    RepoError, Scope, VariantId, report_duplicate,
 };
 use thiserror::Error;
 
@@ -82,6 +82,18 @@ async fn handle_taken<R: ProductRepo>(
             handle: handle.clone(),
             product: existing.id(),
         }))
+}
+
+/// A page of products, newest first, only those with `status` when given (design note
+/// 0012).
+pub async fn list_products<R: ProductRepo>(
+    ctx: &Ctx,
+    repo: &R,
+    status: Option<ProductStatus>,
+    page: PageRequest<ProductId>,
+) -> Result<Page<Product>, CommandError> {
+    ctx.require(Scope::ProductsRead)?;
+    Ok(repo.list(status, page).await?)
 }
 
 pub async fn get_product<R: ProductRepo>(

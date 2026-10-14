@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    Money, OptionId, OptionValueId, ProductId, RepoError, VariantId, Version, Versioned,
+    Money, OptionId, OptionValueId, Page, PageRequest, ProductId, RepoError, VariantId, Version,
+    Versioned,
 };
 use hypha_products::{
     Handle, OptionSnapshot, OptionValueSnapshot, Product, ProductRepo, ProductSnapshot,
-    VariantSnapshot,
+    ProductStatus, VariantSnapshot,
 };
 use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
@@ -31,6 +32,38 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         let mut conn = self.conn().await;
         let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
         consistent_read!(conn.client(), |tx| load(tx, &ids).await)
+    }
+
+    async fn list(
+        &self,
+        status: Option<ProductStatus>,
+        page: PageRequest<ProductId>,
+    ) -> Result<Page<Product>, RepoError> {
+        let status = status.map(|s| s.as_str());
+        let after = page.after.map(|id| id.as_uuid());
+        let fetch = i64::from(page.limit.get()) + 1;
+        let mut conn = self.conn().await;
+        consistent_read!(conn.client(), |tx| {
+            let ids: Vec<Uuid> = tx
+                .query_typed(
+                    "SELECT id FROM products
+                     WHERE ($1::text IS NULL OR status = $1) AND ($2::uuid IS NULL OR id < $2)
+                     ORDER BY id DESC LIMIT $3",
+                    &[
+                        (&status, Type::TEXT),
+                        (&after, Type::UUID),
+                        (&fetch, Type::INT8),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?
+                .iter()
+                .map(|row| row.get(0))
+                .collect();
+            let mut products = load(tx, &ids).await?;
+            products.sort_by_key(|p| std::cmp::Reverse(p.id().as_uuid()));
+            Ok(Page::from_overfetch(products, page.limit))
+        })
     }
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {

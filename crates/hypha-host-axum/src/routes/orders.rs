@@ -5,14 +5,15 @@ use hypha_core::{
     ProductId, TaxClassId, TaxRate, VariantId,
 };
 use hypha_orders::{
-    FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, get_order, mark_order_paid,
+    FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, get_order, list_orders,
+    mark_order_paid,
 };
 use serde::{Deserialize, Serialize};
 
-use super::rfc3339;
+use super::{next_cursor, page_request, rfc3339};
 use crate::{
     error::ApiError,
-    extract::{Caller, KeyedJson, PathId, Storefront, idempotent_response},
+    extract::{Caller, KeyedJson, PathId, QueryParams, Storefront, idempotent_response},
     state::{SharedState, Storage},
 };
 
@@ -180,6 +181,94 @@ pub(super) async fn checkout_handler<S: Storage>(
         OrderResponse::new(&placed.value)?,
         placed.replayed,
     ))
+}
+
+/// An order in a list: what a table of orders shows, without lines.
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct OrderSummaryResponse {
+    id: OrderId,
+    /// The human number, shown as "#1001".
+    number: i64,
+    /// RFC 3339, UTC.
+    placed_at: String,
+    customer: CustomerId,
+    email: Email,
+    country: CountryCode,
+    financial_status: FinancialStatusDto,
+    fulfillment_status: FulfillmentStatusDto,
+    total: Money,
+    /// How many items, adding up line quantities.
+    item_count: u64,
+}
+
+impl OrderSummaryResponse {
+    fn new(order: &Order) -> Result<Self, ApiError> {
+        Ok(Self {
+            id: order.id(),
+            number: order.number().value(),
+            placed_at: rfc3339(order.placed_at())?,
+            customer: order.customer(),
+            email: order.email().clone(),
+            country: order.country(),
+            financial_status: order.financial_status().into(),
+            fulfillment_status: order.fulfillment_status().into(),
+            total: order.total(),
+            item_count: order
+                .lines()
+                .iter()
+                .map(|l| u64::from(l.quantity.value()))
+                .sum(),
+        })
+    }
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(super) struct ListOrdersQuery {
+    /// The previous page's `next_cursor`; absent for the first page.
+    cursor: Option<String>,
+    /// Orders per page, 1 to 100 (default 50).
+    #[param(minimum = 1, maximum = 100)]
+    limit: Option<u32>,
+}
+
+/// A page of orders, newest first (design note 0012).
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct OrderPage {
+    items: Vec<OrderSummaryResponse>,
+    /// Whether there are more after these.
+    has_more: bool,
+    /// Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.
+    next_cursor: Option<String>,
+}
+
+/// Orders, newest first.
+#[utoipa::path(
+    get,
+    path = "/admin/orders",
+    params(ListOrdersQuery),
+    responses((status = 200, description = "OK", body = OrderPage)),
+    extensions(("x-hypha-scopes" = json!(["orders:read"]))),
+)]
+pub(super) async fn list<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    query: QueryParams<ListOrdersQuery>,
+) -> Result<Json<OrderPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let query = query.parse()?;
+    let page = page_request(query.cursor.as_deref(), query.limit)?;
+    let page = list_orders(&ctx, ports.orders(), page).await?;
+    Ok(Json(OrderPage {
+        items: page
+            .items
+            .iter()
+            .map(OrderSummaryResponse::new)
+            .collect::<Result<_, _>>()?,
+        has_more: page.has_more,
+        next_cursor: next_cursor(&page, Order::id),
+    }))
 }
 
 /// An order.

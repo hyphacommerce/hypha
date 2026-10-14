@@ -1,6 +1,6 @@
 use hypha_core::{
-    Currency, Money, OptionId, OptionValueId, Price, ProductId, RepoError, VariantId, Version,
-    Versioned,
+    Currency, Money, OptionId, OptionValueId, PageLimit, PageRequest, Price, ProductId, RepoError,
+    VariantId, Version, Versioned,
 };
 use hypha_products::{
     Handle, NewVariant, OptionValue, Product, ProductOption, ProductRepo, ProductStatus, repo::keys,
@@ -29,6 +29,8 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     stale_update(&make().await).await;
     scenario("product: update of a missing product is stale");
     missing_update(&make().await).await;
+    scenario("product: list pages newest first, after a cursor, by status");
+    list_pages(&make().await).await;
 }
 
 // ---------- fixtures ----------
@@ -273,4 +275,83 @@ async fn handle_key_on_update<R: ProductRepo>(repo: &R) {
         Err(RepoError::Duplicate(keys::HANDLE))
     );
     assert_eq!(repo.get(pid(2)).await, Ok(Some(cup)));
+}
+
+fn page(after: Option<u128>, limit: u32) -> PageRequest<ProductId> {
+    PageRequest {
+        after: after.map(pid),
+        limit: PageLimit::new(limit).unwrap(),
+    }
+}
+
+async fn listed<R: ProductRepo>(
+    repo: &R,
+    status: Option<ProductStatus>,
+    after: Option<u128>,
+    limit: u32,
+) -> (Vec<ProductId>, bool) {
+    let page = repo.list(status, page(after, limit)).await.unwrap();
+    (page.items.iter().map(Product::id).collect(), page.has_more)
+}
+
+async fn list_pages<R: ProductRepo>(repo: &R) {
+    assert_eq!(listed(repo, None, None, 10).await, (vec![], false));
+
+    // Products 1 to 5, inserted out of order; 2 and 4 active (updated, so version 2).
+    for n in [3, 1, 5, 2, 4] {
+        let mut p = if n == 5 {
+            shirt(n, "shirt")
+        } else {
+            simple(n, &format!("p{n}"))
+        };
+        repo.insert(&mut p).await.unwrap();
+        if n % 2 == 0 {
+            p.set_status(ProductStatus::Active).unwrap();
+            repo.update(&mut p).await.unwrap();
+        }
+    }
+
+    // Whole aggregates come back, children included.
+    let first = repo.list(None, page(None, 2)).await.unwrap();
+    assert_eq!(
+        first.items,
+        vec![
+            repo.get(pid(5)).await.unwrap().unwrap(),
+            repo.get(pid(4)).await.unwrap().unwrap(),
+        ]
+    );
+    assert!(first.has_more);
+
+    assert_eq!(
+        listed(repo, None, Some(4), 2).await,
+        (vec![pid(3), pid(2)], true)
+    );
+    assert_eq!(listed(repo, None, Some(2), 2).await, (vec![pid(1)], false));
+    // Exactly `limit` left: no more after them.
+    assert_eq!(
+        listed(repo, None, Some(3), 2).await,
+        (vec![pid(2), pid(1)], false)
+    );
+    assert_eq!(listed(repo, None, Some(1), 2).await, (vec![], false));
+    // A cursor needn't be an existing product (it may have been deleted since).
+    assert_eq!(listed(repo, None, Some(99), 1).await, (vec![pid(5)], true));
+
+    let active = Some(ProductStatus::Active);
+    assert_eq!(
+        listed(repo, active, None, 10).await,
+        (vec![pid(4), pid(2)], false)
+    );
+    assert_eq!(listed(repo, active, None, 1).await, (vec![pid(4)], true));
+    assert_eq!(
+        listed(repo, active, Some(4), 1).await,
+        (vec![pid(2)], false)
+    );
+    assert_eq!(
+        listed(repo, Some(ProductStatus::Draft), Some(5), 10).await,
+        (vec![pid(3), pid(1)], false)
+    );
+    assert_eq!(
+        listed(repo, Some(ProductStatus::Archived), None, 10).await,
+        (vec![], false)
+    );
 }

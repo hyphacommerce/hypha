@@ -1,11 +1,11 @@
 use hypha_core::{
     Actor, AuthError, CartId, CountryCode, Ctx, Currency, CustomerId, Email, MarketId, Money,
-    OrderId, OrderLineId, Price, ProductId, Quantity, Scope, Timestamp, UserId, VariantId, Version,
-    Versioned,
+    OrderId, OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Scope, Timestamp, UserId,
+    VariantId, Version, Versioned,
 };
 use hypha_orders::{
     CommandError, FinancialStatus, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, get_order,
-    mark_order_paid,
+    list_orders, mark_order_paid,
 };
 use hypha_testkit::InMemoryOrderRepo;
 use pollster::block_on;
@@ -138,6 +138,9 @@ impl OrderRepo for LoadedBeforeAChange {
     ) -> Result<Option<Order>, hypha_core::RepoError> {
         self.repo.get_by_number(number).await
     }
+    async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<Order>, hypha_core::RepoError> {
+        self.repo.list(page).await
+    }
     async fn insert(&self, order: &mut Order) -> Result<(), hypha_core::RepoError> {
         self.repo.insert(order).await
     }
@@ -163,4 +166,30 @@ fn marking_an_order_paid_twice_at_once_succeeds_both_times() {
     let order = block_on(mark_order_paid(&Ctx::system(), &racing, order_id())).unwrap();
     assert_eq!(order.financial_status(), FinancialStatus::Paid);
     assert_eq!(order.version(), Version::new(2));
+}
+
+#[test]
+fn list_orders_returns_a_page() {
+    let repo = repo_with_order();
+    let page = block_on(list_orders(&Ctx::system(), &repo, PageRequest::default())).unwrap();
+    let stored = block_on(repo.get(order_id())).unwrap().unwrap();
+    assert_eq!(
+        page,
+        Page {
+            items: vec![stored],
+            has_more: false
+        }
+    );
+}
+
+#[test]
+fn list_orders_needs_orders_read() {
+    let repo = repo_with_order();
+    let ctx = user_with(vec![Scope::Checkout]);
+    assert_eq!(
+        block_on(list_orders(&ctx, &repo, PageRequest::default())),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::OrdersRead
+        )))
+    );
 }

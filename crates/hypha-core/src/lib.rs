@@ -8,6 +8,7 @@ pub mod ids;
 pub mod money;
 #[cfg(feature = "openapi")]
 mod openapi;
+pub mod page;
 pub mod ports;
 pub mod quantity;
 pub mod scope;
@@ -31,6 +32,7 @@ pub use ids::{
     UserId, VariantId,
 };
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
+pub use page::{Page, PageError, PageLimit, PageRequest};
 pub use ports::{
     Clock, HasBatch, IdGenerator, Notifier, NotifyError, Random, RepoError, report_duplicate,
 };

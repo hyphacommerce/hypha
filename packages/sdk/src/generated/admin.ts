@@ -597,6 +597,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Orders, newest first. */
+        get: operations["admin.orders.list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/orders/{id}": {
         parameters: {
             query?: never;
@@ -676,7 +693,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Products in any status, newest first, optionally of one status. */
+        get: operations["admin.products.list"];
         put?: never;
         /** Creates a product with one variant, as a draft. */
         post: operations["admin.products.create"];
@@ -769,7 +787,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Changes the store's details. */
+        patch: operations["admin.stores.update"];
         trace?: never;
     };
     "/admin/tax-assignments": {
@@ -1312,6 +1331,25 @@ export interface components {
             currency: "EUR" | "USD" | "RSD";
         };
         /**
+         * @description A OptionId: `opt_` and 32 hex digits.
+         * @example opt_0190f1a2b3c47d8e9f00112233445566
+         */
+        OptionId: string;
+        OptionResponse: {
+            id: components["schemas"]["OptionId"];
+            name: string;
+            values: components["schemas"]["OptionValueResponse"][];
+        };
+        /**
+         * @description A OptionValueId: `optval_` and 32 hex digits.
+         * @example optval_0190f1a2b3c47d8e9f00112233445566
+         */
+        OptionValueId: string;
+        OptionValueResponse: {
+            id: components["schemas"]["OptionValueId"];
+            label: string;
+        };
+        /**
          * @description A OrderId: `ord_` and 32 hex digits.
          * @example ord_0190f1a2b3c47d8e9f00112233445566
          */
@@ -1334,6 +1372,14 @@ export interface components {
             variant: components["schemas"]["VariantId"];
             /** @description The variant's option values ("M / Blue"); `null` for a product without options. */
             variant_title?: string | null;
+        };
+        /** @description A page of orders, newest first (design note 0012). */
+        OrderPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["OrderSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
         };
         OrderResponse: {
             cart: components["schemas"]["CartId"];
@@ -1358,6 +1404,28 @@ export interface components {
             tax_total: components["schemas"]["Money"];
             /** @description Whether line prices include tax (the market decided, at checkout). */
             taxes_included: boolean;
+            total: components["schemas"]["Money"];
+        };
+        /** @description An order in a list: what a table of orders shows, without lines. */
+        OrderSummaryResponse: {
+            country: components["schemas"]["CountryCode"];
+            customer: components["schemas"]["CustomerId"];
+            email: components["schemas"]["Email"];
+            financial_status: components["schemas"]["FinancialStatusDto"];
+            fulfillment_status: components["schemas"]["FulfillmentStatusDto"];
+            id: components["schemas"]["OrderId"];
+            /**
+             * Format: int64
+             * @description How many items, adding up line quantities.
+             */
+            item_count: number;
+            /**
+             * Format: int64
+             * @description The human number, shown as "#1001".
+             */
+            number: number;
+            /** @description RFC 3339, UTC. */
+            placed_at: string;
             total: components["schemas"]["Money"];
         };
         OrderTaxResponse: {
@@ -1385,9 +1453,22 @@ export interface components {
          * @example prod_0190f1a2b3c47d8e9f00112233445566
          */
         ProductId: string;
+        /** @description A page of products, newest first (design note 0012). */
+        ProductPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["ProductResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
         ProductResponse: {
             handle: string;
             id: components["schemas"]["ProductId"];
+            /**
+             * @description What variants differ by (Size, Color), in display order; empty for a product
+             *     with a single variant.
+             */
+            options: components["schemas"]["OptionResponse"][];
             status: components["schemas"]["ProductStatus"];
             title: string;
             variants: components["schemas"]["VariantResponse"][];
@@ -1532,6 +1613,11 @@ export interface components {
             name?: string;
             scopes?: components["schemas"]["Scope"][];
         };
+        /** @description A JSON Merge Patch of the store: absent fields stay as they are. */
+        UpdateStoreRequest: {
+            /** @description 1 to 100 characters, trimmed. */
+            name?: string;
+        };
         UpdateTaxRegionRequest: {
             /** Format: int32 */
             default_rate_ppm?: number;
@@ -1562,7 +1648,13 @@ export interface components {
         VariantId: string;
         VariantResponse: {
             id: components["schemas"]["VariantId"];
+            /** @description The base price, before markets and price lists. */
             price: components["schemas"]["Money"];
+            /** @description One value per option, in the order of `options`. */
+            selections: components["schemas"]["OptionValueId"][];
+            sku?: string | null;
+            /** @description Its option values ("M / Blue"); `null` for a product without options. */
+            title?: string | null;
         };
     };
     responses: never;
@@ -5177,6 +5269,76 @@ export interface operations {
             };
         };
     };
+    "admin.orders.list": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Orders per page, 1 to 100 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.orders.fetch": {
         parameters: {
             query?: never;
@@ -5607,6 +5769,78 @@ export interface operations {
                 };
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.list": {
+        parameters: {
+            query?: {
+                /** @description Only products in this status. */
+                status?: components["schemas"]["ProductStatus"];
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Products per page, 1 to 100 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6195,6 +6429,102 @@ export interface operations {
             };
             /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.stores.update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateStoreRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
