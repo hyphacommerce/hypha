@@ -3,7 +3,7 @@ use std::{collections::HashSet, fmt, str::FromStr};
 use hypha_core::{
     CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId, OrderLineId, Price,
     ProductId, Quantity, TaxClassId, TaxRate, TaxRegionId, Timestamp, VariantId, Version,
-    Versioned, optional_text, required_text,
+    Versioned, required_text,
 };
 
 use crate::OrderError;
@@ -373,8 +373,8 @@ impl Order {
                 return Err(OrderError::DuplicateLine(line.id));
             }
             line.product_title = required_text("product_title", &line.product_title)?;
-            line.variant_title = optional_text("variant_title", line.variant_title.take())?;
-            line.sku = optional_text("sku", line.sku.take())?;
+            line.variant_title = copied_text(line.variant_title.take());
+            line.sku = copied_text(line.sku.take());
 
             in_currency(line.unit_price.money())?;
             in_currency(line.total)?;
@@ -420,6 +420,15 @@ impl Order {
             fulfillment_status: s.fulfillment_status,
         })
     }
+}
+
+/// Text copied from a product that the product doesn't cap (option labels joined into a
+/// variant title, a SKU): trimmed and blank as `None`, but no length limit. An order must
+/// accept whatever the cart could sell, or checkout would fail on every retry.
+fn copied_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 #[cfg(test)]
@@ -544,13 +553,23 @@ mod tests {
     }
 
     #[test]
-    fn line_text_is_trimmed_and_a_title_is_required() {
+    fn line_text_is_trimmed_a_title_is_required_and_copied_text_is_uncapped() {
         let mut new = new_order();
         new.lines[0].product_title = " Mug ".to_string();
         new.lines[0].sku = Some("  ".to_string());
         let order = Order::place(new).unwrap();
         assert_eq!(order.lines()[0].product_title, "Mug");
         assert_eq!(order.lines()[0].sku, None);
+
+        // A variant title joins one label per option, so it can be longer than any
+        // single field; the order keeps it whole.
+        let long = "S / ".repeat(100);
+        let mut long_title = new_order();
+        long_title.lines[0].variant_title = Some(long.clone());
+        long_title.lines[0].sku = Some("x".repeat(300));
+        let order = Order::place(long_title).unwrap();
+        assert_eq!(order.lines()[0].variant_title.as_deref(), Some(long.trim()));
+        assert_eq!(order.lines()[0].sku.as_deref().map(str::len), Some(300));
 
         let mut untitled = new_order();
         untitled.lines[0].product_title = " ".to_string();

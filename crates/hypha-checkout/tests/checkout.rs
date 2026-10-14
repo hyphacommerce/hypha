@@ -455,3 +455,65 @@ fn a_completed_cart_refuses_new_lines() {
         ))
     );
 }
+
+#[test]
+fn long_option_labels_and_skus_are_copied_whole() {
+    use hypha_core::{OptionId, OptionValueId};
+    use hypha_products::{NewVariant, OptionValue, ProductOption};
+
+    let world = World::new();
+    // Three options with 100-character labels: the joined variant title is longer than
+    // any single text field, and the SKU is too. Products allow both, so checkout must.
+    let options: Vec<_> = ["a", "b", "c"]
+        .iter()
+        .enumerate()
+        .map(|(n, letter)| {
+            let n = n as u128;
+            ProductOption::new(
+                OptionId::from_uuid(Uuid::from_u128(1300 + n)),
+                format!("Option {letter}"),
+                vec![OptionValue::new(
+                    OptionValueId::from_uuid(Uuid::from_u128(1310 + n)),
+                    letter.repeat(100),
+                )],
+            )
+        })
+        .collect();
+    let poster = ProductId::from_uuid(Uuid::from_u128(1320));
+    let variant = VariantId::from_uuid(Uuid::from_u128(1321));
+    let sku = "S".repeat(300);
+    let mut product = Product::new_configurable(
+        poster,
+        Handle::new("poster").unwrap(),
+        "Poster".to_string(),
+        options,
+        NewVariant {
+            id: variant,
+            sku: Some(sku.clone()),
+            price: Price::new(eur(500)).unwrap(),
+            selections: (0..3)
+                .map(|n| OptionValueId::from_uuid(Uuid::from_u128(1310 + n)))
+                .collect(),
+        },
+    )
+    .unwrap();
+    product.set_status(ProductStatus::Active).unwrap();
+    block_on(world.products.insert(&mut product)).unwrap();
+    let catalog = hypha_core::CatalogId::from_uuid(Uuid::from_u128(1003));
+    block_on(world.catalogs.add_products(catalog, &[poster])).unwrap();
+
+    let cart = world.cart();
+    let input = AddLine {
+        cart,
+        variant,
+        quantity: 1,
+        idempotency: None,
+    };
+    block_on(add_line(&Ctx::system(), &world.ports, &world.clock, input)).unwrap();
+
+    let order = world.checkout(cart).unwrap();
+    let line = order.lines().iter().find(|l| l.variant == variant).unwrap();
+    let title = ["a", "b", "c"].map(|l| l.repeat(100)).join(" / ");
+    assert_eq!(line.variant_title.as_deref(), Some(title.as_str()));
+    assert_eq!(line.sku.as_deref(), Some(sku.as_str()));
+}
