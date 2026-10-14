@@ -98,6 +98,24 @@ impl ApiError {
         )
     }
 
+    /// An admin route called with a publishable key (design note 0010, S3).
+    pub fn admin_credentials_required() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "admin_credentials_required",
+            "admin routes take a staff session or a secret key, not a publishable key",
+        )
+    }
+
+    /// A storefront route called with something other than a publishable key.
+    pub fn publishable_key_required() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "publishable_key_required",
+            "storefront routes take a publishable key (`X-Publishable-Key`)",
+        )
+    }
+
     /// A staff-only route called with an API key.
     pub fn session_required() -> Self {
         Self::new(

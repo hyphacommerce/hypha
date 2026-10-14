@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId},
+    extract::{Caller, JsonBody, PathId, Storefront},
     state::{SharedState, Storage},
 };
 
@@ -114,6 +114,42 @@ pub(super) async fn fetch<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let product = get_product(&ctx, ports.products(), id).await?;
     Ok(Json(ProductResponse::from(&product)))
+}
+
+/// A product as a storefront sees it (design note 0010, S5): active products only, without
+/// admin fields. A draft or archived product is `404 product_not_found`, the same as one
+/// that doesn't exist, so a storefront can't tell them apart.
+#[derive(Serialize)]
+pub(super) struct StorefrontProductResponse {
+    id: ProductId,
+    handle: String,
+    title: String,
+    variants: Vec<VariantResponse>,
+}
+
+impl From<&Product> for StorefrontProductResponse {
+    fn from(p: &Product) -> Self {
+        let admin = ProductResponse::from(p);
+        Self {
+            id: admin.id,
+            handle: admin.handle,
+            title: admin.title,
+            variants: admin.variants,
+        }
+    }
+}
+
+pub(super) async fn fetch_storefront<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<ProductId>,
+) -> Result<Json<StorefrontProductResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let product = get_product(&ctx, ports.products(), id).await?;
+    if product.status() != ProductStatus::Active {
+        return Err(hypha_products::CommandError::ProductNotFound(id).into());
+    }
+    Ok(Json(StorefrontProductResponse::from(&product)))
 }
 
 pub(super) async fn set_status<S: Storage>(

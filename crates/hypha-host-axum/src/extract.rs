@@ -102,11 +102,52 @@ pub struct PathId<T>(pub T);
 ///
 /// Nothing at all is `401 unauthenticated` (from the extractor); anything unknown,
 /// expired or revoked is `401 invalid_token` (from `authenticate`).
-pub struct Caller(Credential);
+///
+/// Each surface takes its own kind of credential (design note 0010, S3): `Caller` (that
+/// is, `Caller<Admin>`) a staff session or a secret key, `Caller<Storefront>` a
+/// publishable key. The wrong kind is a 403 before anything is looked up, so a
+/// publishable key never reaches an admin command, whatever its scopes.
+pub struct Caller<A: Surface = Admin>(Credential, PhantomData<A>);
 
-/// A staff member's session, for the routes about "me" (password, 2FA, logout). An API
-/// key gets `401 session_required`. Authenticated like `Caller`.
+/// A staff member's session, for the routes about "me" (password, 2FA, logout), on the
+/// admin surface. An API key gets `401 session_required`.
 pub struct StaffCaller(Credential);
+
+/// Which credentials an API surface takes.
+pub trait Surface {
+    /// Refuses a credential of the wrong kind for this surface: `kind` is what the
+    /// token's prefix says (`None` if it isn't one of ours), `publishable_header`
+    /// whether it came in `X-Publishable-Key`.
+    fn admit(kind: Option<TokenKind>, publishable_header: bool) -> Result<(), ApiError>;
+}
+
+/// `/admin/*`: staff sessions and secret keys.
+pub struct Admin;
+
+/// `/storefront/*`: publishable keys (customer sessions later).
+pub struct Storefront;
+
+impl Surface for Admin {
+    fn admit(kind: Option<TokenKind>, publishable_header: bool) -> Result<(), ApiError> {
+        match kind {
+            Some(TokenKind::PublishableKey) => Err(ApiError::admin_credentials_required()),
+            Some(TokenKind::Session | TokenKind::SecretKey) if !publishable_header => Ok(()),
+            _ => Err(hypha_auth::CommandError::InvalidToken.into()),
+        }
+    }
+}
+
+impl Surface for Storefront {
+    fn admit(kind: Option<TokenKind>, _publishable_header: bool) -> Result<(), ApiError> {
+        match kind {
+            Some(TokenKind::PublishableKey) => Ok(()),
+            Some(TokenKind::Session | TokenKind::SecretKey) => {
+                Err(ApiError::publishable_key_required())
+            }
+            _ => Err(hypha_auth::CommandError::InvalidToken.into()),
+        }
+    }
+}
 
 struct Credential {
     token: String,
@@ -167,7 +208,7 @@ impl Credential {
     }
 }
 
-impl Caller {
+impl<A: Surface> Caller<A> {
     /// The request's ports and its `Ctx` (a staff member's role scopes or a key's). The
     /// only way an authenticated handler gets ports: storage is reachable through the
     /// credentials, so no handler can use it without them.
@@ -175,6 +216,7 @@ impl Caller {
         self,
         state: &AppState<S>,
     ) -> Result<(S::Ports<'_>, Ctx), ApiError> {
+        A::admit(TokenKind::of(&self.0.token), self.0.publishable_header)?;
         let ports = state.public_ports().await?;
         let ctx = match self.0.authenticate(&ports, &state.clock).await? {
             Authenticated::Staff(staff) => staff.ctx,
@@ -191,6 +233,7 @@ impl StaffCaller {
         self,
         state: &AppState<S>,
     ) -> Result<(S::Ports<'_>, StaffSession), ApiError> {
+        Admin::admit(TokenKind::of(&self.0.token), self.0.publishable_header)?;
         let ports = state.public_ports().await?;
         match self.0.authenticate(&ports, &state.clock).await? {
             Authenticated::Staff(staff) => Ok((ports, *staff)),
@@ -199,11 +242,11 @@ impl StaffCaller {
     }
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for Caller {
+impl<S: Send + Sync, A: Surface> FromRequestParts<S> for Caller<A> {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, ApiError> {
-        credential(parts).map(Caller)
+        credential(parts).map(|c| Caller(c, PhantomData))
     }
 }
 

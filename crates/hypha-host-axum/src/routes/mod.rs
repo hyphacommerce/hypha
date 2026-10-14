@@ -11,6 +11,7 @@ mod health;
 mod inventory;
 mod markets;
 mod me;
+mod openapi;
 mod orders;
 mod products;
 mod staff;
@@ -19,7 +20,7 @@ mod taxes;
 
 use axum::{
     Router,
-    routing::{delete, get, patch, post, put},
+    routing::{MethodFilter, on},
 };
 
 use hypha_core::Timestamp;
@@ -36,191 +37,164 @@ pub(crate) fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
         .map_err(ApiError::internal)
 }
 
-/// Every route, once. A macro rather than a generic function: handlers are generic over
-/// the storage, but axum must prove each handler's future is `Send`, and with our
-/// `Send`-free repo traits the compiler can only do that for a concrete storage type.
-macro_rules! router {
-    ($storage:ty) => {
-        Router::new()
-            .route("/health", get(health::check::<$storage>))
-            // the store this deployment serves
-            .route("/store", get(stores::fetch::<$storage>))
-            // logging in (no credentials needed)
-            .route("/auth/login", post(auth::login_handler::<$storage>))
-            .route(
-                "/auth/login/mfa",
-                post(auth::finish_login_handler::<$storage>),
-            )
-            .route("/auth/logout", post(auth::logout_handler::<$storage>))
-            .route(
-                "/auth/password-reset",
-                post(auth::request_reset_handler::<$storage>),
-            )
-            .route(
-                "/auth/password-reset/confirm",
-                post(auth::confirm_reset_handler::<$storage>),
-            )
-            .route(
-                "/invites/accept",
-                post(auth::accept_invite_handler::<$storage>),
-            )
+/// Every route, once (design note 0010, S7): `[surface, METHOD, "path", handler]`.
+/// `$callback!` gets the whole table: `build_router!` turns it into a router per
+/// storage, `route_list!` into `ROUTES`, which the OpenAPI tests check against the
+/// documents, so a route can't go undocumented or a documented one unrouted.
+///
+/// Surfaces: `admin` (`/admin/*`, staff and secret keys), `storefront`
+/// (`/storefront/*`, publishable keys), `hidden` (health and the documents themselves,
+/// in no document).
+macro_rules! route_table {
+    ($callback:ident ! ( $($args:tt)* )) => {
+        $callback! { $($args)*
+            [hidden, GET, "/health", health::check],
+            [hidden, GET, "/admin/openapi.json", openapi::admin_document],
+            [hidden, GET, "/storefront/openapi.json", openapi::storefront_document],
+
+            // ---------- admin ----------
+            [admin, GET, "/admin/store", stores::fetch],
+            // staff auth (no credentials needed; rate limited, 0009)
+            [admin, POST, "/admin/auth/login", auth::login_handler],
+            [admin, POST, "/admin/auth/login/mfa", auth::finish_login_handler],
+            [admin, POST, "/admin/auth/logout", auth::logout_handler],
+            [admin, POST, "/admin/auth/password-reset", auth::request_reset_handler],
+            [admin, POST, "/admin/auth/password-reset/confirm", auth::confirm_reset_handler],
+            [admin, POST, "/admin/invites/accept", auth::accept_invite_handler],
             // the logged-in staff member
-            .route("/me", get(me::fetch::<$storage>))
-            .route("/me/password", put(me::change_password_handler::<$storage>))
-            .route("/me/mfa/totp", post(me::start_totp_handler::<$storage>))
-            .route(
-                "/me/mfa/totp/confirm",
-                post(me::confirm_totp_handler::<$storage>),
-            )
-            .route(
-                "/me/mfa/totp/disable",
-                post(me::disable_totp_handler::<$storage>),
-            )
-            .route(
-                "/me/mfa/recovery-codes",
-                post(me::recovery_codes_handler::<$storage>),
-            )
+            [admin, GET, "/admin/me", me::fetch],
+            [admin, PUT, "/admin/me/password", me::change_password_handler],
+            [admin, POST, "/admin/me/mfa/totp", me::start_totp_handler],
+            [admin, POST, "/admin/me/mfa/totp/confirm", me::confirm_totp_handler],
+            [admin, POST, "/admin/me/mfa/totp/disable", me::disable_totp_handler],
+            [admin, POST, "/admin/me/mfa/recovery-codes", me::recovery_codes_handler],
             // staff, roles, invites, API keys
-            .route("/roles", post(staff::create_role_handler::<$storage>))
-            .route(
-                "/roles/{id}",
-                get(staff::fetch_role::<$storage>).patch(staff::update_role_handler::<$storage>),
-            )
-            .route(
-                "/users/{id}",
-                get(staff::fetch_user::<$storage>).patch(staff::update_user_handler::<$storage>),
-            )
-            .route("/invites", post(staff::invite_handler::<$storage>))
-            .route("/api-keys", post(api_keys::create::<$storage>))
-            .route("/api-keys/{id}", get(api_keys::fetch::<$storage>))
-            .route("/api-keys/{id}/revoke", post(api_keys::revoke::<$storage>))
+            [admin, POST, "/admin/roles", staff::create_role_handler],
+            [admin, GET, "/admin/roles/{id}", staff::fetch_role],
+            [admin, PATCH, "/admin/roles/{id}", staff::update_role_handler],
+            [admin, GET, "/admin/users/{id}", staff::fetch_user],
+            [admin, PATCH, "/admin/users/{id}", staff::update_user_handler],
+            [admin, POST, "/admin/invites", staff::invite_handler],
+            [admin, POST, "/admin/api-keys", api_keys::create],
+            [admin, GET, "/admin/api-keys/{id}", api_keys::fetch],
+            [admin, POST, "/admin/api-keys/{id}/revoke", api_keys::revoke],
             // products
-            .route("/products", post(products::create::<$storage>))
-            .route("/products/{id}", get(products::fetch::<$storage>))
-            .route(
-                "/products/{id}/status",
-                patch(products::set_status::<$storage>),
-            )
+            [admin, POST, "/admin/products", products::create],
+            [admin, GET, "/admin/products/{id}", products::fetch],
+            [admin, PATCH, "/admin/products/{id}/status", products::set_status],
             // markets, price lists, catalogs
-            .route("/markets", post(markets::create_market_handler::<$storage>))
-            .route(
-                "/markets/{id}",
-                patch(markets::update_market_handler::<$storage>),
-            )
-            .route(
-                "/markets/{id}/countries",
-                post(markets::add_country_handler::<$storage>),
-            )
-            .route(
-                "/markets/{id}/countries/{country}",
-                delete(markets::remove_country_handler::<$storage>),
-            )
-            .route(
-                "/price-lists",
-                post(markets::create_price_list_handler::<$storage>),
-            )
-            .route(
-                "/price-lists/{id}/fixed-prices",
-                put(markets::set_fixed_prices_handler::<$storage>)
-                    .delete(markets::remove_fixed_prices_handler::<$storage>),
-            )
-            .route(
-                "/catalogs",
-                post(markets::create_catalog_handler::<$storage>),
-            )
-            .route(
-                "/catalogs/{id}/products",
-                post(markets::add_products_handler::<$storage>)
-                    .delete(markets::remove_products_handler::<$storage>),
-            )
-            .route(
-                "/catalogs/{id}/price-list",
-                put(markets::assign_price_list_handler::<$storage>),
-            )
-            // carts
-            .route("/carts", post(carts::create::<$storage>))
-            .route("/carts/{id}", get(carts::fetch::<$storage>))
-            .route("/carts/{id}/lines", post(carts::add::<$storage>))
-            .route(
-                "/carts/{id}/lines/{variant}",
-                put(carts::set_quantity::<$storage>).delete(carts::remove_line::<$storage>),
-            )
-            .route("/carts/{id}/email", put(carts::set_email::<$storage>))
-            .route("/carts/{id}/customer", put(carts::set_customer::<$storage>))
-            .route(
-                "/carts/{id}/checkout",
-                post(orders::checkout_handler::<$storage>),
-            )
+            [admin, POST, "/admin/markets", markets::create_market_handler],
+            [admin, PATCH, "/admin/markets/{id}", markets::update_market_handler],
+            [admin, POST, "/admin/markets/{id}/countries", markets::add_country_handler],
+            [admin, DELETE, "/admin/markets/{id}/countries/{country}", markets::remove_country_handler],
+            [admin, POST, "/admin/price-lists", markets::create_price_list_handler],
+            [admin, PUT, "/admin/price-lists/{id}/fixed-prices", markets::set_fixed_prices_handler],
+            [admin, DELETE, "/admin/price-lists/{id}/fixed-prices", markets::remove_fixed_prices_handler],
+            [admin, POST, "/admin/catalogs", markets::create_catalog_handler],
+            [admin, POST, "/admin/catalogs/{id}/products", markets::add_products_handler],
+            [admin, DELETE, "/admin/catalogs/{id}/products", markets::remove_products_handler],
+            [admin, PUT, "/admin/catalogs/{id}/price-list", markets::assign_price_list_handler],
+            // carts: only linking a customer (storefronts set an email; 0010 §2)
+            [admin, PUT, "/admin/carts/{id}/customer", carts::set_customer],
             // orders
-            .route("/orders/{id}", get(orders::fetch::<$storage>))
-            .route("/orders/{id}/paid", post(orders::mark_paid::<$storage>))
+            [admin, GET, "/admin/orders/{id}", orders::fetch],
+            [admin, POST, "/admin/orders/{id}/paid", orders::mark_paid],
             // customers
-            .route("/customers", post(customers::create::<$storage>))
-            .route(
-                "/customers/{id}",
-                get(customers::fetch::<$storage>).patch(customers::update::<$storage>),
-            )
-            .route(
-                "/customers/{id}/addresses",
-                post(customers::add_address_handler::<$storage>),
-            )
-            .route(
-                "/customers/{id}/addresses/{address_id}",
-                put(customers::update_address_handler::<$storage>)
-                    .delete(customers::remove_address_handler::<$storage>),
-            )
+            [admin, POST, "/admin/customers", customers::create],
+            [admin, GET, "/admin/customers/{id}", customers::fetch],
+            [admin, PATCH, "/admin/customers/{id}", customers::update],
+            [admin, POST, "/admin/customers/{id}/addresses", customers::add_address_handler],
+            [admin, PUT, "/admin/customers/{id}/addresses/{address_id}", customers::update_address_handler],
+            [admin, DELETE, "/admin/customers/{id}/addresses/{address_id}", customers::remove_address_handler],
             // taxes
-            .route("/tax-classes", post(taxes::create_class::<$storage>))
-            .route("/tax-assignments", put(taxes::assign_class::<$storage>))
-            .route("/tax-regions", post(taxes::create_region::<$storage>))
-            .route(
-                "/tax-regions/{id}",
-                get(taxes::fetch_region::<$storage>).patch(taxes::update_region::<$storage>),
-            )
-            .route(
-                "/tax-regions/{id}/class-rates/{class_id}",
-                put(taxes::set_region_class_rate::<$storage>)
-                    .delete(taxes::remove_region_class_rate::<$storage>),
-            )
+            [admin, POST, "/admin/tax-classes", taxes::create_class],
+            [admin, PUT, "/admin/tax-assignments", taxes::assign_class],
+            [admin, POST, "/admin/tax-regions", taxes::create_region],
+            [admin, GET, "/admin/tax-regions/{id}", taxes::fetch_region],
+            [admin, PATCH, "/admin/tax-regions/{id}", taxes::update_region],
+            [admin, PUT, "/admin/tax-regions/{id}/class-rates/{class_id}", taxes::set_region_class_rate],
+            [admin, DELETE, "/admin/tax-regions/{id}/class-rates/{class_id}", taxes::remove_region_class_rate],
             // inventory
-            .route(
-                "/locations",
-                post(inventory::create_location_handler::<$storage>),
-            )
-            .route(
-                "/locations/{id}",
-                get(inventory::fetch_location::<$storage>)
-                    .patch(inventory::update_location_handler::<$storage>),
-            )
-            .route("/inventory-items", post(inventory::create_item::<$storage>))
-            .route(
-                "/inventory-items/{id}",
-                get(inventory::fetch_item::<$storage>).patch(inventory::update_item::<$storage>),
-            )
-            .route(
-                "/inventory-items/{id}/levels/{location_id}",
-                put(inventory::set_level::<$storage>),
-            )
-            .route(
-                "/inventory-items/{id}/levels/{location_id}/adjustments",
-                post(inventory::adjust_level::<$storage>),
-            )
-            .route(
-                "/variants/{id}/inventory",
-                get(inventory::fetch_variant_inventory::<$storage>),
-            )
-            // everything else
+            [admin, POST, "/admin/locations", inventory::create_location_handler],
+            [admin, GET, "/admin/locations/{id}", inventory::fetch_location],
+            [admin, PATCH, "/admin/locations/{id}", inventory::update_location_handler],
+            [admin, POST, "/admin/inventory-items", inventory::create_item],
+            [admin, GET, "/admin/inventory-items/{id}", inventory::fetch_item],
+            [admin, PATCH, "/admin/inventory-items/{id}", inventory::update_item],
+            [admin, PUT, "/admin/inventory-items/{id}/levels/{location_id}", inventory::set_level],
+            [admin, POST, "/admin/inventory-items/{id}/levels/{location_id}/adjustments", inventory::adjust_level],
+            [admin, GET, "/admin/variants/{id}/inventory", inventory::fetch_variant_inventory],
+
+            // ---------- storefront ----------
+            [storefront, GET, "/storefront/store", stores::fetch_storefront],
+            [storefront, GET, "/storefront/products/{id}", products::fetch_storefront],
+            [storefront, POST, "/storefront/carts", carts::create],
+            [storefront, GET, "/storefront/carts/{id}", carts::fetch],
+            [storefront, POST, "/storefront/carts/{id}/lines", carts::add],
+            [storefront, PUT, "/storefront/carts/{id}/lines/{variant}", carts::set_quantity],
+            [storefront, DELETE, "/storefront/carts/{id}/lines/{variant}", carts::remove_line],
+            [storefront, PUT, "/storefront/carts/{id}/email", carts::set_email],
+            [storefront, POST, "/storefront/carts/{id}/checkout", orders::checkout_handler],
+        }
+    };
+}
+
+/// Builds the router for one concrete storage from the route table. A macro rather than
+/// a generic function: handlers are generic over the storage, but axum must prove each
+/// handler's future is `Send`, and with our `Send`-free repo traits the compiler can
+/// only do that for a concrete storage type.
+macro_rules! build_router {
+    ($storage:ty $(, [$surface:ident, $method:ident, $path:literal, $($handler:ident)::+])* $(,)?) => {
+        Router::new()
+            $(.route($path, on(MethodFilter::$method, $($handler)::+::<$storage>)))*
             .fallback(|| async { ApiError::route_not_found() })
             .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
     };
 }
 
+/// Which document a route belongs in.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surface {
+    Admin,
+    Storefront,
+    /// Health checks and the documents themselves.
+    Hidden,
+}
+
+/// One row of the route table, as plain data.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteInfo {
+    pub surface: Surface,
+    pub method: &'static str,
+    pub path: &'static str,
+}
+
+#[cfg(test)]
+macro_rules! route_list {
+    ($([$surface:ident, $method:ident, $path:literal, $($handler:ident)::+]),* $(,)?) => {
+        &[$(RouteInfo {
+            surface: route_list!(@surface $surface),
+            method: stringify!($method),
+            path: $path,
+        }),*]
+    };
+    (@surface admin) => { Surface::Admin };
+    (@surface storefront) => { Surface::Storefront };
+    (@surface hidden) => { Surface::Hidden };
+}
+
+/// Every route in the table (for the tests that check the documents against it).
+#[cfg(test)]
+pub const ROUTES: &[RouteInfo] = route_table!(route_list!());
+
 pub fn memory_router() -> Router<SharedState<MemoryStorage>> {
-    router!(MemoryStorage)
+    route_table!(build_router!(MemoryStorage,))
 }
 
 pub fn postgres_router() -> Router<SharedState<PgStorage>> {
-    router!(PgStorage)
+    route_table!(build_router!(PgStorage,))
 }
 
 #[cfg(test)]

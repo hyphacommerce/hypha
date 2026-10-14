@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::{
     error::ApiError,
-    extract::Caller,
+    extract::{Caller, Storefront},
     state::{SharedState, Storage},
 };
 
@@ -35,4 +35,24 @@ pub(super) async fn fetch<S: Storage>(
     let directory = state.storage.directory().await?;
     let store = get_store(&ctx, &directory, state.store).await?;
     Ok(Json(StoreResponse::from(&store)))
+}
+
+/// What a storefront sees of the store: its name.
+#[derive(Serialize)]
+pub(super) struct StorefrontStoreResponse {
+    name: String,
+}
+
+pub(super) async fn fetch_storefront<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+) -> Result<Json<StorefrontStoreResponse>, ApiError> {
+    // The ports are only needed to authenticate; `_` drops them before the directory
+    // takes a connection.
+    let (_, ctx) = caller.authenticate(&state).await?;
+    let directory = state.storage.directory().await?;
+    let store = get_store(&ctx, &directory, state.store).await?;
+    Ok(Json(StorefrontStoreResponse {
+        name: store.name().to_string(),
+    }))
 }

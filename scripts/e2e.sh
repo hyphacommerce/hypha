@@ -21,8 +21,23 @@ OWNER_PASSWORD="${E2E_OWNER_PASSWORD:-e2e-owner-password}"
 JSON='content-type: application/json'
 FAILED=0
 BODY=''
-# Credentials every step sends (curl arguments); empty until the owner logs in.
+# Credentials steps send (curl arguments): AUTH on admin routes (empty until the owner
+# logs in), SF_AUTH (a publishable key) on /storefront/* routes, chosen by URL.
 AUTH=()
+SF_AUTH=()
+CREDS=()
+
+# pick_creds CURL_ARGS...: sets CREDS to SF_AUTH for a storefront URL, else AUTH.
+pick_creds() {
+    CREDS=(${AUTH[@]+"${AUTH[@]}"})
+    local a
+    for a in "$@"; do
+        if [[ $a == "$BASE/storefront/"* ]]; then
+            CREDS=(${SF_AUTH[@]+"${SF_AUTH[@]}"})
+            return
+        fi
+    done
+}
 
 # step NAME STATUS CODE_OR_DASH CURL_ARGS...
 # Runs curl, checks the status and (unless "-") the "code" field. Leaves the body in $BODY.
@@ -30,7 +45,8 @@ step() {
     local name=$1 want_status=$2 want_code=$3
     shift 3
     local out status
-    out=$(curl -s -w '\n%{http_code}' ${AUTH[@]+"${AUTH[@]}"} "$@")
+    pick_creds "$@"
+    out=$(curl -s -w '\n%{http_code}' ${CREDS[@]+"${CREDS[@]}"} "$@")
     status=${out##*$'\n'}
     BODY=${out%$'\n'*}
     if [[ $status != "$want_status" ]]; then
@@ -59,7 +75,8 @@ contains() {
 replayed() {
     local name=$1
     shift
-    if curl -s -o /dev/null -D - ${AUTH[@]+"${AUTH[@]}"} "$@" | grep -qi '^idempotent-replayed: true'; then
+    pick_creds "$@"
+    if curl -s -o /dev/null -D - ${CREDS[@]+"${CREDS[@]}"} "$@" | grep -qi '^idempotent-replayed: true'; then
         echo "ok   $name"
     else
         echo "FAIL $name: no Idempotent-Replayed header"
@@ -71,7 +88,8 @@ replayed() {
 fresh() {
     local name=$1
     shift
-    if curl -s -o /dev/null -D - ${AUTH[@]+"${AUTH[@]}"} "$@" | grep -qi '^idempotent-replayed'; then
+    pick_creds "$@"
+    if curl -s -o /dev/null -D - ${CREDS[@]+"${CREDS[@]}"} "$@" | grep -qi '^idempotent-replayed'; then
         echo "FAIL $name: unexpected Idempotent-Replayed header"
         FAILED=$((FAILED + 1))
     else
@@ -97,8 +115,8 @@ fi
 
 echo "## logging in"
 step "health needs no credentials" 200 - "$BASE/health"
-step "anything else does" 401 unauthenticated "$BASE/store"
-step "owner logs in" 200 - -X POST "$BASE/auth/login" -H "$JSON" \
+step "anything else does" 401 unauthenticated "$BASE/admin/store"
+step "owner logs in" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
 if [[ $BODY != *'"status":"authenticated"'* ]]; then
     echo "Cannot log in as $OWNER_EMAIL. Start the server with HYPHA_OWNER_EMAIL and"
@@ -107,13 +125,16 @@ if [[ $BODY != *'"status":"authenticated"'* ]]; then
 fi
 SESSION=$(token)
 AUTH=(-H "authorization: Bearer $SESSION")
+step "a publishable key for the storefront steps" 201 - -X POST "$BASE/admin/api-keys" -H "$JSON" \
+    -d '{"kind":"publishable","name":"e2e storefront"}'
+SF_AUTH=(-H "x-publishable-key: $(token)")
 
 echo
 echo "## happy path"
 step "health" 200 - "$BASE/health"
-step "the store this deployment serves" 200 - "$BASE/store"
+step "the store this deployment serves" 200 - "$BASE/admin/store"
 contains "store has a store_ ID" '"id":"store_'
-step "create mug" 201 - -X POST "$BASE/products" -H "$JSON" \
+step "create mug" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}'
 if [[ $BODY == *'"code":"handle_taken"'* ]]; then
     echo "The server still has data from a previous run. Restart it and try again."
@@ -121,80 +142,80 @@ if [[ $BODY == *'"code":"handle_taken"'* ]]; then
 fi
 MUG=$(id)
 MUG_VAR=$(variant)
-step "create cup" 201 - -X POST "$BASE/products" -H "$JSON" \
+step "create cup" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"cup","title":"Cup","price":{"amount":250,"currency":"EUR"}}'
 CUP=$(id)
 CUP_VAR=$(variant)
-step "activate mug" 200 - -X PATCH "$BASE/products/$MUG/status" -H "$JSON" -d '{"status":"active"}'
+step "activate mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"active"}'
 contains "mug is active" '"status":"active"'
-step "activate cup" 200 - -X PATCH "$BASE/products/$CUP/status" -H "$JSON" -d '{"status":"active"}'
+step "activate cup" 200 - -X PATCH "$BASE/admin/products/$CUP/status" -H "$JSON" -d '{"status":"active"}'
 
-step "create market" 201 - -X POST "$BASE/markets" -H "$JSON" \
+step "create market" 201 - -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"Eurozone","countries":["HR","DE"],"currency":"EUR"}'
 MARKET=$(id)
 contains "prices exclude tax by default" '"prices_include_tax":false'
-step "prices include tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
+step "prices include tax" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
 contains "market now includes tax" '"prices_include_tax":true'
-step "back to excluding tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
-step "sell to Slovenia too" 200 - -X POST "$BASE/markets/$MARKET/countries" -H "$JSON" -d '{"country":"SI"}'
+step "back to excluding tax" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
+step "sell to Slovenia too" 200 - -X POST "$BASE/admin/markets/$MARKET/countries" -H "$JSON" -d '{"country":"SI"}'
 contains "Slovenia added" '"countries":["HR","DE","SI"]'
-step "stop selling to Slovenia" 200 - -X DELETE "$BASE/markets/$MARKET/countries/SI"
+step "stop selling to Slovenia" 200 - -X DELETE "$BASE/admin/markets/$MARKET/countries/SI"
 contains "Slovenia removed" '"countries":["HR","DE"]'
-step "create price list (-10%)" 201 - -X POST "$BASE/price-lists" -H "$JSON" \
+step "create price list (-10%)" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" \
     -d '{"currency":"EUR","adjustment_bps":-1000}'
 LIST=$(id)
-step "fix cup price at 200" 204 - -X PUT "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
+step "fix cup price at 200" 204 - -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}}]}"
-step "create catalog" 201 - -X POST "$BASE/catalogs" -H "$JSON" -d "{\"market\":\"$MARKET\"}"
+step "create catalog" 201 - -X POST "$BASE/admin/catalogs" -H "$JSON" -d "{\"market\":\"$MARKET\"}"
 CATALOG=$(id)
-step "add mug and cup to catalog" 204 - -X POST "$BASE/catalogs/$CATALOG/products" -H "$JSON" \
+step "add mug and cup to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
     -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
-step "assign price list" 200 - -X PUT "$BASE/catalogs/$CATALOG/price-list" -H "$JSON" \
+step "assign price list" 200 - -X PUT "$BASE/admin/catalogs/$CATALOG/price-list" -H "$JSON" \
     -d "{\"price_list\":\"$LIST\"}"
 
-step "create cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "create cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 contains "cart ships to Croatia" '"country":"HR"'
 contains "cart names its market and currency" "\"market\":\"$MARKET\",\"currency\":\"EUR\""
 CART=$(id)
-step "add 2 mugs" 200 - -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
+step "add 2 mugs" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "mug unit price is 900 (1000 - 10%)" '"unit_price":{"amount":900,"currency":"EUR"}'
 contains "mug line is named" '"product_title":"Mug","variant_title":null,"sku":null,"status":"priced"'
-step "add 3 cups" 200 - -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
+step "add 3 cups" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":3}"
 contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
 
 echo "## idempotency keys"
-fresh "a first request isn't marked replayed" -X POST "$BASE/carts" -H "$JSON" \
+fresh "a first request isn't marked replayed" -X POST "$BASE/storefront/carts" -H "$JSON" \
     -H 'idempotency-key: cart-0' -d '{"country":"HR"}'
-step "create cart with a key" 201 - -X POST "$BASE/carts" -H "$JSON" -H 'idempotency-key: cart-1' \
+step "create cart with a key" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -H 'idempotency-key: cart-1' \
     -d '{"country":"HR"}'
 KEYED=$(id)
-step "retry it" 201 - -X POST "$BASE/carts" -H "$JSON" -H 'idempotency-key: cart-1' \
+step "retry it" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -H 'idempotency-key: cart-1' \
     -d '{"country":"HR"}'
 contains "the retry returns the first cart" "\"id\":\"$KEYED\""
-replayed "the retry is marked replayed" -X POST "$BASE/carts" -H "$JSON" \
+replayed "the retry is marked replayed" -X POST "$BASE/storefront/carts" -H "$JSON" \
     -H 'idempotency-key: cart-1' -d '{"country":"HR"}'
-step "same key, different body" 422 idempotency_key_reused -X POST "$BASE/carts" -H "$JSON" \
+step "same key, different body" 422 idempotency_key_reused -X POST "$BASE/storefront/carts" -H "$JSON" \
     -H 'idempotency-key: cart-1' -d '{"country":"DE"}'
-step "a key with a space" 422 invalid_idempotency_key -X POST "$BASE/carts" -H "$JSON" \
+step "a key with a space" 422 invalid_idempotency_key -X POST "$BASE/storefront/carts" -H "$JSON" \
     -H 'idempotency-key: two words' -d '{"country":"HR"}'
-step "add 2 mugs with a key" 200 - -X POST "$BASE/carts/$KEYED/lines" -H "$JSON" \
+step "add 2 mugs with a key" 200 - -X POST "$BASE/storefront/carts/$KEYED/lines" -H "$JSON" \
     -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
-step "retry the add" 200 - -X POST "$BASE/carts/$KEYED/lines" -H "$JSON" \
+step "retry the add" 200 - -X POST "$BASE/storefront/carts/$KEYED/lines" -H "$JSON" \
     -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "the retry didn't add the mugs again" '"quantity":2,'
-replayed "the add retry is marked replayed" -X POST "$BASE/carts/$KEYED/lines" -H "$JSON" \
+replayed "the add retry is marked replayed" -X POST "$BASE/storefront/carts/$KEYED/lines" -H "$JSON" \
     -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 
 echo "## checkout"
-CHECKOUT="$BASE/carts/$KEYED/checkout"
+CHECKOUT="$BASE/storefront/carts/$KEYED/checkout"
 step "checkout an unknown cart" 404 cart_not_found -X POST \
-    "$BASE/carts/cart_00000000000000000000000000000063/checkout" -H "$JSON" -d '{}'
+    "$BASE/storefront/carts/cart_00000000000000000000000000000063/checkout" -H "$JSON" -d '{}'
 step "checkout with an unknown field" 422 invalid_body -X POST "$CHECKOUT" -H "$JSON" \
     -d '{"total":1}'
 step "checkout without an email" 409 cart_email_missing -X POST "$CHECKOUT" -H "$JSON" -d '{}'
-step "give the cart an email" 200 - -X PUT "$BASE/carts/$KEYED/email" -H "$JSON" \
+step "give the cart an email" 200 - -X PUT "$BASE/storefront/carts/$KEYED/email" -H "$JSON" \
     -d '{"email":"checkout@example.hr"}'
 step "checkout at a stale total" 409 total_changed -X POST "$CHECKOUT" -H "$JSON" \
     -d '{"expected_total":{"amount":1700,"currency":"EUR"}}'
@@ -216,390 +237,398 @@ step "retry, re-serialized (spaces, key order)" 201 - -X POST "$CHECKOUT" -H "$J
 contains "is the same request" "\"id\":\"$ORDER\""
 step "same key, different total" 422 idempotency_key_reused -X POST "$CHECKOUT" -H "$JSON" \
     -H 'idempotency-key: order-1' -d '{"expected_total":{"amount":1801,"currency":"EUR"}}'
-step "a cart key reused to add a line" 422 idempotency_key_reused -X POST "$BASE/carts/$CART/lines" \
+step "a cart key reused to add a line" 422 idempotency_key_reused -X POST "$BASE/storefront/carts/$CART/lines" \
     -H "$JSON" -H 'idempotency-key: cart-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "checkout again without the key" 409 cart_completed -X POST "$CHECKOUT" -H "$JSON" -d '{}'
 contains "the error names the order" "\"details\":{\"order\":\"$ORDER\"}"
-step "get the checked-out cart" 200 - "$BASE/carts/$KEYED"
+step "get the checked-out cart" 200 - "$BASE/storefront/carts/$KEYED"
 contains "the cart names its order" "\"order\":\"$ORDER\""
-step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/carts/$KEYED/lines" \
+step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/storefront/carts/$KEYED/lines" \
     -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
-step "get the order" 200 - "$BASE/orders/$ORDER"
+step "get the order" 200 - "$BASE/admin/orders/$ORDER"
 contains "it has a placed_at" '"placed_at":"20'
-step "mark it paid" 200 - -X POST "$BASE/orders/$ORDER/paid"
+step "mark it paid" 200 - -X POST "$BASE/admin/orders/$ORDER/paid"
 contains "it is paid" '"financial_status":"paid"'
-step "mark it paid again" 200 - -X POST "$BASE/orders/$ORDER/paid"
+step "mark it paid again" 200 - -X POST "$BASE/admin/orders/$ORDER/paid"
 contains "still paid" '"financial_status":"paid"'
-step "an unknown order" 404 order_not_found "$BASE/orders/ord_00000000000000000000000000000000"
-step "an order ID of the wrong kind" 400 invalid_path "$BASE/orders/$CART"
-step "a new cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "an unknown order" 404 order_not_found "$BASE/admin/orders/ord_00000000000000000000000000000000"
+step "an order ID of the wrong kind" 400 invalid_path "$BASE/admin/orders/$CART"
+step "a new cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 contains "an open cart has no order" '"order":null'
-step "checkout an empty cart" 409 cart_empty -X POST "$BASE/carts/$(id)/checkout" -H "$JSON" -d '{}'
+step "checkout an empty cart" 409 cart_empty -X POST "$BASE/storefront/carts/$(id)/checkout" -H "$JSON" -d '{}'
 
-step "archive mug" 200 - -X PATCH "$BASE/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
-step "get cart" 200 - "$BASE/carts/$CART"
+step "archive mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
+step "get cart" 200 - "$BASE/storefront/carts/$CART"
 contains "mug line is unavailable" '"status":"unavailable","reason_code":"product_not_active"'
 contains "unavailable mug keeps its name" '"product_title":"Mug","variant_title":null,"sku":null,"status":"unavailable"'
 contains "total only counts the cup" '"total":{"amount":600,"currency":"EUR"},"fully_available":false'
 
-step "remove cup's fixed price" 204 - -X DELETE "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
+step "remove cup's fixed price" 204 - -X DELETE "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"variants\":[\"$CUP_VAR\"]}"
-step "get cart" 200 - "$BASE/carts/$CART"
+step "get cart" 200 - "$BASE/storefront/carts/$CART"
 contains "cup falls back to 250 - 10% = 225" '"unit_price":{"amount":225,"currency":"EUR"},"total":{"amount":675'
-step "remove cup from catalog" 204 - -X DELETE "$BASE/catalogs/$CATALOG/products" -H "$JSON" \
+step "remove cup from catalog" 204 - -X DELETE "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
     -d "{\"products\":[\"$CUP\"]}"
-step "get cart" 200 - "$BASE/carts/$CART"
+step "get cart" 200 - "$BASE/storefront/carts/$CART"
 contains "cup line is unavailable" '"status":"unavailable","reason_code":"not_available_in_market"'
 
 echo "## tax"
-step "create book" 201 - -X POST "$BASE/products" -H "$JSON" \
+step "create book" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"book","title":"Book","price":{"amount":1000,"currency":"EUR"}}'
 BOOK=$(id)
 BOOK_VAR=$(variant)
-step "activate book" 200 - -X PATCH "$BASE/products/$BOOK/status" -H "$JSON" -d '{"status":"active"}'
-step "add book to catalog" 204 - -X POST "$BASE/catalogs/$CATALOG/products" -H "$JSON" \
+step "activate book" 200 - -X PATCH "$BASE/admin/products/$BOOK/status" -H "$JSON" -d '{"status":"active"}'
+step "add book to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
     -d "{\"products\":[\"$BOOK\"]}"
-step "create tax class" 201 - -X POST "$BASE/tax-classes" -H "$JSON" -d '{"name":"Books"}'
+step "create tax class" 201 - -X POST "$BASE/admin/tax-classes" -H "$JSON" -d '{"name":"Books"}'
 BOOKS=$(id)
-step "put book in it" 204 - -X PUT "$BASE/tax-assignments" -H "$JSON" \
+step "put book in it" 204 - -X PUT "$BASE/admin/tax-assignments" -H "$JSON" \
     -d "{\"products\":[\"$BOOK\"],\"tax_class\":\"$BOOKS\"}"
-step "create Croatian tax region (25%)" 201 - -X POST "$BASE/tax-regions" -H "$JSON" \
+step "create Croatian tax region (25%)" 201 - -X POST "$BASE/admin/tax-regions" -H "$JSON" \
     -d '{"country":"HR","default_rate_ppm":250000}'
 REGION=$(id)
-step "books pay 5% in Croatia" 200 - -X PUT "$BASE/tax-regions/$REGION/class-rates/$BOOKS" \
+step "books pay 5% in Croatia" 200 - -X PUT "$BASE/admin/tax-regions/$REGION/class-rates/$BOOKS" \
     -H "$JSON" -d '{"rate_ppm":50000}'
 contains "class rate is stored" "\"class_rates\":[{\"tax_class\":\"$BOOKS\",\"rate_ppm\":50000}]"
-step "get tax region" 200 - "$BASE/tax-regions/$REGION"
-step "create taxed cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "get tax region" 200 - "$BASE/admin/tax-regions/$REGION"
+step "create taxed cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 TAX_CART=$(id)
-step "add 2 books" 200 - -X POST "$BASE/carts/$TAX_CART/lines" -H "$JSON" \
+step "add 2 books" 200 - -X POST "$BASE/storefront/carts/$TAX_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$BOOK_VAR\",\"quantity\":2}"
 contains "book line pays 5% of 1800" "\"tax\":{\"rate_ppm\":50000,\"amount\":{\"amount\":90,\"currency\":\"EUR\"},\"tax_class\":\"$BOOKS\"}"
 contains "tax is added on top" '"taxes_included":false,"subtotal":{"amount":1800,"currency":"EUR"},"tax_total":{"amount":90,"currency":"EUR"},"total":{"amount":1890'
-step "prices include tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
-step "get taxed cart" 200 - "$BASE/carts/$TAX_CART"
+step "prices include tax" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
+step "get taxed cart" 200 - "$BASE/storefront/carts/$TAX_CART"
 contains "tax is extracted (1800 x 5/105 = 85.7)" '"taxes_included":true,"subtotal":{"amount":1800,"currency":"EUR"},"tax_total":{"amount":86,"currency":"EUR"},"total":{"amount":1800'
-step "remove books rate" 200 - -X DELETE "$BASE/tax-regions/$REGION/class-rates/$BOOKS"
+step "remove books rate" 200 - -X DELETE "$BASE/admin/tax-regions/$REGION/class-rates/$BOOKS"
 contains "no class rates left" '"class_rates":[]'
-step "get taxed cart" 200 - "$BASE/carts/$TAX_CART"
+step "get taxed cart" 200 - "$BASE/storefront/carts/$TAX_CART"
 contains "book pays the 25% default (1800 x 25/125)" '"tax_total":{"amount":360,"currency":"EUR"}'
-step "lower the default to 13%" 200 - -X PATCH "$BASE/tax-regions/$REGION" -H "$JSON" -d '{"default_rate_ppm":130000}'
-step "get taxed cart" 200 - "$BASE/carts/$TAX_CART"
+step "lower the default to 13%" 200 - -X PATCH "$BASE/admin/tax-regions/$REGION" -H "$JSON" -d '{"default_rate_ppm":130000}'
+step "get taxed cart" 200 - "$BASE/storefront/carts/$TAX_CART"
 contains "book pays 13% (1800 x 13/113 = 207.1)" '"tax_total":{"amount":207,"currency":"EUR"}'
-step "back to excluding tax" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
+step "back to excluding tax" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
 
 echo "## inventory"
-step "create lamp" 201 - -X POST "$BASE/products" -H "$JSON" \
+step "create lamp" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"lamp","title":"Lamp","price":{"amount":1000,"currency":"EUR"}}'
 LAMP=$(id)
 LAMP_VAR=$(variant)
-step "activate lamp" 200 - -X PATCH "$BASE/products/$LAMP/status" -H "$JSON" -d '{"status":"active"}'
-step "add lamp to catalog" 204 - -X POST "$BASE/catalogs/$CATALOG/products" -H "$JSON" \
+step "activate lamp" 200 - -X PATCH "$BASE/admin/products/$LAMP/status" -H "$JSON" -d '{"status":"active"}'
+step "add lamp to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
     -d "{\"products\":[\"$LAMP\"]}"
-step "lamp has no stock set up" 200 - "$BASE/variants/$LAMP_VAR/inventory"
+step "lamp has no stock set up" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
 contains "so it is untracked" '"id":null,'
 contains "reported as tracked: false" '"tracked":false'
-step "create warehouse for the market" 201 - -X POST "$BASE/locations" -H "$JSON" \
+step "create warehouse for the market" 201 - -X POST "$BASE/admin/locations" -H "$JSON" \
     -d "{\"name\":\"Zagreb\",\"markets\":[\"$MARKET\"]}"
 WAREHOUSE=$(id)
-step "create lamp inventory" 201 - -X POST "$BASE/inventory-items" -H "$JSON" \
+step "create lamp inventory" 201 - -X POST "$BASE/admin/inventory-items" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\"}"
 LAMP_ITEM=$(id)
 contains "tracked by default" '"tracked":true,"continue_selling":false,"levels":[]'
-step "2 lamps on hand" 200 - -X PUT "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" \
+step "2 lamps on hand" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" \
     -d '{"on_hand":2}'
 contains "level is stored" "\"levels\":[{\"location\":\"$WAREHOUSE\",\"on_hand\":2,\"reserved\":0,\"available\":2}]"
-step "create stock cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "create stock cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 STOCK_CART=$(id)
-step "add 3 lamps" 409 out_of_stock -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
+step "add 3 lamps" 409 out_of_stock -X POST "$BASE/storefront/carts/$STOCK_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":3}"
-step "add 2 lamps" 200 - -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
+step "add 2 lamps" 200 - -X POST "$BASE/storefront/carts/$STOCK_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":2}"
 contains "lamps are available" '"fully_available":true'
 step "count with a stale expected" 409 on_hand_changed -X PUT \
-    "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":1,"expected_on_hand":5}'
-step "a lamp broke (1 left)" 200 - -X PUT "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" \
+    "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":1,"expected_on_hand":5}'
+step "a lamp broke (1 left)" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" \
     -H "$JSON" -d '{"on_hand":1,"expected_on_hand":2}'
-step "get stock cart" 200 - "$BASE/carts/$STOCK_CART"
+step "get stock cart" 200 - "$BASE/storefront/carts/$STOCK_CART"
 contains "lamp line ran out" '"status":"unavailable","reason_code":"out_of_stock"'
 contains "and is left out of the total" '"total":{"amount":0,"currency":"EUR"},"fully_available":false'
-step "delivery of 4" 200 - -X POST "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
+step "delivery of 4" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
     -H "$JSON" -d '{"delta":4}'
 contains "5 on hand" '"on_hand":5'
-step "get stock cart" 200 - "$BASE/carts/$STOCK_CART"
+step "get stock cart" 200 - "$BASE/storefront/carts/$STOCK_CART"
 contains "lamps are back" '"fully_available":true'
-step "raise lamps beyond stock" 409 out_of_stock -X PUT "$BASE/carts/$STOCK_CART/lines/$LAMP_VAR" \
+step "raise lamps beyond stock" 409 out_of_stock -X PUT "$BASE/storefront/carts/$STOCK_CART/lines/$LAMP_VAR" \
     -H "$JSON" -d '{"quantity":6}'
-step "set lamps to 3" 200 - -X PUT "$BASE/carts/$STOCK_CART/lines/$LAMP_VAR" -H "$JSON" -d '{"quantity":3}'
+step "set lamps to 3" 200 - -X PUT "$BASE/storefront/carts/$STOCK_CART/lines/$LAMP_VAR" -H "$JSON" -d '{"quantity":3}'
 contains "line holds 3" '"quantity":3'
-step "stop tracking lamps" 200 - -X PATCH "$BASE/inventory-items/$LAMP_ITEM" -H "$JSON" -d '{"tracked":false}'
-step "add 100 untracked lamps" 200 - -X POST "$BASE/carts/$STOCK_CART/lines" -H "$JSON" \
+step "stop tracking lamps" 200 - -X PATCH "$BASE/admin/inventory-items/$LAMP_ITEM" -H "$JSON" -d '{"tracked":false}'
+step "add 100 untracked lamps" 200 - -X POST "$BASE/storefront/carts/$STOCK_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":100}"
-step "remove the lamp line" 200 - -X DELETE "$BASE/carts/$STOCK_CART/lines/$LAMP_VAR"
+step "remove the lamp line" 200 - -X DELETE "$BASE/storefront/carts/$STOCK_CART/lines/$LAMP_VAR"
 contains "cart is empty again" '"lines":[]'
-step "remove it again" 404 line_not_found -X DELETE "$BASE/carts/$STOCK_CART/lines/$LAMP_VAR"
-step "lower warehouse priority" 200 - -X PATCH "$BASE/locations/$WAREHOUSE" -H "$JSON" -d '{"priority":5}'
+step "remove it again" 404 line_not_found -X DELETE "$BASE/storefront/carts/$STOCK_CART/lines/$LAMP_VAR"
+step "lower warehouse priority" 200 - -X PATCH "$BASE/admin/locations/$WAREHOUSE" -H "$JSON" -d '{"priority":5}'
 contains "priority is stored" '"priority":5'
-step "get warehouse" 200 - "$BASE/locations/$WAREHOUSE"
+step "get warehouse" 200 - "$BASE/admin/locations/$WAREHOUSE"
 
 echo "## customers"
-step "create customer" 201 - -X POST "$BASE/customers" -H "$JSON" \
+step "create customer" 201 - -X POST "$BASE/admin/customers" -H "$JSON" \
     -d '{"email":" Ana@Example.HR ","first_name":"Ana"}'
 CUSTOMER=$(id)
 contains "email is normalized" '"email":"ana@example.hr","first_name":"Ana"'
-step "rename customer" 200 - -X PATCH "$BASE/customers/$CUSTOMER" -H "$JSON" \
+step "rename customer" 200 - -X PATCH "$BASE/admin/customers/$CUSTOMER" -H "$JSON" \
     -d '{"first_name":null,"last_name":"Horvat"}'
 contains "null clears, others change" '"first_name":null,"last_name":"Horvat"'
-step "add shipping address" 201 - -X POST "$BASE/customers/$CUSTOMER/addresses" -H "$JSON" \
+step "add shipping address" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
 ADDRESS=$(address)
 contains "it is the default shipping address" "\"default_shipping_address\":\"$ADDRESS\",\"default_billing_address\":null"
-step "move it to Split, billing only" 200 - -X PUT "$BASE/customers/$CUSTOMER/addresses/$ADDRESS" -H "$JSON" \
+step "move it to Split, billing only" 200 - -X PUT "$BASE/admin/customers/$CUSTOMER/addresses/$ADDRESS" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Riva 2","city":"Split","country":"HR","default_billing":true}'
 contains "defaults follow the request" "\"default_shipping_address\":null,\"default_billing_address\":\"$ADDRESS\""
 contains "address is replaced" '"city":"Split"'
-step "get customer" 200 - "$BASE/customers/$CUSTOMER"
-step "create buyer cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "get customer" 200 - "$BASE/admin/customers/$CUSTOMER"
+step "create buyer cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 BUYER_CART=$(id)
 contains "no buyer yet" '"email":null,"customer":null'
-step "set cart email" 200 - -X PUT "$BASE/carts/$BUYER_CART/email" -H "$JSON" -d '{"email":"Ivo@Example.hr"}'
+step "set cart email" 200 - -X PUT "$BASE/storefront/carts/$BUYER_CART/email" -H "$JSON" -d '{"email":"Ivo@Example.hr"}'
 contains "cart email is normalized" '"email":"ivo@example.hr","customer":null'
-step "link the customer" 200 - -X PUT "$BASE/carts/$BUYER_CART/customer" -H "$JSON" \
+step "link the customer" 200 - -X PUT "$BASE/admin/carts/$BUYER_CART/customer" -H "$JSON" \
     -d "{\"customer\":\"$CUSTOMER\"}"
 contains "cart takes the customer's email" "\"email\":\"ana@example.hr\",\"customer\":\"$CUSTOMER\""
-step "unlink the customer" 200 - -X PUT "$BASE/carts/$BUYER_CART/customer" -H "$JSON" -d '{"customer":null}'
+step "unlink the customer" 200 - -X PUT "$BASE/admin/carts/$BUYER_CART/customer" -H "$JSON" -d '{"customer":null}'
 contains "email stays" '"email":"ana@example.hr","customer":null'
-step "remove the address" 200 - -X DELETE "$BASE/customers/$CUSTOMER/addresses/$ADDRESS"
+step "remove the address" 200 - -X DELETE "$BASE/admin/customers/$CUSTOMER/addresses/$ADDRESS"
 contains "address book is empty, defaults cleared" '"default_billing_address":null,"addresses":[]'
 
 echo "## checkout with stock and tax"
 # Books and lamps cost 900 (the price list takes 10%) and pay the region's 13% default;
 # lamps are tracked again, 5 on hand.
-step "track lamps again" 200 - -X PATCH "$BASE/inventory-items/$LAMP_ITEM" -H "$JSON" -d '{"tracked":true}'
-step "create shop cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "track lamps again" 200 - -X PATCH "$BASE/admin/inventory-items/$LAMP_ITEM" -H "$JSON" -d '{"tracked":true}'
+step "create shop cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 SHOP_CART=$(id)
-step "add 2 lamps" 200 - -X POST "$BASE/carts/$SHOP_CART/lines" -H "$JSON" \
+step "add 2 lamps" 200 - -X POST "$BASE/storefront/carts/$SHOP_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":2}"
-step "add a book" 200 - -X POST "$BASE/carts/$SHOP_CART/lines" -H "$JSON" \
+step "add a book" 200 - -X POST "$BASE/storefront/carts/$SHOP_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$BOOK_VAR\",\"quantity\":1}"
-step "a guest's email" 200 - -X PUT "$BASE/carts/$SHOP_CART/email" -H "$JSON" \
+step "a guest's email" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
-step "checkout" 201 - -X POST "$BASE/carts/$SHOP_CART/checkout" -H "$JSON" -d '{}'
+step "checkout" 201 - -X POST "$BASE/storefront/carts/$SHOP_CART/checkout" -H "$JSON" -d '{}'
 SHOP_ORDER=$(id)
 GUEST=$(customer)
 contains "the order copies the tax line" '"tax":{"rate_ppm":130000,"amount":{"amount":117,"currency":"EUR"},"tax_class":null}'
 contains "and adds tax on top" '"subtotal":{"amount":2700,"currency":"EUR"},"tax_total":{"amount":351,"currency":"EUR"},"total":{"amount":3051'
-step "the guest became a customer" 200 - "$BASE/customers/$GUEST"
+step "the guest became a customer" 200 - "$BASE/admin/customers/$GUEST"
 contains "with the cart's email" '"email":"guest@example.hr"'
-step "the lamps are reserved" 200 - "$BASE/inventory-items/$LAMP_ITEM"
+step "the lamps are reserved" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
 contains "2 of 5" "\"on_hand\":5,\"reserved\":2,\"available\":3"
-step "the checked-out cart" 200 - "$BASE/carts/$SHOP_CART"
+step "the checked-out cart" 200 - "$BASE/storefront/carts/$SHOP_CART"
 contains "reads as charged, not out of stock" '"total":{"amount":3051,"currency":"EUR"},"fully_available":true'
-step "a second cart, same guest" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "a second cart, same guest" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 AGAIN_CART=$(id)
-step "add 3 lamps" 200 - -X POST "$BASE/carts/$AGAIN_CART/lines" -H "$JSON" \
+step "add 3 lamps" 200 - -X POST "$BASE/storefront/carts/$AGAIN_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":3}"
-step "same email" 200 - -X PUT "$BASE/carts/$AGAIN_CART/email" -H "$JSON" \
+step "same email" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
 step "a lamp broke (4 on hand, 2 reserved)" 200 - -X PUT \
-    "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":4,"expected_on_hand":5}'
-step "checkout with too few lamps" 409 cart_unavailable -X POST "$BASE/carts/$AGAIN_CART/checkout" \
+    "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":4,"expected_on_hand":5}'
+step "checkout with too few lamps" 409 cart_unavailable -X POST "$BASE/storefront/carts/$AGAIN_CART/checkout" \
     -H "$JSON" -d '{}'
 contains "the error lists the lamp" "\"details\":{\"lines\":[\"$LAMP_VAR\"]}"
-step "take 2 lamps instead" 200 - -X PUT "$BASE/carts/$AGAIN_CART/lines/$LAMP_VAR" -H "$JSON" \
+step "take 2 lamps instead" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/lines/$LAMP_VAR" -H "$JSON" \
     -d '{"quantity":2}'
-step "checkout" 201 - -X POST "$BASE/carts/$AGAIN_CART/checkout" -H "$JSON" -d '{}'
+step "checkout" 201 - -X POST "$BASE/storefront/carts/$AGAIN_CART/checkout" -H "$JSON" -d '{}'
 contains "the same guest customer" "\"customer\":\"$GUEST\""
-step "every lamp is reserved" 200 - "$BASE/inventory-items/$LAMP_ITEM"
+step "every lamp is reserved" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
 contains "4 of 4" '"on_hand":4,"reserved":4,"available":0'
-step "the first order is unchanged" 200 - "$BASE/orders/$SHOP_ORDER"
-step "stop tracking lamps again" 200 - -X PATCH "$BASE/inventory-items/$LAMP_ITEM" -H "$JSON" \
+step "the first order is unchanged" 200 - "$BASE/admin/orders/$SHOP_ORDER"
+step "stop tracking lamps again" 200 - -X PATCH "$BASE/admin/inventory-items/$LAMP_ITEM" -H "$JSON" \
     -d '{"tracked":false}'
 
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
-step "wrong method" 405 method_not_allowed -X DELETE "$BASE/products/$MUG"
-step "malformed json" 400 malformed_json -X POST "$BASE/markets" -H "$JSON" -d '{"name":'
-step "missing field" 422 invalid_body -X POST "$BASE/markets" -H "$JSON" -d '{"name":"X"}'
-step "unknown currency" 422 invalid_body -X POST "$BASE/markets" -H "$JSON" \
+step "wrong method" 405 method_not_allowed -X DELETE "$BASE/admin/products/$MUG"
+step "malformed json" 400 malformed_json -X POST "$BASE/admin/markets" -H "$JSON" -d '{"name":'
+step "missing field" 422 invalid_body -X POST "$BASE/admin/markets" -H "$JSON" -d '{"name":"X"}'
+step "unknown currency" 422 invalid_body -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"UK","countries":["GB"],"currency":"GBP"}'
-step "amount beyond 2^53-1" 422 invalid_body -X POST "$BASE/products" -H "$JSON" \
+step "amount beyond 2^53-1" 422 invalid_body -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"huge","title":"Huge","price":{"amount":9007199254740992,"currency":"EUR"}}'
-step "wrong id prefix" 400 invalid_path "$BASE/carts/$MUG"
-step "unknown cart" 404 cart_not_found "$BASE/carts/cart_00000000000000000000000000000063"
-step "duplicate handle" 409 handle_taken -X POST "$BASE/products" -H "$JSON" \
+step "wrong id prefix" 400 invalid_path "$BASE/storefront/carts/$MUG"
+step "unknown cart" 404 cart_not_found "$BASE/storefront/carts/cart_00000000000000000000000000000063"
+step "duplicate handle" 409 handle_taken -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"mug","title":"Mug 2","price":{"amount":1,"currency":"EUR"}}'
-step "country in other market" 409 country_in_other_market -X POST "$BASE/markets" -H "$JSON" \
+step "country in other market" 409 country_in_other_market -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"DACH","countries":["AT","DE"],"currency":"EUR"}'
-step "create Serbia market" 201 - -X POST "$BASE/markets" -H "$JSON" \
+step "create Serbia market" 201 - -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"Serbia","countries":["RS"],"currency":"RSD"}'
 SERBIA=$(id)
 step "add a country another market has" 409 country_in_other_market -X POST \
-    "$BASE/markets/$MARKET/countries" -H "$JSON" -d '{"country":"RS"}'
-step "remove a market's last country" 422 last_country -X DELETE "$BASE/markets/$SERBIA/countries/RS"
+    "$BASE/admin/markets/$MARKET/countries" -H "$JSON" -d '{"country":"RS"}'
+step "remove a market's last country" 422 last_country -X DELETE "$BASE/admin/markets/$SERBIA/countries/RS"
 step "remove a country the market lacks" 404 country_not_in_market -X DELETE \
-    "$BASE/markets/$MARKET/countries/FR"
-step "second catalog for market" 409 catalog_exists -X POST "$BASE/catalogs" -H "$JSON" \
+    "$BASE/admin/markets/$MARKET/countries/FR"
+step "second catalog for market" 409 catalog_exists -X POST "$BASE/admin/catalogs" -H "$JSON" \
     -d "{\"market\":\"$MARKET\"}"
-step "create RSD price list" 201 - -X POST "$BASE/price-lists" -H "$JSON" -d '{"currency":"RSD"}'
+step "create RSD price list" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" -d '{"currency":"RSD"}'
 RSD_LIST=$(id)
 step "assign RSD list to EUR market" 422 price_list_currency_mismatch -X PUT \
-    "$BASE/catalogs/$CATALOG/price-list" -H "$JSON" -d "{\"price_list\":\"$RSD_LIST\"}"
+    "$BASE/admin/catalogs/$CATALOG/price-list" -H "$JSON" -d "{\"price_list\":\"$RSD_LIST\"}"
 step "fixed prices on unknown list" 404 price_list_not_found -X PUT \
-    "$BASE/price-lists/pl_00000000000000000000000000000063/fixed-prices" -H "$JSON" -d '{"fixed_prices":[]}'
+    "$BASE/admin/price-lists/pl_00000000000000000000000000000063/fixed-prices" -H "$JSON" -d '{"fixed_prices":[]}'
 step "fixed price in other currency" 422 fixed_price_currency_mismatch -X PUT \
-    "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"RSD\"}}]}"
-step "misspelled PATCH field" 422 invalid_body -X PATCH "$BASE/customers/$CUSTOMER" -H "$JSON" \
+step "misspelled PATCH field" 422 invalid_body -X PATCH "$BASE/admin/customers/$CUSTOMER" -H "$JSON" \
     -d '{"frist_name":"Ana"}'
 step "null for a field that can't be cleared" 422 invalid_body -X PATCH \
-    "$BASE/customers/$CUSTOMER" -H "$JSON" -d '{"email":null}'
-step "empty PATCH changes nothing" 200 - -X PATCH "$BASE/markets/$MARKET" -H "$JSON" -d '{}'
+    "$BASE/admin/customers/$CUSTOMER" -H "$JSON" -d '{"email":null}'
+step "empty PATCH changes nothing" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{}'
 step "update unknown market" 404 market_not_found -X PATCH \
-    "$BASE/markets/mkt_00000000000000000000000000000063" -H "$JSON" -d '{"prices_include_tax":true}'
+    "$BASE/admin/markets/mkt_00000000000000000000000000000063" -H "$JSON" -d '{"prices_include_tax":true}'
 step "products for unknown catalog" 404 catalog_not_found -X POST \
-    "$BASE/catalogs/cat_00000000000000000000000000000063/products" -H "$JSON" -d '{"products":[]}'
-step "add archived mug" 422 product_not_active -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
+    "$BASE/admin/catalogs/cat_00000000000000000000000000000063/products" -H "$JSON" -d '{"products":[]}'
+step "add archived mug" 422 product_not_active -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
-step "cart to a country without market" 422 no_market_for_country -X POST "$BASE/carts" -H "$JSON" \
+step "cart to a country without market" 422 no_market_for_country -X POST "$BASE/storefront/carts" -H "$JSON" \
     -d '{"country":"US"}'
-step "cart to a lowercase country" 422 invalid_country_code -X POST "$BASE/carts" -H "$JSON" \
+step "cart to a lowercase country" 422 invalid_country_code -X POST "$BASE/storefront/carts" -H "$JSON" \
     -d '{"country":"us"}'
-step "second tax region for a country" 409 tax_region_exists -X POST "$BASE/tax-regions" -H "$JSON" \
+step "second tax region for a country" 409 tax_region_exists -X POST "$BASE/admin/tax-regions" -H "$JSON" \
     -d '{"country":"HR","default_rate_ppm":250000}'
-step "tax rate above 100%" 422 invalid_tax_rate -X POST "$BASE/tax-regions" -H "$JSON" \
+step "tax rate above 100%" 422 invalid_tax_rate -X POST "$BASE/admin/tax-regions" -H "$JSON" \
     -d '{"country":"DE","default_rate_ppm":1000001}'
-step "unknown tax region" 404 tax_region_not_found "$BASE/tax-regions/txreg_00000000000000000000000000000063"
+step "unknown tax region" 404 tax_region_not_found "$BASE/admin/tax-regions/txreg_00000000000000000000000000000063"
 step "rate for unknown class" 404 tax_class_not_found -X PUT \
-    "$BASE/tax-regions/$REGION/class-rates/txc_00000000000000000000000000000063" -H "$JSON" -d '{"rate_ppm":0}'
+    "$BASE/admin/tax-regions/$REGION/class-rates/txc_00000000000000000000000000000063" -H "$JSON" -d '{"rate_ppm":0}'
 step "remove a rate the class doesn't have" 404 class_rate_not_found -X DELETE \
-    "$BASE/tax-regions/$REGION/class-rates/$BOOKS"
-step "assign unknown class" 422 tax_class_not_found -X PUT "$BASE/tax-assignments" -H "$JSON" \
+    "$BASE/admin/tax-regions/$REGION/class-rates/$BOOKS"
+step "assign unknown class" 422 tax_class_not_found -X PUT "$BASE/admin/tax-assignments" -H "$JSON" \
     -d "{\"products\":[\"$BOOK\"],\"tax_class\":\"txc_00000000000000000000000000000063\"}"
-step "second item for a variant" 409 inventory_item_exists -X POST "$BASE/inventory-items" -H "$JSON" \
+step "second item for a variant" 409 inventory_item_exists -X POST "$BASE/admin/inventory-items" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\"}"
 step "unknown inventory item" 404 inventory_item_not_found \
-    "$BASE/inventory-items/invi_00000000000000000000000000000063"
+    "$BASE/admin/inventory-items/invi_00000000000000000000000000000063"
 step "stock at unknown location" 404 location_not_found -X PUT \
-    "$BASE/inventory-items/$LAMP_ITEM/levels/loc_00000000000000000000000000000063" -H "$JSON" -d '{"on_hand":1}'
-step "unknown location" 404 location_not_found "$BASE/locations/loc_00000000000000000000000000000063"
-step "location listing a market twice" 422 duplicate_market -X POST "$BASE/locations" -H "$JSON" \
+    "$BASE/admin/inventory-items/$LAMP_ITEM/levels/loc_00000000000000000000000000000063" -H "$JSON" -d '{"on_hand":1}'
+step "unknown location" 404 location_not_found "$BASE/admin/locations/loc_00000000000000000000000000000063"
+step "location listing a market twice" 422 duplicate_market -X POST "$BASE/admin/locations" -H "$JSON" \
     -d "{\"name\":\"Split\",\"markets\":[\"$MARKET\",\"$MARKET\"]}"
-step "blank location name" 422 field_required -X POST "$BASE/locations" -H "$JSON" -d '{"name":" "}'
+step "blank location name" 422 field_required -X POST "$BASE/admin/locations" -H "$JSON" -d '{"name":" "}'
 step "stock beyond 2^53-1" 422 stock_out_of_range -X PUT \
-    "$BASE/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":9007199254740992}'
-step "same email in another case" 409 customer_exists -X POST "$BASE/customers" -H "$JSON" \
+    "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":9007199254740992}'
+step "same email in another case" 409 customer_exists -X POST "$BASE/admin/customers" -H "$JSON" \
     -d '{"email":"ANA@example.hr"}'
-step "invalid customer email" 422 invalid_email -X POST "$BASE/customers" -H "$JSON" -d '{"email":"ana"}'
-step "address without a city" 422 invalid_address -X POST "$BASE/customers/$CUSTOMER/addresses" \
+step "invalid customer email" 422 invalid_email -X POST "$BASE/admin/customers" -H "$JSON" -d '{"email":"ana"}'
+step "address without a city" 422 invalid_address -X POST "$BASE/admin/customers/$CUSTOMER/addresses" \
     -H "$JSON" -d '{"last_name":"Horvat","line1":"Ilica 1","city":" ","country":"HR"}'
-step "unknown customer" 404 customer_not_found "$BASE/customers/cus_00000000000000000000000000000063"
+step "unknown customer" 404 customer_not_found "$BASE/admin/customers/cus_00000000000000000000000000000063"
 step "remove unknown address" 404 address_not_found -X DELETE \
-    "$BASE/customers/$CUSTOMER/addresses/addr_00000000000000000000000000000063"
-step "link unknown customer to cart" 422 customer_not_found -X PUT "$BASE/carts/$BUYER_CART/customer" \
+    "$BASE/admin/customers/$CUSTOMER/addresses/addr_00000000000000000000000000000063"
+step "link unknown customer to cart" 422 customer_not_found -X PUT "$BASE/admin/carts/$BUYER_CART/customer" \
     -H "$JSON" -d '{"customer":"cus_00000000000000000000000000000063"}'
-step "invalid cart email" 422 invalid_email -X PUT "$BASE/carts/$BUYER_CART/email" -H "$JSON" \
+step "invalid cart email" 422 invalid_email -X PUT "$BASE/storefront/carts/$BUYER_CART/email" -H "$JSON" \
     -d '{"email":"nope"}'
-step "zero quantity" 422 invalid_quantity -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
+step "zero quantity" 422 invalid_quantity -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":0}"
-step "get mug" 200 - "$BASE/products/$MUG"
+step "get mug" 200 - "$BASE/admin/products/$MUG"
 contains "mug has its handle" '"handle":"mug"'
-step "unknown product" 404 product_not_found "$BASE/products/prod_00000000000000000000000000000063"
-step "get lamp inventory item" 200 - "$BASE/inventory-items/$LAMP_ITEM"
-step "handle with a space" 422 invalid_handle -X POST "$BASE/products" -H "$JSON" \
+step "unknown product" 404 product_not_found "$BASE/admin/products/prod_00000000000000000000000000000063"
+step "get lamp inventory item" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
+step "handle with a space" 422 invalid_handle -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"blue mug","title":"Mug","price":{"amount":1,"currency":"EUR"}}'
-step "blank product title" 422 field_required -X POST "$BASE/products" -H "$JSON" \
+step "blank product title" 422 field_required -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"untitled","title":" ","price":{"amount":1,"currency":"EUR"}}'
-step "body without content type" 415 missing_content_type -X POST "$BASE/products" \
+step "body without content type" 415 missing_content_type -X POST "$BASE/admin/products" \
     -d '{"handle":"x","title":"X","price":{"amount":1,"currency":"EUR"}}'
-step "market without countries" 422 no_countries -X POST "$BASE/markets" -H "$JSON" \
+step "market without countries" 422 no_countries -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"Nowhere","countries":[],"currency":"EUR"}'
-step "market listing a country twice" 422 duplicate_country -X POST "$BASE/markets" -H "$JSON" \
+step "market listing a country twice" 422 duplicate_country -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"France","countries":["FR","FR"],"currency":"EUR"}'
-step "discount beyond 100%" 422 invalid_basis_points -X POST "$BASE/price-lists" -H "$JSON" \
+step "discount beyond 100%" 422 invalid_basis_points -X POST "$BASE/admin/price-lists" -H "$JSON" \
     -d '{"currency":"EUR","adjustment_bps":-10001}'
 step "the same variant twice in fixed prices" 422 duplicate_fixed_price -X PUT \
-    "$BASE/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":1,\"currency\":\"EUR\"}},{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":2,\"currency\":\"EUR\"}}]}"
-step "unknown price list in a body" 422 price_list_not_found -X PUT "$BASE/catalogs/$CATALOG/price-list" \
+step "unknown price list in a body" 422 price_list_not_found -X PUT "$BASE/admin/catalogs/$CATALOG/price-list" \
     -H "$JSON" -d '{"price_list":"pl_00000000000000000000000000000063"}'
-step "unknown market in a body" 422 market_not_found -X POST "$BASE/catalogs" -H "$JSON" \
+step "unknown market in a body" 422 market_not_found -X POST "$BASE/admin/catalogs" -H "$JSON" \
     -d '{"market":"mkt_00000000000000000000000000000063"}'
-step "unknown variant in a cart line" 422 variant_not_found -X POST "$BASE/carts/$CART/lines" \
+step "unknown variant in a cart line" 422 variant_not_found -X POST "$BASE/storefront/carts/$CART/lines" \
     -H "$JSON" -d '{"variant":"var_00000000000000000000000000000063","quantity":1}'
-step "create overflow cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
+step "create overflow cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 OVERFLOW_CART=$(id)
-step "add 4294967295 lamps" 200 - -X POST "$BASE/carts/$OVERFLOW_CART/lines" -H "$JSON" \
+step "add 4294967295 lamps" 200 - -X POST "$BASE/storefront/carts/$OVERFLOW_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":4294967295}"
-step "one lamp too many" 422 quantity_overflow -X POST "$BASE/carts/$OVERFLOW_CART/lines" -H "$JSON" \
+step "one lamp too many" 422 quantity_overflow -X POST "$BASE/storefront/carts/$OVERFLOW_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":1}"
 LONG=$(printf 'x%.0s' $(seq 1 256))
-step "first name over 255 characters" 422 field_too_long -X PATCH "$BASE/customers/$CUSTOMER" \
+step "first name over 255 characters" 422 field_too_long -X PATCH "$BASE/admin/customers/$CUSTOMER" \
     -H "$JSON" -d "{\"first_name\":\"$LONG\"}"
-step "create draft product" 201 - -X POST "$BASE/products" -H "$JSON" \
+step "create draft product" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"draft","title":"Draft","price":{"amount":1,"currency":"EUR"}}'
-step "draft -> archived" 422 invalid_status_transition -X PATCH "$BASE/products/$(id)/status" \
+step "draft -> archived" 422 invalid_status_transition -X PATCH "$BASE/admin/products/$(id)/status" \
     -H "$JSON" -d '{"status":"archived"}'
 
 echo
 echo "## auth (design note 0008)"
-step "who am I" 200 - "$BASE/me"
+step "who am I" 200 - "$BASE/admin/me"
 contains "the owner has the owner role" '"name":"Owner"'
 OWNER=$(sed -E 's/.*"user":\{"id":"(user_[0-9a-f]+)".*/\1/' <<<"$BODY")
-step "the last owner can't be disabled" 409 last_owner -X PATCH "$BASE/users/$OWNER" \
+step "the last owner can't be disabled" 409 last_owner -X PATCH "$BASE/admin/users/$OWNER" \
     -H "$JSON" -d '{"status":"disabled"}'
-step "create a read-only key" 201 - -X POST "$BASE/api-keys" -H "$JSON" \
+step "create a read-only key" 201 - -X POST "$BASE/admin/api-keys" -H "$JSON" \
     -d '{"kind":"secret","name":"Reader","scopes":["products:read"]}'
 contains "the key is shown redacted" '"redacted":"hypha_sk_…'
 READER=$(token)
 READER_ID=$(id)
 SAVED_AUTH=("${AUTH[@]}")
 AUTH=(-H "authorization: Bearer $READER")
-step "the key reads products" 200 - "$BASE/products/$MUG"
-step "but can't write them" 403 missing_scope -X POST "$BASE/products" -H "$JSON" \
+step "the key reads products" 200 - "$BASE/admin/products/$MUG"
+step "but can't write them" 403 missing_scope -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"nope","title":"Nope","price":{"amount":1,"currency":"EUR"}}'
-step "a key is no session" 401 session_required "$BASE/me"
+step "a key is no session" 401 session_required "$BASE/admin/me"
 AUTH=("${SAVED_AUTH[@]}")
-step "revoke the key" 200 - -X POST "$BASE/api-keys/$READER_ID/revoke"
-step "revoking twice" 409 api_key_revoked -X POST "$BASE/api-keys/$READER_ID/revoke"
+step "revoke the key" 200 - -X POST "$BASE/admin/api-keys/$READER_ID/revoke"
+step "revoking twice" 409 api_key_revoked -X POST "$BASE/admin/api-keys/$READER_ID/revoke"
 AUTH=(-H "authorization: Bearer $READER")
-step "a revoked key stops working" 401 invalid_token "$BASE/products/$MUG"
+step "a revoked key stops working" 401 invalid_token "$BASE/admin/products/$MUG"
 AUTH=("${SAVED_AUTH[@]}")
 step "a publishable key's scopes are fixed" 422 api_key_scopes_fixed -X POST \
-    "$BASE/api-keys" -H "$JSON" -d '{"kind":"publishable","name":"Shop","scopes":["orders:read"]}'
-step "create a publishable key" 201 - -X POST "$BASE/api-keys" -H "$JSON" \
+    "$BASE/admin/api-keys" -H "$JSON" -d '{"kind":"publishable","name":"Shop","scopes":["orders:read"]}'
+step "create a publishable key" 201 - -X POST "$BASE/admin/api-keys" -H "$JSON" \
     -d '{"kind":"publishable","name":"Storefront"}'
 PUBLISHABLE=$(token)
+SAVED_SF_AUTH=("${SF_AUTH[@]}")
+SF_AUTH=(-H "x-publishable-key: $PUBLISHABLE")
+step "a storefront reads the store" 200 - "$BASE/storefront/store"
+contains "only its name" '{"name":'
+step "and makes a cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+SF_AUTH=("${SAVED_SF_AUTH[@]}")
 AUTH=(-H "x-publishable-key: $PUBLISHABLE")
-step "a storefront reads the store" 200 - "$BASE/store"
-step "and makes a cart" 201 - -X POST "$BASE/carts" -H "$JSON" -d '{"country":"HR"}'
-step "but can't create customers" 403 missing_scope -X POST "$BASE/customers" -H "$JSON" \
-    -d '{"email":"shop@example.com"}'
+step "but never uses admin routes" 403 admin_credentials_required -X POST \
+    "$BASE/admin/customers" -H "$JSON" -d '{"email":"shop@example.com"}'
 AUTH=("${SAVED_AUTH[@]}")
-step "create a role" 201 - -X POST "$BASE/roles" -H "$JSON" \
+SF_AUTH=(-H "authorization: Bearer $SESSION")
+step "and a staff session never uses the storefront" 403 publishable_key_required \
+    "$BASE/storefront/store"
+SF_AUTH=("${SAVED_SF_AUTH[@]}")
+step "create a role" 201 - -X POST "$BASE/admin/roles" -H "$JSON" \
     -d '{"name":"Support","scopes":["orders:write","customers:read"]}'
 ROLE=$(id)
-step "role names are unique ignoring case" 409 role_name_taken -X POST "$BASE/roles" -H "$JSON" \
+step "role names are unique ignoring case" 409 role_name_taken -X POST "$BASE/admin/roles" -H "$JSON" \
     -d '{"name":"SUPPORT","scopes":["orders:read"]}'
 step "the owner role can't change" 409 owner_role_fixed -X PATCH \
-    "$BASE/roles/$(sed -E 's/.*"role":"(role_[0-9a-f]+)".*/\1/' <<<"$(curl -s "${AUTH[@]}" "$BASE/users/$OWNER")")" \
+    "$BASE/admin/roles/$(sed -E 's/.*"role":"(role_[0-9a-f]+)".*/\1/' <<<"$(curl -s "${AUTH[@]}" "$BASE/admin/users/$OWNER")")" \
     -H "$JSON" -d '{"name":"Boss"}'
-step "invite someone" 201 - -X POST "$BASE/invites" -H "$JSON" \
+step "invite someone" 201 - -X POST "$BASE/admin/invites" -H "$JSON" \
     -d "{\"email\":\"support@example.com\",\"role\":\"$ROLE\"}"
-step "staff can't be invited" 409 user_exists -X POST "$BASE/invites" -H "$JSON" \
+step "staff can't be invited" 409 user_exists -X POST "$BASE/admin/invites" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"role\":\"$ROLE\"}"
 AUTH=()
-step "a made-up invite token" 401 invalid_token -X POST "$BASE/invites/accept" -H "$JSON" \
+step "a made-up invite token" 401 invalid_token -X POST "$BASE/admin/invites/accept" -H "$JSON" \
     -d '{"token":"hypha_inv_nope","name":"Eve","password":"eve password"}'
-step "a wrong password" 401 invalid_credentials -X POST "$BASE/auth/login" -H "$JSON" \
+step "a wrong password" 401 invalid_credentials -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"wrong password\"}"
-step "a reset for anyone is 202" 202 - -X POST "$BASE/auth/password-reset" -H "$JSON" \
+step "a reset for anyone is 202" 202 - -X POST "$BASE/admin/auth/password-reset" -H "$JSON" \
     -d '{"email":"nobody@example.com"}'
-step "a made-up reset token" 401 invalid_token -X POST "$BASE/auth/password-reset/confirm" \
+step "a made-up reset token" 401 invalid_token -X POST "$BASE/admin/auth/password-reset/confirm" \
     -H "$JSON" -d '{"token":"hypha_rst_nope","password":"new password"}'
 AUTH=(-H "authorization: Bearer $SESSION")
-step "log out" 204 - -X POST "$BASE/auth/logout"
-step "the session is over" 401 invalid_token "$BASE/me"
+step "log out" 204 - -X POST "$BASE/admin/auth/logout"
+step "the session is over" 401 invalid_token "$BASE/admin/me"
 
 echo
 echo "## rate limits (design note 0009)"
@@ -608,10 +637,10 @@ echo "## rate limits (design note 0009)"
 # the email-and-address limits, whichever trips first.
 AUTH=()
 for n in $(seq 1 10); do
-    curl -s -o /dev/null -X POST "$BASE/auth/login" -H "$JSON" \
+    curl -s -o /dev/null -X POST "$BASE/admin/auth/login" -H "$JSON" \
         -d '{"email":"guess@example.com","password":"guess"}'
 done
-step "a run of login tries from one address is refused" 429 rate_limited -X POST "$BASE/auth/login" -H "$JSON" \
+step "a run of login tries from one address is refused" 429 rate_limited -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -d '{"email":"guess@example.com","password":"guess"}'
 contains "and says when to come back" '"retry_after_secs":'
 

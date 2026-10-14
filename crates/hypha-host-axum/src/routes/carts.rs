@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, KeyedJson, PathId, idempotent_response},
+    extract::{Caller, JsonBody, KeyedJson, PathId, Storefront, idempotent_response},
     state::{SharedState, Storage},
 };
 
@@ -169,7 +169,7 @@ impl From<&PricedCart> for CartResponse {
 /// Takes an `Idempotency-Key` header: a retry returns the cart the first request made.
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
-    caller: Caller,
+    caller: Caller<Storefront>,
     req: KeyedJson<CreateCartRequest>,
 ) -> Result<Response, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
@@ -188,7 +188,7 @@ pub(super) async fn create<S: Storage>(
 
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
-    caller: Caller,
+    caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
@@ -199,7 +199,7 @@ pub(super) async fn fetch<S: Storage>(
 /// Takes an `Idempotency-Key` header: a retry returns the cart without adding again.
 pub(super) async fn add<S: Storage>(
     State(state): State<SharedState<S>>,
-    caller: Caller,
+    caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
     req: KeyedJson<AddLineRequest>,
 ) -> Result<Response, ApiError> {
@@ -221,7 +221,7 @@ pub(super) async fn add<S: Storage>(
 
 pub(super) async fn set_email<S: Storage>(
     State(state): State<SharedState<S>>,
-    caller: Caller,
+    caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
     body: JsonBody<SetEmailRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
@@ -252,7 +252,7 @@ pub(super) struct SetQuantityRequest {
 
 pub(super) async fn set_quantity<S: Storage>(
     State(state): State<SharedState<S>>,
-    caller: Caller,
+    caller: Caller<Storefront>,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
     body: JsonBody<SetQuantityRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
@@ -271,7 +271,7 @@ pub(super) async fn set_quantity<S: Storage>(
 
 pub(super) async fn remove_line<S: Storage>(
     State(state): State<SharedState<S>>,
-    caller: Caller,
+    caller: Caller<Storefront>,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;

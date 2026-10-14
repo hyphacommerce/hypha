@@ -156,7 +156,7 @@ async fn unknown_routes_and_methods_get_json_errors() {
         (status, code(&body)),
         (StatusCode::NOT_FOUND, "route_not_found")
     );
-    let (status, body) = send(&app, "DELETE", "/products", None).await;
+    let (status, body) = send(&app, "DELETE", "/admin/products", None).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed")
@@ -167,7 +167,7 @@ async fn unknown_routes_and_methods_get_json_errors() {
 async fn bad_bodies_are_rejected_with_codes() {
     let app = app().await;
 
-    let (status, body) = send(&app, "POST", "/products", Some("{")).await;
+    let (status, body) = send(&app, "POST", "/admin/products", Some("{")).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::BAD_REQUEST, "malformed_json")
@@ -175,7 +175,7 @@ async fn bad_bodies_are_rejected_with_codes() {
 
     let request = Request::builder()
         .method("POST")
-        .uri("/products")
+        .uri("/admin/products")
         .header(AUTHORIZATION, format!("Bearer {}", app.admin_key))
         .body(Body::from("{}"))
         .unwrap();
@@ -184,7 +184,7 @@ async fn bad_bodies_are_rejected_with_codes() {
 
     let typo =
         r#"{"handle":"mug","title":"Mug","price":{"amount":1,"currency":"EUR"},"titel":"x"}"#;
-    let (status, body) = send(&app, "POST", "/products", Some(typo)).await;
+    let (status, body) = send(&app, "POST", "/admin/products", Some(typo)).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body")
@@ -197,17 +197,17 @@ async fn a_created_product_can_be_fetched_and_an_unknown_one_is_404() {
     let (status, created) = send(
         &app,
         "POST",
-        "/products",
+        "/admin/products",
         Some(r#"{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}"#),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let id = created["id"].as_str().unwrap();
 
-    let (status, fetched) = send(&app, "GET", &format!("/products/{id}"), None).await;
+    let (status, fetched) = send(&app, "GET", &format!("/admin/products/{id}"), None).await;
     assert_eq!((status, &fetched), (StatusCode::OK, &created));
 
-    let unknown = "/products/prod_00000000000000000000000000000063";
+    let unknown = "/admin/products/prod_00000000000000000000000000000063";
     let (status, body) = send(&app, "GET", unknown, None).await;
     assert_eq!(
         (status, code(&body)),
@@ -217,7 +217,7 @@ async fn a_created_product_can_be_fetched_and_an_unknown_one_is_404() {
     let (status, body) = send(
         &app,
         "GET",
-        "/products/cart_00000000000000000000000000000063",
+        "/admin/products/cart_00000000000000000000000000000063",
         None,
     )
     .await;
@@ -230,7 +230,7 @@ async fn a_created_product_can_be_fetched_and_an_unknown_one_is_404() {
 #[tokio::test]
 async fn the_store_is_the_one_created_at_startup() {
     let app = app().await;
-    let (status, body) = send(&app, "GET", "/store", None).await;
+    let (status, body) = send(&app, "GET", "/admin/store", None).await;
     assert_eq!(
         (status, body["name"].as_str()),
         (StatusCode::OK, Some("Test"))
@@ -242,7 +242,7 @@ async fn the_store_is_the_one_created_at_startup() {
 /// Logs the owner in; returns the session token.
 async fn owner_session(app: &TestApp) -> String {
     let body = json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string();
-    let (status, login) = send_with(app, &[], "POST", "/auth/login", Some(&body)).await;
+    let (status, login) = send_with(app, &[], "POST", "/admin/auth/login", Some(&body)).await;
     assert_eq!(
         (status, login["status"].as_str()),
         (StatusCode::OK, Some("authenticated"))
@@ -252,7 +252,7 @@ async fn owner_session(app: &TestApp) -> String {
 
 /// Creates a key as the admin; returns its token.
 async fn key(app: &TestApp, body: Value) -> String {
-    let (status, created) = send(app, "POST", "/api-keys", Some(&body.to_string())).await;
+    let (status, created) = send(app, "POST", "/admin/api-keys", Some(&body.to_string())).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     created["token"].as_str().unwrap().to_string()
 }
@@ -261,13 +261,13 @@ async fn key(app: &TestApp, body: Value) -> String {
 async fn no_credentials_is_401_with_a_bearer_challenge() {
     let app = app().await;
     let request = Request::builder()
-        .uri("/store")
+        .uri("/admin/store")
         .body(Body::empty())
         .unwrap();
     let response = app.router.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(response.headers()[WWW_AUTHENTICATE], "Bearer");
-    let (_, body) = send_with(&app, &[], "GET", "/store", None).await;
+    let (_, body) = send_with(&app, &[], "GET", "/admin/store", None).await;
     assert_eq!(code(&body), "unauthenticated");
     // Health checks need none.
     assert_eq!(
@@ -286,8 +286,14 @@ async fn bad_credentials_are_invalid_token() {
         format!("Bearer {}", session.replace("hypha_sess_", "hypha_rst_")),
         format!("Bearer hypha_sk_{}", "0".repeat(64)),
     ] {
-        let (status, body) =
-            send_with(&app, &[("authorization", &auth)], "GET", "/store", None).await;
+        let (status, body) = send_with(
+            &app,
+            &[("authorization", &auth)],
+            "GET",
+            "/admin/store",
+            None,
+        )
+        .await;
         assert_eq!(
             (status, code(&body)),
             (StatusCode::UNAUTHORIZED, "invalid_token"),
@@ -300,7 +306,7 @@ async fn bad_credentials_are_invalid_token() {
         &app,
         &[("x-publishable-key", &secret)],
         "GET",
-        "/store",
+        "/admin/store",
         None,
     )
     .await;
@@ -314,7 +320,7 @@ async fn bad_credentials_are_invalid_token() {
 async fn the_owner_logs_in_sees_themselves_and_logs_out() {
     let app = app().await;
     let session = owner_session(&app).await;
-    let (status, me) = send_as(&app, &session, "GET", "/me", None).await;
+    let (status, me) = send_as(&app, &session, "GET", "/admin/me", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(me["user"]["email"], OWNER_EMAIL);
     assert_eq!(me["role"]["name"], "Owner");
@@ -325,12 +331,12 @@ async fn the_owner_logs_in_sees_themselves_and_logs_out() {
     );
 
     assert_eq!(
-        send_as(&app, &session, "POST", "/auth/logout", None)
+        send_as(&app, &session, "POST", "/admin/auth/logout", None)
             .await
             .0,
         StatusCode::NO_CONTENT
     );
-    let (status, body) = send_as(&app, &session, "GET", "/me", None).await;
+    let (status, body) = send_as(&app, &session, "GET", "/admin/me", None).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::UNAUTHORIZED, "invalid_token")
@@ -341,7 +347,7 @@ async fn the_owner_logs_in_sees_themselves_and_logs_out() {
 async fn a_wrong_password_is_401() {
     let app = app().await;
     let body = json!({ "email": OWNER_EMAIL, "password": "nope nope" }).to_string();
-    let (status, body) = send_with(&app, &[], "POST", "/auth/login", Some(&body)).await;
+    let (status, body) = send_with(&app, &[], "POST", "/admin/auth/login", Some(&body)).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::UNAUTHORIZED, "invalid_credentials")
@@ -351,7 +357,7 @@ async fn a_wrong_password_is_401() {
 #[tokio::test]
 async fn me_routes_need_a_session_not_a_key() {
     let app = app().await;
-    let (status, body) = send(&app, "GET", "/me", None).await;
+    let (status, body) = send(&app, "GET", "/admin/me", None).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::UNAUTHORIZED, "session_required")
@@ -367,7 +373,7 @@ async fn a_key_has_only_its_scopes() {
     )
     .await;
     let product = r#"{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}"#;
-    let (status, body) = send_as(&app, &reader, "POST", "/products", Some(product)).await;
+    let (status, body) = send_as(&app, &reader, "POST", "/admin/products", Some(product)).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::FORBIDDEN, "missing_scope")
@@ -375,12 +381,12 @@ async fn a_key_has_only_its_scopes() {
 }
 
 #[tokio::test]
-async fn a_publishable_key_works_in_its_own_header_with_storefront_scopes() {
+async fn a_publishable_key_works_on_the_storefront_only() {
     let app = app().await;
     let (status, created) = send(
         &app,
         "POST",
-        "/api-keys",
+        "/admin/api-keys",
         Some(r#"{"kind":"publishable","name":"Storefront"}"#),
     )
     .await;
@@ -393,21 +399,91 @@ async fn a_publishable_key_works_in_its_own_header_with_storefront_scopes() {
     );
     let token = created["token"].as_str().unwrap();
     let header = [("x-publishable-key", token)];
+    let (status, store) = send_with(&app, &header, "GET", "/storefront/store", None).await;
     assert_eq!(
-        send_with(&app, &header, "GET", "/store", None).await.0,
-        StatusCode::OK
+        (status, &store),
+        (StatusCode::OK, &json!({ "name": "Test" }))
     );
-    let (status, body) = send_with(
+    // In the Authorization header too.
+    let (status, _) = send_as(&app, token, "GET", "/storefront/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    // Never on the admin surface, whatever its scopes (the store read is one of them).
+    for (method, path, body) in [
+        ("GET", "/admin/store", None),
+        ("POST", "/admin/customers", Some(r#"{"email":"a@b.co"}"#)),
+    ] {
+        let (status, json) = send_as(&app, token, method, path, body).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::FORBIDDEN, "admin_credentials_required"),
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_storefront_takes_no_admin_credentials() {
+    let app = app().await;
+    let session = owner_session(&app).await;
+    for token in [app.admin_key.as_str(), session.as_str()] {
+        let (status, json) = send_as(&app, token, "GET", "/storefront/store", None).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::FORBIDDEN, "publishable_key_required")
+        );
+    }
+}
+
+/// A publishable key, made with the admin key.
+async fn publishable(app: &TestApp) -> String {
+    let body = json!({ "kind": "publishable", "name": "Storefront" });
+    key(app, body).await
+}
+
+#[tokio::test]
+async fn a_storefront_sees_active_products_only_without_admin_fields() {
+    let app = app().await;
+    let (_, product) = send(
         &app,
-        &header,
         "POST",
-        "/customers",
-        Some(r#"{"email":"a@b.co"}"#),
+        "/admin/products",
+        Some(r#"{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}"#),
     )
     .await;
+    let id = product["id"].as_str().unwrap();
+    let pk = publishable(&app).await;
+    let path = format!("/storefront/products/{id}");
+
+    // A draft reads as missing.
+    let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
     assert_eq!(
-        (status, code(&body)),
-        (StatusCode::FORBIDDEN, "missing_scope")
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "product_not_found")
+    );
+
+    let activate = r#"{"status":"active"}"#;
+    send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{id}/status"),
+        Some(activate),
+    )
+    .await;
+    let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["handle"], "mug");
+    assert!(json.get("status").is_none());
+}
+
+#[tokio::test]
+async fn linking_a_cart_to_a_customer_is_admin_only() {
+    let app = app().await;
+    let pk = publishable(&app).await;
+    let cart = "/storefront/carts/cart_00000000000000000000000000000063/customer";
+    let (status, json) = send_as(&app, &pk, "PUT", cart, Some(r#"{"customer":null}"#)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "route_not_found")
     );
 }
 
@@ -417,24 +493,24 @@ async fn a_revoked_key_stops_working() {
     let (_, created) = send(
         &app,
         "POST",
-        "/api-keys",
+        "/admin/api-keys",
         Some(r#"{"kind":"secret","name":"Temp","scopes":["stores:read"]}"#),
     )
     .await;
     let token = created["token"].as_str().unwrap();
     let id = created["id"].as_str().unwrap();
     assert_eq!(
-        send_as(&app, token, "GET", "/store", None).await.0,
+        send_as(&app, token, "GET", "/admin/store", None).await.0,
         StatusCode::OK
     );
-    let (status, revoked) = send(&app, "POST", &format!("/api-keys/{id}/revoke"), None).await;
+    let (status, revoked) = send(&app, "POST", &format!("/admin/api-keys/{id}/revoke"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(revoked["revoked_at"].is_string());
     assert_eq!(
-        send_as(&app, token, "GET", "/store", None).await.0,
+        send_as(&app, token, "GET", "/admin/store", None).await.0,
         StatusCode::UNAUTHORIZED
     );
-    let (status, body) = send(&app, "POST", &format!("/api-keys/{id}/revoke"), None).await;
+    let (status, body) = send(&app, "POST", &format!("/admin/api-keys/{id}/revoke"), None).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::CONFLICT, "api_key_revoked")
@@ -450,7 +526,7 @@ async fn nobody_creates_a_key_beyond_their_scopes() {
     )
     .await;
     let body = json!({ "kind": "secret", "name": "More", "scopes": ["orders:read"] }).to_string();
-    let (status, body) = send_as(&app, &limited, "POST", "/api-keys", Some(&body)).await;
+    let (status, body) = send_as(&app, &limited, "POST", "/admin/api-keys", Some(&body)).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::FORBIDDEN, "not_allowed_to_grant")
@@ -472,7 +548,7 @@ async fn two_factor_setup_and_login_over_http() {
         &app,
         &session,
         "POST",
-        "/me/mfa/totp",
+        "/admin/me/mfa/totp",
         Some(r#"{"password":"nope"}"#),
     )
     .await;
@@ -481,7 +557,14 @@ async fn two_factor_setup_and_login_over_http() {
         (StatusCode::UNPROCESSABLE_ENTITY, "wrong_password")
     );
     let password = json!({ "password": OWNER_PASSWORD }).to_string();
-    let (status, setup) = send_as(&app, &session, "POST", "/me/mfa/totp", Some(&password)).await;
+    let (status, setup) = send_as(
+        &app,
+        &session,
+        "POST",
+        "/admin/me/mfa/totp",
+        Some(&password),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED);
     assert!(
         setup["uri"]
@@ -495,7 +578,7 @@ async fn two_factor_setup_and_login_over_http() {
         &app,
         &session,
         "POST",
-        "/me/mfa/totp/confirm",
+        "/admin/me/mfa/totp/confirm",
         Some(r#"{"code":"000000"}"#),
     )
     .await;
@@ -509,7 +592,7 @@ async fn two_factor_setup_and_login_over_http() {
         &app,
         &session,
         "POST",
-        "/me/mfa/totp/confirm",
+        "/admin/me/mfa/totp/confirm",
         Some(&confirm),
     )
     .await;
@@ -517,7 +600,7 @@ async fn two_factor_setup_and_login_over_http() {
     let recovery = codes["recovery_codes"][0].as_str().unwrap().to_string();
 
     let body = json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string();
-    let (status, login) = send_with(&app, &[], "POST", "/auth/login", Some(&body)).await;
+    let (status, login) = send_with(&app, &[], "POST", "/admin/auth/login", Some(&body)).await;
     assert_eq!(
         (status, login["status"].as_str()),
         (StatusCode::OK, Some("mfa_required"))
@@ -529,12 +612,12 @@ async fn two_factor_setup_and_login_over_http() {
     );
     // The challenge is no session.
     assert_eq!(
-        send_as(&app, challenge, "GET", "/me", None).await.0,
+        send_as(&app, challenge, "GET", "/admin/me", None).await.0,
         StatusCode::UNAUTHORIZED
     );
 
     let wrong = json!({ "challenge": challenge, "code": "000000" }).to_string();
-    let (status, body) = send_with(&app, &[], "POST", "/auth/login/mfa", Some(&wrong)).await;
+    let (status, body) = send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&wrong)).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::UNAUTHORIZED, "invalid_mfa_code")
@@ -542,13 +625,13 @@ async fn two_factor_setup_and_login_over_http() {
 
     // The confirm used this step's TOTP code, so finish with a recovery code.
     let right = json!({ "challenge": challenge, "code": recovery }).to_string();
-    let (status, done) = send_with(&app, &[], "POST", "/auth/login/mfa", Some(&right)).await;
+    let (status, done) = send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&right)).await;
     assert_eq!(
         (status, done["status"].as_str()),
         (StatusCode::OK, Some("authenticated"))
     );
     let new_session = done["session"]["token"].as_str().unwrap();
-    let (_, me) = send_as(&app, new_session, "GET", "/me", None).await;
+    let (_, me) = send_as(&app, new_session, "GET", "/admin/me", None).await;
     assert_eq!(me["mfa_enabled"], true);
 }
 
@@ -558,7 +641,7 @@ async fn roles_and_invites_over_http() {
     let (status, role) = send(
         &app,
         "POST",
-        "/roles",
+        "/admin/roles",
         Some(r#"{"name":"Support","scopes":["orders:write","customers:read"]}"#),
     )
     .await;
@@ -569,7 +652,7 @@ async fn roles_and_invites_over_http() {
     let (status, body) = send(
         &app,
         "POST",
-        "/roles",
+        "/admin/roles",
         Some(r#"{"name":"support","scopes":["orders:read"]}"#),
     )
     .await;
@@ -579,19 +662,19 @@ async fn roles_and_invites_over_http() {
     );
 
     let invite = json!({ "email": "bob@example.com", "role": id }).to_string();
-    let (status, invited) = send(&app, "POST", "/invites", Some(&invite)).await;
+    let (status, invited) = send(&app, "POST", "/admin/invites", Some(&invite)).await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(invited["email"], "bob@example.com");
     assert!(invited.get("token").is_none());
 
     let unknown_role = "role_00000000000000000000000000000063";
-    let (status, body) = send(&app, "GET", &format!("/roles/{unknown_role}"), None).await;
+    let (status, body) = send(&app, "GET", &format!("/admin/roles/{unknown_role}"), None).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::NOT_FOUND, "role_not_found")
     );
     let invite = json!({ "email": "eve@example.com", "role": unknown_role }).to_string();
-    let (status, body) = send(&app, "POST", "/invites", Some(&invite)).await;
+    let (status, body) = send(&app, "POST", "/admin/invites", Some(&invite)).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::UNPROCESSABLE_ENTITY, "role_not_found")
@@ -599,7 +682,7 @@ async fn roles_and_invites_over_http() {
 
     let accept =
         json!({ "token": "hypha_inv_nope", "name": "Bob", "password": "bob password" }).to_string();
-    let (status, body) = send_with(&app, &[], "POST", "/invites/accept", Some(&accept)).await;
+    let (status, body) = send_with(&app, &[], "POST", "/admin/invites/accept", Some(&accept)).await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::UNAUTHORIZED, "invalid_token")
@@ -612,7 +695,7 @@ async fn a_reset_request_is_202_whoever_asks() {
     for email in [OWNER_EMAIL, "nobody@example.com", "not an email"] {
         let body = json!({ "email": email }).to_string();
         assert_eq!(
-            send_with(&app, &[], "POST", "/auth/password-reset", Some(&body))
+            send_with(&app, &[], "POST", "/admin/auth/password-reset", Some(&body))
                 .await
                 .0,
             StatusCode::ACCEPTED
@@ -624,12 +707,12 @@ async fn a_reset_request_is_202_whoever_asks() {
 async fn the_last_owner_cannot_be_disabled_over_http() {
     let app = app().await;
     let session = owner_session(&app).await;
-    let (_, me) = send_as(&app, &session, "GET", "/me", None).await;
+    let (_, me) = send_as(&app, &session, "GET", "/admin/me", None).await;
     let id = me["user"]["id"].as_str().unwrap();
     let (status, body) = send(
         &app,
         "PATCH",
-        &format!("/users/{id}"),
+        &format!("/admin/users/{id}"),
         Some(r#"{"status":"disabled"}"#),
     )
     .await;
@@ -645,7 +728,7 @@ async fn a_bad_token_is_refused_before_the_body_is_looked_at() {
             &app,
             &[("authorization", &fake)],
             "POST",
-            "/products",
+            "/admin/products",
             Some(body),
         )
         .await;
@@ -656,11 +739,15 @@ async fn a_bad_token_is_refused_before_the_body_is_looked_at() {
         );
     }
     // Keyed routes too: nothing is parsed or fingerprinted for a stranger.
+    let fake_publishable = format!("Bearer hypha_pk_{}", "0".repeat(64));
     let (status, json) = send_with(
         &app,
-        &[("authorization", &fake), ("idempotency-key", "k1")],
+        &[
+            ("authorization", &fake_publishable),
+            ("idempotency-key", "k1"),
+        ],
         "POST",
-        "/carts",
+        "/storefront/carts",
         Some("{"),
     )
     .await;
@@ -683,12 +770,12 @@ async fn too_many_logins_from_one_address_get_429_with_retry_after() {
     for n in 0..burst {
         // Different emails, so only the per-address limit can trip.
         let body = login_body(&format!("user{n}@example.com"));
-        let (status, _) = send_with(&app, &[], "POST", "/auth/login", Some(&body)).await;
+        let (status, _) = send_with(&app, &[], "POST", "/admin/auth/login", Some(&body)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
     let request = Request::builder()
         .method("POST")
-        .uri("/auth/login")
+        .uri("/admin/auth/login")
         .header(CONTENT_TYPE, "application/json")
         .body(Body::from(login_body("again@example.com")))
         .unwrap();
@@ -713,18 +800,18 @@ async fn one_email_is_limited_however_many_addresses_try_it() {
     for n in 0..burst {
         let client = format!("203.0.{}.{}", n / 250, n % 250);
         let headers = [("x-forwarded-for", client.as_str())];
-        let (status, _) = send_with(&app, &headers, "POST", "/auth/login", Some(&body)).await;
+        let (status, _) = send_with(&app, &headers, "POST", "/admin/auth/login", Some(&body)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{client}");
     }
     let headers = [("x-forwarded-for", "198.51.100.1")];
-    let (status, json) = send_with(&app, &headers, "POST", "/auth/login", Some(&body)).await;
+    let (status, json) = send_with(&app, &headers, "POST", "/admin/auth/login", Some(&body)).await;
     assert_eq!(
         (status, code(&json)),
         (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
     );
     // The address itself is fine: another email from it goes through.
     let other = login_body("someone@example.com");
-    let (status, _) = send_with(&app, &headers, "POST", "/auth/login", Some(&other)).await;
+    let (status, _) = send_with(&app, &headers, "POST", "/admin/auth/login", Some(&other)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
@@ -735,14 +822,14 @@ async fn hammering_an_email_from_one_address_does_not_lock_its_owner_out() {
     let attacker = [("x-forwarded-for", "203.0.113.66")];
     let wrong = login_body(OWNER_EMAIL);
     for _ in 0..burst {
-        send_with(&app, &attacker, "POST", "/auth/login", Some(&wrong)).await;
+        send_with(&app, &attacker, "POST", "/admin/auth/login", Some(&wrong)).await;
     }
-    let (status, _) = send_with(&app, &attacker, "POST", "/auth/login", Some(&wrong)).await;
+    let (status, _) = send_with(&app, &attacker, "POST", "/admin/auth/login", Some(&wrong)).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     // The owner, elsewhere, logs in as usual.
     let owner = [("x-forwarded-for", "198.51.100.7")];
     let right = json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string();
-    let (status, json) = send_with(&app, &owner, "POST", "/auth/login", Some(&right)).await;
+    let (status, json) = send_with(&app, &owner, "POST", "/admin/auth/login", Some(&right)).await;
     assert_eq!(
         (status, json["status"].as_str()),
         (StatusCode::OK, Some("authenticated"))
@@ -756,7 +843,7 @@ async fn something_that_is_not_an_email_still_gets_its_answer() {
     let app = app().await;
     let huge = "x".repeat(100_000);
     let body = json!({ "email": huge, "password": "guess" }).to_string();
-    let (status, json) = send_with(&app, &[], "POST", "/auth/login", Some(&body)).await;
+    let (status, json) = send_with(&app, &[], "POST", "/admin/auth/login", Some(&body)).await;
     assert_eq!(
         (status, code(&json)),
         (StatusCode::UNAUTHORIZED, "invalid_credentials")
@@ -769,14 +856,14 @@ async fn asking_for_reset_links_does_not_block_using_one() {
     let (burst, _) = crate::rate_limit::Rule::ResetIp.quota();
     for n in 0..burst {
         let body = json!({ "email": format!("user{n}@example.com") }).to_string();
-        send_with(&app, &[], "POST", "/auth/password-reset", Some(&body)).await;
+        send_with(&app, &[], "POST", "/admin/auth/password-reset", Some(&body)).await;
     }
     let confirm = json!({ "token": "hypha_rst_nope", "password": "new password" }).to_string();
     let (status, json) = send_with(
         &app,
         &[],
         "POST",
-        "/auth/password-reset/confirm",
+        "/admin/auth/password-reset/confirm",
         Some(&confirm),
     )
     .await;
@@ -796,7 +883,7 @@ async fn a_forged_forwarded_for_does_not_escape_the_limit() {
         let client = format!("203.0.113.{n}");
         let body = login_body(&format!("user{n}@example.com"));
         let headers = [("x-forwarded-for", client.as_str())];
-        last = send_with(&app, &headers, "POST", "/auth/login", Some(&body))
+        last = send_with(&app, &headers, "POST", "/admin/auth/login", Some(&body))
             .await
             .0;
     }
@@ -810,17 +897,38 @@ async fn reset_requests_for_one_email_are_limited_per_address() {
     let body = json!({ "email": OWNER_EMAIL }).to_string();
     let here = [("x-forwarded-for", "203.0.113.1")];
     for _ in 0..burst {
-        let (status, _) = send_with(&app, &here, "POST", "/auth/password-reset", Some(&body)).await;
+        let (status, _) = send_with(
+            &app,
+            &here,
+            "POST",
+            "/admin/auth/password-reset",
+            Some(&body),
+        )
+        .await;
         assert_eq!(status, StatusCode::ACCEPTED);
     }
-    let (status, json) = send_with(&app, &here, "POST", "/auth/password-reset", Some(&body)).await;
+    let (status, json) = send_with(
+        &app,
+        &here,
+        "POST",
+        "/admin/auth/password-reset",
+        Some(&body),
+    )
+    .await;
     assert_eq!(
         (status, code(&json)),
         (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
     );
     // From elsewhere the same email still gets its 202.
     let there = [("x-forwarded-for", "198.51.100.1")];
-    let (status, _) = send_with(&app, &there, "POST", "/auth/password-reset", Some(&body)).await;
+    let (status, _) = send_with(
+        &app,
+        &there,
+        "POST",
+        "/admin/auth/password-reset",
+        Some(&body),
+    )
+    .await;
     assert_eq!(status, StatusCode::ACCEPTED);
 }
 
@@ -829,11 +937,27 @@ async fn the_address_limit_comes_before_the_body_is_parsed() {
     let app = app().await;
     let (burst, _) = crate::rate_limit::Rule::InviteIp.quota();
     for _ in 0..burst {
-        send_with(&app, &[], "POST", "/invites/accept", Some("{")).await;
+        send_with(&app, &[], "POST", "/admin/invites/accept", Some("{")).await;
     }
-    let (status, json) = send_with(&app, &[], "POST", "/invites/accept", Some("{")).await;
+    let (status, json) = send_with(&app, &[], "POST", "/admin/invites/accept", Some("{")).await;
     assert_eq!(
         (status, code(&json)),
         (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
     );
+}
+
+// ---------- the route table (design note 0010) ----------
+
+#[test]
+fn every_route_is_listed_once_under_its_surface() {
+    use super::{ROUTES, Surface};
+    let mut seen = std::collections::HashSet::new();
+    for route in ROUTES {
+        assert!(seen.insert((route.method, route.path)), "{route:?} twice");
+        match route.surface {
+            Surface::Admin => assert!(route.path.starts_with("/admin/"), "{route:?}"),
+            Surface::Storefront => assert!(route.path.starts_with("/storefront/"), "{route:?}"),
+            Surface::Hidden => {}
+        }
+    }
 }

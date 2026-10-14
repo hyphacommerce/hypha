@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::rfc3339;
 use crate::{
     error::ApiError,
-    extract::{Caller, KeyedJson, PathId, idempotent_response},
+    extract::{Caller, KeyedJson, PathId, Storefront, idempotent_response},
     state::{SharedState, Storage},
 };
 
@@ -155,7 +155,7 @@ impl From<&OrderLine> for OrderLineResponse {
 /// the order the first request placed. The body is `{}` or `{"expected_total": …}`.
 pub(super) async fn checkout_handler<S: Storage>(
     State(state): State<SharedState<S>>,
-    caller: Caller,
+    caller: Caller<Storefront>,
     PathId(cart): PathId<CartId>,
     req: KeyedJson<CheckoutRequest>,
 ) -> Result<Response, ApiError> {
