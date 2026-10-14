@@ -333,6 +333,30 @@ fn retried_with_its_key_checkout_replays_the_order() {
 }
 
 #[test]
+fn a_retry_that_loses_the_race_to_its_own_key_replays_the_order() {
+    let world = World::new();
+    let cart = world.cart();
+    let key = || {
+        Some(IdempotencyRequest {
+            key: "co-1".to_string(),
+            fingerprint: [1; 32],
+        })
+    };
+    let first = world
+        .checkout_as(&Ctx::system(), cart, None, key())
+        .unwrap();
+    // The retry's first check runs before the first request's record is visible, so it
+    // goes on and finds the cart completed: that is the first request's order.
+    world.idempotency.hide_next_lookups(1);
+    let retry = world
+        .checkout_as(&Ctx::system(), cart, None, key())
+        .unwrap();
+    assert!(retry.replayed);
+    assert_eq!(retry.value, first.value);
+    assert_eq!(world.mug_reserved(), 2);
+}
+
+#[test]
 fn an_empty_cart_is_refused() {
     let world = World::new();
     let input = CreateCart {

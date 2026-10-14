@@ -4,7 +4,7 @@ use hypha_cart::{
 use hypha_core::{
     AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, IdGenerator, IdempotencyError,
     IdempotencyRecord, IdempotencyRequest, Idempotent, Money, OrderId, OrderLineId, RepoError,
-    Scope, StageIdempotency, VariantId, earlier_result, idempotency::keys::IDEMPOTENCY_KEY,
+    Scope, StageIdempotency, VariantId, earlier_result,
 };
 use hypha_customers::{Customer, CustomerRepo, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{
@@ -132,10 +132,20 @@ pub async fn checkout<S: CheckoutPorts, I: IdGenerator, C: Clock>(
 
     let mut tries = 1;
     loop {
-        match attempt(ctx, ports, ids, clock, &input).await {
-            Err(e) if lost_a_race(&e) && tries < MAX_ATTEMPTS => tries += 1,
-            result => return result,
+        let e = match attempt(ctx, ports, ids, clock, &input).await {
+            Err(e) => e,
+            placed => return placed,
+        };
+        // A request with the same key may have placed the order meanwhile: then this
+        // attempt failed because of it (the cart is completed, its version moved on, or
+        // the key is taken), and that order is this request's answer too.
+        if let Some(order) = replay_of(ctx, ports, input.idempotency.as_ref()).await? {
+            return replay(ports, order).await;
         }
+        if !lost_a_race(&e) || tries == MAX_ATTEMPTS {
+            return Err(e);
+        }
+        tries += 1;
     }
 }
 
@@ -273,19 +283,9 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock>(
         batch.record_idempotency(record);
     }
 
-    match ports.commit(batch).await {
-        // Another request with the same key placed its order first: replay it.
-        Err(RepoError::Duplicate(IDEMPOTENCY_KEY)) => {
-            match replay_of(ctx, ports, input.idempotency.as_ref()).await? {
-                Some(winner) => replay(ports, winner).await,
-                None => Err(RepoError::Duplicate(IDEMPOTENCY_KEY).into()),
-            }
-        }
-        written => {
-            written?;
-            Ok(Idempotent::fresh(order))
-        }
-    }
+    // If another request with the same key committed first, `checkout` replays it.
+    ports.commit(batch).await?;
+    Ok(Idempotent::fresh(order))
 }
 
 /// An available line as the order keeps it: names, prices and tax copied (0007, O4).

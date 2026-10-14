@@ -5,7 +5,6 @@ use hypha_core::{
     ErrorCode, HasBatch, HasIdempotency, IdGenerator, IdempotencyError, IdempotencyRecord,
     IdempotencyRequest, Idempotent, MarketId, MoneyError, ProductId, Quantity, QuantityError,
     RepoError, Scope, StageIdempotency, VariantId, earlier_result,
-    idempotency::keys::IDEMPOTENCY_KEY,
 };
 use hypha_customers::{CustomerRepo, HasCustomers};
 use hypha_inventory::{
@@ -330,13 +329,14 @@ async fn write_cart<S: IdempotentCartPorts, C: Clock>(
     }
     batch.record_idempotency(record);
     match ports.commit(batch).await {
-        Err(RepoError::Duplicate(IDEMPOTENCY_KEY)) => {
-            match replay_of(ctx, ports, operation, Some(request)).await? {
-                Some(winner) => Ok(Some(winner)),
-                None => Err(RepoError::Duplicate(IDEMPOTENCY_KEY).into()),
-            }
-        }
-        written => Ok(written.map(|()| None)?),
+        Ok(()) => Ok(None),
+        // A request with the same key may have committed first. Its write is then what
+        // failed this one (the key is taken, or the cart's version moved on), and its
+        // cart is this request's answer too.
+        Err(e) => match replay_of(ctx, ports, operation, Some(request)).await? {
+            Some(winner) => Ok(Some(winner)),
+            None => Err(e.into()),
+        },
     }
 }
 
