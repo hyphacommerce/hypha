@@ -3,6 +3,7 @@
 
 mod carts;
 mod customers;
+mod health;
 mod inventory;
 mod markets;
 mod products;
@@ -25,6 +26,7 @@ use crate::{
 macro_rules! router {
     ($storage:ty) => {
         Router::new()
+            .route("/health", get(health::check::<$storage>))
             // the store this deployment serves
             .route("/store", get(stores::fetch::<$storage>))
             // products
@@ -148,3 +150,6 @@ pub fn memory_router() -> Router<SharedState<MemoryStorage>> {
 pub fn postgres_router() -> Router<SharedState<PgStorage>> {
     router!(PgStorage)
 }
+
+#[cfg(test)]
+mod tests;

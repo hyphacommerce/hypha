@@ -15,8 +15,17 @@ hypha-customers = { path = "../hypha-customers" }
 hypha-stores = { path = "../hypha-stores" }
 uuid.workspace = true
 
+[features]
+# The repository contract suite (`contract`): adapters run it from their tests. Off by
+# default so it doesn't ship in host binaries that use the in-memory repos.
+contract = []
+
 [dev-dependencies]
 pollster = "0.4"
+
+[[test]]
+name = "contract"
+required-features = ["contract"]
 
 [lints]
 workspace = true

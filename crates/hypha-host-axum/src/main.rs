@@ -69,9 +69,80 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S) {
     });
     let app = router.layer(TraceLayer::new_for_http()).with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+    let addr = bind_address();
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::error!("cannot listen on {addr}: {e}");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!("Hypha listening on http://{addr}");
+    if let Err(e) = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
         .await
-        .expect("port 3000 should be free");
-    tracing::info!("Hypha listening on http://127.0.0.1:3000");
-    axum::serve(listener, app).await.expect("server error");
+    {
+        tracing::error!("server error: {e}");
+        std::process::exit(1);
+    }
+    tracing::info!("stopped");
+}
+
+/// `HYPHA_BIND` (`host:port`) if set. Otherwise `PORT` on every interface, as platforms
+/// like Fly.io and Render expect. Otherwise `127.0.0.1:3000` for local development.
+fn bind_address() -> String {
+    bind_address_from(std::env::var("HYPHA_BIND").ok(), std::env::var("PORT").ok())
+}
+
+fn bind_address_from(bind: Option<String>, port: Option<String>) -> String {
+    match (bind, port) {
+        (Some(bind), _) => bind,
+        (None, Some(port)) => format!("0.0.0.0:{port}"),
+        (None, None) => "127.0.0.1:3000".to_string(),
+    }
+}
+
+/// Resolves on Ctrl+C or (on Unix) SIGTERM, which is how orchestrators stop a
+/// container. The server then stops accepting connections and lets in-flight requests
+/// finish before `main` returns.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::error!("cannot listen for Ctrl+C: {e}");
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(e) => {
+                tracing::error!("cannot listen for SIGTERM: {e}");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
+    tracing::info!("shutting down: finishing in-flight requests");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bind_address_prefers_hypha_bind_then_port_then_localhost() {
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(bind_address_from(s("[::]:8080"), s("9000")), "[::]:8080");
+        assert_eq!(bind_address_from(None, s("9000")), "0.0.0.0:9000");
+        assert_eq!(bind_address_from(None, None), "127.0.0.1:3000");
+    }
 }

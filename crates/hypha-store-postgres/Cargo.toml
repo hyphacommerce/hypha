@@ -24,7 +24,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-postgres = { version = "0.7.18", default-features = false, features = ["js"] }
 
 [dev-dependencies]
-hypha-testkit = { path = "../hypha-testkit" }
+hypha-testkit = { path = "../hypha-testkit", features = ["contract"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 tokio-postgres = { version = "0.7.18" }
 

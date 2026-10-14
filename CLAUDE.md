@@ -30,7 +30,7 @@ Extend the wasm build list when a domain crate or storage adapter is added.
 - Single crate's tests: `cargo test -p hypha-products`
 - Single test by name: `cargo test -p hypha-products rejects_same_handle_products`
 - Only an integration test file: `cargo test -p hypha-products --test commands`
-- Run the HTTP host (binds `127.0.0.1:3000`, `RUST_LOG` respected): `cargo run -p hypha-host-axum` (in memory), or with `DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha` for Postgres (migrations run on startup).
+- Run the HTTP host (binds `HYPHA_BIND`, else `0.0.0.0:$PORT`, else `127.0.0.1:3000`; `RUST_LOG` respected; Ctrl+C or SIGTERM drains in-flight requests; `GET /health` for probes): `cargo run -p hypha-host-axum` (in memory), or with `DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha` for Postgres (migrations run on startup).
 - End-to-end check against a freshly started host (Git Bash on Windows): `bash scripts/e2e.sh`. Asserts status + error `code` per step, exits non-zero on failure. Run it after changing routes, DTOs or error mapping, and add a step for new routes. Against Postgres, use a fresh database (the script reuses handles and countries): `docker compose exec -T postgres psql -U hypha -c "DROP DATABASE IF EXISTS hypha_e2e" -c "CREATE DATABASE hypha_e2e"`, then start the host with `DATABASE_URL=.../hypha_e2e`.
 - Postgres (Docker Desktop): `docker compose up -d`, then `DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha cargo test -p hypha-store-postgres` runs the repository contract against it (each test gets its own schema). Without `DATABASE_URL` those tests skip themselves.
 
@@ -82,7 +82,7 @@ When a command needs more than one repository, take `ports: &S` bound on the acc
 - Unit tests in `#[cfg(test)] mod tests` at the bottom of each file; one rule per test; test boundaries (0 vs -1, exact rounding halves); compare expected errors exactly with `assert_eq!(result, Err(...))`, never via `unwrap`.
 - Command tests are integration tests in each crate's `tests/` folder using `hypha-testkit` (avoids duplicate-crate issues with dev-dependencies).
 - Async in tests via `pollster::block_on`; deterministic IDs via `SequentialIds` and `Uuid::from_u128(n)`.
-- Repository contract: `hypha_testkit::contract::{product_repo, market_repo, catalog_repo, price_list_repo, cart_repo, tax_class_repo, tax_region_repo, location_repo, inventory_item_repo, customer_repo}` define what every repo adapter must do (round trips, versions, unique keys, batched methods). The in-memory repos run them in `crates/hypha-testkit/tests/contract.rs`, and every new adapter must run them too. When a repo trait gains a method or a unique key, add a contract scenario first.
+- Repository contract: `hypha_testkit::contract::{product_repo, market_repo, catalog_repo, price_list_repo, cart_repo, tax_class_repo, tax_region_repo, location_repo, inventory_item_repo, customer_repo}` define what every repo adapter must do (round trips, versions, unique keys, batched methods). The suite is behind testkit's `contract` feature (so hosts don't ship it): adapters enable it as a dev-dependency, and the in-memory run (`crates/hypha-testkit/tests/contract.rs`) needs `--features contract` when testing that crate alone (`cargo test --workspace` enables it). Every new adapter must run it. Batch methods state caller preconditions (parent exists, no duplicates) in their docs, and the contract checks that breaking them fails. When a repo trait gains a method or a unique key, add a contract scenario first.
 
 ## Conventions
 

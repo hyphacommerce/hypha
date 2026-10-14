@@ -58,6 +58,7 @@ if ! curl -s -o /dev/null "$BASE/"; then
 fi
 
 echo "## happy path"
+step "health" 200 - "$BASE/health"
 step "the store this deployment serves" 200 - "$BASE/store"
 contains "store has a store_ ID" '"id":"store_'
 step "create mug" 201 - -X POST "$BASE/products" -H "$JSON" \

@@ -1,3 +1,4 @@
+#[cfg(feature = "contract")]
 pub mod contract;
 
 mod carts;
