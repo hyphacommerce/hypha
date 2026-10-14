@@ -7,7 +7,7 @@ use hypha_auth::{
     start_totp, totp,
 };
 use hypha_core::{
-    Actor, ApiKeyId, AuthError, Clock, Ctx, Email, IdentityId, Scope, Timestamp, UserId,
+    Actor, ApiKeyId, AuthError, Clock, Ctx, Email, IdentityId, Scope, Timestamp, UserId, Versioned,
 };
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use pollster::block_on;
@@ -394,6 +394,21 @@ fn a_used_code_sent_again_is_refused_without_counting() {
         );
     }
     assert_eq!(identity(&ports).mfa_locked_until(env.now()), None);
+}
+
+#[test]
+fn a_replayed_code_writes_nothing() {
+    let (ports, env) = world();
+    let (secret, _) = enable_mfa(&ports, &env);
+    let used = code(&secret, env.now(), 0);
+    let challenge = token_of(&login(&ports, &env));
+    block_on(finish_login(&ports, &env, &challenge, &used)).unwrap();
+    let before = identity(&ports).version();
+    assert_eq!(
+        block_on(disable_mfa(&ports.identities, &env, identity_id(), &used)),
+        Err(CommandError::InvalidMfaCode)
+    );
+    assert_eq!(identity(&ports).version(), before);
 }
 
 #[test]

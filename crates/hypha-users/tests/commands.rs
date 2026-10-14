@@ -721,6 +721,50 @@ fn a_reset_is_emailed_to_staff_only() {
 }
 
 #[test]
+fn a_reset_email_that_failed_does_not_hold_back_the_next() {
+    let (ports, env, _) = world();
+    env.fail_sending(true);
+    assert!(matches!(
+        block_on(request_password_reset(&ports, &env, "ana@example.com")),
+        Err(CommandError::Notify(_))
+    ));
+    env.fail_sending(false);
+    block_on(request_password_reset(&ports, &env, "ana@example.com")).unwrap();
+    assert_eq!(env.sent().len(), 1);
+}
+
+#[test]
+fn a_reset_asked_while_disabled_does_not_hold_back_the_next() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let (bob, _) = join(&ports, &env, &owner, support.id());
+    let status = |status| UpdateUser {
+        status: Some(status),
+        ..UpdateUser::default()
+    };
+    block_on(update_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        bob.id(),
+        status(UserStatus::Disabled),
+    ))
+    .unwrap();
+    let before = env.sent().len();
+    block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
+    block_on(update_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        bob.id(),
+        status(UserStatus::Active),
+    ))
+    .unwrap();
+    block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
+    assert_eq!(env.sent().len(), before + 1);
+}
+
+#[test]
 fn a_disabled_user_gets_no_reset_email() {
     let (ports, env, owner) = world();
     let support = support_role(&ports, &env, &owner);
@@ -745,7 +789,8 @@ fn a_disabled_user_gets_no_reset_email() {
 // ---------- a disable landing in the middle of a login ----------
 
 /// Ports whose user lookups disable the user right after the first one answered: as if
-/// an admin's disable committed between login's check and its session insert.
+/// an admin's disable committed between login's check and its session insert. The
+/// login's batch then conflicts on the user, and its second look sees the disable.
 struct DisableAfterFirstLookup<'a> {
     ports: &'a InMemoryPorts,
     users: DisablingUsers<'a>,
@@ -802,6 +847,39 @@ impl hypha_auth::HasSessions for DisableAfterFirstLookup<'_> {
     type Sessions = hypha_testkit::InMemorySessionRepo;
     fn sessions(&self) -> &Self::Sessions {
         &self.ports.sessions
+    }
+}
+
+impl hypha_auth::HasPasswordResets for DisableAfterFirstLookup<'_> {
+    type PasswordResets = hypha_testkit::InMemoryPasswordResetRepo;
+    fn password_resets(&self) -> &Self::PasswordResets {
+        &self.ports.password_resets
+    }
+}
+
+impl hypha_users::HasRoles for DisableAfterFirstLookup<'_> {
+    type Roles = hypha_testkit::InMemoryRoleRepo;
+    fn roles(&self) -> &Self::Roles {
+        &self.ports.roles
+    }
+}
+
+impl hypha_users::HasInvites for DisableAfterFirstLookup<'_> {
+    type Invites = hypha_testkit::InMemoryInviteRepo;
+    fn invites(&self) -> &Self::Invites {
+        &self.ports.invites
+    }
+}
+
+/// Batches go to the real tables: the disable the user lookup simulated is already
+/// there when the login's batch commits.
+impl hypha_core::HasBatch for DisableAfterFirstLookup<'_> {
+    type Batch = hypha_testkit::InMemoryBatch;
+    fn batch(&self) -> Self::Batch {
+        self.ports.batch()
+    }
+    async fn commit(&self, batch: Self::Batch) -> Result<(), hypha_core::RepoError> {
+        self.ports.commit(batch).await
     }
 }
 

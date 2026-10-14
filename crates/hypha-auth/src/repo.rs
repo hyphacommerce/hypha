@@ -90,6 +90,8 @@ pub trait StageSessions {
 
 /// Stages password reset writes in a `hypha_core::HasBatch` batch.
 pub trait StagePasswordResets {
+    /// What `PasswordResetRepo::insert` would write; same keys on commit.
+    fn insert_password_reset(&mut self, reset: &mut PasswordReset);
     fn update_password_reset(&mut self, reset: &mut PasswordReset);
     /// Marks every unused reset of `identity` as used at `at`, bumping their versions:
     /// once the password changed, no older reset link may change it again. Runs after

@@ -38,6 +38,7 @@ pub struct InMemoryBatch {
     new_sessions: Vec<Session>,
     sessions: Vec<Session>,
     session_revocations: Vec<(IdentityId, Option<SessionId>, Timestamp)>,
+    new_password_resets: Vec<PasswordReset>,
     password_resets: Vec<PasswordReset>,
     used_up_resets: Vec<(IdentityId, Timestamp)>,
     new_roles: Vec<Role>,
@@ -76,6 +77,11 @@ impl StageSessions for InMemoryBatch {
 }
 
 impl StagePasswordResets for InMemoryBatch {
+    fn insert_password_reset(&mut self, reset: &mut PasswordReset) {
+        self.new_password_resets.push(reset.clone());
+        reset.set_version(Version::NEW.next());
+    }
+
     fn update_password_reset(&mut self, reset: &mut PasswordReset) {
         self.password_resets.push(reset.clone());
         reset.set_version(reset.version().next());
@@ -296,6 +302,15 @@ impl HasBatch for InMemoryPorts {
                     session.revoke(at);
                     session.set_version(session.version().next());
                 }
+            }
+            for mut reset in batch.new_password_resets {
+                insert_row(
+                    &mut resets,
+                    reset.id(),
+                    &mut reset,
+                    auth_keys::PASSWORD_RESET_ID,
+                    &unique_reset,
+                )?;
             }
             for mut reset in batch.password_resets {
                 update_row(&mut resets, reset.id(), &mut reset, &unique_reset)?;

@@ -184,31 +184,26 @@ pub async fn check_password<R: IdentityRepo>(
     }
 }
 
-/// Opens a session for an identity whose first factor checked out: active, or pending
-/// if it has a second factor.
-pub async fn open_session<R: SessionRepo>(
-    sessions: &R,
-    env: &impl AuthEnv,
-    identity: &Identity,
-) -> Result<LoginStep, CommandError> {
+/// The session for an identity whose first factor checked out, not yet stored: active,
+/// or pending if it has a second factor. For callers that store it in a batch with
+/// other writes (`hypha_users::login`); `open_session` stores it alone.
+pub fn prepare_login(identity: &Identity, env: &impl AuthEnv) -> LoginStep {
     let id = SessionId::from_uuid(env.new_uuid());
     let token = NewToken::generate(TokenKind::Session, env);
     let now = env.now();
     if identity.mfa_enabled() {
-        let mut session =
-            Session::pending(id, identity.id(), identity.principal(), token.hash(), now);
-        sessions.insert(&mut session).await?;
+        let session = Session::pending(id, identity.id(), identity.principal(), token.hash(), now);
         let mut methods = vec![MfaMethod::Totp];
         if identity.recovery_codes_left() > 0 {
             methods.push(MfaMethod::RecoveryCode);
         }
-        Ok(LoginStep::MfaRequired {
+        LoginStep::MfaRequired {
             session,
             token,
             methods,
-        })
+        }
     } else {
-        let mut session = Session::active(
+        let session = Session::active(
             id,
             identity.id(),
             identity.principal(),
@@ -216,9 +211,31 @@ pub async fn open_session<R: SessionRepo>(
             now,
             None,
         );
-        sessions.insert(&mut session).await?;
-        Ok(LoginStep::Authenticated { session, token })
+        LoginStep::Authenticated { session, token }
     }
+}
+
+impl LoginStep {
+    /// The session either way, for storing it.
+    pub fn session_mut(&mut self) -> &mut Session {
+        match self {
+            LoginStep::Authenticated { session, .. } | LoginStep::MfaRequired { session, .. } => {
+                session
+            }
+        }
+    }
+}
+
+/// Opens (stores) a session for an identity whose first factor checked out; see
+/// `prepare_login`.
+pub async fn open_session<R: SessionRepo>(
+    sessions: &R,
+    env: &impl AuthEnv,
+    identity: &Identity,
+) -> Result<LoginStep, CommandError> {
+    let mut step = prepare_login(identity, env);
+    sessions.insert(step.session_mut()).await?;
+    Ok(step)
 }
 
 /// A new active session for `identity`, staged rather than written (accepting an invite
@@ -252,7 +269,7 @@ fn use_second_factor(
     identity: &mut Identity,
     env: &impl AuthEnv,
     code: &str,
-) -> Result<bool, CommandError> {
+) -> Result<Factor, CommandError> {
     let now = env.now();
     if let Some(until) = identity.mfa_locked_until(now) {
         return Err(CommandError::MfaLocked { until });
@@ -267,23 +284,32 @@ fn use_second_factor(
             _ => totp::Check::Wrong,
         }
     } else if recovery::hash(code).is_some_and(|hash| identity.use_recovery_code(hash)) {
-        return Ok(true);
+        return Ok(Factor::Right);
     } else {
         totp::Check::Wrong
     };
     match check {
         totp::Check::Valid(step) => {
             identity.record_totp_step(step)?;
-            Ok(true)
+            Ok(Factor::Right)
         }
         // The right code, already used (a double submit, often): refused, but not a
         // guess, so it doesn't count toward the lockout.
-        totp::Check::Replayed => Ok(false),
+        totp::Check::Replayed => Ok(Factor::Replayed),
         totp::Check::Wrong => {
             identity.record_mfa_failure(now);
-            Ok(false)
+            Ok(Factor::Wrong)
         }
     }
+}
+
+/// What `use_second_factor` made of a code. Only `Right` and `Wrong` change the
+/// identity (and need writing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Factor {
+    Right,
+    Wrong,
+    Replayed,
 }
 
 /// Finishes a login that owes a second factor: `challenge` is the pending session's
@@ -319,15 +345,19 @@ where
             .await?
             .ok_or(CommandError::IdentityNotFound(session.identity()))?;
 
-        let right = use_second_factor(&mut identity, env, code)?;
+        let factor = use_second_factor(&mut identity, env, code)?;
+        let right = factor == Factor::Right;
         let token = NewToken::generate(TokenKind::Session, env);
         if right {
             session.activate(token.hash(), now);
         } else {
+            // A replayed code counts on the challenge (it's no way in), not the identity.
             session.record_failed_attempt(now);
         }
         let mut batch = ports.batch();
-        batch.update_identity(&mut identity);
+        if factor != Factor::Replayed {
+            batch.update_identity(&mut identity);
+        }
         batch.update_session(&mut session);
         match ports.commit(batch).await {
             Ok(()) if right => return Ok((session, token)),
@@ -354,10 +384,11 @@ async fn with_second_factor<R: IdentityRepo, T>(
         if !identity.mfa_enabled() {
             return Err(IdentityError::MfaNotEnabled.into());
         }
-        let result = if use_second_factor(&mut identity, env, code)? {
-            Some(change(&mut identity)?)
-        } else {
-            None
+        let result = match use_second_factor(&mut identity, env, code)? {
+            Factor::Right => Some(change(&mut identity)?),
+            Factor::Wrong => None,
+            // Nothing changed, so nothing to write.
+            Factor::Replayed => return Err(CommandError::InvalidMfaCode),
         };
         match identities.update(&mut identity).await {
             Ok(()) => return result.ok_or(CommandError::InvalidMfaCode),
@@ -461,12 +492,12 @@ pub async fn start_password_reset<S>(
     email: &str,
 ) -> Result<Option<(Identity, PasswordReset, NewToken)>, CommandError>
 where
-    S: HasIdentities + HasPasswordResets,
+    S: HasIdentities + HasPasswordResets + HasBatch<Batch: StageIdentities + StagePasswordResets>,
 {
     let Ok(email) = Email::new(email) else {
         return Ok(None);
     };
-    let Some(identity) = ports
+    let Some(mut identity) = ports
         .identities()
         .find_login(kind, CredentialKind::Password, email.as_str())
         .await?
@@ -488,8 +519,33 @@ where
         token.hash(),
         env.now(),
     );
-    ports.password_resets().insert(&mut reset).await?;
-    Ok(Some((identity, reset, token)))
+    // The identity is written too (unchanged, at its next version): two requests that
+    // both passed the check above then conflict on it, and only one link is made.
+    let mut batch = ports.batch();
+    batch.update_identity(&mut identity);
+    batch.insert_password_reset(&mut reset);
+    match ports.commit(batch).await {
+        Ok(()) => Ok(Some((identity, reset, token))),
+        // A concurrent request made the link (or the identity changed meanwhile, e.g. a
+        // code was used): either way, no second email now.
+        Err(RepoError::StaleVersion) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Uses up `identity`'s open reset links, e.g. one whose email couldn't be sent, so it
+/// doesn't hold back the next request (`PasswordReset::RESEND_AFTER_SECS`).
+pub async fn withdraw_password_resets<S>(
+    ports: &S,
+    clock: &impl Clock,
+    identity: IdentityId,
+) -> Result<(), CommandError>
+where
+    S: HasBatch<Batch: StagePasswordResets>,
+{
+    let mut batch = ports.batch();
+    batch.use_up_password_resets(identity, clock.now());
+    Ok(ports.commit(batch).await?)
 }
 
 /// Sets a new password with an emailed reset token, uses up that token and every other
@@ -596,7 +652,8 @@ pub async fn confirm_totp<R: IdentityRepo>(
                 identity.confirm_totp(step, codes.hashes)?;
                 Some(codes.codes)
             }
-            totp::Check::Replayed => None,
+            // Nothing changed, so nothing to write.
+            totp::Check::Replayed => return Err(CommandError::InvalidMfaCode),
             totp::Check::Wrong => {
                 identity.record_mfa_failure(now);
                 None

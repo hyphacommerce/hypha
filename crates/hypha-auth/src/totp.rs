@@ -79,14 +79,6 @@ pub fn check(secret: &[u8], code: &str, now: Timestamp, last_used: Option<u64>) 
     }
 }
 
-/// The step `code` is valid for, or `None` (wrong or replayed); see `check`.
-pub fn verify(secret: &[u8], code: &str, now: Timestamp, last_used: Option<u64>) -> Option<u64> {
-    match check(secret, code, now, last_used) {
-        Check::Valid(step) => Some(step),
-        Check::Replayed | Check::Wrong => None,
-    }
-}
-
 /// Compares without an early exit, so timing doesn't tell how close a guess was.
 fn constant_time_eq(a: u32, b: u32) -> bool {
     (a ^ b) == 0
@@ -191,21 +183,9 @@ mod tests {
         for (offset, ok) in [(-2i64, false), (-1, true), (0, true), (1, true), (2, false)] {
             let s = step.checked_add_signed(offset).unwrap();
             let code = format!("{:06}", code_at(RFC_SECRET, s));
-            assert_eq!(
-                verify(RFC_SECRET, &code, now, None),
-                ok.then_some(s),
-                "{offset}"
-            );
+            let want = if ok { Check::Valid(s) } else { Check::Wrong };
+            assert_eq!(check(RFC_SECRET, &code, now, None), want, "{offset}");
         }
-    }
-
-    #[test]
-    fn refuses_a_step_already_used() {
-        let now = at(1_111_111_111);
-        let step = step_at(now);
-        let code = format!("{:06}", code_at(RFC_SECRET, step));
-        assert_eq!(verify(RFC_SECRET, &code, now, Some(step - 1)), Some(step));
-        assert_eq!(verify(RFC_SECRET, &code, now, Some(step)), None);
     }
 
     #[test]
@@ -224,9 +204,9 @@ mod tests {
     #[test]
     fn refuses_codes_that_are_not_six_digits() {
         let now = at(59);
-        assert_eq!(verify(RFC_SECRET, " 287082 ", now, None), Some(1));
+        assert_eq!(check(RFC_SECRET, " 287082 ", now, None), Check::Valid(1));
         for bad in ["28708", "2870820", "28708a", "", "+87082"] {
-            assert_eq!(verify(RFC_SECRET, bad, now, None), None, "{bad:?}");
+            assert_eq!(check(RFC_SECRET, bad, now, None), Check::Wrong, "{bad:?}");
         }
     }
 

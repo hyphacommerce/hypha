@@ -496,12 +496,14 @@ pub async fn accept_invite<S: StaffPorts>(
 /// The first login step for staff: email and password. A disabled user gets the same
 /// answer as a wrong password.
 ///
-/// The user is checked again after the session is stored. A disable committing between
-/// the first check and the insert would otherwise miss the new session (its revocation
-/// ran before the session existed), and enabling the user later would bring it to
-/// life. Checking after the insert closes that gap: a disable that commits later
-/// revokes the session itself.
-pub async fn login<S: HasUsers + HasIdentities + HasSessions>(
+/// The session is stored in a batch that also writes the user (unchanged, at its next
+/// version). Disabling writes the user too, so a login and a disable at the same moment
+/// conflict and one starts over: either the disable lands first and the login sees a
+/// disabled user, or the login lands first and the disable revokes its session. Without
+/// this, a disable committing while the login stored its session could miss it (on
+/// Postgres, even if the login checked the user again afterwards), and enabling the user
+/// later would bring that session to life.
+pub async fn login<S: StaffPorts>(
     ports: &S,
     env: &impl AuthEnv,
     email: &str,
@@ -516,28 +518,23 @@ pub async fn login<S: HasUsers + HasIdentities + HasSessions>(
     )
     .await?;
     let Principal::Staff(user) = identity.principal();
-    let is_active = async || -> Result<bool, CommandError> {
-        Ok(ports
-            .users()
-            .get(user)
-            .await?
-            .is_some_and(|u| u.is_active()))
-    };
-    if !is_active().await? {
-        return Err(hypha_auth::CommandError::InvalidCredentials.into());
-    }
-    let step = hypha_auth::open_session(ports.sessions(), env, &identity).await?;
-    if !is_active().await? {
-        let mut session = match step {
-            LoginStep::Authenticated { session, .. } | LoginStep::MfaRequired { session, .. } => {
-                session
-            }
+    const ROUNDS: usize = 3;
+    for _ in 0..ROUNDS {
+        let Some(mut user) = ports.users().get(user).await?.filter(User::is_active) else {
+            return Err(hypha_auth::CommandError::InvalidCredentials.into());
         };
-        session.revoke(env.now());
-        hypha_auth::SessionRepo::update(ports.sessions(), &mut session).await?;
-        return Err(hypha_auth::CommandError::InvalidCredentials.into());
+        let mut step = hypha_auth::prepare_login(&identity, env);
+        let mut batch = ports.batch();
+        batch.update_user(&mut user);
+        batch.insert_session(step.session_mut());
+        match ports.commit(batch).await {
+            Ok(()) => return Ok(step),
+            // The user changed meanwhile (maybe disabled): look again.
+            Err(RepoError::StaleVersion) => continue,
+            Err(e) => return Err(e.into()),
+        }
     }
-    Ok(step)
+    Err(RepoError::StaleVersion.into())
 }
 
 /// A request's staff caller: the session, the user and the `Ctx` with their role's
@@ -577,27 +574,44 @@ pub async fn authenticate_staff<S: HasUsers + HasRoles + HasSessions>(
 
 // ---------- password reset ----------
 
-/// Emails a reset link if `email` belongs to a staff member, and does nothing
+/// Emails a reset link if `email` belongs to an active staff member, and does nothing
 /// otherwise. Callers answer the same either way, so nobody can probe for accounts.
-pub async fn request_password_reset<S: HasUsers + HasIdentities + HasPasswordResets>(
+///
+/// The user is checked before a link is made, so a disabled account doesn't get a link
+/// that would hold back the next request (`PasswordReset::RESEND_AFTER_SECS`); and a link
+/// whose email couldn't be sent is withdrawn for the same reason.
+pub async fn request_password_reset<S: StaffPorts>(
     ports: &S,
     env: &(impl AuthEnv + Notifier<StaffEmail>),
     email: &str,
 ) -> Result<(), CommandError> {
+    let Ok(address) = Email::new(email) else {
+        return Ok(());
+    };
+    // A staff member's login email is their user email.
+    if !ports
+        .users()
+        .get_by_email(&address)
+        .await?
+        .is_some_and(|u| u.is_active())
+    {
+        return Ok(());
+    }
     let Some((identity, reset, token)) =
         hypha_auth::start_password_reset(ports, env, PrincipalKind::Staff, email).await?
     else {
         return Ok(());
     };
-    let Principal::Staff(user) = identity.principal();
-    let Some(user) = ports.users().get(user).await?.filter(User::is_active) else {
-        return Ok(());
-    };
-    env.notify(StaffEmail::PasswordReset {
-        to: user.email().clone(),
-        token: token.expose().to_string(),
-        expires_at: reset.expires_at(),
-    })
-    .await?;
+    let sent = env
+        .notify(StaffEmail::PasswordReset {
+            to: address,
+            token: token.expose().to_string(),
+            expires_at: reset.expires_at(),
+        })
+        .await;
+    if let Err(e) = sent {
+        hypha_auth::withdraw_password_resets(ports, env, identity.id()).await?;
+        return Err(e.into());
+    }
     Ok(())
 }

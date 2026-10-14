@@ -602,29 +602,8 @@ impl<C: PgConnection> PasswordResetRepo for PgStore<C> {
     }
 
     async fn insert(&self, reset: &mut PasswordReset) -> Result<(), RepoError> {
-        let s = reset.snapshot();
         let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                &format!(
-                    "INSERT INTO password_resets (id, version, identity_id, token_hash,
-                         created_at, expires_at, used_at)
-                     VALUES ($1, 1, $2, $3, {}, {}, {})",
-                    ts(4),
-                    ts(5),
-                    ts(6)
-                ),
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&s.identity.as_uuid(), Type::UUID),
-                    (&s.token_hash.as_bytes().as_slice(), Type::BYTEA),
-                    (&s.created_at.unix_micros(), Type::INT8),
-                    (&s.expires_at.unix_micros(), Type::INT8),
-                    (&opt_micros(s.used_at), Type::INT8),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
+        insert_password_reset(conn.client(), &reset.snapshot()).await?;
         reset.set_version(Version::NEW.next());
         Ok(())
     }
@@ -669,6 +648,35 @@ pub(crate) async fn use_up_password_resets(
             &[
                 (&identity.as_uuid(), Type::UUID),
                 (&at.unix_micros(), Type::INT8),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    Ok(())
+}
+
+/// `PasswordResetRepo::insert` inside the caller's transaction (also used by `PgBatch`).
+pub(crate) async fn insert_password_reset(
+    client: &impl GenericClient,
+    s: &PasswordResetSnapshot,
+) -> Result<(), RepoError> {
+    client
+        .query_typed(
+            &format!(
+                "INSERT INTO password_resets (id, version, identity_id, token_hash,
+                     created_at, expires_at, used_at)
+                 VALUES ($1, 1, $2, $3, {}, {}, {})",
+                ts(4),
+                ts(5),
+                ts(6)
+            ),
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&s.identity.as_uuid(), Type::UUID),
+                (&s.token_hash.as_bytes().as_slice(), Type::BYTEA),
+                (&s.created_at.unix_micros(), Type::INT8),
+                (&s.expires_at.unix_micros(), Type::INT8),
+                (&opt_micros(s.used_at), Type::INT8),
             ],
         )
         .await

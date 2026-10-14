@@ -8,7 +8,7 @@ use futures_util::future::join_all;
 use hypha_auth::{
     CommandError, Identity, IdentityRepo, LoginStep, Password, Principal, PrincipalKind,
     SessionRepo, TokenHash, check_password, confirm_totp, finish_login, hash_new_password,
-    open_session, start_totp, totp,
+    open_session, start_password_reset, start_totp, totp,
 };
 use hypha_core::{Actor, Ctx, Email, IdentityId, Scope, UserId};
 use hypha_store_postgres::{CORE, PgStore, migrate};
@@ -204,4 +204,51 @@ async fn two_owners_disabling_each_other_leave_one_active() {
                 .unwrap();
         }
     }
+}
+
+#[tokio::test]
+async fn parallel_reset_requests_make_one_link() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("DATABASE_URL not set: skipping");
+        return;
+    };
+    let schema = "race_reset_requests";
+    let mut client = connect(&url, "public").await;
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}; \
+             SET search_path TO {schema};"
+        ))
+        .await
+        .expect("reset schema");
+    migrate(&mut client, &[CORE]).await.expect("migrate");
+    let store = PgStore::new(client);
+    let env = TestEnv::default();
+    let hash = hash_new_password(&env, &Password::new(PASSWORD).unwrap())
+        .await
+        .unwrap();
+    let mut identity = Identity::with_password(
+        IdentityId::from_uuid(Uuid::from_u128(1)),
+        Principal::Staff(UserId::from_uuid(Uuid::from_u128(2))),
+        Email::new("ana@example.com").unwrap(),
+        hash,
+    );
+    IdentityRepo::insert(&store, &mut identity).await.unwrap();
+
+    let mut stores = Vec::new();
+    for _ in 0..8 {
+        stores.push(PgStore::new(connect(&url, schema).await));
+    }
+    let results = join_all(
+        stores
+            .iter()
+            .map(|s| start_password_reset(s, &env, PrincipalKind::Staff, "ana@example.com")),
+    )
+    .await;
+    let made = results
+        .into_iter()
+        .map(|r| r.unwrap())
+        .filter(Option::is_some)
+        .count();
+    assert_eq!(made, 1, "parallel requests made {made} links");
 }

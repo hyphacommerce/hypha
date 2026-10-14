@@ -17,8 +17,8 @@ use hypha_users::{
 
 use crate::{
     auth::{
-        insert_identity, insert_session, revoke_sessions, update_identity, update_password_reset,
-        update_session, use_up_password_resets,
+        insert_identity, insert_password_reset, insert_session, revoke_sessions, update_identity,
+        update_password_reset, update_session, use_up_password_resets,
     },
     carts::{insert_cart, update_cart},
     customers::insert_customer,
@@ -50,6 +50,7 @@ pub struct PgBatch {
     new_sessions: Vec<SessionSnapshot>,
     sessions: Vec<SessionSnapshot>,
     session_revocations: Vec<(IdentityId, Option<SessionId>, Timestamp)>,
+    new_password_resets: Vec<PasswordResetSnapshot>,
     password_resets: Vec<PasswordResetSnapshot>,
     used_up_resets: Vec<(IdentityId, Timestamp)>,
 }
@@ -72,6 +73,7 @@ impl PgBatch {
             && self.new_sessions.is_empty()
             && self.sessions.is_empty()
             && self.session_revocations.is_empty()
+            && self.new_password_resets.is_empty()
             && self.password_resets.is_empty()
             && self.used_up_resets.is_empty()
     }
@@ -137,6 +139,11 @@ impl StageSessions for PgBatch {
 }
 
 impl StagePasswordResets for PgBatch {
+    fn insert_password_reset(&mut self, reset: &mut PasswordReset) {
+        self.new_password_resets.push(reset.snapshot());
+        reset.set_version(Version::NEW.next());
+    }
+
     fn update_password_reset(&mut self, reset: &mut PasswordReset) {
         self.password_resets.push(reset.snapshot());
         reset.set_version(reset.version().next());
@@ -247,6 +254,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         }
         for (identity, keep, at) in &batch.session_revocations {
             revoke_sessions(&tx, *identity, *keep, *at).await?;
+        }
+        for reset in &batch.new_password_resets {
+            insert_password_reset(&tx, reset).await?;
         }
         for reset in &batch.password_resets {
             update_password_reset(&tx, reset).await?;

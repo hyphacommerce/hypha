@@ -44,8 +44,44 @@ where
     revoke_sessions(&make().await).await;
     scenario("staff batch: a reset updates identity and reset; a stale reset writes nothing");
     password_reset(&make().await).await;
+    scenario(
+        "staff batch: a reset staged with its identity commits; a stale identity writes nothing",
+    );
+    insert_reset_with_identity(&make().await).await;
     scenario("staff batch: using up resets spares other identities and used ones");
     use_up_resets(&make().await).await;
+}
+
+async fn insert_reset_with_identity<S>(ports: &S)
+where
+    S: HasBatch + HasIdentities + HasPasswordResets,
+    S::Batch: StageIdentities + StagePasswordResets,
+{
+    let mut i = identity(1, "ana@example.com");
+    ports.identities().insert(&mut i).await.unwrap();
+    let stale = i.clone();
+    let mut r = reset(1, 1, 1);
+    let mut batch = ports.batch();
+    batch.update_identity(&mut i);
+    batch.insert_password_reset(&mut r);
+    assert_eq!(r.version(), Version::new(1));
+    ports.commit(batch).await.unwrap();
+    let get = async |n: u8| {
+        ports
+            .password_resets()
+            .get_by_token(TokenHash::from_bytes([n; 32]))
+            .await
+            .unwrap()
+    };
+    assert_eq!(get(1).await, Some(r));
+    assert_eq!(ports.identities().get(i.id()).await, Ok(Some(i)));
+
+    // A second request that read the identity at its old version: nothing written.
+    let mut batch = ports.batch();
+    batch.update_identity(&mut stale.clone());
+    batch.insert_password_reset(&mut reset(2, 1, 2));
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(get(2).await, None);
 }
 
 async fn use_up_resets<S>(ports: &S)
