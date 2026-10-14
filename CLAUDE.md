@@ -30,8 +30,8 @@ Extend the wasm build list when a domain crate or storage adapter is added.
 - Single crate's tests: `cargo test -p hypha-products`
 - Single test by name: `cargo test -p hypha-products rejects_same_handle_products`
 - Only an integration test file: `cargo test -p hypha-products --test commands`
-- Run the HTTP host (binds `127.0.0.1:3000`, `RUST_LOG` respected): `cargo run -p hypha-host-axum` (in memory), or with `DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha` for Postgres (migrations run on startup).
-- End-to-end check against a freshly started host (Git Bash on Windows): `bash scripts/e2e.sh`. Asserts status + error `code` per step, exits non-zero on failure. Run it after changing routes, DTOs or error mapping, and add a step for new routes. Against Postgres, use a fresh database (the script reuses handles and countries): `docker compose exec -T postgres psql -U hypha -c "DROP DATABASE IF EXISTS hypha_e2e" -c "CREATE DATABASE hypha_e2e"`, then start the host with `DATABASE_URL=.../hypha_e2e`.
+- Run the HTTP host (binds `127.0.0.1:3000`, or `PORT`; `RUST_LOG` respected): `cargo run -p hypha-host-axum` (in memory), or with `DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha` for Postgres (migrations run on startup).
+- End-to-end check against a freshly started host (Git Bash on Windows): `bash scripts/e2e.sh` (`HYPHA_URL` for another port). Asserts status + error `code` per step, exits non-zero on failure. Run it after changing routes, DTOs or error mapping, and add a step for new routes. Against Postgres, use a fresh database (the script reuses handles and countries): `docker compose exec -T postgres psql -U hypha -c "DROP DATABASE IF EXISTS hypha_e2e" -c "CREATE DATABASE hypha_e2e"`, then start the host with `DATABASE_URL=.../hypha_e2e`.
 - Postgres (Docker Desktop): `docker compose up -d`, then `DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha cargo test -p hypha-store-postgres` runs the repository contract against it (each test gets its own schema). Without `DATABASE_URL` those tests skip themselves.
 
 ## Architecture (hexagonal / ports and adapters)

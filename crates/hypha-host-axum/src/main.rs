@@ -69,9 +69,24 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S) {
     });
     let app = router.layer(TraceLayer::new_for_http()).with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
-        .await
-        .expect("port 3000 should be free");
-    tracing::info!("Hypha listening on http://127.0.0.1:3000");
+    // PORT picks another port when 3000 is taken (a frontend dev server, a second host).
+    let port = match std::env::var("PORT") {
+        Err(_) => 3000,
+        Ok(port) => match port.parse::<u16>() {
+            Ok(port) => port,
+            Err(_) => {
+                tracing::error!("PORT must be a number from 0 to 65535, got {port:?}");
+                std::process::exit(1);
+            }
+        },
+    };
+    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::error!("cannot listen on 127.0.0.1:{port}: {e}");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!("Hypha listening on http://127.0.0.1:{port}");
     axum::serve(listener, app).await.expect("server error");
 }
