@@ -65,7 +65,8 @@ pub enum Credential {
     RecoveryCodes { hashes: Vec<TokenHash> },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Ordered as an identity lists its credentials: the first factor, then the second.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CredentialKind {
     Password,
     Totp,
@@ -442,13 +443,16 @@ impl Identity {
     }
 
     /// Rebuilds an identity from storage, re-checking the rules: at most one credential
-    /// of each kind, and recovery codes only beside a confirmed authenticator.
+    /// of each kind, and recovery codes only beside a confirmed authenticator. Storage
+    /// may return credentials in any order; they come back in `CredentialKind` order,
+    /// the order the methods above add them in.
     pub fn restore(s: IdentitySnapshot) -> Result<Identity, RestoreError> {
-        let credentials = s
+        let mut credentials = s
             .credentials
             .into_iter()
             .map(Credential::from_stored)
             .collect::<Result<Vec<_>, _>>()?;
+        credentials.sort_by_key(Credential::kind);
         for (i, c) in credentials.iter().enumerate() {
             if credentials[..i].iter().any(|o| o.kind() == c.kind()) {
                 return Err(RestoreError::DuplicateCredential(c.kind().as_str()));
@@ -572,6 +576,14 @@ mod tests {
     fn snapshot_round_trips() {
         let i = with_mfa();
         assert_eq!(Identity::restore(i.snapshot()), Ok(i));
+    }
+
+    #[test]
+    fn restore_puts_credentials_in_kind_order() {
+        let i = with_mfa();
+        let mut s = i.snapshot();
+        s.credentials.reverse();
+        assert_eq!(Identity::restore(s), Ok(i));
     }
 
     #[test]

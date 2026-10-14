@@ -123,3 +123,52 @@ async fn order_repo() {
     let Some(url) = database_url() else { return };
     contract::order_repo(async || fresh_store(&url, "contract_orders").await).await;
 }
+
+#[tokio::test]
+async fn identity_repo() {
+    let Some(url) = database_url() else { return };
+    contract::identity_repo(async || fresh_store(&url, "contract_identities").await).await;
+}
+
+#[tokio::test]
+async fn session_repo() {
+    let Some(url) = database_url() else { return };
+    contract::session_repo(async || fresh_store(&url, "contract_sessions").await).await;
+}
+
+#[tokio::test]
+async fn api_key_repo() {
+    let Some(url) = database_url() else { return };
+    contract::api_key_repo(async || fresh_store(&url, "contract_api_keys").await).await;
+}
+
+#[tokio::test]
+async fn password_reset_repo() {
+    let Some(url) = database_url() else { return };
+    contract::password_reset_repo(async || fresh_store(&url, "contract_password_resets").await)
+        .await;
+}
+
+#[tokio::test]
+async fn user_repo() {
+    let Some(url) = database_url() else { return };
+    contract::user_repo(async || fresh_store(&url, "contract_users").await).await;
+}
+
+#[tokio::test]
+async fn role_repo() {
+    let Some(url) = database_url() else { return };
+    contract::role_repo(async || fresh_store(&url, "contract_roles").await).await;
+}
+
+#[tokio::test]
+async fn invite_repo() {
+    let Some(url) = database_url() else { return };
+    contract::invite_repo(async || fresh_store(&url, "contract_invites").await).await;
+}
+
+#[tokio::test]
+async fn staff_batch() {
+    let Some(url) = database_url() else { return };
+    contract::staff_batch(async || fresh_store(&url, "contract_staff_batch").await).await;
+}

@@ -671,6 +671,7 @@ name = "hypha-store-postgres"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "hypha-auth",
  "hypha-cart",
  "hypha-checkout",
  "hypha-core",
@@ -682,6 +683,8 @@ dependencies = [
  "hypha-stores",
  "hypha-tax",
  "hypha-testkit",
+ "hypha-users",
+ "serde_json",
  "tokio",
  "tokio-postgres",
  "uuid",

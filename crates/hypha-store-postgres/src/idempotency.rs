@@ -3,6 +3,7 @@ use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
+    columns::actor_to_db,
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
 };
@@ -82,15 +83,4 @@ pub(crate) async fn insert_records(
     .await
     .map_err(repo_error)?;
     Ok(())
-}
-
-/// `actor_kind` and `actor_id`; the system actor has no ID and is stored as nil. No
-/// reverse mapping is needed: `get` already knows the actor it asked for.
-fn actor_to_db(actor: Actor) -> (&'static str, Uuid) {
-    match actor {
-        Actor::System => ("system", Uuid::nil()),
-        Actor::User(id) => ("user", id.as_uuid()),
-        Actor::Agent(id) => ("agent", id.as_uuid()),
-        Actor::ApiKey(id) => ("api_key", id.as_uuid()),
-    }
 }

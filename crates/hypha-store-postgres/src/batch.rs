@@ -1,10 +1,25 @@
+use hypha_auth::{
+    Identity, IdentitySnapshot, PasswordReset, PasswordResetSnapshot, Session, SessionSnapshot,
+    StageIdentities, StagePasswordResets, StageSessions,
+};
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
-use hypha_core::{HasBatch, IdempotencyRecord, RepoError, StageIdempotency, Version, Versioned};
+use hypha_core::{
+    HasBatch, IdempotencyRecord, IdentityId, RepoError, SessionId, StageIdempotency, Timestamp,
+    Version, Versioned,
+};
 use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
 use hypha_orders::{Order, OrderSnapshot, StageOrders};
+use hypha_users::{
+    Invite, InviteSnapshot, Role, RoleSnapshot, StageInvites, StageRoles, StageUsers, User,
+    UserSnapshot,
+};
 
 use crate::{
+    auth::{
+        insert_identity, insert_session, revoke_sessions, update_identity, update_password_reset,
+        update_session,
+    },
     carts::{insert_cart, update_cart},
     customers::insert_customer,
     error::repo_error,
@@ -12,6 +27,7 @@ use crate::{
     inventory::update_items,
     orders::insert_order,
     store::{PgConnection, PgStore},
+    users::{insert_role, insert_user, update_invite},
 };
 
 /// Writes staged for `PgStore::commit`: snapshots taken when each aggregate was staged,
@@ -24,6 +40,15 @@ pub struct PgBatch {
     carts: Vec<CartSnapshot>,
     inventory_items: Vec<InventoryItemSnapshot>,
     idempotency: Vec<IdempotencyRecord>,
+    new_roles: Vec<RoleSnapshot>,
+    new_users: Vec<UserSnapshot>,
+    invites: Vec<InviteSnapshot>,
+    new_identities: Vec<IdentitySnapshot>,
+    identities: Vec<IdentitySnapshot>,
+    new_sessions: Vec<SessionSnapshot>,
+    sessions: Vec<SessionSnapshot>,
+    session_revocations: Vec<(IdentityId, Option<SessionId>, Timestamp)>,
+    password_resets: Vec<PasswordResetSnapshot>,
 }
 
 impl PgBatch {
@@ -34,6 +59,71 @@ impl PgBatch {
             && self.carts.is_empty()
             && self.inventory_items.is_empty()
             && self.idempotency.is_empty()
+            && self.new_roles.is_empty()
+            && self.new_users.is_empty()
+            && self.invites.is_empty()
+            && self.new_identities.is_empty()
+            && self.identities.is_empty()
+            && self.new_sessions.is_empty()
+            && self.sessions.is_empty()
+            && self.session_revocations.is_empty()
+            && self.password_resets.is_empty()
+    }
+}
+
+impl StageRoles for PgBatch {
+    fn insert_role(&mut self, role: &mut Role) {
+        self.new_roles.push(role.snapshot());
+        role.set_version(Version::NEW.next());
+    }
+}
+
+impl StageUsers for PgBatch {
+    fn insert_user(&mut self, user: &mut User) {
+        self.new_users.push(user.snapshot());
+        user.set_version(Version::NEW.next());
+    }
+}
+
+impl StageInvites for PgBatch {
+    fn update_invite(&mut self, invite: &mut Invite) {
+        self.invites.push(invite.snapshot());
+        invite.set_version(invite.version().next());
+    }
+}
+
+impl StageIdentities for PgBatch {
+    fn insert_identity(&mut self, identity: &mut Identity) {
+        self.new_identities.push(identity.snapshot());
+        identity.set_version(Version::NEW.next());
+    }
+
+    fn update_identity(&mut self, identity: &mut Identity) {
+        self.identities.push(identity.snapshot());
+        identity.set_version(identity.version().next());
+    }
+}
+
+impl StageSessions for PgBatch {
+    fn insert_session(&mut self, session: &mut Session) {
+        self.new_sessions.push(session.snapshot());
+        session.set_version(Version::NEW.next());
+    }
+
+    fn update_session(&mut self, session: &mut Session) {
+        self.sessions.push(session.snapshot());
+        session.set_version(session.version().next());
+    }
+
+    fn revoke_sessions(&mut self, identity: IdentityId, keep: Option<SessionId>, at: Timestamp) {
+        self.session_revocations.push((identity, keep, at));
+    }
+}
+
+impl StagePasswordResets for PgBatch {
+    fn update_password_reset(&mut self, reset: &mut PasswordReset) {
+        self.password_resets.push(reset.snapshot());
+        reset.set_version(reset.version().next());
     }
 }
 
@@ -108,6 +198,33 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
             insert_customer(&tx, customer).await?;
         }
         insert_records(&tx, &batch.idempotency).await?;
+        for role in &batch.new_roles {
+            insert_role(&tx, role).await?;
+        }
+        for user in &batch.new_users {
+            insert_user(&tx, user).await?;
+        }
+        for invite in &batch.invites {
+            update_invite(&tx, invite).await?;
+        }
+        for identity in &batch.new_identities {
+            insert_identity(&tx, identity).await?;
+        }
+        for identity in &batch.identities {
+            update_identity(&tx, identity).await?;
+        }
+        for session in &batch.new_sessions {
+            insert_session(&tx, session).await?;
+        }
+        for session in &batch.sessions {
+            update_session(&tx, session).await?;
+        }
+        for (identity, keep, at) in &batch.session_revocations {
+            revoke_sessions(&tx, *identity, *keep, *at).await?;
+        }
+        for reset in &batch.password_resets {
+            update_password_reset(&tx, reset).await?;
+        }
         tx.commit().await.map_err(repo_error)
     }
 }

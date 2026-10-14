@@ -12,6 +12,7 @@
 //!   check, so it holds a pooled connection only briefly;
 //! - errors are mapped by SQLSTATE and constraint name (`error.rs`), never by message text.
 
+mod auth;
 mod batch;
 mod carts;
 mod columns;
@@ -27,6 +28,7 @@ mod products;
 mod store;
 mod stores;
 mod tax;
+mod users;
 
 pub use batch::PgBatch;
 pub use config::{DEFAULT_CONNECT_TIMEOUT, database_config};

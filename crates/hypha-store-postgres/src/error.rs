@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use hypha_auth::keys as auth_keys;
 use hypha_cart::repo::keys as cart_keys;
 use hypha_core::{RepoError, idempotency::keys as idempotency_keys};
 use hypha_customers::repo::keys as customer_keys;
@@ -9,6 +10,7 @@ use hypha_orders::repo::keys as order_keys;
 use hypha_products::repo::keys as product_keys;
 use hypha_stores::repo::keys as store_keys;
 use hypha_tax::repo::keys as tax_keys;
+use hypha_users::keys as user_keys;
 use tokio_postgres::error::SqlState;
 
 /// Unique constraint names (see `migrations/`) and the repo key each one reports.
@@ -40,6 +42,23 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("order_number", order_keys::ORDER_NUMBER),
     ("order_cart", order_keys::ORDER_CART),
     ("order_lines_pkey", order_keys::ORDER_LINE_ID),
+    ("identities_pkey", auth_keys::IDENTITY_ID),
+    ("identity_principal", auth_keys::IDENTITY_PRINCIPAL),
+    ("identity_login", auth_keys::IDENTITY_LOGIN),
+    ("sessions_pkey", auth_keys::SESSION_ID),
+    ("session_token", auth_keys::SESSION_TOKEN),
+    ("api_keys_pkey", auth_keys::API_KEY_ID),
+    ("api_key_token", auth_keys::API_KEY_TOKEN),
+    ("password_resets_pkey", auth_keys::PASSWORD_RESET_ID),
+    ("password_reset_token", auth_keys::PASSWORD_RESET_TOKEN),
+    ("users_pkey", user_keys::USER_ID),
+    ("user_email", user_keys::USER_EMAIL),
+    ("roles_pkey", user_keys::ROLE_ID),
+    ("role_name", user_keys::ROLE_NAME),
+    ("role_owner", user_keys::ROLE_OWNER),
+    ("invites_pkey", user_keys::INVITE_ID),
+    ("invite_email", user_keys::INVITE_EMAIL),
+    ("invite_token", user_keys::INVITE_TOKEN),
 ];
 
 /// Maps a driver error to the repo error the ports promise.

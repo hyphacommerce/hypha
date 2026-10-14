@@ -69,6 +69,13 @@ accessors! {
     hypha_customers::HasCustomers => Customers, customers;
     hypha_core::HasIdempotency => Idempotency, idempotency;
     hypha_orders::HasOrders => Orders, orders;
+    hypha_auth::HasIdentities => Identities, identities;
+    hypha_auth::HasSessions => Sessions, sessions;
+    hypha_auth::HasApiKeys => ApiKeys, api_keys;
+    hypha_auth::HasPasswordResets => PasswordResets, password_resets;
+    hypha_users::HasUsers => Users, users;
+    hypha_users::HasRoles => Roles, roles;
+    hypha_users::HasInvites => Invites, invites;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one
