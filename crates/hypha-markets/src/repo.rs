@@ -49,6 +49,9 @@ pub trait CatalogRepo {
     async fn update(&self, catalog: &mut Catalog) -> Result<(), RepoError>;
 
     /// Adds products to the catalog. Products already in it are ignored.
+    ///
+    /// Precondition: the catalog exists (commands load it first). Otherwise adapters
+    /// fail with `Backend` rather than store orphaned membership.
     async fn add_products(
         &self,
         catalog: CatalogId,
@@ -81,6 +84,10 @@ pub trait PriceListRepo {
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
 
     /// Inserts or replaces fixed prices for the given variants.
+    ///
+    /// Preconditions: the list exists and each variant appears once
+    /// (`PriceList::check_fixed_prices` reports duplicates precisely). Otherwise adapters
+    /// fail with `Backend` and store nothing.
     async fn set_fixed_prices(
         &self,
         list: PriceListId,
