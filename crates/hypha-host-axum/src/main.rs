@@ -13,7 +13,9 @@ use tracing_subscriber::EnvFilter;
 use hypha_core::Ctx;
 use hypha_stores::ensure_single_store;
 
-use crate::state::{AppState, MemoryStorage, PgStorage, SharedState, Storage, UuidV7Ids};
+use crate::state::{
+    AppState, MemoryStorage, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids,
+};
 
 #[tokio::main]
 async fn main() {
@@ -65,6 +67,7 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S) {
     let state = Arc::new(AppState {
         storage,
         ids,
+        clock: SystemClock,
         store: store.id(),
     });
     let app = router.layer(TraceLayer::new_for_http()).with_state(state);

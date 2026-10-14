@@ -30,6 +30,14 @@ impl ApiError {
         }
     }
 
+    pub fn body_too_large(limit: usize) -> Self {
+        Self::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "body_too_large",
+            format!("the request body is larger than {limit} bytes"),
+        )
+    }
+
     pub fn route_not_found() -> Self {
         Self::new(StatusCode::NOT_FOUND, "route_not_found", "no such route")
     }
@@ -161,6 +169,7 @@ impl From<hypha_cart::CommandError> for ApiError {
             | E::VariantNotFound(_)
             | E::Email(_)
             | E::Country(_)
+            | E::Idempotency(_)
             | E::CustomerNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
@@ -262,6 +271,15 @@ mod tests {
         assert_eq!(e.status, StatusCode::FORBIDDEN);
         assert_eq!(e.code, "missing_scope");
         assert_eq!(e.message, "missing scope pricing:write");
+    }
+
+    #[test]
+    fn a_reused_idempotency_key_is_invalid_input() {
+        let e = ApiError::from(hypha_cart::CommandError::Idempotency(
+            hypha_core::IdempotencyError::KeyReused,
+        ));
+        assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(e.code, "idempotency_key_reused");
     }
 
     #[test]

@@ -1,7 +1,10 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use hypha_cart::CartPorts;
-use hypha_core::{IdGenerator, StoreId};
+use hypha_core::{Clock, IdGenerator, StoreId, Timestamp};
 use hypha_store_postgres::{CORE, PgConnection, PgStore, migrate};
 use hypha_stores::StoreRepo;
 use hypha_testkit::{InMemoryPorts, InMemoryStoreRepo};
@@ -19,9 +22,26 @@ impl IdGenerator for UuidV7Ids {
     }
 }
 
+/// The real clock. Only hosts read it; commands get it as a `Clock`.
+#[derive(Default)]
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now(&self) -> Timestamp {
+        // A clock set before 1970 reads as 1970; i64 microseconds last until year 294247.
+        let micros = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| {
+                i64::try_from(since.as_micros()).unwrap_or(i64::MAX)
+            });
+        Timestamp::from_unix_micros(micros)
+    }
+}
+
 pub struct AppState<S> {
     pub storage: S,
     pub ids: UuidV7Ids,
+    pub clock: SystemClock,
     /// The one store this deployment serves (design note 0006, model A), set at startup.
     pub store: StoreId,
 }

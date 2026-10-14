@@ -6,8 +6,9 @@ pub mod repo;
 
 pub use cart::{Cart, CartLine, CartLineSnapshot, CartSnapshot};
 pub use commands::{
-    AddLine, CartPorts, CommandError, PricingPorts, SetLineQuantity, add_line, create_cart,
-    get_cart, remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
+    ADD_LINE, AddLine, CREATE_CART, CartPorts, CommandError, CreateCart, IdempotentCartPorts,
+    PricingPorts, SetLineQuantity, add_line, create_cart, get_cart, remove_cart_line,
+    set_cart_customer, set_cart_email, set_line_quantity,
 };
 pub use error::{CartError, LineError, RestoreError};
 pub use pricing::{

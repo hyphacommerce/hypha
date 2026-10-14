@@ -22,20 +22,7 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
         let s = cart.snapshot();
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
-        tx.query_typed(
-            "INSERT INTO carts (id, version, market_id, country, email, customer_id)
-             VALUES ($1, 1, $2, $3, $4, $5)",
-            &[
-                (&s.id.as_uuid(), Type::UUID),
-                (&s.market.as_uuid(), Type::UUID),
-                (&s.country.as_str(), Type::TEXT),
-                (&s.email.as_ref().map(Email::as_str), Type::TEXT),
-                (&s.customer.map(|c| c.as_uuid()), Type::UUID),
-            ],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_lines(&tx, s.id, &s.lines).await?;
+        insert_cart(&tx, &s).await?;
         tx.commit().await.map_err(repo_error)?;
         cart.set_version(Version::NEW.next());
         Ok(())
@@ -50,6 +37,27 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
         cart.set_version(new_version);
         Ok(())
     }
+}
+
+/// `CartRepo::insert` inside the caller's transaction (also used by `PgBatch`).
+pub(crate) async fn insert_cart(
+    tx: &impl GenericClient,
+    s: &CartSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO carts (id, version, market_id, country, email, customer_id)
+         VALUES ($1, 1, $2, $3, $4, $5)",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.market.as_uuid(), Type::UUID),
+            (&s.country.as_str(), Type::TEXT),
+            (&s.email.as_ref().map(Email::as_str), Type::TEXT),
+            (&s.customer.map(|c| c.as_uuid()), Type::UUID),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_lines(tx, s.id, &s.lines).await
 }
 
 /// `CartRepo::update` inside the caller's transaction (also used by `PgBatch`). Returns

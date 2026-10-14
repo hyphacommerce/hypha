@@ -213,9 +213,14 @@ it again). Storing response bodies would mean the domain storing host DTOs.
 
 **Consequences**
 - `add_line` and `create_cart` write through a batch (cart + key) when given a key.
-- Records expire after 24 hours (needs the `Clock`). Cleanup is a scheduled job, so for
-  now an expired record is simply ignored on read.
-- The host reads the `Idempotency-Key` header in an extractor next to `Caller`.
+- *Changed while building (2026-10-14):* records don't expire on read. Ignoring an
+  expired record would leave its row in place, and the retry's insert would then hit the
+  unique key, so expiry needs a delete inside the batch, which breaks "records are
+  insert-only". Instead a scheduled cleanup job (later) deletes records older than 24
+  hours (`created_at` is indexed for it); until then a key is remembered. Clients send
+  fresh keys (UUIDs), so this only matters for storage size.
+- The host's `KeyedJson` extractor (`extract.rs`) reads the `Idempotency-Key` header and
+  fingerprints the request; replays carry `Idempotent-Replayed: true`.
 
 ## 6. `Clock` (O8)
 

@@ -3,6 +3,7 @@ pub mod country;
 pub mod ctx;
 pub mod email;
 pub mod error_code;
+pub mod idempotency;
 pub mod ids;
 pub mod money;
 pub mod ports;
@@ -17,6 +18,10 @@ pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
 pub use email::{Email, EmailError};
 pub use error_code::ErrorCode;
+pub use idempotency::{
+    HasIdempotency, IdempotencyError, IdempotencyKey, IdempotencyRecord, IdempotencyRepo,
+    IdempotencyRequest, Idempotent, StageIdempotency, earlier_result,
+};
 pub use ids::{
     AddressId, AgentId, CartId, CatalogId, CustomerId, IdError, InventoryItemId, LocationId,
     MarketId, OptionId, OptionValueId, PriceListId, ProductId, StoreId, TaxClassId, TaxRegionId,

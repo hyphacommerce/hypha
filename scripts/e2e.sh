@@ -46,6 +46,19 @@ contains() {
     fi
 }
 
+# replayed NAME CURL_ARGS...: sends the request again and asserts the response carries
+# `Idempotent-Replayed: true`.
+replayed() {
+    local name=$1
+    shift
+    if curl -s -o /dev/null -D - "$@" | grep -qi '^idempotent-replayed: true'; then
+        echo "ok   $name"
+    else
+        echo "FAIL $name: no Idempotent-Replayed header"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
 # The top-level "id" of the last response (always the first "id" key).
 id() { sed -E 's/^[^"]*"id":"([^"]+)".*/\1/' <<<"$BODY"; }
 # The first address id of the last customer response.
@@ -111,6 +124,25 @@ contains "mug line is named" '"product_title":"Mug","variant_title":null,"sku":n
 step "add 3 cups" 200 - -X POST "$BASE/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":3}"
 contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
+
+echo "## idempotency keys"
+step "create cart with a key" 201 - -X POST "$BASE/carts" -H "$JSON" -H 'idempotency-key: cart-1' \
+    -d '{"country":"HR"}'
+KEYED=$(id)
+step "retry it" 201 - -X POST "$BASE/carts" -H "$JSON" -H 'idempotency-key: cart-1' \
+    -d '{"country":"HR"}'
+contains "the retry returns the first cart" "\"id\":\"$KEYED\""
+replayed "the retry is marked replayed" -X POST "$BASE/carts" -H "$JSON" \
+    -H 'idempotency-key: cart-1' -d '{"country":"HR"}'
+step "same key, different body" 422 idempotency_key_reused -X POST "$BASE/carts" -H "$JSON" \
+    -H 'idempotency-key: cart-1' -d '{"country":"DE"}'
+step "a key with a space" 422 invalid_idempotency_key -X POST "$BASE/carts" -H "$JSON" \
+    -H 'idempotency-key: two words' -d '{"country":"HR"}'
+step "add 2 mugs with a key" 200 - -X POST "$BASE/carts/$KEYED/lines" -H "$JSON" \
+    -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
+step "retry the add" 200 - -X POST "$BASE/carts/$KEYED/lines" -H "$JSON" \
+    -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
+contains "the retry didn't add the mugs again" '"quantity":2,'
 
 step "archive mug" 200 - -X PATCH "$BASE/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
 step "get cart" 200 - "$BASE/carts/$CART"

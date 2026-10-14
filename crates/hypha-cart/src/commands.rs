@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AuthError, CartId, CountryCode, CountryError, Ctx, CustomerId, Email, EmailError, ErrorCode,
-    IdGenerator, MarketId, MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope,
-    VariantId,
+    AuthError, CartId, Clock, CountryCode, CountryError, Ctx, CustomerId, Email, EmailError,
+    ErrorCode, HasBatch, HasIdempotency, IdGenerator, IdempotencyError, IdempotencyRecord,
+    IdempotencyRequest, Idempotent, MarketId, MoneyError, ProductId, Quantity, QuantityError,
+    RepoError, Scope, StageIdempotency, VariantId, earlier_result,
+    idempotency::keys::IDEMPOTENCY_KEY,
 };
 use hypha_customers::{CustomerRepo, HasCustomers};
 use hypha_inventory::{
@@ -19,8 +21,8 @@ use hypha_tax::{HasTaxClasses, HasTaxRegions, TaxClassRepo, TaxContext, TaxRegio
 use thiserror::Error;
 
 use crate::{
-    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, check_stock,
-    price_cart, price_line,
+    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, StageCarts,
+    check_stock, price_cart, price_line,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -39,6 +41,8 @@ pub enum CommandError {
     Email(#[from] EmailError),
     #[error(transparent)]
     Country(#[from] CountryError),
+    #[error(transparent)]
+    Idempotency(#[from] IdempotencyError),
     #[error("customer {0} not found")]
     CustomerNotFound(CustomerId),
     #[error("cart {0} not found")]
@@ -68,6 +72,7 @@ impl ErrorCode for CommandError {
             CommandError::Money(e) => e.code(),
             CommandError::Email(e) => e.code(),
             CommandError::Country(e) => e.code(),
+            CommandError::Idempotency(e) => e.code(),
             CommandError::CustomerNotFound(_) => "customer_not_found",
             CommandError::CartNotFound(_) => "cart_not_found",
             CommandError::MarketNotFound(_) => "market_not_found",
@@ -95,6 +100,7 @@ pub trait CartPorts:
     + HasInventoryItems
     + HasLocations
     + HasCustomers
+    + IdempotentCartPorts
 {
 }
 
@@ -109,6 +115,23 @@ impl<T> CartPorts for T where
         + HasInventoryItems
         + HasLocations
         + HasCustomers
+        + IdempotentCartPorts
+        + ?Sized
+{
+}
+
+/// What a cart command that takes an idempotency key needs: carts and pricing, the
+/// recorded keys, and a batch that writes the cart and its key together.
+pub trait IdempotentCartPorts:
+    HasCarts + PricingPorts + HasIdempotency + HasBatch<Batch: StageCarts + StageIdempotency>
+{
+}
+
+impl<T> IdempotentCartPorts for T where
+    T: HasCarts
+        + PricingPorts
+        + HasIdempotency
+        + HasBatch<Batch: StageCarts + StageIdempotency>
         + ?Sized
 {
 }
@@ -139,18 +162,34 @@ impl<T> PricingPorts for T where
 {
 }
 
+/// The operation names idempotency records carry (`IdempotencyRecord::operation`).
+pub const CREATE_CART: &str = "create_cart";
+pub const ADD_LINE: &str = "add_line";
+
+pub struct CreateCart {
+    /// Where the cart ships to: an ISO 3166-1 alpha-2 code, checked here.
+    pub country: String,
+    /// A retry with the same key returns the cart the first request created.
+    pub idempotency: Option<IdempotencyRequest>,
+}
+
 /// Creates an empty cart shipping to `country`, in the market that sells there
 /// (like Shopify, the buyer's country picks the market), and returns it priced like
-/// `get_cart`. `country` is an ISO 3166-1 alpha-2 code, checked here.
-pub async fn create_cart<S: HasCarts + PricingPorts, I: IdGenerator>(
+/// `get_cart`.
+pub async fn create_cart<S: IdempotentCartPorts, I: IdGenerator, C: Clock>(
     ctx: &Ctx,
     ports: &S,
     ids: &I,
-    country: &str,
-) -> Result<PricedCart, CommandError> {
+    clock: &C,
+    input: CreateCart,
+) -> Result<Idempotent<PricedCart>, CommandError> {
     ctx.require(Scope::CartsWrite)?;
+    let key = input.idempotency.as_ref();
+    if let Some(cart) = replay_of(ctx, ports, CREATE_CART, key).await? {
+        return replay(ports, cart).await;
+    }
 
-    let country = CountryCode::new(country)?;
+    let country = CountryCode::new(&input.country)?;
     let market = ports
         .markets()
         .get_by_country(country)
@@ -159,14 +198,28 @@ pub async fn create_cart<S: HasCarts + PricingPorts, I: IdGenerator>(
 
     let mut cart = Cart::new(CartId::from_uuid(ids.new_uuid()), market.id(), country);
     let priced = reprice(ports, &cart).await?;
-    ports.carts().insert(&mut cart).await?;
-    Ok(priced)
+    match write_cart(
+        ctx,
+        ports,
+        clock,
+        CREATE_CART,
+        key,
+        &mut cart,
+        Write::Insert,
+    )
+    .await?
+    {
+        Some(winner) => replay(ports, winner).await,
+        None => Ok(Idempotent::fresh(priced)),
+    }
 }
 
 pub struct AddLine {
     pub cart: CartId,
     pub variant: VariantId,
     pub quantity: u32,
+    /// A retry with the same key returns the cart instead of adding the line again.
+    pub idempotency: Option<IdempotencyRequest>,
 }
 
 /// Adds a variant to the cart (or increases its quantity) and returns the repriced cart.
@@ -175,12 +228,17 @@ pub struct AddLine {
 /// catalog with a price in its currency, and the market's locations must have stock
 /// for the line's new quantity (design note 0004, I6). Other lines that went stale
 /// don't block it; they come back marked unavailable.
-pub async fn add_line<S: HasCarts + PricingPorts>(
+pub async fn add_line<S: IdempotentCartPorts, C: Clock>(
     ctx: &Ctx,
     ports: &S,
+    clock: &C,
     input: AddLine,
-) -> Result<PricedCart, CommandError> {
+) -> Result<Idempotent<PricedCart>, CommandError> {
     ctx.require(Scope::CartsWrite)?;
+    let key = input.idempotency.as_ref();
+    if let Some(cart) = replay_of(ctx, ports, ADD_LINE, key).await? {
+        return replay(ports, cart).await;
+    }
 
     let quantity = Quantity::new(input.quantity)?;
     let mut cart = ports
@@ -200,8 +258,86 @@ pub async fn add_line<S: HasCarts + PricingPorts>(
 
     // Fails with StaleVersion (409) if another request changed the cart meanwhile,
     // instead of silently dropping that request's line.
-    ports.carts().update(&mut cart).await?;
-    Ok(priced)
+    match write_cart(ctx, ports, clock, ADD_LINE, key, &mut cart, Write::Update).await? {
+        Some(winner) => replay(ports, winner).await,
+        None => Ok(Idempotent::fresh(priced)),
+    }
+}
+
+/// The cart an earlier request produced, if this caller already sent `request` for
+/// `operation`; `KeyReused` if the key was used for something else.
+async fn replay_of<S: IdempotentCartPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    operation: &str,
+    request: Option<&IdempotencyRequest>,
+) -> Result<Option<CartId>, CommandError> {
+    let Some(request) = request else {
+        return Ok(None);
+    };
+    let earlier: Option<_> =
+        earlier_result::<_, CommandError>(ports.idempotency(), ctx.actor(), operation, request)
+            .await?;
+    Ok(earlier.map(CartId::from_uuid))
+}
+
+/// What a replay returns: the cart as it is now (not as the first response showed it;
+/// design note 0007, section 5).
+async fn replay<S: HasCarts + PricingPorts>(
+    ports: &S,
+    cart: CartId,
+) -> Result<Idempotent<PricedCart>, CommandError> {
+    let cart = load_cart(ports, cart).await?;
+    Ok(Idempotent::replayed(reprice(ports, &cart).await?))
+}
+
+enum Write {
+    Insert,
+    Update,
+}
+
+/// Saves `cart`. With an idempotency key, the cart and the key's record commit together,
+/// so a retry finds both or neither. If another request with the same key committed
+/// between `replay_of` and this write, returns its cart to replay instead.
+async fn write_cart<S: IdempotentCartPorts, C: Clock>(
+    ctx: &Ctx,
+    ports: &S,
+    clock: &C,
+    operation: &str,
+    request: Option<&IdempotencyRequest>,
+    cart: &mut Cart,
+    write: Write,
+) -> Result<Option<CartId>, CommandError> {
+    let Some(request) = request else {
+        match write {
+            Write::Insert => ports.carts().insert(cart).await?,
+            Write::Update => ports.carts().update(cart).await?,
+        }
+        return Ok(None);
+    };
+
+    let record = IdempotencyRecord::new(
+        ctx.actor(),
+        request,
+        operation,
+        cart.id().as_uuid(),
+        clock.now(),
+    )?;
+    let mut batch = ports.batch();
+    match write {
+        Write::Insert => batch.insert_cart(cart),
+        Write::Update => batch.update_cart(cart),
+    }
+    batch.record_idempotency(record);
+    match ports.commit(batch).await {
+        Err(RepoError::Duplicate(IDEMPOTENCY_KEY)) => {
+            match replay_of(ctx, ports, operation, Some(request)).await? {
+                Some(winner) => Ok(Some(winner)),
+                None => Err(RepoError::Duplicate(IDEMPOTENCY_KEY).into()),
+            }
+        }
+        written => Ok(written.map(|()| None)?),
+    }
 }
 
 /// Sets who to contact about the order this cart becomes; `None` clears it.

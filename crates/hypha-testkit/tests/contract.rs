@@ -84,3 +84,10 @@ fn store_repo() {
 fn batch() {
     block_on(contract::batch(async || InMemoryPorts::default()));
 }
+
+#[test]
+fn idempotency_repo() {
+    block_on(contract::idempotency_repo(async || {
+        InMemoryPorts::default()
+    }));
+}

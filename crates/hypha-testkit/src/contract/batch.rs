@@ -1,4 +1,4 @@
-use hypha_cart::{Cart, CartRepo, HasCarts, StageCarts};
+use hypha_cart::{Cart, CartRepo, HasCarts, StageCarts, repo::keys as cart_keys};
 use hypha_core::{
     CartId, CountryCode, HasBatch, InventoryItemId, MarketId, ProductId, Quantity, RepoError,
     VariantId, Version, Versioned,
@@ -21,6 +21,10 @@ where
     stale_cart_writes_nothing(&make().await).await;
     scenario("batch: a stale inventory item writes nothing");
     stale_item_writes_nothing(&make().await).await;
+    scenario("batch: inserts a new cart at version 1");
+    inserts_a_cart(&make().await).await;
+    scenario("batch: a duplicate new cart writes nothing");
+    duplicate_cart_writes_nothing(&make().await).await;
     scenario("batch: an empty batch commits");
     empty_batch(&make().await).await;
 }
@@ -134,6 +138,39 @@ where
         ports.inventory_items().get(rival.id()).await,
         Ok(Some(rival))
     );
+}
+
+async fn inserts_a_cart<S>(ports: &S)
+where
+    S: HasBatch + HasCarts,
+    S::Batch: StageCarts,
+{
+    let mut new = cart(7);
+    add_mug(&mut new);
+    let mut batch = ports.batch();
+    batch.insert_cart(&mut new);
+    assert_eq!(new.version(), Version::new(1));
+    assert_eq!(ports.commit(batch).await, Ok(()));
+    assert_eq!(ports.carts().get(new.id()).await, Ok(Some(new)));
+}
+
+async fn duplicate_cart_writes_nothing<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems,
+    S::Batch: StageCarts + StageInventoryItems,
+{
+    let (c, a, _) = stored(ports).await;
+    let (mut again, mut changed) = (cart(1), a.clone());
+    changed.set_tracked(false);
+    let mut batch = ports.batch();
+    batch.update_inventory_item(&mut changed);
+    batch.insert_cart(&mut again);
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Duplicate(cart_keys::CART_ID))
+    );
+    assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c)));
+    assert_eq!(ports.inventory_items().get(a.id()).await, Ok(Some(a)));
 }
 
 async fn empty_batch<S: HasBatch>(ports: &S) {

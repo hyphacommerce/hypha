@@ -1,10 +1,11 @@
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
-use hypha_core::{HasBatch, RepoError, Versioned};
+use hypha_core::{HasBatch, IdempotencyRecord, RepoError, StageIdempotency, Version, Versioned};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
 
 use crate::{
-    carts::update_cart,
+    carts::{insert_cart, update_cart},
     error::repo_error,
+    idempotency::insert_records,
     inventory::update_items,
     store::{PgConnection, PgStore},
 };
@@ -13,11 +14,27 @@ use crate::{
 /// carrying the version it was loaded at.
 #[derive(Default)]
 pub struct PgBatch {
+    new_carts: Vec<CartSnapshot>,
     carts: Vec<CartSnapshot>,
     inventory_items: Vec<InventoryItemSnapshot>,
+    idempotency: Vec<IdempotencyRecord>,
+}
+
+impl PgBatch {
+    fn is_empty(&self) -> bool {
+        self.new_carts.is_empty()
+            && self.carts.is_empty()
+            && self.inventory_items.is_empty()
+            && self.idempotency.is_empty()
+    }
 }
 
 impl StageCarts for PgBatch {
+    fn insert_cart(&mut self, cart: &mut Cart) {
+        self.new_carts.push(cart.snapshot());
+        cart.set_version(Version::NEW.next());
+    }
+
     fn update_cart(&mut self, cart: &mut Cart) {
         self.carts.push(cart.snapshot());
         cart.set_version(cart.version().next());
@@ -28,6 +45,12 @@ impl StageInventoryItems for PgBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
         self.inventory_items.push(item.snapshot());
         item.set_version(item.version().next());
+    }
+}
+
+impl StageIdempotency for PgBatch {
+    fn record_idempotency(&mut self, record: IdempotencyRecord) {
+        self.idempotency.push(record);
     }
 }
 
@@ -42,17 +65,21 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
     /// ID, so two commits lock rows in the same order and queue instead of deadlocking.
     /// Any failure returns early and drops the transaction, which rolls it back.
     async fn commit(&self, mut batch: PgBatch) -> Result<(), RepoError> {
-        if batch.carts.is_empty() && batch.inventory_items.is_empty() {
+        if batch.is_empty() {
             return Ok(());
         }
         batch.carts.sort_by_key(|s| s.id.as_uuid());
 
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
+        for cart in &batch.new_carts {
+            insert_cart(&tx, cart).await?;
+        }
         for cart in &batch.carts {
             update_cart(&tx, cart).await?;
         }
         update_items(&tx, batch.inventory_items).await?;
+        insert_records(&tx, &batch.idempotency).await?;
         tx.commit().await.map_err(repo_error)
     }
 }

@@ -1,6 +1,6 @@
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_cart::{
-    AddLine, LineStatus, PricedCart, SetLineQuantity, add_line, create_cart, get_cart,
+    AddLine, CreateCart, LineStatus, PricedCart, SetLineQuantity, add_line, create_cart, get_cart,
     remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
 };
 use hypha_core::{
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId},
+    extract::{Caller, JsonBody, KeyedJson, PathId, idempotent_response},
     state::{SharedState, Storage},
 };
 
@@ -163,14 +163,23 @@ impl From<&PricedCart> for CartResponse {
     }
 }
 
+/// Takes an `Idempotency-Key` header: a retry returns the cart the first request made.
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     Caller(ctx): Caller,
-    JsonBody(req): JsonBody<CreateCartRequest>,
-) -> Result<(StatusCode, Json<CartResponse>), ApiError> {
+    req: KeyedJson<CreateCartRequest>,
+) -> Result<Response, ApiError> {
     let ports = state.ports().await?;
-    let priced = create_cart(&ctx, &ports, &state.ids, &req.country).await?;
-    Ok((StatusCode::CREATED, Json(CartResponse::from(&priced))))
+    let input = CreateCart {
+        country: req.body.country,
+        idempotency: req.idempotency,
+    };
+    let created = create_cart(&ctx, &ports, &state.ids, &state.clock, input).await?;
+    Ok(idempotent_response(
+        StatusCode::CREATED,
+        CartResponse::from(&created.value),
+        created.replayed,
+    ))
 }
 
 pub(super) async fn fetch<S: Storage>(
@@ -183,20 +192,26 @@ pub(super) async fn fetch<S: Storage>(
     Ok(Json(CartResponse::from(&priced)))
 }
 
+/// Takes an `Idempotency-Key` header: a retry returns the cart without adding again.
 pub(super) async fn add<S: Storage>(
     State(state): State<SharedState<S>>,
     Caller(ctx): Caller,
     PathId(id): PathId<CartId>,
-    JsonBody(req): JsonBody<AddLineRequest>,
-) -> Result<Json<CartResponse>, ApiError> {
+    req: KeyedJson<AddLineRequest>,
+) -> Result<Response, ApiError> {
     let ports = state.ports().await?;
     let input = AddLine {
         cart: id,
-        variant: req.variant,
-        quantity: req.quantity,
+        variant: req.body.variant,
+        quantity: req.body.quantity,
+        idempotency: req.idempotency,
     };
-    let priced = add_line(&ctx, &ports, input).await?;
-    Ok(Json(CartResponse::from(&priced)))
+    let added = add_line(&ctx, &ports, &state.clock, input).await?;
+    Ok(idempotent_response(
+        StatusCode::OK,
+        CartResponse::from(&added.value),
+        added.replayed,
+    ))
 }
 
 pub(super) async fn set_email<S: Storage>(

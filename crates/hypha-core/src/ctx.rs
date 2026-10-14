@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::{AgentId, ErrorCode, UserId, scope::Scope};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Actor {
     User(UserId),
     Agent(AgentId),

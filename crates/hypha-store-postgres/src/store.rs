@@ -67,6 +67,7 @@ accessors! {
     hypha_inventory::HasInventoryItems => InventoryItems, inventory_items;
     hypha_inventory::HasLocations => Locations, locations;
     hypha_customers::HasCustomers => Customers, customers;
+    hypha_core::HasIdempotency => Idempotency, idempotency;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

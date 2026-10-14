@@ -109,3 +109,9 @@ async fn batch() {
     let Some(url) = database_url() else { return };
     contract::batch(async || fresh_store(&url, "contract_batch").await).await;
 }
+
+#[tokio::test]
+async fn idempotency_repo() {
+    let Some(url) = database_url() else { return };
+    contract::idempotency_repo(async || fresh_store(&url, "contract_idempotency").await).await;
+}

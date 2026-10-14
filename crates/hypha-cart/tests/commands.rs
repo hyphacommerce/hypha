@@ -1,14 +1,17 @@
 use hypha_cart::{
-    AddLine, CartError, CartRepo, CommandError, LineError, LineStatus, PricedCart, SetLineQuantity,
-    add_line, create_cart, get_cart, remove_cart_line, set_cart_customer, set_cart_email,
-    set_line_quantity,
+    AddLine, CartError, CartRepo, CommandError, CreateCart, LineError, LineStatus, PricedCart,
+    SetLineQuantity, add_line, create_cart, get_cart, remove_cart_line, set_cart_customer,
+    set_cart_email, set_line_quantity,
 };
 use hypha_core::{
     Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, CountryError, Ctx, Currency,
     InventoryItemId, LocationId, MarketId, Money, Price, PriceListId, ProductId, Scope, TaxClassId,
     TaxRate, TaxRegionId, UserId, VariantId,
 };
-use hypha_core::{CustomerId, Email, EmailError, MoneyError, Quantity, QuantityError};
+use hypha_core::{
+    CustomerId, Email, EmailError, IdempotencyError, IdempotencyRequest, Idempotent, MoneyError,
+    Quantity, QuantityError,
+};
 use hypha_customers::{Customer, CustomerRepo};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
 use hypha_markets::{
@@ -17,7 +20,7 @@ use hypha_markets::{
 use hypha_pricing::PricingError;
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus};
 use hypha_tax::{TaxClass, TaxClassRepo, TaxLine, TaxRegion, TaxRegionRepo, TaxSource};
-use hypha_testkit::{InMemoryPorts, SequentialIds};
+use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
 
@@ -82,10 +85,12 @@ fn eur(amount: i64) -> Money {
     Money::new(amount, Currency::Eur).unwrap()
 }
 
-/// The repositories (`InMemoryPorts`, reached through `Deref`) and an ID generator.
+/// The repositories (`InMemoryPorts`, reached through `Deref`), an ID generator and a
+/// clock.
 struct World {
     ports: InMemoryPorts,
     ids: SequentialIds,
+    clock: FixedClock,
 }
 
 impl std::ops::Deref for World {
@@ -102,6 +107,7 @@ impl World {
         let world = Self {
             ports: InMemoryPorts::default(),
             ids: SequentialIds::default(),
+            clock: FixedClock::default(),
         };
 
         let mut market = Market::new(
@@ -210,9 +216,22 @@ impl World {
     }
 
     fn create_cart(&self) -> CartId {
-        block_on(create_cart(&Ctx::system(), &self.ports, &self.ids, "HR"))
-            .unwrap()
-            .id
+        self.create_cart_in("HR").unwrap().id
+    }
+
+    fn create_cart_in(&self, country: &str) -> Result<PricedCart, CommandError> {
+        let input = CreateCart {
+            country: country.to_string(),
+            idempotency: None,
+        };
+        block_on(create_cart(
+            &Ctx::system(),
+            &self.ports,
+            &self.ids,
+            &self.clock,
+            input,
+        ))
+        .map(|created| created.value)
     }
 
     fn add(
@@ -222,15 +241,13 @@ impl World {
         name: &str,
         quantity: u32,
     ) -> Result<PricedCart, CommandError> {
-        block_on(add_line(
-            ctx,
-            &self.ports,
-            AddLine {
-                cart,
-                variant: vid(name),
-                quantity,
-            },
-        ))
+        let input = AddLine {
+            cart,
+            variant: vid(name),
+            quantity,
+            idempotency: None,
+        };
+        block_on(add_line(ctx, &self.ports, &self.clock, input)).map(|added| added.value)
     }
 
     fn get(&self, cart: CartId) -> Result<PricedCart, CommandError> {
@@ -265,7 +282,7 @@ impl World {
 #[test]
 fn create_cart_picks_the_market_of_its_country() {
     let world = World::new();
-    let cart = block_on(create_cart(&Ctx::system(), &world.ports, &world.ids, "HR")).unwrap();
+    let cart = world.create_cart_in("HR").unwrap();
     assert_eq!((cart.country, cart.lines.len()), (hr(), 0));
     let stored = block_on(world.carts.get(cart.id)).unwrap().unwrap();
     assert_eq!((stored.market(), stored.country()), (market_id(), hr()));
@@ -276,14 +293,14 @@ fn create_cart_picks_the_market_of_its_country() {
 fn create_cart_rejects_country_without_market() {
     let world = World::new();
     let de = CountryCode::new("DE").unwrap();
-    let result = block_on(create_cart(&Ctx::system(), &world.ports, &world.ids, "DE"));
+    let result = world.create_cart_in("DE");
     assert_eq!(result, Err(CommandError::NoMarketForCountry(de)));
 }
 
 #[test]
 fn create_cart_rejects_an_invalid_country() {
     let world = World::new();
-    let result = block_on(create_cart(&Ctx::system(), &world.ports, &world.ids, "hr"));
+    let result = world.create_cart_in("hr");
     assert_eq!(
         result,
         Err(CommandError::Country(CountryError::NotUppercase))
@@ -962,4 +979,138 @@ fn remove_cart_line_takes_the_variant_out() {
         )),
         Err(CommandError::Cart(CartError::LineNotFound(vid("mug"))))
     );
+}
+
+// ---------- idempotency keys ----------
+
+fn keyed(key: &str, fingerprint: u8) -> Option<IdempotencyRequest> {
+    Some(IdempotencyRequest {
+        key: key.to_string(),
+        fingerprint: [fingerprint; 32],
+    })
+}
+
+impl World {
+    fn create_keyed(
+        &self,
+        ctx: &Ctx,
+        idempotency: Option<IdempotencyRequest>,
+    ) -> Result<Idempotent<PricedCart>, CommandError> {
+        let input = CreateCart {
+            country: "HR".to_string(),
+            idempotency,
+        };
+        block_on(create_cart(ctx, &self.ports, &self.ids, &self.clock, input))
+    }
+
+    fn add_keyed(
+        &self,
+        cart: CartId,
+        name: &str,
+        quantity: u32,
+        idempotency: Option<IdempotencyRequest>,
+    ) -> Result<Idempotent<PricedCart>, CommandError> {
+        let input = AddLine {
+            cart,
+            variant: vid(name),
+            quantity,
+            idempotency,
+        };
+        block_on(add_line(&Ctx::system(), &self.ports, &self.clock, input))
+    }
+}
+
+#[test]
+fn create_cart_retried_with_its_key_returns_the_first_cart() {
+    let world = World::new();
+    let first = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
+    let retry = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
+    assert!(!first.replayed);
+    assert!(retry.replayed);
+    assert_eq!(retry.value, first.value);
+}
+
+#[test]
+fn add_line_retried_with_its_key_adds_once() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let first = world.add_keyed(cart, "mug", 2, keyed("k-1", 1)).unwrap();
+    let retry = world.add_keyed(cart, "mug", 2, keyed("k-1", 1)).unwrap();
+    assert!(retry.replayed);
+    assert_eq!(retry.value, first.value);
+    assert_eq!(world.stored_quantity(cart, "mug"), 2);
+}
+
+#[test]
+fn a_key_reused_for_a_different_request_is_refused() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add_keyed(cart, "mug", 2, keyed("k-1", 1)).unwrap();
+    assert_eq!(
+        world.add_keyed(cart, "mug", 3, keyed("k-1", 2)),
+        Err(CommandError::Idempotency(IdempotencyError::KeyReused))
+    );
+    // The same fingerprint for another operation is a different request too.
+    assert_eq!(
+        world.create_keyed(&Ctx::system(), keyed("k-1", 1)),
+        Err(CommandError::Idempotency(IdempotencyError::KeyReused))
+    );
+    assert_eq!(world.stored_quantity(cart, "mug"), 2);
+}
+
+#[test]
+fn an_invalid_key_is_refused_before_anything_is_written() {
+    let world = World::new();
+    let cart = world.create_cart();
+    assert_eq!(
+        world.add_keyed(cart, "mug", 1, keyed("two words", 1)),
+        Err(CommandError::Idempotency(IdempotencyError::InvalidKey))
+    );
+    assert_eq!(world.stored_line_count(cart), 0);
+}
+
+#[test]
+fn keys_belong_to_the_actor_that_sent_them() {
+    let world = World::new();
+    let user = Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(7))),
+        vec![Scope::CartsWrite],
+    );
+    let system_cart = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
+    let user_cart = world.create_keyed(&user, keyed("k-1", 1)).unwrap();
+    assert!(!user_cart.replayed);
+    assert_ne!(user_cart.value.id, system_cart.value.id);
+}
+
+#[test]
+fn a_command_that_fails_records_no_key() {
+    let world = World::new();
+    world.stock("mug", 1);
+    let cart = world.create_cart();
+    assert!(world.add_keyed(cart, "mug", 2, keyed("k-1", 1)).is_err());
+
+    let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
+        .unwrap()
+        .unwrap();
+    item.set_on_hand(warehouse(), 5, None).unwrap();
+    block_on(world.inventory_items.update(&mut item)).unwrap();
+
+    // Nothing was recorded, so the retry runs for real.
+    let retry = world.add_keyed(cart, "mug", 2, keyed("k-1", 1)).unwrap();
+    assert!(!retry.replayed);
+    assert_eq!(world.stored_quantity(cart, "mug"), 2);
+}
+
+#[test]
+fn losing_the_race_for_a_key_replays_the_winner() {
+    let world = World::new();
+    let winner = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
+    // The retry's check runs before the winner's record is visible; its own write then
+    // fails on the key, and nothing of it is stored.
+    world.idempotency.hide_next_lookups(1);
+    let loser = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
+    assert!(loser.replayed);
+    assert_eq!(loser.value.id, winner.value.id);
+    let loser_cart = CartId::from_uuid(Uuid::from_u128(2));
+    assert_eq!(block_on(world.carts.get(loser_cart)), Ok(None));
 }

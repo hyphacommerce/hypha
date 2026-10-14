@@ -1,4 +1,5 @@
 use hypha_cart::HasCarts;
+use hypha_core::HasIdempotency;
 use hypha_customers::HasCustomers;
 use hypha_inventory::{HasInventoryItems, HasLocations};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
@@ -6,9 +7,9 @@ use hypha_products::HasProducts;
 use hypha_tax::{HasTaxClasses, HasTaxRegions};
 
 use crate::{
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryInventoryItemRepo,
-    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPriceListRepo, InMemoryProductRepo,
-    InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
+    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryIdempotencyRepo,
+    InMemoryInventoryItemRepo, InMemoryLocationRepo, InMemoryMarketRepo, InMemoryPriceListRepo,
+    InMemoryProductRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
 };
 
 /// Every repository of one store, in memory: the in-memory host's storage and the
@@ -26,6 +27,7 @@ pub struct InMemoryPorts {
     pub inventory_items: InMemoryInventoryItemRepo,
     pub locations: InMemoryLocationRepo,
     pub customers: InMemoryCustomerRepo,
+    pub idempotency: InMemoryIdempotencyRepo,
 }
 
 impl HasCarts for InMemoryPorts {
@@ -95,5 +97,12 @@ impl HasCustomers for InMemoryPorts {
     type Customers = InMemoryCustomerRepo;
     fn customers(&self) -> &InMemoryCustomerRepo {
         &self.customers
+    }
+}
+
+impl HasIdempotency for InMemoryPorts {
+    type Idempotency = InMemoryIdempotencyRepo;
+    fn idempotency(&self) -> &InMemoryIdempotencyRepo {
+        &self.idempotency
     }
 }

@@ -20,6 +20,9 @@ pub trait CartRepo {
 /// Stages cart writes in a `hypha_core::HasBatch` batch; the adapter's batch type
 /// implements it.
 pub trait StageCarts {
+    /// Stages what `CartRepo::insert` would write; `cart` is at version 1 once the batch
+    /// commits. Enforces `CART_ID` on commit.
+    fn insert_cart(&mut self, cart: &mut Cart);
     /// Stages what `CartRepo::update` would write, and moves `cart` to the version it has
     /// once the batch commits. If the commit fails, `cart` is stale: load it again.
     fn update_cart(&mut self, cart: &mut Cart);
