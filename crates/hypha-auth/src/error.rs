@@ -39,8 +39,6 @@ pub enum RestoreError {
     RecoveryCodesWithoutMfa,
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
-    #[error("{0}")]
-    Invalid(&'static str),
 }
 
 /// Broken rules of an API key.

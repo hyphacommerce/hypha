@@ -165,15 +165,14 @@ impl ApiKey {
     }
 
     /// Rebuilds a key from storage, re-checking the name and the scope rules.
+    ///
+    /// A publishable key's scopes come from its kind, not from storage: they are
+    /// whatever `Scope::STOREFRONT` is in this version, so changing that list changes
+    /// every publishable key at once instead of making the stored ones unreadable.
     pub fn restore(s: ApiKeySnapshot) -> Result<ApiKey, RestoreError> {
         let scopes = match s.kind {
             ApiKeyKind::Secret => Some(s.scopes),
-            ApiKeyKind::Publishable if normalize(&s.scopes) == normalize(&Scope::STOREFRONT) => {
-                None
-            }
-            ApiKeyKind::Publishable => {
-                return Err(RestoreError::Invalid("publishable key with other scopes"));
-            }
+            ApiKeyKind::Publishable => None,
         };
         let parts = ApiKeyParts {
             id: s.id,
@@ -299,9 +298,13 @@ mod tests {
     }
 
     #[test]
-    fn restore_refuses_a_publishable_key_with_other_scopes() {
+    fn a_stored_publishable_key_gets_todays_storefront_scopes() {
         let mut s = key(ApiKeyKind::Publishable, None).unwrap().snapshot();
-        s.scopes.push(Scope::OrdersWrite);
-        assert!(ApiKey::restore(s).is_err());
+        // As if stored by a version whose storefront scopes were different.
+        s.scopes = vec![Scope::OrdersWrite];
+        assert_eq!(
+            ApiKey::restore(s).map(|k| k.scopes().to_vec()),
+            Ok(normalize(&Scope::STOREFRONT))
+        );
     }
 }
