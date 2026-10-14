@@ -1,6 +1,6 @@
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_cart::{
-    AddLine, CreateCart, LineStatus, PricedCart, SetLineQuantity, add_line, create_cart, get_cart,
+    AddLine, CreateCart, LineStatus, PricedCart, SetLineQuantity, add_line, create_cart,
     remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
 };
 use hypha_core::{
@@ -191,7 +191,7 @@ pub(super) async fn fetch<S: Storage>(
     PathId(id): PathId<CartId>,
 ) -> Result<Json<CartResponse>, ApiError> {
     let ports = state.ports().await?;
-    let priced = get_cart(&ctx, &ports, id).await?;
+    let priced = hypha_checkout::view_cart(&ctx, &ports, id).await?;
     Ok(Json(CartResponse::from(&priced)))
 }
 

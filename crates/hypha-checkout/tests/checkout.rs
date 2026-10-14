@@ -2,7 +2,7 @@ use hypha_cart::{
     AddLine, CartRepo, CartStatus, CreateCart, add_line, create_cart, set_cart_customer,
     set_cart_email,
 };
-use hypha_checkout::{Checkout, CommandError, checkout};
+use hypha_checkout::{Checkout, CommandError, checkout, view_cart};
 use hypha_core::{
     Actor, AuthError, CartId, Clock, CountryCode, Ctx, Currency, CustomerId, Email,
     IdempotencyRequest, Idempotent, InventoryItemId, LocationId, MarketId, Money, Price, ProductId,
@@ -516,4 +516,35 @@ fn long_option_labels_and_skus_are_copied_whole() {
     let title = ["a", "b", "c"].map(|l| l.repeat(100)).join(" / ");
     assert_eq!(line.variant_title.as_deref(), Some(title.as_str()));
     assert_eq!(line.sku.as_deref(), Some(sku.as_str()));
+}
+
+#[test]
+fn a_checked_out_cart_reads_as_its_order_charged_it() {
+    let world = World::new();
+    let cart = world.cart();
+    world.add(cart, "mug", 3); // all 5 mugs
+    let order = world.checkout(cart).unwrap();
+
+    // Priced now, the cart's mugs are out of stock: its own order reserved them.
+    let now = block_on(hypha_cart::get_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert!(!now.is_fully_available());
+
+    let view = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(view.order, Some(order.id()));
+    assert!(view.is_fully_available());
+    assert_eq!(
+        (view.subtotal, view.tax_total, view.total),
+        (order.subtotal(), order.tax_total(), order.total())
+    );
+    assert_eq!(view.lines.len(), order.lines().len());
+    assert_eq!(view.email.as_ref(), Some(&ana()));
+}
+
+#[test]
+fn an_open_cart_reads_at_current_prices() {
+    let world = World::new();
+    let cart = world.cart();
+    let view = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    let now = block_on(hypha_cart::get_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(view, now);
 }

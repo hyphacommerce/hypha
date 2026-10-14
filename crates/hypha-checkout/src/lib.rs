@@ -6,5 +6,7 @@
 //! guest, and the idempotency key.
 
 pub mod commands;
+mod view;
 
 pub use commands::{CHECKOUT, Checkout, CheckoutPorts, CommandError, checkout};
+pub use view::view_cart;
