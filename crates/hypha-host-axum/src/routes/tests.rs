@@ -48,6 +48,7 @@ async fn app() -> TestApp {
         ids: UuidV7Ids,
         clock: SystemClock,
         env,
+        background: Default::default(),
         store: store.id(),
     });
     let ports = state.public_ports().await.unwrap();

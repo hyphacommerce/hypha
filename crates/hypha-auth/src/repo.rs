@@ -62,6 +62,11 @@ pub trait ApiKeyRepo {
 #[allow(async_fn_in_trait)]
 pub trait PasswordResetRepo {
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<PasswordReset>, RepoError>;
+    /// The identity's most recently created reset, used or not.
+    async fn latest_for_identity(
+        &self,
+        identity: IdentityId,
+    ) -> Result<Option<PasswordReset>, RepoError>;
     /// Enforces `PASSWORD_RESET_ID` and `PASSWORD_RESET_TOKEN`.
     async fn insert(&self, reset: &mut PasswordReset) -> Result<(), RepoError>;
 }

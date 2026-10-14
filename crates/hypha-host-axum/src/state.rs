@@ -161,11 +161,53 @@ impl Notifier<StaffEmail> for HostEnv {
     }
 }
 
+/// Work that runs after its response went out (password reset requests), with a fixed
+/// number of slots. When they are full, new work is dropped and logged: anonymous
+/// requests can't pile up tasks that each wait for a pooled connection, and the client
+/// gets no signal it could probe with. Shutdown waits for the work in flight (`drain`).
+pub struct Background {
+    slots: Arc<tokio::sync::Semaphore>,
+}
+
+impl Background {
+    /// Few on purpose: each slot may hold a pooled connection.
+    pub const SLOTS: u32 = 4;
+
+    /// Spawns `work` if a slot is free; `false` (and nothing runs) if not.
+    pub fn spawn(&self, work: impl Future<Output = ()> + Send + 'static) -> bool {
+        let Ok(slot) = Arc::clone(&self.slots).try_acquire_owned() else {
+            return false;
+        };
+        tokio::spawn(async move {
+            work.await;
+            drop(slot);
+        });
+        true
+    }
+
+    /// Waits up to `limit` for the work in flight to finish; `false` if it didn't. Takes
+    /// every slot, so nothing new starts meanwhile.
+    pub async fn drain(&self, limit: std::time::Duration) -> bool {
+        tokio::time::timeout(limit, self.slots.acquire_many(Self::SLOTS))
+            .await
+            .is_ok_and(|permits| permits.is_ok())
+    }
+}
+
+impl Default for Background {
+    fn default() -> Self {
+        Self {
+            slots: Arc::new(tokio::sync::Semaphore::new(Self::SLOTS as usize)),
+        }
+    }
+}
+
 pub struct AppState<S> {
     pub storage: S,
     pub ids: UuidV7Ids,
     pub clock: SystemClock,
     pub env: HostEnv,
+    pub background: Background,
     /// The one store this deployment serves (design note 0006, model A), set at startup.
     pub store: StoreId,
 }
@@ -209,10 +251,11 @@ pub trait Storage: Send + Sync + 'static {
     /// The stores this deployment knows (in model C, a control plane).
     async fn directory(&self) -> Result<Self::Directory<'_>, ApiError>;
 
-    /// Runs a password reset request on a task of its own, so the response doesn't wait
-    /// for it (design note 0008, section 5). Here rather than in the handler because
-    /// `tokio::spawn` needs a `Send` future, which the compiler can only prove for a
-    /// concrete storage (the same reason as `routes::router!`).
+    /// Runs a password reset request in a `Background` slot, so the response doesn't
+    /// wait for it (design note 0008, section 5); dropped and logged when every slot is
+    /// busy. Here rather than in the handler because `tokio::spawn` needs a `Send`
+    /// future, which the compiler can only prove for a concrete storage (the same reason
+    /// as `routes::router!`).
     fn spawn_password_reset(state: SharedState<Self>, email: String)
     where
         Self: Sized;
@@ -241,7 +284,11 @@ impl Storage for MemoryStorage {
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {
-        tokio::spawn(crate::routes::password_reset_in_background(state, email));
+        let background = Arc::clone(&state);
+        let work = crate::routes::password_reset_in_background(state, email);
+        if !background.background.spawn(work) {
+            tracing::warn!("password reset request dropped: every background slot is busy");
+        }
     }
 }
 
@@ -318,6 +365,31 @@ impl Storage for PgStorage {
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {
-        tokio::spawn(crate::routes::password_reset_in_background(state, email));
+        let background = Arc::clone(&state);
+        let work = crate::routes::password_reset_in_background(state, email);
+        if !background.background.spawn(work) {
+            tracing::warn!("password reset request dropped: every background slot is busy");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn background_work_beyond_the_slots_is_dropped_and_drain_waits() {
+        let background = Background::default();
+        let (release, wait) = tokio::sync::watch::channel(false);
+        for _ in 0..Background::SLOTS {
+            let mut wait = wait.clone();
+            assert!(background.spawn(async move {
+                let _ = wait.wait_for(|go| *go).await;
+            }));
+        }
+        assert!(!background.spawn(async {}));
+        assert!(!background.drain(std::time::Duration::from_millis(20)).await);
+        release.send(true).unwrap();
+        assert!(background.drain(std::time::Duration::from_secs(5)).await);
     }
 }

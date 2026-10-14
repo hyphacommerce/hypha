@@ -366,6 +366,35 @@ pub async fn password_reset_repo<R: PasswordResetRepo>(make: impl AsyncFn() -> R
     reset_round_trips(&make().await).await;
     scenario("password reset: unique ID and token");
     reset_keys(&make().await).await;
+    scenario("password reset: the latest one per identity");
+    reset_latest(&make().await).await;
+}
+
+async fn reset_latest<R: PasswordResetRepo>(repo: &R) {
+    assert_eq!(repo.latest_for_identity(identity_id(1)).await, Ok(None));
+    let at = |micros, n, token| {
+        PasswordReset::new(
+            PasswordResetId::from_uuid(Uuid::from_u128(n)),
+            identity_id(1),
+            hash(token),
+            Timestamp::from_unix_micros(micros),
+        )
+    };
+    let mut older = at(1_000, 1, 1);
+    let mut newer = at(2_000, 2, 2);
+    let mut other = reset(3, 2, 3);
+    // Inserted newest first, so insertion order can't be what decides.
+    repo.insert(&mut newer).await.unwrap();
+    repo.insert(&mut older).await.unwrap();
+    repo.insert(&mut other).await.unwrap();
+    assert_eq!(
+        repo.latest_for_identity(identity_id(1)).await,
+        Ok(Some(newer))
+    );
+    assert_eq!(
+        repo.latest_for_identity(identity_id(2)).await,
+        Ok(Some(other))
+    );
 }
 
 async fn reset_round_trips<R: PasswordResetRepo>(repo: &R) {

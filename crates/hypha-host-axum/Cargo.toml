@@ -24,7 +24,7 @@ getrandom = "0.4"
 deadpool-postgres = "0.14.2"
 tokio-postgres = "0.7.18"
 axum = { version = "0.8", features = ["macros"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 serde.workspace = true
 serde_json.workspace = true
 uuid = { workspace = true, features = ["v7"] }

@@ -446,7 +446,9 @@ where
 }
 
 /// A reset for the identity of `kind` that logs in with `email`, or `None` if there is
-/// none (the caller answers the same either way). The caller emails the token.
+/// none, or if its latest link is only minutes old and unused
+/// (`PasswordReset::RESEND_AFTER_SECS`). The caller answers the same either way, and
+/// emails the token when there is one.
 pub async fn start_password_reset<S>(
     ports: &S,
     env: &impl AuthEnv,
@@ -466,6 +468,14 @@ where
     else {
         return Ok(None);
     };
+    // Asked again within a few minutes: the link already sent stands (no email bomb).
+    let latest = ports
+        .password_resets()
+        .latest_for_identity(identity.id())
+        .await?;
+    if latest.is_some_and(|r| r.blocks_another(env.now())) {
+        return Ok(None);
+    }
     let token = NewToken::generate(TokenKind::PasswordReset, env);
     let mut reset = PasswordReset::new(
         PasswordResetId::from_uuid(env.new_uuid()),

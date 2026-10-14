@@ -134,6 +134,18 @@ impl PasswordResetRepo for InMemoryPasswordResetRepo {
         Ok(self.resets.find(|r| r.token_hash() == hash))
     }
 
+    async fn latest_for_identity(
+        &self,
+        identity: IdentityId,
+    ) -> Result<Option<PasswordReset>, RepoError> {
+        Ok(self
+            .resets
+            .all()
+            .into_iter()
+            .filter(|r| r.identity() == identity)
+            .max_by_key(|r| (r.created_at(), r.id().as_uuid())))
+    }
+
     async fn insert(&self, reset: &mut PasswordReset) -> Result<(), RepoError> {
         self.resets
             .insert(reset.id(), reset, keys::PASSWORD_RESET_ID, &unique_reset)

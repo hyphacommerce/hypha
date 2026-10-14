@@ -28,6 +28,9 @@ impl Versioned for PasswordReset {
 impl PasswordReset {
     /// How long the emailed link works.
     pub const LIFETIME_SECS: i64 = 60 * 60;
+    /// While the latest link is younger than this and unused, no new one is sent: at
+    /// most one reset email per account every few minutes, however often it's asked.
+    pub const RESEND_AFTER_SECS: i64 = 5 * 60;
 
     pub fn new(
         id: PasswordResetId,
@@ -73,6 +76,11 @@ impl PasswordReset {
     /// Unused and not expired.
     pub fn is_usable(&self, now: Timestamp) -> bool {
         self.used_at.is_none() && now < self.expires_at
+    }
+
+    /// Whether a new reset for the same identity should wait (`RESEND_AFTER_SECS`).
+    pub fn blocks_another(&self, now: Timestamp) -> bool {
+        self.used_at.is_none() && now < self.created_at.plus_secs(Self::RESEND_AFTER_SECS)
     }
 
     /// Uses the token up. Callers check `is_usable` first.

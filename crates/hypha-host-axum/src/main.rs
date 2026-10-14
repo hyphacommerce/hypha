@@ -148,6 +148,7 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         ids,
         clock: SystemClock,
         env,
+        background: Default::default(),
         store: store.id(),
     });
     if let Err(e) = ensure_owner(&state).await {
@@ -155,7 +156,9 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         std::process::exit(1);
     }
     tracing::warn!("emails (invites, password resets) are logged, not sent: development only");
-    let app = router.layer(TraceLayer::new_for_http()).with_state(state);
+    let app = router
+        .layer(TraceLayer::new_for_http())
+        .with_state(Arc::clone(&state));
 
     let addr = bind_address();
     let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -172,6 +175,14 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
     {
         tracing::error!("server error: {e}");
         std::process::exit(1);
+    }
+    // Requests are done; let work they started (password reset emails) finish too.
+    if !state
+        .background
+        .drain(std::time::Duration::from_secs(10))
+        .await
+    {
+        tracing::warn!("stopping with background work unfinished");
     }
     tracing::info!("stopped");
 }

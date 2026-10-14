@@ -623,7 +623,10 @@ fn a_reset_uses_up_every_other_reset_link() {
         .unwrap()
         .2
     };
-    let (first, second) = (start(), start());
+    let first = start();
+    // A second link (sent once the first is a few minutes old).
+    env.advance(hypha_auth::PasswordReset::RESEND_AFTER_SECS);
+    let second = start();
     block_on(reset_password(
         &ports,
         &env,
@@ -667,6 +670,57 @@ fn changing_the_password_uses_up_open_reset_links() {
     assert_eq!(
         block_on(reset_password(&ports, &env, link.expose(), "another pass")).map(|i| i.id()),
         Err(CommandError::InvalidToken)
+    );
+}
+
+#[test]
+fn one_reset_email_per_account_every_few_minutes() {
+    let (ports, env) = world();
+    let start = || {
+        block_on(start_password_reset(
+            &ports,
+            &env,
+            PrincipalKind::Staff,
+            "ana@example.com",
+        ))
+        .unwrap()
+        .map(|(_, reset, _)| reset.id())
+    };
+    let first = start().unwrap();
+    env.advance(hypha_auth::PasswordReset::RESEND_AFTER_SECS - 1);
+    assert_eq!(start(), None);
+    env.advance(1);
+    let second = start().unwrap();
+    assert_ne!(first, second);
+}
+
+#[test]
+fn a_used_link_does_not_hold_back_the_next() {
+    let (ports, env) = world();
+    let (_, _, token) = block_on(start_password_reset(
+        &ports,
+        &env,
+        PrincipalKind::Staff,
+        "ana@example.com",
+    ))
+    .unwrap()
+    .unwrap();
+    block_on(reset_password(
+        &ports,
+        &env,
+        token.expose(),
+        "brand new pass",
+    ))
+    .unwrap();
+    assert!(
+        block_on(start_password_reset(
+            &ports,
+            &env,
+            PrincipalKind::Staff,
+            "ana@example.com"
+        ))
+        .unwrap()
+        .is_some()
     );
 }
 

@@ -99,6 +99,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "staff_auth",
             sql: include_str!("../migrations/0015_staff_auth.sql"),
         },
+        Migration {
+            version: 16,
+            name: "password_reset_lookups",
+            sql: include_str!("../migrations/0016_password_reset_lookups.sql"),
+        },
     ],
 };
 

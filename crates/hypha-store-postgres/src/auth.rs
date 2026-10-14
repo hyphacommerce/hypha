@@ -543,33 +543,62 @@ impl<C: PgConnection> ApiKeyRepo for PgStore<C> {
 
 // ---------- password resets ----------
 
+fn reset_columns() -> String {
+    format!(
+        "id, version, identity_id, token_hash, {}, {}, {}",
+        micros("created_at"),
+        micros("expires_at"),
+        micros("used_at")
+    )
+}
+
+fn reset_from_row(row: &Row) -> Result<PasswordReset, RepoError> {
+    Ok(PasswordReset::restore(PasswordResetSnapshot {
+        id: PasswordResetId::from_uuid(row.get(0)),
+        version: version_from_db(row.get(1))?,
+        identity: IdentityId::from_uuid(row.get(2)),
+        token_hash: token_hash_from_db(row.get(3))?,
+        created_at: Timestamp::from_unix_micros(row.get(4)),
+        expires_at: Timestamp::from_unix_micros(row.get(5)),
+        used_at: opt_ts(row.get(6)),
+    }))
+}
+
 impl<C: PgConnection> PasswordResetRepo for PgStore<C> {
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<PasswordReset>, RepoError> {
         let mut conn = self.conn().await;
-        let row = conn
-            .client()
+        conn.client()
             .query_typed_opt(
                 &format!(
-                    "SELECT id, version, identity_id, token_hash, {}, {}, {}
-                     FROM password_resets WHERE token_hash = $1",
-                    micros("created_at"),
-                    micros("expires_at"),
-                    micros("used_at")
+                    "SELECT {} FROM password_resets WHERE token_hash = $1",
+                    reset_columns()
                 ),
                 &[(&hash.as_bytes().as_slice(), Type::BYTEA)],
             )
             .await
-            .map_err(repo_error)?;
-        let Some(row) = row else { return Ok(None) };
-        Ok(Some(PasswordReset::restore(PasswordResetSnapshot {
-            id: PasswordResetId::from_uuid(row.get(0)),
-            version: version_from_db(row.get(1))?,
-            identity: IdentityId::from_uuid(row.get(2)),
-            token_hash: token_hash_from_db(row.get(3))?,
-            created_at: Timestamp::from_unix_micros(row.get(4)),
-            expires_at: Timestamp::from_unix_micros(row.get(5)),
-            used_at: opt_ts(row.get(6)),
-        })))
+            .map_err(repo_error)?
+            .map(|row| reset_from_row(&row))
+            .transpose()
+    }
+
+    async fn latest_for_identity(
+        &self,
+        identity: IdentityId,
+    ) -> Result<Option<PasswordReset>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.client()
+            .query_typed_opt(
+                &format!(
+                    "SELECT {} FROM password_resets WHERE identity_id = $1
+                     ORDER BY created_at DESC, id DESC LIMIT 1",
+                    reset_columns()
+                ),
+                &[(&identity.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?
+            .map(|row| reset_from_row(&row))
+            .transpose()
     }
 
     async fn insert(&self, reset: &mut PasswordReset) -> Result<(), RepoError> {
