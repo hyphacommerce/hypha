@@ -58,12 +58,17 @@ pub trait InviteRepo {
 pub trait StageUsers {
     /// What `UserRepo::insert` would write; same keys on commit.
     fn insert_user(&mut self, user: &mut User);
+    /// What `UserRepo::update` would write; `StaleVersion` on commit if it moved.
+    fn update_user(&mut self, user: &mut User);
 }
 
 /// Stages role writes in a `hypha_core::HasBatch` batch.
 pub trait StageRoles {
     /// What `RoleRepo::insert` would write; same keys on commit.
     fn insert_role(&mut self, role: &mut Role);
+    /// What `RoleRepo::update` would write; `StaleVersion` on commit if it moved. Also
+    /// how a batch claims a role it reads but doesn't change (`update_user`).
+    fn update_role(&mut self, role: &mut Role);
 }
 
 /// Stages invite writes in a `hypha_core::HasBatch` batch.

@@ -27,7 +27,7 @@ use crate::{
     inventory::update_items,
     orders::insert_order,
     store::{PgConnection, PgStore},
-    users::{insert_role, insert_user, update_invite},
+    users::{insert_role, insert_user, update_invite, update_role, update_user},
 };
 
 /// Writes staged for `PgStore::commit`: snapshots taken when each aggregate was staged,
@@ -41,7 +41,9 @@ pub struct PgBatch {
     inventory_items: Vec<InventoryItemSnapshot>,
     idempotency: Vec<IdempotencyRecord>,
     new_roles: Vec<RoleSnapshot>,
+    roles: Vec<RoleSnapshot>,
     new_users: Vec<UserSnapshot>,
+    users: Vec<UserSnapshot>,
     invites: Vec<InviteSnapshot>,
     new_identities: Vec<IdentitySnapshot>,
     identities: Vec<IdentitySnapshot>,
@@ -60,7 +62,9 @@ impl PgBatch {
             && self.inventory_items.is_empty()
             && self.idempotency.is_empty()
             && self.new_roles.is_empty()
+            && self.roles.is_empty()
             && self.new_users.is_empty()
+            && self.users.is_empty()
             && self.invites.is_empty()
             && self.new_identities.is_empty()
             && self.identities.is_empty()
@@ -76,12 +80,22 @@ impl StageRoles for PgBatch {
         self.new_roles.push(role.snapshot());
         role.set_version(Version::NEW.next());
     }
+
+    fn update_role(&mut self, role: &mut Role) {
+        self.roles.push(role.snapshot());
+        role.set_version(role.version().next());
+    }
 }
 
 impl StageUsers for PgBatch {
     fn insert_user(&mut self, user: &mut User) {
         self.new_users.push(user.snapshot());
         user.set_version(Version::NEW.next());
+    }
+
+    fn update_user(&mut self, user: &mut User) {
+        self.users.push(user.snapshot());
+        user.set_version(user.version().next());
     }
 }
 
@@ -201,8 +215,14 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         for role in &batch.new_roles {
             insert_role(&tx, role).await?;
         }
+        for role in &batch.roles {
+            update_role(&tx, role).await?;
+        }
         for user in &batch.new_users {
             insert_user(&tx, user).await?;
+        }
+        for user in &batch.users {
+            update_user(&tx, user).await?;
         }
         for invite in &batch.invites {
             update_invite(&tx, invite).await?;

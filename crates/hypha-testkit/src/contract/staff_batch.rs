@@ -38,6 +38,8 @@ where
     taken_login_writes_nothing(&make().await).await;
     scenario("staff batch: the owner's role, user and identity commit together");
     bootstrap(&make().await).await;
+    scenario("staff batch: a user and role update commit together; a stale role writes nothing");
+    update_user_and_role(&make().await).await;
     scenario("staff batch: revoking sessions spares `keep`, other identities and old revocations");
     revoke_sessions(&make().await).await;
     scenario("staff batch: a reset updates identity and reset; a stale reset writes nothing");
@@ -148,6 +150,39 @@ where
     assert_eq!(ports.users().any().await, Ok(true));
     let bob = hypha_core::Email::new("bob@example.com").unwrap();
     assert_eq!(ports.users().get_by_email(&bob).await, Ok(None));
+}
+
+async fn update_user_and_role<S>(ports: &S)
+where
+    S: HasBatch + HasUsers + HasRoles,
+    S::Batch: StageUsers + StageRoles,
+{
+    let mut owner = Role::owner(role_id(1));
+    ports.roles().insert(&mut owner).await.unwrap();
+    let mut u = user(1, "ana@example.com", 1);
+    ports.users().insert(&mut u).await.unwrap();
+    let stale_role = owner.clone();
+
+    u.set_status(hypha_users::UserStatus::Disabled);
+    let mut batch = ports.batch();
+    batch.update_user(&mut u);
+    batch.update_role(&mut owner);
+    assert_eq!(
+        (u.version(), owner.version()),
+        (Version::new(2), Version::new(2))
+    );
+    ports.commit(batch).await.unwrap();
+    assert_eq!(ports.users().get(u.id()).await, Ok(Some(u.clone())));
+    assert_eq!(ports.roles().get(owner.id()).await, Ok(Some(owner)));
+
+    // A batch claiming the role at its old version writes nothing, not even the user.
+    let before = u.clone();
+    u.rename("Someone Else").unwrap();
+    let mut batch = ports.batch();
+    batch.update_user(&mut u);
+    batch.update_role(&mut stale_role.clone());
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(ports.users().get(u.id()).await, Ok(Some(before)));
 }
 
 async fn revoke_sessions<S>(ports: &S)

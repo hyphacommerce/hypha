@@ -164,7 +164,7 @@ pub(super) async fn update_user_handler<S: Storage>(
             StatusRequest::Disabled => UserStatus::Disabled,
         }),
     };
-    let user = update_user(&ctx, &ports, id, input).await?;
+    let user = update_user(&ctx, &ports, &state.clock, id, input).await?;
     Ok(Json(UserResponse::new(&user)?))
 }
 

@@ -2,8 +2,8 @@
 //! password reset, composing `hypha-auth` with users and roles.
 
 use hypha_auth::{
-    AuthEnv, HasIdentities, HasPasswordResets, HasSessions, Identity, LoginStep, NewToken,
-    Password, Principal, PrincipalKind, Session, StageIdentities, StagePasswordResets,
+    AuthEnv, HasIdentities, HasPasswordResets, HasSessions, Identity, IdentityRepo, LoginStep,
+    NewToken, Password, Principal, PrincipalKind, Session, StageIdentities, StagePasswordResets,
     StageSessions, TokenHash, TokenKind, hash_new_password, new_active_session, require_grantable,
 };
 use hypha_core::{
@@ -281,18 +281,30 @@ pub struct UpdateUser {
 }
 
 /// Changing someone's role or status needs every scope of their current role (and of
-/// the new one), so nobody demotes or disables someone more powerful. The last active
-/// owner keeps the owner role and stays active.
-pub async fn update_user<S: HasUsers + HasRoles>(
+/// the new one), so nobody demotes or disables someone more powerful.
+///
+/// Disabling a user also revokes all their sessions, in the same batch: otherwise
+/// enabling them again would bring back every token, a stolen one included.
+///
+/// The last active owner keeps the owner role and stays active. Counting the owners and
+/// then writing one user isn't enough on its own: two requests removing two different
+/// owners would both count two. So a change that removes an active owner also writes
+/// the owner role (unchanged, at its next version); two such changes at once then
+/// conflict on it, and the later one fails with `concurrent_modification`.
+pub async fn update_user<S: StaffPorts>(
     ctx: &Ctx,
     ports: &S,
+    clock: &impl Clock,
     id: UserId,
     input: UpdateUser,
 ) -> Result<User, CommandError> {
     ctx.require(Scope::UsersWrite)?;
     let mut user = load_user(ports.users(), id).await?;
-    let current = load_role(ports.roles(), user.role()).await?;
-    let was_active_owner = current.is_owner() && user.is_active();
+    // Loaded before the owners are counted: if another request removes an owner after
+    // this read, the role's version has moved and this batch fails.
+    let mut current = load_role(ports.roles(), user.role()).await?;
+    let was_active = user.is_active();
+    let was_active_owner = current.is_owner() && was_active;
     let changes_role = input.role.is_some_and(|r| r != user.role());
     if changes_role || input.status.is_some_and(|s| s != user.status()) {
         require_grantable(ctx, &current.granted())?;
@@ -308,14 +320,26 @@ pub async fn update_user<S: HasUsers + HasRoles>(
     if let Some(status) = input.status {
         user.set_status(status);
     }
-    let still_active_owner = user.role() == current.id() && user.is_active();
-    if was_active_owner
-        && !still_active_owner
-        && ports.users().count_active_with_role(current.id()).await? <= 1
-    {
+    let removes_owner = was_active_owner && !(user.role() == current.id() && user.is_active());
+    if removes_owner && ports.users().count_active_with_role(current.id()).await? <= 1 {
         return Err(CommandError::LastOwner);
     }
-    ports.users().update(&mut user).await?;
+
+    let mut batch = ports.batch();
+    batch.update_user(&mut user);
+    if removes_owner {
+        batch.update_role(&mut current);
+    }
+    if was_active
+        && !user.is_active()
+        && let Some(identity) = ports
+            .identities()
+            .get_by_principal(Principal::Staff(user.id()))
+            .await?
+    {
+        batch.revoke_sessions(identity.id(), None, clock.now());
+    }
+    ports.commit(batch).await?;
     Ok(user)
 }
 

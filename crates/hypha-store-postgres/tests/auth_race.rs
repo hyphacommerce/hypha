@@ -1,6 +1,6 @@
-//! Concurrent second-factor guesses against a real Postgres, each request on its own
-//! connection: guesses sent at once must each count toward the limits, so the challenge
-//! ends and the identity locks after five, however many arrive together.
+//! Concurrent auth requests against a real Postgres, each on its own connection:
+//! second-factor guesses sent at once must each count toward the limits, and two owners
+//! removing each other at once must leave one.
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 
@@ -10,9 +10,10 @@ use hypha_auth::{
     SessionRepo, TokenHash, check_password, confirm_totp, finish_login, hash_new_password,
     open_session, start_totp, totp,
 };
-use hypha_core::{Email, IdentityId, UserId};
+use hypha_core::{Actor, Ctx, Email, IdentityId, Scope, UserId};
 use hypha_store_postgres::{CORE, PgStore, migrate};
 use hypha_testkit::TestEnv;
+use hypha_users::{NewOwner, UpdateUser, User, UserRepo, UserStatus, bootstrap_owner, update_user};
 use tokio_postgres::{Client, NoTls};
 use uuid::Uuid;
 
@@ -127,4 +128,80 @@ async fn parallel_wrong_codes_all_count() {
     );
     let identity = IdentityRepo::get(&store, id).await.unwrap().unwrap();
     assert!(identity.mfa_locked_until(env.now()).is_some());
+}
+
+#[tokio::test]
+async fn two_owners_disabling_each_other_leave_one_active() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("DATABASE_URL not set: skipping");
+        return;
+    };
+    let schema = "race_last_owner";
+    let mut client = connect(&url, "public").await;
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}; \
+             SET search_path TO {schema};"
+        ))
+        .await
+        .expect("reset schema");
+    migrate(&mut client, &[CORE]).await.expect("migrate");
+    let store = PgStore::new(client);
+    let env = TestEnv::default();
+    let ana = bootstrap_owner(
+        &Ctx::system(),
+        &store,
+        &env,
+        NewOwner {
+            email: "ana@example.com".to_string(),
+            name: "Ana".to_string(),
+            password: PASSWORD.to_string(),
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let mut bob = User::new(
+        UserId::from_uuid(Uuid::from_u128(900)),
+        Email::new("bob@example.com").unwrap(),
+        "Bob",
+        ana.role(),
+        env.now(),
+    )
+    .unwrap();
+    UserRepo::insert(&store, &mut bob).await.unwrap();
+
+    // Many rounds, since one race may happen to run one after the other.
+    for _ in 0..10 {
+        let (a, b) = (
+            PgStore::new(connect(&url, schema).await),
+            PgStore::new(connect(&url, schema).await),
+        );
+        let disable = || UpdateUser {
+            status: Some(UserStatus::Disabled),
+            ..UpdateUser::default()
+        };
+        let ctx = |user: &User| Ctx::new(Actor::User(user.id()), Scope::ALL.to_vec());
+        let (ana_ctx, bob_ctx) = (ctx(&ana), ctx(&bob));
+        let (first, second) = tokio::join!(
+            update_user(&ana_ctx, &a, &env, bob.id(), disable()),
+            update_user(&bob_ctx, &b, &env, ana.id(), disable()),
+        );
+        let active = UserRepo::count_active_with_role(&store, ana.role())
+            .await
+            .unwrap();
+        assert_eq!(active, 1, "{first:?} {second:?}");
+        assert!(first.is_ok() != second.is_ok(), "{first:?} {second:?}");
+
+        // Enable both again for the next round.
+        for id in [ana.id(), bob.id()] {
+            let enable = UpdateUser {
+                status: Some(UserStatus::Active),
+                ..UpdateUser::default()
+            };
+            update_user(&Ctx::system(), &store, &env, id, enable)
+                .await
+                .unwrap();
+        }
+    }
 }

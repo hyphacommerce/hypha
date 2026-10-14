@@ -40,7 +40,9 @@ pub struct InMemoryBatch {
     session_revocations: Vec<(IdentityId, Option<SessionId>, Timestamp)>,
     password_resets: Vec<PasswordReset>,
     new_roles: Vec<Role>,
+    roles: Vec<Role>,
     new_users: Vec<User>,
+    users: Vec<User>,
     invites: Vec<Invite>,
 }
 
@@ -84,12 +86,22 @@ impl StageRoles for InMemoryBatch {
         self.new_roles.push(role.clone());
         role.set_version(Version::NEW.next());
     }
+
+    fn update_role(&mut self, role: &mut Role) {
+        self.roles.push(role.clone());
+        role.set_version(role.version().next());
+    }
 }
 
 impl StageUsers for InMemoryBatch {
     fn insert_user(&mut self, user: &mut User) {
         self.new_users.push(user.clone());
         user.set_version(Version::NEW.next());
+    }
+
+    fn update_user(&mut self, user: &mut User) {
+        self.users.push(user.clone());
+        user.set_version(user.version().next());
     }
 }
 
@@ -233,6 +245,12 @@ impl HasBatch for InMemoryPorts {
                     user_keys::USER_ID,
                     &unique_user,
                 )?;
+            }
+            for mut role in batch.roles {
+                update_row(&mut roles, role.id(), &mut role, &unique_role)?;
+            }
+            for mut user in batch.users {
+                update_row(&mut users, user.id(), &mut user, &unique_user)?;
             }
             for mut invite in batch.invites {
                 update_row(&mut invites, invite.id(), &mut invite, &unique_invite)?;

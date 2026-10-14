@@ -1,5 +1,5 @@
 use hypha_auth::{LoginStep, PasswordError};
-use hypha_core::{Actor, AuthError, Ctx, Email, NotifyError, RoleId, Scope, UserId};
+use hypha_core::{Actor, AuthError, Ctx, Email, NotifyError, RoleId, Scope, UserId, Versioned};
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use hypha_users::{
     AcceptInvite, CommandError, InviteUser, NewOwner, Role, RoleError, RoleRepo, StaffEmail,
@@ -143,11 +143,19 @@ fn a_disabled_user_can_neither_log_in_nor_use_a_session() {
         status: Some(UserStatus::Disabled),
         ..UpdateUser::default()
     };
-    block_on(update_user(&owner_ctx(&owner), &ports, bob.id(), disable)).unwrap();
+    block_on(update_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        bob.id(),
+        disable,
+    ))
+    .unwrap();
 
+    // Disabling revoked the session outright.
     assert_eq!(
         block_on(authenticate_staff(&ports, &env, &token)).map(|s| s.user.id()),
-        Err(CommandError::NotStaff)
+        Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
     );
     assert_eq!(
         block_on(login(&ports, &env, "bob@example.com", "bob password")).map(|_| ()),
@@ -155,6 +163,62 @@ fn a_disabled_user_can_neither_log_in_nor_use_a_session() {
             hypha_auth::CommandError::InvalidCredentials
         ))
     );
+}
+
+#[test]
+fn enabling_a_disabled_user_again_does_not_bring_back_old_sessions() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let (bob, token) = join(&ports, &env, &owner, support.id());
+    let status = |status| UpdateUser {
+        status: Some(status),
+        ..UpdateUser::default()
+    };
+    block_on(update_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        bob.id(),
+        status(UserStatus::Disabled),
+    ))
+    .unwrap();
+    block_on(update_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        bob.id(),
+        status(UserStatus::Active),
+    ))
+    .unwrap();
+    assert_eq!(
+        block_on(authenticate_staff(&ports, &env, &token)).map(|s| s.user.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
+    );
+    // Logging in again works.
+    assert!(block_on(login(&ports, &env, "bob@example.com", "bob password")).is_ok());
+}
+
+#[test]
+fn removing_an_owner_claims_the_owner_role() {
+    let (ports, env, owner) = world();
+    let (bob, _) = join(&ports, &env, &owner, owner.role());
+    let before = block_on(ports.roles.get(owner.role())).unwrap().unwrap();
+    let disable = UpdateUser {
+        status: Some(UserStatus::Disabled),
+        ..UpdateUser::default()
+    };
+    block_on(update_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        bob.id(),
+        disable,
+    ))
+    .unwrap();
+    let after = block_on(ports.roles.get(owner.role())).unwrap().unwrap();
+    // The same role, one version on: a concurrent removal based on the old version fails.
+    assert_eq!(after.granted(), before.granted());
+    assert_eq!(after.version(), before.version().next());
 }
 
 #[test]
@@ -472,7 +536,14 @@ fn the_last_owner_stays_an_active_owner() {
         },
     ] {
         assert_eq!(
-            block_on(update_user(&owner_ctx(&owner), &ports, owner.id(), change)).map(|u| u.id()),
+            block_on(update_user(
+                &owner_ctx(&owner),
+                &ports,
+                &env,
+                owner.id(),
+                change
+            ))
+            .map(|u| u.id()),
             Err(CommandError::LastOwner)
         );
     }
@@ -490,6 +561,7 @@ fn an_owner_can_step_down_once_another_exists() {
     let ana = block_on(update_user(
         &owner_ctx(&owner),
         &ports,
+        &env,
         owner.id(),
         step_down,
     ))
@@ -501,21 +573,28 @@ fn an_owner_can_step_down_once_another_exists() {
         ..UpdateUser::default()
     };
     assert_eq!(
-        block_on(update_user(&owner_ctx(&owner), &ports, bob.id(), disable)).map(|u| u.id()),
+        block_on(update_user(
+            &owner_ctx(&owner),
+            &ports,
+            &env,
+            bob.id(),
+            disable
+        ))
+        .map(|u| u.id()),
         Err(CommandError::LastOwner)
     );
 }
 
 #[test]
 fn nobody_disables_someone_stronger() {
-    let (ports, _, owner) = world();
+    let (ports, env, owner) = world();
     let limited = Ctx::new(Actor::System, vec![Scope::UsersWrite]);
     let disable = UpdateUser {
         status: Some(UserStatus::Disabled),
         ..UpdateUser::default()
     };
     assert_eq!(
-        block_on(update_user(&limited, &ports, owner.id(), disable)).map(|u| u.id()),
+        block_on(update_user(&limited, &ports, &env, owner.id(), disable)).map(|u| u.id()),
         Err(CommandError::Login(hypha_auth::CommandError::CannotGrant(
             Scope::ProductsRead
         )))
@@ -526,7 +605,8 @@ fn nobody_disables_someone_stronger() {
         ..UpdateUser::default()
     };
     assert_eq!(
-        block_on(update_user(&limited, &ports, owner.id(), rename)).map(|u| u.name().to_string()),
+        block_on(update_user(&limited, &ports, &env, owner.id(), rename))
+            .map(|u| u.name().to_string()),
         Ok("Ana B.".to_string())
     );
 }
@@ -580,7 +660,14 @@ fn a_disabled_user_gets_no_reset_email() {
         status: Some(UserStatus::Disabled),
         ..UpdateUser::default()
     };
-    block_on(update_user(&owner_ctx(&owner), &ports, bob.id(), disable)).unwrap();
+    block_on(update_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        bob.id(),
+        disable,
+    ))
+    .unwrap();
     let before = env.sent().len();
     block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
     assert_eq!(env.sent().len(), before);

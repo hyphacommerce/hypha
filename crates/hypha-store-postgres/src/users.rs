@@ -101,31 +101,37 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
     }
 
     async fn update(&self, user: &mut User) -> Result<(), RepoError> {
-        let s = user.snapshot();
         let mut conn = self.conn().await;
-        let row = conn
-            .client()
-            .query_typed_opt(
-                "UPDATE users SET version = version + 1, email = $3, name = $4, role_id = $5,
-                     status = $6
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.email.as_str(), Type::TEXT),
-                    (&s.name, Type::TEXT),
-                    (&s.role.as_uuid(), Type::UUID),
-                    (&s.status.as_str(), Type::TEXT),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = row else {
-            return Err(RepoError::StaleVersion);
-        };
-        user.set_version(version_from_db(row.get(0))?);
+        let version = update_user(conn.client(), &user.snapshot()).await?;
+        user.set_version(version);
         Ok(())
     }
+}
+
+pub(crate) async fn update_user(
+    client: &impl GenericClient,
+    s: &UserSnapshot,
+) -> Result<Version, RepoError> {
+    let row = client
+        .query_typed_opt(
+            "UPDATE users SET version = version + 1, email = $3, name = $4, role_id = $5,
+                 status = $6
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.email.as_str(), Type::TEXT),
+                (&s.name, Type::TEXT),
+                (&s.role.as_uuid(), Type::UUID),
+                (&s.status.as_str(), Type::TEXT),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let Some(row) = row else {
+        return Err(RepoError::StaleVersion);
+    };
+    version_from_db(row.get(0))
 }
 
 pub(crate) async fn insert_user(
@@ -227,30 +233,36 @@ impl<C: PgConnection> RoleRepo for PgStore<C> {
     }
 
     async fn update(&self, role: &mut Role) -> Result<(), RepoError> {
-        let s = role.snapshot();
-        let (is_owner, scopes) = role_scopes_to_db(&s.scopes);
         let mut conn = self.conn().await;
-        let row = conn
-            .client()
-            .query_typed_opt(
-                "UPDATE roles SET version = version + 1, name = $3, is_owner = $4, scopes = $5
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.name, Type::TEXT),
-                    (&is_owner, Type::BOOL),
-                    (&scopes, Type::TEXT_ARRAY),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = row else {
-            return Err(RepoError::StaleVersion);
-        };
-        role.set_version(version_from_db(row.get(0))?);
+        let version = update_role(conn.client(), &role.snapshot()).await?;
+        role.set_version(version);
         Ok(())
     }
+}
+
+pub(crate) async fn update_role(
+    client: &impl GenericClient,
+    s: &RoleSnapshot,
+) -> Result<Version, RepoError> {
+    let (is_owner, scopes) = role_scopes_to_db(&s.scopes);
+    let row = client
+        .query_typed_opt(
+            "UPDATE roles SET version = version + 1, name = $3, is_owner = $4, scopes = $5
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.name, Type::TEXT),
+                (&is_owner, Type::BOOL),
+                (&scopes, Type::TEXT_ARRAY),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let Some(row) = row else {
+        return Err(RepoError::StaleVersion);
+    };
+    version_from_db(row.get(0))
 }
 
 pub(crate) async fn insert_role(
