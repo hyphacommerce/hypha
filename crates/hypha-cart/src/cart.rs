@@ -80,7 +80,9 @@ impl Cart {
     }
 
     /// Every change goes through this first: a checked-out cart is the order's history.
-    fn ensure_open(&self) -> Result<(), CartError> {
+    /// Commands also call it right after loading, so a completed cart is reported as
+    /// such before any other check (an unknown line or variant).
+    pub(crate) fn ensure_open(&self) -> Result<(), CartError> {
         match self.status {
             CartStatus::Open => Ok(()),
             CartStatus::Completed { order } => Err(CartError::Completed { order }),

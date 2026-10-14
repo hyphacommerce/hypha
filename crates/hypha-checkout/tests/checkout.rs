@@ -571,3 +571,50 @@ fn a_linked_customer_who_changed_email_gets_the_order_at_the_new_one() {
     let order = world.checkout(cart).unwrap();
     assert_eq!((order.customer(), order.email()), (id, &new_email));
 }
+
+#[test]
+fn a_completed_cart_is_reported_before_other_checks() {
+    let world = World::new();
+    let cart = world.cart();
+    let order = world.checkout(cart).unwrap();
+    let completed = Err(hypha_cart::CommandError::Cart(
+        hypha_cart::CartError::Completed { order: order.id() },
+    ));
+    let unknown = VariantId::from_uuid(Uuid::from_u128(1999));
+
+    let add = AddLine {
+        cart,
+        variant: unknown,
+        quantity: 1,
+        idempotency: None,
+    };
+    assert_eq!(
+        block_on(add_line(&Ctx::system(), &world.ports, &world.clock, add)).map(|_| ()),
+        completed
+    );
+    let set = hypha_cart::SetLineQuantity {
+        cart,
+        variant: unknown,
+        quantity: 1,
+    };
+    assert_eq!(
+        block_on(hypha_cart::set_line_quantity(
+            &Ctx::system(),
+            &world.ports,
+            set
+        ))
+        .map(|_| ()),
+        completed
+    );
+    let nobody = CustomerId::from_uuid(Uuid::from_u128(1999));
+    assert_eq!(
+        block_on(set_cart_customer(
+            &Ctx::system(),
+            &world.ports,
+            cart,
+            Some(nobody)
+        ))
+        .map(|_| ()),
+        completed
+    );
+}

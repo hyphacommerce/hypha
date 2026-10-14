@@ -240,11 +240,7 @@ pub async fn add_line<S: IdempotentCartPorts, C: Clock>(
     }
 
     let quantity = Quantity::new(input.quantity)?;
-    let mut cart = ports
-        .carts()
-        .get(input.cart)
-        .await?
-        .ok_or(CommandError::CartNotFound(input.cart))?;
+    let mut cart = load_open_cart(ports, input.cart).await?;
     let product = ports
         .products()
         .get_by_variant(input.variant)
@@ -350,7 +346,7 @@ pub async fn set_cart_email<S: HasCarts + PricingPorts>(
     ctx.require(Scope::CartsWrite)?;
 
     let email = email.as_deref().map(Email::new).transpose()?;
-    let mut cart = load_cart(ports, id).await?;
+    let mut cart = load_open_cart(ports, id).await?;
     cart.set_email(email)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
@@ -373,7 +369,7 @@ pub async fn set_cart_customer<S: CartPorts>(
         ctx.require(Scope::CustomersRead)?;
     }
 
-    let mut cart = load_cart(ports, id).await?;
+    let mut cart = load_open_cart(ports, id).await?;
     let buyer = match customer {
         Some(customer) => {
             let found = ports
@@ -411,7 +407,7 @@ pub async fn set_line_quantity<S: HasCarts + PricingPorts>(
     ctx.require(Scope::CartsWrite)?;
 
     let quantity = Quantity::new(input.quantity)?;
-    let mut cart = load_cart(ports, input.cart).await?;
+    let mut cart = load_open_cart(ports, input.cart).await?;
     let raised = quantity > cart.line(input.variant)?.quantity();
     cart.set_quantity(input.variant, quantity)?;
 
@@ -440,7 +436,7 @@ pub async fn remove_cart_line<S: HasCarts + PricingPorts>(
 ) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
 
-    let mut cart = load_cart(ports, cart).await?;
+    let mut cart = load_open_cart(ports, cart).await?;
     cart.remove_line(variant)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
@@ -498,6 +494,14 @@ async fn load_cart<S: HasCarts>(ports: &S, id: CartId) -> Result<Cart, CommandEr
         .get(id)
         .await?
         .ok_or(CommandError::CartNotFound(id))
+}
+
+/// `load_cart` for a command that changes the cart: a checked-out cart is refused here,
+/// before lookups that would report a less useful error.
+async fn load_open_cart<S: HasCarts>(ports: &S, id: CartId) -> Result<Cart, CommandError> {
+    let cart = load_cart(ports, id).await?;
+    cart.ensure_open()?;
+    Ok(cart)
 }
 
 /// The cart at current prices, tax rates and stock. Stale lines are marked unavailable,
