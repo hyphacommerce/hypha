@@ -2,6 +2,7 @@ pub mod contract;
 
 mod carts;
 mod catalogs;
+mod clock;
 mod customers;
 mod ids;
 mod inventory_items;
@@ -17,6 +18,7 @@ mod tax_regions;
 
 pub use carts::InMemoryCartRepo;
 pub use catalogs::InMemoryCatalogRepo;
+pub use clock::FixedClock;
 pub use customers::InMemoryCustomerRepo;
 pub use ids::SequentialIds;
 pub use inventory_items::InMemoryInventoryItemRepo;

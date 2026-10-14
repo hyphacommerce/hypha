@@ -1,11 +1,19 @@
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::Timestamp;
+
 pub trait IdGenerator {
     fn new_uuid(&self) -> Uuid;
 }
 
-/// What a repository can report. Adapters (in-memory, Postgres, D1) must map their
+/// Where commands get "now" from: hosts read the system clock, tests use a fixed one
+/// (`hypha_testkit::FixedClock`), so a command's timestamps are exact in assertions.
+pub trait Clock {
+    fn now(&self) -> Timestamp;
+}
+
+/// What a repository can report. Adapters (in-memory, Postgres) must map their
 /// failures onto these, so commands behave the same on every backend.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum RepoError {
