@@ -30,23 +30,7 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
         let s = customer.snapshot();
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
-        tx.query_typed(
-            "INSERT INTO customers (id, version, email, first_name, last_name, phone,
-                 default_shipping_address_id, default_billing_address_id)
-             VALUES ($1, 1, $2, $3, $4, $5, $6, $7)",
-            &[
-                (&s.id.as_uuid(), Type::UUID),
-                (&s.email.as_str(), Type::TEXT),
-                (&s.first_name, Type::TEXT),
-                (&s.last_name, Type::TEXT),
-                (&s.phone, Type::TEXT),
-                (&s.default_shipping.map(|a| a.as_uuid()), Type::UUID),
-                (&s.default_billing.map(|a| a.as_uuid()), Type::UUID),
-            ],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_addresses(&tx, s.id, &s.addresses).await?;
+        insert_customer(&tx, &s).await?;
         tx.commit().await.map_err(repo_error)?;
         customer.set_version(Version::NEW.next());
         Ok(())
@@ -92,6 +76,30 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
         customer.set_version(new_version);
         Ok(())
     }
+}
+
+/// `CustomerRepo::insert` inside the caller's transaction (also used by `PgBatch`).
+pub(crate) async fn insert_customer(
+    tx: &impl GenericClient,
+    s: &CustomerSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO customers (id, version, email, first_name, last_name, phone,
+             default_shipping_address_id, default_billing_address_id)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7)",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.email.as_str(), Type::TEXT),
+            (&s.first_name, Type::TEXT),
+            (&s.last_name, Type::TEXT),
+            (&s.phone, Type::TEXT),
+            (&s.default_shipping.map(|a| a.as_uuid()), Type::UUID),
+            (&s.default_billing.map(|a| a.as_uuid()), Type::UUID),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_addresses(tx, s.id, &s.addresses).await
 }
 
 /// All addresses in one statement; `WITH ORDINALITY` keeps their order.

@@ -1,7 +1,7 @@
 use hypha_cart::{Cart, CartRepo, repo::keys};
 use hypha_core::{
-    CartId, CountryCode, CustomerId, Email, MarketId, ProductId, Quantity, RepoError, VariantId,
-    Version, Versioned,
+    CartId, CountryCode, CustomerId, Email, MarketId, OrderId, ProductId, Quantity, RepoError,
+    VariantId, Version, Versioned,
 };
 use uuid::Uuid;
 
@@ -52,11 +52,18 @@ async fn round_trips<R: CartRepo>(repo: &R) {
     full.set_customer(Some((
         CustomerId::from_uuid(Uuid::from_u128(7)),
         Email::new("ana@example.hr").unwrap(),
-    )));
+    )))
+    .unwrap();
     full.add_line(pid(1), vid(12), qty(3)).unwrap();
     full.add_line(pid(1), vid(11), qty(1)).unwrap();
     full.add_line(pid(2), vid(21), qty(u32::MAX)).unwrap();
     repo.insert(&mut full).await.unwrap();
+    assert_eq!(repo.get(full.id()).await, Ok(Some(full.clone())));
+
+    // A checked-out cart keeps its order.
+    full.complete(OrderId::from_uuid(Uuid::from_u128(99)))
+        .unwrap();
+    repo.update(&mut full).await.unwrap();
     assert_eq!(repo.get(full.id()).await, Ok(Some(full)));
 
     assert_eq!(
@@ -72,7 +79,7 @@ async fn update_round_trips<R: CartRepo>(repo: &R) {
     repo.insert(&mut c).await.unwrap();
 
     c.set_quantity(vid(11), qty(5)).unwrap();
-    c.remove_line(vid(21));
+    c.remove_line(vid(21)).unwrap();
     c.add_line(pid(3), vid(31), qty(2)).unwrap();
     c.set_email(Some(Email::new("ivo@example.hr").unwrap()))
         .unwrap();

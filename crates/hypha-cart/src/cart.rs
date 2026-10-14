@@ -1,6 +1,6 @@
 use hypha_core::{
-    CartId, CountryCode, CustomerId, Email, MarketId, ProductId, Quantity, VariantId, Version,
-    Versioned,
+    CartId, CountryCode, CustomerId, Email, MarketId, OrderId, ProductId, Quantity, VariantId,
+    Version, Versioned,
 };
 
 use crate::error::{CartError, RestoreError};
@@ -28,6 +28,16 @@ impl CartLine {
     }
 }
 
+/// Whether a cart can still change (design note 0007, O6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CartStatus {
+    Open,
+    /// Checked out as `order`. Nothing about the cart changes after this.
+    Completed {
+        order: OrderId,
+    },
+}
+
 /// A cart ships to one country, which picked its market (and so its currency) when the
 /// cart was created, and picks its tax rates.
 ///
@@ -42,6 +52,7 @@ pub struct Cart {
     lines: Vec<CartLine>,
     email: Option<Email>,
     customer: Option<CustomerId>,
+    status: CartStatus,
 }
 
 impl Versioned for Cart {
@@ -64,12 +75,29 @@ impl Cart {
             lines: Vec::new(),
             email: None,
             customer: None,
+            status: CartStatus::Open,
         }
+    }
+
+    /// Every change goes through this first: a checked-out cart is the order's history.
+    fn ensure_open(&self) -> Result<(), CartError> {
+        match self.status {
+            CartStatus::Open => Ok(()),
+            CartStatus::Completed { order } => Err(CartError::Completed { order }),
+        }
+    }
+
+    /// Marks the cart checked out as `order`; only checkout calls this.
+    pub fn complete(&mut self, order: OrderId) -> Result<(), CartError> {
+        self.ensure_open()?;
+        self.status = CartStatus::Completed { order };
+        Ok(())
     }
 
     /// A linked customer is who the order is for, so their cart keeps an email: clearing
     /// it fails until the customer is unlinked.
     pub fn set_email(&mut self, email: Option<Email>) -> Result<(), CartError> {
+        self.ensure_open()?;
         if email.is_none() && self.customer.is_some() {
             return Err(CartError::EmailRequired);
         }
@@ -79,7 +107,8 @@ impl Cart {
 
     /// Links the cart to a customer and takes their email; `None` unlinks it and keeps
     /// the email.
-    pub fn set_customer(&mut self, customer: Option<(CustomerId, Email)>) {
+    pub fn set_customer(&mut self, customer: Option<(CustomerId, Email)>) -> Result<(), CartError> {
+        self.ensure_open()?;
         match customer {
             Some((id, email)) => {
                 self.customer = Some(id);
@@ -87,6 +116,7 @@ impl Cart {
             }
             None => self.customer = None,
         }
+        Ok(())
     }
 
     /// Adds a line, or increases the quantity if the variant is already in the cart.
@@ -96,6 +126,7 @@ impl Cart {
         variant: VariantId,
         quantity: Quantity,
     ) -> Result<(), CartError> {
+        self.ensure_open()?;
         if let Some(line) = self.lines.iter_mut().find(|l| l.variant == variant) {
             line.quantity = line.quantity.checked_add(quantity)?;
         } else {
@@ -113,6 +144,7 @@ impl Cart {
         variant: VariantId,
         quantity: Quantity,
     ) -> Result<(), CartError> {
+        self.ensure_open()?;
         let line = self
             .lines
             .iter_mut()
@@ -122,11 +154,14 @@ impl Cart {
         Ok(())
     }
 
-    /// Returns `false` if the variant wasn't in the cart.
-    pub fn remove_line(&mut self, variant: VariantId) -> bool {
+    pub fn remove_line(&mut self, variant: VariantId) -> Result<(), CartError> {
+        self.ensure_open()?;
         let before = self.lines.len();
         self.lines.retain(|l| l.variant != variant);
-        self.lines.len() != before
+        if self.lines.len() == before {
+            return Err(CartError::LineNotFound(variant));
+        }
+        Ok(())
     }
 
     pub fn id(&self) -> CartId {
@@ -153,6 +188,10 @@ impl Cart {
         self.customer
     }
 
+    pub fn status(&self) -> CartStatus {
+        self.status
+    }
+
     /// The line holding `variant`.
     pub fn line(&self, variant: VariantId) -> Result<CartLine, CartError> {
         self.lines
@@ -173,6 +212,8 @@ pub struct CartSnapshot {
     pub lines: Vec<CartLineSnapshot>,
     pub email: Option<Email>,
     pub customer: Option<CustomerId>,
+    /// `Some` once checked out (`CartStatus::Completed`).
+    pub order: Option<OrderId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,6 +241,10 @@ impl Cart {
                 .collect(),
             email: self.email.clone(),
             customer: self.customer,
+            order: match self.status {
+                CartStatus::Open => None,
+                CartStatus::Completed { order } => Some(order),
+            },
         }
     }
 
@@ -229,6 +274,10 @@ impl Cart {
             lines,
             email: s.email,
             customer: s.customer,
+            status: match s.order {
+                None => CartStatus::Open,
+                Some(order) => CartStatus::Completed { order },
+            },
         })
     }
 }
@@ -291,9 +340,9 @@ mod tests {
         let customer = CustomerId::from_uuid(Uuid::from_u128(5));
         c.set_email(Some(Email::new("old@example.hr").unwrap()))
             .unwrap();
-        c.set_customer(Some((customer, ana.clone())));
+        c.set_customer(Some((customer, ana.clone()))).unwrap();
         assert_eq!((c.customer(), c.email()), (Some(customer), Some(&ana)));
-        c.set_customer(None);
+        c.set_customer(None).unwrap();
         assert_eq!((c.customer(), c.email()), (None, Some(&ana)));
     }
 
@@ -304,7 +353,8 @@ mod tests {
         c.set_customer(Some((
             CustomerId::from_uuid(Uuid::from_u128(5)),
             ana.clone(),
-        )));
+        )))
+        .unwrap();
         assert_eq!(c.set_email(None), Err(CartError::EmailRequired));
         assert_eq!(c.email(), Some(&ana));
 
@@ -349,12 +399,33 @@ mod tests {
     }
 
     #[test]
-    fn remove_line_reports_whether_it_was_there() {
+    fn remove_line_reports_a_missing_line() {
         let mut c = cart();
         c.add_line(pid(), vid(1), qty(1)).unwrap();
-        assert!(c.remove_line(vid(1)));
-        assert!(!c.remove_line(vid(1)));
+        assert_eq!(c.remove_line(vid(1)), Ok(()));
+        assert_eq!(c.remove_line(vid(1)), Err(CartError::LineNotFound(vid(1))));
         assert!(c.lines().is_empty());
+    }
+
+    fn order() -> OrderId {
+        OrderId::from_uuid(Uuid::from_u128(9))
+    }
+
+    #[test]
+    fn a_completed_cart_refuses_every_change() {
+        let mut c = cart();
+        c.add_line(pid(), vid(1), qty(1)).unwrap();
+        c.complete(order()).unwrap();
+        assert_eq!(c.status(), CartStatus::Completed { order: order() });
+
+        let completed = Err(CartError::Completed { order: order() });
+        assert_eq!(c.add_line(pid(), vid(2), qty(1)), completed);
+        assert_eq!(c.set_quantity(vid(1), qty(2)), completed);
+        assert_eq!(c.remove_line(vid(1)), completed);
+        assert_eq!(c.set_email(None), completed);
+        assert_eq!(c.set_customer(None), completed);
+        assert_eq!(c.complete(order()), completed);
+        assert_eq!(c.lines().len(), 1);
     }
 
     #[test]
@@ -363,6 +434,9 @@ mod tests {
         c.add_line(pid(), vid(1), qty(2)).unwrap();
         c.add_line(pid(), vid(2), qty(1)).unwrap();
         c.set_version(Version::new(5));
+        assert_eq!(Cart::restore(c.snapshot()), Ok(c.clone()));
+
+        c.complete(order()).unwrap();
         assert_eq!(Cart::restore(c.snapshot()), Ok(c));
     }
 

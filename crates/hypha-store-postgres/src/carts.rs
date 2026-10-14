@@ -1,7 +1,7 @@
 use hypha_cart::{Cart, CartLineSnapshot, CartRepo, CartSnapshot};
 use hypha_core::{
-    CartId, CountryCode, CustomerId, Email, MarketId, ProductId, RepoError, VariantId, Version,
-    Versioned,
+    CartId, CountryCode, CustomerId, Email, MarketId, OrderId, ProductId, RepoError, VariantId,
+    Version, Versioned,
 };
 use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
@@ -45,14 +45,15 @@ pub(crate) async fn insert_cart(
     s: &CartSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
-        "INSERT INTO carts (id, version, market_id, country, email, customer_id)
-         VALUES ($1, 1, $2, $3, $4, $5)",
+        "INSERT INTO carts (id, version, market_id, country, email, customer_id, order_id)
+         VALUES ($1, 1, $2, $3, $4, $5, $6)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.market.as_uuid(), Type::UUID),
             (&s.country.as_str(), Type::TEXT),
             (&s.email.as_ref().map(Email::as_str), Type::TEXT),
             (&s.customer.map(|c| c.as_uuid()), Type::UUID),
+            (&s.order.map(|o| o.as_uuid()), Type::UUID),
         ],
     )
     .await
@@ -70,7 +71,7 @@ pub(crate) async fn update_cart(
     let bumped = tx
         .query_typed_opt(
             "UPDATE carts SET version = version + 1, market_id = $3, country = $4, email = $5,
-                     customer_id = $6
+                     customer_id = $6, order_id = $7
                  WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -79,6 +80,7 @@ pub(crate) async fn update_cart(
                 (&s.country.as_str(), Type::TEXT),
                 (&s.email.as_ref().map(Email::as_str), Type::TEXT),
                 (&s.customer.map(|c| c.as_uuid()), Type::UUID),
+                (&s.order.map(|o| o.as_uuid()), Type::UUID),
             ],
         )
         .await
@@ -126,7 +128,8 @@ async fn write_lines(
 async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Cart>, RepoError> {
     let Some(row) = client
         .query_typed_opt(
-            "SELECT version, market_id, country, email, customer_id FROM carts WHERE id = $1",
+            "SELECT version, market_id, country, email, customer_id, order_id
+             FROM carts WHERE id = $1",
             &[(&id.as_uuid(), Type::UUID)],
         )
         .await
@@ -167,6 +170,7 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
             .transpose()
             .map_err(corrupt)?,
         customer: row.get::<_, Option<Uuid>>(4).map(CustomerId::from_uuid),
+        order: row.get::<_, Option<Uuid>>(5).map(OrderId::from_uuid),
     };
     Cart::restore(snapshot)
         .map(Some)

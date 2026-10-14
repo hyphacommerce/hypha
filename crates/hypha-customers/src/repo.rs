@@ -16,6 +16,15 @@ pub trait CustomerRepo {
     async fn update(&self, customer: &mut Customer) -> Result<(), RepoError>;
 }
 
+/// Stages customer writes in a `hypha_core::HasBatch` batch; the adapter's batch type
+/// implements it.
+pub trait StageCustomers {
+    /// Stages what `CustomerRepo::insert` would write (checkout creating a guest's
+    /// customer); `customer` is at version 1 once the batch commits. Enforces
+    /// `CUSTOMER_EMAIL` on commit.
+    fn insert_customer(&mut self, customer: &mut Customer);
+}
+
 /// Whatever holds the `CustomerRepo`: a host's per-request ports, a test world. Commands
 /// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
 /// the union of all of them.

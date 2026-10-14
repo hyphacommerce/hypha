@@ -385,7 +385,7 @@ pub async fn set_cart_customer<S: CartPorts>(
         }
         None => None,
     };
-    cart.set_customer(buyer);
+    cart.set_customer(buyer)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
     Ok(priced)
@@ -441,9 +441,7 @@ pub async fn remove_cart_line<S: HasCarts + PricingPorts>(
     ctx.require(Scope::CartsWrite)?;
 
     let mut cart = load_cart(ports, cart).await?;
-    if !cart.remove_line(variant) {
-        return Err(CartError::LineNotFound(variant).into());
-    }
+    cart.remove_line(variant)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
     Ok(priced)
@@ -518,11 +516,22 @@ pub async fn get_cart<S: HasCarts + PricingPorts>(
 /// `cart` at current prices, tax rates and stock, in a fixed number of queries. Commands
 /// that change a cart return this, so callers get the same shape as `get_cart`.
 async fn reprice<S: PricingPorts>(ports: &S, cart: &Cart) -> Result<PricedCart, CommandError> {
+    Ok(price_for_checkout(ports, cart).await?.0)
+}
+
+/// `cart` priced like `get_cart`, with the stock it was checked against. Not a command
+/// (no scope check): checkout calls it, then reserves from that same stock, so pricing
+/// and reservation see one read.
+pub async fn price_for_checkout<S: PricingPorts>(
+    ports: &S,
+    cart: &Cart,
+) -> Result<(PricedCart, StockContext), CommandError> {
     let pricing = load_pricing(ports, cart).await?;
     let tax = load_tax(ports, cart, &pricing.market).await?;
     let stock = load_stock(ports, cart).await?;
     let cart_products = load_products(ports, cart).await?;
-    Ok(price_cart(cart, &cart_products, &pricing, &tax, &stock))
+    let priced = price_cart(cart, &cart_products, &pricing, &tax, &stock);
+    Ok((priced, stock))
 }
 
 /// Everything needed to price the cart's lines, with a fixed number of queries

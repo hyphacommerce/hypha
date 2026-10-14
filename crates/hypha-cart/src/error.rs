@@ -1,4 +1,4 @@
-use hypha_core::{ErrorCode, MoneyError, ProductId, QuantityError, VariantId};
+use hypha_core::{ErrorCode, MoneyError, OrderId, ProductId, QuantityError, VariantId};
 use hypha_pricing::PricingError;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -9,6 +9,9 @@ pub enum CartError {
     LineNotFound(VariantId),
     #[error("a cart linked to a customer needs an email; unlink the customer first")]
     EmailRequired,
+    /// Checked out: the cart became `order` and can't change any more.
+    #[error("the cart was checked out as order {order}")]
+    Completed { order: OrderId },
 }
 
 /// Why a line can't be priced. Returned as an error by `price_line` (and so by `add_line`),
@@ -53,6 +56,7 @@ impl ErrorCode for CartError {
             CartError::Quantity(e) => e.code(),
             CartError::LineNotFound(_) => "line_not_found",
             CartError::EmailRequired => "email_required",
+            CartError::Completed { .. } => "cart_completed",
         }
     }
 }

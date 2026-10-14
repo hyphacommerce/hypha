@@ -4,11 +4,11 @@ pub mod error;
 pub mod pricing;
 pub mod repo;
 
-pub use cart::{Cart, CartLine, CartLineSnapshot, CartSnapshot};
+pub use cart::{Cart, CartLine, CartLineSnapshot, CartSnapshot, CartStatus};
 pub use commands::{
     ADD_LINE, AddLine, CREATE_CART, CartPorts, CommandError, CreateCart, IdempotentCartPorts,
-    PricingPorts, SetLineQuantity, add_line, create_cart, get_cart, remove_cart_line,
-    set_cart_customer, set_cart_email, set_line_quantity,
+    PricingPorts, SetLineQuantity, add_line, create_cart, get_cart, price_for_checkout,
+    remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
 };
 pub use error::{CartError, LineError, RestoreError};
 pub use pricing::{

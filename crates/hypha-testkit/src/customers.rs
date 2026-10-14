@@ -5,11 +5,11 @@ use crate::table::Table;
 
 #[derive(Default)]
 pub struct InMemoryCustomerRepo {
-    customers: Table<CustomerId, Customer>,
+    pub(crate) customers: Table<CustomerId, Customer>,
 }
 
 /// One customer per email.
-fn unique(new: &Customer, other: &Customer) -> Option<&'static str> {
+pub(crate) fn unique(new: &Customer, other: &Customer) -> Option<&'static str> {
     (new.email() == other.email()).then_some(keys::CUSTOMER_EMAIL)
 }
 

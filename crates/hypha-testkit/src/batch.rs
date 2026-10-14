@@ -1,10 +1,12 @@
 use hypha_cart::{Cart, StageCarts, repo::keys as cart_keys};
 use hypha_core::{HasBatch, IdempotencyRecord, RepoError, StageIdempotency, Version, Versioned};
+use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
 use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
 
 use crate::{
     InMemoryPorts,
+    customers::unique as unique_customer,
     idempotency::insert_record,
     inventory_items,
     orders::unique as unique_order,
@@ -17,6 +19,7 @@ use crate::{
 pub struct InMemoryBatch {
     new_orders: Vec<Order>,
     new_carts: Vec<Cart>,
+    new_customers: Vec<Customer>,
     carts: Vec<Cart>,
     inventory_items: Vec<InventoryItem>,
     idempotency: Vec<IdempotencyRecord>,
@@ -48,6 +51,13 @@ impl StageOrders for InMemoryBatch {
     }
 }
 
+impl StageCustomers for InMemoryBatch {
+    fn insert_customer(&mut self, customer: &mut Customer) {
+        self.new_customers.push(customer.clone());
+        customer.set_version(Version::NEW.next());
+    }
+}
+
 impl StageIdempotency for InMemoryBatch {
     fn record_idempotency(&mut self, record: IdempotencyRecord) {
         self.idempotency.push(record);
@@ -70,11 +80,13 @@ impl HasBatch for InMemoryPorts {
         let mut orders = self.orders.orders.lock();
         let mut carts = self.carts.carts.lock();
         let mut items = self.inventory_items.items.lock();
+        let mut customers = self.customers.customers.lock();
         let mut records = self.idempotency.lock();
         let before = (
             orders.clone(),
             carts.clone(),
             items.clone(),
+            customers.clone(),
             records.clone(),
         );
 
@@ -103,13 +115,22 @@ impl HasBatch for InMemoryPorts {
             for mut item in batch.inventory_items {
                 update_row(&mut items, item.id(), &mut item, &inventory_items::unique)?;
             }
+            for mut customer in batch.new_customers {
+                insert_row(
+                    &mut customers,
+                    customer.id(),
+                    &mut customer,
+                    customer_keys::CUSTOMER_ID,
+                    &unique_customer,
+                )?;
+            }
             for record in batch.idempotency {
                 insert_record(&mut records, record)?;
             }
             Ok(())
         })();
         if written.is_err() {
-            (*orders, *carts, *items, *records) = before;
+            (*orders, *carts, *items, *customers, *records) = before;
         }
         written
     }

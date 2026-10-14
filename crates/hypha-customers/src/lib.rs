@@ -14,4 +14,4 @@ pub use commands::{
 };
 pub use customer::{Customer, CustomerSnapshot, SavedAddress};
 pub use error::{CustomerError, RestoreError};
-pub use repo::{CustomerRepo, HasCustomers};
+pub use repo::{CustomerRepo, HasCustomers, StageCustomers};

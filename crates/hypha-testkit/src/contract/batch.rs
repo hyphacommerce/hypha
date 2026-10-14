@@ -1,7 +1,10 @@
 use hypha_cart::{Cart, CartRepo, HasCarts, StageCarts, repo::keys as cart_keys};
 use hypha_core::{
-    CartId, CountryCode, HasBatch, InventoryItemId, MarketId, ProductId, Quantity, RepoError,
-    VariantId, Version, Versioned,
+    CartId, CountryCode, CustomerId, HasBatch, InventoryItemId, MarketId, ProductId, Quantity,
+    RepoError, VariantId, Version, Versioned,
+};
+use hypha_customers::{
+    Customer, CustomerRepo, HasCustomers, StageCustomers, repo::keys as customer_keys,
 };
 use hypha_inventory::{HasInventoryItems, InventoryItem, InventoryItemRepo, StageInventoryItems};
 use hypha_orders::{HasOrders, OrderRepo, StageOrders, repo::keys as order_keys};
@@ -13,8 +16,8 @@ use super::{orders::order, scenario};
 /// aggregates commit together, with the versions checked as single writes check them.
 pub async fn batch<S>(make: impl AsyncFn() -> S)
 where
-    S: HasBatch + HasCarts + HasInventoryItems + HasOrders,
-    S::Batch: StageCarts + StageInventoryItems + StageOrders,
+    S: HasBatch + HasCarts + HasInventoryItems + HasOrders + HasCustomers,
+    S::Batch: StageCarts + StageInventoryItems + StageOrders + StageCustomers,
 {
     scenario("batch: commits every staged write, at the versions staging promised");
     commits_everything(&make().await).await;
@@ -30,6 +33,8 @@ where
     inserts_an_order(&make().await).await;
     scenario("batch: a duplicate order writes nothing");
     duplicate_order_writes_nothing(&make().await).await;
+    scenario("batch: inserts a customer; a taken email writes nothing");
+    customers(&make().await).await;
     scenario("batch: an empty batch commits");
     empty_batch(&make().await).await;
 }
@@ -212,6 +217,35 @@ where
     assert_eq!(
         ports.commit(batch).await,
         Err(RepoError::Duplicate(order_keys::ORDER_ID))
+    );
+    assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c)));
+}
+
+async fn customers<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems + HasCustomers,
+    S::Batch: StageCarts + StageCustomers,
+{
+    let ana = || hypha_core::Email::new("ana@example.hr").unwrap();
+    let mut first = Customer::new(CustomerId::from_uuid(Uuid::from_u128(1)), ana());
+    let mut batch = ports.batch();
+    batch.insert_customer(&mut first);
+    assert_eq!(ports.commit(batch).await, Ok(()));
+    assert_eq!(first.version(), Version::new(1));
+    assert_eq!(ports.customers().get(first.id()).await, Ok(Some(first)));
+
+    let (c, _, _) = stored(ports).await;
+    let (mut changed, mut twin) = (
+        c.clone(),
+        Customer::new(CustomerId::from_uuid(Uuid::from_u128(2)), ana()),
+    );
+    add_mug(&mut changed);
+    let mut batch = ports.batch();
+    batch.update_cart(&mut changed);
+    batch.insert_customer(&mut twin);
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Duplicate(customer_keys::CUSTOMER_EMAIL))
     );
     assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c)));
 }

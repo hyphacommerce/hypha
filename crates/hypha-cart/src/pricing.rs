@@ -1,5 +1,5 @@
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, MoneyError, Price,
+    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, MoneyError, OrderId, Price,
     ProductId, Quantity, VariantId,
 };
 use hypha_inventory::{Availability, StockContext};
@@ -8,7 +8,7 @@ use hypha_products::{Product, ProductStatus};
 use hypha_tax::{TaxContext, TaxLine, TaxableLine, tax_line};
 
 use crate::{
-    cart::{Cart, CartLine},
+    cart::{Cart, CartLine, CartStatus},
     error::LineError,
 };
 
@@ -67,6 +67,8 @@ pub struct PricedCart {
     pub country: CountryCode,
     pub email: Option<Email>,
     pub customer: Option<CustomerId>,
+    /// The order this cart was checked out as; `None` while it is open.
+    pub order: Option<OrderId>,
     pub lines: Vec<PricedLine>,
     /// Whether line prices include tax (the market decides).
     pub taxes_included: bool,
@@ -175,6 +177,10 @@ pub fn price_cart(
         country: cart.country(),
         email: cart.email().cloned(),
         customer: cart.customer(),
+        order: match cart.status() {
+            CartStatus::Open => None,
+            CartStatus::Completed { order } => Some(order),
+        },
         lines,
         taxes_included: tax.prices_include_tax,
         subtotal: totals.subtotal,

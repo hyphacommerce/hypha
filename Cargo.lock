@@ -417,6 +417,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-checkout"
+version = "0.1.0"
+dependencies = [
+ "hypha-cart",
+ "hypha-core",
+ "hypha-customers",
+ "hypha-inventory",
+ "hypha-markets",
+ "hypha-orders",
+ "hypha-products",
+ "hypha-tax",
+ "hypha-testkit",
+ "pollster",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-core"
 version = "0.1.0"
 dependencies = [
