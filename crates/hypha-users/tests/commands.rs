@@ -215,6 +215,37 @@ fn enabling_a_disabled_user_again_does_not_bring_back_old_sessions() {
 }
 
 #[test]
+fn disabling_a_user_uses_up_their_reset_links() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let (bob, _) = join(&ports, &env, &owner, support.id());
+    block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
+    let link = env.last_token().unwrap();
+    let disable = UpdateUser {
+        status: Some(UserStatus::Disabled),
+        ..UpdateUser::default()
+    };
+    block_on(update_user(
+        &owner_ctx(&owner),
+        &ports,
+        &env,
+        bob.id(),
+        disable,
+    ))
+    .unwrap();
+    assert_eq!(
+        block_on(hypha_auth::reset_password(
+            &ports,
+            &env,
+            &link,
+            "thief password"
+        ))
+        .map(|i| i.id()),
+        Err(hypha_auth::CommandError::InvalidToken)
+    );
+}
+
+#[test]
 fn removing_an_owner_claims_the_owner_role() {
     let (ports, env, owner) = world();
     let (bob, _) = join(&ports, &env, &owner, owner.role());
@@ -709,4 +740,98 @@ fn a_disabled_user_gets_no_reset_email() {
     let before = env.sent().len();
     block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
     assert_eq!(env.sent().len(), before);
+}
+
+// ---------- a disable landing in the middle of a login ----------
+
+/// Ports whose user lookups disable the user right after the first one answered: as if
+/// an admin's disable committed between login's check and its session insert.
+struct DisableAfterFirstLookup<'a> {
+    ports: &'a InMemoryPorts,
+    users: DisablingUsers<'a>,
+}
+
+struct DisablingUsers<'a> {
+    inner: &'a hypha_testkit::InMemoryUserRepo,
+    looked_up: std::cell::Cell<bool>,
+}
+
+impl UserRepo for DisablingUsers<'_> {
+    async fn get(&self, id: UserId) -> Result<Option<User>, hypha_core::RepoError> {
+        let found = self.inner.get(id).await?;
+        if !self.looked_up.replace(true)
+            && let Some(mut user) = found.clone()
+        {
+            user.set_status(UserStatus::Disabled);
+            self.inner.update(&mut user).await?;
+        }
+        Ok(found)
+    }
+    async fn get_by_email(&self, email: &Email) -> Result<Option<User>, hypha_core::RepoError> {
+        self.inner.get_by_email(email).await
+    }
+    async fn any(&self) -> Result<bool, hypha_core::RepoError> {
+        self.inner.any().await
+    }
+    async fn count_active_with_role(&self, role: RoleId) -> Result<usize, hypha_core::RepoError> {
+        self.inner.count_active_with_role(role).await
+    }
+    async fn insert(&self, user: &mut User) -> Result<(), hypha_core::RepoError> {
+        self.inner.insert(user).await
+    }
+    async fn update(&self, user: &mut User) -> Result<(), hypha_core::RepoError> {
+        self.inner.update(user).await
+    }
+}
+
+impl<'a> hypha_users::HasUsers for DisableAfterFirstLookup<'a> {
+    type Users = DisablingUsers<'a>;
+    fn users(&self) -> &DisablingUsers<'a> {
+        &self.users
+    }
+}
+
+impl hypha_auth::HasIdentities for DisableAfterFirstLookup<'_> {
+    type Identities = hypha_testkit::InMemoryIdentityRepo;
+    fn identities(&self) -> &Self::Identities {
+        &self.ports.identities
+    }
+}
+
+impl hypha_auth::HasSessions for DisableAfterFirstLookup<'_> {
+    type Sessions = hypha_testkit::InMemorySessionRepo;
+    fn sessions(&self) -> &Self::Sessions {
+        &self.ports.sessions
+    }
+}
+
+#[test]
+fn a_disable_during_login_leaves_no_session_to_revive() {
+    let (ports, env, owner) = world();
+    let racing = DisableAfterFirstLookup {
+        ports: &ports,
+        users: DisablingUsers {
+            inner: &ports.users,
+            looked_up: std::cell::Cell::new(false),
+        },
+    };
+    assert_eq!(
+        block_on(login(&racing, &env, "ana@example.com", OWNER_PASSWORD)).map(|_| ()),
+        Err(CommandError::Login(
+            hypha_auth::CommandError::InvalidCredentials
+        ))
+    );
+    // Enabled again (directly: the disable left no other owner to do it), no session
+    // from that login works.
+    let mut ana = block_on(ports.users.get(owner.id())).unwrap().unwrap();
+    ana.set_status(UserStatus::Active);
+    block_on(ports.users.update(&mut ana)).unwrap();
+    let identity = block_on(hypha_auth::IdentityRepo::get_by_principal(
+        &ports.identities,
+        hypha_auth::Principal::Staff(owner.id()),
+    ))
+    .unwrap()
+    .unwrap();
+    let live = ports.sessions.live_for(identity.id(), env.now());
+    assert_eq!(live, 0, "a session from the login survived");
 }

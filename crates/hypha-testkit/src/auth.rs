@@ -73,6 +73,17 @@ pub(crate) fn unique_session(new: &Session, other: &Session) -> Option<&'static 
     (new.token_hash() == other.token_hash()).then_some(keys::SESSION_TOKEN)
 }
 
+impl InMemorySessionRepo {
+    /// How many of `identity`'s sessions are live at `now` (for assertions).
+    pub fn live_for(&self, identity: IdentityId, now: hypha_core::Timestamp) -> usize {
+        self.sessions
+            .all()
+            .iter()
+            .filter(|s| s.identity() == identity && s.is_live(now))
+            .count()
+    }
+}
+
 impl SessionRepo for InMemorySessionRepo {
     async fn get(&self, id: SessionId) -> Result<Option<Session>, RepoError> {
         Ok(self.sessions.get(&id))

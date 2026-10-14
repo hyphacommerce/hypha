@@ -288,8 +288,9 @@ pub struct UpdateUser {
 /// Changing someone's role or status needs every scope of their current role (and of
 /// the new one), so nobody demotes or disables someone more powerful.
 ///
-/// Disabling a user also revokes all their sessions, in the same batch: otherwise
-/// enabling them again would bring back every token, a stolen one included.
+/// Disabling a user also revokes all their sessions and uses up their reset links, in
+/// the same batch: otherwise enabling them again would bring back every token, a stolen
+/// one included.
 ///
 /// The last active owner keeps the owner role and stays active. Counting the owners and
 /// then writing one user isn't enough on its own: two requests removing two different
@@ -343,6 +344,9 @@ pub async fn update_user<S: StaffPorts>(
             .await?
     {
         batch.revoke_sessions(identity.id(), None, clock.now());
+        // A reset link already sent would let whoever holds it set the password, and
+        // take the account back when it's enabled again.
+        batch.use_up_password_resets(identity.id(), clock.now());
     }
     ports.commit(batch).await?;
     Ok(user)
@@ -491,6 +495,12 @@ pub async fn accept_invite<S: StaffPorts>(
 
 /// The first login step for staff: email and password. A disabled user gets the same
 /// answer as a wrong password.
+///
+/// The user is checked again after the session is stored. A disable committing between
+/// the first check and the insert would otherwise miss the new session (its revocation
+/// ran before the session existed), and enabling the user later would bring it to
+/// life. Checking after the insert closes that gap: a disable that commits later
+/// revokes the session itself.
 pub async fn login<S: HasUsers + HasIdentities + HasSessions>(
     ports: &S,
     env: &impl AuthEnv,
@@ -506,15 +516,28 @@ pub async fn login<S: HasUsers + HasIdentities + HasSessions>(
     )
     .await?;
     let Principal::Staff(user) = identity.principal();
-    let active = ports
-        .users()
-        .get(user)
-        .await?
-        .is_some_and(|u| u.is_active());
-    if !active {
+    let is_active = async || -> Result<bool, CommandError> {
+        Ok(ports
+            .users()
+            .get(user)
+            .await?
+            .is_some_and(|u| u.is_active()))
+    };
+    if !is_active().await? {
         return Err(hypha_auth::CommandError::InvalidCredentials.into());
     }
-    Ok(hypha_auth::open_session(ports.sessions(), env, &identity).await?)
+    let step = hypha_auth::open_session(ports.sessions(), env, &identity).await?;
+    if !is_active().await? {
+        let mut session = match step {
+            LoginStep::Authenticated { session, .. } | LoginStep::MfaRequired { session, .. } => {
+                session
+            }
+        };
+        session.revoke(env.now());
+        hypha_auth::SessionRepo::update(ports.sessions(), &mut session).await?;
+        return Err(hypha_auth::CommandError::InvalidCredentials.into());
+    }
+    Ok(step)
 }
 
 /// A request's staff caller: the session, the user and the `Ctx` with their role's
