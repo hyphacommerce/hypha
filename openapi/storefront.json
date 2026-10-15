@@ -1,1585 +1,51 @@
 {
-  "openapi": "3.1.0",
-  "info": {
-    "title": "Hypha Storefront API",
-    "description": "What a shop front needs: the store, active products, carts and checkout. Publishable keys only.",
-    "license": {
-      "name": "MIT OR Apache-2.0",
-      "identifier": "MIT OR Apache-2.0"
-    },
-    "version": "0.1.0"
-  },
-  "servers": [
-    {
-      "url": "/"
-    }
-  ],
-  "paths": {
-    "/storefront/carts": {
-      "post": {
-        "tags": [
-          "carts"
-        ],
-        "summary": "Takes an `Idempotency-Key` header: a retry returns the cart the first request made.",
-        "operationId": "storefront.carts.create",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateCartRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "headers": {
-              "Idempotent-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`."
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A body that isn't JSON (`malformed_json`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "A body over 2 MB (`body_too_large`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "No `Content-Type: application/json` (`missing_content_type`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Over the rate limit for new carts per client address (`rate_limited`); see `Retry-After`",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "carts:write"
-        ]
-      }
-    },
-    "/storefront/carts/{id}": {
-      "get": {
-        "tags": [
-          "carts"
-        ],
-        "summary": "A cart, priced for its market and country.",
-        "operationId": "storefront.carts.fetch",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CartId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "carts:read"
-        ]
-      }
-    },
-    "/storefront/carts/{id}/checkout": {
-      "post": {
-        "tags": [
-          "orders"
-        ],
-        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns\nthe order the first request placed. The body is `{}` or `{\"expected_total\": …}`.",
-        "operationId": "storefront.orders.checkout",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CartId"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckoutRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "headers": {
-              "Idempotent-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`."
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrderResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "A body over 2 MB (`body_too_large`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "No `Content-Type: application/json` (`missing_content_type`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "checkout"
-        ]
-      }
-    },
-    "/storefront/carts/{id}/email": {
-      "put": {
-        "tags": [
-          "carts"
-        ],
-        "summary": "Sets the buyer's email; checkout finds or creates the customer from it.",
-        "operationId": "storefront.carts.set_email",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CartId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetEmailRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "A body over 2 MB (`body_too_large`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "No `Content-Type: application/json` (`missing_content_type`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "carts:write"
-        ]
-      }
-    },
-    "/storefront/carts/{id}/lines": {
-      "post": {
-        "tags": [
-          "carts"
-        ],
-        "summary": "Takes an `Idempotency-Key` header: a retry returns the cart without adding again.",
-        "operationId": "storefront.carts.add",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CartId"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddLineRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "headers": {
-              "Idempotent-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`."
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "A body over 2 MB (`body_too_large`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "No `Content-Type: application/json` (`missing_content_type`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "carts:write"
-        ]
-      }
-    },
-    "/storefront/carts/{id}/lines/{variant}": {
-      "put": {
-        "tags": [
-          "carts"
-        ],
-        "summary": "Sets a line's quantity.",
-        "operationId": "storefront.carts.set_quantity",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CartId"
-            }
-          },
-          {
-            "name": "variant",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/VariantId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetQuantityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "A body over 2 MB (`body_too_large`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "No `Content-Type: application/json` (`missing_content_type`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "carts:write"
-        ]
-      },
-      "delete": {
-        "tags": [
-          "carts"
-        ],
-        "summary": "Removes a line.",
-        "operationId": "storefront.carts.remove_line",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CartId"
-            }
-          },
-          {
-            "name": "variant",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/VariantId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "carts:write"
-        ]
-      }
-    },
-    "/storefront/carts/{id}/shipping-address": {
-      "put": {
-        "tags": [
-          "carts"
-        ],
-        "summary": "Sets where the cart ships.",
-        "operationId": "storefront.carts.set_address",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CartId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetShippingAddressRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "A body over 2 MB (`body_too_large`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "No `Content-Type: application/json` (`missing_content_type`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "carts:write"
-        ]
-      }
-    },
-    "/storefront/carts/{id}/shipping-options": {
-      "get": {
-        "tags": [
-          "carts"
-        ],
-        "summary": "What each shipping group can pick, priced now: built-in rates computed, rate\nproviders asked. Needs a shipping address and a zone for the cart's country.",
-        "operationId": "storefront.carts.shipping_options",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CartId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ShippingOptionsResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "carts:read"
-        ]
-      }
-    },
-    "/storefront/carts/{id}/shipping/{group_id}": {
-      "put": {
-        "tags": [
-          "carts"
-        ],
-        "summary": "Picks a group's shipping option. A provider's price is kept with the choice for 15\nminutes; checkout asks again after that.",
-        "operationId": "storefront.carts.select",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CartId"
-            }
-          },
-          {
-            "name": "group_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ShippingGroupId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SelectShippingRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "A body over 2 MB (`body_too_large`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "No `Content-Type: application/json` (`missing_content_type`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "carts:write"
-        ]
-      }
-    },
-    "/storefront/products/{id}": {
-      "get": {
-        "tags": [
-          "products"
-        ],
-        "summary": "An active product; drafts and archived products read as missing.",
-        "operationId": "storefront.products.fetch",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ProductId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StorefrontProductResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A malformed ID in the path (`invalid_path`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "products:read"
-        ]
-      }
-    },
-    "/storefront/store": {
-      "get": {
-        "tags": [
-          "stores"
-        ],
-        "summary": "The store's name.",
-        "operationId": "storefront.stores.fetch",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StorefrontStoreResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "A server failure (`internal_error`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "x-hypha-scopes": [
-          "stores:read"
-        ]
-      }
-    }
-  },
   "components": {
     "schemas": {
       "AddLineRequest": {
-        "type": "object",
-        "required": [
-          "variant",
-          "quantity"
-        ],
+        "additionalProperties": false,
         "properties": {
           "quantity": {
-            "type": "integer",
             "format": "int32",
-            "minimum": 0
+            "minimum": 0,
+            "type": "integer"
           },
           "variant": {
             "$ref": "#/components/schemas/VariantId"
           }
         },
-        "additionalProperties": false
+        "required": [
+          "variant",
+          "quantity"
+        ],
+        "type": "object"
       },
       "AssetId": {
-        "type": "string",
         "description": "A AssetId: `asset_` and 32 hex digits.",
         "examples": [
           "asset_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^asset_[0-9a-f]{32}$"
+        "pattern": "^asset_[0-9a-f]{32}$",
+        "type": "string"
       },
       "AssetKindDto": {
-        "type": "string",
-        "description": "`AssetKind` on the wire.",
+        "description": "`AssetKind` on the wire.\n\nKnown values: `image`, `video`, `file`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "image",
           "video",
           "file"
-        ]
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "CartId": {
-        "type": "string",
         "description": "A CartId: `cart_` and 32 hex digits.",
         "examples": [
           "cart_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^cart_[0-9a-f]{32}$"
+        "pattern": "^cart_[0-9a-f]{32}$",
+        "type": "string"
       },
       "CartResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "market",
-          "currency",
-          "country",
-          "taxes_included",
-          "subtotal",
-          "shipping_total",
-          "tax_total",
-          "total",
-          "fully_available",
-          "lines",
-          "shipping_groups",
-          "shipping_ready"
-        ],
         "properties": {
           "country": {
             "$ref": "#/components/schemas/CountryCode"
@@ -1610,17 +76,17 @@
             ]
           },
           "fully_available": {
-            "type": "boolean",
-            "description": "False when any line is unavailable; checkout should refuse such a cart."
+            "description": "False when any line is unavailable; checkout should refuse such a cart.",
+            "type": "boolean"
           },
           "id": {
             "$ref": "#/components/schemas/CartId"
           },
           "lines": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/LineResponse"
-            }
+            },
+            "type": "array"
           },
           "market": {
             "$ref": "#/components/schemas/MarketId",
@@ -1649,15 +115,15 @@
             ]
           },
           "shipping_groups": {
-            "type": "array",
+            "description": "The groups of lines that ship together, each needing a chosen option before\ncheckout; empty when nothing ships.",
             "items": {
               "$ref": "#/components/schemas/ShippingGroupResponse"
             },
-            "description": "The groups of lines that ship together, each needing a chosen option before\ncheckout; empty when nothing ships."
+            "type": "array"
           },
           "shipping_ready": {
-            "type": "boolean",
-            "description": "Whether every group has an option priced now (checkout requires it)."
+            "description": "Whether every group has an option priced now (checkout requires it).",
+            "type": "boolean"
           },
           "shipping_total": {
             "$ref": "#/components/schemas/Money",
@@ -1672,17 +138,33 @@
             "description": "Tax on the available lines and on shipping: part of `subtotal` and\n`shipping_total` if `taxes_included`, else on top."
           },
           "taxes_included": {
-            "type": "boolean",
-            "description": "Whether line prices include tax (set on the market)."
+            "description": "Whether line prices include tax (set on the market).",
+            "type": "boolean"
           },
           "total": {
             "$ref": "#/components/schemas/Money",
             "description": "What the buyer pays."
           }
-        }
+        },
+        "required": [
+          "id",
+          "market",
+          "currency",
+          "country",
+          "taxes_included",
+          "subtotal",
+          "shipping_total",
+          "tax_total",
+          "total",
+          "fully_available",
+          "lines",
+          "shipping_groups",
+          "shipping_ready"
+        ],
+        "type": "object"
       },
       "CheckoutRequest": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
           "expected_total": {
             "oneOf": [
@@ -1696,137 +178,141 @@
             ]
           }
         },
-        "additionalProperties": false
+        "type": "object"
       },
       "CountryCode": {
-        "type": "string",
         "description": "An ISO 3166-1 alpha-2 country code.",
         "examples": [
           "HR"
         ],
-        "pattern": "^[A-Z]{2}$"
+        "pattern": "^[A-Z]{2}$",
+        "type": "string"
       },
       "CreateCartRequest": {
-        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "description": "Where the cart ships to; picks the market and the tax rates.",
+            "type": "string"
+          }
+        },
         "required": [
           "country"
         ],
-        "properties": {
-          "country": {
-            "type": "string",
-            "description": "Where the cart ships to; picks the market and the tax rates."
-          }
-        },
-        "additionalProperties": false
+        "type": "object"
       },
       "Currency": {
-        "type": "string",
+        "description": "Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "EUR",
           "USD",
           "RSD"
-        ]
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "CustomerId": {
-        "type": "string",
         "description": "A CustomerId: `cus_` and 32 hex digits.",
         "examples": [
           "cus_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^cus_[0-9a-f]{32}$"
+        "pattern": "^cus_[0-9a-f]{32}$",
+        "type": "string"
       },
       "DeliveryEstimateDto": {
-        "type": "object",
+        "additionalProperties": false,
         "description": "Delivery in days, from `min_days` to `max_days`.",
+        "properties": {
+          "max_days": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_days": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
         "required": [
           "min_days",
           "max_days"
         ],
-        "properties": {
-          "max_days": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "min_days": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          }
-        },
-        "additionalProperties": false
+        "type": "object"
       },
       "Email": {
-        "type": "string",
-        "format": "email",
         "description": "An email address; stored trimmed and lowercased, so responses show it that way.",
         "examples": [
           "ana@example.com"
         ],
-        "maxLength": 254
+        "format": "email",
+        "maxLength": 254,
+        "type": "string"
       },
       "Error": {
-        "type": "object",
         "description": "Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`\nserializes as this shape.",
-        "required": [
-          "code",
-          "error"
-        ],
         "properties": {
           "code": {
-            "type": "string",
-            "description": "Stable snake_case code: what clients match on."
+            "description": "Stable snake_case code: what clients match on.",
+            "type": "string"
           },
           "details": {
             "description": "Data a client acts on, for the codes that have any (see each operation)."
           },
           "error": {
-            "type": "string",
-            "description": "For humans; may change."
+            "description": "For humans; may change.",
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "code",
+          "error"
+        ],
+        "type": "object"
       },
       "FinancialStatusDto": {
-        "type": "string",
-        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.",
+        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.\n\nKnown values: `pending`, `paid`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "pending",
           "paid"
-        ]
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "FulfillmentStatusDto": {
-        "type": "string",
-        "description": "`FulfillmentStatus` on the wire.",
+        "description": "`FulfillmentStatus` on the wire.\n\nKnown values: `unfulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "unfulfilled"
-        ]
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "GroupOffersResponse": {
-        "type": "object",
-        "required": [
-          "group",
-          "offers",
-          "unavailable"
-        ],
         "properties": {
           "group": {
             "$ref": "#/components/schemas/ShippingGroupId"
           },
           "offers": {
-            "type": "array",
+            "description": "What the buyer can pick, in the store's order, priced now.",
             "items": {
               "$ref": "#/components/schemas/OfferResponse"
             },
-            "description": "What the buyer can pick, in the store's order, priced now."
+            "type": "array"
           },
           "unavailable": {
-            "type": "array",
+            "description": "Options of the zone not offered right now, and why: for diagnostics, never shown\nas choices.",
             "items": {
               "$ref": "#/components/schemas/UnavailableOptionResponse"
             },
-            "description": "Options of the zone not offered right now, and why: for diagnostics, never shown\nas choices."
+            "type": "array"
           }
-        }
+        },
+        "required": [
+          "group",
+          "offers",
+          "unavailable"
+        ],
+        "type": "object"
       },
       "LineResponse": {
         "allOf": [
@@ -1834,27 +320,21 @@
             "$ref": "#/components/schemas/LineState"
           },
           {
-            "type": "object",
-            "required": [
-              "product",
-              "variant",
-              "quantity"
-            ],
             "properties": {
               "product": {
                 "$ref": "#/components/schemas/ProductId"
               },
               "product_title": {
+                "description": "The product's title now; `null` only when the product or variant is gone, so an\nunavailable line still says what it was.",
                 "type": [
                   "string",
                   "null"
-                ],
-                "description": "The product's title now; `null` only when the product or variant is gone, so an\nunavailable line still says what it was."
+                ]
               },
               "quantity": {
-                "type": "integer",
                 "format": "int32",
-                "minimum": 0
+                "minimum": 0,
+                "type": "integer"
               },
               "sku": {
                 "type": [
@@ -1866,31 +346,31 @@
                 "$ref": "#/components/schemas/VariantId"
               },
               "variant_title": {
+                "description": "The variant's option values (\"M / Blue\"); `null` for a product without options.",
                 "type": [
                   "string",
                   "null"
-                ],
-                "description": "The variant's option values (\"M / Blue\"); `null` for a product without options."
+                ]
               }
-            }
+            },
+            "required": [
+              "product",
+              "variant",
+              "quantity"
+            ],
+            "type": "object"
           }
         ]
       },
       "LineState": {
         "oneOf": [
           {
-            "type": "object",
-            "required": [
-              "unit_price",
-              "total",
-              "status"
-            ],
             "properties": {
               "status": {
-                "type": "string",
                 "enum": [
                   "priced"
-                ]
+                ],
+                "type": "string"
               },
               "tax": {
                 "oneOf": [
@@ -1909,80 +389,81 @@
               "unit_price": {
                 "$ref": "#/components/schemas/Money"
               }
-            }
-          },
-          {
-            "type": "object",
+            },
             "required": [
-              "reason_code",
-              "reason",
+              "unit_price",
+              "total",
               "status"
             ],
+            "type": "object"
+          },
+          {
             "properties": {
               "reason": {
                 "type": "string"
               },
               "reason_code": {
-                "type": "string",
-                "description": "Stable `ErrorCode`, e.g. \"product_not_active\"."
+                "description": "Stable `ErrorCode`, e.g. \"product_not_active\".",
+                "type": "string"
               },
               "status": {
-                "type": "string",
                 "enum": [
                   "unavailable"
-                ]
+                ],
+                "type": "string"
               }
-            }
+            },
+            "required": [
+              "reason_code",
+              "reason",
+              "status"
+            ],
+            "type": "object"
           }
         ]
       },
       "MarketId": {
-        "type": "string",
         "description": "A MarketId: `mkt_` and 32 hex digits.",
         "examples": [
           "mkt_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^mkt_[0-9a-f]{32}$"
+        "pattern": "^mkt_[0-9a-f]{32}$",
+        "type": "string"
       },
       "Money": {
-        "type": "object",
         "description": "An amount of money in one currency.",
-        "required": [
-          "amount",
-          "currency"
-        ],
-        "properties": {
-          "amount": {
-            "type": "integer",
-            "format": "int64",
-            "description": "In minor units (1050 is 10.50). At most 2^53 - 1 either way, so every amount is exact in JSON.",
-            "maximum": 9007199254740991,
-            "minimum": -9007199254740991
-          },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "EUR",
-              "USD",
-              "RSD"
-            ]
-          }
-        },
         "examples": [
           {
             "amount": 1050,
             "currency": "EUR"
           }
-        ]
+        ],
+        "properties": {
+          "amount": {
+            "description": "In minor units (1050 is 10.50). At most 2^53 - 1 either way, so every amount is exact in JSON.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "currency": {
+            "description": "Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+            "enum": [
+              "EUR",
+              "USD",
+              "RSD"
+            ],
+            "type": "string",
+            "x-hypha-open-enum": true
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "type": "object"
       },
       "OfferResponse": {
-        "type": "object",
-        "required": [
-          "option",
-          "code",
-          "name",
-          "amount"
-        ],
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money",
@@ -2007,35 +488,32 @@
           "option": {
             "$ref": "#/components/schemas/ShippingOptionId"
           }
-        }
+        },
+        "required": [
+          "option",
+          "code",
+          "name",
+          "amount"
+        ],
+        "type": "object"
       },
       "OrderId": {
-        "type": "string",
         "description": "A OrderId: `ord_` and 32 hex digits.",
         "examples": [
           "ord_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^ord_[0-9a-f]{32}$"
+        "pattern": "^ord_[0-9a-f]{32}$",
+        "type": "string"
       },
       "OrderLineId": {
-        "type": "string",
         "description": "A OrderLineId: `ordl_` and 32 hex digits.",
         "examples": [
           "ordl_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^ordl_[0-9a-f]{32}$"
+        "pattern": "^ordl_[0-9a-f]{32}$",
+        "type": "string"
       },
       "OrderLineResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "product",
-          "variant",
-          "quantity",
-          "product_title",
-          "unit_price",
-          "total"
-        ],
         "properties": {
           "id": {
             "$ref": "#/components/schemas/OrderLineId"
@@ -2047,9 +525,9 @@
             "type": "string"
           },
           "quantity": {
-            "type": "integer",
             "format": "int32",
-            "minimum": 0
+            "minimum": 0,
+            "type": "integer"
           },
           "sku": {
             "type": [
@@ -2078,36 +556,25 @@
             "$ref": "#/components/schemas/VariantId"
           },
           "variant_title": {
+            "description": "The variant's option values (\"M / Blue\"); `null` for a product without options.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "The variant's option values (\"M / Blue\"); `null` for a product without options."
+            ]
           }
-        }
-      },
-      "OrderResponse": {
-        "type": "object",
+        },
         "required": [
           "id",
-          "number",
-          "placed_at",
-          "cart",
-          "market",
-          "currency",
-          "country",
-          "customer",
-          "email",
-          "financial_status",
-          "fulfillment_status",
-          "taxes_included",
-          "subtotal",
-          "shipping_total",
-          "tax_total",
-          "total",
-          "lines",
-          "shipping_lines"
+          "product",
+          "variant",
+          "quantity",
+          "product_title",
+          "unit_price",
+          "total"
         ],
+        "type": "object"
+      },
+      "OrderResponse": {
         "properties": {
           "cart": {
             "$ref": "#/components/schemas/CartId"
@@ -2134,22 +601,22 @@
             "$ref": "#/components/schemas/OrderId"
           },
           "lines": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/OrderLineResponse"
-            }
+            },
+            "type": "array"
           },
           "market": {
             "$ref": "#/components/schemas/MarketId"
           },
           "number": {
-            "type": "integer",
+            "description": "The human number, shown as \"#1001\".",
             "format": "int64",
-            "description": "The human number, shown as \"#1001\"."
+            "type": "integer"
           },
           "placed_at": {
-            "type": "string",
-            "description": "RFC 3339, UTC."
+            "description": "RFC 3339, UTC.",
+            "type": "string"
           },
           "shipping_address": {
             "oneOf": [
@@ -2163,11 +630,11 @@
             ]
           },
           "shipping_lines": {
-            "type": "array",
+            "description": "How each group of lines ships, as charged.",
             "items": {
               "$ref": "#/components/schemas/OrderShippingLineResponse"
             },
-            "description": "How each group of lines ships, as charged."
+            "type": "array"
           },
           "shipping_total": {
             "$ref": "#/components/schemas/Money",
@@ -2181,24 +648,36 @@
             "description": "Tax on lines and shipping: part of `subtotal` and `shipping_total` if\n`taxes_included`, else on top."
           },
           "taxes_included": {
-            "type": "boolean",
-            "description": "Whether line prices include tax (the market decided, at checkout)."
+            "description": "Whether line prices include tax (the market decided, at checkout).",
+            "type": "boolean"
           },
           "total": {
             "$ref": "#/components/schemas/Money"
           }
-        }
+        },
+        "required": [
+          "id",
+          "number",
+          "placed_at",
+          "cart",
+          "market",
+          "currency",
+          "country",
+          "customer",
+          "email",
+          "financial_status",
+          "fulfillment_status",
+          "taxes_included",
+          "subtotal",
+          "shipping_total",
+          "tax_total",
+          "total",
+          "lines",
+          "shipping_lines"
+        ],
+        "type": "object"
       },
       "OrderShippingLineResponse": {
-        "type": "object",
-        "required": [
-          "group",
-          "lines",
-          "option",
-          "code",
-          "name",
-          "amount"
-        ],
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money"
@@ -2221,11 +700,11 @@
             "$ref": "#/components/schemas/ShippingGroupId"
           },
           "lines": {
-            "type": "array",
+            "description": "The order lines this ships.",
             "items": {
               "$ref": "#/components/schemas/OrderLineId"
             },
-            "description": "The order lines this ships."
+            "type": "array"
           },
           "name": {
             "type": "string"
@@ -2234,18 +713,18 @@
             "$ref": "#/components/schemas/ShippingOptionId"
           },
           "provider": {
+            "description": "`app_…` or `spore_…`; `null` for a built-in rate.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "`app_…` or `spore_…`; `null` for a built-in rate."
+            ]
           },
           "reference": {
+            "description": "The provider's quote ID.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "The provider's quote ID."
+            ]
           },
           "service": {
             "type": [
@@ -2264,14 +743,18 @@
               }
             ]
           }
-        }
-      },
-      "OrderTaxResponse": {
-        "type": "object",
+        },
         "required": [
-          "rate_ppm",
+          "group",
+          "lines",
+          "option",
+          "code",
+          "name",
           "amount"
         ],
+        "type": "object"
+      },
+      "OrderTaxResponse": {
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money"
@@ -2291,17 +774,16 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "rate_ppm",
+          "amount"
+        ],
+        "type": "object"
       },
       "PostalAddressRequest": {
-        "type": "object",
+        "additionalProperties": false,
         "description": "Sent: checked by `Address::new` (last name, first line and city required; text is\ntrimmed, at most 255 characters per field).",
-        "required": [
-          "last_name",
-          "line1",
-          "city",
-          "country"
-        ],
         "properties": {
           "city": {
             "type": "string"
@@ -2313,8 +795,8 @@
             ]
           },
           "country": {
-            "type": "string",
-            "description": "ISO 3166-1 alpha-2, e.g. `HR`."
+            "description": "ISO 3166-1 alpha-2, e.g. `HR`.",
+            "type": "string"
           },
           "first_name": {
             "type": [
@@ -2353,16 +835,15 @@
             ]
           }
         },
-        "additionalProperties": false
-      },
-      "PostalAddressResponse": {
-        "type": "object",
         "required": [
           "last_name",
           "line1",
           "city",
           "country"
         ],
+        "type": "object"
+      },
+      "PostalAddressResponse": {
         "properties": {
           "city": {
             "type": "string"
@@ -2412,43 +893,43 @@
               "null"
             ]
           }
-        }
+        },
+        "required": [
+          "last_name",
+          "line1",
+          "city",
+          "country"
+        ],
+        "type": "object"
       },
       "ProductId": {
-        "type": "string",
         "description": "A ProductId: `prod_` and 32 hex digits.",
         "examples": [
           "prod_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^prod_[0-9a-f]{32}$"
+        "pattern": "^prod_[0-9a-f]{32}$",
+        "type": "string"
       },
       "ProductMediaResponse": {
-        "type": "object",
         "description": "One item of a product's media list (design note 0014, section 7): what a page needs\nto render it. The asset's own route has the rest.",
-        "required": [
-          "asset_id",
-          "kind",
-          "mime_type",
-          "url"
-        ],
         "properties": {
           "alt": {
+            "description": "The asset's alt text.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "The asset's alt text."
+            ]
           },
           "asset_id": {
             "$ref": "#/components/schemas/AssetId"
           },
           "height": {
+            "format": "int32",
+            "minimum": 0,
             "type": [
               "integer",
               "null"
-            ],
-            "format": "int32",
-            "minimum": 0
+            ]
           },
           "kind": {
             "$ref": "#/components/schemas/AssetKindDto",
@@ -2458,47 +939,47 @@
             "type": "string"
           },
           "thumbnail_url": {
+            "description": "Images: a version at most 400 pixels wide when the media URLs can resize, else\nthe original. `null` for videos.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "Images: a version at most 400 pixels wide when the media URLs can resize, else\nthe original. `null` for videos."
+            ]
           },
           "url": {
-            "type": "string",
-            "description": "The file. Public, so it doesn't expire when served from the media URL; without\none (local development) it is signed and works for 15 minutes."
+            "description": "The file. Public, so it doesn't expire when served from the media URL; without\none (local development) it is signed and works for 15 minutes.",
+            "type": "string"
           },
           "width": {
+            "format": "int32",
+            "minimum": 0,
             "type": [
               "integer",
               "null"
-            ],
-            "format": "int32",
-            "minimum": 0
+            ]
           }
-        }
+        },
+        "required": [
+          "asset_id",
+          "kind",
+          "mime_type",
+          "url"
+        ],
+        "type": "object"
       },
       "SelectShippingRequest": {
-        "type": "object",
-        "required": [
-          "option"
-        ],
+        "additionalProperties": false,
         "properties": {
           "option": {
             "$ref": "#/components/schemas/ShippingOptionId",
             "description": "One of the group's offers."
           }
         },
-        "additionalProperties": false
+        "required": [
+          "option"
+        ],
+        "type": "object"
       },
       "SelectedShippingResponse": {
-        "type": "object",
-        "required": [
-          "option",
-          "code",
-          "name",
-          "amount"
-        ],
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money"
@@ -2523,11 +1004,11 @@
             "$ref": "#/components/schemas/ShippingOptionId"
           },
           "quote_expires_at": {
+            "description": "RFC 3339: for a provider's rate, when checkout asks the provider again (and may\nanswer `total_changed`). `null` for built-in rates, which are always current.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "RFC 3339: for a provider's rate, when checkout asks the provider again (and may\nanswer `total_changed`). `null` for built-in rates, which are always current."
+            ]
           },
           "tax": {
             "oneOf": [
@@ -2540,38 +1021,45 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "option",
+          "code",
+          "name",
+          "amount"
+        ],
+        "type": "object"
       },
       "SetEmailRequest": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
           "email": {
+            "description": "`null` clears it.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "`null` clears it."
+            ]
           }
         },
-        "additionalProperties": false
+        "type": "object"
       },
       "SetQuantityRequest": {
-        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "quantity": {
+            "description": "At least 1; `DELETE` the line to take it out.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
         "required": [
           "quantity"
         ],
-        "properties": {
-          "quantity": {
-            "type": "integer",
-            "format": "int32",
-            "description": "At least 1; `DELETE` the line to take it out.",
-            "minimum": 0
-          }
-        },
-        "additionalProperties": false
+        "type": "object"
       },
       "SetShippingAddressRequest": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
           "address": {
             "oneOf": [
@@ -2585,40 +1073,35 @@
             ]
           }
         },
-        "additionalProperties": false
+        "type": "object"
       },
       "ShippingGroupId": {
-        "type": "string",
         "description": "A ShippingGroupId: `shgrp_` and 32 hex digits.",
         "examples": [
           "shgrp_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^shgrp_[0-9a-f]{32}$"
+        "pattern": "^shgrp_[0-9a-f]{32}$",
+        "type": "string"
       },
       "ShippingGroupResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "lines"
-        ],
         "properties": {
           "id": {
             "$ref": "#/components/schemas/ShippingGroupId",
             "description": "Stable for the cart: what `PUT …/shipping/{group_id}` names."
           },
           "lines": {
-            "type": "array",
+            "description": "The available lines that ship in this group.",
             "items": {
               "$ref": "#/components/schemas/VariantId"
             },
-            "description": "The available lines that ship in this group."
+            "type": "array"
           },
           "problem": {
+            "description": "Why the chosen option can't be charged now; pick again from the offers.\n`shipping_option_unavailable`, `no_price_in_currency`, `weight_unknown`, or a money\nerror code.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "Why the chosen option can't be charged now; pick again from the offers.\n`shipping_option_unavailable`, `no_price_in_currency`, `weight_unknown`, or a money\nerror code."
+            ]
           },
           "selected": {
             "oneOf": [
@@ -2631,40 +1114,37 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "id",
+          "lines"
+        ],
+        "type": "object"
       },
       "ShippingOptionId": {
-        "type": "string",
         "description": "A ShippingOptionId: `shipopt_` and 32 hex digits.",
         "examples": [
           "shipopt_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^shipopt_[0-9a-f]{32}$"
+        "pattern": "^shipopt_[0-9a-f]{32}$",
+        "type": "string"
       },
       "ShippingOptionsResponse": {
-        "type": "object",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/GroupOffersResponse"
+            },
+            "type": "array"
+          }
+        },
         "required": [
           "groups"
         ],
-        "properties": {
-          "groups": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/GroupOffersResponse"
-            }
-          }
-        }
+        "type": "object"
       },
       "StorefrontProductResponse": {
-        "type": "object",
         "description": "A product as a storefront sees it (design note 0010, S5): active products only, without\nadmin fields. A draft or archived product is `404 product_not_found`, the same as one\nthat doesn't exist, so a storefront can't tell them apart.\n\nNo prices: a product's base price isn't what a shopper pays (their market's price\nlist and currency decide that), so showing it would mislead. Until product listing\nbrings prices per market, the cart is where a storefront gets them.",
-        "required": [
-          "id",
-          "handle",
-          "title",
-          "variants",
-          "media"
-        ],
         "properties": {
           "handle": {
             "type": "string"
@@ -2673,40 +1153,44 @@
             "$ref": "#/components/schemas/ProductId"
           },
           "media": {
-            "type": "array",
+            "description": "In order; the first is the featured item.",
             "items": {
               "$ref": "#/components/schemas/ProductMediaResponse"
             },
-            "description": "In order; the first is the featured item."
+            "type": "array"
           },
           "title": {
             "type": "string"
           },
           "variants": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/StorefrontVariantResponse"
-            }
+            },
+            "type": "array"
           }
-        }
+        },
+        "required": [
+          "id",
+          "handle",
+          "title",
+          "variants",
+          "media"
+        ],
+        "type": "object"
       },
       "StorefrontStoreResponse": {
-        "type": "object",
         "description": "What a storefront sees of the store: its name.",
-        "required": [
-          "name"
-        ],
         "properties": {
           "name": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
       },
       "StorefrontVariantResponse": {
-        "type": "object",
-        "required": [
-          "id"
-        ],
         "properties": {
           "id": {
             "$ref": "#/components/schemas/VariantId"
@@ -2722,22 +1206,21 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
       },
       "TaxClassId": {
-        "type": "string",
         "description": "A TaxClassId: `txc_` and 32 hex digits.",
         "examples": [
           "txc_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^txc_[0-9a-f]{32}$"
+        "pattern": "^txc_[0-9a-f]{32}$",
+        "type": "string"
       },
       "TaxLineResponse": {
-        "type": "object",
-        "required": [
-          "rate_ppm",
-          "amount"
-        ],
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money"
@@ -2757,22 +1240,21 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "rate_ppm",
+          "amount"
+        ],
+        "type": "object"
       },
       "TaxRate": {
-        "type": "integer",
-        "format": "int32",
         "description": "A tax rate in parts per million: 250000 is 25 %.",
+        "format": "int32",
         "maximum": 1000000,
-        "minimum": 0
+        "minimum": 0,
+        "type": "integer"
       },
       "UnavailableOptionResponse": {
-        "type": "object",
-        "required": [
-          "option",
-          "name",
-          "reason"
-        ],
         "properties": {
           "name": {
             "type": "string"
@@ -2781,27 +1263,1552 @@
             "$ref": "#/components/schemas/ShippingOptionId"
           },
           "reason": {
-            "type": "string",
-            "description": "`no_price_in_currency`, `weight_unknown`, `provider_failed`, `service_not_quoted`,\nor `backup_not_needed` (a backup while a regular option is offered)."
+            "description": "`no_price_in_currency`, `weight_unknown`, `provider_failed`, `service_not_quoted`,\nor `backup_not_needed` (a backup while a regular option is offered).",
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "option",
+          "name",
+          "reason"
+        ],
+        "type": "object"
       },
       "VariantId": {
-        "type": "string",
         "description": "A VariantId: `var_` and 32 hex digits.",
         "examples": [
           "var_0190f1a2b3c47d8e9f00112233445566"
         ],
-        "pattern": "^var_[0-9a-f]{32}$"
+        "pattern": "^var_[0-9a-f]{32}$",
+        "type": "string"
       }
     },
     "securitySchemes": {
       "publishable_key": {
-        "type": "apiKey",
+        "description": "A publishable API key (`hypha_pk_…`); `Authorization: Bearer` works too.",
         "in": "header",
         "name": "X-Publishable-Key",
-        "description": "A publishable API key (`hypha_pk_…`); `Authorization: Bearer` works too."
+        "type": "apiKey"
       }
     }
-  }
+  },
+  "info": {
+    "description": "What a shop front needs: the store, active products, carts and checkout. Publishable keys only.",
+    "license": {
+      "identifier": "MIT OR Apache-2.0",
+      "name": "MIT OR Apache-2.0"
+    },
+    "title": "Hypha Storefront API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/storefront/carts": {
+      "post": {
+        "operationId": "storefront.carts.create",
+        "parameters": [
+          {
+            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Idempotent-Replayed": {
+                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over 2 MB (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit for new carts per client address (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Takes an `Idempotency-Key` header: a retry returns the cart the first request made.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}": {
+      "get": {
+        "operationId": "storefront.carts.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "A cart, priced for its market and country.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:read"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/checkout": {
+      "post": {
+        "operationId": "storefront.orders.checkout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          },
+          {
+            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Idempotent-Replayed": {
+                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over 2 MB (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns\nthe order the first request placed. The body is `{}` or `{\"expected_total\": …}`.",
+        "tags": [
+          "orders"
+        ],
+        "x-hypha-scopes": [
+          "checkout"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/email": {
+      "put": {
+        "operationId": "storefront.carts.set_email",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over 2 MB (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Sets the buyer's email; checkout finds or creates the customer from it.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/lines": {
+      "post": {
+        "operationId": "storefront.carts.add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          },
+          {
+            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Idempotent-Replayed": {
+                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over 2 MB (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Takes an `Idempotency-Key` header: a retry returns the cart without adding again.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/lines/{variant}": {
+      "delete": {
+        "operationId": "storefront.carts.remove_line",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/VariantId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Removes a line.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      },
+      "put": {
+        "operationId": "storefront.carts.set_quantity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "variant",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/VariantId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetQuantityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over 2 MB (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Sets a line's quantity.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/shipping-address": {
+      "put": {
+        "operationId": "storefront.carts.set_address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetShippingAddressRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over 2 MB (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Sets where the cart ships.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/shipping-options": {
+      "get": {
+        "operationId": "storefront.carts.shipping_options",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingOptionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "What each shipping group can pick, priced now: built-in rates computed, rate\nproviders asked. Needs a shipping address and a zone for the cart's country.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:read"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/shipping/{group_id}": {
+      "put": {
+        "operationId": "storefront.carts.select",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingGroupId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectShippingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over 2 MB (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Picks a group's shipping option. A provider's price is kept with the choice for 15\nminutes; checkout asks again after that.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/products/{id}": {
+      "get": {
+        "operationId": "storefront.products.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorefrontProductResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "An active product; drafts and archived products read as missing.",
+        "tags": [
+          "products"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      }
+    },
+    "/storefront/store": {
+      "get": {
+        "operationId": "storefront.stores.fetch",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorefrontStoreResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "The store's name.",
+        "tags": [
+          "stores"
+        ],
+        "x-hypha-scopes": [
+          "stores:read"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ]
 }

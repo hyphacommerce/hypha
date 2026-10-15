@@ -1386,9 +1386,11 @@ export interface components {
         AssetId: string;
         /**
          * @description `AssetKind` on the wire.
+         *
+         *     Known values: `image`, `video`, `file`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
-        AssetKindDto: "image" | "video" | "file";
+        AssetKindDto: string;
         /** @description A page of a list, newest first (design note 0012). */
         AssetPage: {
             /** @description Whether there are more after these. */
@@ -1433,9 +1435,11 @@ export interface components {
         };
         /**
          * @description `AssetStatus` on the wire.
+         *
+         *     Known values: `pending`, `ready`, `failed`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
-        AssetStatusDto: "pending" | "ready" | "failed";
+        AssetStatusDto: string;
         /** @description A page of a list, newest first (design note 0012). */
         AssetUsagePage: {
             /** @description Whether there are more after these. */
@@ -1456,8 +1460,11 @@ export interface components {
             products: components["schemas"]["ProductId"][];
             tax_class?: components["schemas"]["TaxClassId"] | null;
         };
-        /** @enum {string} */
-        BasisDto: "flat" | "subtotal" | "weight";
+        /**
+         * @description Known values: `flat`, `subtotal`, `weight`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        BasisDto: string;
         /**
          * @description A CartId: `cart_` and 32 hex digits.
          * @example cart_0190f1a2b3c47d8e9f00112233445566
@@ -1648,8 +1655,11 @@ export interface components {
             /** @description The key itself, shown only in this response. */
             token: string;
         };
-        /** @enum {string} */
-        Currency: "EUR" | "USD" | "RSD";
+        /**
+         * @description Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        Currency: string;
         /**
          * @description A CustomerId: `cus_` and 32 hex digits.
          * @example cus_0190f1a2b3c47d8e9f00112233445566
@@ -1693,9 +1703,11 @@ export interface components {
         /**
          * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
          *     serde and renaming a variant can't silently change the API.
+         *
+         *     Known values: `pending`, `paid`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
-        FinancialStatusDto: "pending" | "paid";
+        FinancialStatusDto: string;
         FinishLoginRequest: {
             /** @description The challenge token from the first step. */
             challenge: string;
@@ -1708,9 +1720,11 @@ export interface components {
         };
         /**
          * @description `FulfillmentStatus` on the wire.
+         *
+         *     Known values: `unfulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
-        FulfillmentStatusDto: "unfulfilled";
+        FulfillmentStatusDto: string;
         HeaderResponse: {
             name: string;
             value: string;
@@ -1856,8 +1870,11 @@ export interface components {
              * @description In minor units (1050 is 10.50). At most 2^53 - 1 either way, so every amount is exact in JSON.
              */
             amount: number;
-            /** @enum {string} */
-            currency: "EUR" | "USD" | "RSD";
+            /**
+             * @description Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+             * @enum {string}
+             */
+            currency: string;
         };
         /**
          * @description A OptionId: `opt_` and 32 hex digits.
@@ -2096,9 +2113,11 @@ export interface components {
         /**
          * @description `ProductStatus` on the wire: snake_case strings. A DTO of its own, so the domain
          *     enum carries no serde and renaming a variant can't silently change the API.
+         *
+         *     Known values: `draft`, `active`, `archived`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
-        ProductStatus: "draft" | "active" | "archived";
+        ProductStatus: string;
         /** @description A page of a list, newest first (design note 0012). */
         ProductSummaryPage: {
             /** @description Whether there are more after these. */
@@ -2165,8 +2184,11 @@ export interface components {
             owner: boolean;
             scopes: components["schemas"]["Scope"][];
         };
-        /** @enum {string} */
-        Scope: "products:read" | "products:write" | "markets:read" | "markets:write" | "pricing:read" | "pricing:write" | "carts:read" | "carts:write" | "taxes:read" | "taxes:write" | "inventory:read" | "inventory:write" | "customers:read" | "customers:write" | "stores:read" | "stores:write" | "orders:read" | "orders:write" | "checkout" | "users:read" | "users:write" | "api_keys:read" | "api_keys:write" | "media:read" | "media:write" | "shipping:read" | "shipping:write";
+        /**
+         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        Scope: string;
         SelectedShippingResponse: {
             amount: components["schemas"]["Money"];
             code: string;
@@ -2506,9 +2528,11 @@ export interface components {
         };
         /**
          * @description `Visibility` on the wire.
+         *
+         *     Known values: `public`, `private`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
-        VisibilityDto: "public" | "private";
+        VisibilityDto: string;
     };
     responses: never;
     parameters: never;

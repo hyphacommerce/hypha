@@ -320,10 +320,17 @@ Before any external consumer reads events or lists:
 - **Cursors** become `base64url(json { v: 1, after: <last id>, filters })`. A cursor
   used with different filters is `400 invalid_cursor`. Clients already treat it as
   opaque (0012), so this changes no code that follows the docs.
-- **Enums that will grow** (`FinancialStatus`, `FulfillmentStatus`, `Currency`, event
-  types) are documented as open: the OpenAPI schemas say "more values may be added", and
-  the SDK generator emits `… | (string & {})` for them, so a new value isn't a compile
-  break for clients.
+- **Enums that will grow** are documented as open. Every named enum schema
+  (`FinancialStatusDto`, `FulfillmentStatusDto`, `Currency`, `Scope`, …) and every inline
+  enum with several values is affected. Single-value inline enums are tagged unions'
+  tags and stay literal; request-only enums (`CLOSED_ENUMS` in `openapi.rs`) stay closed.
+  - The documents mark them `x-hypha-open-enum: true` and list the known values in the
+    description.
+  - The SDK generates them as `string`, so a new value is never a compile break and
+    clients have to handle one they don't know.
+  - We tried `"a" | "b" | (string & {})` first, which keeps editor suggestions.
+    openapi-fetch's `Readable<T>` maps over `string & {}` as if it were an object, so
+    response types came out mangled.
 
 ## 10. Later, and what's reserved for it
 

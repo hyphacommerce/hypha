@@ -215,9 +215,11 @@ export interface components {
         AssetId: string;
         /**
          * @description `AssetKind` on the wire.
+         *
+         *     Known values: `image`, `video`, `file`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
-        AssetKindDto: "image" | "video" | "file";
+        AssetKindDto: string;
         /**
          * @description A CartId: `cart_` and 32 hex digits.
          * @example cart_0190f1a2b3c47d8e9f00112233445566
@@ -270,8 +272,11 @@ export interface components {
             /** @description Where the cart ships to; picks the market and the tax rates. */
             country: string;
         };
-        /** @enum {string} */
-        Currency: "EUR" | "USD" | "RSD";
+        /**
+         * @description Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        Currency: string;
         /**
          * @description A CustomerId: `cus_` and 32 hex digits.
          * @example cus_0190f1a2b3c47d8e9f00112233445566
@@ -305,14 +310,18 @@ export interface components {
         /**
          * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
          *     serde and renaming a variant can't silently change the API.
+         *
+         *     Known values: `pending`, `paid`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
-        FinancialStatusDto: "pending" | "paid";
+        FinancialStatusDto: string;
         /**
          * @description `FulfillmentStatus` on the wire.
+         *
+         *     Known values: `unfulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
-        FulfillmentStatusDto: "unfulfilled";
+        FulfillmentStatusDto: string;
         GroupOffersResponse: {
             group: components["schemas"]["ShippingGroupId"];
             /** @description What the buyer can pick, in the store's order, priced now. */
@@ -368,8 +377,11 @@ export interface components {
              * @description In minor units (1050 is 10.50). At most 2^53 - 1 either way, so every amount is exact in JSON.
              */
             amount: number;
-            /** @enum {string} */
-            currency: "EUR" | "USD" | "RSD";
+            /**
+             * @description Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+             * @enum {string}
+             */
+            currency: string;
         };
         OfferResponse: {
             /** @description Before tax if the market's prices exclude it. */

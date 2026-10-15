@@ -71,6 +71,10 @@ export function toDraft(rate: RateDto): RateDraft {
     };
   }
   const basis = rate.basis;
+  // The admin ships with the API it calls, so a basis it doesn't know is a bug here.
+  if (basis !== "subtotal" && basis !== "weight") {
+    throw new Error(`no editor for the rate basis ${JSON.stringify(basis)}`);
+  }
   return {
     kind: basis,
     tables: rate.tables.map((t) => ({

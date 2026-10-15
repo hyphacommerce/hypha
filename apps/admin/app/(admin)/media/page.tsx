@@ -27,7 +27,12 @@ const FILTERS: { label: string; kind?: Kind }[] = [
   { label: "Files", kind: "file" },
 ];
 
-const KIND_ICONS = { image: PhotoIcon, video: FilmIcon, file: DocumentIcon };
+// Keyed by string: the API may add kinds (design note 0016 §9); those show as files.
+const KIND_ICONS: Record<string, typeof DocumentIcon | undefined> = {
+  image: PhotoIcon,
+  video: FilmIcon,
+  file: DocumentIcon,
+};
 
 function asKind(value: string | string[] | undefined): Kind | undefined {
   return FILTERS.find((f) => f.kind === value)?.kind;
@@ -35,7 +40,7 @@ function asKind(value: string | string[] | undefined): Kind | undefined {
 
 /** A square preview: the thumbnail for images, the kind's icon for the rest. */
 function Preview({ asset }: { asset: Asset }) {
-  const KindIcon = KIND_ICONS[asset.kind];
+  const KindIcon = KIND_ICONS[asset.kind] ?? DocumentIcon;
   return (
     <AspectRatio ratio={1} fit={asset.thumbnail_url ? "cover" : "center"}>
       {asset.thumbnail_url ? (

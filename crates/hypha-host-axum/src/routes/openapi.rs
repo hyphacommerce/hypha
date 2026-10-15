@@ -12,6 +12,7 @@ use std::{collections::BTreeMap, sync::OnceLock};
 
 use axum::{extract::State, http::header::CONTENT_TYPE, response::IntoResponse};
 use hypha_core::PageLimit;
+use serde_json::Value;
 use utoipa::{
     PartialSchema, ToSchema,
     openapi::{
@@ -328,10 +329,77 @@ pub fn document(doc: Doc) -> OpenApi {
 /// The document as the committed file holds it: pretty JSON and a final newline.
 pub fn document_json(doc: Doc) -> String {
     // A document is plain data; serializing it can't fail.
-    let mut json = serde_json::to_string_pretty(&document(doc))
+    let mut value = serde_json::to_value(document(doc))
+        .unwrap_or_else(|e| panic!("cannot serialize the OpenAPI document: {e}"));
+    mark_open_enums(&mut value);
+    let mut json = serde_json::to_string_pretty(&value)
         .unwrap_or_else(|e| panic!("cannot serialize the OpenAPI document: {e}"));
     json.push('\n');
     json
+}
+
+/// Enum schemas that only requests use: the server checks them, and a client never
+/// meets a value it doesn't know, so they stay closed.
+const CLOSED_ENUMS: &[&str] = &["KindRequest", "StatusRequest"];
+
+/// The extension that marks an enum as open (design note 0016, section 9). The SDK
+/// generator turns such an enum into `"a" | "b" | (string & {})`.
+pub(crate) const OPEN_ENUM: &str = "x-hypha-open-enum";
+
+/// Marks every enum a response can carry as open: statuses, currencies, kinds and
+/// scopes gain values as Hypha grows (fulfilment adds states), and a client that
+/// switched exhaustively over today's values must not break on tomorrow's.
+///
+/// Named enum schemas are open. An inline enum is open only with several values: one
+/// value is a tagged union's tag (`"type": "builtin"`), which must stay a literal so
+/// clients can tell the variants apart.
+fn mark_open_enums(document: &mut Value) {
+    fn walk(node: &mut Value, named: bool, closed: bool) {
+        match node {
+            Value::Object(map) => {
+                let open = match map.get("enum") {
+                    Some(Value::Array(values)) => !closed && (named || values.len() > 1),
+                    _ => false,
+                };
+                if let Some(Value::Array(values)) = map.get("enum").filter(|_| open) {
+                    let known: Vec<String> = values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|v| format!("`{v}`"))
+                        .collect();
+                    let note = format!(
+                        "Known values: {}. More may be added: treat an unknown one as you \
+                         would an unexpected state, not as an error.",
+                        known.join(", ")
+                    );
+                    map.insert(OPEN_ENUM.to_string(), Value::Bool(true));
+                    let description = match map.get("description").and_then(Value::as_str) {
+                        Some(text) => format!("{text}\n\n{note}"),
+                        None => note,
+                    };
+                    map.insert("description".to_string(), Value::String(description));
+                }
+                for child in map.values_mut() {
+                    walk(child, false, false);
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|item| walk(item, false, false)),
+            _ => {}
+        }
+    }
+    let Some(schemas) = document
+        .pointer_mut("/components/schemas")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    for (name, schema) in schemas.iter_mut() {
+        walk(schema, true, CLOSED_ENUMS.contains(&name.as_str()));
+    }
+    // Paths too: query parameters with inline enums (a list's `status` filter).
+    if let Some(paths) = document.get_mut("paths") {
+        walk(paths, false, false);
+    }
 }
 
 /// The document's JSON, built once per process: it only changes with the code.
@@ -361,9 +429,16 @@ pub(super) async fn storefront_document<S>(State(_): State<SharedState<S>>) -> i
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
-
     use super::*;
+
+    #[test]
+    fn response_enums_are_open_and_request_only_ones_closed() {
+        let json: Value = serde_json::from_str(&document_json(Doc::Admin)).unwrap();
+        let schema = |name: &str| json["components"]["schemas"][name].clone();
+        assert_eq!(schema("FulfillmentStatusDto")[OPEN_ENUM], Value::Bool(true));
+        assert_eq!(schema("Currency")[OPEN_ENUM], Value::Bool(true));
+        assert_eq!(schema("KindRequest").get(OPEN_ENUM), None);
+    }
 
     #[test]
     fn every_annotation_names_its_route_table_row() {
