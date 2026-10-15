@@ -105,7 +105,8 @@ impl Checksum {
     /// 64 hex characters, either case.
     pub fn from_hex(hex: &str) -> Result<Self, MediaError> {
         let invalid = || MediaError::InvalidChecksum(hex.to_string());
-        if hex.len() != 64 {
+        // Checked first: `from_str_radix` would also take a sign (`+a`).
+        if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(invalid());
         }
         let mut bytes = [0u8; 32];
@@ -367,24 +368,42 @@ fn blob_key(visibility: Visibility, id: AssetId, file_version: u32, filename: &s
 }
 
 /// `filename` made safe for keys and URLs: lowercase `[a-z0-9._-]`, other runs of
-/// characters as one `-` (none next to a `.`), at most 100 characters; `file` when
-/// nothing is left.
+/// characters as one `-` (none next to a `.`), at most 100 characters with the
+/// extension kept; `file` when nothing of the name is left.
 fn key_name(filename: &str) -> String {
-    let mut name = String::new();
-    for c in filename.chars().flat_map(char::to_lowercase) {
+    // The extension is kept apart, so shortening a long name never cuts it off.
+    let (stem, extension) = match filename.rsplit_once('.') {
+        Some((stem, ext)) if !ext.is_empty() && ext.len() <= 10 => (stem, safe_part(ext)),
+        _ => (filename, String::new()),
+    };
+    let room = if extension.is_empty() {
+        100
+    } else {
+        100 - extension.len() - 1
+    };
+    let stem: String = safe_part(stem).chars().take(room).collect();
+    let stem = stem.trim_end_matches(['-', '.']);
+    let stem = if stem.is_empty() { "file" } else { stem };
+    if extension.is_empty() {
+        stem.to_string()
+    } else {
+        format!("{stem}.{extension}")
+    }
+}
+
+/// Lowercase `[a-z0-9._-]`, other runs of characters as one `-`, no `-` next to a `.`,
+/// nothing to trim at either end.
+fn safe_part(part: &str) -> String {
+    let mut out = String::new();
+    for c in part.chars().flat_map(char::to_lowercase) {
         if c.is_ascii_alphanumeric() || c == '.' || c == '_' {
-            name.push(c);
-        } else if !name.ends_with('-') {
-            name.push('-');
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
         }
     }
-    let name = name.replace("-.", ".").replace(".-", ".");
-    let name: String = name.trim_matches(['-', '.']).chars().take(100).collect();
-    if name.is_empty() {
-        "file".to_string()
-    } else {
-        name
-    }
+    let out = out.replace("-.", ".").replace(".-", ".");
+    out.trim_matches(['-', '.']).to_string()
 }
 
 /// Plain-data form of an `Asset` for storage adapters; `restore` re-checks the rules.
@@ -530,6 +549,16 @@ mod tests {
         assert_eq!(key_name("Été à la plage.webp"), "t-la-plage.webp");
         assert_eq!(key_name("--.."), "file");
         assert_eq!(key_name(&"a".repeat(300)).len(), 100);
+        assert_eq!(key_name("-.png"), "file.png");
+    }
+
+    #[test]
+    fn long_names_keep_their_extension() {
+        let long = format!("{}-v2.jpg", "long-product-name-".repeat(10));
+        let name = key_name(&long);
+        assert_eq!(name.len(), 100);
+        assert!(name.ends_with(".jpg"), "{name}");
+        assert!(!name.contains("-."), "{name}");
     }
 
     #[test]
@@ -610,6 +639,11 @@ mod tests {
         assert_eq!(
             Checksum::from_hex("abc"),
             Err(MediaError::InvalidChecksum("abc".to_string()))
+        );
+        let signed = "+a".repeat(32);
+        assert_eq!(
+            Checksum::from_hex(&signed),
+            Err(MediaError::InvalidChecksum(signed.clone()))
         );
         let not_hex = "zz".repeat(32);
         assert_eq!(

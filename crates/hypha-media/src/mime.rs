@@ -118,16 +118,44 @@ impl MimeType {
         } else if at(0, b"%PDF-") {
             Some(MimeType::Pdf)
         } else if at(4, b"ftyp") {
-            // ISO base media files (MP4, MOV, AVIF) name their format in the major brand.
-            match head.get(8..12)? {
-                b"avif" | b"avis" => Some(MimeType::Avif),
-                b"qt  " => Some(MimeType::QuickTime),
-                _ => Some(MimeType::Mp4),
-            }
+            iso_media(head)
         } else {
             None
         }
     }
+}
+
+/// An ISO base media file (MP4, MOV, AVIF, but also HEIC and M4A) by its `ftyp` box: the
+/// major brand and the compatible brands after it say what it is.
+fn iso_media(head: &[u8]) -> Option<MimeType> {
+    let size = u32::from_be_bytes(head.get(0..4)?.try_into().ok()?) as usize;
+    let ftyp = head.get(8..size.min(head.len()))?;
+    let major = ftyp.get(0..4)?;
+    // After the major brand come the minor version (4 bytes) and the compatible brands.
+    let compatible = ftyp.get(8..).unwrap_or_default().chunks_exact(4);
+    let brands: Vec<&[u8]> = std::iter::once(major).chain(compatible).collect();
+    let has = |brand: &[u8]| brands.contains(&brand);
+    if has(b"avif") || has(b"avis") {
+        return Some(MimeType::Avif);
+    }
+    // Audio and still-image formats that also list MP4 brands: not videos.
+    const NOT_VIDEO: [&[u8]; 10] = [
+        b"M4A ", b"M4B ", b"M4P ", b"heic", b"heix", b"hevc", b"heim", b"heis", b"mif1", b"msf1",
+    ];
+    if NOT_VIDEO.contains(&major) {
+        return None;
+    }
+    if major == b"qt  " {
+        return Some(MimeType::QuickTime);
+    }
+    const VIDEO: [&[u8]; 11] = [
+        b"isom", b"iso2", b"iso4", b"iso5", b"iso6", b"mp41", b"mp42", b"avc1", b"M4V ", b"dash",
+        b"mmp4",
+    ];
+    brands
+        .iter()
+        .any(|brand| VIDEO.contains(brand))
+        .then_some(MimeType::Mp4)
 }
 
 impl fmt::Display for MimeType {
@@ -181,9 +209,47 @@ mod tests {
         assert_eq!(MimeType::Pdf.kind(), AssetKind::File);
     }
 
+    /// An `ftyp` box with a major brand and compatible brands.
+    fn ftyp_box(major: &[u8], compatible: &[&[u8]]) -> Vec<u8> {
+        let size = (16 + 4 * compatible.len()) as u32;
+        let mut boxed = size.to_be_bytes().to_vec();
+        boxed.extend_from_slice(b"ftyp");
+        boxed.extend_from_slice(major);
+        boxed.extend_from_slice(&[0, 0, 0, 0]);
+        for brand in compatible {
+            boxed.extend_from_slice(brand);
+        }
+        boxed
+    }
+
+    #[test]
+    fn iso_files_are_told_apart_by_all_their_brands() {
+        // AVIF exported with a generic major brand, AVIF named in the compatible ones.
+        assert_eq!(
+            MimeType::sniff(&ftyp_box(b"mif1", &[b"mif1", b"avif", b"miaf"])),
+            Some(MimeType::Avif)
+        );
+        assert_eq!(
+            MimeType::sniff(&ftyp_box(b"heic", &[b"mif1", b"heic"])),
+            None,
+            "HEIC isn't accepted"
+        );
+        assert_eq!(
+            MimeType::sniff(&ftyp_box(b"M4A ", &[b"M4A ", b"mp42", b"isom"])),
+            None,
+            "audio isn't a video"
+        );
+        assert_eq!(
+            MimeType::sniff(&ftyp_box(b"XAVC", &[b"mp42", b"iso2"])),
+            Some(MimeType::Mp4),
+            "an unknown major brand that is compatible with MP4"
+        );
+        assert_eq!(MimeType::sniff(&ftyp_box(b"crx ", &[])), None);
+    }
+
     #[test]
     fn files_are_told_apart_by_their_first_bytes() {
-        let ftyp = |brand: &[u8]| [&[0, 0, 0, 0x20][..], b"ftyp", brand].concat();
+        let ftyp = |brand: &[u8]| ftyp_box(brand, &[]);
         assert_eq!(
             MimeType::sniff(&[0xFF, 0xD8, 0xFF, 0xE0]),
             Some(MimeType::Jpeg)
