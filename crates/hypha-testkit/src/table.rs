@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use hypha_core::{RepoError, Version, Versioned};
+use hypha_core::{Page, PageRequest, RepoError, Version, Versioned};
 
 /// One in-memory "table" of aggregates with the same write rules a database adapter
 /// has: `insert` fails on a duplicate ID or unique key, `update` fails with
@@ -48,7 +48,7 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         ids.iter().filter_map(|id| rows.get(id).cloned()).collect()
     }
 
-    /// Makes the next `n` lookups by something other than the ID (`find`, `all`) see no
+    /// Makes the next `n` lookups by something other than the ID (`find`, `all`, `page`) see no
     /// rows, as if another request inserted them right after. Tests use it to lose the
     /// race between a command's pre-check and its write, which the unique keys must
     /// still catch.
@@ -75,27 +75,35 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
             .cloned()
     }
 
-    /// A page of the rows `matches` keeps, newest first by `id_of` (UUIDv7 IDs sort by
-    /// creation time), below `after` when given: what a database does with
-    /// `WHERE id < $after ORDER BY id DESC LIMIT n + 1`.
-    pub(crate) fn page(
+    /// A page of the rows `matches` keeps, newest first by key (UUIDv7 IDs sort by
+    /// creation time), below `page.after` when given, each turned into what the list
+    /// returns by `view`: what a database does with `WHERE id < $after ORDER BY id DESC
+    /// LIMIT n + 1`. Only the page's rows are viewed. Hidden like `find` and `all`
+    /// (`hide_next_lookups`).
+    pub(crate) fn page<U>(
         &self,
-        id_of: impl Fn(&T) -> uuid::Uuid,
         matches: impl Fn(&T) -> bool,
-        after: Option<uuid::Uuid>,
-        limit: hypha_core::PageLimit,
-    ) -> hypha_core::Page<T> {
-        let mut rows: Vec<T> = self
-            .rows
-            .lock()
-            .unwrap()
-            .values()
-            .filter(|r| matches(r) && after.is_none_or(|a| id_of(r) < a))
-            .cloned()
+        page: PageRequest<K>,
+        view: impl Fn(&T) -> U,
+    ) -> Page<U>
+    where
+        K: Ord,
+    {
+        if self.hiding() {
+            return Page::from_overfetch(Vec::new(), page.limit);
+        }
+        let rows = self.rows.lock().unwrap();
+        let mut found: Vec<(&K, &T)> = rows
+            .iter()
+            .filter(|(id, row)| page.after.is_none_or(|after| **id < after) && matches(row))
             .collect();
-        rows.sort_by_key(|r| std::cmp::Reverse(id_of(r)));
-        rows.truncate(limit.get() as usize + 1);
-        hypha_core::Page::from_overfetch(rows, limit)
+        found.sort_unstable_by(|(a, _), (b, _)| b.cmp(a));
+        let fetched = found
+            .into_iter()
+            .take(page.limit.get() as usize + 1)
+            .map(|(_, row)| view(row))
+            .collect();
+        Page::from_overfetch(fetched, page.limit)
     }
 
     pub(crate) fn all(&self) -> Vec<T> {
@@ -214,4 +222,81 @@ pub(crate) fn missing(what: &str, id: impl std::fmt::Display) -> RepoError {
 /// For tables with no unique keys besides the ID.
 pub(crate) fn no_unique_keys<T>(_: &T, _: &T) -> Option<&'static str> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use hypha_core::{PageLimit, Version, Versioned};
+
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct Row(u32, Version);
+
+    impl Versioned for Row {
+        fn version(&self) -> Version {
+            self.1
+        }
+        fn set_version(&mut self, version: Version) {
+            self.1 = version;
+        }
+    }
+
+    fn table_of(ids: &[u32]) -> Table<u32, Row> {
+        let table = Table::default();
+        for &id in ids {
+            table
+                .insert(id, &mut Row(id, Version::NEW), "row_id", &no_unique_keys)
+                .unwrap();
+        }
+        table
+    }
+
+    fn request(after: Option<u32>, limit: u32) -> PageRequest<u32> {
+        PageRequest {
+            after,
+            limit: PageLimit::new(limit).unwrap(),
+        }
+    }
+
+    #[test]
+    fn a_page_is_newest_first_below_the_cursor() {
+        let table = table_of(&[1, 4, 2, 5, 3]);
+        let page = table.page(|_| true, request(Some(4), 2), |r| r.0);
+        assert_eq!(
+            page,
+            Page {
+                items: vec![3, 2],
+                has_more: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_page_keeps_only_matching_rows() {
+        let table = table_of(&[1, 2, 3, 4]);
+        let page = table.page(|r| r.0 % 2 == 0, request(None, 10), |r| r.0);
+        assert_eq!(
+            page,
+            Page {
+                items: vec![4, 2],
+                has_more: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_hidden_lookup_sees_an_empty_page() {
+        let table = table_of(&[1, 2]);
+        table.hide_next_lookups(1);
+        assert_eq!(
+            table.page(|_| true, request(None, 10), |r| r.0).items,
+            Vec::<u32>::new()
+        );
+        // Used up: the next page sees the rows again.
+        assert_eq!(
+            table.page(|_| true, request(None, 10), |r| r.0).items,
+            vec![2, 1]
+        );
+    }
 }

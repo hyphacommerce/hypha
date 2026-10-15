@@ -47,10 +47,9 @@ impl ProductRepo for InMemoryProductRepo {
         page: PageRequest<ProductId>,
     ) -> Result<Page<Product>, RepoError> {
         Ok(self.products.page(
-            |p| p.id().as_uuid(),
             |p| status.is_none_or(|s| p.status() == s),
-            page.after.map(|id| id.as_uuid()),
-            page.limit,
+            page,
+            Clone::clone,
         ))
     }
 

@@ -22,7 +22,11 @@ impl crate::ErrorCode for IdError {
 
 macro_rules! define_id {
     ($name:ident, $prefix:literal) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        /// Ordered like the UUID inside: by creation time for UUIDv7 (list pages,
+        /// design note 0012).
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+        )]
         #[serde(try_from = "String", into = "String")]
         pub struct $name(Uuid);
 

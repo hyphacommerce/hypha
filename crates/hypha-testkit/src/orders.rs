@@ -45,12 +45,7 @@ impl OrderRepo for InMemoryOrderRepo {
     }
 
     async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<Order>, RepoError> {
-        Ok(self.orders.page(
-            |o| o.id().as_uuid(),
-            |_| true,
-            page.after.map(|id| id.as_uuid()),
-            page.limit,
-        ))
+        Ok(self.orders.page(|_| true, page, Clone::clone))
     }
 
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {
