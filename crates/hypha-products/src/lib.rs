@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod error;
+pub mod events;
 pub mod handle;
 pub mod option;
 pub mod product;
@@ -13,6 +14,7 @@ pub use commands::{
     set_product_options, set_product_status, update_product, update_product_variant,
 };
 pub use error::{HandleError, ProductError};
+pub use events::{ProductCreated, ProductUpdated, VariantAdded, VariantRemoved, VariantUpdated};
 pub use handle::Handle;
 pub use option::{OptionValue, ProductOption};
 pub use product::{

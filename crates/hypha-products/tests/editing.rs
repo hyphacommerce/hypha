@@ -488,3 +488,59 @@ fn variant_commands_need_products_write() {
         missing_write()
     );
 }
+
+// ---- events (design note 0016) ----
+
+#[test]
+fn each_edit_records_what_changed() {
+    let w = World::new();
+    let p = w.shirt("shirt");
+    let (s, m) = (p.variants()[0].id(), p.variants()[1].id());
+    let patch = UpdateVariant {
+        sku: None,
+        price: Some(eur(1200)),
+        selections: None,
+        weight: None,
+        requires_shipping: None,
+    };
+    block_on(update_product_variant(&w.ctx, &w.repo, p.id(), s, patch)).unwrap();
+    block_on(remove_product_variant(&w.ctx, &w.repo, p.id(), m)).unwrap();
+
+    let events = w.repo.outbox().events();
+    let types: Vec<&str> = events.iter().map(|e| e.event_type.as_str()).collect();
+    assert_eq!(
+        types,
+        [
+            // `shirt`: created, then options set (S selected for the first variant),
+            // then M added.
+            "product.created",
+            "product.updated",
+            "product.variant_updated",
+            "product.variant_added",
+            "product.variant_updated",
+            "product.variant_removed",
+        ]
+    );
+    let price = &events[4];
+    assert_eq!(price.data["variant"], s.to_string());
+    assert_eq!(price.data["fields"], serde_json::json!(["price"]));
+    assert_eq!(events[5].data["variant"], m.to_string());
+    // Each write's events carry the version that write gave the product.
+    let versions: Vec<u64> = events
+        .iter()
+        .map(|e| e.subject_version.unwrap().value())
+        .collect();
+    assert_eq!(versions, [1, 2, 2, 3, 4, 5]);
+}
+
+#[test]
+fn an_edit_that_changes_nothing_records_nothing() {
+    let w = World::new();
+    let p = w.create("shirt");
+    let input = UpdateProduct {
+        title: Some("Shirt".to_string()),
+        handle: Some("shirt".to_string()),
+    };
+    block_on(update_product(&w.ctx, &w.repo, p.id(), input)).unwrap();
+    assert_eq!(w.repo.outbox().types(), ["product.created"]);
+}

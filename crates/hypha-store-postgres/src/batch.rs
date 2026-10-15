@@ -6,8 +6,8 @@ use hypha_auth::{
 };
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_core::{
-    HasBatch, IdempotencyRecord, IdentityId, RepoError, SessionId, StageIdempotency, Timestamp,
-    Version, Versioned,
+    HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Recorded, RepoError, SessionId,
+    StageEvents, StageIdempotency, Timestamp, Version, Versioned,
 };
 use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
@@ -31,6 +31,7 @@ use crate::{
     inventory::update_items,
     media::replace_usages,
     orders::insert_order,
+    outbox::insert_events,
     products::update_product,
     store::{PgConnection, PgStore},
     users::{insert_role, insert_user, update_invite, update_role, update_user},
@@ -67,6 +68,9 @@ enum Staged {
     PasswordReset(PasswordResetSnapshot),
     UsedUpResets(IdentityId, Timestamp),
     InventoryItem(InventoryItemSnapshot),
+    /// Events about the aggregate staged just before, with the version that write gives
+    /// it, or staged on their own (`StageEvents`, no version).
+    Events(Vec<PendingEvent>, Option<Version>),
 }
 
 impl Staged {
@@ -99,6 +103,8 @@ impl Staged {
             // These two are gathered and written in one statement each, last.
             Staged::Idempotency(_) => 19,
             Staged::InventoryItem(_) => 20,
+            // Inserts into a table nothing else locks: anywhere would do.
+            Staged::Events(..) => 21,
         }
     }
 
@@ -137,6 +143,23 @@ impl Staged {
 impl PgBatch {
     fn stage(&mut self, write: Staged) {
         self.staged.push(write);
+    }
+
+    /// Stages the events `aggregate` recorded, about the write staged with them, which
+    /// gives it `version`.
+    fn stage_events_of(&mut self, aggregate: &mut impl Recorded, version: Version) {
+        let events = aggregate.take_events();
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, Some(version)));
+        }
+    }
+}
+
+impl StageEvents for PgBatch {
+    fn record_events(&mut self, events: Vec<PendingEvent>) {
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, None));
+        }
     }
 }
 
@@ -230,7 +253,9 @@ impl StageCarts for PgBatch {
 impl StageProducts for PgBatch {
     fn update_product(&mut self, product: &mut Product) {
         self.stage(Staged::Product(product.snapshot()));
-        product.set_version(product.version().next());
+        let version = product.version().next();
+        self.stage_events_of(product, version);
+        product.set_version(version);
     }
 }
 
@@ -332,6 +357,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     use_up_password_resets(&tx, identity, at).await?
                 }
                 Staged::InventoryItem(s) => items.push(s),
+                Staged::Events(events, version) => {
+                    insert_events(&tx, &events, version, self.actor()).await?
+                }
             }
         }
         insert_records(&tx, &records).await?;

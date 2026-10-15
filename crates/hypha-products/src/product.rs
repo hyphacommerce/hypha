@@ -1,12 +1,13 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
-    AssetId, Money, OptionId, OptionValueId, Price, ProductId, VariantId, Version, Versioned,
-    optional_text, required_text,
+    AssetId, Money, OptionId, OptionValueId, PendingEvent, Price, ProductId, Recorded, VariantId,
+    Version, Versioned, optional_text, required_text,
 };
 
 use crate::{
     error::ProductError,
+    events::Changes,
     handle::Handle,
     option::{OptionValue, ProductOption},
     variant::{NewVariant, Variant, VariantPatch},
@@ -69,6 +70,15 @@ pub struct Product {
     /// Ordered; the first is the featured item. Asset IDs only: products don't know
     /// assets (design note 0014, E8).
     media: Vec<AssetId>,
+    /// What changed since it was loaded, for its events (design note 0016).
+    changes: Changes,
+}
+
+impl Recorded for Product {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.changes
+            .take(self.id, self.handle.as_str(), self.status.as_str())
+    }
 }
 
 impl Versioned for Product {
@@ -103,6 +113,7 @@ impl Product {
             options: Vec::new(),
             variants: vec![Variant::new(variant_id, None, price, Vec::new())],
             media: Vec::new(),
+            changes: Changes::created(),
         })
     }
 
@@ -127,6 +138,7 @@ impl Product {
             options,
             variants: Vec::new(),
             media: Vec::new(),
+            changes: Changes::created(),
         };
         product.add_variant(first_variant)?;
         Ok(product)
@@ -147,6 +159,7 @@ impl Product {
 
         self.variants
             .push(Variant::new(new.id, sku, new.price, new.selections));
+        self.changes.variant_added(new.id);
         Ok(())
     }
 
@@ -207,6 +220,7 @@ impl Product {
             | (ProductStatus::Active, ProductStatus::Archived)
             | (ProductStatus::Archived, ProductStatus::Draft) => {
                 self.status = to;
+                self.changes.field("status");
                 Ok(())
             }
             _ => Err(ProductError::InvalidTransition {
@@ -432,6 +446,7 @@ impl Product {
             options,
             variants: Vec::with_capacity(s.variants.len()),
             media: Vec::new(),
+            changes: Changes::default(),
         };
         product.set_media(s.media)?;
         // add_variant checks IDs, selection count, option values, unique combinations and
@@ -457,6 +472,8 @@ impl Product {
         if product.variants.is_empty() {
             return Err(ProductError::NoVariants);
         }
+        // Rebuilding went through the editing methods; nothing happened, though.
+        product.changes = Changes::default();
         Ok(product)
     }
 }

@@ -144,6 +144,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "order_shipping",
             sql: include_str!("../migrations/0024_order_shipping.sql"),
         },
+        Migration {
+            version: 25,
+            name: "outbox",
+            sql: include_str!("../migrations/0025_outbox.sql"),
+        },
     ],
 };
 

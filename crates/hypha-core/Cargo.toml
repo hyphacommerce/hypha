@@ -11,14 +11,14 @@ serde.workspace = true
 # Only for hosts that publish OpenAPI documents (design note 0010, S8): domain crates
 # and wasm builds never turn it on.
 utoipa = { version = "6", optional = true }
-serde_json = { workspace = true, optional = true }
+# Event payloads (design note 0016) are JSON values; builds for wasm.
+serde_json.workspace = true
 
 [features]
-openapi = ["dep:utoipa", "dep:serde_json"]
+openapi = ["dep:utoipa"]
 
 [dev-dependencies]
 pollster = "0.4"
-serde_json.workspace = true
 
 [lints]
 workspace = true

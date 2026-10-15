@@ -25,6 +25,7 @@ mod markets;
 mod media;
 mod migrate;
 mod orders;
+mod outbox;
 mod products;
 mod shipping;
 mod store;

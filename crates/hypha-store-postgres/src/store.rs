@@ -1,5 +1,5 @@
 use futures_util::lock::{Mutex, MutexGuard};
-use hypha_core::RepoError;
+use hypha_core::{Actor, RepoError};
 use tokio_postgres::{Client, IsolationLevel, Transaction};
 
 use crate::error::repo_error;
@@ -29,17 +29,38 @@ impl PgConnection for &mut Client {
 /// store is shared. Transactions need `&mut Client`, which the mutex hands out.
 pub struct PgStore<C> {
     conn: Mutex<C>,
+    /// Who the events this store writes are stamped with (`ActingAs`, design note 0016,
+    /// Q1): `Actor::System` until the host sets the caller. A plain mutex: it's held
+    /// only to copy an `Actor`, never across an `.await`.
+    actor: std::sync::Mutex<Actor>,
 }
 
 impl<C: PgConnection> PgStore<C> {
     pub fn new(conn: C) -> Self {
         Self {
             conn: Mutex::new(conn),
+            actor: std::sync::Mutex::new(Actor::System),
         }
     }
 
     pub(crate) async fn conn(&self) -> MutexGuard<'_, C> {
         self.conn.lock().await
+    }
+
+    /// The actor events are stamped with now.
+    pub(crate) fn actor(&self) -> Actor {
+        // A poisoned lock still holds a whole `Actor` (it's `Copy`; no write is torn).
+        *self
+            .actor
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn set_actor(&self, actor: Actor) {
+        *self
+            .actor
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = actor;
     }
 }
 
@@ -80,6 +101,7 @@ accessors! {
     hypha_media::HasAssetUsages => AssetUsages, asset_usages;
     hypha_shipping::HasShippingZones => ShippingZones, shipping_zones;
     hypha_shipping::HasAppProviders => AppProviders, app_providers;
+    hypha_core::HasOutbox => Outbox, outbox;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

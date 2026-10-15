@@ -4,8 +4,8 @@ use hypha_auth::{
 };
 use hypha_cart::{Cart, StageCarts, repo::keys as cart_keys};
 use hypha_core::{
-    HasBatch, IdempotencyRecord, IdentityId, RepoError, SessionId, StageIdempotency, Timestamp,
-    Version, Versioned,
+    HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Recorded, RepoError, SessionId,
+    StageEvents, StageIdempotency, Timestamp, Version, Versioned,
 };
 use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
@@ -57,11 +57,29 @@ enum Staged {
     NewPasswordReset(PasswordReset),
     PasswordReset(PasswordReset),
     UsedUpResets(IdentityId, Timestamp),
+    Events(Vec<PendingEvent>, Option<Version>),
 }
 
 impl InMemoryBatch {
     fn stage(&mut self, write: Staged) {
         self.staged.push(write);
+    }
+
+    /// Stages the events `aggregate` recorded, about the write staged with them, which
+    /// gives it `version`.
+    fn stage_events_of(&mut self, aggregate: &mut impl Recorded, version: Version) {
+        let events = aggregate.take_events();
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, Some(version)));
+        }
+    }
+}
+
+impl StageEvents for InMemoryBatch {
+    fn record_events(&mut self, events: Vec<PendingEvent>) {
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, None));
+        }
     }
 }
 
@@ -155,7 +173,9 @@ impl StageCarts for InMemoryBatch {
 impl StageProducts for InMemoryBatch {
     fn update_product(&mut self, product: &mut Product) {
         self.stage(Staged::Product(product.clone()));
-        product.set_version(product.version().next());
+        let version = product.version().next();
+        self.stage_events_of(product, version);
+        product.set_version(version);
     }
 }
 
@@ -241,6 +261,8 @@ impl HasBatch for InMemoryPorts {
             invites.clone(),
         );
 
+        // Written only if everything else is: an event exists iff its change committed.
+        let mut events = Vec::new();
         let written = (|| {
             for write in batch.staged {
                 match write {
@@ -353,10 +375,16 @@ impl HasBatch for InMemoryPorts {
                             reset.set_version(reset.version().next());
                         }
                     }
+                    Staged::Events(staged, version) => events.push((staged, version)),
                 }
             }
             Ok(())
         })();
+        if written.is_ok() {
+            for (staged, version) in events {
+                self.outbox.write(staged, version);
+            }
+        }
         if written.is_err() {
             (*orders, *carts, *products, *items, *customers, *records) = before;
             *usages = usages_before;

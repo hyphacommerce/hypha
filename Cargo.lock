@@ -997,6 +997,8 @@ dependencies = [
  "hypha-core",
  "hypha-testkit",
  "pollster",
+ "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -1095,6 +1097,8 @@ dependencies = [
  "hypha-tax",
  "hypha-users",
  "pollster",
+ "serde",
+ "serde_json",
  "sha2",
  "uuid",
 ]

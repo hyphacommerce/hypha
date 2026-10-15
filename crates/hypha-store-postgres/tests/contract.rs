@@ -196,3 +196,9 @@ async fn app_provider_repo() {
     let Some(url) = database_url() else { return };
     contract::app_provider_repo(async || fresh_store(&url, "contract_app_providers").await).await;
 }
+
+#[tokio::test]
+async fn outbox() {
+    let Some(url) = database_url() else { return };
+    contract::outbox(async || fresh_store(&url, "contract_outbox").await).await;
+}

@@ -29,13 +29,20 @@ pub struct OptionValueDraft {
 
 impl Product {
     pub fn rename(&mut self, title: &str) -> Result<(), ProductError> {
-        self.title = required_text("title", title)?;
+        let title = required_text("title", title)?;
+        if title != self.title {
+            self.title = title;
+            self.changes.field("title");
+        }
         Ok(())
     }
 
     /// Uniqueness is the repository's key (`keys::HANDLE`), as on create.
     pub fn set_handle(&mut self, handle: Handle) {
-        self.handle = handle;
+        if handle != self.handle {
+            self.handle = handle;
+            self.changes.field("handle");
+        }
     }
 
     /// Replaces the options with `drafts`, in order (design note 0014, section 3).
@@ -91,6 +98,8 @@ impl Product {
         }
 
         let mut variants = Vec::with_capacity(self.variants.len());
+        // Variants whose selections the new options change, for their events.
+        let mut changed = Vec::new();
         let mut combinations: HashMap<Vec<OptionValueId>, VariantId> = HashMap::new();
         for variant in self.variants.iter().filter(|v| !removing.contains(&v.id())) {
             // Every option has a value (`validate_options`) and every selection list has
@@ -109,6 +118,9 @@ impl Product {
                 });
             }
             let mut variant = variant.clone();
+            if variant.selections() != selections.as_slice() {
+                changed.push(variant.id());
+            }
             variant.set_selections(selections);
             variants.push(variant);
         }
@@ -118,6 +130,13 @@ impl Product {
 
         self.options = options;
         self.variants = variants;
+        self.changes.field("options");
+        for id in remove {
+            self.changes.variant_removed(*id);
+        }
+        for id in changed {
+            self.changes.variant_field(id, "selections");
+        }
         Ok(())
     }
 
@@ -200,20 +219,39 @@ impl Product {
         };
 
         let variant = &mut self.variants[index];
-        if let Some(sku) = sku {
+        let mut changed = Vec::new();
+        if let Some(sku) = sku
+            && variant.sku() != sku.as_deref()
+        {
             variant.set_sku(sku);
+            changed.push("sku");
         }
-        if let Some(price) = patch.price {
+        if let Some(price) = patch.price
+            && variant.base_price() != price
+        {
             variant.set_base_price(price);
+            changed.push("price");
         }
-        if let Some(selections) = patch.selections {
+        if let Some(selections) = patch.selections
+            && variant.selections() != selections.as_slice()
+        {
             variant.set_selections(selections);
+            changed.push("selections");
         }
-        if let Some(weight) = patch.weight {
+        if let Some(weight) = patch.weight
+            && variant.weight() != weight
+        {
             variant.set_weight(weight);
+            changed.push("weight");
         }
-        if let Some(requires) = patch.requires_shipping {
+        if let Some(requires) = patch.requires_shipping
+            && variant.requires_shipping() != requires
+        {
             variant.set_requires_shipping(requires);
+            changed.push("requires_shipping");
+        }
+        for field in changed {
+            self.changes.variant_field(id, field);
         }
         Ok(())
     }
@@ -229,6 +267,7 @@ impl Product {
             return Err(ProductError::NoVariants);
         }
         self.variants.remove(index);
+        self.changes.variant_removed(id);
         Ok(())
     }
 
@@ -247,9 +286,13 @@ impl Product {
         for variant in &mut self.variants {
             if variant.media().is_some_and(|id| !media.contains(&id)) {
                 variant.set_media(None);
+                self.changes.variant_field(variant.id(), "media");
             }
         }
-        self.media = media;
+        if media != self.media {
+            self.media = media;
+            self.changes.field("media");
+        }
         Ok(())
     }
 
@@ -269,7 +312,10 @@ impl Product {
             .iter_mut()
             .find(|v| v.id() == id)
             .ok_or(ProductError::VariantNotFound(id))?;
-        variant.set_media(media);
+        if variant.media() != media {
+            variant.set_media(media);
+            self.changes.variant_field(id, "media");
+        }
         Ok(())
     }
 }

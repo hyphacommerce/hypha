@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    AssetId, Money, OptionId, OptionValueId, Page, PageRequest, Price, ProductId, RepoError,
-    VariantId, Version, Versioned, Weight,
+    AssetId, Money, OptionId, OptionValueId, Page, PageRequest, Price, ProductId, Recorded,
+    RepoError, VariantId, Version, Versioned, Weight,
 };
 use hypha_products::{
     Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductRepo, ProductSnapshot,
@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::{
     columns::{col, currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -137,14 +138,26 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
 
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
         let s = product.snapshot();
-        in_transaction!(self, |tx| insert_product(tx, &s).await)?;
-        product.set_version(Version::NEW.next());
+        let events = product.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_product(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        product.set_version(version);
         Ok(())
     }
 
     async fn update(&self, product: &mut Product) -> Result<(), RepoError> {
         let s = product.snapshot();
-        let version = in_transaction!(self, |tx| update_product(tx, &s).await)?;
+        let events = product.take_events();
+        let actor = self.actor();
+        let version = in_transaction!(self, |tx| {
+            let version = update_product(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await?;
+            Ok(version)
+        })?;
         product.set_version(version);
         Ok(())
     }

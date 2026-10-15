@@ -1,6 +1,6 @@
 use hypha_auth::{HasApiKeys, HasIdentities, HasPasswordResets, HasSessions};
 use hypha_cart::HasCarts;
-use hypha_core::HasIdempotency;
+use hypha_core::{ActingAs, Actor, HasIdempotency, HasOutbox};
 use hypha_customers::HasCustomers;
 use hypha_inventory::{HasInventoryItems, HasLocations};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
@@ -15,15 +15,16 @@ use crate::{
     InMemoryApiKeyRepo, InMemoryAppProviderRepo, InMemoryAssetRepo, InMemoryCartRepo,
     InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryIdempotencyRepo, InMemoryIdentityRepo,
     InMemoryInventoryItemRepo, InMemoryInviteRepo, InMemoryLocationRepo, InMemoryMarketRepo,
-    InMemoryOrderRepo, InMemoryPasswordResetRepo, InMemoryPriceListRepo, InMemoryProductRepo,
-    InMemoryRoleRepo, InMemorySessionRepo, InMemoryShippingZoneRepo, InMemoryTaxClassRepo,
-    InMemoryTaxRegionRepo, InMemoryUserRepo,
+    InMemoryOrderRepo, InMemoryOutbox, InMemoryPasswordResetRepo, InMemoryPriceListRepo,
+    InMemoryProductRepo, InMemoryRoleRepo, InMemorySessionRepo, InMemoryShippingZoneRepo,
+    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
 };
 
 /// Every repository of one store, in memory: the tests' world. It has every accessor, so it is `hypha_cart::CartPorts`; the fields are
-/// public so tests can set data up directly.
-#[derive(Default)]
+/// public so tests can set data up directly. One outbox is shared by every repo that
+/// writes events and by batches, so `outbox.events()` is everything the store recorded.
 pub struct InMemoryPorts {
+    pub outbox: InMemoryOutbox,
     pub carts: InMemoryCartRepo,
     pub products: InMemoryProductRepo,
     pub markets: InMemoryMarketRepo,
@@ -47,6 +48,50 @@ pub struct InMemoryPorts {
     pub users: InMemoryUserRepo,
     pub roles: InMemoryRoleRepo,
     pub invites: InMemoryInviteRepo,
+}
+
+impl Default for InMemoryPorts {
+    fn default() -> Self {
+        let outbox = InMemoryOutbox::default();
+        Self {
+            carts: InMemoryCartRepo::default(),
+            products: InMemoryProductRepo::sharing(&outbox),
+            markets: InMemoryMarketRepo::default(),
+            catalogs: InMemoryCatalogRepo::default(),
+            price_lists: InMemoryPriceListRepo::default(),
+            tax_classes: InMemoryTaxClassRepo::default(),
+            tax_regions: InMemoryTaxRegionRepo::default(),
+            inventory_items: InMemoryInventoryItemRepo::default(),
+            locations: InMemoryLocationRepo::default(),
+            customers: InMemoryCustomerRepo::default(),
+            idempotency: InMemoryIdempotencyRepo::default(),
+            orders: InMemoryOrderRepo::default(),
+            assets: InMemoryAssetRepo::default(),
+            shipping_zones: InMemoryShippingZoneRepo::default(),
+            app_providers: InMemoryAppProviderRepo::default(),
+            identities: InMemoryIdentityRepo::default(),
+            sessions: InMemorySessionRepo::default(),
+            api_keys: InMemoryApiKeyRepo::default(),
+            password_resets: InMemoryPasswordResetRepo::default(),
+            users: InMemoryUserRepo::default(),
+            roles: InMemoryRoleRepo::default(),
+            invites: InMemoryInviteRepo::default(),
+            outbox,
+        }
+    }
+}
+
+impl ActingAs for InMemoryPorts {
+    fn act_as(&self, actor: Actor) {
+        self.outbox.act_as(actor);
+    }
+}
+
+impl HasOutbox for InMemoryPorts {
+    type Outbox = InMemoryOutbox;
+    fn outbox(&self) -> &InMemoryOutbox {
+        &self.outbox
+    }
 }
 
 impl HasCarts for InMemoryPorts {

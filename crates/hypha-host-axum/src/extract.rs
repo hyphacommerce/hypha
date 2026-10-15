@@ -20,6 +20,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use hypha_auth::{HasApiKeys, TokenKind, authenticate_api_key};
+use hypha_core::ActingAs;
 use hypha_core::{Clock, Ctx, IdempotencyRequest};
 use hypha_users::{StaffPorts, StaffSession, authenticate_staff};
 use serde::{Serialize, de::DeserializeOwned};
@@ -222,6 +223,8 @@ impl<A: Surface> Caller<A> {
             Authenticated::Staff(staff) => staff.ctx,
             Authenticated::Key(ctx) => ctx,
         };
+        // Every event these ports write from here on is the caller's (design note 0016).
+        ports.act_as(ctx.actor());
         Ok((ports, ctx))
     }
 }
@@ -236,7 +239,10 @@ impl StaffCaller {
         Admin::admit(TokenKind::of(&self.0.token), self.0.publishable_header)?;
         let ports = state.public_ports().await?;
         match self.0.authenticate(&ports, &state.clock).await? {
-            Authenticated::Staff(staff) => Ok((ports, *staff)),
+            Authenticated::Staff(staff) => {
+                ports.act_as(staff.ctx.actor());
+                Ok((ports, *staff))
+            }
             Authenticated::Key(_) => Err(ApiError::session_required()),
         }
     }

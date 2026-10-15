@@ -1,14 +1,30 @@
-use hypha_core::{Page, PageRequest, ProductId, RepoError, VariantId};
+use hypha_core::{Page, PageRequest, ProductId, Recorded, RepoError, VariantId, Versioned};
 use hypha_products::{
     Handle, Product, ProductStatus, ProductSummary,
     repo::{ProductRepo, keys},
 };
 
-use crate::table::Table;
+use crate::{InMemoryOutbox, table::Table};
 
 #[derive(Default)]
 pub struct InMemoryProductRepo {
     pub(crate) products: Table<ProductId, Product>,
+    pub(crate) outbox: InMemoryOutbox,
+}
+
+impl InMemoryProductRepo {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            products: Table::default(),
+            outbox: outbox.clone(),
+        }
+    }
+
+    /// The events this repo wrote (into its outbox, shared or not).
+    pub fn outbox(&self) -> &InMemoryOutbox {
+        &self.outbox
+    }
 }
 
 /// The unique keys of `keys` that `new` would break against `other`.
@@ -78,12 +94,18 @@ impl ProductRepo for InMemoryProductRepo {
     }
 
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
+        let events = product.take_events();
         self.products
-            .insert(product.id(), product, keys::PRODUCT_ID, &unique)
+            .insert(product.id(), product, keys::PRODUCT_ID, &unique)?;
+        self.outbox.write(events, Some(product.version()));
+        Ok(())
     }
 
     async fn update(&self, product: &mut Product) -> Result<(), RepoError> {
-        self.products.update(product.id(), product, &unique)
+        let events = product.take_events();
+        self.products.update(product.id(), product, &unique)?;
+        self.outbox.write(events, Some(product.version()));
+        Ok(())
     }
 }
 

@@ -274,6 +274,8 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_merchandising::MerchandisingPorts
         + hypha_shipping::HasShippingZones
         + hypha_shipping::HasAppProviders
+        + hypha_core::HasOutbox
+        + hypha_core::ActingAs
     where
         Self: 'a;
     type Directory<'a>: StoreRepo

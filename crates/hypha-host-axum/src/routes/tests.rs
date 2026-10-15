@@ -41,6 +41,8 @@ const OWNER_PASSWORD: &str = "owner password";
 struct TestApp {
     router: Router,
     admin_key: String,
+    /// The app's state, for checks the API doesn't expose (the outbox).
+    state: crate::state::SharedState<PgStorage>,
 }
 
 /// The app without file storage: most routes don't need it, so their tests don't need
@@ -169,6 +171,7 @@ async fn app_from(trusted_proxies: TrustedProxies, media: Option<Media>) -> Test
             .with_state(state.clone())
             .layer(MockConnectInfo(SocketAddr::from(PEER))),
         admin_key: token.expose().to_string(),
+        state,
     }
 }
 
@@ -378,6 +381,31 @@ async fn create_product(app: &TestApp, handle: &str) -> String {
     let (status, created) = send(app, "POST", "/admin/products", Some(&body.to_string())).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     created["id"].as_str().unwrap().to_string()
+}
+
+/// Every event the app's outbox holds, oldest first.
+async fn outbox_events(app: &TestApp) -> Vec<hypha_core::StoredEvent> {
+    use hypha_core::{HasOutbox, OutboxRepo};
+    let ports = app.state.public_ports().await.unwrap();
+    ports.outbox().events_after(0, 1000).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_write_records_its_event_by_the_caller() {
+    let app = app().await;
+    let id = create_product(&app, "mug").await;
+    let events = outbox_events(&app).await;
+    let created = events
+        .iter()
+        .find(|e| e.event_type == "product.created")
+        .expect("product.created recorded");
+    assert_eq!(created.data["product"], id);
+    // The admin key, not the system: ports act as whoever authenticated.
+    assert!(
+        matches!(created.actor, hypha_core::Actor::ApiKey(_)),
+        "{:?}",
+        created.actor
+    );
 }
 
 fn ids(page: &Value) -> Vec<&str> {

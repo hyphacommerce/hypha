@@ -83,6 +83,11 @@ fn store_repo() {
 }
 
 #[test]
+fn outbox() {
+    block_on(contract::outbox(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn batch() {
     block_on(contract::batch(async || InMemoryPorts::default()));
 }
