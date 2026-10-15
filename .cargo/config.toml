@@ -1,0 +1,5 @@
+# The database `docker compose up -d` starts, for `cargo test` (the host's route tests
+# and the Postgres adapter's tests need it) and `cargo run -p hypha-host-axum`. A
+# DATABASE_URL in the environment wins (`force = false`).
+[env]
+DATABASE_URL = { value = "postgres://hypha:hypha@localhost:5432/hypha", force = false }

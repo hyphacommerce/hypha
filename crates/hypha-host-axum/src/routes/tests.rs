@@ -1,6 +1,11 @@
-//! Route-level tests: the in-memory router driven with `oneshot`, no socket. They check
+//! Route-level tests: the router on Postgres driven with `oneshot`, no socket. They check
 //! what only the HTTP layer decides (status codes, error codes, extractors); domain
 //! rules are tested in their crates and end to end in `scripts/e2e.sh`.
+//!
+//! They need Postgres at `DATABASE_URL` (`.cargo/config.toml` points it at the database
+//! `docker compose up -d` starts).
+//! Each test gets a schema of its own, named after it, so they run in parallel and a
+//! rerun starts clean.
 
 use std::sync::Arc;
 
@@ -12,7 +17,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE, WWW_AUTHENTICATE},
     },
 };
-use hypha_auth::{ApiKeyKind, Argon2id, CreateApiKey, create_api_key, totp};
+use hypha_auth::{ApiKeyKind, Argon2id, CreateApiKey, HasApiKeys, create_api_key, totp};
 use hypha_core::{Ctx, Scope, Timestamp};
 use hypha_stores::ensure_single_store;
 use hypha_users::{NewOwner, bootstrap_owner};
@@ -23,14 +28,14 @@ use std::net::SocketAddr;
 
 use axum::extract::connect_info::MockConnectInfo;
 
-use super::memory_router;
+use super::postgres_router;
 use crate::client_ip::TrustedProxies;
-use crate::state::{AppState, HostEnv, MemoryStorage, Storage, SystemClock, UuidV7Ids};
+use crate::state::{AppState, HostEnv, PgStorage, Storage, SystemClock, UuidV7Ids};
 
 const OWNER_EMAIL: &str = "owner@example.com";
 const OWNER_PASSWORD: &str = "owner password";
 
-/// The in-memory app with its owner (`OWNER_EMAIL`), and a secret key with every scope
+/// The app on a fresh schema, with its owner (`OWNER_EMAIL`), and a secret key with every scope
 /// that `send` uses unless a test picks other credentials.
 struct TestApp {
     router: Router,
@@ -44,8 +49,50 @@ async fn app() -> TestApp {
 /// Requests in these tests come from this peer (`MockConnectInfo`), as if over a socket.
 const PEER: ([u8; 4], u16) = ([127, 0, 0, 1], 4000);
 
+/// A schema of its own for the running test, emptied, and the URL that connects to it.
+/// libtest runs each test on a thread named after it, so the name is stable across runs
+/// and unique within one.
+async fn fresh_schema() -> String {
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL (see .cargo/config.toml)");
+    let test = std::thread::current()
+        .name()
+        .unwrap_or("unnamed")
+        .to_string();
+    // Postgres names are at most 63 bytes: a readable tail of the test's name, and a hash
+    // of all of it so two long names with the same tail stay apart.
+    let hash = test.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    });
+    let tail: String = test
+        .rsplit("::")
+        .next()
+        .unwrap_or(&test)
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .take(40)
+        .collect();
+    let schema = format!("rt_{hash:016x}_{tail}").to_lowercase();
+
+    let config = hypha_store_postgres::database_config(&url).expect("DATABASE_URL");
+    let (client, connection) = config
+        .connect(tokio_postgres::NoTls)
+        .await
+        .unwrap_or_else(|e| {
+            panic!("route tests need Postgres at {url} (`docker compose up -d`): {e}")
+        });
+    tokio::spawn(connection);
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema};"
+        ))
+        .await
+        .expect("reset the test's schema");
+    let separator = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{separator}options=-csearch_path%3D{schema}")
+}
+
 async fn app_with(trusted_proxies: TrustedProxies) -> TestApp {
-    let storage = MemoryStorage::default();
+    let storage = PgStorage::connect(&fresh_schema().await).await.unwrap();
     let store = ensure_single_store(
         &Ctx::system(),
         &storage.directory().await.unwrap(),
@@ -80,11 +127,11 @@ async fn app_with(trusted_proxies: TrustedProxies) -> TestApp {
         name: "Tests".to_string(),
         scopes: Some(Scope::ALL.to_vec()),
     };
-    let (_, token) = create_api_key(&Ctx::system(), &ports.api_keys, &state.env, input)
+    let (_, token) = create_api_key(&Ctx::system(), ports.api_keys(), &state.env, input)
         .await
         .unwrap();
     TestApp {
-        router: memory_router()
+        router: postgres_router()
             .with_state(state.clone())
             .layer(MockConnectInfo(SocketAddr::from(PEER))),
         admin_key: token.expose().to_string(),

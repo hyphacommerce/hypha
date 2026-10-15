@@ -12,14 +12,12 @@ use axum::Router;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use hypha_core::{Ctx, Random};
+use hypha_core::Ctx;
 use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
 use crate::client_ip::TrustedProxies;
-use crate::state::{
-    AppState, HostEnv, MemoryStorage, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids,
-};
+use crate::state::{AppState, HostEnv, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids};
 
 /// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
 /// `openapi`) and exits (design note 0010, S6). Run it after changing routes or DTOs;
@@ -66,41 +64,33 @@ async fn main() {
         None => None,
     };
 
-    // DATABASE_URL set: Postgres (migrated on startup). Otherwise in memory.
-    match std::env::var("DATABASE_URL") {
-        Ok(url) => {
-            // Data outlives the process, so the key must too: a new key each start would
-            // make every stored authenticator secret unreadable.
-            let Some(secret_key) = secret_key else {
-                tracing::error!(
-                    "HYPHA_SECRET_KEY is required with DATABASE_URL: 64 hex characters, e.g. \
-                     from `openssl rand -hex 32`. Keep it; it seals 2FA secrets."
-                );
-                std::process::exit(1);
-            };
-            let storage = match PgStorage::connect(&url).await {
-                Ok(storage) => storage,
-                Err(e) => {
-                    tracing::error!("{e}");
-                    std::process::exit(1);
-                }
-            };
-            tracing::info!("storage: Postgres (migrations applied)");
-            let env = HostEnv::new(secret_key, admin_url);
-            serve(routes::postgres_router(), storage, env).await;
+    // Postgres, migrated on startup.
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        tracing::error!(
+            "DATABASE_URL is required, e.g. postgres://hypha:hypha@localhost:5432/hypha \
+             (`docker compose up -d` starts that database)."
+        );
+        std::process::exit(1);
+    };
+    // Data outlives the process, so the key must too: a new key each start would make
+    // every stored authenticator secret unreadable.
+    let Some(secret_key) = secret_key else {
+        tracing::error!(
+            "HYPHA_SECRET_KEY is required: 64 hex characters, e.g. from \
+             `openssl rand -hex 32`. Keep it; it seals 2FA secrets."
+        );
+        std::process::exit(1);
+    };
+    let storage = match PgStorage::connect(&url).await {
+        Ok(storage) => storage,
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
         }
-        Err(_) => {
-            tracing::info!("storage: in memory (set DATABASE_URL for Postgres)");
-            let secret_key = secret_key.unwrap_or_else(|| {
-                // Nothing outlives the process in memory, so a throwaway key is fine.
-                let mut key = [0u8; 32];
-                HostEnv::new([0; 32], None).fill(&mut key);
-                key
-            });
-            let env = HostEnv::new(secret_key, admin_url);
-            serve(routes::memory_router(), MemoryStorage::default(), env).await;
-        }
-    }
+    };
+    tracing::info!("storage: Postgres (migrations applied)");
+    let env = HostEnv::new(secret_key, admin_url);
+    serve(routes::postgres_router(), storage, env).await;
 }
 
 /// A 32-byte key written as 64 hex characters.

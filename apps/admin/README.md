@@ -7,9 +7,12 @@ note: [`docs/design/0011-apps-and-admin.md`](../../docs/design/0011-apps-and-adm
 ## Run it locally
 
 ```bash
-# 1. The API (from the repo root), with an owner to log in as:
-HYPHA_BIND=127.0.0.1:3917 HYPHA_OWNER_EMAIL=owner@example.com \
-  HYPHA_OWNER_PASSWORD=change-me-please cargo run -p hypha-host-axum
+# 1. Postgres, and the API (from the repo root) with an owner to log in as:
+docker compose up -d
+# HYPHA_SECRET_KEY: generate once (`openssl rand -hex 32`) and keep it; it seals 2FA secrets.
+HYPHA_BIND=127.0.0.1:3917 HYPHA_SECRET_KEY=<your key> \
+  HYPHA_OWNER_EMAIL=owner@example.com HYPHA_OWNER_PASSWORD=change-me-please \
+  cargo run -p hypha-host-axum
 
 # 2. The admin's settings (once):
 cp apps/admin/.env.example apps/admin/.dev.vars

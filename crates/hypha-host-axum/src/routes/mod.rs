@@ -27,7 +27,7 @@ use hypha_core::Timestamp;
 
 use crate::{
     error::ApiError,
-    state::{MemoryStorage, PgStorage, SharedState},
+    state::{PgStorage, SharedState},
 };
 
 /// A `Timestamp` as RFC 3339 in UTC, e.g. "2026-10-14T09:30:00.123456Z".
@@ -156,10 +156,6 @@ macro_rules! build_router {
             .fallback(|| async { ApiError::route_not_found() })
             .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
     };
-}
-
-pub fn memory_router() -> Router<SharedState<MemoryStorage>> {
-    route_table!(build_router!(MemoryStorage,))
 }
 
 pub fn postgres_router() -> Router<SharedState<PgStorage>> {

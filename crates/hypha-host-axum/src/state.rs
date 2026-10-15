@@ -11,7 +11,6 @@ use hypha_checkout::CheckoutPorts;
 use hypha_core::{Clock, IdGenerator, Notifier, NotifyError, Random, StoreId, Timestamp};
 use hypha_store_postgres::{CORE, PgConnection, PgStore, database_config, migrate};
 use hypha_stores::StoreRepo;
-use hypha_testkit::{InMemoryPorts, InMemoryStoreRepo};
 use hypha_users::{StaffEmail, StaffPorts};
 use uuid::Uuid;
 
@@ -268,38 +267,7 @@ pub trait Storage: Send + Sync + 'static {
         Self: Sized;
 }
 
-// ---------- in memory (default; data is lost on restart) ----------
-
-/// The store directory and one store's repositories (`InMemoryPorts`, shared with the
-/// tests).
-#[derive(Default)]
-pub struct MemoryStorage {
-    stores: InMemoryStoreRepo,
-    ports: InMemoryPorts,
-}
-
-impl Storage for MemoryStorage {
-    type Ports<'a> = &'a InMemoryPorts;
-    type Directory<'a> = &'a InMemoryStoreRepo;
-
-    async fn ports(&self, _store: StoreId) -> Result<&InMemoryPorts, ApiError> {
-        Ok(&self.ports)
-    }
-
-    async fn directory(&self) -> Result<&InMemoryStoreRepo, ApiError> {
-        Ok(&self.stores)
-    }
-
-    fn spawn_password_reset(state: SharedState<Self>, email: String) {
-        let background = Arc::clone(&state);
-        let work = crate::routes::password_reset_in_background(state, email);
-        if !background.background.spawn(work) {
-            tracing::warn!("password reset request dropped: every background slot is busy");
-        }
-    }
-}
-
-// ---------- Postgres (when DATABASE_URL is set) ----------
+// ---------- Postgres ----------
 
 /// A connection checked out of the pool; it goes back when the request's store is dropped.
 pub struct PooledClient(deadpool_postgres::Object);

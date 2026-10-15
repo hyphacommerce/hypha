@@ -19,7 +19,7 @@ Hypha is an open-source, modular e-commerce API written in Rust. The same core i
 | Stores: one store per deployment, created on first start (`GET /store`) | ✅ |
 | Products: handles, options, explicit variants, status transitions, create/get commands | ✅ |
 | Markets, catalogs (one per market) and price lists, with `assign_price_list` | ✅ |
-| HTTP host (axum): products, markets, price lists, catalogs, carts; JSON errors everywhere; in memory or Postgres (`DATABASE_URL`) | ✅ |
+| HTTP host (axum): products, markets, price lists, catalogs, carts; JSON errors everywhere; Postgres (`DATABASE_URL`) | ✅ |
 | Price resolution: fixed price, else base price adjusted by basis points | ✅ |
 | Cart: create, add line by variant, get at current prices with per-line availability | ✅ |
 | Orders | ⏳ planned |
@@ -69,10 +69,12 @@ Check that the core still builds for WASM:
 cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-stores -p hypha-store-postgres --target wasm32-unknown-unknown
 ```
 
-Start the HTTP host on `http://127.0.0.1:3000` (data lives in memory). Set the log level with `RUST_LOG`:
+Start Postgres (`docker compose up -d`; the tests need it too), then the HTTP host on `http://127.0.0.1:3000`. Set the log level with `RUST_LOG`:
+
+`HYPHA_SECRET_KEY` seals 2FA secrets: generate it once with `openssl rand -hex 32` and keep it.
 
 ```bash
-cargo run -p hypha-host-axum
+HYPHA_SECRET_KEY=<your key> cargo run -p hypha-host-axum
 ```
 
 Create a product. Amounts are in minor units, so `1000` = €10.00:

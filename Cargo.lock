@@ -706,7 +706,6 @@ dependencies = [
  "hypha-store-postgres",
  "hypha-stores",
  "hypha-tax",
- "hypha-testkit",
  "hypha-users",
  "ipnet",
  "jiff",
