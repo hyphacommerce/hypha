@@ -20,6 +20,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("products_pkey", product_keys::PRODUCT_ID),
     ("product_handle", product_keys::HANDLE),
     ("variant_id", product_keys::VARIANT_ID),
+    ("variant_sku", product_keys::VARIANT_SKU),
     ("markets_pkey", market_keys::MARKET_ID),
     ("market_country", market_keys::COUNTRY),
     ("catalogs_pkey", market_keys::CATALOG_ID),

@@ -8,11 +8,11 @@ use crate::table::Table;
 
 #[derive(Default)]
 pub struct InMemoryProductRepo {
-    products: Table<ProductId, Product>,
+    pub(crate) products: Table<ProductId, Product>,
 }
 
 /// The unique keys of `keys` that `new` would break against `other`.
-fn unique(new: &Product, other: &Product) -> Option<&'static str> {
+pub(crate) fn unique(new: &Product, other: &Product) -> Option<&'static str> {
     if new.handle() == other.handle() {
         return Some(keys::HANDLE);
     }
@@ -20,7 +20,15 @@ fn unique(new: &Product, other: &Product) -> Option<&'static str> {
         .variants()
         .iter()
         .any(|v| other.variants().iter().any(|o| o.id() == v.id()));
-    shares_variant.then_some(keys::VARIANT_ID)
+    if shares_variant {
+        return Some(keys::VARIANT_ID);
+    }
+    let shares_sku = new
+        .variants()
+        .iter()
+        .filter_map(|v| v.sku())
+        .any(|sku| other.variants().iter().any(|o| o.sku() == Some(sku)));
+    shares_sku.then_some(keys::VARIANT_SKU)
 }
 
 impl InMemoryProductRepo {
@@ -61,6 +69,12 @@ impl ProductRepo for InMemoryProductRepo {
         Ok(self
             .products
             .find(|p| p.variants().iter().any(|v| v.id() == variant)))
+    }
+
+    async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError> {
+        Ok(self
+            .products
+            .find(|p| p.variants().iter().any(|v| v.sku() == Some(sku))))
     }
 
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {

@@ -1,4 +1,4 @@
-use hypha_core::{OptionValueId, Price, VariantId};
+use hypha_core::{AssetId, OptionValueId, Price, VariantId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variant {
@@ -6,6 +6,7 @@ pub struct Variant {
     sku: Option<String>,
     base_price: Price,
     selections: Vec<OptionValueId>,
+    media: Option<AssetId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +15,14 @@ pub struct NewVariant {
     pub sku: Option<String>,
     pub price: Price,
     pub selections: Vec<OptionValueId>,
+}
+
+/// Changes to a variant; `None` keeps a field. `sku: Some(None)` clears the SKU.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VariantPatch {
+    pub sku: Option<Option<String>>,
+    pub price: Option<Price>,
+    pub selections: Option<Vec<OptionValueId>>,
 }
 
 impl Variant {
@@ -28,6 +37,7 @@ impl Variant {
             sku,
             base_price,
             selections,
+            media: None,
         }
     }
 
@@ -42,5 +52,22 @@ impl Variant {
     }
     pub fn selections(&self) -> &[OptionValueId] {
         &self.selections
+    }
+    /// The item of the product's media list this variant shows, if any.
+    pub fn media(&self) -> Option<AssetId> {
+        self.media
+    }
+
+    pub(crate) fn set_sku(&mut self, sku: Option<String>) {
+        self.sku = sku;
+    }
+    pub(crate) fn set_base_price(&mut self, price: Price) {
+        self.base_price = price;
+    }
+    pub(crate) fn set_selections(&mut self, selections: Vec<OptionValueId>) {
+        self.selections = selections;
+    }
+    pub(crate) fn set_media(&mut self, media: Option<AssetId>) {
+        self.media = media;
     }
 }

@@ -45,6 +45,9 @@ pub struct ApiErrorBody {
 /// - `cart_completed`: `{"order": "ord_…"}`
 /// - `mfa_locked`: `{"locked_until": "<RFC 3339>"}`
 /// - `rate_limited`: `{"retry_after_secs": n}`, also sent as `Retry-After`
+/// - `option_value_in_use`: `{"variants": ["var_…"]}`, to remove with the values
+/// - `duplicate_option_combination` (removing an option): `{"variants": ["var_…", "var_…"]}`
+/// - `sku_taken` (another product): `{"sku", "product": "prod_…"}`
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
 /// a rate limit or locked second factor; 403
@@ -292,16 +295,55 @@ impl From<PageError> for ApiError {
 
 impl From<hypha_products::CommandError> for ApiError {
     fn from(e: hypha_products::CommandError) -> Self {
-        use hypha_products::CommandError as E;
+        use hypha_products::{CommandError as E, ProductError as P};
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
-            E::Product(_) | E::Money(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            E::HandleTaken { .. } => StatusCode::CONFLICT,
+            // Every route that names a variant names it in its URL.
+            E::Product(P::VariantNotFound(_)) => StatusCode::NOT_FOUND,
+            // What the product already has: other variants, their SKUs, its last variant.
+            E::Product(
+                P::OptionValueInUse { .. }
+                | P::VariantsCollide { .. }
+                | P::DuplicateSku(_)
+                | P::NoVariants,
+            ) => StatusCode::CONFLICT,
+            E::Product(
+                P::InvalidHandle(_)
+                | P::Text(_)
+                | P::DuplicateVariantId(_)
+                | P::SelectionCountMismatch { .. }
+                | P::UnknownOptionValue(_)
+                | P::DuplicateCombination
+                | P::NoOptions
+                | P::EmptyOption(_)
+                | P::DuplicateOptionName(_)
+                | P::DuplicateOptionValue(_)
+                | P::InvalidTransition { .. }
+                | P::InvalidPrice(_)
+                | P::TooManyVariants { .. }
+                | P::UnknownVariant(_)
+                | P::UnknownOption(_)
+                | P::DuplicateOption(_)
+                | P::DuplicateOptionLabel { .. }
+                | P::TooManyMedia { .. }
+                | P::DuplicateMedia(_)
+                | P::MediaNotInProduct(_),
+            )
+            | E::Money(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::HandleTaken { .. } | E::SkuTaken { .. } => StatusCode::CONFLICT,
             E::ProductNotFound(_) => StatusCode::NOT_FOUND,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::Product(P::OptionValueInUse { variants }) => Some(json!({ "variants": variants })),
+            E::Product(P::VariantsCollide { first, second }) => {
+                Some(json!({ "variants": [first, second] }))
+            }
+            E::SkuTaken { sku, product } => Some(json!({ "sku": sku, "product": product })),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 

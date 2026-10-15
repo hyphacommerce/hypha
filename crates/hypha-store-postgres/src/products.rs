@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    Money, OptionId, OptionValueId, Page, PageRequest, Price, ProductId, RepoError, VariantId,
-    Version, Versioned,
+    AssetId, Money, OptionId, OptionValueId, Page, PageRequest, Price, ProductId, RepoError,
+    VariantId, Version, Versioned,
 };
 use hypha_products::{
     Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductRepo, ProductSnapshot,
@@ -50,7 +50,9 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
             .client()
             .query_typed(
                 "SELECT p.id, p.handle, p.title, p.status, c.variants,
-                        r.currencies, r.mins, r.maxes
+                        r.currencies, r.mins, r.maxes,
+                        (SELECT asset_id FROM product_media
+                         WHERE product_id = p.id AND position = 0) AS featured
                  FROM products p
                  CROSS JOIN LATERAL (
                      SELECT count(*) AS variants FROM variants WHERE product_id = p.id
@@ -116,6 +118,23 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         })
     }
 
+    async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError> {
+        let mut conn = self.conn().await;
+        consistent_read!(conn.client(), |tx| {
+            let row = tx
+                .query_typed_opt(
+                    "SELECT product_id FROM variants WHERE sku = $1",
+                    &[(&sku, Type::TEXT)],
+                )
+                .await
+                .map_err(repo_error)?;
+            match row {
+                Some(row) => Ok(load(tx, &[row.get(0)]).await?.pop()),
+                None => Ok(None),
+            }
+        })
+    }
+
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
         let s = product.snapshot();
         let mut conn = self.conn().await;
@@ -168,6 +187,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         for sql in [
             "DELETE FROM product_options WHERE product_id = $1",
             "DELETE FROM variants WHERE product_id = $1",
+            "DELETE FROM product_media WHERE product_id = $1",
         ] {
             tx.query_typed(sql, &[(&s.id.as_uuid(), Type::UUID)])
                 .await
@@ -180,7 +200,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     }
 }
 
-/// Writes options, option values and variants in 3 statements however many there are:
+/// Writes options, option values, variants and media in 4 statements however many there are:
 /// each column goes in as an array, `unnest` turns them back into rows, and `WITH
 /// ORDINALITY` numbers them, which is the position.
 async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<(), RepoError> {
@@ -244,13 +264,19 @@ async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<
         .iter()
         .flat_map(|v| v.selections.iter().map(|id| id.as_uuid()))
         .collect();
+    let media: Vec<Option<Uuid>> = s
+        .variants
+        .iter()
+        .map(|v| v.media.map(|id| id.as_uuid()))
+        .collect();
     tx.query_typed(
         "INSERT INTO variants
-            (id, product_id, position, sku, price_amount, price_currency, selections)
+            (id, product_id, position, sku, price_amount, price_currency, selections,
+             media_asset_id)
          SELECT v.id, $1, v.ord - 1, v.sku, v.amount, v.currency,
-                ($7::uuid[])[(v.ord - 1) * $6 + 1 : v.ord * $6]
-         FROM unnest($2::uuid[], $3::text[], $4::int8[], $5::text[])
-              WITH ORDINALITY AS v(id, sku, amount, currency, ord)",
+                ($7::uuid[])[(v.ord - 1) * $6 + 1 : v.ord * $6], v.media
+         FROM unnest($2::uuid[], $3::text[], $4::int8[], $5::text[], $8::uuid[])
+              WITH ORDINALITY AS v(id, sku, amount, currency, media, ord)",
         &[
             (&product_id, Type::UUID),
             (&variant_ids, Type::UUID_ARRAY),
@@ -259,14 +285,24 @@ async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<
             (&currencies, Type::TEXT_ARRAY),
             (&per_variant, Type::INT8),
             (&selections, Type::UUID_ARRAY),
+            (&media, Type::UUID_ARRAY),
         ],
+    )
+    .await
+    .map_err(repo_error)?;
+
+    let assets: Vec<Uuid> = s.media.iter().map(|id| id.as_uuid()).collect();
+    tx.query_typed(
+        "INSERT INTO product_media (product_id, position, asset_id)
+         SELECT $1, m.ord - 1, m.asset FROM unnest($2::uuid[]) WITH ORDINALITY AS m(asset, ord)",
+        &[(&product_id, Type::UUID), (&assets, Type::UUID_ARRAY)],
     )
     .await
     .map_err(repo_error)?;
     Ok(())
 }
 
-/// Loads the products with these IDs (missing ones are skipped), in 4 queries.
+/// Loads the products with these IDs (missing ones are skipped), in 5 queries.
 async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>, RepoError> {
     if ids.is_empty() {
         return Ok(vec![]);
@@ -329,8 +365,8 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
     let mut variants: HashMap<Uuid, Vec<VariantSnapshot>> = HashMap::new();
     for row in client
         .query_typed(
-            "SELECT product_id, id, sku, price_amount, price_currency, selections FROM variants
-             WHERE product_id = ANY($1) ORDER BY product_id, position",
+            "SELECT product_id, id, sku, price_amount, price_currency, selections, media_asset_id
+             FROM variants WHERE product_id = ANY($1) ORDER BY product_id, position",
             &param,
         )
         .await
@@ -350,7 +386,24 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
                     .into_iter()
                     .map(OptionValueId::from_uuid)
                     .collect(),
+                media: row.get::<_, Option<Uuid>>(6).map(AssetId::from_uuid),
             });
+    }
+
+    let mut media: HashMap<Uuid, Vec<AssetId>> = HashMap::new();
+    for row in client
+        .query_typed(
+            "SELECT product_id, asset_id FROM product_media
+             WHERE product_id = ANY($1) ORDER BY product_id, position",
+            &param,
+        )
+        .await
+        .map_err(repo_error)?
+    {
+        media
+            .entry(row.get(0))
+            .or_default()
+            .push(AssetId::from_uuid(row.get(1)));
     }
 
     products
@@ -368,6 +421,7 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
                     .map_err(|s| corrupt(format!("product status {s:?}")))?,
                 options: options.remove(&id).unwrap_or_default(),
                 variants: variants.remove(&id).unwrap_or_default(),
+                media: media.remove(&id).unwrap_or_default(),
             };
             Product::restore(snapshot).map_err(|e| corrupt(format!("product {id}: {e}")))
         })
@@ -412,5 +466,6 @@ fn summary_from_db(row: &Row) -> Result<ProductSummary, RepoError> {
             .map_err(|s| corrupt(format!("product status {s:?}")))?,
         variant_count: usize::try_from(variants).map_err(corrupt)?,
         price_ranges,
+        featured_media: row.get::<_, Option<Uuid>>(8).map(AssetId::from_uuid),
     })
 }

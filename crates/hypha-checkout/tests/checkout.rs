@@ -463,7 +463,8 @@ fn long_option_labels_and_skus_are_copied_whole() {
 
     let world = World::new();
     // Three options with 100-character labels: the joined variant title is longer than
-    // any single text field, and the SKU is too. Products allow both, so checkout must.
+    // any single text field. The SKU is as long as products allow (the text rule, 255
+    // characters). Checkout must copy both whole.
     let options: Vec<_> = ["a", "b", "c"]
         .iter()
         .enumerate()
@@ -481,7 +482,7 @@ fn long_option_labels_and_skus_are_copied_whole() {
         .collect();
     let poster = ProductId::from_uuid(Uuid::from_u128(1320));
     let variant = VariantId::from_uuid(Uuid::from_u128(1321));
-    let sku = "S".repeat(300);
+    let sku = "S".repeat(hypha_core::MAX_TEXT_LEN);
     let mut product = Product::new_configurable(
         poster,
         Handle::new("poster").unwrap(),

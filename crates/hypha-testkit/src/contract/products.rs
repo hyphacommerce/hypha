@@ -1,9 +1,10 @@
 use hypha_core::{
-    Currency, Money, OptionId, OptionValueId, PageLimit, PageRequest, Price, ProductId, RepoError,
-    VariantId, Version, Versioned,
+    AssetId, Currency, Money, OptionId, OptionValueId, PageLimit, PageRequest, Price, ProductId,
+    RepoError, VariantId, Version, Versioned,
 };
 use hypha_products::{
-    Handle, NewVariant, OptionValue, Product, ProductOption, ProductRepo, ProductStatus, repo::keys,
+    Handle, NewVariant, OptionValue, Product, ProductOption, ProductRepo, ProductStatus,
+    VariantPatch, repo::keys,
 };
 use uuid::Uuid;
 
@@ -31,6 +32,12 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     missing_update(&make().await).await;
     scenario("product: list pages newest first, after a cursor, by status");
     list_pages(&make().await).await;
+    scenario("product: media and variant media round trip, in order");
+    media_round_trips(&make().await).await;
+    scenario("product: get_by_sku matches the exact SKU");
+    sku_lookup(&make().await).await;
+    scenario("product: SKUs stay unique across products, on insert and update");
+    sku_key(&make().await).await;
 }
 
 // ---------- fixtures ----------
@@ -146,6 +153,17 @@ fn shirt_in_two_currencies(n: u128) -> Product {
     let usd = Price::new(Money::new(2000, Currency::Usd).unwrap()).unwrap();
     p.add_variant(variant(3, usd)).unwrap();
     p
+}
+
+fn aid(n: u128) -> AssetId {
+    AssetId::from_uuid(Uuid::from_u128(n))
+}
+
+fn with_sku(sku: &str) -> VariantPatch {
+    VariantPatch {
+        sku: Some(Some(sku.to_string())),
+        ..VariantPatch::default()
+    }
 }
 
 fn sorted(mut products: Vec<Product>) -> Vec<Product> {
@@ -334,7 +352,9 @@ async fn list_pages<R: ProductRepo>(repo: &R) {
     // 5 has variants priced in two currencies.
     for n in [3, 1, 5, 2, 4] {
         let mut p = if n == 5 {
-            shirt_in_two_currencies(n)
+            let mut p = shirt_in_two_currencies(n);
+            p.set_media(vec![aid(2), aid(1)]).unwrap();
+            p
         } else {
             simple(n, &format!("p{n}"))
         };
@@ -357,9 +377,11 @@ async fn list_pages<R: ProductRepo>(repo: &R) {
     assert_eq!(
         (
             first.items[0].variant_count,
-            first.items[0].price_ranges.len()
+            first.items[0].price_ranges.len(),
+            first.items[0].featured_media,
+            first.items[1].featured_media,
         ),
-        (3, 2)
+        (3, 2, Some(aid(2)), None)
     );
     assert!(first.has_more);
 
@@ -395,4 +417,75 @@ async fn list_pages<R: ProductRepo>(repo: &R) {
         listed(repo, Some(ProductStatus::Archived), None, 10).await,
         (vec![], false)
     );
+}
+
+async fn media_round_trips<R: ProductRepo>(repo: &R) {
+    let mut p = shirt(1, "shirt");
+    p.set_media(vec![aid(3), aid(1), aid(2)]).unwrap();
+    p.set_variant_media(vid(101), Some(aid(1))).unwrap();
+    repo.insert(&mut p).await.unwrap();
+    assert_eq!(repo.get(p.id()).await, Ok(Some(p.clone())));
+
+    // Reordered, one item gone (its variant shows nothing now), another variant set.
+    p.set_media(vec![aid(2), aid(3)]).unwrap();
+    p.set_variant_media(vid(102), Some(aid(3))).unwrap();
+    repo.update(&mut p).await.unwrap();
+    let stored = repo.get(p.id()).await.unwrap().unwrap();
+    assert_eq!(stored.media(), &[aid(2), aid(3)]);
+    assert_eq!(stored.variant(vid(101)).unwrap().media(), None);
+    assert_eq!(stored, p);
+
+    // The same asset on two products.
+    let mut other = simple(2, "mug");
+    other.set_media(vec![aid(2)]).unwrap();
+    repo.insert(&mut other).await.unwrap();
+    assert_eq!(repo.get(other.id()).await, Ok(Some(other)));
+}
+
+async fn sku_lookup<R: ProductRepo>(repo: &R) {
+    let mut s = shirt(1, "shirt");
+    repo.insert(&mut s).await.unwrap();
+    repo.insert(&mut simple(2, "mug")).await.unwrap();
+
+    assert_eq!(repo.get_by_sku("SHIRT-S-RED").await, Ok(Some(s)));
+    assert_eq!(repo.get_by_sku("shirt-s-red").await, Ok(None));
+    assert_eq!(repo.get_by_sku("SHIRT").await, Ok(None));
+}
+
+async fn sku_key<R: ProductRepo>(repo: &R) {
+    let mut first = shirt(1, "shirt");
+    repo.insert(&mut first).await.unwrap();
+
+    // Product 2 inserted with product 1's SKU.
+    let mut second = shirt(2, "shirt-2");
+    assert_eq!(
+        repo.insert(&mut second).await,
+        Err(RepoError::Duplicate(keys::VARIANT_SKU))
+    );
+    second
+        .update_variant(vid(201), with_sku("SHIRT-2"))
+        .unwrap();
+    repo.insert(&mut second).await.unwrap();
+
+    // Product 2 updated to take it.
+    let before = second.clone();
+    second
+        .update_variant(vid(202), with_sku("SHIRT-S-RED"))
+        .unwrap();
+    assert_eq!(
+        repo.update(&mut second).await,
+        Err(RepoError::Duplicate(keys::VARIANT_SKU))
+    );
+    assert_eq!(repo.get(pid(2)).await, Ok(Some(before)));
+
+    // Moving a SKU between a product's own variants in one write is fine.
+    first.update_variant(vid(101), with_sku("TEMP")).unwrap();
+    first
+        .update_variant(vid(102), with_sku("SHIRT-S-RED"))
+        .unwrap();
+    first
+        .update_variant(vid(101), with_sku("SHIRT-S-RED-2"))
+        .unwrap();
+    repo.update(&mut first).await.unwrap();
+    assert_eq!(repo.get(pid(1)).await, Ok(Some(first)));
 }

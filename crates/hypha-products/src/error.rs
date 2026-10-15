@@ -1,4 +1,4 @@
-use hypha_core::{ErrorCode, MoneyError, OptionId, OptionValueId, TextError, VariantId};
+use hypha_core::{AssetId, ErrorCode, MoneyError, OptionId, OptionValueId, TextError, VariantId};
 
 use crate::ProductStatus;
 
@@ -45,6 +45,42 @@ pub enum ProductError {
     NoVariants,
     #[error("invalid price: {0}")]
     InvalidPrice(MoneyError),
+    #[error("a product has at most {max} variants")]
+    TooManyVariants { max: usize },
+    /// The variant named in the request's URL isn't this product's.
+    #[error("variant {0} not found")]
+    VariantNotFound(VariantId),
+    /// A variant named in the request's body isn't this product's.
+    #[error("variant {0} isn't one of this product's")]
+    UnknownVariant(VariantId),
+    #[error("option {0} isn't one of this product's")]
+    UnknownOption(OptionId),
+    #[error("option {0} is listed twice")]
+    DuplicateOption(OptionId),
+    #[error("option {option:?} has the value {label:?} twice")]
+    DuplicateOptionLabel { option: String, label: String },
+    /// Removing option values would orphan these variants; naming them for removal in
+    /// the same request removes them too.
+    #[error("variants use the option values being removed: {}", join(variants))]
+    OptionValueInUse { variants: Vec<VariantId> },
+    /// After removing an option, two variants would be the same combination.
+    #[error("variants {first} and {second} would have the same options")]
+    VariantsCollide { first: VariantId, second: VariantId },
+    #[error("SKU {0:?} is used by another variant of this product")]
+    DuplicateSku(String),
+    #[error("a product has at most {max} media items")]
+    TooManyMedia { max: usize },
+    #[error("asset {0} is listed twice")]
+    DuplicateMedia(AssetId),
+    #[error("asset {0} isn't in the product's media")]
+    MediaNotInProduct(AssetId),
+}
+
+fn join(ids: &[VariantId]) -> String {
+    ids.iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl ErrorCode for HandleError {
@@ -74,6 +110,18 @@ impl ErrorCode for ProductError {
             ProductError::InvalidTransition { .. } => "invalid_status_transition",
             ProductError::NoVariants => "no_variants",
             ProductError::InvalidPrice(e) => e.code(),
+            ProductError::TooManyVariants { .. } => "too_many_variants",
+            ProductError::VariantNotFound(_) => "variant_not_found",
+            ProductError::UnknownVariant(_) => "unknown_variant",
+            ProductError::UnknownOption(_) => "unknown_option",
+            ProductError::DuplicateOption(_) => "duplicate_option",
+            ProductError::DuplicateOptionLabel { .. } => "duplicate_option_value",
+            ProductError::OptionValueInUse { .. } => "option_value_in_use",
+            ProductError::VariantsCollide { .. } => "duplicate_option_combination",
+            ProductError::DuplicateSku(_) => "sku_taken",
+            ProductError::TooManyMedia { .. } => "too_many_media",
+            ProductError::DuplicateMedia(_) => "duplicate_media",
+            ProductError::MediaNotInProduct(_) => "media_not_in_product",
         }
     }
 }

@@ -10,6 +10,7 @@ use hypha_core::{
 use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
 use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
+use hypha_products::{Product, StageProducts};
 use hypha_users::{Invite, Role, StageInvites, StageRoles, StageUsers, User, keys as user_keys};
 
 use crate::{
@@ -19,6 +20,7 @@ use crate::{
     idempotency::insert_record,
     inventory_items,
     orders::unique as unique_order,
+    products::unique as unique_product,
     table::{insert_row, no_unique_keys, update_row},
     users::{unique_invite, unique_role, unique_user},
 };
@@ -31,6 +33,7 @@ pub struct InMemoryBatch {
     new_carts: Vec<Cart>,
     new_customers: Vec<Customer>,
     carts: Vec<Cart>,
+    products: Vec<Product>,
     inventory_items: Vec<InventoryItem>,
     idempotency: Vec<IdempotencyRecord>,
     new_identities: Vec<Identity>,
@@ -135,6 +138,13 @@ impl StageCarts for InMemoryBatch {
     }
 }
 
+impl StageProducts for InMemoryBatch {
+    fn update_product(&mut self, product: &mut Product) {
+        self.products.push(product.clone());
+        product.set_version(product.version().next());
+    }
+}
+
 impl StageInventoryItems for InMemoryBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
         self.inventory_items.push(item.clone());
@@ -177,6 +187,7 @@ impl HasBatch for InMemoryPorts {
     async fn commit(&self, batch: InMemoryBatch) -> Result<(), RepoError> {
         let mut orders = self.orders.orders.lock();
         let mut carts = self.carts.carts.lock();
+        let mut products = self.products.products.lock();
         let mut items = self.inventory_items.items.lock();
         let mut customers = self.customers.customers.lock();
         let mut records = self.idempotency.lock();
@@ -189,6 +200,7 @@ impl HasBatch for InMemoryPorts {
         let before = (
             orders.clone(),
             carts.clone(),
+            products.clone(),
             items.clone(),
             customers.clone(),
             records.clone(),
@@ -223,6 +235,9 @@ impl HasBatch for InMemoryPorts {
             }
             for mut cart in batch.carts {
                 update_row(&mut carts, cart.id(), &mut cart, &no_unique_keys)?;
+            }
+            for mut product in batch.products {
+                update_row(&mut products, product.id(), &mut product, &unique_product)?;
             }
             for mut item in batch.inventory_items {
                 update_row(&mut items, item.id(), &mut item, &inventory_items::unique)?;
@@ -327,7 +342,7 @@ impl HasBatch for InMemoryPorts {
             Ok(())
         })();
         if written.is_err() {
-            (*orders, *carts, *items, *customers, *records) = before;
+            (*orders, *carts, *products, *items, *customers, *records) = before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written

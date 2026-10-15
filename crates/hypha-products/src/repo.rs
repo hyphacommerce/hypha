@@ -9,6 +9,8 @@ pub mod keys {
     pub const HANDLE: &str = "product_handle";
     /// Variant IDs are unique across all products, not just within one.
     pub const VARIANT_ID: &str = "variant_id";
+    /// A set SKU is unique across all products' variants (design note 0014, Q4).
+    pub const VARIANT_SKU: &str = "variant_sku";
 }
 
 /// Option and option value IDs are generated, so they are assumed unique across products
@@ -23,6 +25,8 @@ pub trait ProductRepo {
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError>;
     /// The product that owns `variant`.
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError>;
+    /// The product with a variant whose SKU is exactly `sku`.
+    async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError>;
     /// A page of product summaries, newest first (by ID; design note 0012), only those
     /// with `status` when given. Each equals `Product::summary` of the stored product;
     /// an adapter may compute them without loading whole products.
@@ -37,6 +41,15 @@ pub trait ProductRepo {
     /// Stores changes and bumps the version, unless the stored product has a different
     /// version than `product` (then `StaleVersion`). Also enforces `keys`.
     async fn update(&self, product: &mut Product) -> Result<(), RepoError>;
+}
+
+/// Stages product writes in a `hypha_core::HasBatch` batch; the adapter's batch type
+/// implements it.
+pub trait StageProducts {
+    /// Stages what `ProductRepo::update` would write, and moves `product` to the version
+    /// it has once the batch commits. Enforces `keys` on commit. If the commit fails,
+    /// `product` is stale: load it again.
+    fn update_product(&mut self, product: &mut Product);
 }
 
 /// Whatever holds the `ProductRepo`: a host's per-request ports, a test world. Commands

@@ -1,7 +1,8 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
-    Money, OptionId, OptionValueId, Price, ProductId, VariantId, Version, Versioned, required_text,
+    AssetId, Money, OptionId, OptionValueId, Price, ProductId, VariantId, Version, Versioned,
+    optional_text, required_text,
 };
 
 use crate::{
@@ -10,6 +11,10 @@ use crate::{
     option::{OptionValue, ProductOption},
     variant::{NewVariant, Variant},
 };
+
+mod edit;
+
+pub use edit::{OptionDraft, OptionValueDraft};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProductStatus {
@@ -61,6 +66,9 @@ pub struct Product {
     status: ProductStatus,
     options: Vec<ProductOption>,
     variants: Vec<Variant>,
+    /// Ordered; the first is the featured item. Asset IDs only: products don't know
+    /// assets (design note 0014, E8).
+    media: Vec<AssetId>,
 }
 
 impl Versioned for Product {
@@ -74,6 +82,11 @@ impl Versioned for Product {
 }
 
 impl Product {
+    /// Keeps a product one load, however large the catalog (design note 0014, Q5).
+    pub const MAX_VARIANTS: usize = 2048;
+    /// Shopify's limit (design note 0013, section 5).
+    pub const MAX_MEDIA: usize = 250;
+
     pub fn new_simple(
         id: ProductId,
         handle: Handle,
@@ -89,6 +102,7 @@ impl Product {
             status: ProductStatus::Draft,
             options: Vec::new(),
             variants: vec![Variant::new(variant_id, None, price, Vec::new())],
+            media: Vec::new(),
         })
     }
 
@@ -112,6 +126,7 @@ impl Product {
             status: ProductStatus::Draft,
             options,
             variants: Vec::new(),
+            media: Vec::new(),
         };
         product.add_variant(first_variant)?;
         Ok(product)
@@ -121,15 +136,35 @@ impl Product {
         if self.variants.iter().any(|v| v.id() == new.id) {
             return Err(ProductError::DuplicateVariantId(new.id));
         }
-
-        if new.selections.len() != self.options.len() {
-            return Err(ProductError::SelectionCountMismatch {
-                expected: self.options.len(),
-                got: new.selections.len(),
+        self.check_selections(&new.selections, None)?;
+        let sku = optional_text("sku", new.sku)?;
+        self.check_sku(sku.as_deref(), None)?;
+        if self.variants.len() >= Self::MAX_VARIANTS {
+            return Err(ProductError::TooManyVariants {
+                max: Self::MAX_VARIANTS,
             });
         }
 
-        for (option, selection) in self.options.iter().zip(&new.selections) {
+        self.variants
+            .push(Variant::new(new.id, sku, new.price, new.selections));
+        Ok(())
+    }
+
+    /// `selections` name one value of each option, in option order, and no variant but
+    /// `except` has the same combination.
+    fn check_selections(
+        &self,
+        selections: &[OptionValueId],
+        except: Option<VariantId>,
+    ) -> Result<(), ProductError> {
+        if selections.len() != self.options.len() {
+            return Err(ProductError::SelectionCountMismatch {
+                expected: self.options.len(),
+                got: selections.len(),
+            });
+        }
+
+        for (option, selection) in self.options.iter().zip(selections) {
             if !option.has_value(*selection) {
                 return Err(ProductError::UnknownOptionValue(*selection));
             }
@@ -138,14 +173,27 @@ impl Product {
         if self
             .variants
             .iter()
-            .any(|v| v.selections() == new.selections.as_slice())
+            .any(|v| Some(v.id()) != except && v.selections() == selections)
         {
             return Err(ProductError::DuplicateCombination);
         }
-
-        self.variants
-            .push(Variant::new(new.id, new.sku, new.price, new.selections));
         Ok(())
+    }
+
+    /// No variant but `except` has `sku`. Other products are the repository's key
+    /// (`keys::VARIANT_SKU`).
+    fn check_sku(&self, sku: Option<&str>, except: Option<VariantId>) -> Result<(), ProductError> {
+        match sku {
+            Some(sku)
+                if self
+                    .variants
+                    .iter()
+                    .any(|v| Some(v.id()) != except && v.sku() == Some(sku)) =>
+            {
+                Err(ProductError::DuplicateSku(sku.to_string()))
+            }
+            _ => Ok(()),
+        }
     }
 
     pub fn set_status(&mut self, to: ProductStatus) -> Result<(), ProductError> {
@@ -191,6 +239,19 @@ impl Product {
         &self.variants
     }
 
+    pub fn variant(&self, id: VariantId) -> Option<&Variant> {
+        self.variants.iter().find(|v| v.id() == id)
+    }
+
+    /// The media list, in order; the first is the featured item.
+    pub fn media(&self) -> &[AssetId] {
+        &self.media
+    }
+
+    pub fn featured_media(&self) -> Option<AssetId> {
+        self.media.first().copied()
+    }
+
     /// How `variant` is named next to the product title: its option values in option
     /// order, joined with " / " (`"M / Blue"`), as Shopify does. `None` for a simple
     /// product's variant, which has no options, and for a variant this product doesn't
@@ -217,18 +278,31 @@ impl Product {
     }
 }
 
-/// Option rules shared by `new_configurable` and `restore`: every option has values,
-/// option names are unique, and value IDs are unique across all options.
+/// Option rules shared by `new_configurable`, `set_options` and `restore`: names and
+/// labels follow the shared text rule, every option has values, option names are unique
+/// and so are labels within an option (both ignoring case), and value IDs are unique
+/// across all options.
 fn validate_options(options: &[ProductOption]) -> Result<(), ProductError> {
     for option in options {
+        required_text("option name", option.name())?;
         if option.values().is_empty() {
             return Err(ProductError::EmptyOption(option.id()));
+        }
+        let mut seen_labels = HashSet::new();
+        for value in option.values() {
+            required_text("option value", value.label())?;
+            if !seen_labels.insert(value.label().to_lowercase()) {
+                return Err(ProductError::DuplicateOptionLabel {
+                    option: option.name().to_string(),
+                    label: value.label().to_string(),
+                });
+            }
         }
     }
 
     let mut seen_names = HashSet::new();
     for option in options {
-        if !seen_names.insert(option.name()) {
+        if !seen_names.insert(option.name().to_lowercase()) {
             return Err(ProductError::DuplicateOptionName(option.name().to_string()));
         }
     }
@@ -259,6 +333,8 @@ pub struct ProductSnapshot {
     pub options: Vec<OptionSnapshot>,
     /// In display order. A simple product has exactly one, with no selections.
     pub variants: Vec<VariantSnapshot>,
+    /// In order; the first is featured.
+    pub media: Vec<AssetId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,6 +357,8 @@ pub struct VariantSnapshot {
     pub base_price: Money,
     /// One value per option, in option order.
     pub selections: Vec<OptionValueId>,
+    /// One of the product's `media`.
+    pub media: Option<AssetId>,
 }
 
 impl Product {
@@ -316,8 +394,10 @@ impl Product {
                     sku: v.sku().map(str::to_string),
                     base_price: v.base_price().money(),
                     selections: v.selections().to_vec(),
+                    media: v.media(),
                 })
                 .collect(),
+            media: self.media.clone(),
         }
     }
 
@@ -347,9 +427,11 @@ impl Product {
             status: s.status,
             options,
             variants: Vec::with_capacity(s.variants.len()),
+            media: Vec::new(),
         };
-        // add_variant checks IDs, selection count, option values and unique combinations;
-        // with no options it allows exactly one variant (the simple-product shape).
+        product.set_media(s.media)?;
+        // add_variant checks IDs, selection count, option values, unique combinations and
+        // SKUs; with no options it allows exactly one variant (the simple-product shape).
         for v in s.variants {
             let price = Price::new(v.base_price).map_err(ProductError::InvalidPrice)?;
             product.add_variant(NewVariant {
@@ -358,6 +440,7 @@ impl Product {
                 price,
                 selections: v.selections,
             })?;
+            product.set_variant_media(v.id, v.media)?;
         }
         if product.variants.is_empty() {
             return Err(ProductError::NoVariants);
@@ -753,6 +836,7 @@ mod tests {
             sku: None,
             base_price: price().money(),
             selections: vec![],
+            media: None,
         });
         assert_eq!(Product::restore(s), Err(ProductError::DuplicateCombination));
     }

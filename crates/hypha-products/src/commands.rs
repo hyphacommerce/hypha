@@ -1,11 +1,12 @@
 use hypha_core::{
-    AuthError, Ctx, ErrorCode, IdGenerator, Money, MoneyError, Page, PageRequest, Price, ProductId,
-    RepoError, Scope, VariantId, report_duplicate,
+    AuthError, Ctx, ErrorCode, IdGenerator, Money, MoneyError, OptionValueId, Page, PageRequest,
+    Price, ProductId, RepoError, Scope, VariantId, report_duplicate,
 };
 use thiserror::Error;
 
 use crate::{
-    Handle, Product, ProductError, ProductRepo, ProductStatus, ProductSummary, repo::keys,
+    Handle, NewVariant, OptionDraft, Product, ProductError, ProductRepo, ProductStatus,
+    ProductSummary, VariantPatch, repo::keys,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -22,6 +23,8 @@ pub enum CommandError {
     HandleTaken { handle: Handle, product: ProductId },
     #[error("product {0} not found")]
     ProductNotFound(ProductId),
+    #[error("SKU {sku:?} is already used by product {product}")]
+    SkuTaken { sku: String, product: ProductId },
 }
 
 impl ErrorCode for CommandError {
@@ -33,6 +36,7 @@ impl ErrorCode for CommandError {
             CommandError::Repo(e) => e.code(),
             CommandError::HandleTaken { .. } => "handle_taken",
             CommandError::ProductNotFound(_) => "product_not_found",
+            CommandError::SkuTaken { .. } => "sku_taken",
         }
     }
 }
@@ -104,7 +108,7 @@ pub async fn get_product<R: ProductRepo>(
     id: ProductId,
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsRead)?;
-    repo.get(id).await?.ok_or(CommandError::ProductNotFound(id))
+    load(repo, id).await
 }
 
 /// Moves a product to `status`, following the allowed transitions
@@ -117,11 +121,196 @@ pub async fn set_product_status<R: ProductRepo>(
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsWrite)?;
 
-    let mut product = repo
-        .get(id)
-        .await?
-        .ok_or(CommandError::ProductNotFound(id))?;
+    let mut product = load(repo, id).await?;
     product.set_status(status)?;
     repo.update(&mut product).await?;
     Ok(product)
+}
+
+/// Changes only the fields that are `Some`, like a JSON Merge Patch.
+#[derive(Debug, Default)]
+pub struct UpdateProduct {
+    pub title: Option<String>,
+    pub handle: Option<String>,
+}
+
+/// Renames a product or changes its handle (design note 0014, section 2).
+pub async fn update_product<R: ProductRepo>(
+    ctx: &Ctx,
+    repo: &R,
+    id: ProductId,
+    input: UpdateProduct,
+) -> Result<Product, CommandError> {
+    ctx.require(Scope::ProductsWrite)?;
+    let handle = input.handle.as_deref().map(Handle::new).transpose()?;
+
+    let mut product = load(repo, id).await?;
+    if let Some(title) = &input.title {
+        product.rename(title)?;
+    }
+    if let Some(handle) = handle
+        && &handle != product.handle()
+    {
+        if let Some(taken) = handle_taken(repo, &handle).await? {
+            return Err(taken);
+        }
+        product.set_handle(handle);
+    }
+    save(repo, &mut product, None).await?;
+    Ok(product)
+}
+
+pub struct SetProductOptions {
+    /// The options in order: existing ones by ID, new ones without.
+    pub options: Vec<OptionDraft>,
+    /// Variants to remove in the same write: those using a value being removed.
+    pub remove_variants: Vec<VariantId>,
+}
+
+/// Replaces a product's options and values (design note 0014, section 3; the rules are
+/// `Product::set_options`'s).
+pub async fn set_product_options<R: ProductRepo, I: IdGenerator>(
+    ctx: &Ctx,
+    repo: &R,
+    ids: &I,
+    id: ProductId,
+    input: SetProductOptions,
+) -> Result<Product, CommandError> {
+    ctx.require(Scope::ProductsWrite)?;
+    let mut product = load(repo, id).await?;
+    product.set_options(input.options, &input.remove_variants, ids)?;
+    save(repo, &mut product, None).await?;
+    Ok(product)
+}
+
+pub struct AddVariant {
+    pub sku: Option<String>,
+    pub price: Money,
+    /// One value per option, in option order.
+    pub selections: Vec<OptionValueId>,
+}
+
+/// Adds one variant: the combination a merchant sells, never all of them (E5).
+pub async fn add_product_variant<R: ProductRepo, I: IdGenerator>(
+    ctx: &Ctx,
+    repo: &R,
+    ids: &I,
+    id: ProductId,
+    input: AddVariant,
+) -> Result<Product, CommandError> {
+    ctx.require(Scope::ProductsWrite)?;
+    let price = Price::new(input.price)?;
+    let mut product = load(repo, id).await?;
+    let variant = VariantId::from_uuid(ids.new_uuid());
+    product.add_variant(NewVariant {
+        id: variant,
+        sku: input.sku,
+        price,
+        selections: input.selections,
+    })?;
+    let sku = product
+        .variant(variant)
+        .and_then(|v| v.sku())
+        .map(str::to_string);
+    save(repo, &mut product, sku.as_deref()).await?;
+    Ok(product)
+}
+
+/// Changes only the fields that are `Some`; `sku: Some(None)` clears the SKU.
+#[derive(Debug, Default)]
+pub struct UpdateVariant {
+    pub sku: Option<Option<String>>,
+    pub price: Option<Money>,
+    pub selections: Option<Vec<OptionValueId>>,
+}
+
+pub async fn update_product_variant<R: ProductRepo>(
+    ctx: &Ctx,
+    repo: &R,
+    id: ProductId,
+    variant: VariantId,
+    input: UpdateVariant,
+) -> Result<Product, CommandError> {
+    ctx.require(Scope::ProductsWrite)?;
+    let price = input.price.map(Price::new).transpose()?;
+    let mut product = load(repo, id).await?;
+    let sku_before = product
+        .variant(variant)
+        .and_then(|v| v.sku())
+        .map(str::to_string);
+    product.update_variant(
+        variant,
+        VariantPatch {
+            sku: input.sku,
+            price,
+            selections: input.selections,
+        },
+    )?;
+    let sku = product
+        .variant(variant)
+        .and_then(|v| v.sku())
+        .map(str::to_string);
+    let changed = sku.as_deref().filter(|_| sku != sku_before);
+    save(repo, &mut product, changed).await?;
+    Ok(product)
+}
+
+/// Removes a variant. Price lists and inventory keep its ID until the outbox cleans
+/// them up (design note 0014, section 4); carts show it as unavailable.
+pub async fn remove_product_variant<R: ProductRepo>(
+    ctx: &Ctx,
+    repo: &R,
+    id: ProductId,
+    variant: VariantId,
+) -> Result<Product, CommandError> {
+    ctx.require(Scope::ProductsWrite)?;
+    let mut product = load(repo, id).await?;
+    product.remove_variant(variant)?;
+    save(repo, &mut product, None).await?;
+    Ok(product)
+}
+
+async fn load<R: ProductRepo>(repo: &R, id: ProductId) -> Result<Product, CommandError> {
+    repo.get(id).await?.ok_or(CommandError::ProductNotFound(id))
+}
+
+/// Writes a changed product. `new_sku` is a SKU this change gave a variant: it's checked
+/// against other products first, and a concurrent write that takes it first reports the
+/// same `SkuTaken`, like a taken handle.
+async fn save<R: ProductRepo>(
+    repo: &R,
+    product: &mut Product,
+    new_sku: Option<&str>,
+) -> Result<(), CommandError> {
+    if let Some(sku) = new_sku
+        && let Some(taken) = sku_taken(repo, product.id(), sku).await?
+    {
+        return Err(taken);
+    }
+    let written = repo.update(product).await;
+    match (written, new_sku) {
+        (Err(RepoError::Duplicate(key)), Some(sku)) if key == keys::VARIANT_SKU => {
+            let taken = sku_taken(repo, product.id(), sku).await?;
+            Err(taken.unwrap_or(RepoError::Duplicate(key).into()))
+        }
+        (written, _) => {
+            report_duplicate(written, keys::HANDLE, handle_taken(repo, product.handle())).await
+        }
+    }
+}
+
+/// `SkuTaken` naming the other product that has `sku`, if one does.
+async fn sku_taken<R: ProductRepo>(
+    repo: &R,
+    own: ProductId,
+    sku: &str,
+) -> Result<Option<CommandError>, CommandError> {
+    Ok(repo
+        .get_by_sku(sku)
+        .await?
+        .filter(|other| other.id() != own)
+        .map(|other| CommandError::SkuTaken {
+            sku: sku.to_string(),
+            product: other.id(),
+        }))
 }

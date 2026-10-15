@@ -3,7 +3,7 @@
 //! aggregate: adapters may compute it in storage (Postgres aggregates it in SQL), and
 //! the repository contract checks it equals `Product::summary`.
 
-use hypha_core::{Currency, Price, ProductId};
+use hypha_core::{AssetId, Currency, Price, ProductId};
 
 use crate::{Handle, Product, ProductStatus};
 
@@ -17,6 +17,8 @@ pub struct ProductSummary {
     /// The lowest and highest base price in each currency the variants are priced in,
     /// ordered by currency code (variants may be priced in different currencies).
     pub price_ranges: Vec<PriceRange>,
+    /// The first item of the product's media (design note 0014).
+    pub featured_media: Option<AssetId>,
 }
 
 /// The lowest and highest base price among variants priced in one currency; `min` and
@@ -58,6 +60,7 @@ impl Product {
             status: self.status(),
             variant_count: self.variants().len(),
             price_ranges,
+            featured_media: self.featured_media(),
         }
     }
 }
