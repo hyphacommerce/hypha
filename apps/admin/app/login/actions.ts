@@ -10,6 +10,7 @@ import {
   publicClient,
   sessionClient,
   startSession,
+  takeNext,
 } from "@/lib/hypha";
 
 export type FormState = { error?: string };
@@ -24,7 +25,7 @@ export async function login(
   if (error) return { error: describe(error) };
   if (data.status === "authenticated") {
     await startSession(data.session);
-    redirect("/");
+    redirect(await takeNext());
   }
   await holdChallenge(data.challenge);
   redirect("/login/mfa");
@@ -41,7 +42,7 @@ export async function finishLogin(_previous: FormState, code: string): Promise<F
   if (error) return { error: describe(error) };
   if (data.status !== "authenticated") redirect("/login");
   await startSession(data.session);
-  redirect("/");
+  redirect(await takeNext());
 }
 
 /** Ends the session on the API and forgets it here. */

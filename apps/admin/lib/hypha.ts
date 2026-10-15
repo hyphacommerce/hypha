@@ -9,6 +9,8 @@ import { notFound, redirect } from "next/navigation";
 const SESSION_COOKIE = "hypha_admin_session";
 /** A pending login's second-factor challenge, for the few minutes it lives. */
 const CHALLENGE_COOKIE = "hypha_admin_challenge";
+/** Where to go after signing in again, set when a session expired. */
+const NEXT_COOKIE = "hypha_admin_next";
 
 function apiUrl(): string {
   const url = process.env.HYPHA_API_URL;
@@ -22,10 +24,19 @@ function apiUrl(): string {
  * The user's address, passed on so Hypha's per-address rate limits (design note 0009)
  * count the user, not the admin server. Hypha only believes it when the admin's address
  * is in `HYPHA_TRUSTED_PROXIES`.
+ *
+ * Only from a source the browser can't forge: Cloudflare's `cf-connecting-ip` (set on
+ * Workers), or, when `ADMIN_TRUST_X_FORWARDED_FOR=true` because the admin runs behind
+ * its own proxy, the last `x-forwarded-for` entry (the one that proxy appended; earlier
+ * entries are whatever the client sent). Otherwise nothing, and the limits count the
+ * admin server's address: stricter, never bypassable.
  */
 async function forwardedFor(): Promise<Record<string, string>> {
   const h = await headers();
-  const ip = h.get("cf-connecting-ip") ?? h.get("x-forwarded-for")?.split(",")[0]?.trim();
+  let ip = h.get("cf-connecting-ip")?.trim();
+  if (!ip && process.env.ADMIN_TRUST_X_FORWARDED_FOR === "true") {
+    ip = h.get("x-forwarded-for")?.split(",").at(-1)?.trim();
+  }
   return ip ? { "x-forwarded-for": ip } : {};
 }
 
@@ -34,11 +45,67 @@ export async function publicClient() {
   return createAdminClient(apiUrl(), undefined, await forwardedFor());
 }
 
-/** A client acting as the signed-in staff member; without a session, to the login page. */
+/**
+ * A client acting as the signed-in staff member; without a session, to the login page.
+ * A session the API no longer accepts (expired, revoked, user disabled) answers 401 to
+ * any call: then the user goes to `/session-expired`, which clears the cookie, and
+ * after signing in again comes back to the page they were on.
+ */
 export async function sessionClient() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) redirect("/login");
-  return createAdminClient(apiUrl(), token);
+  const client = createAdminClient(apiUrl(), token);
+  client.use({
+    async onResponse({ response }) {
+      if (response.status === 401) await sessionExpired();
+      return undefined;
+    },
+  });
+  return client;
+}
+
+/**
+ * Sends the user to sign in again. Pages can't change cookies while rendering, so a
+ * route handler (`app/session-expired/route.ts`) clears them. The way back is the
+ * page the request came from (for a server action, the page it ran on).
+ */
+async function sessionExpired(): Promise<never> {
+  let back = "/";
+  const referer = (await headers()).get("referer");
+  if (referer) {
+    try {
+      const url = new URL(referer);
+      back = url.pathname + url.search;
+    } catch {
+      // Not a URL: back to the start.
+    }
+  }
+  redirect(`/session-expired?next=${encodeURIComponent(safeNext(back))}`);
+}
+
+/**
+ * A path on this admin to go to after signing in, or "/". Only plain local paths: never
+ * another origin (`//evil.example`, `/\\evil.example`), nor the login pages themselves.
+ */
+export function safeNext(path: string | null | undefined): string {
+  if (!path || !path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\")) {
+    return "/";
+  }
+  if (path.startsWith("/login") || path.startsWith("/session-expired")) return "/";
+  return path;
+}
+
+/** Remembers where to go after the next login, for a few minutes. */
+export async function rememberNext(path: string) {
+  (await cookies()).set(NEXT_COOKIE, safeNext(path), { ...cookieBase, maxAge: 15 * 60 });
+}
+
+/** Where to go now that the user signed in: the remembered page, once, or "/". */
+export async function takeNext(): Promise<string> {
+  const jar = await cookies();
+  const next = safeNext(jar.get(NEXT_COOKIE)?.value);
+  jar.delete(NEXT_COOKIE);
+  return next;
 }
 
 const cookieBase = {
@@ -73,21 +140,19 @@ export async function heldChallenge(): Promise<string | undefined> {
 
 /**
  * The signed-in staff member, for pages behind the login. A session the API no longer
- * accepts (expired, revoked, user disabled) sends the user to the login page; the stale
- * cookie is replaced at the next login.
+ * accepts goes to `/session-expired` (`sessionClient`).
  */
 export async function requireStaff(): Promise<AdminSchemas["MeResponse"]> {
   const client = await sessionClient();
   const { data, response } = await client.GET("/admin/me");
   if (data) return data;
-  if (response.status === 401) redirect("/login");
   throw new Error(`GET /admin/me failed with ${response.status}`);
 }
 
 /**
- * The data of an API call a page needs. A session the API no longer accepts goes to the
- * login page and a missing resource to the 404 page; anything else is a bug or an
- * outage, so it throws to the error page.
+ * The data of an API call a page needs. A missing resource goes to the 404 page (a
+ * session the API no longer accepts never gets here: `sessionClient` redirects);
+ * anything else is a bug or an outage, so it throws to the error page.
  */
 export function loaded<T>(result: {
   data?: T;
@@ -95,7 +160,6 @@ export function loaded<T>(result: {
   response: Response;
 }): T {
   if (result.data !== undefined) return result.data;
-  if (result.response.status === 401) redirect("/login");
   if (result.response.status === 404) notFound();
   throw new Error(
     `${result.response.url} failed with ${result.response.status} ${result.error?.code ?? ""}`,

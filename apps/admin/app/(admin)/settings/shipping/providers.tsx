@@ -118,7 +118,8 @@ function ProviderRow({
 }) {
   const setError = (error?: string) =>
     onMessage(error ? { text: error, isError: true } : undefined);
-  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  // Both actions break a live app at once, so each asks first.
+  const [confirming, setConfirming] = useState<"delete" | "rotate">();
   const [isPending, startTransition] = useTransition();
   const [isTesting, startTest] = useTransition();
 
@@ -167,9 +168,9 @@ function ProviderRow({
       </TableCell>
       <TableCell>
         <HStack gap={1} hAlign="end" vAlign="center">
-          {isConfirmingDelete ? (
+          {confirming === "delete" ? (
             <>
-              <Button label="Cancel" size="sm" variant="ghost" onClick={() => setIsConfirmingDelete(false)} />
+              <Button label="Cancel" size="sm" variant="ghost" onClick={() => setConfirming(undefined)} />
               <Button
                 label="Delete app"
                 size="sm"
@@ -178,7 +179,28 @@ function ProviderRow({
                 onClick={() =>
                   startTransition(async () => {
                     setError((await deleteProvider(provider.key)).error);
-                    setIsConfirmingDelete(false);
+                    setConfirming(undefined);
+                  })
+                }
+              />
+            </>
+          ) : confirming === "rotate" ? (
+            <>
+              <Text type="supporting" color="secondary">
+                The current secret stops working at once.
+              </Text>
+              <Button label="Cancel" size="sm" variant="ghost" onClick={() => setConfirming(undefined)} />
+              <Button
+                label="New secret"
+                size="sm"
+                variant="destructive"
+                isLoading={isPending}
+                onClick={() =>
+                  startTransition(async () => {
+                    const result = await rotateSecret(provider.key);
+                    setError(result.error);
+                    if (result.secret) onSecret(result.secret);
+                    setConfirming(undefined);
                   })
                 }
               />
@@ -199,20 +221,14 @@ function ProviderRow({
                 variant="ghost"
                 tooltip="New secret: the current one stops working at once."
                 isDisabled={isPending}
-                onClick={() =>
-                  startTransition(async () => {
-                    const result = await rotateSecret(provider.key);
-                    setError(result.error);
-                    if (result.secret) onSecret(result.secret);
-                  })
-                }
+                onClick={() => setConfirming("rotate")}
               />
               <IconButton
                 label={`Delete ${provider.name}`}
                 icon={<TrashIcon />}
                 size="sm"
                 variant="ghost"
-                onClick={() => setIsConfirmingDelete(true)}
+                onClick={() => setConfirming("delete")}
               />
             </>
           )}
