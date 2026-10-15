@@ -54,3 +54,15 @@ export function formatDateTime(rfc3339: string): string {
     timeZone: "UTC",
   }).format(new Date(rfc3339))} UTC`;
 }
+
+/** "980 B", "1.4 MB": file sizes in powers of 1024, one decimal above a kilobyte. */
+export function formatBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return unit === 0 ? `${value} B` : `${value.toFixed(1)} ${units[unit]}`;
+}

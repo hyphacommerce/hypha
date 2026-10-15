@@ -117,6 +117,14 @@ export function describe(error: ApiError): string {
       return "Another product already uses that handle. Pick a different one.";
     case "missing_scope":
       return "Your role doesn't allow this. Ask the store owner for access.";
+    case "unsupported_media_type":
+      return "That file type isn't supported. Use JPEG, PNG, WebP, AVIF, GIF, MP4, WebM, MOV or PDF.";
+    case "file_too_large":
+      return "That file is too large: images up to 20 MB, videos up to 1 GB, PDFs up to 100 MB.";
+    case "upload_mismatch":
+      return "The file's contents don't match its type. Export it again and retry.";
+    case "media_not_configured":
+      return "File storage isn't set up for this store yet.";
     case "concurrent_modification":
       return "Someone else changed this at the same time. Reload and try again.";
     case "rate_limited": {

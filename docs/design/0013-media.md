@@ -1,6 +1,7 @@
 # 0013: Media, file storage and delivery
 
-- **Status:** Accepted (2026-10-15); building phase 1 (section 10). Danilo set the direction in conversation: media is a
+- **Status:** Accepted (2026-10-15). Phase 1 built (branch `feat/media`); changes made
+  while building are marked in place. Danilo set the direction in conversation: media is a
   first-class part of Hypha, like Shopify's; an S3 server in Docker for local development
   (MinIO was the pick; see M10), so S3
   incompatibilities show up early; every asset knows where it is used; proper image
@@ -67,7 +68,7 @@ storage can move into a spore later without changing the model.
 | `mime_type`, `byte_size`, `checksum` | From the stored object. The SHA-256 checksum finds duplicates (the library offers the existing asset instead of a second copy) |
 | `width`, `height` | Images and videos. Sizes for display come from URL transforms (section 4) |
 | `duration_ms` | Videos, when known. *Later* |
-| `alt`, `title` | Up to 512 characters each. `alt` describes the image for screen readers and search engines; `title` is the merchant's label in the library |
+| `alt`, `title` | Up to 255 characters each (the shared text rule). `alt` describes the image for screen readers and search engines; `title` is the merchant's label in the library |
 | `visibility` | `public` or `private` (M6) |
 | `created_at`, `updated_at`, `version` | `Versioned` like every aggregate |
 
@@ -234,8 +235,12 @@ URL the admin's server got from Hypha, so the session token stays server-side (0
 ## 10. Phases
 
 1. **Assets and storage:** `hypha-media`, `BlobStore` and its contract, the S3 adapter,
-   MinIO in compose, uploads, `plain` and Cloudflare `MediaUrls`, the asset routes, the
-   admin Media page.
+   an S3 server in compose, uploads, public, Cloudflare and signed URLs, the asset
+   routes, the admin Media page. *Built* (2026-10-15): asset responses carry `url` and,
+   for images, `thumbnail_url` (at most 400 px wide with Cloudflare, else the original);
+   visibility is chosen at upload and can't change yet (moving a file between public and
+   private is phase 3); `replace` and "used by" come with phase 2. Alt text and title
+   follow the shared text rule (255 characters).
 2. **Products:** attachments, usages, the delete guard, media in product responses and
    list summaries, the product page's Media section.
 3. **Library and sources:** imgproxy adapter, imports by URL, external-asset commands for
