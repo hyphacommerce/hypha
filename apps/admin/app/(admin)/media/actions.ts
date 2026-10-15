@@ -42,13 +42,16 @@ export async function completeUpload(id: string): Promise<FormState> {
 
 export async function updateAsset(
   _previous: FormState,
-  input: { id: string; alt: string; title: string },
+  input: { id: string; alt?: string; title: string },
 ): Promise<FormState> {
   const client = await sessionClient();
-  // Blank clears (the API trims), so the form can send both fields every time.
+  // Blank clears (the API trims). Without `alt` (the form only edits it for images) the
+  // stored alt text stays as it is: Merge Patch leaves absent fields alone.
+  const body =
+    input.alt === undefined ? { title: input.title } : { alt: input.alt, title: input.title };
   const { error } = await client.PATCH("/admin/assets/{id}", {
     params: { path: { id: input.id } },
-    body: { alt: input.alt, title: input.title },
+    body,
   });
   if (error) return { error: describe(error) };
   revalidatePath(`/media/${input.id}`);

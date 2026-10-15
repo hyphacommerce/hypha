@@ -17,7 +17,9 @@ export function AssetForm(props: { id: string; alt: string; title: string; hasAl
 
   const submit = () => {
     if (!isChanged) return;
-    startTransition(() => save({ id: props.id, alt, title }));
+    startTransition(() =>
+      save({ id: props.id, alt: props.hasAlt ? alt : undefined, title }),
+    );
   };
 
   return (
