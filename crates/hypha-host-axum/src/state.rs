@@ -220,8 +220,10 @@ pub struct AppState<S> {
     /// `HYPHA_S3_ENDPOINT`, and the asset routes then answer 503.
     pub media: Option<crate::media::Media>,
     /// For rate callbacks to external apps (design note 0015); each call sets its own
-    /// timeout, the provider's.
+    /// timeout, the provider's. Built by `outbound::client` under `outbound`.
     pub http: reqwest::Client,
+    /// Whether those calls may reach private addresses (`HYPHA_ALLOW_PRIVATE_CALLBACKS`).
+    pub outbound: crate::outbound::OutboundPolicy,
 }
 
 impl<S: Storage> AppState<S> {
@@ -246,21 +248,11 @@ impl<S> AppState<S> {
         crate::shipping::HostRates {
             apps,
             http: &self.http,
+            outbound: self.outbound,
             env: &self.env,
             clock: &self.clock,
         }
     }
-}
-
-/// The client rate callbacks use: no overall timeout (each request sets its provider's),
-/// a short connect one, and no redirects: a signed request goes only where the merchant
-/// pointed it, and a redirect answer counts as a failure.
-pub fn rate_callback_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(3))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| format!("cannot build the HTTP client: {e}"))
 }
 
 pub type SharedState<S> = Arc<AppState<S>>;
@@ -328,6 +320,22 @@ impl PgConnection for PooledClient {
 /// How long a request waits for a pooled connection (or for a new one to open).
 const POOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// TLS for Postgres, verified against the operating system's trust store (as reqwest's
+/// is). The URL's `sslmode` decides whether it's used: `prefer` (the default) tries TLS
+/// and falls back to plain, which the compose database needs; `require` refuses to
+/// connect without it, as managed databases (Neon, RDS, Supabase) expect. A private CA
+/// (RDS's) goes into the system's trust store.
+fn postgres_tls() -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
+    use rustls_platform_verifier::BuilderVerifierExt;
+    let provider = std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .and_then(|b| b.with_platform_verifier())
+        .map_err(|e| format!("cannot set up TLS for Postgres: {e}"))?
+        .with_no_client_auth();
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
+}
+
 pub struct PgStorage {
     pool: deadpool_postgres::Pool,
 }
@@ -340,7 +348,7 @@ impl PgStorage {
         let config = database_config(url).map_err(|e| format!("invalid DATABASE_URL: {e}"))?;
         let manager = Manager::from_config(
             config,
-            tokio_postgres::NoTls,
+            postgres_tls()?,
             ManagerConfig {
                 recycling_method: RecyclingMethod::Fast,
             },

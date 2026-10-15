@@ -138,7 +138,14 @@ async fn app_from(trusted_proxies: TrustedProxies, media: Option<Media>) -> Test
         store: store.id(),
         store_name: store.name().to_string(),
         media,
-        http: crate::state::rate_callback_client().unwrap(),
+        // The tests' rate apps listen on localhost.
+        outbound: crate::outbound::OutboundPolicy {
+            allow_private: true,
+        },
+        http: crate::outbound::client(crate::outbound::OutboundPolicy {
+            allow_private: true,
+        })
+        .unwrap(),
     });
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {
@@ -2186,6 +2193,22 @@ async fn asking_for_shipping_options_is_rate_limited_per_cart() {
     let path = format!("{}/shipping-options", cart(2));
     let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+}
+
+#[tokio::test]
+async fn creating_carts_is_rate_limited_per_address() {
+    let app = app().await;
+    let pk = publishable(&app).await;
+    // Counted before the body is read: an invalid one costs the same.
+    for _ in 0..20 {
+        let (status, json) = send_as(&app, &pk, "POST", "/storefront/carts", Some("{}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
+    }
+    let (status, json) = send_as(&app, &pk, "POST", "/storefront/carts", Some("{}")).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
 }
 
 #[tokio::test]

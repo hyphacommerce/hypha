@@ -2,6 +2,7 @@ mod client_ip;
 mod error;
 mod extract;
 mod media;
+mod outbound;
 mod patch;
 mod rate_limit;
 mod routes;
@@ -208,6 +209,13 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         }
     }
 
+    let outbound = outbound::OutboundPolicy::from_env();
+    if outbound.allow_private {
+        tracing::warn!(
+            "HYPHA_ALLOW_PRIVATE_CALLBACKS: rate apps may call private addresses; \
+             development only"
+        );
+    }
     let state = Arc::new(AppState {
         storage,
         ids,
@@ -219,7 +227,8 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         store: store.id(),
         store_name: store.name().to_string(),
         media,
-        http: match state::rate_callback_client() {
+        outbound,
+        http: match outbound::client(outbound) {
             Ok(client) => client,
             Err(e) => {
                 tracing::error!("{e}");

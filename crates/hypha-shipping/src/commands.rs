@@ -400,13 +400,14 @@ pub async fn delete_app_provider<R: AppProviderRepo>(
     Ok(providers.delete(provider.key()).await?)
 }
 
-/// The services a provider (app or spore) can quote, for the option editor.
+/// The services a provider (app or spore) can quote, for the option editor. Needs
+/// `shipping:write`: for an app without declared services, it calls the app's URL.
 pub async fn provider_services<P: RateProvider>(
     ctx: &Ctx,
     rates: &P,
     key: &str,
 ) -> Result<Vec<ServiceInfo>, CommandError> {
-    ctx.require(Scope::ShippingRead)?;
+    ctx.require(Scope::ShippingWrite)?;
     let key = ProviderKey::new(key)?;
     Ok(rates.services(&key).await?)
 }

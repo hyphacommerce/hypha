@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 use crate::{
+    outbound::OutboundPolicy,
     routes::{address::PostalAddressResponse, rfc3339},
     state::{HostEnv, SystemClock},
 };
@@ -37,6 +38,7 @@ pub const MAX_ANSWER_BYTES: usize = 256 * 1024;
 pub struct HostRates<'a, A: AppProviderRepo> {
     pub apps: &'a A,
     pub http: &'a reqwest::Client,
+    pub outbound: OutboundPolicy,
     pub env: &'a HostEnv,
     pub clock: &'a SystemClock,
 }
@@ -129,6 +131,14 @@ impl<A: AppProviderRepo> HostRates<'_, A> {
         body: Vec<u8>,
     ) -> Result<Vec<u8>, ProviderError> {
         let key = app.key();
+        // Names are checked by the client's resolver; IP literals never reach it.
+        let literal = reqwest::Url::parse(url).ok().and_then(|u| {
+            let host = u.host_str()?.trim_start_matches('[').trim_end_matches(']');
+            host.parse::<std::net::IpAddr>().ok()
+        });
+        if literal.is_some_and(|ip| !self.outbound.allows(ip)) {
+            return Err(failed(key, "the callback URL is not a public address"));
+        }
         let secret = open_secret(self.env, app).map_err(|e| failed(key, e.to_string()))?;
         let at = self.clock.now().unix_micros() / 1_000_000;
         let signature = sign(&secret, at, &body);
@@ -146,7 +156,10 @@ impl<A: AppProviderRepo> HostRates<'_, A> {
                 if e.is_timeout() {
                     ProviderError::Timeout(key.clone())
                 } else {
-                    failed(key, format!("unreachable: {e}"))
+                    // The details (refused, TLS, no public address) stay in the log: in
+                    // an answer they would map the network behind the URL.
+                    tracing::warn!(provider = %key, error = %e, "rate app unreachable");
+                    failed(key, "unreachable")
                 }
             })?;
         let status = response.status();

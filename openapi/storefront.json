@@ -135,6 +135,16 @@
               }
             }
           },
+          "429": {
+            "description": "Over the rate limit for new carts per client address (`rate_limited`); see `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "A server failure (`internal_error`).",
             "content": {

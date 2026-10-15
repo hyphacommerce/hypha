@@ -226,9 +226,9 @@ pub(super) async fn checkout_handler<S: Storage>(
     PathId(cart): PathId<CartId>,
     req: KeyedJson<CheckoutRequest>,
 ) -> Result<Response, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
     // Renewing an expired quote calls rate apps, like asking for options.
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &cart.to_string()).await?;
-    let (ports, ctx) = caller.authenticate(&state).await?;
     let req = req.parse()?;
     let input = Checkout {
         cart,

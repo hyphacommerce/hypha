@@ -193,11 +193,13 @@ impl fmt::Display for MigrateError {
             ),
             MigrateError::Edited { module, version } => write!(
                 f,
-                "migration {module}/{version} was edited after it was applied; applied \n                 migrations must never change (add a new one instead)"
+                "migration {module}/{version} was edited after it was applied; applied \
+                 migrations must never change (add a new one instead)"
             ),
             MigrateError::Unknown { module, version } => write!(
                 f,
-                "the database has migration {module}/{version}, which this code doesn't \n                 know: it was migrated by a newer Hypha"
+                "the database has migration {module}/{version}, which this code doesn't \
+                 know: it was migrated by a newer Hypha"
             ),
         }
     }
@@ -392,6 +394,24 @@ mod tests {
         assert_ne!(checksum("A;\nB;\n"), checksum("A;\nC;\n"));
         // FNV-1a of the empty string is its offset basis.
         assert_eq!(checksum(""), "fnv1a64:cbf29ce484222325");
+    }
+
+    #[test]
+    fn errors_read_as_one_line() {
+        let module = "core".to_string();
+        for e in [
+            MigrateError::Edited {
+                module: module.clone(),
+                version: 3,
+            },
+            MigrateError::Unknown { module, version: 4 },
+        ] {
+            let message = e.to_string();
+            assert!(
+                !message.contains('\n') && !message.contains("  "),
+                "{message:?}"
+            );
+        }
     }
 
     const ONE: &[Migration] = &[Migration {

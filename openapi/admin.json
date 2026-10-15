@@ -8440,7 +8440,7 @@
           }
         ],
         "x-hypha-scopes": [
-          "shipping:read"
+          "shipping:write"
         ]
       }
     },

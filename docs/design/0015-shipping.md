@@ -183,7 +183,12 @@ pub trait RateProvider {
     secret>` (Stripe's scheme, reused by webhooks in 0016) and `Hypha-Request-Id` (the
     body's `id`). The app should check the signature and refuse a `t` more than a few
     minutes old. The callback URL is parsed with WHATWG rules and may not carry
-    credentials, so the host checked is the host called.
+    credentials, so the host checked is the host called. The host calls only public
+    addresses: names are resolved and private, loopback, link-local and other internal
+    addresses dropped at connect time (so re-pointing a name later doesn't help), and IP
+    literals are checked before the call (`outbound.rs`; `HYPHA_ALLOW_PRIVATE_CALLBACKS=
+    true` lifts it for development). A transport failure reaches the merchant only as
+    `unreachable`; the details stay in the host's log, so an answer can't map a network.
   - Body (amounts are `Money`, `{"amount": <minor units>, "currency": "EUR"}`; addresses
     are the API's postal address shape):
 
@@ -235,7 +240,10 @@ pub trait RateProvider {
   concurrently, each under its timeout. It, selecting and checkout are rate limited per
   cart (`Rule::ShippingQuotesCart`), since each may wait on rate apps; per cart rather
   than per address, because a server-rendered storefront sends every shopper's requests
-  from one address.
+  from one address. Creating carts is limited per client address
+  (`Rule::CartCreateIp`), so new carts can't get around the per-cart limit; a
+  server-rendered storefront passes shoppers' addresses in `X-Forwarded-For` and is
+  listed in `HYPHA_TRUSTED_PROXIES`.
 - `PUT /storefront/carts/{id}/shipping/{group}` `{"option": "shipopt_…"}` selects one.
   For a provider option the quote is stored on the cart (amount, reference, quoted at).
 - **Priced carts** include the selected option: built-in prices are recomputed on every
@@ -284,7 +292,7 @@ pub trait RateProvider {
 | `POST /admin/shipping-zones/{id}/options`, `PATCH/DELETE …/options/{option}`, `PUT …/options/order` | `shipping:write` | Options with their rates (a zone's `GET` lists them) |
 | `POST/GET /admin/shipping-providers`, `PATCH/DELETE …/{key}` | `shipping:write` / `:read` | External app providers (callback URL, timeout); spores are listed read-only |
 | `POST /admin/shipping-providers/{key}/secret` | `shipping:write` | Rotates the callback secret, shown once |
-| `GET /admin/shipping-providers/{key}/services` | `shipping:read` | For the option editor |
+| `GET /admin/shipping-providers/{key}/services` | `shipping:write` | For the option editor; may call the app's URL, so not for readers |
 | `PUT /storefront/carts/{id}/shipping-address` | publishable key | The `Address` shape customers use |
 | `GET /storefront/carts/{id}/shipping-options` | publishable key | Per group, with prices and reasons |
 | `PUT /storefront/carts/{id}/shipping/{group}` | publishable key | Selects an option |

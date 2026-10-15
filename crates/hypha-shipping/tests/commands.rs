@@ -363,13 +363,24 @@ impl RateProvider for OneSpore {
 #[test]
 fn a_providers_services_come_from_the_registry() {
     assert_eq!(
-        block_on(provider_services(&reader(), &OneSpore, "spore_dhl")).map(|s| s.len()),
+        block_on(provider_services(&Ctx::system(), &OneSpore, "spore_dhl")).map(|s| s.len()),
         Ok(1)
     );
     assert_eq!(
-        block_on(provider_services(&reader(), &OneSpore, "spore_ups")),
+        block_on(provider_services(&Ctx::system(), &OneSpore, "spore_ups")),
         Err(CommandError::Provider(ProviderError::Unknown(
             ProviderKey::new("spore_ups").unwrap()
+        )))
+    );
+}
+
+#[test]
+fn asking_for_services_needs_shipping_write() {
+    // It may call the app's URL, which a reader shouldn't be able to trigger.
+    assert_eq!(
+        block_on(provider_services(&reader(), &OneSpore, "spore_dhl")).map(|s| s.len()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::ShippingWrite
         )))
     );
 }

@@ -751,7 +751,7 @@ pub(super) struct ServiceList {
     path = "/admin/shipping-providers/{key}/services",
     params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_shipcalc", description = "`app_<name>` or `spore_<name>`")),
     responses((status = 200, description = "OK", body = ServiceList)),
-    extensions(("x-hypha-scopes" = json!(["shipping:read"]))),
+    extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
 pub(super) async fn provider_services_handler<S: Storage>(
     State(state): State<SharedState<S>>,

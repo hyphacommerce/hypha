@@ -241,7 +241,7 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvider>(
         .map(|line| order_line(line, OrderLineId::from_uuid(ids.new_uuid())))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let shipping_lines = shipping_lines(&priced, &lines);
+    let shipping_lines = shipping_lines(&priced, &lines)?;
 
     // Reserve before taking a number, so a shortage doesn't use one up.
     let StockContext {
@@ -455,15 +455,21 @@ async fn ask_again<P: RateProvider>(
 }
 
 /// The groups' choices as the order keeps them (design note 0015, SH12), each naming the
-/// order lines it ships.
-fn shipping_lines(priced: &PricedCart, lines: &[OrderLine]) -> Vec<OrderShippingLine> {
+/// order lines it ships. `check_shipping` made sure every group has one.
+fn shipping_lines(
+    priced: &PricedCart,
+    lines: &[OrderLine],
+) -> Result<Vec<OrderShippingLine>, CommandError> {
     priced
         .shipping_groups
         .iter()
-        .filter_map(|group| {
-            let selected = group.selected.as_ref()?;
-            let amount = hypha_core::Price::new(selected.amount).ok()?;
-            Some(OrderShippingLine {
+        .filter_map(|group| group.selected.as_ref().map(|selected| (group, selected)))
+        .map(|(group, selected)| {
+            // Prices are never negative, so this holds; a failure is reported, not
+            // dropped (a missing line would fail the order's totals check instead).
+            let amount =
+                hypha_core::Price::new(selected.amount).map_err(hypha_cart::CommandError::from)?;
+            Ok(OrderShippingLine {
                 group: group.id,
                 lines: lines
                     .iter()

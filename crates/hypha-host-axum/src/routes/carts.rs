@@ -18,6 +18,7 @@ use super::{
     shipping::DeliveryEstimateDto,
 };
 use crate::{
+    client_ip::ClientIp,
     error::{ApiError, ApiErrorBody},
     extract::{Caller, JsonBody, KeyedJson, PathId, Storefront, idempotent_response},
     rate_limit::{self, Rule},
@@ -245,15 +246,17 @@ impl From<&PricedCart> for CartResponse {
     path = "/storefront/carts",
     params(("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CreateCartRequest,
-    responses((status = 201, description = "Created", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`.")))),
+    responses((status = 201, description = "Created", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for new carts per client address (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub(super) async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
     caller: Caller<Storefront>,
     req: KeyedJson<CreateCartRequest>,
 ) -> Result<Response, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    rate_limit::enforce(&state.limiter, Rule::CartCreateIp, &ip).await?;
     let req = req.parse()?;
     let input = CreateCart {
         country: req.body.country,
@@ -523,9 +526,9 @@ pub(super) async fn shipping_options<S: Storage>(
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
 ) -> Result<Json<ShippingOptionsResponse>, ApiError> {
-    // Before anything takes a pool connection.
-    rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
+    // After the key: a stranger can't use up a cart's quota.
     let (ports, ctx) = caller.authenticate(&state).await?;
+    rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let rates = state.rates(ports.app_providers());
     let groups = shipping_offers(&ctx, &ports, &rates, id).await?;
     Ok(Json(ShippingOptionsResponse {
@@ -556,8 +559,8 @@ pub(super) async fn select<S: Storage>(
     PathId((id, group)): PathId<(CartId, ShippingGroupId)>,
     body: JsonBody<SelectShippingRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
-    rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let (ports, ctx) = caller.authenticate(&state).await?;
+    rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let req = body.parse()?;
     let rates = state.rates(ports.app_providers());
     let priced = select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;

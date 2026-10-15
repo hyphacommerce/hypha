@@ -48,13 +48,18 @@ pub enum Rule {
     /// `POST …/checkout`, per cart: each may call rate apps for seconds while holding a
     /// database connection, so a flood would starve the pool (0015, section 9). Per cart
     /// rather than per address, since a server-rendered storefront sends every shopper's
-    /// requests from one address.
+    /// requests from one address. Checked after the publishable key, so only callers
+    /// of this store count.
     ShippingQuotesCart,
+    /// `POST /storefront/carts`, per client address: without it, new carts would get
+    /// around the per-cart limit above. A server-rendered storefront passes each
+    /// shopper's address in `X-Forwarded-For` and is listed in `HYPHA_TRUSTED_PROXIES`.
+    CartCreateIp,
 }
 
 impl Rule {
     /// In declaration order: `MemoryRateLimiter` indexes by `rule as usize`.
-    pub const ALL: [Rule; 9] = [
+    pub const ALL: [Rule; 10] = [
         Rule::LoginIp,
         Rule::LoginEmailFromIp,
         Rule::LoginEmail,
@@ -64,6 +69,7 @@ impl Rule {
         Rule::ResetConfirmIp,
         Rule::InviteIp,
         Rule::ShippingQuotesCart,
+        Rule::CartCreateIp,
     ];
 
     /// `(burst, one more every)`: the starting numbers from 0009, section 3.
@@ -79,6 +85,8 @@ impl Rule {
             Rule::ResetEmailFromIp => (3, Duration::from_secs(5 * 60)),
             // A checkout asks a few times; a page polling every second doesn't need to.
             Rule::ShippingQuotesCart => (10, Duration::from_secs(2)),
+            // A shopper makes a cart or two; a page reloading makes a few more.
+            Rule::CartCreateIp => (20, Duration::from_secs(3)),
         }
     }
 
