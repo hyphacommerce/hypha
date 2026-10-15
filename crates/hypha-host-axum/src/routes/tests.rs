@@ -43,12 +43,19 @@ struct TestApp {
     admin_key: String,
 }
 
+/// The app without file storage: most routes don't need it, so their tests don't need
+/// the S3 server.
 async fn app() -> TestApp {
     app_with(TrustedProxies::default()).await
 }
 
 async fn app_with(trusted_proxies: TrustedProxies) -> TestApp {
-    app_from(trusted_proxies, Some(test_media().await)).await
+    app_from(trusted_proxies, None).await
+}
+
+/// The app with file storage (the compose S3 server), for the media routes.
+async fn app_with_media() -> TestApp {
+    app_from(TrustedProxies::default(), Some(test_media().await)).await
 }
 
 /// Requests in these tests come from this peer (`MockConnectInfo`), as if over a socket.
@@ -538,7 +545,7 @@ async fn put_file(upload: &Value, body: Vec<u8>) -> u16 {
 
 #[tokio::test]
 async fn an_upload_goes_straight_to_storage_and_completes_into_a_ready_asset() {
-    let app = app().await;
+    let app = app_with_media().await;
     let created = start_png_upload(&app, 100).await;
     let asset = &created["asset"];
     let id = asset["id"].as_str().unwrap();
@@ -586,7 +593,7 @@ async fn an_upload_goes_straight_to_storage_and_completes_into_a_ready_asset() {
 
 #[tokio::test]
 async fn completing_checks_what_was_stored() {
-    let app = app().await;
+    let app = app_with_media().await;
     let created = start_png_upload(&app, 100).await;
     let id = created["asset"]["id"].as_str().unwrap();
     let complete = format!("/admin/assets/{id}/complete");
@@ -615,14 +622,14 @@ async fn completing_checks_what_was_stored() {
 
 #[tokio::test]
 async fn storage_refuses_an_upload_of_another_size() {
-    let app = app().await;
+    let app = app_with_media().await;
     let created = start_png_upload(&app, 100).await;
     assert_ne!(put_file(&created["upload"], png(99)).await, 200);
 }
 
 #[tokio::test]
 async fn bad_uploads_are_refused_with_codes() {
-    let app = app().await;
+    let app = app_with_media().await;
     for (body, expected) in [
         (
             json!({ "filename": "logo.svg", "mime_type": "image/svg+xml", "byte_size": 10 }),
@@ -652,7 +659,7 @@ async fn bad_uploads_are_refused_with_codes() {
 
 #[tokio::test]
 async fn the_library_needs_media_scopes() {
-    let app = app().await;
+    let app = app_with_media().await;
     let products = key(
         &app,
         json!({ "kind": "secret", "name": "Products", "scopes": ["products:write"] }),
@@ -667,7 +674,7 @@ async fn the_library_needs_media_scopes() {
 
 #[tokio::test]
 async fn without_file_storage_the_library_is_unavailable() {
-    let app = app_from(TrustedProxies::default(), None).await;
+    let app = app().await;
     let (status, body) = send(&app, "GET", "/admin/assets", None).await;
     assert_eq!(
         (status, code(&body)),
