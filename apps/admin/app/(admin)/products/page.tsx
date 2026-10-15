@@ -59,8 +59,10 @@ export default async function ProductsPage({
   const result = await client.GET("/admin/products", {
     params: { query: { status, cursor } },
   });
-  // A hand-edited URL (an old or foreign cursor): start the list again.
-  if (result.response.status === 400) redirect("/products");
+  // A hand-edited URL (an old or foreign cursor): start the list again, same filter.
+  if (result.response.status === 400) {
+    redirect(status ? `/products?status=${status}` : "/products");
+  }
   const page = loaded(result);
 
   return (
@@ -86,7 +88,9 @@ export default async function ProductsPage({
         {page.items.length === 0 ? (
           <EmptyState
             icon={<CubeIcon width={32} />}
-            title={status ? `No ${status} products` : "No products yet"}
+            title={
+              cursor ? "No more products" : status ? `No ${status} products` : "No products yet"
+            }
             description="Products you add show up here, newest first."
             actions={<Button label="Add product" href="/products/new" />}
           />
