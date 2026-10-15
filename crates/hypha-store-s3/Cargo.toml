@@ -11,5 +11,14 @@ hmac = "0.13"
 sha2 = { version = "0.11", default-features = false }
 base64 = "0.22"
 
+# A native `HttpClient` (`ReqwestClient`) for hosts and tests. Workers builds bring
+# their own (`fetch`), so wasm doesn't get it.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+hypha-testkit = { path = "../hypha-testkit", features = ["contract"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+
 [lints]
 workspace = true

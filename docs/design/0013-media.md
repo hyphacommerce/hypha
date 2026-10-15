@@ -1,7 +1,8 @@
 # 0013: Media, file storage and delivery
 
 - **Status:** Accepted (2026-10-15); building phase 1 (section 10). Danilo set the direction in conversation: media is a
-  first-class part of Hypha, like Shopify's; MinIO in Docker for local development, so S3
+  first-class part of Hypha, like Shopify's; an S3 server in Docker for local development
+  (MinIO was the pick; see M10), so S3
   incompatibilities show up early; every asset knows where it is used; proper image
   metadata; a CDN story for every host; others can bring their own DAM. Answers given
   on 2026-10-15 are marked *Decided*.
@@ -29,7 +30,7 @@
 | M7 | **Products own an ordered media list; a variant points at one item of it.** The first item is the featured image. Products store asset IDs unchecked, like other cross-domain IDs; the attach commands live in a new composing crate, `hypha-merchandising` (section 5). *Hard to reverse*; *Decided* |
 | M8 | **Usage is recorded, not derived**: each attachment writes an `AssetUsage` (asset, owner, role) in the same batch as the owner's write. "Used by" is one query for any owner, including spores, and an asset in use can't be deleted (section 6) |
 | M9 | **External DAMs plug in as asset sources.** A spore creates Hypha assets that point at its own files and URLs and keeps their metadata in sync; products attach them like uploads (section 7) |
-| M10 | **S3 API for storage**: Cloudflare R2, AWS S3 and MinIO with one adapter. **MinIO in `compose.yaml` for local development** and for the `BlobStore` contract, like Postgres for the repositories (section 8) |
+| M10 | **S3 API for storage**: Cloudflare R2, AWS S3 and S3-compatible servers with one adapter. **An S3 server in `compose.yaml` for local development** and for the `BlobStore` contract, like Postgres for the repositories (section 8). *Changed while building:* MinIO's community edition stopped publishing images (October 2025) and was archived; of the two candidates Danilo picked to test, both SeaweedFS 4.48 and RustFS 1.0.1 passed the contract, and **SeaweedFS** answers browsers' CORS requests out of the box, so it is the one in compose |
 | M11 | **Alt text and title live on the asset**, so they are written once and follow it everywhere. A per-usage alt override (the same photo described differently on two products) can be added to `AssetUsage` later without breaking anything. *Decided* |
 | M12 | **No SVG uploads until we can sanitise them.** SVG files can carry scripts; refusing them is the safe default, and supporting them later is additive. *Decided* |
 
@@ -46,7 +47,7 @@ What can be replaced, and where:
 | Layer | Core or port |
 | --- | --- |
 | Assets, metadata, product and variant attachments, usage tracking | **Core** (`hypha-media`, the product attachments) |
-| Where bytes live | **`BlobStore`**: S3 API (R2, S3, MinIO); a Workers R2-binding adapter later |
+| Where bytes live | **`BlobStore`**: S3 API (R2, S3, S3-compatible servers); a Workers R2-binding adapter later |
 | URLs, sizes, the CDN | **`MediaUrls`**: Cloudflare, imgproxy, plain |
 | Where assets come from | Uploads (built in), or an **external source** spore (Cloudinary, Bynder, Sanity…) |
 
@@ -83,7 +84,7 @@ the first version lists, searches by filename and title, and filters by kind.
 ```text
 admin ──POST /admin/assets {filename, mime_type, byte_size}──▶ Hypha   (asset: pending)
       ◀─ {asset, upload: {url, method: PUT, headers}} ─┘
-admin ──PUT file──────────────────────────────────────────────▶ R2 / S3 / MinIO
+admin ──PUT file──────────────────────────────────────────────▶ R2 / S3 / SeaweedFS
 admin ──POST /admin/assets/{id}/complete──▶ Hypha ──HEAD + ranged GET──▶ storage
       ◀─ asset: ready (type, size, dimensions read from the file) ─┘
 ```
@@ -124,8 +125,8 @@ URLs that cache well; any CDN in front then works.
 | Host | Storage | CDN and sizes | Setup |
 | --- | --- | --- | --- |
 | Cloudflare | R2 | R2 custom domain (Cloudflare's CDN), Image Transformations (`/cdn-cgi/image/width=800,format=auto/<key>`) | Bind a domain to the bucket, enable transformations |
-| VPS / AWS | S3 or MinIO | CloudFront, bunny.net or Cloudflare in front; imgproxy for sizes (signed URLs, so strangers can't make the server resize at will) | Point the CDN at the origin |
-| Local | MinIO (compose) | None; originals only (`plain` adapter), or imgproxy in compose | `docker compose up -d` |
+| VPS / AWS | S3, or an S3-compatible server (SeaweedFS, RustFS) | CloudFront, bunny.net or Cloudflare in front; imgproxy for sizes (signed URLs, so strangers can't make the server resize at will) | Point the CDN at the origin |
+| Local | SeaweedFS (compose) | None; originals only, through signed URLs (no `HYPHA_MEDIA_URL`, so the bucket needs no public access) | `docker compose up -d` |
 
 - **Private assets (M6):** stored under `private/…`, outside what the public domain
   serves; `BlobStore::signed_get(key, ttl)` gives a short-lived URL to someone allowed to
@@ -191,14 +192,17 @@ AssetUsage { asset: AssetId, owner: Owner { kind: "product", id: "prod_…" }, r
   repositories. The S3 adapter lives in a new storage-adapter crate (`hypha-store-s3`),
   using the host's HTTP client through a small port so it builds for Workers too.
 - **Contract:** `hypha_testkit::contract::blob_store` (presign then upload, `head`,
-  ranges, delete, signed URLs expiring) runs against MinIO in CI and locally, so R2/S3
-  behaviour differences show up as test failures. The testkit gets an in-memory
+  ranges, delete, signed URLs expiring, and that storage refuses another size, type,
+  checksum or an expired URL) runs against the compose server locally and in CI, and
+  against R2 with the same `HYPHA_S3_*` variables, so behaviour differences show up as
+  test failures. The testkit gets an in-memory
   `BlobStore` for the domain crates' fast tests.
-- **`compose.yaml`** gains MinIO (S3 API on 9000, console on 9001) and a one-shot `mc`
-  container that creates the `hypha-media` bucket with public read on `assets/` only.
-  `.cargo/config.toml` and `apps/admin/.env.example` get the defaults:
-  `HYPHA_S3_ENDPOINT=http://localhost:9000`, bucket, keys, and
-  `HYPHA_MEDIA_URL=http://localhost:9000/hypha-media`.
+- **`compose.yaml`** gains SeaweedFS's S3 gateway on 8333, with development
+  credentials in `dev/seaweedfs-s3.json`; the bucket is created on first use
+  (`S3BlobStore::ensure_bucket`, development only). `.cargo/config.toml` has the
+  defaults (`HYPHA_S3_ENDPOINT=http://localhost:8333`, region, bucket, keys). Without
+  `HYPHA_MEDIA_URL`, the API serves signed download URLs instead of public ones, so a
+  private bucket works with no CDN (local development, small deployments).
 - **Postgres:** `assets`, `asset_usages (asset_id, owner_kind, owner_id, role)` with an
   index on `asset_id`, `product_media (product_id, position, asset_id)` and
   `variants.media_asset_id`. No foreign keys from products into media (0002 §7), so

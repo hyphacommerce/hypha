@@ -130,6 +130,44 @@ impl<H: HttpClient, C: Clock> S3BlobStore<H, C> {
     }
 }
 
+impl<H: HttpClient, C: Clock> S3BlobStore<H, C> {
+    /// Creates the bucket unless it exists: for development servers and tests. Production
+    /// buckets are made by their owner, with the permissions and CORS rules they need.
+    pub async fn ensure_bucket(&self) -> Result<(), BlobError> {
+        let path = encode_path(&format!("/{}", self.config.bucket));
+        let headers = self.config.signer().authorize(&Request {
+            method: "PUT",
+            host: self.config.host(),
+            path: &path,
+            headers: &[],
+            now: self.clock.now(),
+        });
+        let response = self
+            .http
+            .send(HttpRequest {
+                method: "PUT",
+                url: self.config.url(&path),
+                headers,
+            })
+            .await
+            .map_err(|e| BlobError::Backend(format!("create bucket: {e}")))?;
+        let body = String::from_utf8_lossy(&response.body);
+        match response.status {
+            200 => Ok(()),
+            409 if body.contains("BucketAlreadyOwnedByYou")
+                || body.contains("BucketAlreadyExists") =>
+            {
+                Ok(())
+            }
+            status => Err(BlobError::Backend(format!(
+                "create bucket {}: HTTP {status}: {}",
+                self.config.bucket,
+                body.chars().take(300).collect::<String>()
+            ))),
+        }
+    }
+}
+
 /// An unexpected answer, with the start of S3's error document for the logs.
 fn unexpected(what: &str, key: &BlobKey, response: &HttpResponse) -> BlobError {
     let body = String::from_utf8_lossy(&response.body);
@@ -243,5 +281,42 @@ impl<H: HttpClient, C: Clock> BlobStore for S3BlobStore<H, C> {
             expires_in_secs,
         );
         Ok(format!("{}?{query}", self.config.url(&path)))
+    }
+}
+
+/// `HttpClient` on `reqwest`, for native hosts and tests.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Default)]
+pub struct ReqwestClient(reqwest::Client);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ReqwestClient {
+    pub fn new(client: reqwest::Client) -> Self {
+        Self(client)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl HttpClient for ReqwestClient {
+    async fn send(&self, request: HttpRequest) -> Result<HttpResponse, String> {
+        let method =
+            reqwest::Method::from_bytes(request.method.as_bytes()).map_err(|e| e.to_string())?;
+        let mut builder = self.0.request(method, &request.url);
+        for (name, value) in &request.headers {
+            builder = builder.header(name, value);
+        }
+        let response = builder.send().await.map_err(|e| e.to_string())?;
+        let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(n, v)| Some((n.to_string(), v.to_str().ok()?.to_string())))
+            .collect();
+        let body = response.bytes().await.map_err(|e| e.to_string())?.to_vec();
+        Ok(HttpResponse {
+            status,
+            headers,
+            body,
+        })
     }
 }

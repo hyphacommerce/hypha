@@ -1,11 +1,13 @@
-# Local development database for hypha-store-postgres (design note 0001, step 5).
+# Local development services: Postgres (design note 0001) and an S3 server for media
+# files (design note 0013).
 #
-#   docker compose up -d          # start Postgres in the background
-#   docker compose down           # stop it (data is kept in the named volume)
-#   docker compose down -v        # stop it and delete the data
+#   docker compose up -d          # start them in the background
+#   docker compose down           # stop them (data is kept in the named volumes)
+#   docker compose down -v        # stop them and delete the data
 #
-# Connection string for the host and the contract tests:
+# `.cargo/config.toml` points the host and the tests at both:
 #   DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha
+#   HYPHA_S3_ENDPOINT=http://localhost:8333 (bucket hypha-media, created on first use)
 #
 # Development only: the credentials are not secret.
 services:
@@ -25,5 +27,19 @@ services:
       timeout: 3s
       retries: 15
 
+  # SeaweedFS's S3 gateway. MinIO was the plan, but its community edition stopped
+  # publishing images in October 2025; SeaweedFS passes the `blob_store` contract
+  # (signatures, sizes, types, checksums, expiry) and answers browsers' CORS requests.
+  # Credentials are in dev/seaweedfs-s3.json.
+  s3:
+    image: chrislusf/seaweedfs:4.48
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/config/s3.json
+    ports:
+      - "8333:8333"
+    volumes:
+      - s3-data:/data
+      - ./dev/seaweedfs-s3.json:/config/s3.json:ro
+
 volumes:
   postgres-data:
+  s3-data:
