@@ -17,6 +17,8 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
     keys_and_stale(&make().await).await;
     scenario("cart: clearing the buyer stores no email and no customer");
     buyer_cleared(&make().await).await;
+    scenario("cart: shipping address, choice and quote round trip, and clear");
+    shipping_round_trips(&make().await).await;
 }
 
 fn cart(n: u128) -> Cart {
@@ -126,5 +128,60 @@ async fn buyer_cleared<R: CartRepo>(repo: &R) {
 
     let stored = repo.get(c.id()).await.unwrap().unwrap();
     assert_eq!((stored.customer(), stored.email()), (None, None));
+    assert_eq!(stored, c);
+}
+
+async fn shipping_round_trips<R: CartRepo>(repo: &R) {
+    use hypha_cart::{SelectedShipping, StoredQuote};
+    use hypha_core::{Address, AddressParts, Currency, Money, Price, ShippingOptionId, Timestamp};
+    use hypha_shipping::ProviderKey;
+
+    let full = Address::new(AddressParts {
+        first_name: Some("Ana".to_string()),
+        last_name: "Horvat".to_string(),
+        company: Some("Hypha".to_string()),
+        line1: "Ilica 1".to_string(),
+        line2: Some("Stan 4".to_string()),
+        city: "Zagreb".to_string(),
+        province: Some("Grad Zagreb".to_string()),
+        postal_code: Some("10000".to_string()),
+        country: "HR".to_string(),
+        phone: Some("+385 1 234".to_string()),
+    })
+    .unwrap();
+    let option = ShippingOptionId::from_uuid(Uuid::from_u128(77));
+
+    // An address and a built-in choice (no quote).
+    let mut c = cart(1);
+    c.set_shipping_address(Some(full.clone())).unwrap();
+    c.select_shipping(Some(SelectedShipping {
+        option,
+        quote: None,
+    }))
+    .unwrap();
+    repo.insert(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+
+    // A provider's quote, every field set and the largest amount.
+    let quote = StoredQuote {
+        amount: Price::new(Money::new(Money::MAX_AMOUNT, Currency::Eur).unwrap()).unwrap(),
+        provider: ProviderKey::new("spore_dhl").unwrap(),
+        service: "EXPRESS".to_string(),
+        reference: Some("q-1".to_string()),
+        quoted_at: Timestamp::from_unix_micros(1_767_225_600_123_456),
+    };
+    c.select_shipping(Some(SelectedShipping {
+        option,
+        quote: Some(quote),
+    }))
+    .unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+
+    // Cleared.
+    c.set_shipping_address(None).unwrap();
+    repo.update(&mut c).await.unwrap();
+    let stored = repo.get(c.id()).await.unwrap().unwrap();
+    assert_eq!((stored.shipping_address(), stored.shipping()), (None, None));
     assert_eq!(stored, c);
 }

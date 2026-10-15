@@ -1,4 +1,6 @@
-use hypha_core::{ErrorCode, MoneyError, OrderId, ProductId, QuantityError, VariantId};
+use hypha_core::{
+    AddressError, CountryCode, ErrorCode, MoneyError, OrderId, ProductId, QuantityError, VariantId,
+};
 use hypha_pricing::PricingError;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -12,6 +14,15 @@ pub enum CartError {
     /// Checked out: the cart became `order` and can't change any more.
     #[error("the cart was checked out as order {order}")]
     Completed { order: OrderId },
+    /// The cart's country picked its market and taxes; an address elsewhere would need
+    /// another cart (design note 0015, Q5).
+    #[error("the address is in {address}, but the cart ships to {cart}")]
+    AddressCountryMismatch {
+        address: CountryCode,
+        cart: CountryCode,
+    },
+    #[error("set a shipping address first")]
+    ShippingAddressRequired,
 }
 
 /// Why a line can't be priced. Returned as an error by `price_line` (and so by `add_line`),
@@ -48,6 +59,8 @@ pub enum RestoreError {
     Cart(#[from] CartError),
     #[error("variant {0} is on more than one line")]
     DuplicateLine(VariantId),
+    #[error(transparent)]
+    Address(#[from] AddressError),
 }
 
 impl ErrorCode for CartError {
@@ -57,6 +70,8 @@ impl ErrorCode for CartError {
             CartError::LineNotFound(_) => "line_not_found",
             CartError::EmailRequired => "email_required",
             CartError::Completed { .. } => "cart_completed",
+            CartError::AddressCountryMismatch { .. } => "address_country_mismatch",
+            CartError::ShippingAddressRequired => "shipping_address_required",
         }
     }
 }

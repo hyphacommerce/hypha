@@ -1,13 +1,14 @@
-use hypha_cart::{Cart, CartLineSnapshot, CartRepo, CartSnapshot};
+use hypha_cart::{Cart, CartLineSnapshot, CartRepo, CartSnapshot, SelectedShipping, StoredQuote};
 use hypha_core::{
-    CartId, CountryCode, CustomerId, Email, MarketId, OrderId, ProductId, RepoError, VariantId,
-    Version, Versioned,
+    AddressParts, CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, Price,
+    ProductId, RepoError, ShippingOptionId, Timestamp, VariantId, Version, Versioned,
 };
+use hypha_shipping::ProviderKey;
 use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{version_from_db, version_to_db},
+    columns::{currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
 };
@@ -58,7 +59,52 @@ pub(crate) async fn insert_cart(
     )
     .await
     .map_err(repo_error)?;
+    write_shipping(tx, s).await?;
     write_lines(tx, s.id, &s.lines).await
+}
+
+/// Sets the shipping columns to the snapshot's address and choice (NULL for none).
+async fn write_shipping(tx: &impl GenericClient, s: &CartSnapshot) -> Result<(), RepoError> {
+    let a = s.shipping_address.as_ref();
+    let text = |f: fn(&AddressParts) -> Option<&str>| a.and_then(f);
+    let choice = s.shipping.as_ref();
+    let quote = choice.and_then(|c| c.quote.as_ref());
+    tx.query_typed(
+        "UPDATE carts SET shipping_first_name = $2, shipping_last_name = $3,
+                shipping_company = $4, shipping_line1 = $5, shipping_line2 = $6,
+                shipping_city = $7, shipping_province = $8, shipping_postal_code = $9,
+                shipping_country = $10, shipping_phone = $11, shipping_option_id = $12,
+                quote_amount = $13, quote_currency = $14, quote_provider = $15,
+                quote_service = $16, quote_reference = $17,
+                quoted_at = 'epoch'::timestamptz + $18 * interval '1 microsecond'
+         WHERE id = $1",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&text(|p| p.first_name.as_deref()), Type::TEXT),
+            (&text(|p| Some(p.last_name.as_str())), Type::TEXT),
+            (&text(|p| p.company.as_deref()), Type::TEXT),
+            (&text(|p| Some(p.line1.as_str())), Type::TEXT),
+            (&text(|p| p.line2.as_deref()), Type::TEXT),
+            (&text(|p| Some(p.city.as_str())), Type::TEXT),
+            (&text(|p| p.province.as_deref()), Type::TEXT),
+            (&text(|p| p.postal_code.as_deref()), Type::TEXT),
+            (&text(|p| Some(p.country.as_str())), Type::TEXT),
+            (&text(|p| p.phone.as_deref()), Type::TEXT),
+            (&choice.map(|c| c.option.as_uuid()), Type::UUID),
+            (&quote.map(|q| q.amount.money().amount()), Type::INT8),
+            (
+                &quote.map(|q| q.amount.money().currency().as_str()),
+                Type::TEXT,
+            ),
+            (&quote.map(|q| q.provider.as_str()), Type::TEXT),
+            (&quote.map(|q| q.service.as_str()), Type::TEXT),
+            (&quote.and_then(|q| q.reference.as_deref()), Type::TEXT),
+            (&quote.map(|q| q.quoted_at.unix_micros()), Type::INT8),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
 }
 
 /// `CartRepo::update` inside the caller's transaction (also used by `PgBatch`). Returns
@@ -95,6 +141,7 @@ pub(crate) async fn update_cart(
     )
     .await
     .map_err(repo_error)?;
+    write_shipping(tx, s).await?;
     write_lines(tx, s.id, &s.lines).await?;
     Ok(new_version)
 }
@@ -128,7 +175,12 @@ async fn write_lines(
 async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Cart>, RepoError> {
     let Some(row) = client
         .query_typed_opt(
-            "SELECT version, market_id, country, email, customer_id, order_id
+            "SELECT version, market_id, country, email, customer_id, order_id,
+                    shipping_first_name, shipping_last_name, shipping_company, shipping_line1,
+                    shipping_line2, shipping_city, shipping_province, shipping_postal_code,
+                    shipping_country, shipping_phone, shipping_option_id, quote_amount,
+                    quote_currency, quote_provider, quote_service, quote_reference,
+                    (extract(epoch FROM quoted_at) * 1000000)::bigint
              FROM carts WHERE id = $1",
             &[(&id.as_uuid(), Type::UUID)],
         )
@@ -171,6 +223,42 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
             .map_err(corrupt)?,
         customer: row.get::<_, Option<Uuid>>(4).map(CustomerId::from_uuid),
         order: row.get::<_, Option<Uuid>>(5).map(OrderId::from_uuid),
+        // The check constraint keeps the required columns all set or all NULL.
+        shipping_address: row
+            .get::<_, Option<String>>(7)
+            .map(|last_name| AddressParts {
+                first_name: row.get(6),
+                last_name,
+                company: row.get(8),
+                line1: row.get(9),
+                line2: row.get(10),
+                city: row.get(11),
+                province: row.get(12),
+                postal_code: row.get(13),
+                country: row.get(14),
+                phone: row.get(15),
+            }),
+        shipping: match row.get::<_, Option<Uuid>>(16) {
+            None => None,
+            Some(option) => Some(SelectedShipping {
+                option: ShippingOptionId::from_uuid(option),
+                quote: match row.get::<_, Option<i64>>(17) {
+                    None => None,
+                    Some(amount) => {
+                        let currency = currency_from_db(row.get(18))?;
+                        Some(StoredQuote {
+                            amount: Money::new(amount, currency)
+                                .and_then(Price::new)
+                                .map_err(corrupt)?,
+                            provider: ProviderKey::new(row.get(19)).map_err(corrupt)?,
+                            service: row.get(20),
+                            reference: row.get(21),
+                            quoted_at: Timestamp::from_unix_micros(row.get(22)),
+                        })
+                    }
+                },
+            }),
+        },
     };
     Cart::restore(snapshot)
         .map(Some)

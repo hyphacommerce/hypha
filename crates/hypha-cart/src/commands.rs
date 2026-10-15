@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AuthError, CartId, Clock, CountryCode, CountryError, Ctx, CustomerId, Email, EmailError,
-    ErrorCode, HasBatch, HasIdempotency, IdGenerator, IdempotencyError, IdempotencyRecord,
-    IdempotencyRequest, Idempotent, MarketId, MoneyError, ProductId, Quantity, QuantityError,
-    RepoError, Scope, StageIdempotency, VariantId, earlier_result,
+    AddressError, AddressParts, AuthError, CartId, Clock, CountryCode, CountryError, Ctx,
+    CustomerId, Email, EmailError, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
+    IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId, MoneyError,
+    ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId,
+    StageIdempotency, VariantId, earlier_result,
 };
 use hypha_customers::{CustomerRepo, HasCustomers};
 use hypha_inventory::{
@@ -16,12 +17,16 @@ use hypha_markets::{
 };
 use hypha_pricing::PricingContext;
 use hypha_products::{HasProducts, Product, ProductRepo};
+use hypha_shipping::{
+    HasShippingZones, NotOffered, OfferOutcome, RateItem, RateProvider, RateRequest,
+    ShippingZoneRepo, offers,
+};
 use hypha_tax::{HasTaxClasses, HasTaxRegions, TaxClassRepo, TaxContext, TaxRegionRepo};
 use thiserror::Error;
 
 use crate::{
-    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, StageCarts,
-    check_stock, price_cart, price_line,
+    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, SelectedShipping,
+    ShippingContext, StageCarts, StoredQuote, check_stock, price_cart_with_shipping, price_line,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -52,6 +57,23 @@ pub enum CommandError {
     NoMarketForCountry(CountryCode),
     #[error("variant {0} not found")]
     VariantNotFound(VariantId),
+    #[error(transparent)]
+    Address(#[from] AddressError),
+    #[error("shipping group {0} not found")]
+    ShippingGroupNotFound(ShippingGroupId),
+    /// Nothing in the cart needs shipping, so there's nothing to choose.
+    #[error("nothing in the cart is shipped")]
+    NothingToShip,
+    #[error("no shipping to {0}")]
+    NoShippingToCountry(CountryCode),
+    #[error("shipping option {0} isn't one of the cart's zone")]
+    ShippingOptionUnknown(ShippingOptionId),
+    /// Known, but not offered to this cart right now (`reason`).
+    #[error("shipping option {option} isn't offered to this cart: {}", reason.code())]
+    ShippingOptionNotOffered {
+        option: ShippingOptionId,
+        reason: NotOffered,
+    },
 }
 
 /// A quantity from the request is part of a cart line, so it reports like the cart's.
@@ -77,6 +99,12 @@ impl ErrorCode for CommandError {
             CommandError::MarketNotFound(_) => "market_not_found",
             CommandError::NoMarketForCountry(_) => "no_market_for_country",
             CommandError::VariantNotFound(_) => "variant_not_found",
+            CommandError::Address(e) => e.code(),
+            CommandError::ShippingGroupNotFound(_) => "shipping_group_not_found",
+            CommandError::NothingToShip => "nothing_to_ship",
+            CommandError::NoShippingToCountry(_) => "no_shipping_to_country",
+            CommandError::ShippingOptionUnknown(_) => "shipping_option_unknown",
+            CommandError::ShippingOptionNotOffered { .. } => "shipping_option_not_offered",
         }
     }
 }
@@ -145,6 +173,7 @@ pub trait PricingPorts:
     + HasTaxRegions
     + HasInventoryItems
     + HasLocations
+    + HasShippingZones
 {
 }
 
@@ -157,6 +186,7 @@ impl<T> PricingPorts for T where
         + HasTaxRegions
         + HasInventoryItems
         + HasLocations
+        + HasShippingZones
         + ?Sized
 {
 }
@@ -468,7 +498,13 @@ async fn reprice_grown_line<S: PricingPorts>(
         .collect();
     let mut cart_products = ports.products().get_many(&others).await?;
     cart_products.push(product);
-    let priced = price_cart(cart, &cart_products, &pricing, &tax, &stock);
+    let shipping = ShippingContext {
+        zone: ports
+            .shipping_zones()
+            .get_by_country(cart.country())
+            .await?,
+    };
+    let priced = price_cart_with_shipping(cart, &cart_products, &pricing, &tax, &stock, &shipping);
 
     refuse_unavailable(&priced, variant)?;
     Ok(priced)
@@ -530,12 +566,41 @@ pub async fn price_for_checkout<S: PricingPorts>(
     ports: &S,
     cart: &Cart,
 ) -> Result<(PricedCart, StockContext), CommandError> {
+    let reading = read_cart(ports, cart).await?;
+    Ok((reading.priced, reading.stock))
+}
+
+/// A cart priced, with what it was priced from: what offers and checkout build rate
+/// requests from.
+pub struct CartReading {
+    pub priced: PricedCart,
+    pub stock: StockContext,
+    pub products: Vec<Product>,
+    pub shipping: ShippingContext,
+}
+
+/// Prices `cart` in a fixed number of queries (see `load_pricing`), its shipping too.
+pub async fn read_cart<S: PricingPorts>(
+    ports: &S,
+    cart: &Cart,
+) -> Result<CartReading, CommandError> {
     let pricing = load_pricing(ports, cart).await?;
     let tax = load_tax(ports, cart, &pricing.market).await?;
     let stock = load_stock(ports, cart).await?;
-    let cart_products = load_products(ports, cart).await?;
-    let priced = price_cart(cart, &cart_products, &pricing, &tax, &stock);
-    Ok((priced, stock))
+    let products = load_products(ports, cart).await?;
+    let shipping = ShippingContext {
+        zone: ports
+            .shipping_zones()
+            .get_by_country(cart.country())
+            .await?,
+    };
+    let priced = price_cart_with_shipping(cart, &products, &pricing, &tax, &stock, &shipping);
+    Ok(CartReading {
+        priced,
+        stock,
+        products,
+        shipping,
+    })
 }
 
 /// Everything needed to price the cart's lines, with a fixed number of queries
@@ -633,4 +698,166 @@ fn product_ids(cart: &Cart) -> Vec<ProductId> {
     ids.sort_by_key(|p| p.as_uuid());
     ids.dedup();
     ids
+}
+
+// ---------- shipping (design note 0015) ----------
+
+/// Sets where the cart ships, or clears it with `None`. It must be in the cart's
+/// country; a new address drops the shipping choice.
+pub async fn set_shipping_address<S: HasCarts + PricingPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+    address: Option<AddressParts>,
+) -> Result<PricedCart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+    let address = address.map(hypha_core::Address::new).transpose()?;
+    let mut cart = load_open_cart(ports, id).await?;
+    cart.set_shipping_address(address)?;
+    let priced = reprice(ports, &cart).await?;
+    ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
+/// What one group of a cart can pick, priced now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupOffers {
+    pub group: ShippingGroupId,
+    pub offers: Vec<OfferOutcome>,
+}
+
+/// Every option the cart's zone offers its groups, priced: built-in rates computed,
+/// providers asked (each once, all at once). A provider that fails leaves its options
+/// out with the reason; it never fails the call (SH7).
+pub async fn shipping_offers<S: HasCarts + PricingPorts, P: RateProvider>(
+    ctx: &Ctx,
+    ports: &S,
+    rates: &P,
+    id: CartId,
+) -> Result<Vec<GroupOffers>, CommandError> {
+    ctx.require(Scope::CartsRead)?;
+    let cart = load_cart(ports, id).await?;
+    let reading = read_cart(ports, &cart).await?;
+    group_offers(&cart, &reading, rates).await
+}
+
+/// Picks `option` for `group`, if the cart is offered it now. A provider's price is
+/// stored with the choice, as quoted (SH9).
+pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
+    ctx: &Ctx,
+    ports: &S,
+    rates: &P,
+    clock: &impl Clock,
+    id: CartId,
+    group: ShippingGroupId,
+    option: ShippingOptionId,
+) -> Result<PricedCart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+    let mut cart = load_open_cart(ports, id).await?;
+    if group != cart.shipping_group() {
+        return Err(CommandError::ShippingGroupNotFound(group));
+    }
+    let reading = read_cart(ports, &cart).await?;
+    let offered = group_offers(&cart, &reading, rates).await?;
+    let outcome = offered
+        .iter()
+        .flat_map(|g| &g.offers)
+        .find(|o| match o {
+            OfferOutcome::Offered(offer) => offer.option == option,
+            OfferOutcome::NotOffered { option: id, .. } => *id == option,
+        })
+        .ok_or(CommandError::ShippingOptionUnknown(option))?;
+    let quote = match outcome {
+        OfferOutcome::NotOffered { reason, .. } => {
+            return Err(CommandError::ShippingOptionNotOffered {
+                option,
+                reason: reason.clone(),
+            });
+        }
+        OfferOutcome::Offered(offer) => match &offer.quote {
+            None => None,
+            Some(source) => Some(StoredQuote {
+                amount: hypha_core::Price::new(offer.amount)?,
+                provider: source.provider.clone(),
+                service: source.service.clone(),
+                reference: source.reference.clone(),
+                quoted_at: clock.now(),
+            }),
+        },
+    };
+    cart.select_shipping(Some(SelectedShipping { option, quote }))?;
+    let priced = reprice(ports, &cart).await?;
+    ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
+/// The offers of each group of a priced cart. Needs an address and a zone for it.
+pub async fn group_offers<P: RateProvider>(
+    cart: &Cart,
+    reading: &CartReading,
+    rates: &P,
+) -> Result<Vec<GroupOffers>, CommandError> {
+    let groups = &reading.priced.shipping_groups;
+    if groups.is_empty() {
+        return Err(CommandError::NothingToShip);
+    }
+    let destination = cart
+        .shipping_address()
+        .cloned()
+        .ok_or(CartError::ShippingAddressRequired)?;
+    let zone = reading
+        .shipping
+        .zone
+        .as_ref()
+        .ok_or(CommandError::NoShippingToCountry(cart.country()))?;
+    // The origin: the first location serving the market (by priority) with an address.
+    let origin = reading
+        .stock
+        .locations
+        .iter()
+        .find_map(|l| l.address().cloned());
+
+    let mut result = Vec::with_capacity(groups.len());
+    for group in groups {
+        let mut items = Vec::with_capacity(group.lines.len());
+        let mut subtotal = hypha_core::Money::zero(reading.priced.currency);
+        for line in reading
+            .priced
+            .lines
+            .iter()
+            .filter(|l| group.lines.contains(&l.variant))
+        {
+            let LineStatus::Priced {
+                unit_price, total, ..
+            } = &line.status
+            else {
+                continue;
+            };
+            let variant = reading
+                .products
+                .iter()
+                .find(|p| p.id() == line.product)
+                .and_then(|p| p.variant(line.variant));
+            subtotal = subtotal.checked_add(*total)?;
+            items.push(RateItem {
+                variant: line.variant,
+                sku: variant.and_then(|v| v.sku()).map(str::to_string),
+                quantity: line.quantity,
+                unit_price: *unit_price,
+                weight: variant.and_then(|v| v.weight()),
+            });
+        }
+        let request = RateRequest {
+            currency: reading.priced.currency,
+            origin: origin.clone(),
+            destination: destination.clone(),
+            items,
+            subtotal,
+        };
+        result.push(GroupOffers {
+            group: group.id,
+            offers: offers(zone, rates, &request).await,
+        });
+    }
+    Ok(result)
 }

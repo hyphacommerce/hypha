@@ -80,6 +80,11 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         lines,
         taxes_included: order.taxes_included(),
         subtotal: order.subtotal(),
+        // Orders snapshot shipping in the next step (design note 0015, SH12); until
+        // then a checked-out cart shows its address and no groups.
+        shipping_address: cart.shipping_address().cloned(),
+        shipping_groups: Vec::new(),
+        shipping_total: hypha_core::Money::zero(order.currency()),
         tax_total: order.tax_total(),
         total: order.total(),
     }

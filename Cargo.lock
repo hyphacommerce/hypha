@@ -788,6 +788,7 @@ dependencies = [
  "hypha-markets",
  "hypha-pricing",
  "hypha-products",
+ "hypha-shipping",
  "hypha-tax",
  "hypha-testkit",
  "pollster",

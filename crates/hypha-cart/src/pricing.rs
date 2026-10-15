@@ -1,6 +1,6 @@
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, MoneyError, OrderId, Price,
-    ProductId, Quantity, VariantId,
+    Address, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, MoneyError,
+    OrderId, Price, ProductId, Quantity, VariantId,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, resolve_price};
@@ -10,6 +10,7 @@ use hypha_tax::{TaxContext, TaxLine, TaxableKind, TaxableLine, tax_line};
 use crate::{
     cart::{Cart, CartLine, CartStatus},
     error::LineError,
+    shipping::{PricedShippingGroup, ShippingContext, ShippingProblem, price_group},
 };
 
 /// Whether a line can be bought right now.
@@ -75,8 +76,15 @@ pub struct PricedCart {
     /// Sum of the available lines' totals, as priced. All amounts are in the market's
     /// currency and count the available lines only.
     pub subtotal: Money,
-    /// Tax on the available lines: already in `subtotal` if `taxes_included`, otherwise
-    /// added on top of it.
+    /// Where the cart ships (design note 0015).
+    pub shipping_address: Option<Address>,
+    /// The groups of lines that need shipping, with the buyer's choice; empty when
+    /// nothing in the cart is shipped. One group for now (SH8).
+    pub shipping_groups: Vec<PricedShippingGroup>,
+    /// The chosen options' prices, as priced (inclusive of tax as the lines are).
+    pub shipping_total: Money,
+    /// Tax on the available lines and on shipping: already in `subtotal` and
+    /// `shipping_total` if `taxes_included`, otherwise added on top of them.
     pub tax_total: Money,
     /// What the buyer pays.
     pub total: Money,
@@ -90,6 +98,14 @@ impl PricedCart {
 
     pub fn unavailable_lines(&self) -> impl Iterator<Item = &PricedLine> {
         self.lines.iter().filter(|l| !l.is_available())
+    }
+
+    /// Whether every group that needs shipping has an option priced now. Checkout
+    /// refuses a cart unless this is true, along with `is_fully_available`.
+    pub fn is_shipping_ready(&self) -> bool {
+        self.shipping_groups
+            .iter()
+            .all(|g| g.selected.is_some() && g.problem.is_none())
     }
 }
 
@@ -138,6 +154,27 @@ pub fn price_cart(
     tax: &TaxContext,
     stock: &StockContext,
 ) -> PricedCart {
+    price_cart_with_shipping(
+        cart,
+        products,
+        pricing,
+        tax,
+        stock,
+        &ShippingContext::default(),
+    )
+}
+
+/// `price_cart`, with the buyer's shipping choice priced and taxed (design note 0015,
+/// section 7). Like lines, a choice that can't be priced now is reported on its group
+/// and left out of the totals.
+pub fn price_cart_with_shipping(
+    cart: &Cart,
+    products: &[Product],
+    pricing: &PricingContext,
+    tax: &TaxContext,
+    stock: &StockContext,
+    shipping: &ShippingContext,
+) -> PricedCart {
     let currency = pricing.market.currency();
     let mut totals = Totals::zero(currency);
     let mut lines = Vec::with_capacity(cart.lines().len());
@@ -170,6 +207,24 @@ pub fn price_cart(
         });
     }
 
+    let mut shipping_groups = Vec::new();
+    if let Some(mut group) = price_group(cart, currency, &lines, products, tax, shipping) {
+        if let Some(selected) = &group.selected {
+            match totals.add_shipping(
+                selected.amount,
+                selected.tax.map(|t| t.amount),
+                tax.prices_include_tax,
+            ) {
+                Ok(with_shipping) => totals = with_shipping,
+                Err(e) => {
+                    group.selected = None;
+                    group.problem = Some(ShippingProblem::Money(e));
+                }
+            }
+        }
+        shipping_groups.push(group);
+    }
+
     PricedCart {
         id: cart.id(),
         market: pricing.market.id(),
@@ -184,6 +239,9 @@ pub fn price_cart(
         lines,
         taxes_included: tax.prices_include_tax,
         subtotal: totals.subtotal,
+        shipping_address: cart.shipping_address().cloned(),
+        shipping_groups,
+        shipping_total: totals.shipping_total,
         tax_total: totals.tax_total,
         total: totals.total,
     }
@@ -193,6 +251,7 @@ pub fn price_cart(
 #[derive(Clone, Copy)]
 struct Totals {
     subtotal: Money,
+    shipping_total: Money,
     tax_total: Money,
     /// `subtotal`, plus `tax_total` when taxes are added on top of prices.
     total: Money,
@@ -203,9 +262,31 @@ impl Totals {
         let zero = Money::zero(currency);
         Self {
             subtotal: zero,
+            shipping_total: zero,
             tax_total: zero,
             total: zero,
         }
+    }
+
+    /// The totals with shipping added, or `Overflow`.
+    fn add_shipping(
+        self,
+        amount: Money,
+        tax: Option<Money>,
+        taxes_included: bool,
+    ) -> Result<Self, MoneyError> {
+        let tax = tax.unwrap_or(Money::zero(amount.currency()));
+        let into_total = if taxes_included {
+            amount
+        } else {
+            amount.checked_add(tax)?
+        };
+        Ok(Self {
+            shipping_total: self.shipping_total.checked_add(amount)?,
+            tax_total: self.tax_total.checked_add(tax)?,
+            total: self.total.checked_add(into_total)?,
+            ..self
+        })
     }
 
     /// The totals with one more line, or `Overflow` if any of them would not fit.
@@ -225,6 +306,7 @@ impl Totals {
             subtotal: self.subtotal.checked_add(line_total)?,
             tax_total: self.tax_total.checked_add(line_tax)?,
             total: self.total.checked_add(into_total)?,
+            ..self
         })
     }
 }

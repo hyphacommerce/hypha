@@ -48,6 +48,8 @@ pub struct ApiErrorBody {
 /// - `option_value_in_use`: `{"variants": ["var_…"]}`, to remove with the values
 /// - `duplicate_option_combination` (removing an option): `{"variants": ["var_…", "var_…"]}`
 /// - `sku_taken` (another product): `{"sku", "product": "prod_…"}`
+/// - `shipping_option_not_offered`: `{"reason"}`: `no_price_in_currency`, `weight_unknown`,
+///   `provider_failed` or `service_not_quoted`
 /// - `asset_in_use`: `{"usages": [{"owner": {"kind", "id"}, "role"}], "has_more"}`, the first
 ///   25; `GET /admin/assets/{id}/usages` pages through all of them
 ///
@@ -448,8 +450,18 @@ impl From<hypha_cart::CommandError> for ApiError {
             // Depends on the stock right now, not on the request: 409 like inventory's.
             E::Line(LineError::OutOfStock { .. }) => StatusCode::CONFLICT,
             // Checked out: the cart's state, not the request, is the problem.
-            E::Cart(CartError::Completed { .. }) => StatusCode::CONFLICT,
+            E::Cart(CartError::Completed { .. } | CartError::ShippingAddressRequired) => {
+                StatusCode::CONFLICT
+            }
+            // Shipping (design note 0015): the group is in the URL; nothing to ship, no
+            // zone and an option not offered right now are the cart's state.
+            E::ShippingGroupNotFound(_) => StatusCode::NOT_FOUND,
+            E::NothingToShip | E::NoShippingToCountry(_) | E::ShippingOptionNotOffered { .. } => {
+                StatusCode::CONFLICT
+            }
             E::Cart(_)
+            | E::Address(_)
+            | E::ShippingOptionUnknown(_)
             | E::Line(_)
             | E::Money(_)
             | E::MarketNotFound(_)
@@ -471,6 +483,7 @@ impl From<hypha_cart::CommandError> for ApiError {
                 available,
             }) => shortages([(*variant, *requested, *available)]),
             E::Cart(CartError::Completed { order }) => completed(*order),
+            E::ShippingOptionNotOffered { reason, .. } => Some(json!({ "reason": reason.code() })),
             _ => None,
         };
         Self::domain(status, e).with_details(details)

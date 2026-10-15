@@ -1,7 +1,9 @@
 use hypha_core::{
-    CartId, CountryCode, CustomerId, Email, MarketId, OrderId, ProductId, Quantity, VariantId,
-    Version, Versioned,
+    Address, AddressParts, CartId, CountryCode, CustomerId, Email, MarketId, OrderId, Price,
+    ProductId, Quantity, ShippingGroupId, ShippingOptionId, Timestamp, VariantId, Version,
+    Versioned,
 };
+use hypha_shipping::ProviderKey;
 
 use crate::error::{CartError, RestoreError};
 
@@ -25,6 +27,34 @@ impl CartLine {
 
     pub fn quantity(&self) -> Quantity {
         self.quantity
+    }
+}
+
+/// The buyer's shipping choice for the cart's group (design note 0015, SH8): an option,
+/// and for one priced by a provider, the quote they were shown (SH9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectedShipping {
+    pub option: ShippingOptionId,
+    pub quote: Option<StoredQuote>,
+}
+
+/// A provider's price for the cart as it was when quoted. Built-in prices aren't stored:
+/// they follow the cart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredQuote {
+    pub amount: Price,
+    pub provider: ProviderKey,
+    pub service: String,
+    pub reference: Option<String>,
+    pub quoted_at: Timestamp,
+}
+
+impl StoredQuote {
+    /// How long a quote holds before checkout asks the provider again (SH9).
+    pub const VALID_FOR_SECS: i64 = 15 * 60;
+
+    pub fn expires_at(&self) -> Timestamp {
+        self.quoted_at.plus_secs(Self::VALID_FOR_SECS)
     }
 }
 
@@ -53,6 +83,10 @@ pub struct Cart {
     email: Option<Email>,
     customer: Option<CustomerId>,
     status: CartStatus,
+    /// In `country` (design note 0015, Q5).
+    shipping_address: Option<Address>,
+    /// The choice for the cart's one group of shippable lines (SH8).
+    shipping: Option<SelectedShipping>,
 }
 
 impl Versioned for Cart {
@@ -76,6 +110,8 @@ impl Cart {
             email: None,
             customer: None,
             status: CartStatus::Open,
+            shipping_address: None,
+            shipping: None,
         }
     }
 
@@ -121,6 +157,50 @@ impl Cart {
         Ok(())
     }
 
+    /// Where the cart ships; it must be in the cart's country. A new address drops the
+    /// shipping choice: what's offered depends on the destination.
+    pub fn set_shipping_address(&mut self, address: Option<Address>) -> Result<(), CartError> {
+        self.ensure_open()?;
+        if let Some(a) = &address
+            && a.country() != self.country
+        {
+            return Err(CartError::AddressCountryMismatch {
+                address: a.country(),
+                cart: self.country,
+            });
+        }
+        if address != self.shipping_address {
+            self.shipping = None;
+        }
+        self.shipping_address = address;
+        Ok(())
+    }
+
+    /// The buyer's choice; picking one needs an address. Commands check the option is
+    /// offered (`select_shipping`).
+    pub fn select_shipping(&mut self, selected: Option<SelectedShipping>) -> Result<(), CartError> {
+        self.ensure_open()?;
+        if selected.is_some() && self.shipping_address.is_none() {
+            return Err(CartError::ShippingAddressRequired);
+        }
+        self.shipping = selected;
+        Ok(())
+    }
+
+    /// The ID of the cart's group of shippable lines. One group for now, named after the
+    /// cart, so it stays the same however its lines change.
+    pub fn shipping_group(&self) -> ShippingGroupId {
+        ShippingGroupId::from_uuid(self.id.as_uuid())
+    }
+
+    /// A provider's quote was for the lines as they were: changing them drops the choice.
+    /// A built-in price simply follows the lines.
+    fn lines_changed(&mut self) {
+        if self.shipping.as_ref().is_some_and(|s| s.quote.is_some()) {
+            self.shipping = None;
+        }
+    }
+
     /// Adds a line, or increases the quantity if the variant is already in the cart.
     pub fn add_line(
         &mut self,
@@ -138,6 +218,7 @@ impl Cart {
                 quantity,
             });
         }
+        self.lines_changed();
         Ok(())
     }
 
@@ -153,6 +234,7 @@ impl Cart {
             .find(|l| l.variant == variant)
             .ok_or(CartError::LineNotFound(variant))?;
         line.quantity = quantity;
+        self.lines_changed();
         Ok(())
     }
 
@@ -163,6 +245,7 @@ impl Cart {
         if self.lines.len() == before {
             return Err(CartError::LineNotFound(variant));
         }
+        self.lines_changed();
         Ok(())
     }
 
@@ -194,6 +277,14 @@ impl Cart {
         self.status
     }
 
+    pub fn shipping_address(&self) -> Option<&Address> {
+        self.shipping_address.as_ref()
+    }
+
+    pub fn shipping(&self) -> Option<&SelectedShipping> {
+        self.shipping.as_ref()
+    }
+
     /// The line holding `variant`.
     pub fn line(&self, variant: VariantId) -> Result<CartLine, CartError> {
         self.lines
@@ -216,6 +307,9 @@ pub struct CartSnapshot {
     pub customer: Option<CustomerId>,
     /// `Some` once checked out (`CartStatus::Completed`).
     pub order: Option<OrderId>,
+    /// Checked by `Address::new` on restore.
+    pub shipping_address: Option<AddressParts>,
+    pub shipping: Option<SelectedShipping>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,6 +341,8 @@ impl Cart {
                 CartStatus::Open => None,
                 CartStatus::Completed { order } => Some(order),
             },
+            shipping_address: self.shipping_address.as_ref().map(|a| a.parts().clone()),
+            shipping: self.shipping.clone(),
         }
     }
 
@@ -268,6 +364,19 @@ impl Cart {
                 quantity: Quantity::new(line.quantity).map_err(CartError::from)?,
             });
         }
+        let shipping_address = s.shipping_address.map(Address::new).transpose()?;
+        if let Some(a) = &shipping_address
+            && a.country() != s.country
+        {
+            return Err(CartError::AddressCountryMismatch {
+                address: a.country(),
+                cart: s.country,
+            }
+            .into());
+        }
+        if s.shipping.is_some() && shipping_address.is_none() {
+            return Err(CartError::ShippingAddressRequired.into());
+        }
         Ok(Cart {
             id: s.id,
             version: s.version,
@@ -280,6 +389,8 @@ impl Cart {
                 None => CartStatus::Open,
                 Some(order) => CartStatus::Completed { order },
             },
+            shipping_address,
+            shipping: s.shipping,
         })
     }
 }
