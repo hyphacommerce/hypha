@@ -178,9 +178,11 @@ impl StageCarts for InMemoryBatch {
 
 impl StageProducts for InMemoryBatch {
     fn update_product(&mut self, product: &mut Product) {
-        self.stage(Staged::Product(product.clone()));
+        // Events first: the copy staged (and stored) must not carry them, or a later
+        // load would hand them out again.
         let version = product.version().next();
         self.stage_events_of(product, version);
+        self.stage(Staged::Product(product.clone()));
         product.set_version(version);
     }
 }
@@ -204,14 +206,19 @@ impl StageInventoryItems for InMemoryBatch {
 
 impl StageOrders for InMemoryBatch {
     fn insert_order(&mut self, order: &mut Order) {
+        // The copy staged keeps no events: they're staged on their own, next.
+        let events = order.take_events();
         self.stage(Staged::NewOrder(order.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
         order.set_version(Version::NEW.next());
     }
 }
 
 impl StageCustomers for InMemoryBatch {
     fn insert_customer(&mut self, customer: &mut Customer) {
+        let events = customer.take_events();
         self.stage(Staged::NewCustomer(customer.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
         customer.set_version(Version::NEW.next());
     }
 }

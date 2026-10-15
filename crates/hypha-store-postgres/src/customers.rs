@@ -1,5 +1,5 @@
 use hypha_core::{
-    Address, AddressId, AddressParts, CustomerId, Email, RepoError, Version, Versioned,
+    Address, AddressId, AddressParts, CustomerId, Email, Recorded, RepoError, Version, Versioned,
 };
 use hypha_customers::{Customer, CustomerRepo, CustomerSnapshot, SavedAddress};
 use tokio_postgres::{GenericClient, Row, types::Type};
@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::{
     columns::{address_columns, address_from_row, col, version_from_db, version_to_db},
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -28,14 +29,26 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
 
     async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError> {
         let s = customer.snapshot();
-        in_transaction!(self, |tx| insert_customer(tx, &s).await)?;
-        customer.set_version(Version::NEW.next());
+        let events = customer.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_customer(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        customer.set_version(version);
         Ok(())
     }
 
     async fn update(&self, customer: &mut Customer) -> Result<(), RepoError> {
         let s = customer.snapshot();
-        let version = in_transaction!(self, |tx| update_customer(tx, &s).await)?;
+        let events = customer.take_events();
+        let actor = self.actor();
+        let version = in_transaction!(self, |tx| {
+            let version = update_customer(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await?;
+            Ok(version)
+        })?;
         customer.set_version(version);
         Ok(())
     }

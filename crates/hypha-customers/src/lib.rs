@@ -6,6 +6,7 @@
 pub mod commands;
 pub mod customer;
 pub mod error;
+pub mod events;
 pub mod repo;
 
 pub use commands::{
@@ -14,4 +15,5 @@ pub use commands::{
 };
 pub use customer::{Customer, CustomerSnapshot, SavedAddress};
 pub use error::{CustomerError, RestoreError};
+pub use events::{CustomerCreated, CustomerUpdated};
 pub use repo::{CustomerRepo, HasCustomers, StageCustomers};

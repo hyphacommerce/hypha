@@ -2,11 +2,15 @@ use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
     Address, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId,
-    OrderLineId, Price, ProductId, Quantity, ShippingGroupId, ShippingOptionId, TaxClassId,
-    TaxRate, TaxRegionId, Timestamp, VariantId, Version, Versioned, required_text,
+    OrderLineId, PendingEvent, Price, ProductId, Quantity, Recorded, Recorder, ShippingGroupId,
+    ShippingOptionId, Subject, TaxClassId, TaxRate, TaxRegionId, Timestamp, VariantId, Version,
+    Versioned, required_text,
 };
 
-use crate::OrderError;
+use crate::{
+    OrderError,
+    events::{ORDER, OrderPaid, OrderPlaced},
+};
 
 /// An order's human number (`#1001`) from `OrderRepo::next_number`: unique and
 /// increasing, possibly with gaps.
@@ -224,6 +228,13 @@ pub struct Order {
     total: Money,
     financial_status: FinancialStatus,
     fulfillment_status: FulfillmentStatus,
+    events: Recorder,
+}
+
+impl Recorded for Order {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
 }
 
 impl Versioned for Order {
@@ -239,7 +250,7 @@ impl Versioned for Order {
 impl Order {
     /// A new order: payment pending, nothing fulfilled.
     pub fn place(new: NewOrder) -> Result<Order, OrderError> {
-        Order::restore(OrderSnapshot {
+        let mut order = Order::restore(OrderSnapshot {
             id: new.id,
             version: Version::NEW,
             number: new.number,
@@ -260,7 +271,19 @@ impl Order {
             total: new.total,
             financial_status: FinancialStatus::Pending,
             fulfillment_status: FulfillmentStatus::Unfulfilled,
-        })
+        })?;
+        let placed = OrderPlaced {
+            order: order.id,
+            number: order.number.value(),
+            customer: order.customer,
+            total: order.total,
+        };
+        order.events.record(order.subject(), &placed);
+        Ok(order)
+    }
+
+    fn subject(&self) -> Subject {
+        Subject::new(ORDER, self.id.as_uuid())
     }
 
     /// Records that the order is paid; returns whether that changed anything (an order
@@ -268,6 +291,13 @@ impl Order {
     pub fn mark_paid(&mut self) -> bool {
         let changed = self.financial_status != FinancialStatus::Paid;
         self.financial_status = FinancialStatus::Paid;
+        if changed {
+            let paid = OrderPaid {
+                order: self.id,
+                amount: self.total,
+            };
+            self.events.record(self.subject(), &paid);
+        }
         changed
     }
 
@@ -495,6 +525,7 @@ impl Order {
             total: s.total,
             financial_status: s.financial_status,
             fulfillment_status: s.fulfillment_status,
+            events: Recorder::default(),
         })
     }
 }

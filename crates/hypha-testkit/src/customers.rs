@@ -1,11 +1,27 @@
-use hypha_core::{CustomerId, Email, RepoError};
+use hypha_core::{CustomerId, Email, Recorded, RepoError, Versioned};
 use hypha_customers::{Customer, CustomerRepo, repo::keys};
 
-use crate::table::Table;
+use crate::{InMemoryOutbox, table::Table};
 
 #[derive(Default)]
 pub struct InMemoryCustomerRepo {
     pub(crate) customers: Table<CustomerId, Customer>,
+    pub(crate) outbox: InMemoryOutbox,
+}
+
+impl InMemoryCustomerRepo {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+
+    /// The events this repo wrote (into its outbox, shared or not).
+    pub fn outbox(&self) -> &InMemoryOutbox {
+        &self.outbox
+    }
 }
 
 /// One customer per email.
@@ -32,11 +48,17 @@ impl CustomerRepo for InMemoryCustomerRepo {
     }
 
     async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError> {
+        let events = customer.take_events();
         self.customers
-            .insert(customer.id(), customer, keys::CUSTOMER_ID, &unique)
+            .insert(customer.id(), customer, keys::CUSTOMER_ID, &unique)?;
+        self.outbox.write(events, Some(customer.version()));
+        Ok(())
     }
 
     async fn update(&self, customer: &mut Customer) -> Result<(), RepoError> {
-        self.customers.update(customer.id(), customer, &unique)
+        let events = customer.take_events();
+        self.customers.update(customer.id(), customer, &unique)?;
+        self.outbox.write(events, Some(customer.version()));
+        Ok(())
     }
 }

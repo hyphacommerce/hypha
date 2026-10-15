@@ -297,6 +297,7 @@ impl StageInventoryItems for PgBatch {
 impl StageOrders for PgBatch {
     fn insert_order(&mut self, order: &mut Order) {
         self.stage(Staged::NewOrder(order.snapshot()));
+        self.stage_events_of(order, Version::NEW.next());
         order.set_version(Version::NEW.next());
     }
 }
@@ -304,6 +305,7 @@ impl StageOrders for PgBatch {
 impl StageCustomers for PgBatch {
     fn insert_customer(&mut self, customer: &mut Customer) {
         self.stage(Staged::NewCustomer(customer.snapshot()));
+        self.stage_events_of(customer, Version::NEW.next());
         customer.set_version(Version::NEW.next());
     }
 }

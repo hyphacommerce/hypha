@@ -5,12 +5,14 @@
 
 pub mod commands;
 pub mod error;
+pub mod events;
 pub mod order;
 pub mod repo;
 pub mod summary;
 
 pub use commands::{CommandError, get_order, list_orders, mark_order_paid};
 pub use error::OrderError;
+pub use events::{OrderPaid, OrderPlaced};
 pub use order::{
     FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderLine, OrderNumber, OrderShippingLine,
     OrderSnapshot, OrderTax, OrderTaxSource,

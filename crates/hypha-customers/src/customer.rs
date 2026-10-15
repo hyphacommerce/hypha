@@ -1,8 +1,11 @@
 use std::collections::HashSet;
 
-use hypha_core::{Address, AddressId, CustomerId, Email, Version, Versioned, optional_text};
+use hypha_core::{
+    Address, AddressId, CustomerId, Email, PendingEvent, Recorded, Version, Versioned,
+    optional_text,
+};
 
-use crate::{CustomerError, RestoreError};
+use crate::{CustomerError, RestoreError, events::Changes};
 
 /// An address in a customer's address book.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +30,14 @@ pub struct Customer {
     addresses: Vec<SavedAddress>,
     default_shipping: Option<AddressId>,
     default_billing: Option<AddressId>,
+    /// What changed since it was loaded, for its events (design note 0016).
+    changes: Changes,
+}
+
+impl Recorded for Customer {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.changes.take(self.id)
+    }
 }
 
 impl Versioned for Customer {
@@ -53,28 +64,44 @@ impl Customer {
             addresses: Vec::new(),
             default_shipping: None,
             default_billing: None,
+            changes: Changes::created(),
         }
     }
 
     pub fn set_email(&mut self, email: Email) {
-        self.email = email;
+        if email != self.email {
+            self.email = email;
+            self.changes.field("email");
+        }
     }
 
     /// Trimmed; empty clears it.
     pub fn set_first_name(&mut self, name: Option<String>) -> Result<(), CustomerError> {
-        self.first_name = optional_text("first_name", name)?;
+        let name = optional_text("first_name", name)?;
+        if name != self.first_name {
+            self.first_name = name;
+            self.changes.field("first_name");
+        }
         Ok(())
     }
 
     /// Trimmed; empty clears it.
     pub fn set_last_name(&mut self, name: Option<String>) -> Result<(), CustomerError> {
-        self.last_name = optional_text("last_name", name)?;
+        let name = optional_text("last_name", name)?;
+        if name != self.last_name {
+            self.last_name = name;
+            self.changes.field("last_name");
+        }
         Ok(())
     }
 
     /// Trimmed; empty clears it. Free text for now (no E.164 check).
     pub fn set_phone(&mut self, phone: Option<String>) -> Result<(), CustomerError> {
-        self.phone = optional_text("phone", phone)?;
+        let phone = optional_text("phone", phone)?;
+        if phone != self.phone {
+            self.phone = phone;
+            self.changes.field("phone");
+        }
         Ok(())
     }
 
@@ -90,6 +117,7 @@ impl Customer {
             return Err(CustomerError::DuplicateAddress(id));
         }
         self.addresses.push(SavedAddress { id, address });
+        self.changes.field("addresses");
         self.set_defaults(id, default_shipping, default_billing);
         Ok(())
     }
@@ -108,6 +136,7 @@ impl Customer {
             .find(|a| a.id == id)
             .ok_or(CustomerError::AddressNotFound(id))?;
         saved.address = address;
+        self.changes.field("addresses");
         self.set_defaults(id, default_shipping, default_billing);
         Ok(())
     }
@@ -119,6 +148,7 @@ impl Customer {
         if self.addresses.len() == before {
             return Err(CustomerError::AddressNotFound(id));
         }
+        self.changes.field("addresses");
         self.set_defaults(id, false, false);
         Ok(())
     }
@@ -128,10 +158,14 @@ impl Customer {
             (&mut self.default_shipping, shipping),
             (&mut self.default_billing, billing),
         ] {
+            let before = *default;
             if wanted {
                 *default = Some(id);
             } else if *default == Some(id) {
                 *default = None;
+            }
+            if *default != before {
+                self.changes.field("defaults");
             }
         }
     }
@@ -227,6 +261,8 @@ impl Customer {
         customer.default_shipping = s.default_shipping;
         customer.default_billing = s.default_billing;
         customer.version = s.version;
+        // Rebuilt through `new` and the setters; nothing happened, though.
+        customer.changes = Changes::default();
         Ok(customer)
     }
 }

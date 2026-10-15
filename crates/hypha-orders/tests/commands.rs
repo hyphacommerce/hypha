@@ -104,6 +104,8 @@ fn marking_a_paid_order_again_writes_nothing() {
     block_on(mark_order_paid(&Ctx::system(), &repo, order_id())).unwrap();
     let again = block_on(mark_order_paid(&Ctx::system(), &repo, order_id())).unwrap();
     assert_eq!(again.version(), Version::new(2));
+    // Placed, then paid once.
+    assert_eq!(repo.outbox().types(), ["order.placed", "order.paid"]);
 }
 
 #[test]

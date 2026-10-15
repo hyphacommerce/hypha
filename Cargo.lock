@@ -869,6 +869,7 @@ dependencies = [
  "hypha-core",
  "hypha-testkit",
  "pollster",
+ "serde",
  "thiserror",
  "uuid",
 ]
@@ -978,6 +979,7 @@ dependencies = [
  "hypha-core",
  "hypha-testkit",
  "pollster",
+ "serde",
  "thiserror",
  "uuid",
 ]

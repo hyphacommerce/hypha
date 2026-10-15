@@ -7,7 +7,7 @@ use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasPriceLists, PriceList, PriceListRepo,
     StageCatalogProducts, StageFixedPrices,
 };
-use hypha_products::{Handle, HasProducts, Product, ProductRepo, StageProducts};
+use hypha_products::{Handle, HasProducts, Product, ProductRepo, ProductStatus, StageProducts};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -166,8 +166,15 @@ where
     let tags: Vec<&serde_json::Value> = events[2..].iter().map(|e| &e.data["tag"]).collect();
     assert_eq!(tags, ["a", "b"]);
     assert_eq!(events[2].subject_version, None);
-    // Staging took the events: committing the aggregate again writes none.
     assert_eq!(mug.version(), Version::new(2));
+    // What the batch stored carries no events: loading it and writing it again writes
+    // only what changed since.
+    let mut stored = store.products().get(mug.id()).await.unwrap().unwrap();
+    stored.set_status(ProductStatus::Active).unwrap();
+    store.products().update(&mut stored).await.unwrap();
+    let events = all(store).await;
+    assert_eq!(events.len(), 5);
+    assert_eq!(events[4].data["fields"], serde_json::json!(["status"]));
 }
 
 async fn failed_batch_writes_none<S>(store: &S)

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use hypha_core::{
     Address, CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, OrderLineId, Page,
-    PageRequest, Price, ProductId, Quantity, RepoError, ShippingGroupId, ShippingOptionId,
-    TaxClassId, TaxRegionId, Timestamp, VariantId, Version, Versioned,
+    PageRequest, Price, ProductId, Quantity, Recorded, RepoError, ShippingGroupId,
+    ShippingOptionId, TaxClassId, TaxRegionId, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_orders::{
     Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSummary,
@@ -19,6 +19,7 @@ use crate::{
         version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -79,14 +80,26 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
 
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {
         let s = order.snapshot();
-        in_transaction!(self, |tx| insert_order(tx, &s).await)?;
-        order.set_version(Version::NEW.next());
+        let events = order.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_order(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        order.set_version(version);
         Ok(())
     }
 
     async fn update(&self, order: &mut Order) -> Result<(), RepoError> {
         let s = order.snapshot();
-        let version = in_transaction!(self, |tx| update_order(tx, &s).await)?;
+        let events = order.take_events();
+        let actor = self.actor();
+        let version = in_transaction!(self, |tx| {
+            let version = update_order(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await?;
+            Ok(version)
+        })?;
         order.set_version(version);
         Ok(())
     }

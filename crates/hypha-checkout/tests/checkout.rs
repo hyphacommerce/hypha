@@ -258,6 +258,24 @@ fn a_guest_becomes_a_customer() {
 }
 
 #[test]
+fn checkout_records_the_order_and_the_new_customer_with_them() {
+    let world = World::new();
+    let before = world.ports.outbox.events().len();
+    let order = world.checkout(world.cart()).unwrap();
+    let events: Vec<_> = world.ports.outbox.events().split_off(before);
+    let types: Vec<&str> = events.iter().map(|e| e.event_type.as_str()).collect();
+    assert!(types.contains(&"order.placed"), "{types:?}");
+    assert!(types.contains(&"customer.created"), "{types:?}");
+    let placed = events
+        .iter()
+        .find(|e| e.event_type == "order.placed")
+        .unwrap();
+    assert_eq!(placed.data["order"], order.id().to_string());
+    assert_eq!(placed.data["number"], order.number().value());
+    assert_eq!(placed.data["customer"], order.customer().to_string());
+}
+
+#[test]
 fn a_customer_with_the_email_is_reused() {
     let world = World::new();
     let id = CustomerId::from_uuid(Uuid::from_u128(1500));
