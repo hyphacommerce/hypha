@@ -6,11 +6,20 @@ use hypha_core::{
 };
 use tokio_postgres::{
     Row,
-    types::{ToSql, Type},
+    types::{FromSql, ToSql, Type},
 };
 use uuid::Uuid;
 
 use crate::error::corrupt;
+
+/// The value of `row`'s column `name`, or `corrupt` naming the column when it's missing
+/// or holds another type (a NULL in a non-`Option` type included). Rows are read with
+/// this rather than `Row::get`, which panics on all of those, and by name rather than by
+/// position, so a changed SELECT list can't shift what a column means.
+pub(crate) fn col<'a, T: FromSql<'a>>(row: &'a Row, name: &str) -> Result<T, RepoError> {
+    row.try_get(name)
+        .map_err(|e| corrupt(format!("column {name:?}: {e}")))
+}
 
 /// Versions are `u64` in the domain and `bigint` in the database.
 pub(crate) fn version_to_db(version: Version) -> Result<i64, RepoError> {
@@ -85,9 +94,18 @@ pub(crate) fn ts(n: usize) -> String {
     format!("('epoch'::timestamptz + ${n}::bigint * interval '1 microsecond')")
 }
 
-/// SQL reading a `timestamptz` column back as microseconds since the epoch.
+/// SQL reading a `timestamptz` column back as microseconds since the epoch, for a SELECT
+/// list: named after the column (without any `table.` prefix), so `col` finds it.
 pub(crate) fn micros(column: &str) -> String {
-    format!("(extract(epoch FROM {column}) * 1000000)::bigint")
+    format!(
+        "(extract(epoch FROM {column}) * 1000000)::bigint AS {}",
+        unqualified(column)
+    )
+}
+
+/// `placed_at` for `o.placed_at`.
+fn unqualified(column: &str) -> &str {
+    column.rsplit_once('.').map_or(column, |(_, name)| name)
 }
 
 /// An address's columns, in the order every helper below uses. Tables that keep one
@@ -159,21 +177,56 @@ pub(crate) fn address_values(a: Option<&AddressParts>) -> [Option<&str>; ADDRESS
     ]
 }
 
-/// The address in the ten columns from `first` of `row` (as `address_columns` lists
+/// The address in `row`'s columns with this prefix (as `address_columns(prefix)` lists
 /// them), or `None` when they're NULL. Check constraints keep the required columns all
 /// set or all NULL, so the last name stands for all of them.
-pub(crate) fn address_from_row(row: &Row, first: usize) -> Option<AddressParts> {
-    row.get::<_, Option<String>>(first + 1)
-        .map(|last_name| AddressParts {
-            first_name: row.get(first),
-            last_name,
-            company: row.get(first + 2),
-            line1: row.get(first + 3),
-            line2: row.get(first + 4),
-            city: row.get(first + 5),
-            province: row.get(first + 6),
-            postal_code: row.get(first + 7),
-            country: row.get(first + 8),
-            phone: row.get(first + 9),
-        })
+pub(crate) fn address_from_row(row: &Row, prefix: &str) -> Result<Option<AddressParts>, RepoError> {
+    let [
+        first_name,
+        last_name,
+        company,
+        line1,
+        line2,
+        city,
+        province,
+        postal_code,
+        country,
+        phone,
+    ] = ADDRESS_FIELDS.map(|f| format!("{prefix}{f}"));
+    let Some(last_name) = col::<Option<String>>(row, &last_name)? else {
+        return Ok(None);
+    };
+    Ok(Some(AddressParts {
+        first_name: col(row, &first_name)?,
+        last_name,
+        company: col(row, &company)?,
+        line1: col(row, &line1)?,
+        line2: col(row, &line2)?,
+        city: col(row, &city)?,
+        province: col(row, &province)?,
+        postal_code: col(row, &postal_code)?,
+        country: col(row, &country)?,
+        phone: col(row, &phone)?,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn micros_names_the_column_without_its_table() {
+        assert_eq!(
+            micros("o.placed_at"),
+            "(extract(epoch FROM o.placed_at) * 1000000)::bigint AS placed_at"
+        );
+    }
+
+    #[test]
+    fn micros_names_an_unqualified_column_after_itself() {
+        assert_eq!(
+            micros("created_at"),
+            "(extract(epoch FROM created_at) * 1000000)::bigint AS created_at"
+        );
+    }
 }

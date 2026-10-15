@@ -9,7 +9,7 @@ use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{tax_rate_from_db, tax_rate_to_db, version_from_db, version_to_db},
+    columns::{col, tax_rate_from_db, tax_rate_to_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
@@ -30,8 +30,8 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
         let Some(row) = row else { return Ok(None) };
         TaxClass::restore(TaxClassSnapshot {
             id,
-            version: version_from_db(row.get(0))?,
-            name: row.get(1),
+            version: version_from_db(col(&row, "version")?)?,
+            name: col(&row, "name")?,
         })
         .map(Some)
         .map_err(|e| corrupt(format!("tax class {id}: {e}")))
@@ -70,15 +70,14 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
             )
             .await
             .map_err(repo_error)?;
-        Ok(rows
-            .iter()
+        rows.iter()
             .map(|r| {
-                (
-                    ProductId::from_uuid(r.get(0)),
-                    TaxClassId::from_uuid(r.get(1)),
-                )
+                Ok((
+                    ProductId::from_uuid(col(r, "product_id")?),
+                    TaxClassId::from_uuid(col(r, "tax_class_id")?),
+                ))
             })
-            .collect())
+            .collect()
     }
 }
 
@@ -201,7 +200,7 @@ pub(crate) async fn update_tax_region(
     .await
     .map_err(repo_error)?;
     write_class_rates(tx, s.id, &s.class_rates).await?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// All class rates in one statement; `WITH ORDINALITY` keeps their order.
@@ -247,7 +246,7 @@ async fn load_region<T: tokio_postgres::types::ToSql + Sync>(
     else {
         return Ok(None);
     };
-    let id: Uuid = row.get(0);
+    let id: Uuid = col(&row, "id")?;
     let class_rates = client
         .query_typed(
             "SELECT tax_class_id, rate FROM tax_region_class_rates
@@ -259,17 +258,17 @@ async fn load_region<T: tokio_postgres::types::ToSql + Sync>(
         .iter()
         .map(|r| {
             Ok(ClassRate {
-                class: TaxClassId::from_uuid(r.get(0)),
-                rate: tax_rate_from_db(r.get(1))?,
+                class: TaxClassId::from_uuid(col(r, "tax_class_id")?),
+                rate: tax_rate_from_db(col(r, "rate")?)?,
             })
         })
         .collect::<Result<Vec<_>, RepoError>>()?;
-    let country: String = row.get(2);
+    let country: String = col(&row, "country")?;
     let snapshot = TaxRegionSnapshot {
         id: TaxRegionId::from_uuid(id),
-        version: version_from_db(row.get(1))?,
+        version: version_from_db(col(&row, "version")?)?,
         country: CountryCode::new(&country).map_err(corrupt)?,
-        default_rate: tax_rate_from_db(row.get(3))?,
+        default_rate: tax_rate_from_db(col(&row, "default_rate")?)?,
         class_rates,
     };
     TaxRegion::restore(snapshot)

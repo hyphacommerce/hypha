@@ -3,17 +3,17 @@ use hypha_stores::{Store, StoreRepo, StoreSnapshot};
 use tokio_postgres::{GenericClient, Row, types::Type};
 
 use crate::{
-    columns::{version_from_db, version_to_db},
+    columns::{col, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, in_transaction},
 };
 
 fn store_from_row(row: &Row) -> Result<Store, RepoError> {
-    let id = StoreId::from_uuid(row.get(0));
+    let id = StoreId::from_uuid(col(row, "id")?);
     Store::restore(StoreSnapshot {
         id,
-        version: version_from_db(row.get(1))?,
-        name: row.get(2),
+        version: version_from_db(col(row, "version")?)?,
+        name: col(row, "name")?,
     })
     .map_err(|e| corrupt(format!("store {id}: {e}")))
 }
@@ -90,5 +90,5 @@ pub(crate) async fn update_store(
         .await
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }

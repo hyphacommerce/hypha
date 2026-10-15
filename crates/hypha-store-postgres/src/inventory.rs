@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        address_assignments, address_columns, address_from_row, address_values, id_and_address,
-        version_from_db, version_to_db,
+        address_assignments, address_columns, address_from_row, address_values, col,
+        id_and_address, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -41,8 +41,8 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?
                 .iter()
-                .map(|r| r.get(0))
-                .collect();
+                .map(|r| col(r, "location_id"))
+                .collect::<Result<_, RepoError>>()?;
             load_locations(tx, &ids).await
         })
     }
@@ -110,7 +110,7 @@ pub(crate) async fn update_location(
     .map_err(repo_error)?;
     write_location_markets(tx, s.id, &s.markets).await?;
     write_location_address(tx, s).await?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// All of a location's markets in one statement; `WITH ORDINALITY` keeps their order.
@@ -175,7 +175,10 @@ async fn load_locations(
     if rows.is_empty() {
         return Ok(vec![]);
     }
-    let found: Vec<Uuid> = rows.iter().map(|r| r.get(0)).collect();
+    let found: Vec<Uuid> = rows
+        .iter()
+        .map(|r| col(r, "id"))
+        .collect::<Result<_, RepoError>>()?;
     let mut markets: HashMap<Uuid, Vec<MarketId>> = HashMap::new();
     for r in client
         .query_typed(
@@ -187,23 +190,23 @@ async fn load_locations(
         .map_err(repo_error)?
     {
         markets
-            .entry(r.get(0))
+            .entry(col(&r, "location_id")?)
             .or_default()
-            .push(MarketId::from_uuid(r.get(1)));
+            .push(MarketId::from_uuid(col(&r, "market_id")?));
     }
 
     rows.iter()
         .map(|r| {
-            let id: Uuid = r.get(0);
-            let priority: i64 = r.get(3);
+            let id: Uuid = col(r, "id")?;
+            let priority: i64 = col(r, "priority")?;
             let snapshot = LocationSnapshot {
                 id: LocationId::from_uuid(id),
-                version: version_from_db(r.get(1))?,
-                name: r.get(2),
+                version: version_from_db(col(r, "version")?)?,
+                name: col(r, "name")?,
                 markets: markets.remove(&id).unwrap_or_default(),
                 priority: u32::try_from(priority)
                     .map_err(|_| corrupt(format!("location priority {priority}")))?,
-                address: address_from_row(r, 4),
+                address: address_from_row(r, "address_")?,
             };
             Location::restore(snapshot).map_err(|e| corrupt(format!("location {id}: {e}")))
         })
@@ -344,7 +347,7 @@ pub(crate) async fn update_items(
     }
     let new_versions = bumped
         .iter()
-        .map(|r| Ok((r.get::<_, Uuid>(0), version_from_db(r.get(1))?)))
+        .map(|r| Ok((col::<Uuid>(r, "id")?, version_from_db(col(r, "version")?)?)))
         .collect::<Result<HashMap<Uuid, Version>, RepoError>>()?;
 
     for table in ["inventory_levels", "inventory_reservations"] {
@@ -440,7 +443,10 @@ async fn load_items(
     if rows.is_empty() {
         return Ok(vec![]);
     }
-    let ids: Vec<Uuid> = rows.iter().map(|r| r.get(0)).collect();
+    let ids: Vec<Uuid> = rows
+        .iter()
+        .map(|r| col(r, "id"))
+        .collect::<Result<_, RepoError>>()?;
 
     let mut levels: HashMap<Uuid, Vec<Level>> = HashMap::new();
     for r in client
@@ -452,9 +458,9 @@ async fn load_items(
         .await
         .map_err(repo_error)?
     {
-        levels.entry(r.get(0)).or_default().push(Level {
-            location: LocationId::from_uuid(r.get(1)),
-            on_hand: r.get(2),
+        levels.entry(col(&r, "item_id")?).or_default().push(Level {
+            location: LocationId::from_uuid(col(&r, "location_id")?),
+            on_hand: col(&r, "on_hand")?,
         });
     }
 
@@ -468,27 +474,30 @@ async fn load_items(
         .await
         .map_err(repo_error)?
     {
-        let reference: String = r.get(1);
-        let quantity: i64 = r.get(3);
-        reservations.entry(r.get(0)).or_default().push(Reservation {
-            reference: ReservationRef::new(&reference).map_err(corrupt)?,
-            location: LocationId::from_uuid(r.get(2)),
-            quantity: u32::try_from(quantity)
-                .ok()
-                .and_then(|q| Quantity::new(q).ok())
-                .ok_or_else(|| corrupt(format!("reservation quantity {quantity}")))?,
-        });
+        let reference: String = col(&r, "reference")?;
+        let quantity: i64 = col(&r, "quantity")?;
+        reservations
+            .entry(col(&r, "item_id")?)
+            .or_default()
+            .push(Reservation {
+                reference: ReservationRef::new(&reference).map_err(corrupt)?,
+                location: LocationId::from_uuid(col(&r, "location_id")?),
+                quantity: u32::try_from(quantity)
+                    .ok()
+                    .and_then(|q| Quantity::new(q).ok())
+                    .ok_or_else(|| corrupt(format!("reservation quantity {quantity}")))?,
+            });
     }
 
     rows.iter()
         .map(|r| {
-            let id: Uuid = r.get(0);
+            let id: Uuid = col(r, "id")?;
             let snapshot = InventoryItemSnapshot {
                 id: InventoryItemId::from_uuid(id),
-                version: version_from_db(r.get(1))?,
-                variant: VariantId::from_uuid(r.get(2)),
-                tracked: r.get(3),
-                continue_selling: r.get(4),
+                version: version_from_db(col(r, "version")?)?,
+                variant: VariantId::from_uuid(col(r, "variant_id")?),
+                tracked: col(r, "tracked")?,
+                continue_selling: col(r, "continue_selling")?,
                 levels: levels.remove(&id).unwrap_or_default(),
                 reservations: reservations.remove(&id).unwrap_or_default(),
             };

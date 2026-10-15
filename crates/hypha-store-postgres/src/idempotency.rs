@@ -3,7 +3,7 @@ use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{actor_to_db, micros},
+    columns::{actor_to_db, col, micros},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
 };
@@ -35,16 +35,16 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
             .await
             .map_err(repo_error))?;
         let Some(row) = row else { return Ok(None) };
-        let fingerprint: Vec<u8> = row.get(1);
+        let fingerprint: Vec<u8> = col(&row, "fingerprint")?;
         Ok(Some(IdempotencyRecord {
             actor,
             key: key.clone(),
-            operation: row.get(0),
+            operation: col(&row, "operation")?,
             fingerprint: fingerprint
                 .try_into()
                 .map_err(|_| corrupt("idempotency fingerprint is not 32 bytes"))?,
-            result: row.get(2),
-            created_at: Timestamp::from_unix_micros(row.get(3)),
+            result: col(&row, "result")?,
+            created_at: Timestamp::from_unix_micros(col(&row, "created_at")?),
         }))
     }
 }

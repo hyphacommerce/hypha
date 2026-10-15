@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        actor_from_db, actor_to_db, micros, scopes_from_db, scopes_to_db, token_hash_from_db, ts,
-        version_from_db, version_to_db,
+        actor_from_db, actor_to_db, col, micros, scopes_from_db, scopes_to_db, token_hash_from_db,
+        ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -64,7 +64,7 @@ impl<C: PgConnection> IdentityRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             match row {
-                Some(row) => load_identity(tx, row.get(0)).await,
+                Some(row) => load_identity(tx, col(&row, "id")?).await,
                 None => Ok(None),
             }
         })
@@ -91,7 +91,7 @@ impl<C: PgConnection> IdentityRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             match row {
-                Some(row) => load_identity(tx, row.get(0)).await,
+                Some(row) => load_identity(tx, col(&row, "identity_id")?).await,
                 None => Ok(None),
             }
         })
@@ -133,19 +133,19 @@ async fn load_identity(tx: &impl GenericClient, id: Uuid) -> Result<Option<Ident
         .map_err(repo_error)?
         .iter()
         .map(|c| {
-            let data: String = c.get(2);
+            let data: String = col(c, "data")?;
             Ok(StoredCredential {
-                kind: c.get(0),
-                lookup: c.get(1),
+                kind: col(c, "kind")?,
+                lookup: col(c, "lookup")?,
                 data: serde_json::from_str(&data).map_err(corrupt)?,
             })
         })
         .collect::<Result<Vec<_>, RepoError>>()?;
-    let principal_kind: String = row.get(1);
+    let principal_kind: String = col(&row, "principal_kind")?;
     let snapshot = IdentitySnapshot {
         id: IdentityId::from_uuid(id),
-        version: version_from_db(row.get(0))?,
-        principal: principal_from_db(&principal_kind, row.get(2))?,
+        version: version_from_db(col(&row, "version")?)?,
+        principal: principal_from_db(&principal_kind, col(&row, "principal_id")?)?,
         credentials,
     };
     Identity::restore(snapshot).map(Some).map_err(corrupt)
@@ -197,7 +197,7 @@ pub(crate) async fn update_identity(
     .await
     .map_err(repo_error)?;
     write_credentials(tx, s).await?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 async fn write_credentials(tx: &impl GenericClient, s: &IdentitySnapshot) -> Result<(), RepoError> {
@@ -235,28 +235,28 @@ fn session_columns() -> String {
 }
 
 fn session_from_row(row: &Row) -> Result<Session, RepoError> {
-    let principal_kind: String = row.get(3);
-    let state: String = row.get(6);
-    let failed: i32 = row.get(7);
+    let principal_kind: String = col(row, "principal_kind")?;
+    let state: String = col(row, "state")?;
+    let failed: i32 = col(row, "failed_attempts")?;
     let state = match state.as_str() {
         "pending" => SessionState::Pending {
             failed_attempts: u32::try_from(failed).map_err(corrupt)?,
         },
         "active" => SessionState::Active {
-            mfa_at: opt_ts(row.get(8)),
+            mfa_at: opt_ts(col(row, "mfa_at")?),
         },
         other => return Err(corrupt(format!("unknown session state {other:?}"))),
     };
     Ok(Session::restore(SessionSnapshot {
-        id: SessionId::from_uuid(row.get(0)),
-        version: version_from_db(row.get(1))?,
-        identity: IdentityId::from_uuid(row.get(2)),
-        principal: principal_from_db(&principal_kind, row.get(4))?,
-        token_hash: token_hash_from_db(row.get(5))?,
+        id: SessionId::from_uuid(col(row, "id")?),
+        version: version_from_db(col(row, "version")?)?,
+        identity: IdentityId::from_uuid(col(row, "identity_id")?),
+        principal: principal_from_db(&principal_kind, col(row, "principal_id")?)?,
+        token_hash: token_hash_from_db(col(row, "token_hash")?)?,
         state,
-        created_at: Timestamp::from_unix_micros(row.get(9)),
-        expires_at: Timestamp::from_unix_micros(row.get(10)),
-        revoked_at: opt_ts(row.get(11)),
+        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
+        expires_at: Timestamp::from_unix_micros(col(row, "expires_at")?),
+        revoked_at: opt_ts(col(row, "revoked_at")?),
     }))
 }
 
@@ -384,7 +384,7 @@ pub(crate) async fn update_session(
     let Some(row) = row else {
         return Err(RepoError::StaleVersion);
     };
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// `StageSessions::revoke_sessions` inside the batch's transaction.
@@ -425,20 +425,20 @@ fn key_columns() -> String {
 }
 
 fn key_from_row(row: &Row) -> Result<ApiKey, RepoError> {
-    let kind: String = row.get(2);
-    let created_by_kind: String = row.get(7);
+    let kind: String = col(row, "kind")?;
+    let created_by_kind: String = col(row, "created_by_kind")?;
     let snapshot = ApiKeySnapshot {
-        id: ApiKeyId::from_uuid(row.get(0)),
-        version: version_from_db(row.get(1))?,
+        id: ApiKeyId::from_uuid(col(row, "id")?),
+        version: version_from_db(col(row, "version")?)?,
         kind: ApiKeyKind::parse(&kind)
             .ok_or_else(|| corrupt(format!("unknown api key kind {kind:?}")))?,
-        name: row.get(3),
-        token_hash: token_hash_from_db(row.get(4))?,
-        last_four: row.get(5),
-        scopes: scopes_from_db(row.get(6))?,
-        created_by: actor_from_db(&created_by_kind, row.get(8))?,
-        created_at: Timestamp::from_unix_micros(row.get(9)),
-        revoked_at: opt_ts(row.get(10)),
+        name: col(row, "name")?,
+        token_hash: token_hash_from_db(col(row, "token_hash")?)?,
+        last_four: col(row, "last_four")?,
+        scopes: scopes_from_db(col(row, "scopes")?)?,
+        created_by: actor_from_db(&created_by_kind, col(row, "created_by_id")?)?,
+        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
+        revoked_at: opt_ts(col(row, "revoked_at")?),
     };
     ApiKey::restore(snapshot).map_err(corrupt)
 }
@@ -544,7 +544,7 @@ pub(crate) async fn update_api_key(
         .await
         .map_err(repo_error)?;
     let row = row.ok_or(RepoError::StaleVersion)?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 // ---------- password resets ----------
@@ -560,13 +560,13 @@ fn reset_columns() -> String {
 
 fn reset_from_row(row: &Row) -> Result<PasswordReset, RepoError> {
     Ok(PasswordReset::restore(PasswordResetSnapshot {
-        id: PasswordResetId::from_uuid(row.get(0)),
-        version: version_from_db(row.get(1))?,
-        identity: IdentityId::from_uuid(row.get(2)),
-        token_hash: token_hash_from_db(row.get(3))?,
-        created_at: Timestamp::from_unix_micros(row.get(4)),
-        expires_at: Timestamp::from_unix_micros(row.get(5)),
-        used_at: opt_ts(row.get(6)),
+        id: PasswordResetId::from_uuid(col(row, "id")?),
+        version: version_from_db(col(row, "version")?)?,
+        identity: IdentityId::from_uuid(col(row, "identity_id")?),
+        token_hash: token_hash_from_db(col(row, "token_hash")?)?,
+        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
+        expires_at: Timestamp::from_unix_micros(col(row, "expires_at")?),
+        used_at: opt_ts(col(row, "used_at")?),
     }))
 }
 

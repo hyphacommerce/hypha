@@ -17,7 +17,7 @@ use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{currency_from_db, version_from_db, version_to_db},
+    columns::{col, currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
@@ -46,7 +46,7 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             match row {
-                Some(row) => Ok(load_zones(tx, Some(&[row.get(0)])).await?.pop()),
+                Some(row) => Ok(load_zones(tx, Some(&[col(&row, "zone_id")?])).await?.pop()),
                 None => Ok(None),
             }
         })
@@ -120,7 +120,7 @@ pub(crate) async fn update_zone(
             .map_err(repo_error)?;
     }
     write_zone_children(tx, s).await?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// `ShippingZoneRepo::delete` inside the caller's transaction; its children go with it
@@ -268,7 +268,10 @@ async fn load_zones(
     if zones.is_empty() {
         return Ok(vec![]);
     }
-    let found: Vec<Uuid> = zones.iter().map(|r| r.get(0)).collect();
+    let found: Vec<Uuid> = zones
+        .iter()
+        .map(|r| col(r, "id"))
+        .collect::<Result<_, RepoError>>()?;
     let param = [(
         &found as &(dyn tokio_postgres::types::ToSql + Sync),
         Type::UUID_ARRAY,
@@ -284,9 +287,12 @@ async fn load_zones(
         .await
         .map_err(repo_error)?
     {
-        let code: String = row.get(1);
+        let code: String = col(&row, "country")?;
         let country = CountryCode::new(&code).map_err(corrupt)?;
-        countries.entry(row.get(0)).or_default().push(country);
+        countries
+            .entry(col(&row, "zone_id")?)
+            .or_default()
+            .push(country);
     }
 
     // Tiers by option, then by table, in order.
@@ -302,19 +308,19 @@ async fn load_zones(
         .await
         .map_err(repo_error)?
     {
-        let currency = currency_from_db(row.get(2))?;
-        let up_to = row
-            .get::<_, Option<String>>(3)
+        let currency = currency_from_db(col(&row, "currency")?)?;
+        let up_to = col::<Option<String>>(&row, "up_to")?
             .map(|b| b.parse::<u64>())
             .transpose()
             .map_err(corrupt)?;
-        let price = Money::new(row.get(4), currency)
+        let price = Money::new(col(&row, "amount")?, currency)
             .and_then(Price::new)
             .map_err(corrupt)?;
-        tiers
-            .entry(row.get(0))
-            .or_default()
-            .push((row.get(1), currency, Tier { up_to, price }));
+        tiers.entry(col(&row, "option_id")?).or_default().push((
+            col(&row, "table_position")?,
+            currency,
+            Tier { up_to, price },
+        ));
     }
 
     let mut options: HashMap<Uuid, Vec<NewOption>> = HashMap::new();
@@ -328,8 +334,8 @@ async fn load_zones(
         .await
         .map_err(repo_error)?
     {
-        let id: Uuid = row.get(1);
-        let rate = match row.get::<_, Option<String>>(4) {
+        let id: Uuid = col(&row, "id")?;
+        let rate = match col::<Option<String>>(&row, "rate_basis")? {
             Some(basis) => {
                 let basis = match basis.as_str() {
                     "flat" => RateBasis::Flat,
@@ -340,11 +346,15 @@ async fn load_zones(
                 OptionRate::Builtin(builtin_rate(basis, tiers.remove(&id).unwrap_or_default())?)
             }
             None => OptionRate::Provider {
-                provider: ProviderKey::new(&row.get::<_, String>(5)).map_err(corrupt)?,
-                service: row.get(6),
+                provider: ProviderKey::new(&col::<String>(&row, "provider_key")?)
+                    .map_err(corrupt)?,
+                service: col(&row, "provider_service")?,
             },
         };
-        let estimate = match (row.get::<_, Option<i32>>(7), row.get::<_, Option<i32>>(8)) {
+        let estimate = match (
+            col::<Option<i32>>(&row, "estimate_min_days")?,
+            col::<Option<i32>>(&row, "estimate_max_days")?,
+        ) {
             (Some(min), Some(max)) => Some(
                 DeliveryEstimate::new(
                     u16::try_from(min).map_err(corrupt)?,
@@ -354,26 +364,29 @@ async fn load_zones(
             ),
             _ => None,
         };
-        options.entry(row.get(0)).or_default().push(NewOption {
-            id: ShippingOptionId::from_uuid(id),
-            name: row.get(2),
-            code: row.get(3),
-            rate,
-            estimate,
-            tax_class: row.get::<_, Option<Uuid>>(9).map(TaxClassId::from_uuid),
-            is_backup: row.get(10),
-            enabled: row.get(11),
-        });
+        options
+            .entry(col(&row, "zone_id")?)
+            .or_default()
+            .push(NewOption {
+                id: ShippingOptionId::from_uuid(id),
+                name: col(&row, "name")?,
+                code: col(&row, "code")?,
+                rate,
+                estimate,
+                tax_class: col::<Option<Uuid>>(&row, "tax_class_id")?.map(TaxClassId::from_uuid),
+                is_backup: col(&row, "is_backup")?,
+                enabled: col(&row, "enabled")?,
+            });
     }
 
     zones
         .iter()
         .map(|row| {
-            let id: Uuid = row.get(0);
+            let id: Uuid = col(row, "id")?;
             let snapshot = ShippingZoneSnapshot {
                 id: ShippingZoneId::from_uuid(id),
-                version: version_from_db(row.get(1))?,
-                name: row.get(2),
+                version: version_from_db(col(row, "version")?)?,
+                name: col(row, "name")?,
                 countries: countries.remove(&id).unwrap_or_default(),
                 options: options.remove(&id).unwrap_or_default(),
             };
@@ -489,7 +502,7 @@ pub(crate) async fn update_provider(
     .await
     .map_err(repo_error)?;
     write_services(tx, s).await?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// `AppProviderRepo::delete` inside the caller's transaction.
@@ -551,24 +564,27 @@ async fn load_providers(
         .await
         .map_err(repo_error)?
     {
-        services.entry(row.get(0)).or_default().push(ServiceInfo {
-            code: row.get(1),
-            name: row.get(2),
-        });
+        services
+            .entry(col(&row, "provider_key")?)
+            .or_default()
+            .push(ServiceInfo {
+                code: col(&row, "code")?,
+                name: col(&row, "name")?,
+            });
     }
     rows.iter()
         .map(|row| {
-            let key: String = row.get(0);
-            let timeout: i32 = row.get(4);
+            let key: String = col(row, "key")?;
+            let timeout: i32 = col(row, "timeout_ms")?;
             let snapshot = AppProviderSnapshot {
                 services: services.remove(&key).unwrap_or_default(),
                 key: key.clone(),
-                version: version_from_db(row.get(1))?,
-                name: row.get(2),
-                callback_url: row.get(3),
+                version: version_from_db(col(row, "version")?)?,
+                name: col(row, "name")?,
+                callback_url: col(row, "callback_url")?,
                 timeout_ms: u32::try_from(timeout).map_err(corrupt)?,
-                secret: Sealed::from_bytes(row.get(5)),
-                enabled: row.get(6),
+                secret: Sealed::from_bytes(col(row, "secret")?),
+                enabled: col(row, "enabled")?,
             };
             AppProvider::restore(snapshot)
                 .map_err(|e| corrupt(format!("shipping provider {key}: {e}")))

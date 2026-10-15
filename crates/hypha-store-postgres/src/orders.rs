@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values,
+        ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
         currency_from_db, id_and_address, micros, tax_rate_from_db, tax_rate_to_db, ts,
         version_from_db, version_to_db,
     },
@@ -44,7 +44,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                      o.customer_id, o.email, o.country, o.currency, o.total,
                      o.financial_status, o.fulfillment_status,
                      (SELECT coalesce(sum(quantity), 0) FROM order_lines
-                      WHERE order_id = o.id)::bigint
+                      WHERE order_id = o.id)::bigint AS item_count
                  FROM orders o WHERE ($1::uuid IS NULL OR o.id < $1)
                  ORDER BY o.id DESC LIMIT $2",
                     micros("o.placed_at"),
@@ -71,7 +71,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             match found {
-                Some(row) => Ok(load(tx, &[row.get(0)]).await?.pop()),
+                Some(row) => Ok(load(tx, &[col(&row, "id")?]).await?.pop()),
                 None => Ok(None),
             }
         })
@@ -97,11 +97,11 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         // same number; read-write, because `nextval` writes the sequence.
         let tx = conn.client().transaction().await.map_err(repo_error)?;
         let row = tx
-            .query_typed_one("SELECT nextval('order_numbers')", &[])
+            .query_typed_one("SELECT nextval('order_numbers') AS number", &[])
             .await
             .map_err(repo_error)?;
         tx.commit().await.map_err(repo_error)?;
-        OrderNumber::new(row.get(0)).map_err(corrupt)
+        OrderNumber::new(col(&row, "number")?).map_err(corrupt)
     }
 }
 
@@ -161,7 +161,7 @@ pub(crate) async fn update_order(
     .await
     .map_err(repo_error)?;
     write_shipping(tx, s).await?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// `OrderRepo::insert` inside the caller's transaction (also used by `PgBatch`): the
@@ -349,9 +349,6 @@ async fn insert_lines(
 
 /// The orders with these IDs (missing ones are skipped) and their lines, in 2 queries
 /// (run inside `consistent_read`).
-/// Where `load`'s order rows have the shipping address (`shipping_total` follows it).
-const ADDRESS_AT: usize = 16;
-
 async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, RepoError> {
     if ids.is_empty() {
         return Ok(vec![]);
@@ -392,7 +389,7 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, R
         .await
         .map_err(repo_error)?
     {
-        lines.entry(line.get(13)).or_default().push(line);
+        lines.entry(col(&line, "order_id")?).or_default().push(line);
     }
 
     let mut shipping: HashMap<Uuid, Vec<Row>> = HashMap::new();
@@ -407,13 +404,16 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, R
         .await
         .map_err(repo_error)?
     {
-        shipping.entry(line.get(15)).or_default().push(line);
+        shipping
+            .entry(col(&line, "order_id")?)
+            .or_default()
+            .push(line);
     }
 
     orders
         .iter()
         .map(|row| {
-            let id: Uuid = row.get(0);
+            let id: Uuid = col(row, "id")?;
             order_from_db(
                 row,
                 lines.remove(&id).unwrap_or_default(),
@@ -429,7 +429,7 @@ fn order_from_db(
     line_rows: Vec<Row>,
     shipping_rows: Vec<Row>,
 ) -> Result<Order, RepoError> {
-    let currency_code: String = row.get(6);
+    let currency_code: String = col(row, "currency")?;
     let currency = currency_from_db(&currency_code)?;
     let money = |amount: i64| Money::new(amount, currency).map_err(corrupt);
     let lines = line_rows
@@ -440,34 +440,34 @@ fn order_from_db(
         .iter()
         .map(|line| shipping_line_from_db(line, &money))
         .collect::<Result<Vec<_>, RepoError>>()?;
-    let shipping_address = address_from_row(row, ADDRESS_AT)
+    let shipping_address = address_from_row(row, "shipping_")?
         .map(Address::new)
         .transpose()
         .map_err(corrupt)?;
 
-    let country: String = row.get(7);
-    let email: String = row.get(10);
-    let financial: String = row.get(14);
-    let fulfillment: String = row.get(15);
+    let country: String = col(row, "country")?;
+    let email: String = col(row, "email")?;
+    let financial: String = col(row, "financial_status")?;
+    let fulfillment: String = col(row, "fulfillment_status")?;
     let snapshot = OrderSnapshot {
-        id: OrderId::from_uuid(row.get(0)),
-        version: version_from_db(row.get(1))?,
-        number: OrderNumber::new(row.get(2)).map_err(corrupt)?,
-        placed_at: Timestamp::from_unix_micros(row.get(3)),
-        cart: CartId::from_uuid(row.get(4)),
-        market: MarketId::from_uuid(row.get(5)),
+        id: OrderId::from_uuid(col(row, "id")?),
+        version: version_from_db(col(row, "version")?)?,
+        number: OrderNumber::new(col(row, "number")?).map_err(corrupt)?,
+        placed_at: Timestamp::from_unix_micros(col(row, "placed_at")?),
+        cart: CartId::from_uuid(col(row, "cart_id")?),
+        market: MarketId::from_uuid(col(row, "market_id")?),
         currency,
         country: CountryCode::new(&country).map_err(corrupt)?,
-        taxes_included: row.get(8),
-        customer: CustomerId::from_uuid(row.get(9)),
+        taxes_included: col(row, "taxes_included")?,
+        customer: CustomerId::from_uuid(col(row, "customer_id")?),
         email: Email::new(&email).map_err(corrupt)?,
         lines,
         shipping_address,
         shipping_lines,
-        subtotal: money(row.get(11))?,
-        shipping_total: money(row.get(ADDRESS_AT + ADDRESS_LEN))?,
-        tax_total: money(row.get(12))?,
-        total: money(row.get(13))?,
+        subtotal: money(col(row, "subtotal")?)?,
+        shipping_total: money(col(row, "shipping_total")?)?,
+        tax_total: money(col(row, "tax_total")?)?,
+        total: money(col(row, "total")?)?,
         financial_status: financial.parse().map_err(corrupt)?,
         fulfillment_status: fulfillment.parse().map_err(corrupt)?,
     };
@@ -476,23 +476,23 @@ fn order_from_db(
 
 /// An order summary from `list`'s row.
 fn summary_from_db(row: &Row) -> Result<OrderSummary, RepoError> {
-    let id: Uuid = row.get(0);
-    let email: String = row.get(4);
-    let country: String = row.get(5);
-    let currency: String = row.get(6);
-    let financial: String = row.get(8);
-    let fulfillment: String = row.get(9);
-    let items: i64 = row.get(10);
+    let id: Uuid = col(row, "id")?;
+    let email: String = col(row, "email")?;
+    let country: String = col(row, "country")?;
+    let currency: String = col(row, "currency")?;
+    let financial: String = col(row, "financial_status")?;
+    let fulfillment: String = col(row, "fulfillment_status")?;
+    let items: i64 = col(row, "item_count")?;
     Ok(OrderSummary {
         id: OrderId::from_uuid(id),
-        number: OrderNumber::new(row.get(1)).map_err(corrupt)?,
-        placed_at: Timestamp::from_unix_micros(row.get(2)),
-        customer: CustomerId::from_uuid(row.get(3)),
+        number: OrderNumber::new(col(row, "number")?).map_err(corrupt)?,
+        placed_at: Timestamp::from_unix_micros(col(row, "placed_at")?),
+        customer: CustomerId::from_uuid(col(row, "customer_id")?),
         email: Email::new(&email).map_err(corrupt)?,
         country: CountryCode::new(&country).map_err(corrupt)?,
         financial_status: financial.parse().map_err(corrupt)?,
         fulfillment_status: fulfillment.parse().map_err(corrupt)?,
-        total: Money::new(row.get(7), currency_from_db(&currency)?).map_err(corrupt)?,
+        total: Money::new(col(row, "total")?, currency_from_db(&currency)?).map_err(corrupt)?,
         item_count: u64::try_from(items).map_err(|_| corrupt(format!("order {id} item count")))?,
     })
 }
@@ -501,10 +501,10 @@ fn shipping_line_from_db(
     line: &Row,
     money: &impl Fn(i64) -> Result<Money, RepoError>,
 ) -> Result<OrderShippingLine, RepoError> {
-    let rate: Option<i32> = line.get(11);
-    let class: Option<Uuid> = line.get(12);
-    let amount: Option<i64> = line.get(13);
-    let region: Option<Uuid> = line.get(14);
+    let rate: Option<i32> = col(line, "tax_rate_ppm")?;
+    let class: Option<Uuid> = col(line, "tax_class_id")?;
+    let amount: Option<i64> = col(line, "tax_amount")?;
+    let region: Option<Uuid> = col(line, "tax_region_id")?;
     let tax = match (rate, amount, region) {
         (Some(rate), Some(amount), Some(region)) => Some(OrderTax {
             rate: tax_rate_from_db(rate)?,
@@ -517,23 +517,23 @@ fn shipping_line_from_db(
         (None, None, None) => None,
         _ => return Err(corrupt("order shipping tax columns are partly set")),
     };
-    let days = |i: usize| -> Result<Option<u16>, RepoError> {
-        line.get::<_, Option<i32>>(i)
+    let days = |name: &str| -> Result<Option<u16>, RepoError> {
+        col::<Option<i32>>(line, name)?
             .map(|d| u16::try_from(d).map_err(corrupt))
             .transpose()
     };
-    let line_ids: Vec<Uuid> = line.get(1);
+    let line_ids: Vec<Uuid> = col(line, "line_ids")?;
     Ok(OrderShippingLine {
-        group: ShippingGroupId::from_uuid(line.get(0)),
+        group: ShippingGroupId::from_uuid(col(line, "group_id")?),
         lines: line_ids.into_iter().map(OrderLineId::from_uuid).collect(),
-        option: ShippingOptionId::from_uuid(line.get(2)),
-        code: line.get(3),
-        name: line.get(4),
-        provider: line.get(5),
-        service: line.get(6),
-        reference: line.get(7),
-        amount: Price::new(money(line.get(8))?).map_err(corrupt)?,
-        estimate_days: days(9)?.zip(days(10)?),
+        option: ShippingOptionId::from_uuid(col(line, "option_id")?),
+        code: col(line, "code")?,
+        name: col(line, "name")?,
+        provider: col(line, "provider")?,
+        service: col(line, "service")?,
+        reference: col(line, "reference")?,
+        amount: Price::new(money(col(line, "amount")?)?).map_err(corrupt)?,
+        estimate_days: days("estimate_min_days")?.zip(days("estimate_max_days")?),
         tax,
     })
 }
@@ -542,15 +542,15 @@ fn line_from_db(
     line: &Row,
     money: &impl Fn(i64) -> Result<Money, RepoError>,
 ) -> Result<OrderLine, RepoError> {
-    let quantity: i64 = line.get(3);
+    let quantity: i64 = col(line, "quantity")?;
     let quantity = u32::try_from(quantity)
         .ok()
         .and_then(|q| Quantity::new(q).ok())
         .ok_or_else(|| corrupt(format!("order line quantity {quantity}")))?;
-    let rate: Option<i32> = line.get(9);
-    let class: Option<Uuid> = line.get(10);
-    let amount: Option<i64> = line.get(11);
-    let region: Option<Uuid> = line.get(12);
+    let rate: Option<i32> = col(line, "tax_rate_ppm")?;
+    let class: Option<Uuid> = col(line, "tax_class_id")?;
+    let amount: Option<i64> = col(line, "tax_amount")?;
+    let region: Option<Uuid> = col(line, "tax_region_id")?;
     let tax = match (rate, amount, region) {
         (Some(rate), Some(amount), Some(region)) => Some(OrderTax {
             rate: tax_rate_from_db(rate)?,
@@ -564,15 +564,15 @@ fn line_from_db(
         _ => return Err(corrupt("order line tax columns are partly set")),
     };
     Ok(OrderLine {
-        id: OrderLineId::from_uuid(line.get(0)),
-        product: ProductId::from_uuid(line.get(1)),
-        variant: VariantId::from_uuid(line.get(2)),
+        id: OrderLineId::from_uuid(col(line, "id")?),
+        product: ProductId::from_uuid(col(line, "product_id")?),
+        variant: VariantId::from_uuid(col(line, "variant_id")?),
         quantity,
-        product_title: line.get(4),
-        variant_title: line.get(5),
-        sku: line.get(6),
-        unit_price: Price::new(money(line.get(7))?).map_err(corrupt)?,
-        total: money(line.get(8))?,
+        product_title: col(line, "product_title")?,
+        variant_title: col(line, "variant_title")?,
+        sku: col(line, "sku")?,
+        unit_price: Price::new(money(col(line, "unit_price")?)?).map_err(corrupt)?,
+        total: money(col(line, "total")?)?,
         tax,
     })
 }

@@ -10,8 +10,8 @@ use tokio_postgres::{GenericClient, Row, types::Type};
 
 use crate::{
     columns::{
-        actor_from_db, actor_to_db, micros, scopes_from_db, scopes_to_db, token_hash_from_db, ts,
-        version_from_db, version_to_db,
+        actor_from_db, actor_to_db, col, micros, scopes_from_db, scopes_to_db, token_hash_from_db,
+        ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, in_transaction},
@@ -27,17 +27,17 @@ fn user_columns() -> String {
 }
 
 fn user_from_row(row: &Row) -> Result<User, RepoError> {
-    let email: String = row.get(2);
-    let status: String = row.get(5);
+    let email: String = col(row, "email")?;
+    let status: String = col(row, "status")?;
     User::restore(UserSnapshot {
-        id: UserId::from_uuid(row.get(0)),
-        version: version_from_db(row.get(1))?,
+        id: UserId::from_uuid(col(row, "id")?),
+        version: version_from_db(col(row, "version")?)?,
         email: Email::new(&email).map_err(corrupt)?,
-        name: row.get(3),
-        role: RoleId::from_uuid(row.get(4)),
+        name: col(row, "name")?,
+        role: RoleId::from_uuid(col(row, "role_id")?),
         status: UserStatus::parse(&status)
             .ok_or_else(|| corrupt(format!("unknown user status {status:?}")))?,
-        created_at: Timestamp::from_unix_micros(row.get(6)),
+        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
     })
     .map_err(corrupt)
 }
@@ -73,10 +73,10 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
         let mut conn = self.conn().await;
         let row = conn
             .client()
-            .query_typed_one("SELECT EXISTS (SELECT 1 FROM users)", &[])
+            .query_typed_one("SELECT EXISTS (SELECT 1 FROM users) AS found", &[])
             .await
             .map_err(repo_error)?;
-        Ok(row.get(0))
+        col(&row, "found")
     }
 
     async fn count_active_with_role(&self, role: RoleId) -> Result<usize, RepoError> {
@@ -84,12 +84,12 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
         let row = conn
             .client()
             .query_typed_one(
-                "SELECT count(*) FROM users WHERE role_id = $1 AND status = 'active'",
+                "SELECT count(*) AS count FROM users WHERE role_id = $1 AND status = 'active'",
                 &[(&role.as_uuid(), Type::UUID)],
             )
             .await
             .map_err(repo_error)?;
-        let count: i64 = row.get(0);
+        let count: i64 = col(&row, "count")?;
         usize::try_from(count).map_err(corrupt)
     }
 
@@ -131,7 +131,7 @@ pub(crate) async fn update_user(
     let Some(row) = row else {
         return Err(RepoError::StaleVersion);
     };
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 pub(crate) async fn insert_user(
@@ -164,16 +164,16 @@ pub(crate) async fn insert_user(
 const ROLE_COLUMNS: &str = "id, version, name, is_owner, scopes";
 
 fn role_from_row(row: &Row) -> Result<Role, RepoError> {
-    let is_owner: bool = row.get(3);
+    let is_owner: bool = col(row, "is_owner")?;
     let scopes = if is_owner {
         RoleScopes::All
     } else {
-        RoleScopes::Only(scopes_from_db(row.get(4))?)
+        RoleScopes::Only(scopes_from_db(col(row, "scopes")?)?)
     };
     Role::restore(RoleSnapshot {
-        id: RoleId::from_uuid(row.get(0)),
-        version: version_from_db(row.get(1))?,
-        name: row.get(2),
+        id: RoleId::from_uuid(col(row, "id")?),
+        version: version_from_db(col(row, "version")?)?,
+        name: col(row, "name")?,
         scopes,
     })
     .map_err(corrupt)
@@ -262,7 +262,7 @@ pub(crate) async fn update_role(
     let Some(row) = row else {
         return Err(RepoError::StaleVersion);
     };
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 pub(crate) async fn insert_role(
@@ -297,18 +297,18 @@ fn invite_columns() -> String {
 }
 
 fn invite_from_row(row: &Row) -> Result<Invite, RepoError> {
-    let email: String = row.get(2);
-    let by_kind: String = row.get(5);
-    let accepted: Option<i64> = row.get(9);
+    let email: String = col(row, "email")?;
+    let by_kind: String = col(row, "invited_by_kind")?;
+    let accepted: Option<i64> = col(row, "accepted_at")?;
     Ok(Invite::restore(InviteSnapshot {
-        id: InviteId::from_uuid(row.get(0)),
-        version: version_from_db(row.get(1))?,
+        id: InviteId::from_uuid(col(row, "id")?),
+        version: version_from_db(col(row, "version")?)?,
         email: Email::new(&email).map_err(corrupt)?,
-        role: RoleId::from_uuid(row.get(3)),
-        token_hash: token_hash_from_db(row.get(4))?,
-        invited_by: actor_from_db(&by_kind, row.get(6))?,
-        created_at: Timestamp::from_unix_micros(row.get(7)),
-        expires_at: Timestamp::from_unix_micros(row.get(8)),
+        role: RoleId::from_uuid(col(row, "role_id")?),
+        token_hash: token_hash_from_db(col(row, "token_hash")?)?,
+        invited_by: actor_from_db(&by_kind, col(row, "invited_by_id")?)?,
+        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
+        expires_at: Timestamp::from_unix_micros(col(row, "expires_at")?),
         accepted_at: accepted.map(Timestamp::from_unix_micros),
     }))
 }
@@ -422,5 +422,5 @@ pub(crate) async fn update_invite(
     let Some(row) = row else {
         return Err(RepoError::StaleVersion);
     };
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }

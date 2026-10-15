@@ -7,12 +7,12 @@ use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{micros, ts, version_from_db, version_to_db},
+    columns::{col, micros, ts, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, in_transaction},
 };
 
-/// `assets`' columns in the order `asset_from_db` reads them.
+/// `assets`' columns, as `asset_from_db` reads them.
 fn columns() -> String {
     format!(
         "id, version, status, filename, blob_key, file_version, mime_type, byte_size, \
@@ -176,7 +176,7 @@ pub(crate) async fn update_asset(
         .await
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// `AssetRepo::delete` inside the caller's transaction. An asset in use is refused by
@@ -221,8 +221,9 @@ impl<C: PgConnection> AssetUsageRepo for PgStore<C> {
         let usages = rows
             .iter()
             .map(|row| {
-                let owner = UsageOwner::new(row.get(0), row.get(1)).map_err(corrupt)?;
-                let role = UsageRole::new(row.get(2)).map_err(corrupt)?;
+                let owner = UsageOwner::new(col(row, "owner_kind")?, col(row, "owner_id")?)
+                    .map_err(corrupt)?;
+                let role = UsageRole::new(col(row, "role")?).map_err(corrupt)?;
                 Ok(AssetUsage { asset, owner, role })
             })
             .collect::<Result<Vec<_>, RepoError>>()?;
@@ -330,11 +331,11 @@ impl RowValues {
 
 /// An asset from a row of `columns()`.
 fn asset_from_db(row: &Row) -> Result<Asset, RepoError> {
-    let id: Uuid = row.get(0);
-    let status: String = row.get(2);
-    let mime_type: String = row.get(6);
-    let visibility: String = row.get(13);
-    let checksum: Option<Vec<u8>> = row.get(8);
+    let id: Uuid = col(row, "id")?;
+    let status: String = col(row, "status")?;
+    let mime_type: String = col(row, "mime_type")?;
+    let visibility: String = col(row, "visibility")?;
+    let checksum: Option<Vec<u8>> = col(row, "checksum")?;
     let checksum = checksum
         .map(|bytes| {
             <[u8; 32]>::try_from(bytes.as_slice())
@@ -342,37 +343,37 @@ fn asset_from_db(row: &Row) -> Result<Asset, RepoError> {
                 .map_err(|_| corrupt(format!("asset {id} checksum")))
         })
         .transpose()?;
-    let dimension = |column: usize| -> Result<Option<u32>, RepoError> {
-        let value: Option<i64> = row.get(column);
+    let dimension = |column: &str| -> Result<Option<u32>, RepoError> {
+        let value: Option<i64> = col(row, column)?;
         value
             .map(|v| u32::try_from(v).map_err(|_| corrupt(format!("asset {id} dimension {v}"))))
             .transpose()
     };
-    let file_version: i32 = row.get(5);
-    let byte_size: i64 = row.get(7);
+    let file_version: i32 = col(row, "file_version")?;
+    let byte_size: i64 = col(row, "byte_size")?;
     let snapshot = AssetSnapshot {
         id: AssetId::from_uuid(id),
-        version: version_from_db(row.get(1))?,
+        version: version_from_db(col(row, "version")?)?,
         status: status
             .parse()
             .map_err(|s| corrupt(format!("asset status {s:?}")))?,
-        filename: row.get(3),
-        key: BlobKey::restore(row.get(4)),
+        filename: col(row, "filename")?,
+        key: BlobKey::restore(col(row, "blob_key")?),
         file_version: u32::try_from(file_version)
             .map_err(|_| corrupt(format!("asset {id} file version {file_version}")))?,
         mime_type: mime_type.parse::<MimeType>().map_err(corrupt)?,
         byte_size: u64::try_from(byte_size)
             .map_err(|_| corrupt(format!("asset {id} byte size {byte_size}")))?,
         checksum,
-        width: dimension(9)?,
-        height: dimension(10)?,
-        alt: row.get(11),
-        title: row.get(12),
+        width: dimension("width")?,
+        height: dimension("height")?,
+        alt: col(row, "alt")?,
+        title: col(row, "title")?,
         visibility: visibility
             .parse()
             .map_err(|v| corrupt(format!("asset visibility {v:?}")))?,
-        created_at: Timestamp::from_unix_micros(row.get(14)),
-        updated_at: Timestamp::from_unix_micros(row.get(15)),
+        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
+        updated_at: Timestamp::from_unix_micros(col(row, "updated_at")?),
     };
     Asset::restore(snapshot).map_err(|e| corrupt(format!("asset {id}: {e}")))
 }

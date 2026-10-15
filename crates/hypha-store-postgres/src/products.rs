@@ -12,7 +12,7 @@ use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{currency_from_db, version_from_db, version_to_db},
+    columns::{col, currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
@@ -95,7 +95,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             match row {
-                Some(row) => Ok(load(tx, &[row.get(0)]).await?.pop()),
+                Some(row) => Ok(load(tx, &[col(&row, "id")?]).await?.pop()),
                 None => Ok(None),
             }
         })
@@ -112,7 +112,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             match row {
-                Some(row) => Ok(load(tx, &[row.get(0)]).await?.pop()),
+                Some(row) => Ok(load(tx, &[col(&row, "product_id")?]).await?.pop()),
                 None => Ok(None),
             }
         })
@@ -129,7 +129,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             match row {
-                Some(row) => Ok(load(tx, &[row.get(0)]).await?.pop()),
+                Some(row) => Ok(load(tx, &[col(&row, "product_id")?]).await?.pop()),
                 None => Ok(None),
             }
         })
@@ -193,7 +193,7 @@ pub(crate) async fn update_product(
     let Some(row) = bumped else {
         return Err(RepoError::StaleVersion);
     };
-    let new_version = version_from_db(row.get(0))?;
+    let new_version = version_from_db(col(&row, "version")?)?;
 
     // Children are replaced wholesale; option values go with their options (CASCADE).
     for sql in [
@@ -356,11 +356,11 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
         .map_err(repo_error)?
     {
         values
-            .entry(row.get(0))
+            .entry(col(&row, "option_id")?)
             .or_default()
             .push(OptionValueSnapshot {
-                id: OptionValueId::from_uuid(row.get(1)),
-                label: row.get(2),
+                id: OptionValueId::from_uuid(col(&row, "id")?),
+                label: col(&row, "label")?,
             });
     }
 
@@ -374,12 +374,15 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
         .await
         .map_err(repo_error)?
     {
-        let option_id: Uuid = row.get(1);
-        options.entry(row.get(0)).or_default().push(OptionSnapshot {
-            id: OptionId::from_uuid(option_id),
-            name: row.get(2),
-            values: values.remove(&option_id).unwrap_or_default(),
-        });
+        let option_id: Uuid = col(&row, "id")?;
+        options
+            .entry(col(&row, "product_id")?)
+            .or_default()
+            .push(OptionSnapshot {
+                id: OptionId::from_uuid(option_id),
+                name: col(&row, "name")?,
+                values: values.remove(&option_id).unwrap_or_default(),
+            });
     }
 
     let mut variants: HashMap<Uuid, Vec<VariantSnapshot>> = HashMap::new();
@@ -393,27 +396,26 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
         .await
         .map_err(repo_error)?
     {
-        let currency = currency_from_db(row.get(4))?;
-        let base_price = Money::new(row.get(3), currency).map_err(corrupt)?;
-        let selections: Vec<Uuid> = row.get(5);
+        let currency = currency_from_db(col(&row, "price_currency")?)?;
+        let base_price = Money::new(col(&row, "price_amount")?, currency).map_err(corrupt)?;
+        let selections: Vec<Uuid> = col(&row, "selections")?;
         variants
-            .entry(row.get(0))
+            .entry(col(&row, "product_id")?)
             .or_default()
             .push(VariantSnapshot {
-                id: VariantId::from_uuid(row.get(1)),
-                sku: row.get(2),
+                id: VariantId::from_uuid(col(&row, "id")?),
+                sku: col(&row, "sku")?,
                 base_price,
                 selections: selections
                     .into_iter()
                     .map(OptionValueId::from_uuid)
                     .collect(),
-                media: row.get::<_, Option<Uuid>>(6).map(AssetId::from_uuid),
-                weight: row
-                    .get::<_, Option<i64>>(7)
+                media: col::<Option<Uuid>>(&row, "media_asset_id")?.map(AssetId::from_uuid),
+                weight: col::<Option<i64>>(&row, "weight_grams")?
                     .map(|g| u32::try_from(g).map(Weight::from_grams))
                     .transpose()
                     .map_err(corrupt)?,
-                requires_shipping: row.get(8),
+                requires_shipping: col(&row, "requires_shipping")?,
             });
     }
 
@@ -428,21 +430,21 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
         .map_err(repo_error)?
     {
         media
-            .entry(row.get(0))
+            .entry(col(&row, "product_id")?)
             .or_default()
-            .push(AssetId::from_uuid(row.get(1)));
+            .push(AssetId::from_uuid(col(&row, "asset_id")?));
     }
 
     products
         .iter()
         .map(|row| {
-            let id: Uuid = row.get(0);
-            let status: String = row.get(4);
+            let id: Uuid = col(row, "id")?;
+            let status: String = col(row, "status")?;
             let snapshot = ProductSnapshot {
                 id: ProductId::from_uuid(id),
-                version: version_from_db(row.get(1))?,
-                handle: row.get(2),
-                title: row.get(3),
+                version: version_from_db(col(row, "version")?)?,
+                handle: col(row, "handle")?,
+                title: col(row, "title")?,
                 status: status
                     .parse()
                     .map_err(|s| corrupt(format!("product status {s:?}")))?,
@@ -459,15 +461,15 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
 /// three arrays (currency codes, lowest and highest amounts), aligned and ordered by
 /// currency code.
 fn summary_from_db(row: &Row) -> Result<ProductSummary, RepoError> {
-    let id: Uuid = row.get(0);
-    let handle: String = row.get(1);
-    let status: String = row.get(3);
-    let variants: i64 = row.get(4);
+    let id: Uuid = col(row, "id")?;
+    let handle: String = col(row, "handle")?;
+    let status: String = col(row, "status")?;
+    let variants: i64 = col(row, "variants")?;
     // `array_agg` over no rows is NULL; every product has a variant, but no need to rely
     // on that here.
-    let currencies: Vec<String> = row.get::<_, Option<_>>(5).unwrap_or_default();
-    let mins: Vec<i64> = row.get::<_, Option<_>>(6).unwrap_or_default();
-    let maxes: Vec<i64> = row.get::<_, Option<_>>(7).unwrap_or_default();
+    let currencies: Vec<String> = col::<Option<_>>(row, "currencies")?.unwrap_or_default();
+    let mins: Vec<i64> = col::<Option<_>>(row, "mins")?.unwrap_or_default();
+    let maxes: Vec<i64> = col::<Option<_>>(row, "maxes")?.unwrap_or_default();
     let price = |amount: i64, currency| {
         Money::new(amount, currency)
             .and_then(Price::new)
@@ -487,12 +489,12 @@ fn summary_from_db(row: &Row) -> Result<ProductSummary, RepoError> {
     Ok(ProductSummary {
         id: ProductId::from_uuid(id),
         handle: Handle::new(&handle).map_err(|e| corrupt(format!("product {id}: {e}")))?,
-        title: row.get(2),
+        title: col(row, "title")?,
         status: status
             .parse()
             .map_err(|s| corrupt(format!("product status {s:?}")))?,
         variant_count: usize::try_from(variants).map_err(corrupt)?,
         price_ranges,
-        featured_media: row.get::<_, Option<Uuid>>(8).map(AssetId::from_uuid),
+        featured_media: col::<Option<Uuid>>(row, "featured")?.map(AssetId::from_uuid),
     })
 }

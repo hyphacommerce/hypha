@@ -6,7 +6,7 @@ use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{address_columns, address_from_row, version_from_db, version_to_db},
+    columns::{address_columns, address_from_row, col, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
@@ -74,7 +74,7 @@ pub(crate) async fn update_customer(
     .await
     .map_err(repo_error)?;
     write_addresses(tx, s.id, &s.addresses).await?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// `CustomerRepo::insert` inside the caller's transaction (also used by `PgBatch`).
@@ -169,7 +169,7 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
     else {
         return Ok(None);
     };
-    let id: Uuid = row.get(0);
+    let id: Uuid = col(&row, "id")?;
     let addresses = client
         .query_typed(
             &format!(
@@ -184,17 +184,19 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
         .iter()
         .map(saved_address)
         .collect::<Result<Vec<_>, RepoError>>()?;
-    let email: String = row.get(2);
+    let email: String = col(&row, "email")?;
     let snapshot = CustomerSnapshot {
         id: CustomerId::from_uuid(id),
-        version: version_from_db(row.get(1))?,
+        version: version_from_db(col(&row, "version")?)?,
         email: Email::new(&email).map_err(corrupt)?,
-        first_name: row.get(3),
-        last_name: row.get(4),
-        phone: row.get(5),
+        first_name: col(&row, "first_name")?,
+        last_name: col(&row, "last_name")?,
+        phone: col(&row, "phone")?,
         addresses,
-        default_shipping: row.get::<_, Option<Uuid>>(6).map(AddressId::from_uuid),
-        default_billing: row.get::<_, Option<Uuid>>(7).map(AddressId::from_uuid),
+        default_shipping: col::<Option<Uuid>>(&row, "default_shipping_address_id")?
+            .map(AddressId::from_uuid),
+        default_billing: col::<Option<Uuid>>(&row, "default_billing_address_id")?
+            .map(AddressId::from_uuid),
     };
     Customer::restore(snapshot)
         .map(Some)
@@ -202,10 +204,10 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
 }
 
 fn saved_address(row: &Row) -> Result<SavedAddress, RepoError> {
-    let parts = address_from_row(row, 1).ok_or_else(|| corrupt("address without a last name"))?;
+    let parts = address_from_row(row, "")?.ok_or_else(|| corrupt("address without a last name"))?;
     let address = Address::new(parts).map_err(corrupt)?;
     Ok(SavedAddress {
-        id: AddressId::from_uuid(row.get(0)),
+        id: AddressId::from_uuid(col(row, "id")?),
         address,
     })
 }

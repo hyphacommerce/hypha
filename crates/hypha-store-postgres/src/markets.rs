@@ -12,7 +12,7 @@ use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{currency_from_db, version_from_db, version_to_db},
+    columns::{col, currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
@@ -43,7 +43,7 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             match row {
-                Some(row) => Ok(load_markets(tx, Some(row.get(0))).await?.pop()),
+                Some(row) => Ok(load_markets(tx, Some(col(&row, "market_id")?)).await?.pop()),
                 None => Ok(None),
             }
         })
@@ -113,7 +113,7 @@ pub(crate) async fn update_market(
     .await
     .map_err(repo_error)?;
     write_countries(tx, s).await?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 async fn write_countries(tx: &impl GenericClient, s: &MarketSnapshot) -> Result<(), RepoError> {
@@ -155,20 +155,23 @@ async fn load_markets(
         .await
         .map_err(repo_error)?
     {
-        let code: String = row.get(1);
+        let code: String = col(&row, "country")?;
         let country = CountryCode::new(&code).map_err(corrupt)?;
-        countries.entry(row.get(0)).or_default().push(country);
+        countries
+            .entry(col(&row, "market_id")?)
+            .or_default()
+            .push(country);
     }
     rows.iter()
         .map(|row| {
-            let id: Uuid = row.get(0);
+            let id: Uuid = col(row, "id")?;
             let snapshot = MarketSnapshot {
                 id: MarketId::from_uuid(id),
-                version: version_from_db(row.get(1))?,
-                name: row.get(2),
+                version: version_from_db(col(row, "version")?)?,
+                name: col(row, "name")?,
                 countries: countries.remove(&id).unwrap_or_default(),
-                currency: currency_from_db(row.get(3))?,
-                prices_include_tax: row.get(4),
+                currency: currency_from_db(col(row, "currency")?)?,
+                prices_include_tax: col(row, "prices_include_tax")?,
             };
             Market::restore(snapshot).map_err(|e| corrupt(format!("market {id}: {e}")))
         })
@@ -184,15 +187,15 @@ fn context_to_db(context: CatalogContext) -> (&'static str, Uuid) {
 }
 
 fn catalog_from_row(row: &Row) -> Result<Catalog, RepoError> {
-    let kind: String = row.get(2);
+    let kind: String = col(row, "context_kind")?;
     let context = match kind.as_str() {
-        "market" => CatalogContext::Market(MarketId::from_uuid(row.get(3))),
+        "market" => CatalogContext::Market(MarketId::from_uuid(col(row, "context_id")?)),
         other => return Err(corrupt(format!("catalog context kind {other:?}"))),
     };
-    let price_list: Option<Uuid> = row.get(4);
+    let price_list: Option<Uuid> = col(row, "price_list_id")?;
     Ok(Catalog::restore(CatalogSnapshot {
-        id: CatalogId::from_uuid(row.get(0)),
-        version: version_from_db(row.get(1))?,
+        id: CatalogId::from_uuid(col(row, "id")?),
+        version: version_from_db(col(row, "version")?)?,
         context,
         price_list: price_list.map(PriceListId::from_uuid),
     }))
@@ -279,10 +282,9 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
             )
             .await
             .map_err(repo_error)?;
-        Ok(rows
-            .iter()
-            .map(|r| ProductId::from_uuid(r.get(0)))
-            .collect())
+        rows.iter()
+            .map(|r| Ok(ProductId::from_uuid(col(r, "product_id")?)))
+            .collect()
     }
 }
 
@@ -326,7 +328,7 @@ pub(crate) async fn update_catalog(
         .await
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// `CatalogRepo::add_products` inside the caller's transaction.
@@ -377,11 +379,11 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             .await
             .map_err(repo_error)?;
         let Some(row) = row else { return Ok(None) };
-        let adjustment: i32 = row.get(3);
+        let adjustment: i32 = col(&row, "adjustment")?;
         Ok(Some(PriceList::restore(PriceListSnapshot {
-            id: PriceListId::from_uuid(row.get(0)),
-            version: version_from_db(row.get(1))?,
-            currency: currency_from_db(row.get(2))?,
+            id: PriceListId::from_uuid(col(&row, "id")?),
+            version: version_from_db(col(&row, "version")?)?,
+            currency: currency_from_db(col(&row, "currency")?)?,
             adjustment: BasisPoints::new(adjustment).map_err(corrupt)?,
         })))
     }
@@ -437,10 +439,13 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             .map_err(repo_error)?;
         rows.iter()
             .map(|row| {
-                let money = hypha_core::Money::new(row.get(1), currency_from_db(row.get(2))?)
-                    .map_err(corrupt)?;
+                let money = hypha_core::Money::new(
+                    col(row, "amount")?,
+                    currency_from_db(col(row, "currency")?)?,
+                )
+                .map_err(corrupt)?;
                 let price = Price::new(money).map_err(corrupt)?;
-                Ok((VariantId::from_uuid(row.get(0)), price))
+                Ok((VariantId::from_uuid(col(row, "variant_id")?), price))
             })
             .collect()
     }
@@ -483,7 +488,7 @@ pub(crate) async fn update_price_list(
         .await
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
-    version_from_db(row.get(0))
+    version_from_db(col(&row, "version")?)
 }
 
 /// `PriceListRepo::set_fixed_prices` inside the caller's transaction.

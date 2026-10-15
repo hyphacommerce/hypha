@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values,
+        ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
         currency_from_db, id_and_address, micros, ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
@@ -136,7 +136,7 @@ pub(crate) async fn update_cart(
     let Some(row) = bumped else {
         return Err(RepoError::StaleVersion);
     };
-    let new_version = version_from_db(row.get(0))?;
+    let new_version = version_from_db(col(&row, "version")?)?;
     tx.query_typed(
         "DELETE FROM cart_lines WHERE cart_id = $1",
         &[(&s.id.as_uuid(), Type::UUID)],
@@ -173,9 +173,6 @@ async fn write_lines(
     Ok(())
 }
 
-/// Where `load_cart`'s row has the shipping address.
-const ADDRESS_AT: usize = 6;
-
 /// A cart and its lines, in 2 queries (run inside `consistent_read`).
 async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Cart>, RepoError> {
     let Some(row) = client
@@ -205,23 +202,21 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
         .map_err(repo_error)?
         .iter()
         .map(|line| {
-            let quantity: i64 = line.get(2);
+            let quantity: i64 = col(line, "quantity")?;
             Ok(CartLineSnapshot {
-                product: ProductId::from_uuid(line.get(0)),
-                variant: VariantId::from_uuid(line.get(1)),
+                product: ProductId::from_uuid(col(line, "product_id")?),
+                variant: VariantId::from_uuid(col(line, "variant_id")?),
                 quantity: u32::try_from(quantity)
                     .map_err(|_| corrupt(format!("cart quantity {quantity}")))?,
             })
         })
         .collect::<Result<Vec<_>, RepoError>>()?;
-    let country: String = row.get(2);
-    let email: Option<String> = row.get(3);
-    // The choice's columns follow the address's.
-    let q = ADDRESS_AT + ADDRESS_LEN;
+    let country: String = col(&row, "country")?;
+    let email: Option<String> = col(&row, "email")?;
     let snapshot = CartSnapshot {
         id,
-        version: version_from_db(row.get(0))?,
-        market: MarketId::from_uuid(row.get(1)),
+        version: version_from_db(col(&row, "version")?)?,
+        market: MarketId::from_uuid(col(&row, "market_id")?),
         country: CountryCode::new(&country).map_err(corrupt)?,
         lines,
         email: email
@@ -229,25 +224,26 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
             .map(Email::new)
             .transpose()
             .map_err(corrupt)?,
-        customer: row.get::<_, Option<Uuid>>(4).map(CustomerId::from_uuid),
-        order: row.get::<_, Option<Uuid>>(5).map(OrderId::from_uuid),
-        shipping_address: address_from_row(&row, ADDRESS_AT),
-        shipping: match row.get::<_, Option<Uuid>>(q) {
+        customer: col::<Option<Uuid>>(&row, "customer_id")?.map(CustomerId::from_uuid),
+        order: col::<Option<Uuid>>(&row, "order_id")?.map(OrderId::from_uuid),
+        shipping_address: address_from_row(&row, "shipping_")?,
+        shipping: match col::<Option<Uuid>>(&row, "shipping_option_id")? {
             None => None,
             Some(option) => Some(SelectedShipping {
                 option: ShippingOptionId::from_uuid(option),
-                quote: match row.get::<_, Option<i64>>(q + 1) {
+                quote: match col::<Option<i64>>(&row, "quote_amount")? {
                     None => None,
                     Some(amount) => {
-                        let currency = currency_from_db(row.get(q + 2))?;
+                        let currency = currency_from_db(col(&row, "quote_currency")?)?;
                         Some(StoredQuote {
                             amount: Money::new(amount, currency)
                                 .and_then(Price::new)
                                 .map_err(corrupt)?,
-                            provider: ProviderKey::new(row.get(q + 3)).map_err(corrupt)?,
-                            service: row.get(q + 4),
-                            reference: row.get(q + 5),
-                            quoted_at: Timestamp::from_unix_micros(row.get(q + 6)),
+                            provider: ProviderKey::new(col(&row, "quote_provider")?)
+                                .map_err(corrupt)?,
+                            service: col(&row, "quote_service")?,
+                            reference: col(&row, "quote_reference")?,
+                            quoted_at: Timestamp::from_unix_micros(col(&row, "quoted_at")?),
                         })
                     }
                 },

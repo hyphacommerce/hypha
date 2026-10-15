@@ -313,7 +313,7 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
         if let Some(row) = unknown {
             return Err(MigrateError::Unknown {
                 module: set.module.to_string(),
-                version: row.get(0),
+                version: row.try_get("version")?,
             });
         }
     }
@@ -331,7 +331,7 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
                 .await?;
             match applied {
                 Some(row) => {
-                    let applied_name: String = row.get(0);
+                    let applied_name: String = row.try_get("name")?;
                     if applied_name != migration.name {
                         return Err(MigrateError::Mismatch {
                             module: set.module.to_string(),
@@ -340,7 +340,7 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
                             code: migration.name.to_string(),
                         });
                     }
-                    match row.get::<_, Option<String>>(1) {
+                    match row.try_get::<_, Option<String>>("checksum")? {
                         Some(applied) if applied != checksum(migration.sql) => {
                             return Err(MigrateError::Edited {
                                 module: set.module.to_string(),
