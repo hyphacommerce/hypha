@@ -1,9 +1,9 @@
 # 0016: Domain events, the outbox, jobs and webhooks
 
-- **Status:** Proposed (2026-10-15). The direction in the decisions table was agreed
+- **Status:** Accepted (2026-10-15). The direction in the decisions table was agreed
   after the October audit (the event path, the jobs seam, one `App` record, encoded
-  cursors and extensible enums). Section 11 has the questions still open, each with a
-  recommendation.
+  cursors and extensible enums); Danilo accepted every recommendation in section 11 the
+  same day, marked *Decided*.
 - **Scope:** how commands record domain events, how they reach the outbox in the same
   transaction as the change, how a host runs background work on every runtime, how
   events are delivered (in-process handlers and webhooks to external apps), the `App`
@@ -93,8 +93,7 @@ pub struct Recorder(Vec<PendingEvent>);
   it builds for wasm.
 - **The actor** comes from the ports: the host builds a request's ports in
   `Caller::authenticate`, the one place that also builds its `Ctx`, and the ports stamp
-  every event they write with that actor. Jobs use `Actor::System`. (Q1 has the
-  alternative.)
+  every event they write with that actor. Jobs use `Actor::System`. (Q1, *Decided*.)
 - **Event IDs and times come from storage:** the outbox row's `id` is
   `gen_random_uuid()` and its `occurred_at` is the transaction's commit time (`now()`), so
   aggregates need neither an ID generator nor a clock to record. Business times that
@@ -155,7 +154,7 @@ aggregate's events; claiming skips rows another claim holds.
 ## 4. The event catalog, version 1
 
 Small payloads: the subject and the facts of the change, not the whole resource. A
-consumer that needs the resource fetches it (Q2 has the alternative).
+consumer that needs the resource fetches it (Q2, *Decided*).
 
 | Event | Data | Recorded by |
 | --- | --- | --- |
@@ -346,7 +345,7 @@ Before any external consumer reads events or lists:
 ## 11. Open decisions
 
 **Q1. Where events get their actor.**
-- A. *(Recommended)* From the ports. The host builds ports and `Ctx` together in
+- A. *(Decided)* From the ports. The host builds ports and `Ctx` together in
   `Caller::authenticate`, so the ports stamp every event with that actor. Nothing at the
   call sites changes. Tests and jobs get `Actor::System` unless a test sets another.
 - B. Every write takes the `Ctx` (`repo.update(&mut product, ctx)`). Explicit, but ~80
@@ -354,7 +353,7 @@ Before any external consumer reads events or lists:
   the wrong `Ctx` either.
 
 **Q2. How much an event carries.**
-- A. *(Recommended)* The subject and the facts of the change. Consumers fetch the
+- A. *(Decided)* The subject and the facts of the change. Consumers fetch the
   resource when they need it. Payload versions stay rare, and nothing about a resource
   is sent to an app that subscribed to its events but lacks the scope to read it.
 - B. The whole resource as it was (Stripe, Shopify). Convenient for consumers, but
@@ -363,26 +362,26 @@ Before any external consumer reads events or lists:
 
 **Q3. Timestamps on aggregates in this note.** `created_at` / `updated_at` on every core
 table, filled by the database, read back into snapshots and shown in responses.
-- *(Recommended)* Yes, as its own step here: every write path is touched for the events
+- *(Decided)* Yes, as its own step here: every write path is touched for the events
   anyway, search wants `updated_at`, and 0001 §3.5 already promised it.
 
 **Q4. Moving shipping's app providers onto `App` now** (EV11).
-- *(Recommended)* Yes. Nothing is deployed yet, so the migration is cheap now and costly
+- *(Decided)* Yes. Nothing is deployed yet, so the migration is cheap now and costly
   once merchants have apps.
 
 **Q5. Inventory items of removed variants that still have reservations.**
-- *(Recommended)* Keep them until fulfilment (0017) consumes the reservations, then
+- *(Decided)* Keep them until fulfilment (0017) consumes the reservations, then
   delete them there.
 - The alternative, deleting them anyway, loses the reservations open orders rely on.
 
 **Q6. Retry schedule:** about 3 days of backoff, as in section 5. Shopify retries for
-about 4 hours, Stripe for 3 days. *(Recommended: 3 days.)*
+about 4 hours, Stripe for 3 days. *(Decided: 3 days.)*
 
-**Q7. Retention:** 30 days for events and deliveries. *(Recommended.)* Shorter keeps
+**Q7. Retention:** 30 days for events and deliveries. *(Decided.)* Shorter keeps
 the tables small; longer helps debugging.
 
 **Q8. Built in or a spore.** The dispatcher, handlers and webhooks are core (`hypha-dispatch`,
-`hypha-apps`), not a spore. *(Recommended: core, since spores themselves need events.)*
+`hypha-apps`), not a spore. *(Decided: core, since spores themselves need events.)*
 
 ## 12. Order of work
 
