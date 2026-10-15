@@ -27,123 +27,134 @@ use crate::{
     users::{unique_invite, unique_role, unique_user},
 };
 
-/// Writes staged for `InMemoryPorts::commit`: copies of the aggregates as they were
-/// staged, still carrying the version they were loaded at.
+/// Writes staged for `InMemoryPorts::commit`, in the order they were staged: copies
+/// of the aggregates as they were staged, still carrying the version they were loaded
+/// at. Mirrors `PgBatch`'s list of staged writes (design note 0016, EV2).
 #[derive(Default)]
 pub struct InMemoryBatch {
-    new_orders: Vec<Order>,
-    new_carts: Vec<Cart>,
-    new_customers: Vec<Customer>,
-    carts: Vec<Cart>,
-    products: Vec<Product>,
-    asset_usages: Vec<(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>)>,
-    inventory_items: Vec<InventoryItem>,
-    idempotency: Vec<IdempotencyRecord>,
-    new_identities: Vec<Identity>,
-    identities: Vec<Identity>,
-    new_sessions: Vec<Session>,
-    sessions: Vec<Session>,
-    session_revocations: Vec<(IdentityId, Option<SessionId>, Timestamp)>,
-    new_password_resets: Vec<PasswordReset>,
-    password_resets: Vec<PasswordReset>,
-    used_up_resets: Vec<(IdentityId, Timestamp)>,
-    new_roles: Vec<Role>,
-    roles: Vec<Role>,
-    new_users: Vec<User>,
-    users: Vec<User>,
-    invites: Vec<Invite>,
+    staged: Vec<Staged>,
+}
+
+enum Staged {
+    NewOrder(Order),
+    NewCart(Cart),
+    Cart(Cart),
+    Product(Product),
+    AssetUsages(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>),
+    InventoryItem(InventoryItem),
+    NewCustomer(Customer),
+    Idempotency(IdempotencyRecord),
+    NewRole(Role),
+    Role(Role),
+    NewUser(User),
+    User(User),
+    Invite(Invite),
+    NewIdentity(Identity),
+    Identity(Identity),
+    NewSession(Session),
+    Session(Session),
+    SessionRevocation(IdentityId, Option<SessionId>, Timestamp),
+    NewPasswordReset(PasswordReset),
+    PasswordReset(PasswordReset),
+    UsedUpResets(IdentityId, Timestamp),
+}
+
+impl InMemoryBatch {
+    fn stage(&mut self, write: Staged) {
+        self.staged.push(write);
+    }
 }
 
 impl StageIdentities for InMemoryBatch {
     fn insert_identity(&mut self, identity: &mut Identity) {
-        self.new_identities.push(identity.clone());
+        self.stage(Staged::NewIdentity(identity.clone()));
         identity.set_version(Version::NEW.next());
     }
 
     fn update_identity(&mut self, identity: &mut Identity) {
-        self.identities.push(identity.clone());
+        self.stage(Staged::Identity(identity.clone()));
         identity.set_version(identity.version().next());
     }
 }
 
 impl StageSessions for InMemoryBatch {
     fn insert_session(&mut self, session: &mut Session) {
-        self.new_sessions.push(session.clone());
+        self.stage(Staged::NewSession(session.clone()));
         session.set_version(Version::NEW.next());
     }
 
     fn update_session(&mut self, session: &mut Session) {
-        self.sessions.push(session.clone());
+        self.stage(Staged::Session(session.clone()));
         session.set_version(session.version().next());
     }
 
     fn revoke_sessions(&mut self, identity: IdentityId, keep: Option<SessionId>, at: Timestamp) {
-        self.session_revocations.push((identity, keep, at));
+        self.stage(Staged::SessionRevocation(identity, keep, at));
     }
 }
 
 impl StagePasswordResets for InMemoryBatch {
     fn insert_password_reset(&mut self, reset: &mut PasswordReset) {
-        self.new_password_resets.push(reset.clone());
+        self.stage(Staged::NewPasswordReset(reset.clone()));
         reset.set_version(Version::NEW.next());
     }
 
     fn update_password_reset(&mut self, reset: &mut PasswordReset) {
-        self.password_resets.push(reset.clone());
+        self.stage(Staged::PasswordReset(reset.clone()));
         reset.set_version(reset.version().next());
     }
 
     fn use_up_password_resets(&mut self, identity: IdentityId, at: Timestamp) {
-        self.used_up_resets.push((identity, at));
+        self.stage(Staged::UsedUpResets(identity, at));
     }
 }
 
 impl StageRoles for InMemoryBatch {
     fn insert_role(&mut self, role: &mut Role) {
-        self.new_roles.push(role.clone());
+        self.stage(Staged::NewRole(role.clone()));
         role.set_version(Version::NEW.next());
     }
 
     fn update_role(&mut self, role: &mut Role) {
-        self.roles.push(role.clone());
+        self.stage(Staged::Role(role.clone()));
         role.set_version(role.version().next());
     }
 }
 
 impl StageUsers for InMemoryBatch {
     fn insert_user(&mut self, user: &mut User) {
-        self.new_users.push(user.clone());
+        self.stage(Staged::NewUser(user.clone()));
         user.set_version(Version::NEW.next());
     }
 
     fn update_user(&mut self, user: &mut User) {
-        self.users.push(user.clone());
+        self.stage(Staged::User(user.clone()));
         user.set_version(user.version().next());
     }
 }
 
 impl StageInvites for InMemoryBatch {
     fn update_invite(&mut self, invite: &mut Invite) {
-        self.invites.push(invite.clone());
+        self.stage(Staged::Invite(invite.clone()));
         invite.set_version(invite.version().next());
     }
 }
 
 impl StageCarts for InMemoryBatch {
     fn insert_cart(&mut self, cart: &mut Cart) {
-        self.new_carts.push(cart.clone());
+        self.stage(Staged::NewCart(cart.clone()));
         cart.set_version(Version::NEW.next());
     }
 
     fn update_cart(&mut self, cart: &mut Cart) {
-        self.carts.push(cart.clone());
+        self.stage(Staged::Cart(cart.clone()));
         cart.set_version(cart.version().next());
     }
 }
 
 impl StageProducts for InMemoryBatch {
     fn update_product(&mut self, product: &mut Product) {
-        self.products.push(product.clone());
+        self.stage(Staged::Product(product.clone()));
         product.set_version(product.version().next());
     }
 }
@@ -154,34 +165,34 @@ impl StageAssetUsages for InMemoryBatch {
         owner: &UsageOwner,
         usages: &[(hypha_core::AssetId, UsageRole)],
     ) {
-        self.asset_usages.push((owner.clone(), usages.to_vec()));
+        self.stage(Staged::AssetUsages(owner.clone(), usages.to_vec()));
     }
 }
 
 impl StageInventoryItems for InMemoryBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
-        self.inventory_items.push(item.clone());
+        self.stage(Staged::InventoryItem(item.clone()));
         item.set_version(item.version().next());
     }
 }
 
 impl StageOrders for InMemoryBatch {
     fn insert_order(&mut self, order: &mut Order) {
-        self.new_orders.push(order.clone());
+        self.stage(Staged::NewOrder(order.clone()));
         order.set_version(Version::NEW.next());
     }
 }
 
 impl StageCustomers for InMemoryBatch {
     fn insert_customer(&mut self, customer: &mut Customer) {
-        self.new_customers.push(customer.clone());
+        self.stage(Staged::NewCustomer(customer.clone()));
         customer.set_version(Version::NEW.next());
     }
 }
 
 impl StageIdempotency for InMemoryBatch {
     fn record_idempotency(&mut self, record: IdempotencyRecord) {
-        self.idempotency.push(record);
+        self.stage(Staged::Idempotency(record));
     }
 }
 
@@ -231,131 +242,117 @@ impl HasBatch for InMemoryPorts {
         );
 
         let written = (|| {
-            for mut order in batch.new_orders {
-                insert_row(
-                    &mut orders,
-                    order.id(),
-                    &mut order,
-                    order_keys::ORDER_ID,
-                    &unique_order,
-                )?;
-            }
-            for mut cart in batch.new_carts {
-                insert_row(
-                    &mut carts,
-                    cart.id(),
-                    &mut cart,
-                    cart_keys::CART_ID,
-                    &no_unique_keys,
-                )?;
-            }
-            for mut cart in batch.carts {
-                update_row(&mut carts, cart.id(), &mut cart, &no_unique_keys)?;
-            }
-            for mut product in batch.products {
-                update_row(&mut products, product.id(), &mut product, &unique_product)?;
-            }
-            for (owner, replacement) in &batch.asset_usages {
-                replace_usages(&assets, &mut usages, owner, replacement)?;
-            }
-            for mut item in batch.inventory_items {
-                update_row(&mut items, item.id(), &mut item, &inventory_items::unique)?;
-            }
-            for mut customer in batch.new_customers {
-                insert_row(
-                    &mut customers,
-                    customer.id(),
-                    &mut customer,
-                    customer_keys::CUSTOMER_ID,
-                    &unique_customer,
-                )?;
-            }
-            for record in batch.idempotency {
-                insert_record(&mut records, record)?;
-            }
-            for mut role in batch.new_roles {
-                insert_row(
-                    &mut roles,
-                    role.id(),
-                    &mut role,
-                    user_keys::ROLE_ID,
-                    &unique_role,
-                )?;
-            }
-            for mut user in batch.new_users {
-                insert_row(
-                    &mut users,
-                    user.id(),
-                    &mut user,
-                    user_keys::USER_ID,
-                    &unique_user,
-                )?;
-            }
-            for mut role in batch.roles {
-                update_row(&mut roles, role.id(), &mut role, &unique_role)?;
-            }
-            for mut user in batch.users {
-                update_row(&mut users, user.id(), &mut user, &unique_user)?;
-            }
-            for mut invite in batch.invites {
-                update_row(&mut invites, invite.id(), &mut invite, &unique_invite)?;
-            }
-            for mut identity in batch.new_identities {
-                insert_row(
-                    &mut identities,
-                    identity.id(),
-                    &mut identity,
-                    auth_keys::IDENTITY_ID,
-                    &unique_identity,
-                )?;
-            }
-            for mut identity in batch.identities {
-                update_row(
-                    &mut identities,
-                    identity.id(),
-                    &mut identity,
-                    &unique_identity,
-                )?;
-            }
-            for mut session in batch.new_sessions {
-                insert_row(
-                    &mut sessions,
-                    session.id(),
-                    &mut session,
-                    auth_keys::SESSION_ID,
-                    &unique_session,
-                )?;
-            }
-            for mut session in batch.sessions {
-                update_row(&mut sessions, session.id(), &mut session, &unique_session)?;
-            }
-            for (identity, keep, at) in batch.session_revocations {
-                for session in sessions.values_mut().filter(|s| {
-                    s.identity() == identity && Some(s.id()) != keep && s.revoked_at().is_none()
-                }) {
-                    session.revoke(at);
-                    session.set_version(session.version().next());
-                }
-            }
-            for mut reset in batch.new_password_resets {
-                insert_row(
-                    &mut resets,
-                    reset.id(),
-                    &mut reset,
-                    auth_keys::PASSWORD_RESET_ID,
-                    &unique_reset,
-                )?;
-            }
-            for mut reset in batch.password_resets {
-                update_row(&mut resets, reset.id(), &mut reset, &unique_reset)?;
-            }
-            for (identity, at) in batch.used_up_resets {
-                for reset in resets
-                    .values_mut()
-                    .filter(|r| r.identity() == identity && r.used_at().is_none())
-                {
-                    reset.mark_used(at);
-                    reset.set_version(reset.version().next());
+            for write in batch.staged {
+                match write {
+                    Staged::NewOrder(mut order) => insert_row(
+                        &mut orders,
+                        order.id(),
+                        &mut order,
+                        order_keys::ORDER_ID,
+                        &unique_order,
+                    )?,
+                    Staged::NewCart(mut cart) => insert_row(
+                        &mut carts,
+                        cart.id(),
+                        &mut cart,
+                        cart_keys::CART_ID,
+                        &no_unique_keys,
+                    )?,
+                    Staged::Cart(mut cart) => {
+                        update_row(&mut carts, cart.id(), &mut cart, &no_unique_keys)?
+                    }
+                    Staged::Product(mut product) => {
+                        update_row(&mut products, product.id(), &mut product, &unique_product)?
+                    }
+                    Staged::AssetUsages(owner, replacement) => {
+                        replace_usages(&assets, &mut usages, &owner, &replacement)?
+                    }
+                    Staged::InventoryItem(mut item) => {
+                        update_row(&mut items, item.id(), &mut item, &inventory_items::unique)?
+                    }
+                    Staged::NewCustomer(mut customer) => insert_row(
+                        &mut customers,
+                        customer.id(),
+                        &mut customer,
+                        customer_keys::CUSTOMER_ID,
+                        &unique_customer,
+                    )?,
+                    Staged::Idempotency(record) => insert_record(&mut records, record)?,
+                    Staged::NewRole(mut role) => insert_row(
+                        &mut roles,
+                        role.id(),
+                        &mut role,
+                        user_keys::ROLE_ID,
+                        &unique_role,
+                    )?,
+                    Staged::Role(mut role) => {
+                        update_row(&mut roles, role.id(), &mut role, &unique_role)?
+                    }
+                    Staged::NewUser(mut user) => insert_row(
+                        &mut users,
+                        user.id(),
+                        &mut user,
+                        user_keys::USER_ID,
+                        &unique_user,
+                    )?,
+                    Staged::User(mut user) => {
+                        update_row(&mut users, user.id(), &mut user, &unique_user)?
+                    }
+                    Staged::Invite(mut invite) => {
+                        update_row(&mut invites, invite.id(), &mut invite, &unique_invite)?
+                    }
+                    Staged::NewIdentity(mut identity) => insert_row(
+                        &mut identities,
+                        identity.id(),
+                        &mut identity,
+                        auth_keys::IDENTITY_ID,
+                        &unique_identity,
+                    )?,
+                    Staged::Identity(mut identity) => update_row(
+                        &mut identities,
+                        identity.id(),
+                        &mut identity,
+                        &unique_identity,
+                    )?,
+                    Staged::NewSession(mut session) => insert_row(
+                        &mut sessions,
+                        session.id(),
+                        &mut session,
+                        auth_keys::SESSION_ID,
+                        &unique_session,
+                    )?,
+                    Staged::Session(mut session) => {
+                        update_row(&mut sessions, session.id(), &mut session, &unique_session)?
+                    }
+                    Staged::SessionRevocation(identity, keep, at) => {
+                        for session in sessions.values_mut().filter(|s| {
+                            s.identity() == identity
+                                && Some(s.id()) != keep
+                                && s.revoked_at().is_none()
+                        }) {
+                            session.revoke(at);
+                            session.set_version(session.version().next());
+                        }
+                    }
+                    Staged::NewPasswordReset(mut reset) => insert_row(
+                        &mut resets,
+                        reset.id(),
+                        &mut reset,
+                        auth_keys::PASSWORD_RESET_ID,
+                        &unique_reset,
+                    )?,
+                    Staged::PasswordReset(mut reset) => {
+                        update_row(&mut resets, reset.id(), &mut reset, &unique_reset)?
+                    }
+                    Staged::UsedUpResets(identity, at) => {
+                        for reset in resets
+                            .values_mut()
+                            .filter(|r| r.identity() == identity && r.used_at().is_none())
+                        {
+                            reset.mark_used(at);
+                            reset.set_version(reset.version().next());
+                        }
+                    }
                 }
             }
             Ok(())

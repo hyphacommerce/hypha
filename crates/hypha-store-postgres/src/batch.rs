@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use hypha_auth::{
     Identity, IdentitySnapshot, PasswordReset, PasswordResetSnapshot, Session, SessionSnapshot,
     StageIdentities, StagePasswordResets, StageSessions,
@@ -34,149 +36,200 @@ use crate::{
     users::{insert_role, insert_user, update_invite, update_role, update_user},
 };
 
-/// Writes staged for `PgStore::commit`: snapshots taken when each aggregate was staged,
-/// carrying the version it was loaded at.
+/// Writes staged for `PgStore::commit`, in the order they were staged: snapshots taken
+/// when each aggregate was staged, carrying the version it was loaded at.
 #[derive(Default)]
 pub struct PgBatch {
-    new_orders: Vec<OrderSnapshot>,
-    new_carts: Vec<CartSnapshot>,
-    new_customers: Vec<CustomerSnapshot>,
-    carts: Vec<CartSnapshot>,
-    products: Vec<ProductSnapshot>,
-    asset_usages: Vec<(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>)>,
-    inventory_items: Vec<InventoryItemSnapshot>,
-    idempotency: Vec<IdempotencyRecord>,
-    new_roles: Vec<RoleSnapshot>,
-    roles: Vec<RoleSnapshot>,
-    new_users: Vec<UserSnapshot>,
-    users: Vec<UserSnapshot>,
-    invites: Vec<InviteSnapshot>,
-    new_identities: Vec<IdentitySnapshot>,
-    identities: Vec<IdentitySnapshot>,
-    new_sessions: Vec<SessionSnapshot>,
-    sessions: Vec<SessionSnapshot>,
-    session_revocations: Vec<(IdentityId, Option<SessionId>, Timestamp)>,
-    new_password_resets: Vec<PasswordResetSnapshot>,
-    password_resets: Vec<PasswordResetSnapshot>,
-    used_up_resets: Vec<(IdentityId, Timestamp)>,
+    staged: Vec<Staged>,
+}
+
+/// One staged write. A new aggregate a batch can write is one variant here, one arm in
+/// `rank` and `apply`, and its `Stage*` impl below.
+enum Staged {
+    NewOrder(OrderSnapshot),
+    NewCart(CartSnapshot),
+    Cart(CartSnapshot),
+    Product(ProductSnapshot),
+    AssetUsages(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>),
+    NewCustomer(CustomerSnapshot),
+    Idempotency(IdempotencyRecord),
+    NewRole(RoleSnapshot),
+    Role(RoleSnapshot),
+    NewUser(UserSnapshot),
+    User(UserSnapshot),
+    Invite(InviteSnapshot),
+    NewIdentity(IdentitySnapshot),
+    Identity(IdentitySnapshot),
+    NewSession(SessionSnapshot),
+    Session(SessionSnapshot),
+    SessionRevocation(IdentityId, Option<SessionId>, Timestamp),
+    NewPasswordReset(PasswordResetSnapshot),
+    PasswordReset(PasswordResetSnapshot),
+    UsedUpResets(IdentityId, Timestamp),
+    InventoryItem(InventoryItemSnapshot),
+}
+
+impl Staged {
+    /// Where a write goes in the commit: tables in a fixed order, so two commits lock
+    /// rows in the same order and queue instead of deadlocking. Inventory comes last: its
+    /// rows are the most contended (every checkout of a popular item), so their locks
+    /// are held for the shortest time. Idempotency records just before it: like items,
+    /// they go in one statement however many there are.
+    fn rank(&self) -> u8 {
+        match self {
+            Staged::NewOrder(_) => 0,
+            Staged::NewCart(_) => 1,
+            Staged::Cart(_) => 2,
+            Staged::Product(_) => 3,
+            Staged::AssetUsages(..) => 4,
+            Staged::NewCustomer(_) => 5,
+            Staged::NewRole(_) => 6,
+            Staged::Role(_) => 7,
+            Staged::NewUser(_) => 8,
+            Staged::User(_) => 9,
+            Staged::Invite(_) => 10,
+            Staged::NewIdentity(_) => 11,
+            Staged::Identity(_) => 12,
+            Staged::NewSession(_) => 13,
+            Staged::Session(_) => 14,
+            Staged::SessionRevocation(..) => 15,
+            Staged::NewPasswordReset(_) => 16,
+            Staged::PasswordReset(_) => 17,
+            Staged::UsedUpResets(..) => 18,
+            // These two are gathered and written in one statement each, last.
+            Staged::Idempotency(_) => 19,
+            Staged::InventoryItem(_) => 20,
+        }
+    }
+
+    /// Within a table, rows in key order (same reason). Writes without a row key keep
+    /// the order they were staged in (the sort is stable).
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.rank()
+            .cmp(&other.rank())
+            .then_with(|| match (self, other) {
+                (Staged::NewOrder(a), Staged::NewOrder(b)) => a.id.cmp(&b.id),
+                (Staged::NewCart(a), Staged::NewCart(b)) | (Staged::Cart(a), Staged::Cart(b)) => {
+                    a.id.cmp(&b.id)
+                }
+                (Staged::Product(a), Staged::Product(b)) => a.id.cmp(&b.id),
+                (Staged::AssetUsages(a, _), Staged::AssetUsages(b, _)) => a.cmp(b),
+                (Staged::NewCustomer(a), Staged::NewCustomer(b)) => a.id.cmp(&b.id),
+                (Staged::NewRole(a), Staged::NewRole(b)) | (Staged::Role(a), Staged::Role(b)) => {
+                    a.id.cmp(&b.id)
+                }
+                (Staged::NewUser(a), Staged::NewUser(b)) | (Staged::User(a), Staged::User(b)) => {
+                    a.id.cmp(&b.id)
+                }
+                (Staged::Invite(a), Staged::Invite(b)) => a.id.cmp(&b.id),
+                (Staged::NewIdentity(a), Staged::NewIdentity(b))
+                | (Staged::Identity(a), Staged::Identity(b)) => a.id.cmp(&b.id),
+                (Staged::NewSession(a), Staged::NewSession(b))
+                | (Staged::Session(a), Staged::Session(b)) => a.id.cmp(&b.id),
+                (Staged::NewPasswordReset(a), Staged::NewPasswordReset(b))
+                | (Staged::PasswordReset(a), Staged::PasswordReset(b)) => a.id.cmp(&b.id),
+                (Staged::InventoryItem(a), Staged::InventoryItem(b)) => a.id.cmp(&b.id),
+                _ => Ordering::Equal,
+            })
+    }
 }
 
 impl PgBatch {
-    fn is_empty(&self) -> bool {
-        self.new_orders.is_empty()
-            && self.new_carts.is_empty()
-            && self.new_customers.is_empty()
-            && self.carts.is_empty()
-            && self.products.is_empty()
-            && self.asset_usages.is_empty()
-            && self.inventory_items.is_empty()
-            && self.idempotency.is_empty()
-            && self.new_roles.is_empty()
-            && self.roles.is_empty()
-            && self.new_users.is_empty()
-            && self.users.is_empty()
-            && self.invites.is_empty()
-            && self.new_identities.is_empty()
-            && self.identities.is_empty()
-            && self.new_sessions.is_empty()
-            && self.sessions.is_empty()
-            && self.session_revocations.is_empty()
-            && self.new_password_resets.is_empty()
-            && self.password_resets.is_empty()
-            && self.used_up_resets.is_empty()
+    fn stage(&mut self, write: Staged) {
+        self.staged.push(write);
     }
 }
 
 impl StageRoles for PgBatch {
     fn insert_role(&mut self, role: &mut Role) {
-        self.new_roles.push(role.snapshot());
+        self.stage(Staged::NewRole(role.snapshot()));
         role.set_version(Version::NEW.next());
     }
 
     fn update_role(&mut self, role: &mut Role) {
-        self.roles.push(role.snapshot());
+        self.stage(Staged::Role(role.snapshot()));
         role.set_version(role.version().next());
     }
 }
 
 impl StageUsers for PgBatch {
     fn insert_user(&mut self, user: &mut User) {
-        self.new_users.push(user.snapshot());
+        self.stage(Staged::NewUser(user.snapshot()));
         user.set_version(Version::NEW.next());
     }
 
     fn update_user(&mut self, user: &mut User) {
-        self.users.push(user.snapshot());
+        self.stage(Staged::User(user.snapshot()));
         user.set_version(user.version().next());
     }
 }
 
 impl StageInvites for PgBatch {
     fn update_invite(&mut self, invite: &mut Invite) {
-        self.invites.push(invite.snapshot());
+        self.stage(Staged::Invite(invite.snapshot()));
         invite.set_version(invite.version().next());
     }
 }
 
 impl StageIdentities for PgBatch {
     fn insert_identity(&mut self, identity: &mut Identity) {
-        self.new_identities.push(identity.snapshot());
+        self.stage(Staged::NewIdentity(identity.snapshot()));
         identity.set_version(Version::NEW.next());
     }
 
     fn update_identity(&mut self, identity: &mut Identity) {
-        self.identities.push(identity.snapshot());
+        self.stage(Staged::Identity(identity.snapshot()));
         identity.set_version(identity.version().next());
     }
 }
 
 impl StageSessions for PgBatch {
     fn insert_session(&mut self, session: &mut Session) {
-        self.new_sessions.push(session.snapshot());
+        self.stage(Staged::NewSession(session.snapshot()));
         session.set_version(Version::NEW.next());
     }
 
     fn update_session(&mut self, session: &mut Session) {
-        self.sessions.push(session.snapshot());
+        self.stage(Staged::Session(session.snapshot()));
         session.set_version(session.version().next());
     }
 
     fn revoke_sessions(&mut self, identity: IdentityId, keep: Option<SessionId>, at: Timestamp) {
-        self.session_revocations.push((identity, keep, at));
+        self.stage(Staged::SessionRevocation(identity, keep, at));
     }
 }
 
 impl StagePasswordResets for PgBatch {
     fn insert_password_reset(&mut self, reset: &mut PasswordReset) {
-        self.new_password_resets.push(reset.snapshot());
+        self.stage(Staged::NewPasswordReset(reset.snapshot()));
         reset.set_version(Version::NEW.next());
     }
 
     fn update_password_reset(&mut self, reset: &mut PasswordReset) {
-        self.password_resets.push(reset.snapshot());
+        self.stage(Staged::PasswordReset(reset.snapshot()));
         reset.set_version(reset.version().next());
     }
 
     fn use_up_password_resets(&mut self, identity: IdentityId, at: Timestamp) {
-        self.used_up_resets.push((identity, at));
+        self.stage(Staged::UsedUpResets(identity, at));
     }
 }
 
 impl StageCarts for PgBatch {
     fn insert_cart(&mut self, cart: &mut Cart) {
-        self.new_carts.push(cart.snapshot());
+        self.stage(Staged::NewCart(cart.snapshot()));
         cart.set_version(Version::NEW.next());
     }
 
     fn update_cart(&mut self, cart: &mut Cart) {
-        self.carts.push(cart.snapshot());
+        self.stage(Staged::Cart(cart.snapshot()));
         cart.set_version(cart.version().next());
     }
 }
 
 impl StageProducts for PgBatch {
     fn update_product(&mut self, product: &mut Product) {
-        self.products.push(product.snapshot());
+        self.stage(Staged::Product(product.snapshot()));
         product.set_version(product.version().next());
     }
 }
@@ -187,34 +240,34 @@ impl StageAssetUsages for PgBatch {
         owner: &UsageOwner,
         usages: &[(hypha_core::AssetId, UsageRole)],
     ) {
-        self.asset_usages.push((owner.clone(), usages.to_vec()));
+        self.stage(Staged::AssetUsages(owner.clone(), usages.to_vec()));
     }
 }
 
 impl StageInventoryItems for PgBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
-        self.inventory_items.push(item.snapshot());
+        self.stage(Staged::InventoryItem(item.snapshot()));
         item.set_version(item.version().next());
     }
 }
 
 impl StageOrders for PgBatch {
     fn insert_order(&mut self, order: &mut Order) {
-        self.new_orders.push(order.snapshot());
+        self.stage(Staged::NewOrder(order.snapshot()));
         order.set_version(Version::NEW.next());
     }
 }
 
 impl StageCustomers for PgBatch {
     fn insert_customer(&mut self, customer: &mut Customer) {
-        self.new_customers.push(customer.snapshot());
+        self.stage(Staged::NewCustomer(customer.snapshot()));
         customer.set_version(Version::NEW.next());
     }
 }
 
 impl StageIdempotency for PgBatch {
     fn record_idempotency(&mut self, record: IdempotencyRecord) {
-        self.idempotency.push(record);
+        self.stage(Staged::Idempotency(record));
     }
 }
 
@@ -225,78 +278,64 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         PgBatch::default()
     }
 
-    /// One transaction. Tables are written in a fixed order, and rows within a table by
-    /// ID, so two commits lock rows in the same order and queue instead of deadlocking.
+    /// One transaction, the writes in `Staged::cmp` order; idempotency records and
+    /// inventory items (which sort last) are gathered and each written in one statement.
     /// Any failure returns early and drops the transaction, which rolls it back.
     async fn commit(&self, mut batch: PgBatch) -> Result<(), RepoError> {
-        if batch.is_empty() {
+        if batch.staged.is_empty() {
             return Ok(());
         }
-        batch.carts.sort_by_key(|s| s.id.as_uuid());
-        batch.products.sort_by_key(|s| s.id.as_uuid());
-        batch.asset_usages.sort_by(|(a, _), (b, _)| a.cmp(b));
+        batch.staged.sort_by(Staged::cmp);
+        let mut items = Vec::new();
+        let mut records = Vec::new();
 
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
-        for order in &batch.new_orders {
-            insert_order(&tx, order).await?;
+        for write in batch.staged {
+            match write {
+                Staged::NewOrder(s) => insert_order(&tx, &s).await?,
+                Staged::NewCart(s) => insert_cart(&tx, &s).await?,
+                Staged::Cart(s) => {
+                    update_cart(&tx, &s).await?;
+                }
+                Staged::Product(s) => {
+                    update_product(&tx, &s).await?;
+                }
+                Staged::AssetUsages(owner, usages) => replace_usages(&tx, &owner, &usages).await?,
+                Staged::NewCustomer(s) => insert_customer(&tx, &s).await?,
+                Staged::Idempotency(record) => records.push(record),
+                Staged::NewRole(s) => insert_role(&tx, &s).await?,
+                Staged::Role(s) => {
+                    update_role(&tx, &s).await?;
+                }
+                Staged::NewUser(s) => insert_user(&tx, &s).await?,
+                Staged::User(s) => {
+                    update_user(&tx, &s).await?;
+                }
+                Staged::Invite(s) => {
+                    update_invite(&tx, &s).await?;
+                }
+                Staged::NewIdentity(s) => insert_identity(&tx, &s).await?,
+                Staged::Identity(s) => {
+                    update_identity(&tx, &s).await?;
+                }
+                Staged::NewSession(s) => insert_session(&tx, &s).await?,
+                Staged::Session(s) => {
+                    update_session(&tx, &s).await?;
+                }
+                Staged::SessionRevocation(identity, keep, at) => {
+                    revoke_sessions(&tx, identity, keep, at).await?
+                }
+                Staged::NewPasswordReset(s) => insert_password_reset(&tx, &s).await?,
+                Staged::PasswordReset(s) => update_password_reset(&tx, &s).await?,
+                Staged::UsedUpResets(identity, at) => {
+                    use_up_password_resets(&tx, identity, at).await?
+                }
+                Staged::InventoryItem(s) => items.push(s),
+            }
         }
-        for cart in &batch.new_carts {
-            insert_cart(&tx, cart).await?;
-        }
-        for cart in &batch.carts {
-            update_cart(&tx, cart).await?;
-        }
-        for product in &batch.products {
-            update_product(&tx, product).await?;
-        }
-        for (owner, usages) in &batch.asset_usages {
-            replace_usages(&tx, owner, usages).await?;
-        }
-        update_items(&tx, batch.inventory_items).await?;
-        for customer in &batch.new_customers {
-            insert_customer(&tx, customer).await?;
-        }
-        insert_records(&tx, &batch.idempotency).await?;
-        for role in &batch.new_roles {
-            insert_role(&tx, role).await?;
-        }
-        for role in &batch.roles {
-            update_role(&tx, role).await?;
-        }
-        for user in &batch.new_users {
-            insert_user(&tx, user).await?;
-        }
-        for user in &batch.users {
-            update_user(&tx, user).await?;
-        }
-        for invite in &batch.invites {
-            update_invite(&tx, invite).await?;
-        }
-        for identity in &batch.new_identities {
-            insert_identity(&tx, identity).await?;
-        }
-        for identity in &batch.identities {
-            update_identity(&tx, identity).await?;
-        }
-        for session in &batch.new_sessions {
-            insert_session(&tx, session).await?;
-        }
-        for session in &batch.sessions {
-            update_session(&tx, session).await?;
-        }
-        for (identity, keep, at) in &batch.session_revocations {
-            revoke_sessions(&tx, *identity, *keep, *at).await?;
-        }
-        for reset in &batch.new_password_resets {
-            insert_password_reset(&tx, reset).await?;
-        }
-        for reset in &batch.password_resets {
-            update_password_reset(&tx, reset).await?;
-        }
-        for (identity, at) in &batch.used_up_resets {
-            use_up_password_resets(&tx, *identity, *at).await?;
-        }
+        insert_records(&tx, &records).await?;
+        update_items(&tx, items).await?;
         tx.commit().await.map_err(repo_error)
     }
 }
