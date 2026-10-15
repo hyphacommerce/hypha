@@ -14,6 +14,10 @@ use crate::{
 /// How long an upload URL works.
 pub const UPLOAD_EXPIRES_IN_SECS: u32 = 15 * 60;
 
+/// How long an upload may stay unfinished (or a failed asset stay around) before
+/// `sweep_abandoned_uploads` deletes it.
+pub const ABANDONED_AFTER_SECS: i64 = 24 * 60 * 60;
+
 /// How long a private file's download URL works.
 pub const DOWNLOAD_EXPIRES_IN_SECS: u32 = 15 * 60;
 
@@ -239,6 +243,34 @@ pub async fn delete_asset<R: AssetRepo, B: BlobStore>(
     blobs.delete(&asset.upload_key()).await?;
     assets.delete(id).await?;
     Ok(())
+}
+
+/// Deletes assets whose upload was abandoned (pending for over a day: the tab closed,
+/// the upload failed) or that failed their check over a day ago, with any file under
+/// their keys. Hosts run it regularly. Returns how many it deleted.
+pub async fn sweep_abandoned_uploads<R: AssetRepo, B: BlobStore>(
+    ctx: &Ctx,
+    assets: &R,
+    blobs: &B,
+    clock: &impl Clock,
+) -> Result<usize, CommandError> {
+    ctx.require(Scope::MediaWrite)?;
+    const BATCH: u32 = 100;
+    let before = clock.now().plus_secs(-ABANDONED_AFTER_SECS);
+    let mut deleted = 0;
+    loop {
+        let batch = assets.abandoned(before, BATCH).await?;
+        for asset in &batch {
+            // Files first, as in `delete_asset`: a failure leaves a row to retry.
+            blobs.delete(&asset.upload_key()).await?;
+            blobs.delete(asset.key()).await?;
+            assets.delete(asset.id()).await?;
+        }
+        deleted += batch.len();
+        if batch.len() < BATCH as usize {
+            return Ok(deleted);
+        }
+    }
 }
 
 async fn load<R: AssetRepo>(assets: &R, id: AssetId) -> Result<Asset, CommandError> {

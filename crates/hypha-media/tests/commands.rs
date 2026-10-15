@@ -5,7 +5,7 @@ use hypha_core::{
 use hypha_media::{
     AssetRepo, AssetStatus, BlobStore, CommandError, CreateUpload, MediaError, MimeType,
     UpdateAsset, UploadMismatch, Visibility, complete_upload, create_upload, delete_asset,
-    get_asset, list_assets, update_asset,
+    get_asset, list_assets, sweep_abandoned_uploads, update_asset,
 };
 use hypha_testkit::{FixedClock, InMemoryAssetRepo, InMemoryBlobStore, SequentialIds};
 use pollster::block_on;
@@ -405,6 +405,13 @@ impl AssetRepo for LoadedBeforeTheRaceWasLost {
     ) -> Result<hypha_core::Page<hypha_media::Asset>, RepoError> {
         self.repo.list(kind, page).await
     }
+    async fn abandoned(
+        &self,
+        before: Timestamp,
+        limit: u32,
+    ) -> Result<Vec<hypha_media::Asset>, RepoError> {
+        self.repo.abandoned(before, limit).await
+    }
     async fn insert(&self, asset: &mut hypha_media::Asset) -> Result<(), RepoError> {
         self.repo.insert(asset).await
     }
@@ -460,4 +467,41 @@ fn completing_twice_at_once_succeeds_both_times() {
     .unwrap();
     assert_eq!(completed.status(), AssetStatus::Ready);
     assert_eq!(completed.version(), Version::new(2));
+}
+
+#[test]
+fn the_sweep_deletes_uploads_abandoned_for_a_day() {
+    let world = World::new();
+    let (ready, _) = world.upload(shirt_png(), png(100));
+    // Uploaded, never completed (the tab closed).
+    let (abandoned, upload) = block_on(create_upload(
+        &Ctx::system(),
+        &world.assets,
+        &world.blobs,
+        &world.ids,
+        &world.clock,
+        shirt_png(),
+    ))
+    .unwrap();
+    assert!(world.blobs.upload(&upload, png(100), FixedClock::DEFAULT));
+
+    let sweep = || {
+        block_on(sweep_abandoned_uploads(
+            &Ctx::system(),
+            &world.assets,
+            &world.blobs,
+            &world.clock,
+        ))
+    };
+    assert_eq!(sweep(), Ok(0), "not a day old yet");
+    world
+        .clock
+        .set(FixedClock::DEFAULT.plus_secs(24 * 60 * 60 + 1));
+    assert_eq!(sweep(), Ok(1));
+    assert_eq!(block_on(world.assets.get(abandoned.id())), Ok(None));
+    assert_eq!(
+        block_on(world.blobs.head(&abandoned.upload_key())),
+        Ok(None)
+    );
+    assert!(block_on(world.assets.get(ready)).unwrap().is_some());
 }

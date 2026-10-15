@@ -63,6 +63,28 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         Ok(Page::from_overfetch(assets, page.limit))
     }
 
+    async fn abandoned(&self, before: Timestamp, limit: u32) -> Result<Vec<Asset>, RepoError> {
+        let before = before.unix_micros();
+        let limit = i64::from(limit);
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                &format!(
+                    "SELECT {COLUMNS} FROM assets
+                     WHERE (status = 'pending' AND created_at
+                                < 'epoch'::timestamptz + $1 * interval '1 microsecond')
+                        OR (status = 'failed' AND updated_at
+                                < 'epoch'::timestamptz + $1 * interval '1 microsecond')
+                     ORDER BY id LIMIT $2"
+                ),
+                &[(&before, Type::INT8), (&limit, Type::INT8)],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter().map(asset_from_db).collect()
+    }
+
     async fn insert(&self, asset: &mut Asset) -> Result<(), RepoError> {
         let s = asset.snapshot();
         let mut conn = self.conn().await;

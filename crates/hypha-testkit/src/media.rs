@@ -31,6 +31,22 @@ impl AssetRepo for InMemoryAssetRepo {
         ))
     }
 
+    async fn abandoned(&self, before: Timestamp, limit: u32) -> Result<Vec<Asset>, RepoError> {
+        let mut found: Vec<Asset> = self
+            .assets
+            .all()
+            .into_iter()
+            .filter(|a| match a.status() {
+                AssetStatus::Pending => a.created_at() < before,
+                AssetStatus::Failed => a.updated_at() < before,
+                AssetStatus::Ready => false,
+            })
+            .collect();
+        found.sort_by_key(Asset::id);
+        found.truncate(limit as usize);
+        Ok(found)
+    }
+
     async fn insert(&self, asset: &mut Asset) -> Result<(), RepoError> {
         self.assets
             .insert(asset.id(), asset, keys::ASSET_ID, &no_unique_keys)

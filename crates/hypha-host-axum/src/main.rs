@@ -237,6 +237,7 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         }
     };
     tracing::info!("Hypha listening on http://{addr}");
+    S::spawn_media_sweep(Arc::clone(&state));
     // Drop idle rate-limit keys every minute, so rotating addresses can't grow memory.
     let sweeper = Arc::clone(&state);
     tokio::spawn(async move {

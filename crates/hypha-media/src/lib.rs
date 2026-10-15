@@ -15,8 +15,9 @@ pub use asset::{
 };
 pub use blob::{BlobHead, BlobKey, BlobStore, PresignedUpload, UploadTerms};
 pub use commands::{
-    CommandError, CreateUpload, DOWNLOAD_EXPIRES_IN_SECS, UPLOAD_EXPIRES_IN_SECS, UpdateAsset,
-    complete_upload, create_upload, delete_asset, get_asset, list_assets, update_asset,
+    ABANDONED_AFTER_SECS, CommandError, CreateUpload, DOWNLOAD_EXPIRES_IN_SECS,
+    UPLOAD_EXPIRES_IN_SECS, UpdateAsset, complete_upload, create_upload, delete_asset, get_asset,
+    list_assets, sweep_abandoned_uploads, update_asset,
 };
 pub use error::{BlobError, MediaError, UploadMismatch};
 pub use mime::{AssetKind, MimeType};

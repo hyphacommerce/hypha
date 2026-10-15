@@ -18,6 +18,8 @@ pub async fn asset_repo<R: AssetRepo>(make: impl AsyncFn() -> R) {
     asset_unique_id(&make().await).await;
     scenario("asset: list pages ready assets, newest first, by kind");
     asset_list_pages(&make().await).await;
+    scenario("asset: abandoned finds old pending and failed assets, oldest first");
+    asset_abandoned(&make().await).await;
     scenario("asset: delete removes it; deleting again is fine");
     asset_deletes(&make().await).await;
 }
@@ -177,6 +179,47 @@ async fn asset_list_pages<R: AssetRepo>(repo: &R) {
     assert_eq!(
         listed(repo, Some(AssetKind::File), None, 10).await,
         (vec![aid(2)], false)
+    );
+}
+
+async fn asset_abandoned<R: AssetRepo>(repo: &R) {
+    let at = |secs| NOW.plus_secs(secs);
+    // 1 pending since NOW; 2 failed at NOW+60; 3 ready; 4 pending since NOW+120.
+    let mut failed = pending(2, MimeType::Png);
+    failed.mark_failed(at(60)).unwrap();
+    let late = Asset::new_upload(NewUpload {
+        id: aid(4),
+        filename: "late.png".to_string(),
+        mime_type: MimeType::Png,
+        byte_size: 1,
+        checksum: None,
+        visibility: Visibility::Public,
+        now: at(120),
+    })
+    .unwrap();
+    for mut asset in [
+        late,
+        ready(3, MimeType::Png),
+        failed,
+        pending(1, MimeType::Png),
+    ] {
+        repo.insert(&mut asset).await.unwrap();
+    }
+    let ids = |assets: Vec<Asset>| assets.iter().map(Asset::id).collect::<Vec<_>>();
+    assert_eq!(ids(repo.abandoned(NOW, 10).await.unwrap()), vec![]);
+    assert_eq!(ids(repo.abandoned(at(1), 10).await.unwrap()), vec![aid(1)]);
+    assert_eq!(
+        ids(repo.abandoned(at(61), 10).await.unwrap()),
+        vec![aid(1), aid(2)]
+    );
+    assert_eq!(
+        ids(repo.abandoned(at(1000), 10).await.unwrap()),
+        vec![aid(1), aid(2), aid(4)],
+        "never a ready asset"
+    );
+    assert_eq!(
+        ids(repo.abandoned(at(1000), 2).await.unwrap()),
+        vec![aid(1), aid(2)]
     );
 }
 
