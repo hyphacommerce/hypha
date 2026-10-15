@@ -41,7 +41,25 @@ function FilePreview({ asset }: { asset: Asset }) {
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const asset = loaded(await client.GET("/admin/assets/{id}", { params: { path: { id } } }));
+  const [assetResult, usagesResult] = await Promise.all([
+    client.GET("/admin/assets/{id}", { params: { path: { id } } }),
+    client.GET("/admin/assets/{id}/usages", { params: { path: { id }, query: { limit: 25 } } }),
+  ]);
+  const asset = loaded(assetResult);
+  const usages = loaded(usagesResult);
+  // Products show by title; other owners (spores) by kind and ID.
+  const titles = new Map(
+    await Promise.all(
+      usages.items
+        .filter((u) => u.owner.kind === "product")
+        .map(async (u) => {
+          const { data } = await client.GET("/admin/products/{id}", {
+            params: { path: { id: u.owner.id } },
+          });
+          return [u.owner.id, data?.title ?? u.owner.id] as const;
+        }),
+    ),
+  );
 
   return (
     <Section padding={6}>
@@ -63,6 +81,36 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 title={asset.title ?? ""}
                 hasAlt={asset.kind === "image"}
               />
+            </Card>
+            <Card padding={4}>
+              <VStack gap={2}>
+                <Text type="label">Used by</Text>
+                {usages.items.length === 0 ? (
+                  <Text type="supporting" color="secondary">
+                    Nothing yet. Files in use can&apos;t be deleted.
+                  </Text>
+                ) : (
+                  <>
+                    {usages.items.map((u) =>
+                      u.owner.kind === "product" ? (
+                        <Link key={u.owner.id} href={`/products/${u.owner.id}`}>
+                          {titles.get(u.owner.id)}
+                          {u.role === "featured" ? " (featured)" : ""}
+                        </Link>
+                      ) : (
+                        <Text key={`${u.owner.kind}:${u.owner.id}`}>
+                          {u.owner.kind} {u.owner.id}
+                        </Text>
+                      ),
+                    )}
+                    {usages.has_more && (
+                      <Text type="supporting" color="secondary">
+                        And more.
+                      </Text>
+                    )}
+                  </>
+                )}
+              </VStack>
             </Card>
             <MetadataList title="Details">
               <MetadataListItem label="File">{asset.filename}</MetadataListItem>

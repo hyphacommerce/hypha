@@ -115,6 +115,33 @@ export function describe(error: ApiError): string {
       return "That sign-in expired. Start again.";
     case "handle_taken":
       return "Another product already uses that handle. Pick a different one.";
+    case "sku_taken":
+      return "Another variant already uses that SKU. SKUs are unique across the store.";
+    case "duplicate_option_combination":
+      return "Another variant already has these option values.";
+    case "option_value_in_use":
+      return "Variants still use the values you removed.";
+    case "duplicate_option_name":
+      return "Two options have the same name.";
+    case "duplicate_option_value":
+      return "An option has the same value twice.";
+    case "empty_option":
+      return "Every option needs at least one value.";
+    case "no_variants":
+      return "A product keeps at least one variant.";
+    case "too_many_variants":
+      return "A product has at most 2,048 variants.";
+    case "too_many_media":
+      return "A product has at most 250 media items.";
+    case "asset_in_use":
+      return "This file is used on products. Remove it from them first.";
+    case "asset_not_ready":
+      return "That file hasn't finished uploading.";
+    case "asset_kind_not_allowed":
+      return "Products take images and videos; a variant shows an image.";
+    case "field_required":
+    case "field_too_long":
+      return error.error.charAt(0).toUpperCase() + error.error.slice(1) + ".";
     case "missing_scope":
       return "Your role doesn't allow this. Ask the store owner for access.";
     case "unsupported_media_type":

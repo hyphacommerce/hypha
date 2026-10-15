@@ -13,7 +13,7 @@ import {
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
-import { CubeIcon } from "@heroicons/react/24/outline";
+import { CubeIcon, PhotoIcon } from "@heroicons/react/24/outline";
 import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
@@ -42,6 +42,34 @@ function priceRanges(product: AdminSchemas["ProductSummaryResponse"]): string {
       min.amount === max.amount ? formatMoney(min) : `${formatMoney(min)} – ${formatMoney(max)}`,
     )
     .join(", ");
+}
+
+/** The product's featured image, small; a placeholder for none (or a video). */
+function FeaturedImage({ media }: { media?: AdminSchemas["ProductMediaResponse"] | null }) {
+  const src = media?.kind === "image" ? (media.thumbnail_url ?? media.url) : undefined;
+  return (
+    <div
+      style={{
+        width: 40,
+        height: 40,
+        flexShrink: 0,
+        borderRadius: 6,
+        overflow: "hidden",
+        display: "grid",
+        placeItems: "center",
+        background: "var(--color-background-muted)",
+      }}
+    >
+      {src ? (
+        // A plain <img>: the media URLs resize, so no Next.js image pipeline (0011 §2).
+        <img src={src} alt="" width={40} height={40} style={{ objectFit: "cover" }} />
+      ) : (
+        <Text color="secondary">
+          <PhotoIcon width={18} aria-hidden />
+        </Text>
+      )}
+    </div>
+  );
 }
 
 export default async function ProductsPage({
@@ -106,14 +134,17 @@ export default async function ProductsPage({
               {page.items.map((product) => (
                 <TableRow key={product.id}>
                   <TableCell>
-                    <VStack gap={0.5}>
-                      <Link href={`/products/${product.id}`} weight="medium">
-                        {product.title}
-                      </Link>
-                      <Text type="supporting" color="secondary">
-                        /{product.handle}
-                      </Text>
-                    </VStack>
+                    <HStack gap={3} vAlign="center">
+                      <FeaturedImage media={product.featured_media} />
+                      <VStack gap={0.5}>
+                        <Link href={`/products/${product.id}`} weight="medium">
+                          {product.title}
+                        </Link>
+                        <Text type="supporting" color="secondary">
+                          /{product.handle}
+                        </Text>
+                      </VStack>
+                    </HStack>
                   </TableCell>
                   <TableCell>
                     <ProductStatusBadge status={product.status} />
