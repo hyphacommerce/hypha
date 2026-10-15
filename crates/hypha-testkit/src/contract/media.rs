@@ -22,11 +22,13 @@ pub async fn asset_repo<R: AssetRepo>(make: impl AsyncFn() -> R) {
     asset_abandoned(&make().await).await;
     scenario("asset: delete removes it; deleting again is fine");
     asset_deletes(&make().await).await;
+    scenario("asset: get_many returns the assets that exist");
+    asset_get_many(&make().await).await;
 }
 
 const NOW: Timestamp = Timestamp::from_unix_micros(1_767_225_600_000_000);
 
-fn aid(n: u128) -> AssetId {
+pub(super) fn aid(n: u128) -> AssetId {
     AssetId::from_uuid(Uuid::from_u128(n))
 }
 
@@ -74,7 +76,7 @@ fn full(n: u128) -> Asset {
     asset
 }
 
-fn ready(n: u128, mime_type: MimeType) -> Asset {
+pub(super) fn ready(n: u128, mime_type: MimeType) -> Asset {
     let mut asset = pending(n, mime_type);
     asset.mark_ready(FileFacts::default(), NOW).unwrap();
     asset
@@ -230,6 +232,18 @@ async fn asset_deletes<R: AssetRepo>(repo: &R) {
     assert_eq!(repo.get(aid(1)).await, Ok(None));
     assert!(repo.get(aid(2)).await.unwrap().is_some());
     assert_eq!(repo.delete(aid(1)).await, Ok(()));
+}
+
+async fn asset_get_many<R: AssetRepo>(repo: &R) {
+    assert_eq!(repo.get_many(&[]).await, Ok(vec![]));
+    let mut one = ready(1, MimeType::Png);
+    let mut two = full(2);
+    repo.insert(&mut one).await.unwrap();
+    repo.insert(&mut two).await.unwrap();
+    repo.insert(&mut ready(3, MimeType::Png)).await.unwrap();
+    let mut found = repo.get_many(&[aid(2), aid(9), aid(1)]).await.unwrap();
+    found.sort_by_key(Asset::id);
+    assert_eq!(found, vec![one, two]);
 }
 
 /// Runs every `BlobStore` scenario against `store`, as a client would use it: `upload`

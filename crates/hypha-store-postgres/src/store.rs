@@ -77,6 +77,7 @@ accessors! {
     hypha_users::HasRoles => Roles, roles;
     hypha_users::HasInvites => Invites, invites;
     hypha_media::HasAssets => Assets, assets;
+    hypha_media::HasAssetUsages => AssetUsages, asset_usages;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

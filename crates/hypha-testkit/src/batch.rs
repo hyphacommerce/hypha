@@ -9,6 +9,7 @@ use hypha_core::{
 };
 use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
+use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
 use hypha_products::{Product, StageProducts};
 use hypha_users::{Invite, Role, StageInvites, StageRoles, StageUsers, User, keys as user_keys};
@@ -19,6 +20,7 @@ use crate::{
     customers::unique as unique_customer,
     idempotency::insert_record,
     inventory_items,
+    media::replace_usages,
     orders::unique as unique_order,
     products::unique as unique_product,
     table::{insert_row, no_unique_keys, update_row},
@@ -34,6 +36,7 @@ pub struct InMemoryBatch {
     new_customers: Vec<Customer>,
     carts: Vec<Cart>,
     products: Vec<Product>,
+    asset_usages: Vec<(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>)>,
     inventory_items: Vec<InventoryItem>,
     idempotency: Vec<IdempotencyRecord>,
     new_identities: Vec<Identity>,
@@ -145,6 +148,16 @@ impl StageProducts for InMemoryBatch {
     }
 }
 
+impl StageAssetUsages for InMemoryBatch {
+    fn replace_asset_usages(
+        &mut self,
+        owner: &UsageOwner,
+        usages: &[(hypha_core::AssetId, UsageRole)],
+    ) {
+        self.asset_usages.push((owner.clone(), usages.to_vec()));
+    }
+}
+
 impl StageInventoryItems for InMemoryBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
         self.inventory_items.push(item.clone());
@@ -197,6 +210,9 @@ impl HasBatch for InMemoryPorts {
         let mut roles = self.roles.roles.lock();
         let mut users = self.users.users.lock();
         let mut invites = self.invites.invites.lock();
+        let assets = self.assets.assets.lock();
+        let mut usages = self.assets.lock_usages();
+        let usages_before = usages.clone();
         let before = (
             orders.clone(),
             carts.clone(),
@@ -238,6 +254,9 @@ impl HasBatch for InMemoryPorts {
             }
             for mut product in batch.products {
                 update_row(&mut products, product.id(), &mut product, &unique_product)?;
+            }
+            for (owner, replacement) in &batch.asset_usages {
+                replace_usages(&assets, &mut usages, owner, replacement)?;
             }
             for mut item in batch.inventory_items {
                 update_row(&mut items, item.id(), &mut item, &inventory_items::unique)?;
@@ -343,6 +362,7 @@ impl HasBatch for InMemoryPorts {
         })();
         if written.is_err() {
             (*orders, *carts, *products, *items, *customers, *records) = before;
+            *usages = usages_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written

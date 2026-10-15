@@ -363,6 +363,9 @@ pub(super) async fn update<S: Storage>(
 }
 
 /// Deletes an asset and its file.
+///
+/// Refused while something uses it: `409 asset_in_use`, with the first usages in
+/// `details`.
 #[utoipa::path(
     delete,
     path = "/admin/assets/{id}",
@@ -377,6 +380,6 @@ pub(super) async fn remove<S: Storage>(
 ) -> Result<StatusCode, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let media = media(&state)?;
-    delete_asset(&ctx, ports.assets(), &media.blobs, id).await?;
+    delete_asset(&ctx, &ports, &media.blobs, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -9,7 +9,9 @@ use hypha_core::{
 };
 use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
+use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_orders::{Order, OrderSnapshot, StageOrders};
+use hypha_products::{Product, ProductSnapshot, StageProducts};
 use hypha_users::{
     Invite, InviteSnapshot, Role, RoleSnapshot, StageInvites, StageRoles, StageUsers, User,
     UserSnapshot,
@@ -25,7 +27,9 @@ use crate::{
     error::repo_error,
     idempotency::insert_records,
     inventory::update_items,
+    media::replace_usages,
     orders::insert_order,
+    products::update_product,
     store::{PgConnection, PgStore},
     users::{insert_role, insert_user, update_invite, update_role, update_user},
 };
@@ -38,6 +42,8 @@ pub struct PgBatch {
     new_carts: Vec<CartSnapshot>,
     new_customers: Vec<CustomerSnapshot>,
     carts: Vec<CartSnapshot>,
+    products: Vec<ProductSnapshot>,
+    asset_usages: Vec<(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>)>,
     inventory_items: Vec<InventoryItemSnapshot>,
     idempotency: Vec<IdempotencyRecord>,
     new_roles: Vec<RoleSnapshot>,
@@ -61,6 +67,8 @@ impl PgBatch {
             && self.new_carts.is_empty()
             && self.new_customers.is_empty()
             && self.carts.is_empty()
+            && self.products.is_empty()
+            && self.asset_usages.is_empty()
             && self.inventory_items.is_empty()
             && self.idempotency.is_empty()
             && self.new_roles.is_empty()
@@ -166,6 +174,23 @@ impl StageCarts for PgBatch {
     }
 }
 
+impl StageProducts for PgBatch {
+    fn update_product(&mut self, product: &mut Product) {
+        self.products.push(product.snapshot());
+        product.set_version(product.version().next());
+    }
+}
+
+impl StageAssetUsages for PgBatch {
+    fn replace_asset_usages(
+        &mut self,
+        owner: &UsageOwner,
+        usages: &[(hypha_core::AssetId, UsageRole)],
+    ) {
+        self.asset_usages.push((owner.clone(), usages.to_vec()));
+    }
+}
+
 impl StageInventoryItems for PgBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
         self.inventory_items.push(item.snapshot());
@@ -208,6 +233,8 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
             return Ok(());
         }
         batch.carts.sort_by_key(|s| s.id.as_uuid());
+        batch.products.sort_by_key(|s| s.id.as_uuid());
+        batch.asset_usages.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
@@ -219,6 +246,12 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         }
         for cart in &batch.carts {
             update_cart(&tx, cart).await?;
+        }
+        for product in &batch.products {
+            update_product(&tx, product).await?;
+        }
+        for (owner, usages) in &batch.asset_usages {
+            replace_usages(&tx, owner, usages).await?;
         }
         update_items(&tx, batch.inventory_items).await?;
         for customer in &batch.new_customers {

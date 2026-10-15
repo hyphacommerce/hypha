@@ -643,6 +643,7 @@
           "assets"
         ],
         "summary": "Deletes an asset and its file.",
+        "description": "Refused while something uses it: `409 asset_in_use`, with the first usages in\n`details`.",
         "operationId": "admin.assets.remove",
         "parameters": [
           {

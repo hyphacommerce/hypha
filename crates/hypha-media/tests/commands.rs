@@ -1,11 +1,12 @@
 use hypha_core::{
-    Actor, AssetId, AuthError, Ctx, PageRequest, RepoError, Scope, TextError, Timestamp, UserId,
-    Version, Versioned,
+    Actor, AssetId, AuthError, Ctx, PageLimit, PageRequest, RepoError, Scope, TextError, Timestamp,
+    UserId, Version, Versioned,
 };
 use hypha_media::{
-    AssetRepo, AssetStatus, BlobStore, CommandError, CreateUpload, MediaError, MimeType,
-    UpdateAsset, UploadMismatch, Visibility, complete_upload, create_upload, delete_asset,
-    get_asset, list_assets, sweep_abandoned_uploads, update_asset,
+    AssetRepo, AssetStatus, AssetUsage, BlobStore, CommandError, CreateUpload, IN_USE_LISTED,
+    MediaError, MimeType, UpdateAsset, UploadMismatch, UsageOwner, UsageRole, Visibility,
+    complete_upload, create_upload, delete_asset, get_asset, list_asset_usages, list_assets,
+    sweep_abandoned_uploads, update_asset,
 };
 use hypha_testkit::{FixedClock, InMemoryAssetRepo, InMemoryBlobStore, SequentialIds};
 use pollster::block_on;
@@ -390,6 +391,9 @@ struct LoadedBeforeTheRaceWasLost {
 }
 
 impl AssetRepo for LoadedBeforeTheRaceWasLost {
+    async fn get_many(&self, ids: &[AssetId]) -> Result<Vec<hypha_media::Asset>, RepoError> {
+        self.repo.get_many(ids).await
+    }
     async fn get(&self, id: AssetId) -> Result<Option<hypha_media::Asset>, RepoError> {
         // Taken in its own statement, so the borrow isn't held across the `.await`.
         let stale = self.stale.borrow_mut().take();
@@ -504,4 +508,185 @@ fn the_sweep_deletes_uploads_abandoned_for_a_day() {
         Ok(None)
     );
     assert!(block_on(world.assets.get(ready)).unwrap().is_some());
+}
+
+// ---- usages (design note 0014, section 6) ----
+
+/// A world with batches, to record usages the way merchandising does.
+struct UsageWorld {
+    ports: hypha_testkit::InMemoryPorts,
+    blobs: InMemoryBlobStore,
+}
+
+impl UsageWorld {
+    /// Ready assets 1..=n, and the given product numbers using asset 1.
+    fn new(assets: u128, users: &[u128]) -> Self {
+        let world = Self {
+            ports: hypha_testkit::InMemoryPorts::default(),
+            blobs: InMemoryBlobStore::default(),
+        };
+        for n in 1..=assets {
+            let mut asset = hypha_media::Asset::new_upload(hypha_media::NewUpload {
+                id: aid(n),
+                filename: format!("{n}.png"),
+                mime_type: MimeType::Png,
+                byte_size: 100,
+                checksum: None,
+                visibility: Visibility::Public,
+                now: FixedClock::DEFAULT,
+            })
+            .unwrap();
+            asset
+                .mark_ready(hypha_media::FileFacts::default(), FixedClock::DEFAULT)
+                .unwrap();
+            block_on(world.ports.assets.insert(&mut asset)).unwrap();
+        }
+        for n in users {
+            world.use_asset(*n, &[1]);
+        }
+        world
+    }
+
+    fn use_asset(&self, product: u128, assets: &[u128]) {
+        use hypha_core::HasBatch;
+        use hypha_media::StageAssetUsages;
+        let usages: Vec<_> = assets
+            .iter()
+            .map(|n| (aid(*n), UsageRole::gallery()))
+            .collect();
+        let mut batch = self.ports.batch();
+        batch.replace_asset_usages(&owner(product), &usages);
+        block_on(self.ports.commit(batch)).unwrap();
+    }
+}
+
+fn aid(n: u128) -> AssetId {
+    AssetId::from_uuid(Uuid::from_u128(n))
+}
+
+fn owner(n: u128) -> UsageOwner {
+    UsageOwner::product(hypha_core::ProductId::from_uuid(Uuid::from_u128(n)))
+}
+
+fn usage(product: u128) -> AssetUsage {
+    AssetUsage {
+        asset: aid(1),
+        owner: owner(product),
+        role: UsageRole::gallery(),
+    }
+}
+
+#[test]
+fn an_asset_in_use_isnt_deleted() {
+    let world = UsageWorld::new(1, &[7, 8]);
+    assert_eq!(
+        block_on(delete_asset(
+            &Ctx::system(),
+            &world.ports,
+            &world.blobs,
+            aid(1)
+        )),
+        Err(CommandError::AssetInUse {
+            asset: aid(1),
+            usages: vec![usage(8), usage(7)],
+            has_more: false,
+        })
+    );
+    assert!(block_on(world.ports.assets.get(aid(1))).unwrap().is_some());
+
+    world.use_asset(7, &[]);
+    world.use_asset(8, &[]);
+    assert_eq!(
+        block_on(delete_asset(
+            &Ctx::system(),
+            &world.ports,
+            &world.blobs,
+            aid(1)
+        )),
+        Ok(())
+    );
+}
+
+#[test]
+fn asset_in_use_lists_the_first_usages_and_says_there_are_more() {
+    let users: Vec<u128> = (1..=IN_USE_LISTED as u128 + 1).collect();
+    let world = UsageWorld::new(1, &users);
+    let Err(CommandError::AssetInUse {
+        usages, has_more, ..
+    }) = block_on(delete_asset(
+        &Ctx::system(),
+        &world.ports,
+        &world.blobs,
+        aid(1),
+    ))
+    else {
+        panic!("expected asset_in_use");
+    };
+    assert_eq!((usages.len(), has_more), (IN_USE_LISTED as usize, true));
+}
+
+#[test]
+fn list_asset_usages_pages_by_owner() {
+    let world = UsageWorld::new(2, &[1, 2, 3]);
+    let page = |after: Option<u128>, limit| PageRequest {
+        after: after.map(owner),
+        limit: PageLimit::new(limit).unwrap(),
+    };
+    let first = block_on(list_asset_usages(
+        &Ctx::system(),
+        &world.ports,
+        aid(1),
+        page(None, 2),
+    ))
+    .unwrap();
+    assert_eq!(
+        (first.items, first.has_more),
+        (vec![usage(3), usage(2)], true)
+    );
+    let rest = block_on(list_asset_usages(
+        &Ctx::system(),
+        &world.ports,
+        aid(1),
+        page(Some(2), 2),
+    ))
+    .unwrap();
+    assert_eq!((rest.items, rest.has_more), (vec![usage(1)], false));
+    let unused = block_on(list_asset_usages(
+        &Ctx::system(),
+        &world.ports,
+        aid(2),
+        page(None, 2),
+    ))
+    .unwrap();
+    assert_eq!(unused.items, vec![]);
+}
+
+#[test]
+fn list_asset_usages_of_an_unknown_asset_is_not_found() {
+    let world = UsageWorld::new(0, &[]);
+    assert_eq!(
+        block_on(list_asset_usages(
+            &Ctx::system(),
+            &world.ports,
+            aid(9),
+            PageRequest::default()
+        )),
+        Err(CommandError::AssetNotFound(aid(9)))
+    );
+}
+
+#[test]
+fn list_asset_usages_needs_media_read() {
+    let world = UsageWorld::new(1, &[]);
+    assert_eq!(
+        block_on(list_asset_usages(
+            &user_with(vec![Scope::ProductsRead]),
+            &world.ports,
+            aid(1),
+            PageRequest::default()
+        )),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::MediaRead
+        )))
+    );
 }

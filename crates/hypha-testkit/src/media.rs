@@ -1,22 +1,83 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::{Mutex, MutexGuard},
+};
 
 use hypha_core::{AssetId, Page, PageRequest, RepoError, Timestamp};
 use hypha_media::{
-    Asset, AssetKind, AssetRepo, AssetStatus, BlobError, BlobHead, BlobKey, BlobStore,
-    PresignedUpload, UploadTerms, repo::keys,
+    Asset, AssetKind, AssetRepo, AssetStatus, AssetUsage, AssetUsageRepo, BlobError, BlobHead,
+    BlobKey, BlobStore, HasAssetUsages, HasAssets, PresignedUpload, UploadTerms, UsageOwner,
+    UsageRole, repo::keys,
 };
 use sha2::{Digest, Sha256};
 
 use crate::table::{Table, no_unique_keys};
 
+/// Assets and their usages together, like one database: the usages' reference to their
+/// asset is checked under both locks (always assets first, then usages).
 #[derive(Default)]
 pub struct InMemoryAssetRepo {
     pub(crate) assets: Table<AssetId, Asset>,
+    pub(crate) usages: Mutex<Usages>,
+}
+
+/// Every usage, by owner and asset.
+pub(crate) type Usages = BTreeMap<(UsageOwner, AssetId), UsageRole>;
+
+/// The repo is all of media's ports, so media's own tests need no `InMemoryPorts`.
+impl HasAssets for InMemoryAssetRepo {
+    type Assets = Self;
+    fn assets(&self) -> &Self {
+        self
+    }
+}
+
+impl HasAssetUsages for InMemoryAssetRepo {
+    type AssetUsages = Self;
+    fn asset_usages(&self) -> &Self {
+        self
+    }
+}
+
+impl InMemoryAssetRepo {
+    pub(crate) fn lock_usages(&self) -> MutexGuard<'_, Usages> {
+        self.usages.lock().unwrap()
+    }
+}
+
+/// `StageAssetUsages::replace_asset_usages` on locked tables: fails, changing nothing,
+/// if an asset is listed twice or doesn't exist.
+pub(crate) fn replace_usages(
+    assets: &HashMap<AssetId, Asset>,
+    usages: &mut Usages,
+    owner: &UsageOwner,
+    replacement: &[(AssetId, UsageRole)],
+) -> Result<(), RepoError> {
+    let mut seen = std::collections::HashSet::new();
+    for (asset, _) in replacement {
+        if !seen.insert(*asset) {
+            return Err(RepoError::Backend(format!(
+                "asset {asset} listed twice for {owner}"
+            )));
+        }
+        if !assets.contains_key(asset) {
+            return Err(RepoError::Reference(keys::USAGE_ASSET));
+        }
+    }
+    usages.retain(|(o, _), _| o != owner);
+    for (asset, role) in replacement {
+        usages.insert((owner.clone(), *asset), role.clone());
+    }
+    Ok(())
 }
 
 impl AssetRepo for InMemoryAssetRepo {
     async fn get(&self, id: AssetId) -> Result<Option<Asset>, RepoError> {
         Ok(self.assets.get(&id))
+    }
+
+    async fn get_many(&self, ids: &[AssetId]) -> Result<Vec<Asset>, RepoError> {
+        Ok(self.assets.get_many(ids))
     }
 
     async fn list(
@@ -57,8 +118,36 @@ impl AssetRepo for InMemoryAssetRepo {
     }
 
     async fn delete(&self, id: AssetId) -> Result<(), RepoError> {
-        self.assets.remove(&id);
+        let mut assets = self.assets.lock();
+        if self.lock_usages().keys().any(|(_, asset)| *asset == id) {
+            return Err(RepoError::Reference(keys::USAGE_ASSET));
+        }
+        assets.remove(&id);
         Ok(())
+    }
+}
+
+impl AssetUsageRepo for InMemoryAssetRepo {
+    async fn list_usages(
+        &self,
+        asset: AssetId,
+        page: PageRequest<UsageOwner>,
+    ) -> Result<Page<AssetUsage>, RepoError> {
+        let usages = self.lock_usages();
+        let fetched = usages
+            .iter()
+            .rev()
+            .filter(|((owner, a), _)| {
+                *a == asset && page.after.as_ref().is_none_or(|after| owner < after)
+            })
+            .take(page.limit.get() as usize + 1)
+            .map(|((owner, a), role)| AssetUsage {
+                asset: *a,
+                owner: owner.clone(),
+                role: role.clone(),
+            })
+            .collect();
+        Ok(Page::from_overfetch(fetched, page.limit))
     }
 }
 

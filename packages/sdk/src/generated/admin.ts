@@ -85,7 +85,11 @@ export interface paths {
         get: operations["admin.assets.fetch"];
         put?: never;
         post?: never;
-        /** Deletes an asset and its file. */
+        /**
+         * Deletes an asset and its file.
+         * @description Refused while something uses it: `409 asset_in_use`, with the first usages in
+         *     `details`.
+         */
         delete: operations["admin.assets.remove"];
         options?: never;
         head?: never;

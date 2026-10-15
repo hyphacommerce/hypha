@@ -178,3 +178,9 @@ async fn asset_repo() {
     let Some(url) = database_url() else { return };
     contract::asset_repo(async || fresh_store(&url, "contract_assets").await).await;
 }
+
+#[tokio::test]
+async fn asset_usages() {
+    let Some(url) = database_url() else { return };
+    contract::asset_usages(async || fresh_store(&url, "contract_asset_usages").await).await;
+}

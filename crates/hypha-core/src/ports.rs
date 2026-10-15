@@ -88,6 +88,11 @@ pub enum RepoError {
     /// errors like `HandleTaken`.
     #[error("a record with the same {0} already exists")]
     Duplicate(&'static str),
+    /// A write would break a reference between records: it points at one that doesn't
+    /// exist, or removes one that others point at. The key names the rule (e.g.
+    /// `"asset_usage_asset"`); commands map it to precise errors like `AssetInUse`.
+    #[error("the write breaks the {0} reference")]
+    Reference(&'static str),
 }
 
 impl crate::ErrorCode for RepoError {
@@ -96,7 +101,7 @@ impl crate::ErrorCode for RepoError {
             RepoError::Backend(_) => "storage_error",
             RepoError::StaleVersion => "concurrent_modification",
             // Commands map the keys they know to specific codes; this is the fallback.
-            RepoError::Duplicate(_) => "conflict",
+            RepoError::Duplicate(_) | RepoError::Reference(_) => "conflict",
         }
     }
 }

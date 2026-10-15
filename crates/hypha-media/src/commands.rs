@@ -2,13 +2,15 @@
 //! and storage; these commands sign uploads, check what was stored and keep the metadata.
 
 use hypha_core::{
-    AssetId, AuthError, Clock, Ctx, ErrorCode, IdGenerator, Page, PageRequest, RepoError, Scope,
+    AssetId, AuthError, Clock, Ctx, ErrorCode, IdGenerator, Page, PageLimit, PageRequest,
+    RepoError, Scope,
 };
 use thiserror::Error;
 
 use crate::{
-    Asset, AssetKind, AssetRepo, AssetStatus, BlobError, BlobStore, Checksum, HEAD_BYTES,
-    MediaError, MimeType, NewUpload, PresignedUpload, UploadMismatch, UploadTerms, Visibility,
+    Asset, AssetKind, AssetRepo, AssetStatus, AssetUsage, AssetUsageRepo, BlobError, BlobStore,
+    Checksum, HEAD_BYTES, HasAssetUsages, HasAssets, MediaError, MimeType, NewUpload,
+    PresignedUpload, UploadMismatch, UploadTerms, UsageOwner, Visibility, repo::keys,
 };
 
 /// How long an upload URL works.
@@ -20,6 +22,9 @@ pub const ABANDONED_AFTER_SECS: i64 = 24 * 60 * 60;
 
 /// How long a private file's download URL works.
 pub const DOWNLOAD_EXPIRES_IN_SECS: u32 = 15 * 60;
+
+/// How many usages `AssetInUse` carries; `list_asset_usages` pages through all of them.
+pub const IN_USE_LISTED: u32 = 25;
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -39,6 +44,13 @@ pub enum CommandError {
     /// The stored file wasn't what was declared; the asset is now `failed`.
     #[error(transparent)]
     UploadMismatch(#[from] UploadMismatch),
+    /// The first `IN_USE_LISTED` usages, and whether there are more.
+    #[error("asset {asset} is in use")]
+    AssetInUse {
+        asset: AssetId,
+        usages: Vec<AssetUsage>,
+        has_more: bool,
+    },
 }
 
 impl ErrorCode for CommandError {
@@ -51,6 +63,7 @@ impl ErrorCode for CommandError {
             CommandError::AssetNotFound(_) => "asset_not_found",
             CommandError::UploadMissing(_) => "upload_missing",
             CommandError::UploadMismatch(e) => e.code(),
+            CommandError::AssetInUse { .. } => "asset_in_use",
         }
     }
 }
@@ -226,23 +239,61 @@ pub async fn update_asset<R: AssetRepo>(
     Ok(asset)
 }
 
-/// Deletes the asset and its file. The file goes first, so a failure halfway leaves an
-/// asset whose delete can simply be retried, never a file nothing points at.
-///
-/// Assets in use can't be deleted once usages exist (design note 0013, phase 2).
-pub async fn delete_asset<R: AssetRepo, B: BlobStore>(
+/// Deletes the asset and its file, unless something uses it (`AssetInUse`, design note
+/// 0014, E10). The row goes first: the repository refuses it while usages exist, even
+/// ones attached after the check here, and a file must never disappear from under an
+/// asset that is still in use. If deleting the file then fails, it stays in storage
+/// with nothing pointing at it.
+pub async fn delete_asset<S: HasAssets + HasAssetUsages, B: BlobStore>(
     ctx: &Ctx,
-    assets: &R,
+    ports: &S,
     blobs: &B,
     id: AssetId,
 ) -> Result<(), CommandError> {
     ctx.require(Scope::MediaWrite)?;
-    let asset = load(assets, id).await?;
+    let asset = load(ports.assets(), id).await?;
+    refuse_if_used(ports.asset_usages(), id).await?;
+    match ports.assets().delete(id).await {
+        Err(RepoError::Reference(key)) if key == keys::USAGE_ASSET => {
+            // Attached since the check: report it like the check would have.
+            refuse_if_used(ports.asset_usages(), id).await?;
+            return Err(RepoError::Reference(key).into());
+        }
+        deleted => deleted?,
+    }
     blobs.delete(asset.key()).await?;
     // A pending asset's file, or one uploaded again after completing.
     blobs.delete(&asset.upload_key()).await?;
-    assets.delete(id).await?;
     Ok(())
+}
+
+/// `AssetInUse` with the first usages, if there are any.
+async fn refuse_if_used<U: AssetUsageRepo>(usages: &U, asset: AssetId) -> Result<(), CommandError> {
+    let first = PageRequest {
+        after: None,
+        limit: PageLimit::new(IN_USE_LISTED).unwrap_or_default(),
+    };
+    let page = usages.list_usages(asset, first).await?;
+    if page.items.is_empty() {
+        return Ok(());
+    }
+    Err(CommandError::AssetInUse {
+        asset,
+        usages: page.items,
+        has_more: page.has_more,
+    })
+}
+
+/// Where an asset is used ("used by"), a page at a time.
+pub async fn list_asset_usages<S: HasAssets + HasAssetUsages>(
+    ctx: &Ctx,
+    ports: &S,
+    id: AssetId,
+    page: PageRequest<UsageOwner>,
+) -> Result<Page<AssetUsage>, CommandError> {
+    ctx.require(Scope::MediaRead)?;
+    load(ports.assets(), id).await?;
+    Ok(ports.asset_usages().list_usages(id, page).await?)
 }
 
 /// Deletes assets whose upload was abandoned (pending for over a day: the tab closed,

@@ -43,11 +43,6 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         self.rows.lock().unwrap().get(id).cloned()
     }
 
-    /// Removes the row, if there is one.
-    pub(crate) fn remove(&self, id: &K) {
-        self.rows.lock().unwrap().remove(id);
-    }
-
     pub(crate) fn get_many(&self, ids: &[K]) -> Vec<T> {
         let rows = self.rows.lock().unwrap();
         ids.iter().filter_map(|id| rows.get(id).cloned()).collect()

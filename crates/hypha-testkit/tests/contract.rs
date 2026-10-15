@@ -159,6 +159,11 @@ fn asset_repo() {
 }
 
 #[test]
+fn asset_usages() {
+    block_on(contract::asset_usages(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn blob_store() {
     let store = InMemoryBlobStore::default();
     let now = Timestamp::from_unix_micros(1_767_225_600_000_000);

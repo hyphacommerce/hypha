@@ -158,46 +158,54 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
 
     async fn update(&self, product: &mut Product) -> Result<(), RepoError> {
         let s = product.snapshot();
-        let expected = version_to_db(s.version)?;
         let mut conn = self.conn().await;
         let tx = conn.client().transaction().await.map_err(repo_error)?;
-
-        // The version check comes first; nothing else is touched if it fails.
-        let bumped = tx
-            .query_typed_opt(
-                "UPDATE products SET version = version + 1, handle = $3, title = $4, status = $5
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&expected, Type::INT8),
-                    (&s.handle, Type::TEXT),
-                    (&s.title, Type::TEXT),
-                    (&s.status.as_str(), Type::TEXT),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            tx.rollback().await.map_err(repo_error)?;
-            return Err(RepoError::StaleVersion);
-        };
-        let new_version = version_from_db(row.get(0))?;
-
-        // Children are replaced wholesale; option values go with their options (CASCADE).
-        for sql in [
-            "DELETE FROM product_options WHERE product_id = $1",
-            "DELETE FROM variants WHERE product_id = $1",
-            "DELETE FROM product_media WHERE product_id = $1",
-        ] {
-            tx.query_typed(sql, &[(&s.id.as_uuid(), Type::UUID)])
-                .await
-                .map_err(repo_error)?;
-        }
-        write_children(&tx, &s).await?;
+        // Dropping the transaction on an error rolls it back.
+        let new_version = update_product(&tx, &s).await?;
         tx.commit().await.map_err(repo_error)?;
         product.set_version(new_version);
         Ok(())
     }
+}
+
+/// `ProductRepo::update` inside a transaction (also a batch's): returns the new version.
+pub(crate) async fn update_product(
+    tx: &impl GenericClient,
+    s: &ProductSnapshot,
+) -> Result<Version, RepoError> {
+    let expected = version_to_db(s.version)?;
+    // The version check comes first; nothing else is touched if it fails.
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE products SET version = version + 1, handle = $3, title = $4, status = $5
+                 WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&expected, Type::INT8),
+                (&s.handle, Type::TEXT),
+                (&s.title, Type::TEXT),
+                (&s.status.as_str(), Type::TEXT),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let Some(row) = bumped else {
+        return Err(RepoError::StaleVersion);
+    };
+    let new_version = version_from_db(row.get(0))?;
+
+    // Children are replaced wholesale; option values go with their options (CASCADE).
+    for sql in [
+        "DELETE FROM product_options WHERE product_id = $1",
+        "DELETE FROM variants WHERE product_id = $1",
+        "DELETE FROM product_media WHERE product_id = $1",
+    ] {
+        tx.query_typed(sql, &[(&s.id.as_uuid(), Type::UUID)])
+            .await
+            .map_err(repo_error)?;
+    }
+    write_children(tx, s).await?;
+    Ok(new_version)
 }
 
 /// Writes options, option values, variants and media in 4 statements however many there are:

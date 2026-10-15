@@ -245,7 +245,11 @@ pub type SharedState<S> = Arc<AppState<S>>;
 /// router is built per concrete type (see `routes::router!`).
 #[allow(async_fn_in_trait)]
 pub trait Storage: Send + Sync + 'static {
-    type Ports<'a>: CheckoutPorts + StaffPorts + HasApiKeys + hypha_media::HasAssets
+    type Ports<'a>: CheckoutPorts
+        + StaffPorts
+        + HasApiKeys
+        + hypha_media::HasAssets
+        + hypha_media::HasAssetUsages
     where
         Self: 'a;
     type Directory<'a>: StoreRepo

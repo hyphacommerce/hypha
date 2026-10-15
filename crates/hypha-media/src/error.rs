@@ -18,6 +18,9 @@ pub enum MediaError {
     InvalidChecksum(String),
     #[error("the asset is {status}, so its upload can't be completed")]
     NotPending { status: AssetStatus },
+    /// A usage's owner kind, owner ID or role that breaks its rule (`usage.rs`).
+    #[error("invalid usage {0}")]
+    InvalidUsage(String),
 }
 
 impl ErrorCode for MediaError {
@@ -29,6 +32,7 @@ impl ErrorCode for MediaError {
             MediaError::FileTooLarge { .. } => "file_too_large",
             MediaError::InvalidChecksum(_) => "invalid_checksum",
             MediaError::NotPending { .. } => "asset_not_pending",
+            MediaError::InvalidUsage(_) => "invalid_usage",
         }
     }
 }

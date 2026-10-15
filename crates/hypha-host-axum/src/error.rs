@@ -48,6 +48,8 @@ pub struct ApiErrorBody {
 /// - `option_value_in_use`: `{"variants": ["var_…"]}`, to remove with the values
 /// - `duplicate_option_combination` (removing an option): `{"variants": ["var_…", "var_…"]}`
 /// - `sku_taken` (another product): `{"sku", "product": "prod_…"}`
+/// - `asset_in_use`: `{"usages": [{"owner": {"kind", "id"}, "role"}], "has_more"}`, the first
+///   25; `GET /admin/assets/{id}/usages` pages through all of them
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
 /// a rate limit or locked second factor; 403
@@ -333,7 +335,9 @@ impl From<hypha_products::CommandError> for ApiError {
             E::HandleTaken { .. } | E::SkuTaken { .. } => StatusCode::CONFLICT,
             E::ProductNotFound(_) => StatusCode::NOT_FOUND,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         let details = match &e {
             E::Product(P::OptionValueInUse { variants }) => Some(json!({ "variants": variants })),
@@ -362,7 +366,9 @@ impl From<hypha_markets::CommandError> for ApiError {
             | E::MarketNotFound(_)
             | E::CurrencyMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
     }
@@ -375,7 +381,9 @@ impl From<hypha_stores::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::StoreNotFound(_) => StatusCode::NOT_FOUND,
             E::Store(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
             // Only possible at startup, and a deployment problem rather than a request one.
             E::Repo(RepoError::Backend(_)) | E::MultipleStores(_) => return Self::internal(e),
         };
@@ -404,7 +412,9 @@ impl From<hypha_cart::CommandError> for ApiError {
             | E::Idempotency(_)
             | E::CustomerNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         let details = match &e {
             E::Line(LineError::OutOfStock {
@@ -433,7 +443,9 @@ impl From<hypha_tax::CommandError> for ApiError {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
     }
@@ -462,7 +474,9 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 | I::DuplicateLine { .. },
             ) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         let details = match &e {
             E::OutOfStock { lines } => {
@@ -488,7 +502,9 @@ impl From<hypha_customers::CommandError> for ApiError {
             // Address IDs are generated, so a clash is a bug, not a bad request.
             E::Customer(C::DuplicateAddress(_)) => return Self::internal(e),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
     }
@@ -502,7 +518,9 @@ impl From<hypha_orders::CommandError> for ApiError {
             // Every order route names the order in its URL.
             E::OrderNotFound(_) => StatusCode::NOT_FOUND,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
     }
@@ -523,19 +541,41 @@ impl From<hypha_media::CommandError> for ApiError {
             // Every asset route names the asset in its URL.
             E::AssetNotFound(_) => StatusCode::NOT_FOUND,
             // The asset's state: not uploaded yet, or not pending any more.
-            E::UploadMissing(_) | E::Media(M::NotPending { .. }) => StatusCode::CONFLICT,
+            E::UploadMissing(_) | E::Media(M::NotPending { .. }) | E::AssetInUse { .. } => {
+                StatusCode::CONFLICT
+            }
             E::Media(
                 M::Text(_)
                 | M::UnsupportedMediaType(_)
                 | M::EmptyFile
                 | M::FileTooLarge { .. }
-                | M::InvalidChecksum(_),
+                | M::InvalidChecksum(_)
+                | M::InvalidUsage(_),
             )
             | E::UploadMismatch(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Blob(_) | E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::AssetInUse {
+                usages, has_more, ..
+            } => {
+                let usages: Vec<Value> = usages
+                    .iter()
+                    .map(|u| {
+                        json!({
+                            "owner": { "kind": u.owner.kind(), "id": u.owner.id() },
+                            "role": u.role.as_str(),
+                        })
+                    })
+                    .collect();
+                Some(json!({ "usages": usages, "has_more": has_more }))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -559,7 +599,9 @@ impl From<hypha_checkout::CommandError> for ApiError {
             | E::Unavailable { .. }
             | E::TotalChanged { .. } => StatusCode::CONFLICT,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         let details = match &e {
             E::CartCompleted { order, .. } => completed(*order),
@@ -595,7 +637,9 @@ impl From<hypha_auth::CommandError> for ApiError {
             // failure: all server-side.
             E::IdentityNotFound(_) | E::Hash(_) | E::Seal(_) => return Self::internal(e),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         let details = match &e {
             E::MfaLocked { until } => crate::routes::rfc3339(*until)
@@ -627,7 +671,9 @@ impl From<hypha_users::CommandError> for ApiError {
             | E::Password(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Notify(_) => StatusCode::BAD_GATEWAY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
-            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         if let E::Notify(inner) = &e {
             // The provider's error stays in the log; the client learns what to do.

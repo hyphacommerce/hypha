@@ -4,7 +4,7 @@ use hypha_core::HasIdempotency;
 use hypha_customers::HasCustomers;
 use hypha_inventory::{HasInventoryItems, HasLocations};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
-use hypha_media::HasAssets;
+use hypha_media::{HasAssetUsages, HasAssets};
 use hypha_orders::HasOrders;
 use hypha_products::HasProducts;
 use hypha_tax::{HasTaxClasses, HasTaxRegions};
@@ -125,6 +125,14 @@ impl HasIdempotency for InMemoryPorts {
 impl HasAssets for InMemoryPorts {
     type Assets = InMemoryAssetRepo;
     fn assets(&self) -> &InMemoryAssetRepo {
+        &self.assets
+    }
+}
+
+/// Usages are kept with the assets they point at (`InMemoryAssetRepo`).
+impl HasAssetUsages for InMemoryPorts {
+    type AssetUsages = InMemoryAssetRepo;
+    fn asset_usages(&self) -> &InMemoryAssetRepo {
         &self.assets
     }
 }

@@ -14,6 +14,10 @@ use hypha_tax::repo::keys as tax_keys;
 use hypha_users::keys as user_keys;
 use tokio_postgres::error::SqlState;
 
+/// Foreign keys whose violation is a domain rule (see `migrations/`), and the repo key
+/// each reports as `RepoError::Reference`, whichever side of the reference broke it.
+const REFERENCE_KEYS: &[(&str, &str)] = &[("asset_usage_asset", media_keys::USAGE_ASSET)];
+
 /// Unique constraint names (see `migrations/`) and the repo key each one reports.
 /// Postgres names the violated constraint, so this is an exact lookup, not text parsing.
 const UNIQUE_KEYS: &[(&str, &str)] = &[
@@ -76,6 +80,17 @@ pub(crate) fn repo_error(e: tokio_postgres::Error) -> RepoError {
             });
             if let Some(key) = key {
                 return RepoError::Duplicate(key);
+            }
+        }
+        if *db.code() == SqlState::FOREIGN_KEY_VIOLATION {
+            let key = db.constraint().and_then(|name| {
+                REFERENCE_KEYS
+                    .iter()
+                    .find(|(constraint, _)| *constraint == name)
+                    .map(|(_, key)| *key)
+            });
+            if let Some(key) = key {
+                return RepoError::Reference(key);
             }
         }
         // Two transactions locking the same rows in different orders (`update_many` on

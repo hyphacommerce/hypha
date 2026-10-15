@@ -1,6 +1,9 @@
 use hypha_core::{AssetId, Page, PageRequest, RepoError, Timestamp, Version, Versioned};
-use hypha_media::{Asset, AssetKind, AssetRepo, AssetSnapshot, BlobKey, Checksum, MimeType};
-use tokio_postgres::{Row, types::Type};
+use hypha_media::{
+    Asset, AssetKind, AssetRepo, AssetSnapshot, AssetUsage, AssetUsageRepo, BlobKey, Checksum,
+    MimeType, UsageOwner, UsageRole,
+};
+use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
@@ -28,6 +31,23 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
             .await
             .map_err(repo_error)?;
         row.as_ref().map(asset_from_db).transpose()
+    }
+
+    async fn get_many(&self, ids: &[AssetId]) -> Result<Vec<Asset>, RepoError> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                &format!("SELECT {COLUMNS} FROM assets WHERE id = ANY($1)"),
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter().map(asset_from_db).collect()
     }
 
     async fn list(
@@ -143,6 +163,74 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
             .map_err(repo_error)?;
         Ok(())
     }
+}
+
+impl<C: PgConnection> AssetUsageRepo for PgStore<C> {
+    async fn list_usages(
+        &self,
+        asset: AssetId,
+        page: PageRequest<UsageOwner>,
+    ) -> Result<Page<AssetUsage>, RepoError> {
+        let (after_kind, after_id) = match &page.after {
+            Some(owner) => (Some(owner.kind()), Some(owner.id())),
+            None => (None, None),
+        };
+        let fetch = i64::from(page.limit.get()) + 1;
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                "SELECT owner_kind, owner_id, role FROM asset_usages
+                 WHERE asset_id = $1 AND ($2::text IS NULL OR (owner_kind, owner_id) < ($2, $3))
+                 ORDER BY owner_kind DESC, owner_id DESC LIMIT $4",
+                &[
+                    (&asset.as_uuid(), Type::UUID),
+                    (&after_kind, Type::TEXT),
+                    (&after_id, Type::TEXT),
+                    (&fetch, Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        let usages = rows
+            .iter()
+            .map(|row| {
+                let owner = UsageOwner::new(row.get(0), row.get(1)).map_err(corrupt)?;
+                let role = UsageRole::new(row.get(2)).map_err(corrupt)?;
+                Ok(AssetUsage { asset, owner, role })
+            })
+            .collect::<Result<Vec<_>, RepoError>>()?;
+        Ok(Page::from_overfetch(usages, page.limit))
+    }
+}
+
+/// `StageAssetUsages::replace_asset_usages` inside a batch's transaction.
+pub(crate) async fn replace_usages(
+    tx: &impl GenericClient,
+    owner: &UsageOwner,
+    usages: &[(AssetId, UsageRole)],
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "DELETE FROM asset_usages WHERE owner_kind = $1 AND owner_id = $2",
+        &[(&owner.kind(), Type::TEXT), (&owner.id(), Type::TEXT)],
+    )
+    .await
+    .map_err(repo_error)?;
+    let assets: Vec<Uuid> = usages.iter().map(|(asset, _)| asset.as_uuid()).collect();
+    let roles: Vec<&str> = usages.iter().map(|(_, role)| role.as_str()).collect();
+    tx.query_typed(
+        "INSERT INTO asset_usages (asset_id, owner_kind, owner_id, role)
+         SELECT u.asset, $1, $2, u.role FROM unnest($3::uuid[], $4::text[]) AS u(asset, role)",
+        &[
+            (&owner.kind(), Type::TEXT),
+            (&owner.id(), Type::TEXT),
+            (&assets, Type::UUID_ARRAY),
+            (&roles, Type::TEXT_ARRAY),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
 }
 
 type Param<'a> = (&'a (dyn tokio_postgres::types::ToSql + Sync), Type);
