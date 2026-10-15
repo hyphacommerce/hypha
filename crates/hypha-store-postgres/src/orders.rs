@@ -1,19 +1,25 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    Address, AddressParts, CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId,
-    OrderLineId, Page, PageRequest, Price, ProductId, Quantity, RepoError, ShippingGroupId,
-    ShippingOptionId, TaxClassId, TaxRegionId, Timestamp, VariantId, Version, Versioned,
+    Address, CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, OrderLineId, Page,
+    PageRequest, Price, ProductId, Quantity, RepoError, ShippingGroupId, ShippingOptionId,
+    TaxClassId, TaxRegionId, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_orders::{
     Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSummary,
     OrderTax, OrderTaxSource,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{
+    GenericClient, Row,
+    types::{ToSql, Type},
+};
 use uuid::Uuid;
 
 use crate::{
-    columns::{currency_from_db, tax_rate_from_db, tax_rate_to_db, version_from_db, version_to_db},
+    columns::{
+        address_assignments, address_columns, address_from_row, address_values, currency_from_db,
+        micros, tax_rate_from_db, tax_rate_to_db, version_from_db, version_to_db,
+    },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
 };
@@ -192,28 +198,22 @@ pub(crate) async fn insert_order(
 
 /// The shipping address and total on the order's row, and its shipping lines.
 async fn write_shipping(tx: &impl GenericClient, s: &OrderSnapshot) -> Result<(), RepoError> {
-    let a = s.shipping_address.as_ref().map(|a| a.parts());
-    let text = |f: fn(&AddressParts) -> Option<&str>| a.and_then(f);
+    let id = s.id.as_uuid();
+    let address = address_values(s.shipping_address.as_ref().map(|a| a.parts()));
+    let total = s.shipping_total.amount();
+    let mut params: Vec<(&(dyn ToSql + Sync), Type)> = vec![(&id, Type::UUID)];
+    params.extend(
+        address
+            .iter()
+            .map(|v| (v as &(dyn ToSql + Sync), Type::TEXT)),
+    );
+    params.push((&total, Type::INT8));
     tx.query_typed(
-        "UPDATE orders SET shipping_first_name = $2, shipping_last_name = $3,
-                shipping_company = $4, shipping_line1 = $5, shipping_line2 = $6,
-                shipping_city = $7, shipping_province = $8, shipping_postal_code = $9,
-                shipping_country = $10, shipping_phone = $11, shipping_total = $12
-         WHERE id = $1",
-        &[
-            (&s.id.as_uuid(), Type::UUID),
-            (&text(|p| p.first_name.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.last_name.as_str())), Type::TEXT),
-            (&text(|p| p.company.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.line1.as_str())), Type::TEXT),
-            (&text(|p| p.line2.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.city.as_str())), Type::TEXT),
-            (&text(|p| p.province.as_deref()), Type::TEXT),
-            (&text(|p| p.postal_code.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.country.as_str())), Type::TEXT),
-            (&text(|p| p.phone.as_deref()), Type::TEXT),
-            (&s.shipping_total.amount(), Type::INT8),
-        ],
+        &format!(
+            "UPDATE orders SET {}, shipping_total = $12 WHERE id = $1",
+            address_assignments("shipping_", 2),
+        ),
+        &params,
     )
     .await
     .map_err(repo_error)?;
@@ -359,13 +359,14 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, R
 
     let orders = client
         .query_typed(
-            "SELECT id, version, number, (extract(epoch FROM placed_at) * 1000000)::bigint,
-                 cart_id, market_id, currency, country, taxes_included, customer_id, email,
-                 subtotal, tax_total, total, financial_status, fulfillment_status,
-                 shipping_first_name, shipping_last_name, shipping_company, shipping_line1,
-                 shipping_line2, shipping_city, shipping_province, shipping_postal_code,
-                 shipping_country, shipping_phone, shipping_total
-             FROM orders WHERE id = ANY($1)",
+            &format!(
+                "SELECT id, version, number, {}, cart_id, market_id, currency, country,
+                     taxes_included, customer_id, email, subtotal, tax_total, total,
+                     financial_status, fulfillment_status, {}, shipping_total
+                 FROM orders WHERE id = ANY($1)",
+                micros("placed_at"),
+                address_columns("shipping_"),
+            ),
             &param,
         )
         .await
@@ -434,23 +435,8 @@ fn order_from_db(
         .iter()
         .map(|line| shipping_line_from_db(line, &money))
         .collect::<Result<Vec<_>, RepoError>>()?;
-    // The check constraint keeps the required columns all set or all NULL.
-    let shipping_address = row
-        .get::<_, Option<String>>(17)
-        .map(|last_name| {
-            Address::new(AddressParts {
-                first_name: row.get(16),
-                last_name,
-                company: row.get(18),
-                line1: row.get(19),
-                line2: row.get(20),
-                city: row.get(21),
-                province: row.get(22),
-                postal_code: row.get(23),
-                country: row.get(24),
-                phone: row.get(25),
-            })
-        })
+    let shipping_address = address_from_row(row, 16)
+        .map(Address::new)
         .transpose()
         .map_err(corrupt)?;
 

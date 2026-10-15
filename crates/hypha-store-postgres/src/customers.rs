@@ -6,7 +6,7 @@ use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{version_from_db, version_to_db},
+    columns::{address_columns, address_from_row, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
 };
@@ -173,9 +173,11 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
     let id: Uuid = row.get(0);
     let addresses = client
         .query_typed(
-            "SELECT id, first_name, last_name, company, line1, line2, city, province,
-                 postal_code, country, phone
-             FROM customer_addresses WHERE customer_id = $1 ORDER BY position",
+            &format!(
+                "SELECT id, {} FROM customer_addresses
+                 WHERE customer_id = $1 ORDER BY position",
+                address_columns(""),
+            ),
             &[(&id, Type::UUID)],
         )
         .await
@@ -201,19 +203,8 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
 }
 
 fn saved_address(row: &Row) -> Result<SavedAddress, RepoError> {
-    let address = Address::new(AddressParts {
-        first_name: row.get(1),
-        last_name: row.get(2),
-        company: row.get(3),
-        line1: row.get(4),
-        line2: row.get(5),
-        city: row.get(6),
-        province: row.get(7),
-        postal_code: row.get(8),
-        country: row.get(9),
-        phone: row.get(10),
-    })
-    .map_err(corrupt)?;
+    let parts = address_from_row(row, 1).ok_or_else(|| corrupt("address without a last name"))?;
+    let address = Address::new(parts).map_err(corrupt)?;
     Ok(SavedAddress {
         id: AddressId::from_uuid(row.get(0)),
         address,

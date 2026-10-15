@@ -1,18 +1,23 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    AddressParts, InventoryItemId, LocationId, MarketId, Quantity, RepoError, VariantId, Version,
-    Versioned,
+    InventoryItemId, LocationId, MarketId, Quantity, RepoError, VariantId, Version, Versioned,
 };
 use hypha_inventory::{
     InventoryItem, InventoryItemRepo, InventoryItemSnapshot, Level, Location, LocationRepo,
     LocationSnapshot, Reservation, ReservationRef,
 };
-use tokio_postgres::{GenericClient, types::Type};
+use tokio_postgres::{
+    GenericClient,
+    types::{ToSql, Type},
+};
 use uuid::Uuid;
 
 use crate::{
-    columns::{version_from_db, version_to_db},
+    columns::{
+        address_assignments, address_columns, address_from_row, address_values, version_from_db,
+        version_to_db,
+    },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
 };
@@ -128,27 +133,20 @@ async fn write_location_address(
     tx: &impl GenericClient,
     s: &LocationSnapshot,
 ) -> Result<(), RepoError> {
-    let a = s.address.as_ref();
-    let text = |f: fn(&AddressParts) -> Option<&str>| a.and_then(f);
+    let id = s.id.as_uuid();
+    let address = address_values(s.address.as_ref());
+    let mut params: Vec<(&(dyn ToSql + Sync), Type)> = vec![(&id, Type::UUID)];
+    params.extend(
+        address
+            .iter()
+            .map(|v| (v as &(dyn ToSql + Sync), Type::TEXT)),
+    );
     tx.query_typed(
-        "UPDATE locations SET address_first_name = $2, address_last_name = $3,
-                address_company = $4, address_line1 = $5, address_line2 = $6,
-                address_city = $7, address_province = $8, address_postal_code = $9,
-                address_country = $10, address_phone = $11
-         WHERE id = $1",
-        &[
-            (&s.id.as_uuid(), Type::UUID),
-            (&text(|p| p.first_name.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.last_name.as_str())), Type::TEXT),
-            (&text(|p| p.company.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.line1.as_str())), Type::TEXT),
-            (&text(|p| p.line2.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.city.as_str())), Type::TEXT),
-            (&text(|p| p.province.as_deref()), Type::TEXT),
-            (&text(|p| p.postal_code.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.country.as_str())), Type::TEXT),
-            (&text(|p| p.phone.as_deref()), Type::TEXT),
-        ],
+        &format!(
+            "UPDATE locations SET {} WHERE id = $1",
+            address_assignments("address_", 2),
+        ),
+        &params,
     )
     .await
     .map_err(repo_error)?;
@@ -165,11 +163,12 @@ async fn load_locations(
     }
     let rows = client
         .query_typed(
-            "SELECT id, version, name, priority, address_first_name, address_last_name,
-                    address_company, address_line1, address_line2, address_city,
-                    address_province, address_postal_code, address_country, address_phone
-             FROM locations WHERE id = ANY($1)
-             ORDER BY priority, id",
+            &format!(
+                "SELECT id, version, name, priority, {}
+                 FROM locations WHERE id = ANY($1)
+                 ORDER BY priority, id",
+                address_columns("address_"),
+            ),
             &[(&ids, Type::UUID_ARRAY)],
         )
         .await
@@ -205,19 +204,7 @@ async fn load_locations(
                 markets: markets.remove(&id).unwrap_or_default(),
                 priority: u32::try_from(priority)
                     .map_err(|_| corrupt(format!("location priority {priority}")))?,
-                // The check constraint keeps the required columns all set or all NULL.
-                address: r.get::<_, Option<String>>(5).map(|last_name| AddressParts {
-                    first_name: r.get(4),
-                    last_name,
-                    company: r.get(6),
-                    line1: r.get(7),
-                    line2: r.get(8),
-                    city: r.get(9),
-                    province: r.get(10),
-                    postal_code: r.get(11),
-                    country: r.get(12),
-                    phone: r.get(13),
-                }),
+                address: address_from_row(r, 4),
             };
             Location::restore(snapshot).map_err(|e| corrupt(format!("location {id}: {e}")))
         })

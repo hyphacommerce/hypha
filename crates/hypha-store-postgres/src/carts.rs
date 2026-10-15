@@ -1,14 +1,20 @@
 use hypha_cart::{Cart, CartLineSnapshot, CartRepo, CartSnapshot, SelectedShipping, StoredQuote};
 use hypha_core::{
-    AddressParts, CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, Price,
-    ProductId, RepoError, ShippingOptionId, Timestamp, VariantId, Version, Versioned,
+    CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, Price, ProductId, RepoError,
+    ShippingOptionId, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_shipping::ProviderKey;
-use tokio_postgres::{GenericClient, types::Type};
+use tokio_postgres::{
+    GenericClient,
+    types::{ToSql, Type},
+};
 use uuid::Uuid;
 
 use crate::{
-    columns::{currency_from_db, version_from_db, version_to_db},
+    columns::{
+        address_assignments, address_columns, address_from_row, address_values, currency_from_db,
+        micros, ts, version_from_db, version_to_db,
+    },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
 };
@@ -65,42 +71,42 @@ pub(crate) async fn insert_cart(
 
 /// Sets the shipping columns to the snapshot's address and choice (NULL for none).
 async fn write_shipping(tx: &impl GenericClient, s: &CartSnapshot) -> Result<(), RepoError> {
-    let a = s.shipping_address.as_ref();
-    let text = |f: fn(&AddressParts) -> Option<&str>| a.and_then(f);
     let choice = s.shipping.as_ref();
     let quote = choice.and_then(|c| c.quote.as_ref());
+    let id = s.id.as_uuid();
+    let address = address_values(s.shipping_address.as_ref());
+    let option = choice.map(|c| c.option.as_uuid());
+    let amount = quote.map(|q| q.amount.money().amount());
+    let currency = quote.map(|q| q.amount.money().currency().as_str());
+    let provider = quote.map(|q| q.provider.as_str());
+    let service = quote.map(|q| q.service.as_str());
+    let reference = quote.and_then(|q| q.reference.as_deref());
+    let quoted_at = quote.map(|q| q.quoted_at.unix_micros());
+    let mut params: Vec<(&(dyn ToSql + Sync), Type)> = vec![(&id, Type::UUID)];
+    params.extend(
+        address
+            .iter()
+            .map(|v| (v as &(dyn ToSql + Sync), Type::TEXT)),
+    );
+    params.extend([
+        (&option as &(dyn ToSql + Sync), Type::UUID),
+        (&amount, Type::INT8),
+        (&currency, Type::TEXT),
+        (&provider, Type::TEXT),
+        (&service, Type::TEXT),
+        (&reference, Type::TEXT),
+        (&quoted_at, Type::INT8),
+    ]);
     tx.query_typed(
-        "UPDATE carts SET shipping_first_name = $2, shipping_last_name = $3,
-                shipping_company = $4, shipping_line1 = $5, shipping_line2 = $6,
-                shipping_city = $7, shipping_province = $8, shipping_postal_code = $9,
-                shipping_country = $10, shipping_phone = $11, shipping_option_id = $12,
-                quote_amount = $13, quote_currency = $14, quote_provider = $15,
-                quote_service = $16, quote_reference = $17,
-                quoted_at = 'epoch'::timestamptz + $18 * interval '1 microsecond'
-         WHERE id = $1",
-        &[
-            (&s.id.as_uuid(), Type::UUID),
-            (&text(|p| p.first_name.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.last_name.as_str())), Type::TEXT),
-            (&text(|p| p.company.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.line1.as_str())), Type::TEXT),
-            (&text(|p| p.line2.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.city.as_str())), Type::TEXT),
-            (&text(|p| p.province.as_deref()), Type::TEXT),
-            (&text(|p| p.postal_code.as_deref()), Type::TEXT),
-            (&text(|p| Some(p.country.as_str())), Type::TEXT),
-            (&text(|p| p.phone.as_deref()), Type::TEXT),
-            (&choice.map(|c| c.option.as_uuid()), Type::UUID),
-            (&quote.map(|q| q.amount.money().amount()), Type::INT8),
-            (
-                &quote.map(|q| q.amount.money().currency().as_str()),
-                Type::TEXT,
-            ),
-            (&quote.map(|q| q.provider.as_str()), Type::TEXT),
-            (&quote.map(|q| q.service.as_str()), Type::TEXT),
-            (&quote.and_then(|q| q.reference.as_deref()), Type::TEXT),
-            (&quote.map(|q| q.quoted_at.unix_micros()), Type::INT8),
-        ],
+        &format!(
+            "UPDATE carts SET {}, shipping_option_id = $12, quote_amount = $13,
+                    quote_currency = $14, quote_provider = $15, quote_service = $16,
+                    quote_reference = $17, quoted_at = {}
+             WHERE id = $1",
+            address_assignments("shipping_", 2),
+            ts(18),
+        ),
+        &params,
     )
     .await
     .map_err(repo_error)?;
@@ -175,13 +181,14 @@ async fn write_lines(
 async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Cart>, RepoError> {
     let Some(row) = client
         .query_typed_opt(
-            "SELECT version, market_id, country, email, customer_id, order_id,
-                    shipping_first_name, shipping_last_name, shipping_company, shipping_line1,
-                    shipping_line2, shipping_city, shipping_province, shipping_postal_code,
-                    shipping_country, shipping_phone, shipping_option_id, quote_amount,
-                    quote_currency, quote_provider, quote_service, quote_reference,
-                    (extract(epoch FROM quoted_at) * 1000000)::bigint
-             FROM carts WHERE id = $1",
+            &format!(
+                "SELECT version, market_id, country, email, customer_id, order_id, {},
+                        shipping_option_id, quote_amount, quote_currency, quote_provider,
+                        quote_service, quote_reference, {}
+                 FROM carts WHERE id = $1",
+                address_columns("shipping_"),
+                micros("quoted_at"),
+            ),
             &[(&id.as_uuid(), Type::UUID)],
         )
         .await
@@ -223,21 +230,7 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
             .map_err(corrupt)?,
         customer: row.get::<_, Option<Uuid>>(4).map(CustomerId::from_uuid),
         order: row.get::<_, Option<Uuid>>(5).map(OrderId::from_uuid),
-        // The check constraint keeps the required columns all set or all NULL.
-        shipping_address: row
-            .get::<_, Option<String>>(7)
-            .map(|last_name| AddressParts {
-                first_name: row.get(6),
-                last_name,
-                company: row.get(8),
-                line1: row.get(9),
-                line2: row.get(10),
-                city: row.get(11),
-                province: row.get(12),
-                postal_code: row.get(13),
-                country: row.get(14),
-                phone: row.get(15),
-            }),
+        shipping_address: address_from_row(&row, 6),
         shipping: match row.get::<_, Option<Uuid>>(16) {
             None => None,
             Some(option) => Some(SelectedShipping {
