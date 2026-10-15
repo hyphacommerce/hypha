@@ -215,6 +215,11 @@ AssetUsage { asset: AssetId, owner: UsageOwner { kind: "product", id: "prod_…"
   attached asset is public by E8).
 - `ProductSummaryResponse` gains `featured_media`: the same item shape or `null`.
 - `GET /admin/assets/{id}/usages` returns a page of `{owner: {kind, id}, role}`.
+- *Follow-up (found in review):* the admin's "Used by" list reads each using product
+  whole to show its title (up to 25 reads per page). A lookup made for it, such as
+  usages that carry their owner's label or `GET /admin/products?ids=…` returning
+  summaries, would make it one call; deferred until owners other than products exist,
+  since the label's shape depends on them.
 
 The host builds URLs (`MediaUrls`, as for assets); the views carry `Asset`s, not URLs, so
 the domain never knows the CDN.
