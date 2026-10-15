@@ -7,15 +7,17 @@ use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_media::{HasAssetUsages, HasAssets};
 use hypha_orders::HasOrders;
 use hypha_products::HasProducts;
+use hypha_shipping::{HasAppProviders, HasShippingZones};
 use hypha_tax::{HasTaxClasses, HasTaxRegions};
 use hypha_users::{HasInvites, HasRoles, HasUsers};
 
 use crate::{
-    InMemoryApiKeyRepo, InMemoryAssetRepo, InMemoryCartRepo, InMemoryCatalogRepo,
-    InMemoryCustomerRepo, InMemoryIdempotencyRepo, InMemoryIdentityRepo, InMemoryInventoryItemRepo,
-    InMemoryInviteRepo, InMemoryLocationRepo, InMemoryMarketRepo, InMemoryOrderRepo,
-    InMemoryPasswordResetRepo, InMemoryPriceListRepo, InMemoryProductRepo, InMemoryRoleRepo,
-    InMemorySessionRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
+    InMemoryApiKeyRepo, InMemoryAppProviderRepo, InMemoryAssetRepo, InMemoryCartRepo,
+    InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryIdempotencyRepo, InMemoryIdentityRepo,
+    InMemoryInventoryItemRepo, InMemoryInviteRepo, InMemoryLocationRepo, InMemoryMarketRepo,
+    InMemoryOrderRepo, InMemoryPasswordResetRepo, InMemoryPriceListRepo, InMemoryProductRepo,
+    InMemoryRoleRepo, InMemorySessionRepo, InMemoryShippingZoneRepo, InMemoryTaxClassRepo,
+    InMemoryTaxRegionRepo, InMemoryUserRepo,
 };
 
 /// Every repository of one store, in memory: the tests' world. It has every accessor, so it is `hypha_cart::CartPorts`; the fields are
@@ -35,6 +37,8 @@ pub struct InMemoryPorts {
     pub idempotency: InMemoryIdempotencyRepo,
     pub orders: InMemoryOrderRepo,
     pub assets: InMemoryAssetRepo,
+    pub shipping_zones: InMemoryShippingZoneRepo,
+    pub app_providers: InMemoryAppProviderRepo,
     // Staff and keys live in the store's database (design note 0006, T4).
     pub identities: InMemoryIdentityRepo,
     pub sessions: InMemorySessionRepo,
@@ -134,6 +138,20 @@ impl HasAssetUsages for InMemoryPorts {
     type AssetUsages = InMemoryAssetRepo;
     fn asset_usages(&self) -> &InMemoryAssetRepo {
         &self.assets
+    }
+}
+
+impl HasShippingZones for InMemoryPorts {
+    type ShippingZones = InMemoryShippingZoneRepo;
+    fn shipping_zones(&self) -> &InMemoryShippingZoneRepo {
+        &self.shipping_zones
+    }
+}
+
+impl HasAppProviders for InMemoryPorts {
+    type AppProviders = InMemoryAppProviderRepo;
+    fn app_providers(&self) -> &InMemoryAppProviderRepo {
+        &self.app_providers
     }
 }
 

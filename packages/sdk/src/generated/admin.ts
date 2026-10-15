@@ -1886,7 +1886,7 @@ export interface components {
             scopes: components["schemas"]["Scope"][];
         };
         /** @enum {string} */
-        Scope: "products:read" | "products:write" | "markets:read" | "markets:write" | "pricing:read" | "pricing:write" | "carts:read" | "carts:write" | "taxes:read" | "taxes:write" | "inventory:read" | "inventory:write" | "customers:read" | "customers:write" | "stores:read" | "stores:write" | "orders:read" | "orders:write" | "checkout" | "users:read" | "users:write" | "api_keys:read" | "api_keys:write" | "media:read" | "media:write";
+        Scope: "products:read" | "products:write" | "markets:read" | "markets:write" | "pricing:read" | "pricing:write" | "carts:read" | "carts:write" | "taxes:read" | "taxes:write" | "inventory:read" | "inventory:write" | "customers:read" | "customers:write" | "stores:read" | "stores:write" | "orders:read" | "orders:write" | "checkout" | "users:read" | "users:write" | "api_keys:read" | "api_keys:write" | "media:read" | "media:write" | "shipping:read" | "shipping:write";
         SessionResponse: {
             expires_at: string;
             /** @description Send as `Authorization: Bearer <token>`. Shown only now. */

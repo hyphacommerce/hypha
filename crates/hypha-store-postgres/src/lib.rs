@@ -26,6 +26,7 @@ mod media;
 mod migrate;
 mod orders;
 mod products;
+mod shipping;
 mod store;
 mod stores;
 mod tax;

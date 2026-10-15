@@ -103,15 +103,18 @@
 | `is_backup` | Shown only when all of the zone's provider options failed (SH7) |
 | `enabled`, `position` | Order of display |
 
-**Built-in rates** (SH4), each priced per currency (`Vec<Money>`, one per currency like a
-price list; a cart in a currency the option has no price for doesn't see it):
+**Built-in rates** (SH4). *Changed while building:* the four kinds are one type,
+`BuiltinRate { basis, tables }`: a **basis** (`flat`, `subtotal` or `weight`) and a
+**table of tiers per currency** (one table per currency, like a price list; a cart in a
+currency the option has no table for doesn't see it). A tier's price applies while the
+basis is below its `up_to` (exclusive); the last tier is open. The admin offers the four
+kinds as presets of it:
 
-- `Flat { prices }`
-- `FreeOver { prices, threshold }`: flat below the threshold subtotal, free from it.
-- `SubtotalTiers { tiers }` and `WeightTiers { tiers }`: the first tier whose upper bound
-  (exclusive) is above the cart's subtotal or weight, else the last (open) tier.
-- A weight tier can't be priced for lines whose weight is unknown: such a cart doesn't
-  see the option (reason `weight_unknown`).
+- **Flat:** basis `flat`, one open tier per currency.
+- **Free over a subtotal:** basis `subtotal`, a tier up to the threshold, then a free one.
+- **Subtotal tiers** and **weight tiers:** basis `subtotal` or `weight`, any number of tiers.
+- A weight basis can't price lines whose weight is unknown: such a cart doesn't see the
+  option (reason `weight_unknown`).
 
 **Provider rates:** `{ provider: ProviderKey, service: String }`. The option offers that
 one service of that provider, under the merchant's name. A provider's list of services

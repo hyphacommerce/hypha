@@ -11581,7 +11581,9 @@
           "api_keys:read",
           "api_keys:write",
           "media:read",
-          "media:write"
+          "media:write",
+          "shipping:read",
+          "shipping:write"
         ]
       },
       "SessionResponse": {

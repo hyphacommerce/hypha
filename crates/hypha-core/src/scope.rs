@@ -60,6 +60,11 @@ pub enum Scope {
     MediaRead,
     #[serde(rename = "media:write")]
     MediaWrite,
+    /// Shipping zones, options and providers (design note 0015).
+    #[serde(rename = "shipping:read")]
+    ShippingRead,
+    #[serde(rename = "shipping:write")]
+    ShippingWrite,
 }
 
 impl Scope {
@@ -91,6 +96,8 @@ impl Scope {
             Scope::ApiKeysWrite => "api_keys:write",
             Scope::MediaRead => "media:read",
             Scope::MediaWrite => "media:write",
+            Scope::ShippingRead => "shipping:read",
+            Scope::ShippingWrite => "shipping:write",
         }
     }
 
@@ -111,6 +118,7 @@ impl Scope {
             Scope::UsersRead => Some(Scope::UsersWrite),
             Scope::ApiKeysRead => Some(Scope::ApiKeysWrite),
             Scope::MediaRead => Some(Scope::MediaWrite),
+            Scope::ShippingRead => Some(Scope::ShippingWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -123,7 +131,8 @@ impl Scope {
             | Scope::Checkout
             | Scope::UsersWrite
             | Scope::ApiKeysWrite
-            | Scope::MediaWrite => None,
+            | Scope::MediaWrite
+            | Scope::ShippingWrite => None,
         }
     }
 
@@ -139,7 +148,7 @@ impl Scope {
         Scope::Checkout,
     ];
 
-    pub const ALL: [Scope; 25] = [
+    pub const ALL: [Scope; 27] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -165,6 +174,8 @@ impl Scope {
         Scope::ApiKeysWrite,
         Scope::MediaRead,
         Scope::MediaWrite,
+        Scope::ShippingRead,
+        Scope::ShippingWrite,
     ];
 }
 

@@ -958,6 +958,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-shipping"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-store-postgres"
 version = "0.1.0"
 dependencies = [
@@ -972,6 +984,7 @@ dependencies = [
  "hypha-media",
  "hypha-orders",
  "hypha-products",
+ "hypha-shipping",
  "hypha-stores",
  "hypha-tax",
  "hypha-testkit",
@@ -1032,6 +1045,7 @@ dependencies = [
  "hypha-media",
  "hypha-orders",
  "hypha-products",
+ "hypha-shipping",
  "hypha-stores",
  "hypha-tax",
  "hypha-users",

@@ -184,3 +184,15 @@ async fn asset_usages() {
     let Some(url) = database_url() else { return };
     contract::asset_usages(async || fresh_store(&url, "contract_asset_usages").await).await;
 }
+
+#[tokio::test]
+async fn shipping_zone_repo() {
+    let Some(url) = database_url() else { return };
+    contract::shipping_zone_repo(async || fresh_store(&url, "contract_shipping_zones").await).await;
+}
+
+#[tokio::test]
+async fn app_provider_repo() {
+    let Some(url) = database_url() else { return };
+    contract::app_provider_repo(async || fresh_store(&url, "contract_app_providers").await).await;
+}

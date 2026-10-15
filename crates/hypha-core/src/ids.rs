@@ -137,6 +137,10 @@ define_id!(PasswordResetId, "pwr");
 
 define_id!(AssetId, "asset");
 
+define_id!(ShippingZoneId, "szone");
+define_id!(ShippingOptionId, "shipopt");
+define_id!(ShippingGroupId, "shgrp");
+
 #[cfg(test)]
 mod tests {
     use super::*;

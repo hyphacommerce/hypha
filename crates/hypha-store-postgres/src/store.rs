@@ -78,6 +78,8 @@ accessors! {
     hypha_users::HasInvites => Invites, invites;
     hypha_media::HasAssets => Assets, assets;
     hypha_media::HasAssetUsages => AssetUsages, asset_usages;
+    hypha_shipping::HasShippingZones => ShippingZones, shipping_zones;
+    hypha_shipping::HasAppProviders => AppProviders, app_providers;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

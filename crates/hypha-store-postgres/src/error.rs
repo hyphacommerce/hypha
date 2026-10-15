@@ -9,6 +9,7 @@ use hypha_markets::repo::keys as market_keys;
 use hypha_media::repo::keys as media_keys;
 use hypha_orders::repo::keys as order_keys;
 use hypha_products::repo::keys as product_keys;
+use hypha_shipping::keys as shipping_keys;
 use hypha_stores::repo::keys as store_keys;
 use hypha_tax::repo::keys as tax_keys;
 use hypha_users::keys as user_keys;
@@ -25,6 +26,9 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("product_handle", product_keys::HANDLE),
     ("variant_id", product_keys::VARIANT_ID),
     ("variant_sku", product_keys::VARIANT_SKU),
+    ("shipping_zone_id", shipping_keys::ZONE_ID),
+    ("shipping_zone_country", shipping_keys::ZONE_COUNTRY),
+    ("shipping_provider_key", shipping_keys::PROVIDER_KEY),
     ("markets_pkey", market_keys::MARKET_ID),
     ("market_country", market_keys::COUNTRY),
     ("catalogs_pkey", market_keys::CATALOG_ID),

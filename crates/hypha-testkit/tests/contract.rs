@@ -174,3 +174,17 @@ fn blob_store() {
         async |url| store.download(url, now),
     ));
 }
+
+#[test]
+fn shipping_zone_repo() {
+    block_on(contract::shipping_zone_repo(async || {
+        hypha_testkit::InMemoryShippingZoneRepo::default()
+    }));
+}
+
+#[test]
+fn app_provider_repo() {
+    block_on(contract::app_provider_repo(async || {
+        hypha_testkit::InMemoryAppProviderRepo::default()
+    }));
+}
