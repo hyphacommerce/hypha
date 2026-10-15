@@ -7,16 +7,13 @@ use hypha_inventory::{
     InventoryItem, InventoryItemRepo, InventoryItemSnapshot, Level, Location, LocationRepo,
     LocationSnapshot, Reservation, ReservationRef,
 };
-use tokio_postgres::{
-    GenericClient,
-    types::{ToSql, Type},
-};
+use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{
-        address_assignments, address_columns, address_from_row, address_values, version_from_db,
-        version_to_db,
+        address_assignments, address_columns, address_from_row, address_values, id_and_address,
+        version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
@@ -135,18 +132,12 @@ async fn write_location_address(
 ) -> Result<(), RepoError> {
     let id = s.id.as_uuid();
     let address = address_values(s.address.as_ref());
-    let mut params: Vec<(&(dyn ToSql + Sync), Type)> = vec![(&id, Type::UUID)];
-    params.extend(
-        address
-            .iter()
-            .map(|v| (v as &(dyn ToSql + Sync), Type::TEXT)),
-    );
     tx.query_typed(
         &format!(
             "UPDATE locations SET {} WHERE id = $1",
             address_assignments("address_", 2),
         ),
-        &params,
+        &id_and_address(&id, &address),
     )
     .await
     .map_err(repo_error)?;

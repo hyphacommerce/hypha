@@ -3,7 +3,7 @@ use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::actor_to_db,
+    columns::{actor_to_db, micros},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
 };
@@ -20,10 +20,12 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
         // query cache) would miss a key committed seconds ago and run the command twice.
         let row = consistent_read!(conn.client(), |tx| tx
             .query_typed_opt(
-                "SELECT operation, fingerprint, result,
-                        (extract(epoch FROM created_at) * 1000000)::bigint
-                 FROM idempotency_keys
-                 WHERE actor_kind = $1 AND actor_id = $2 AND key = $3",
+                &format!(
+                    "SELECT operation, fingerprint, result, {}
+                     FROM idempotency_keys
+                     WHERE actor_kind = $1 AND actor_id = $2 AND key = $3",
+                    micros("created_at"),
+                ),
                 &[
                     (&kind, Type::TEXT),
                     (&id, Type::UUID),

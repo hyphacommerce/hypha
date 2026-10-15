@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        address_assignments, address_columns, address_from_row, address_values, currency_from_db,
-        micros, ts, version_from_db, version_to_db,
+        ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values,
+        currency_from_db, id_and_address, micros, ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
@@ -82,12 +82,7 @@ async fn write_shipping(tx: &impl GenericClient, s: &CartSnapshot) -> Result<(),
     let service = quote.map(|q| q.service.as_str());
     let reference = quote.and_then(|q| q.reference.as_deref());
     let quoted_at = quote.map(|q| q.quoted_at.unix_micros());
-    let mut params: Vec<(&(dyn ToSql + Sync), Type)> = vec![(&id, Type::UUID)];
-    params.extend(
-        address
-            .iter()
-            .map(|v| (v as &(dyn ToSql + Sync), Type::TEXT)),
-    );
+    let mut params = id_and_address(&id, &address);
     params.extend([
         (&option as &(dyn ToSql + Sync), Type::UUID),
         (&amount, Type::INT8),
@@ -97,14 +92,21 @@ async fn write_shipping(tx: &impl GenericClient, s: &CartSnapshot) -> Result<(),
         (&reference, Type::TEXT),
         (&quoted_at, Type::INT8),
     ]);
+    let n = 2 + ADDRESS_LEN;
     tx.query_typed(
         &format!(
-            "UPDATE carts SET {}, shipping_option_id = $12, quote_amount = $13,
-                    quote_currency = $14, quote_provider = $15, quote_service = $16,
-                    quote_reference = $17, quoted_at = {}
+            "UPDATE carts SET {}, shipping_option_id = ${}, quote_amount = ${},
+                    quote_currency = ${}, quote_provider = ${}, quote_service = ${},
+                    quote_reference = ${}, quoted_at = {}
              WHERE id = $1",
             address_assignments("shipping_", 2),
-            ts(18),
+            n,
+            n + 1,
+            n + 2,
+            n + 3,
+            n + 4,
+            n + 5,
+            ts(n + 6),
         ),
         &params,
     )
@@ -177,6 +179,9 @@ async fn write_lines(
     Ok(())
 }
 
+/// Where `load_cart`'s row has the shipping address.
+const ADDRESS_AT: usize = 6;
+
 /// A cart and its lines, in 2 queries (run inside `consistent_read`).
 async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Cart>, RepoError> {
     let Some(row) = client
@@ -217,6 +222,8 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
         .collect::<Result<Vec<_>, RepoError>>()?;
     let country: String = row.get(2);
     let email: Option<String> = row.get(3);
+    // The choice's columns follow the address's.
+    let q = ADDRESS_AT + ADDRESS_LEN;
     let snapshot = CartSnapshot {
         id,
         version: version_from_db(row.get(0))?,
@@ -230,23 +237,23 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
             .map_err(corrupt)?,
         customer: row.get::<_, Option<Uuid>>(4).map(CustomerId::from_uuid),
         order: row.get::<_, Option<Uuid>>(5).map(OrderId::from_uuid),
-        shipping_address: address_from_row(&row, 6),
-        shipping: match row.get::<_, Option<Uuid>>(16) {
+        shipping_address: address_from_row(&row, ADDRESS_AT),
+        shipping: match row.get::<_, Option<Uuid>>(q) {
             None => None,
             Some(option) => Some(SelectedShipping {
                 option: ShippingOptionId::from_uuid(option),
-                quote: match row.get::<_, Option<i64>>(17) {
+                quote: match row.get::<_, Option<i64>>(q + 1) {
                     None => None,
                     Some(amount) => {
-                        let currency = currency_from_db(row.get(18))?;
+                        let currency = currency_from_db(row.get(q + 2))?;
                         Some(StoredQuote {
                             amount: Money::new(amount, currency)
                                 .and_then(Price::new)
                                 .map_err(corrupt)?,
-                            provider: ProviderKey::new(row.get(19)).map_err(corrupt)?,
-                            service: row.get(20),
-                            reference: row.get(21),
-                            quoted_at: Timestamp::from_unix_micros(row.get(22)),
+                            provider: ProviderKey::new(row.get(q + 3)).map_err(corrupt)?,
+                            service: row.get(q + 4),
+                            reference: row.get(q + 5),
+                            quoted_at: Timestamp::from_unix_micros(row.get(q + 6)),
                         })
                     }
                 },

@@ -9,16 +9,14 @@ use hypha_orders::{
     Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSummary,
     OrderTax, OrderTaxSource,
 };
-use tokio_postgres::{
-    GenericClient, Row,
-    types::{ToSql, Type},
-};
+use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{
-        address_assignments, address_columns, address_from_row, address_values, currency_from_db,
-        micros, tax_rate_from_db, tax_rate_to_db, version_from_db, version_to_db,
+        ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values,
+        currency_from_db, id_and_address, micros, tax_rate_from_db, tax_rate_to_db, ts,
+        version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read},
@@ -41,13 +39,16 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         let rows = conn
             .client()
             .query_typed(
-                "SELECT o.id, o.number, (extract(epoch FROM o.placed_at) * 1000000)::bigint,
+                &format!(
+                    "SELECT o.id, o.number, {},
                      o.customer_id, o.email, o.country, o.currency, o.total,
                      o.financial_status, o.fulfillment_status,
                      (SELECT coalesce(sum(quantity), 0) FROM order_lines
                       WHERE order_id = o.id)::bigint
                  FROM orders o WHERE ($1::uuid IS NULL OR o.id < $1)
                  ORDER BY o.id DESC LIMIT $2",
+                    micros("o.placed_at"),
+                ),
                 &[(&after, Type::UUID), (&fetch, Type::INT8)],
             )
             .await
@@ -95,13 +96,16 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         let tx = conn.client().transaction().await.map_err(repo_error)?;
         let bumped = tx
             .query_typed_opt(
-                "UPDATE orders SET version = version + 1, number = $3,
-                     placed_at = 'epoch'::timestamptz + $4 * interval '1 microsecond',
+                &format!(
+                    "UPDATE orders SET version = version + 1, number = $3,
+                     placed_at = {},
                      cart_id = $5, market_id = $6, currency = $7, country = $8,
                      taxes_included = $9, customer_id = $10, email = $11, subtotal = $12,
                      tax_total = $13, total = $14, financial_status = $15,
                      fulfillment_status = $16
                  WHERE id = $1 AND version = $2 RETURNING version",
+                    ts(4),
+                ),
                 &[
                     (&s.id.as_uuid(), Type::UUID),
                     (&version_to_db(s.version)?, Type::INT8),
@@ -167,11 +171,13 @@ pub(crate) async fn insert_order(
     s: &OrderSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
-        "INSERT INTO orders (id, version, number, placed_at, cart_id, market_id, currency,
+        &format!(
+            "INSERT INTO orders (id, version, number, placed_at, cart_id, market_id, currency,
              country, taxes_included, customer_id, email, subtotal, tax_total, total,
              financial_status, fulfillment_status)
-         VALUES ($1, 1, $2, 'epoch'::timestamptz + $3 * interval '1 microsecond', $4, $5, $6,
-             $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+         VALUES ($1, 1, $2, {}, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+            ts(3),
+        ),
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.number.value(), Type::INT8),
@@ -201,17 +207,13 @@ async fn write_shipping(tx: &impl GenericClient, s: &OrderSnapshot) -> Result<()
     let id = s.id.as_uuid();
     let address = address_values(s.shipping_address.as_ref().map(|a| a.parts()));
     let total = s.shipping_total.amount();
-    let mut params: Vec<(&(dyn ToSql + Sync), Type)> = vec![(&id, Type::UUID)];
-    params.extend(
-        address
-            .iter()
-            .map(|v| (v as &(dyn ToSql + Sync), Type::TEXT)),
-    );
+    let mut params = id_and_address(&id, &address);
     params.push((&total, Type::INT8));
     tx.query_typed(
         &format!(
-            "UPDATE orders SET {}, shipping_total = $12 WHERE id = $1",
+            "UPDATE orders SET {}, shipping_total = ${} WHERE id = $1",
             address_assignments("shipping_", 2),
+            2 + ADDRESS_LEN,
         ),
         &params,
     )
@@ -347,6 +349,9 @@ async fn insert_lines(
 
 /// The orders with these IDs (missing ones are skipped) and their lines, in 2 queries
 /// (run inside `consistent_read`).
+/// Where `load`'s order rows have the shipping address (`shipping_total` follows it).
+const ADDRESS_AT: usize = 16;
+
 async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, RepoError> {
     if ids.is_empty() {
         return Ok(vec![]);
@@ -435,7 +440,7 @@ fn order_from_db(
         .iter()
         .map(|line| shipping_line_from_db(line, &money))
         .collect::<Result<Vec<_>, RepoError>>()?;
-    let shipping_address = address_from_row(row, 16)
+    let shipping_address = address_from_row(row, ADDRESS_AT)
         .map(Address::new)
         .transpose()
         .map_err(corrupt)?;
@@ -460,7 +465,7 @@ fn order_from_db(
         shipping_address,
         shipping_lines,
         subtotal: money(row.get(11))?,
-        shipping_total: money(row.get(26))?,
+        shipping_total: money(row.get(ADDRESS_AT + ADDRESS_LEN))?,
         tax_total: money(row.get(12))?,
         total: money(row.get(13))?,
         financial_status: financial.parse().map_err(corrupt)?,

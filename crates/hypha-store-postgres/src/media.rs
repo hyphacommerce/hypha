@@ -7,16 +7,20 @@ use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{version_from_db, version_to_db},
+    columns::{micros, ts, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore},
 };
 
 /// `assets`' columns in the order `asset_from_db` reads them.
-const COLUMNS: &str = "id, version, status, filename, blob_key, file_version, mime_type, \
-     byte_size, checksum, width, height, alt, title, visibility, \
-     (extract(epoch FROM created_at) * 1000000)::bigint, \
-     (extract(epoch FROM updated_at) * 1000000)::bigint";
+fn columns() -> String {
+    format!(
+        "id, version, status, filename, blob_key, file_version, mime_type, byte_size, \
+         checksum, width, height, alt, title, visibility, {}, {}",
+        micros("created_at"),
+        micros("updated_at"),
+    )
+}
 
 // An asset is one row, so every read is one query and needs no snapshot transaction.
 impl<C: PgConnection> AssetRepo for PgStore<C> {
@@ -25,7 +29,7 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         let row = conn
             .client()
             .query_typed_opt(
-                &format!("SELECT {COLUMNS} FROM assets WHERE id = $1"),
+                &format!("SELECT {} FROM assets WHERE id = $1", columns()),
                 &[(&id.as_uuid(), Type::UUID)],
             )
             .await
@@ -42,7 +46,7 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         let rows = conn
             .client()
             .query_typed(
-                &format!("SELECT {COLUMNS} FROM assets WHERE id = ANY($1)"),
+                &format!("SELECT {} FROM assets WHERE id = ANY($1)", columns()),
                 &[(&ids, Type::UUID_ARRAY)],
             )
             .await
@@ -63,10 +67,11 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
             .client()
             .query_typed(
                 &format!(
-                    "SELECT {COLUMNS} FROM assets
+                    "SELECT {} FROM assets
                      WHERE status = 'ready' AND ($1::text IS NULL OR kind = $1)
                        AND ($2::uuid IS NULL OR id < $2)
-                     ORDER BY id DESC LIMIT $3"
+                     ORDER BY id DESC LIMIT $3",
+                    columns(),
                 ),
                 &[
                     (&kind, Type::TEXT),
@@ -91,12 +96,12 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
             .client()
             .query_typed(
                 &format!(
-                    "SELECT {COLUMNS} FROM assets
-                     WHERE (status = 'pending' AND created_at
-                                < 'epoch'::timestamptz + $1 * interval '1 microsecond')
-                        OR (status = 'failed' AND updated_at
-                                < 'epoch'::timestamptz + $1 * interval '1 microsecond')
-                     ORDER BY id LIMIT $2"
+                    "SELECT {} FROM assets
+                     WHERE (status = 'pending' AND created_at < {before_at})
+                        OR (status = 'failed' AND updated_at < {before_at})
+                     ORDER BY id LIMIT $2",
+                    columns(),
+                    before_at = ts(1),
                 ),
                 &[(&before, Type::INT8), (&limit, Type::INT8)],
             )
@@ -110,12 +115,15 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         let mut conn = self.conn().await;
         conn.client()
             .query_typed(
-                "INSERT INTO assets (id, version, status, kind, filename, blob_key, file_version,
-                     mime_type, byte_size, checksum, width, height, alt, title, visibility,
-                     created_at, updated_at)
-                 VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                     'epoch'::timestamptz + $15 * interval '1 microsecond',
-                     'epoch'::timestamptz + $16 * interval '1 microsecond')",
+                &format!(
+                    "INSERT INTO assets (id, version, status, kind, filename, blob_key,
+                         file_version, mime_type, byte_size, checksum, width, height, alt,
+                         title, visibility, created_at, updated_at)
+                     VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                         {}, {})",
+                    ts(15),
+                    ts(16),
+                ),
                 &RowValues::new(&s)?.params(),
             )
             .await
@@ -134,13 +142,15 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         let bumped = conn
             .client()
             .query_typed_opt(
-                "UPDATE assets SET version = version + 1, status = $2, kind = $3, filename = $4,
-                     blob_key = $5, file_version = $6, mime_type = $7, byte_size = $8,
-                     checksum = $9, width = $10, height = $11, alt = $12, title = $13,
-                     visibility = $14,
-                     created_at = 'epoch'::timestamptz + $15 * interval '1 microsecond',
-                     updated_at = 'epoch'::timestamptz + $16 * interval '1 microsecond'
-                 WHERE id = $1 AND version = $17 RETURNING version",
+                &format!(
+                    "UPDATE assets SET version = version + 1, status = $2, kind = $3,
+                         filename = $4, blob_key = $5, file_version = $6, mime_type = $7,
+                         byte_size = $8, checksum = $9, width = $10, height = $11, alt = $12,
+                         title = $13, visibility = $14, created_at = {}, updated_at = {}
+                     WHERE id = $1 AND version = $17 RETURNING version",
+                    ts(15),
+                    ts(16),
+                ),
                 &params,
             )
             .await
@@ -302,7 +312,7 @@ impl RowValues {
     }
 }
 
-/// An asset from a row of `COLUMNS`.
+/// An asset from a row of `columns()`.
 fn asset_from_db(row: &Row) -> Result<Asset, RepoError> {
     let id: Uuid = row.get(0);
     let status: String = row.get(2);

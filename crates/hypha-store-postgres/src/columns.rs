@@ -4,7 +4,10 @@ use hypha_auth::TokenHash;
 use hypha_core::{
     Actor, AddressParts, AgentId, ApiKeyId, Currency, RepoError, Scope, TaxRate, UserId, Version,
 };
-use tokio_postgres::Row;
+use tokio_postgres::{
+    Row,
+    types::{ToSql, Type},
+};
 use uuid::Uuid;
 
 use crate::error::corrupt;
@@ -102,6 +105,29 @@ const ADDRESS_FIELDS: [&str; 10] = [
     "phone",
 ];
 
+/// How many columns (and parameters) an address takes: what comes after one is numbered
+/// from its first plus this.
+pub(crate) const ADDRESS_LEN: usize = ADDRESS_FIELDS.len();
+
+/// A typed query parameter.
+pub(crate) type Param<'a> = (&'a (dyn ToSql + Sync), Type);
+
+/// `[$1 = id, $2.. = the address]`, the parameters of an `UPDATE … SET
+/// {address_assignments(prefix, 2)} … WHERE id = $1`. Parameters pushed after these are
+/// numbered from `2 + ADDRESS_LEN`.
+pub(crate) fn id_and_address<'a>(
+    id: &'a Uuid,
+    address: &'a [Option<&'a str>; ADDRESS_LEN],
+) -> Vec<Param<'a>> {
+    let mut params: Vec<Param<'a>> = vec![(id, Type::UUID)];
+    params.extend(
+        address
+            .iter()
+            .map(|v| (v as &(dyn ToSql + Sync), Type::TEXT)),
+    );
+    params
+}
+
 /// `p_first_name, p_last_name, …` for a SELECT list (read back with `address_from_row`).
 pub(crate) fn address_columns(prefix: &str) -> String {
     ADDRESS_FIELDS.map(|f| format!("{prefix}{f}")).join(", ")
@@ -118,7 +144,7 @@ pub(crate) fn address_assignments(prefix: &str, first: usize) -> String {
 }
 
 /// The ten column values of an address, all NULL for none.
-pub(crate) fn address_values(a: Option<&AddressParts>) -> [Option<&str>; 10] {
+pub(crate) fn address_values(a: Option<&AddressParts>) -> [Option<&str>; ADDRESS_LEN] {
     [
         a.and_then(|p| p.first_name.as_deref()),
         a.map(|p| p.last_name.as_str()),
