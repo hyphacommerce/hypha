@@ -18,9 +18,18 @@ pub enum MediaError {
     InvalidChecksum(String),
     #[error("the asset is {status}, so its upload can't be completed")]
     NotPending { status: AssetStatus },
-    /// A usage's owner kind, owner ID or role that breaks its rule (`usage.rs`).
-    #[error("invalid usage {0}")]
-    InvalidUsage(String),
+    /// An owner kind that isn't a lowercase name (`usage.rs`).
+    #[error("invalid usage owner kind {0:?}")]
+    InvalidOwnerKind(String),
+    /// An owner ID that is empty, too long, or has whitespace or `:`.
+    #[error("invalid usage owner ID {0:?}")]
+    InvalidOwnerId(String),
+    /// A usage role that isn't a lowercase name.
+    #[error("invalid usage role {0:?}")]
+    InvalidRole(String),
+    /// A usage owner's text form (a page cursor) without the `kind:` part.
+    #[error("invalid usage owner {0:?}: expected `kind:id`")]
+    InvalidOwner(String),
 }
 
 impl ErrorCode for MediaError {
@@ -32,7 +41,10 @@ impl ErrorCode for MediaError {
             MediaError::FileTooLarge { .. } => "file_too_large",
             MediaError::InvalidChecksum(_) => "invalid_checksum",
             MediaError::NotPending { .. } => "asset_not_pending",
-            MediaError::InvalidUsage(_) => "invalid_usage",
+            MediaError::InvalidOwnerKind(_)
+            | MediaError::InvalidOwnerId(_)
+            | MediaError::InvalidRole(_)
+            | MediaError::InvalidOwner(_) => "invalid_usage",
         }
     }
 }

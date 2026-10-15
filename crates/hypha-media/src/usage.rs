@@ -26,10 +26,12 @@ impl UsageOwner {
     /// `kind` is lowercase ASCII letters, digits and `_`, starting with a letter; `id`
     /// is any text without whitespace or `:`.
     pub fn new(kind: &str, id: &str) -> Result<Self, MediaError> {
-        check_name(kind)?;
+        if !is_name(kind) {
+            return Err(MediaError::InvalidOwnerKind(kind.to_string()));
+        }
         if id.is_empty() || id.len() > MAX_LEN || id.chars().any(|c| c.is_whitespace() || c == ':')
         {
-            return Err(MediaError::InvalidUsage(format!("owner ID {id:?}")));
+            return Err(MediaError::InvalidOwnerId(id.to_string()));
         }
         Ok(Self {
             kind: kind.to_string(),
@@ -66,7 +68,7 @@ impl FromStr for UsageOwner {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (kind, id) = s
             .split_once(':')
-            .ok_or_else(|| MediaError::InvalidUsage(format!("owner {s:?}")))?;
+            .ok_or_else(|| MediaError::InvalidOwner(s.to_string()))?;
         Self::new(kind, id)
     }
 }
@@ -81,7 +83,9 @@ impl UsageRole {
     pub const GALLERY: &str = "gallery";
 
     pub fn new(role: &str) -> Result<Self, MediaError> {
-        check_name(role)?;
+        if !is_name(role) {
+            return Err(MediaError::InvalidRole(role.to_string()));
+        }
         Ok(Self(role.to_string()))
     }
 
@@ -113,16 +117,11 @@ pub struct AssetUsage {
 }
 
 /// Lowercase ASCII letters, digits and `_`, starting with a letter.
-fn check_name(name: &str) -> Result<(), MediaError> {
+fn is_name(name: &str) -> bool {
     let mut chars = name.chars();
-    let valid = name.len() <= MAX_LEN
+    name.len() <= MAX_LEN
         && chars.next().is_some_and(|c| c.is_ascii_lowercase())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-    if valid {
-        Ok(())
-    } else {
-        Err(MediaError::InvalidUsage(format!("name {name:?}")))
-    }
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 #[cfg(test)]
@@ -148,10 +147,14 @@ mod tests {
         for bad in ["", "Product", "2d", "_x", "a-b", "a b"] {
             assert_eq!(
                 UsageOwner::new(bad, "1"),
-                Err(MediaError::InvalidUsage(format!("name {bad:?}"))),
+                Err(MediaError::InvalidOwnerKind(bad.to_string())),
                 "{bad:?}"
             );
-            assert!(UsageRole::new(bad).is_err(), "{bad:?}");
+            assert_eq!(
+                UsageRole::new(bad),
+                Err(MediaError::InvalidRole(bad.to_string())),
+                "{bad:?}"
+            );
         }
     }
 
@@ -160,7 +163,7 @@ mod tests {
         for bad in ["", "a b", "a:b"] {
             assert_eq!(
                 UsageOwner::new("product", bad),
-                Err(MediaError::InvalidUsage(format!("owner ID {bad:?}")))
+                Err(MediaError::InvalidOwnerId(bad.to_string()))
             );
         }
     }
@@ -170,7 +173,10 @@ mod tests {
         let owner = UsageOwner::new("spore_lookbook", "lb_1").unwrap();
         assert_eq!(owner.to_string(), "spore_lookbook:lb_1");
         assert_eq!("spore_lookbook:lb_1".parse(), Ok(owner));
-        assert!("no-colon".parse::<UsageOwner>().is_err());
+        assert_eq!(
+            "no-colon".parse::<UsageOwner>(),
+            Err(MediaError::InvalidOwner("no-colon".to_string()))
+        );
     }
 
     #[test]

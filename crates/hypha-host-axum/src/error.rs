@@ -598,7 +598,10 @@ impl From<hypha_media::CommandError> for ApiError {
                 | M::EmptyFile
                 | M::FileTooLarge { .. }
                 | M::InvalidChecksum(_)
-                | M::InvalidUsage(_),
+                | M::InvalidOwnerKind(_)
+                | M::InvalidOwnerId(_)
+                | M::InvalidRole(_)
+                | M::InvalidOwner(_),
             )
             | E::UploadMismatch(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Blob(_) | E::Repo(RepoError::Backend(_)) => return Self::internal(e),
