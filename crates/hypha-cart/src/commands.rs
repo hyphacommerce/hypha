@@ -5,7 +5,7 @@ use hypha_core::{
     CustomerId, Email, EmailError, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
     IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId, MoneyError,
     ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId,
-    StageIdempotency, VariantId, earlier_result,
+    StageIdempotency, VariantId, earlier_id,
 };
 use hypha_customers::{CustomerRepo, HasCustomers};
 use hypha_inventory::{
@@ -291,19 +291,20 @@ pub async fn add_line<S: IdempotentCartPorts, C: Clock>(
 
 /// The cart an earlier request produced, if this caller already sent `request` for
 /// `operation`; `KeyReused` if the key was used for something else.
-async fn replay_of<S: IdempotentCartPorts>(
+async fn replay_of<S: HasIdempotency>(
     ctx: &Ctx,
     ports: &S,
     operation: &str,
     request: Option<&IdempotencyRequest>,
 ) -> Result<Option<CartId>, CommandError> {
-    let Some(request) = request else {
-        return Ok(None);
-    };
-    let earlier: Option<_> =
-        earlier_result::<_, CommandError>(ports.idempotency(), ctx.actor(), operation, request)
-            .await?;
-    Ok(earlier.map(CartId::from_uuid))
+    earlier_id(
+        ports.idempotency(),
+        ctx.actor(),
+        operation,
+        request,
+        CartId::from_uuid,
+    )
+    .await
 }
 
 /// What a replay returns: the cart as it is now (not as the first response showed it;

@@ -4,13 +4,13 @@
 use std::cell::Cell;
 
 use hypha_core::{
-    Actor, AuthError, Ctx, InventoryItemId, LocationId, MarketId, Quantity, QuantityError,
-    RepoError, Scope, UserId, VariantId, Versioned,
+    Actor, AuthError, Ctx, InventoryItemId, LocationId, MAX_ATTEMPTS, MarketId, Quantity,
+    QuantityError, RepoError, Scope, UserId, VariantId, Versioned,
 };
 use hypha_inventory::{
     CommandError, InventoryError, InventoryItem, InventoryItemRepo, Location, LocationRepo,
-    MAX_ATTEMPTS, ReleaseLine, ReleaseStock, ReservationRef, ReserveLine, ReserveStock, Shortage,
-    release_stock, reserve_stock,
+    ReleaseLine, ReleaseStock, ReservationRef, ReserveLine, ReserveStock, Shortage, release_stock,
+    reserve_stock,
 };
 use hypha_testkit::{InMemoryInventoryItemRepo, InMemoryLocationRepo};
 use pollster::block_on;

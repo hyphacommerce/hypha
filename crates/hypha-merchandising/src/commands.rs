@@ -3,7 +3,7 @@
 
 use hypha_core::{
     AssetId, AuthError, Ctx, ErrorCode, HasBatch, Page, PageRequest, ProductId, RepoError, Scope,
-    VariantId,
+    VariantId, retry_on_conflict,
 };
 use hypha_media::{
     Asset, AssetKind, AssetRepo, AssetStatus, HasAssets, StageAssetUsages, UsageOwner, UsageRole,
@@ -71,7 +71,8 @@ const PRODUCT_MEDIA_KINDS: &[AssetKind] = &[AssetKind::Image, AssetKind::Video];
 /// an image or a video. Variants showing an item that's no longer listed show nothing.
 ///
 /// A product changed by someone else meanwhile is loaded again and the list applied to
-/// it once more: the list replaces the old one whatever it was, so retrying is safe.
+/// it once more, up to `MAX_ATTEMPTS` times in total: the list replaces the old one
+/// whatever it was, so retrying is safe.
 pub async fn set_product_media<S: MerchandisingPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -79,55 +80,55 @@ pub async fn set_product_media<S: MerchandisingPorts>(
     assets: Vec<AssetId>,
 ) -> Result<ProductView, CommandError> {
     ctx.require(Scope::ProductsWrite)?;
-    let mut attempts = 0;
-    loop {
-        attempts += 1;
-        let mut product = load(ports, id).await?;
-        let found = ports.assets().get_many(&assets).await?;
-        for asset in &assets {
-            let Some(found) = found.iter().find(|a| a.id() == *asset) else {
-                return Err(CommandError::AssetNotFound(*asset));
-            };
-            check_attachable(found, PRODUCT_MEDIA_KINDS)?;
-        }
-        product.set_media(assets.clone())?;
-
-        let usages: Vec<(AssetId, UsageRole)> = assets
-            .iter()
-            .enumerate()
-            .map(|(position, asset)| {
-                let role = match position {
-                    0 => UsageRole::featured(),
-                    _ => UsageRole::gallery(),
+    let assets = &assets;
+    retry_on_conflict(
+        move || async move {
+            let mut product = load(ports, id).await?;
+            let found = ports.assets().get_many(assets).await?;
+            for asset in assets {
+                let Some(found) = found.iter().find(|a| a.id() == *asset) else {
+                    return Err(CommandError::AssetNotFound(*asset));
                 };
-                (*asset, role)
-            })
-            .collect();
-        let mut batch = ports.batch();
-        batch.update_product(&mut product);
-        batch.replace_asset_usages(&UsageOwner::product(id), &usages);
-        match ports.commit(batch).await {
-            Ok(()) => {
-                return Ok(ProductView {
+                check_attachable(found, PRODUCT_MEDIA_KINDS)?;
+            }
+            product.set_media(assets.clone())?;
+
+            let usages: Vec<(AssetId, UsageRole)> = assets
+                .iter()
+                .enumerate()
+                .map(|(position, asset)| {
+                    let role = match position {
+                        0 => UsageRole::featured(),
+                        _ => UsageRole::gallery(),
+                    };
+                    (*asset, role)
+                })
+                .collect();
+            let mut batch = ports.batch();
+            batch.update_product(&mut product);
+            batch.replace_asset_usages(&UsageOwner::product(id), &usages);
+            match ports.commit(batch).await {
+                Ok(()) => Ok(ProductView {
                     media: in_order(product.media(), found),
                     product,
-                });
+                }),
+                // An asset deleted since it was loaded: name it, as if it was never there.
+                Err(RepoError::Reference(key)) if key == media_keys::USAGE_ASSET => {
+                    let still_there = ports.assets().get_many(assets).await?;
+                    let gone = assets
+                        .iter()
+                        .find(|asset| !still_there.iter().any(|a| a.id() == **asset));
+                    Err(match gone {
+                        Some(asset) => CommandError::AssetNotFound(*asset),
+                        None => RepoError::Reference(key).into(),
+                    })
+                }
+                Err(e) => Err(e.into()),
             }
-            Err(RepoError::StaleVersion) if attempts < 2 => continue,
-            // An asset deleted since it was loaded: name it, as if it was never there.
-            Err(RepoError::Reference(key)) if key == media_keys::USAGE_ASSET => {
-                let still_there = ports.assets().get_many(&assets).await?;
-                let gone = assets
-                    .iter()
-                    .find(|asset| !still_there.iter().any(|a| a.id() == **asset));
-                return Err(match gone {
-                    Some(asset) => CommandError::AssetNotFound(*asset),
-                    None => RepoError::Reference(key).into(),
-                });
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
+        },
+        |e| matches!(e, CommandError::Repo(RepoError::StaleVersion)),
+    )
+    .await
 }
 
 /// Which item of its product's media list a variant shows, or none. The item must be an

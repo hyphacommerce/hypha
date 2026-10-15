@@ -11,6 +11,7 @@ mod openapi;
 pub mod page;
 pub mod ports;
 pub mod quantity;
+pub mod retry;
 pub mod scope;
 pub mod secret;
 pub mod text;
@@ -25,7 +26,7 @@ pub use email::{Email, EmailError};
 pub use error_code::ErrorCode;
 pub use idempotency::{
     HasIdempotency, IdempotencyError, IdempotencyKey, IdempotencyRecord, IdempotencyRepo,
-    IdempotencyRequest, Idempotent, StageIdempotency, earlier_result,
+    IdempotencyRequest, Idempotent, StageIdempotency, earlier_id, earlier_result,
 };
 pub use ids::{
     AddressId, AgentId, ApiKeyId, AssetId, CartId, CatalogId, CustomerId, IdError, IdentityId,
@@ -39,6 +40,7 @@ pub use ports::{
     Clock, HasBatch, IdGenerator, Notifier, NotifyError, Random, RepoError, report_duplicate,
 };
 pub use quantity::{Quantity, QuantityError};
+pub use retry::{Attempts, MAX_ATTEMPTS, retry_on_conflict};
 pub use scope::Scope;
 pub use secret::{SealError, Sealed, SecretBox};
 pub use text::{MAX_TEXT_LEN, TextError, optional_text, required_text};

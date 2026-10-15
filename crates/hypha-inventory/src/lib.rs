@@ -11,10 +11,10 @@ pub mod repo;
 pub mod stock;
 
 pub use commands::{
-    AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, MAX_ATTEMPTS, ReleaseLine,
-    ReleaseStock, ReserveLine, ReserveStock, SetOnHand, Shortage, UpdateInventoryItem,
-    UpdateLocation, adjust_on_hand, create_inventory_item, create_location, get_inventory_item,
-    get_location, get_variant_inventory, release_stock, reserve_lines, reserve_stock, set_on_hand,
+    AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, ReleaseLine, ReleaseStock,
+    ReserveLine, ReserveStock, SetOnHand, Shortage, UpdateInventoryItem, UpdateLocation,
+    adjust_on_hand, create_inventory_item, create_location, get_inventory_item, get_location,
+    get_variant_inventory, release_stock, reserve_lines, reserve_stock, set_on_hand,
     update_inventory_item, update_location,
 };
 pub use error::{InventoryError, RestoreError};

@@ -17,6 +17,7 @@ serde_json = { workspace = true, optional = true }
 openapi = ["dep:utoipa", "dep:serde_json"]
 
 [dev-dependencies]
+pollster = "0.4"
 serde_json.workspace = true
 
 [lints]

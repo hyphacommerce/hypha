@@ -4,13 +4,14 @@ use hypha_cart::{
     read_cart,
 };
 use hypha_core::{
-    AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
-    IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Money, OrderId,
-    OrderLineId, RepoError, Scope, StageIdempotency, VariantId, Version, Versioned, earlier_result,
+    Attempts, AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency,
+    IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Money,
+    OrderId, OrderLineId, RepoError, Scope, StageIdempotency, VariantId, Version, Versioned,
+    earlier_id,
 };
 use hypha_customers::{Customer, CustomerRepo, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{
-    InventoryItem, MAX_ATTEMPTS, ReservationRef, StageInventoryItems, StockContext, reserve_lines,
+    InventoryItem, ReservationRef, StageInventoryItems, StockContext, reserve_lines,
 };
 use hypha_orders::{
     HasOrders, NewOrder, Order, OrderError, OrderLine, OrderRepo, OrderShippingLine, OrderTax,
@@ -146,7 +147,7 @@ pub async fn checkout<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvide
         return replay(ports, order).await;
     }
 
-    let mut tries = 1;
+    let mut attempts = Attempts::first();
     // A quote renewed by an attempt that then lost a race: the next attempt uses it
     // rather than asking the provider again, if the cart hasn't changed since.
     let mut renewed = None;
@@ -161,10 +162,9 @@ pub async fn checkout<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvide
         if let Some(order) = replay_of(ctx, ports, input.idempotency.as_ref()).await? {
             return replay(ports, order).await;
         }
-        if !lost_a_race(&e) || tries == MAX_ATTEMPTS {
+        if !(lost_a_race(&e) && attempts.another()) {
             return Err(e);
         }
-        tries += 1;
     }
 }
 
@@ -540,13 +540,14 @@ async fn replay_of<S: HasIdempotency>(
     ports: &S,
     request: Option<&IdempotencyRequest>,
 ) -> Result<Option<OrderId>, CommandError> {
-    let Some(request) = request else {
-        return Ok(None);
-    };
-    let earlier: Option<_> =
-        earlier_result::<_, CommandError>(ports.idempotency(), ctx.actor(), CHECKOUT, request)
-            .await?;
-    Ok(earlier.map(OrderId::from_uuid))
+    earlier_id(
+        ports.idempotency(),
+        ctx.actor(),
+        CHECKOUT,
+        request,
+        OrderId::from_uuid,
+    )
+    .await
 }
 
 /// What a replay returns: the order as it is now.
