@@ -2,8 +2,10 @@
 //! of ports and a clock that does a bounded amount of work and says whether there's
 //! more (`Progress`), so a runner loops while there is and sleeps when there isn't.
 
+use hypha_auth::{HasSessions, SessionRepo};
 use hypha_core::{
-    Clock, Delivery, DeliveryOutcome, HasBatch, HasOutbox, OutboxRepo, RepoError, StageEvents,
+    Clock, Delivery, DeliveryOutcome, HasBatch, HasIdempotency, HasOutbox, IdempotencyRepo,
+    OutboxRepo, RepoError, StageEvents,
 };
 use hypha_inventory::HasInventoryItems;
 use hypha_markets::{HasPriceLists, StageFixedPrices};
@@ -44,11 +46,15 @@ impl Progress {
 }
 
 /// Events fanned out, or deliveries run, per call.
-const BATCH: u32 = 100;
+pub const BATCH: u32 = 100;
 /// How long a delivery is leased for: past this, another runner may take it.
 const LEASE_SECS: i64 = 60;
 /// How long events (and their deliveries) are kept (Q7).
 const RETENTION_SECS: i64 = 30 * 24 * 3600;
+/// How long an idempotency key is honoured (design note 0007, section 5).
+const IDEMPOTENCY_SECS: i64 = 24 * 3600;
+/// How long a session is kept after it ended (expired or revoked).
+const ENDED_SESSION_SECS: i64 = 30 * 24 * 3600;
 
 /// Fans out events not fanned out yet: a pending delivery for each destination that
 /// wants them (`handlers::destinations`).
@@ -124,5 +130,26 @@ pub async fn prune_events<S: HasOutbox>(
 ) -> Result<Progress, RepoError> {
     let before = clock.now().plus_secs(-RETENTION_SECS);
     let done = ports.outbox().prune_events(before, BATCH).await?;
+    Ok(Progress::of(done, BATCH))
+}
+
+/// Deletes idempotency records older than a day: past that, a retry with the same key
+/// is a new request (design note 0007, section 5).
+pub async fn prune_idempotency_keys<S: HasIdempotency>(
+    ports: &S,
+    clock: &impl Clock,
+) -> Result<Progress, RepoError> {
+    let before = clock.now().plus_secs(-IDEMPOTENCY_SECS);
+    let done = ports.idempotency().prune(before, BATCH).await?;
+    Ok(Progress::of(done, BATCH))
+}
+
+/// Deletes sessions that ended (expired or revoked) over 30 days ago.
+pub async fn prune_sessions<S: HasSessions>(
+    ports: &S,
+    clock: &impl Clock,
+) -> Result<Progress, RepoError> {
+    let before = clock.now().plus_secs(-ENDED_SESSION_SECS);
+    let done = ports.sessions().prune(before, BATCH).await?;
     Ok(Progress::of(done, BATCH))
 }

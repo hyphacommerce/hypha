@@ -205,6 +205,27 @@ pub async fn session_repo<R: SessionRepo>(make: impl AsyncFn() -> R) {
     session_keys(&make().await).await;
     scenario("session: stale and missing updates fail");
     session_stale(&make().await).await;
+    scenario("session: prune deletes sessions that ended before a time");
+    session_prune(&make().await).await;
+}
+
+async fn session_prune<R: SessionRepo>(repo: &R) {
+    let created = Timestamp::from_unix_micros(1_700_000_000_000_001);
+    let mut revoked = session(1, 1, 1);
+    revoked.revoke(created.plus_secs(10));
+    for mut s in [revoked, session(2, 1, 2), session(3, 2, 3)] {
+        repo.insert(&mut s).await.unwrap();
+    }
+    // Only the revoked one had ended by then.
+    assert_eq!(repo.prune(created.plus_secs(20), 10).await, Ok(1));
+    assert_eq!(
+        repo.get(SessionId::from_uuid(Uuid::from_u128(1))).await,
+        Ok(None)
+    );
+    // Later, the others have expired too.
+    let later = created.plus_secs(Session::ACTIVE_SECS + 1);
+    assert_eq!(repo.prune(later, 10).await, Ok(2));
+    assert_eq!(repo.prune(later, 10).await, Ok(0));
 }
 
 async fn session_round_trips<R: SessionRepo>(repo: &R) {

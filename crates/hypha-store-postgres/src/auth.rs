@@ -295,6 +295,27 @@ impl<C: PgConnection> SessionRepo for PgStore<C> {
         select_session(conn.client(), "id = $1", &id.as_uuid(), Type::UUID).await
     }
 
+    async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError> {
+        let before = before.unix_micros();
+        in_transaction!(self, |tx| {
+            let deleted = tx
+                .execute_typed(
+                    &format!(
+                        "DELETE FROM sessions WHERE id IN (
+                             SELECT id FROM sessions
+                             WHERE expires_at < {before} OR revoked_at < {before}
+                             LIMIT $2
+                         )",
+                        before = ts(1)
+                    ),
+                    &[(&before, Type::INT8), (&i64::from(limit), Type::INT8)],
+                )
+                .await
+                .map_err(repo_error)?;
+            u32::try_from(deleted).map_err(corrupt)
+        })
+    }
+
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<Session>, RepoError> {
         let mut conn = self.conn().await;
         let bytes = hash.as_bytes().as_slice();

@@ -281,6 +281,14 @@ shutdown signal and drains them on shutdown, replacing `Storage::spawn_media_swe
 the loose `tokio::spawn`s in `main.rs`. `Background` stays for work a request starts
 (password-reset emails) until those move to the outbox.
 
+As built: `Storage` keeps one method, `start_jobs`, since spawning needs a concrete
+storage to prove `Send` (the reason `spawn_media_sweep` existed); the jobs are
+`dispatch` (every 2 s: fan out, then lease, run each delivery with its own ports, and
+record), `prune` (hourly: events after 30 days, idempotency keys after a day, sessions
+30 days after they ended, through `IdempotencyRepo::prune` and `SessionRepo::prune`),
+`media_sweep` and `rate_limits`. Shutdown stops them after their current step, waiting
+up to 10 seconds.
+
 **Workers** call the same functions from a Cron trigger (once a minute, so delivery
 latency there is up to a minute; Queues can shorten it later). Lambda: EventBridge.
 

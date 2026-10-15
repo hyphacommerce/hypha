@@ -306,10 +306,10 @@ pub trait Storage: Send + Sync + 'static {
     where
         Self: Sized;
 
-    /// Every hour, deletes uploads abandoned for over a day (design note 0013, section
-    /// 3), when the host has file storage. Concrete per storage for the same `Send`
-    /// reason as `spawn_password_reset`.
-    fn spawn_media_sweep(state: SharedState<Self>)
+    /// Starts the background jobs (`jobs.rs`: delivering events, pruning, the media
+    /// sweep). Concrete per storage for the same `Send` reason as
+    /// `spawn_password_reset`.
+    fn start_jobs(state: SharedState<Self>) -> crate::jobs::Jobs
     where
         Self: Sized;
 }
@@ -415,33 +415,8 @@ impl Storage for PgStorage {
         }
     }
 
-    fn spawn_media_sweep(state: SharedState<Self>) {
-        if state.media.is_none() {
-            return;
-        }
-        tokio::spawn(async move {
-            let mut every = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
-            loop {
-                every.tick().await;
-                let Some(media) = &state.media else { return };
-                let swept = match state.public_ports().await {
-                    Ok(ports) => hypha_media::sweep_abandoned_uploads(
-                        &hypha_core::Ctx::system(),
-                        hypha_media::HasAssets::assets(&ports),
-                        &media.blobs,
-                        &state.clock,
-                    )
-                    .await
-                    .map_err(|e| e.to_string()),
-                    Err(_) => Err("no database connection".to_string()),
-                };
-                match swept {
-                    Ok(0) => {}
-                    Ok(n) => tracing::info!(deleted = n, "media: swept abandoned uploads"),
-                    Err(e) => tracing::warn!("media: sweeping abandoned uploads failed: {e}"),
-                }
-            }
-        });
+    fn start_jobs(state: SharedState<Self>) -> crate::jobs::Jobs {
+        crate::jobs::start(state)
     }
 }
 

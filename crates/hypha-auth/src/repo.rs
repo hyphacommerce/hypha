@@ -48,6 +48,9 @@ pub trait SessionRepo {
     async fn insert(&self, session: &mut Session) -> Result<(), RepoError>;
     /// Enforces `SESSION_TOKEN` (activation swaps the token).
     async fn update(&self, session: &mut Session) -> Result<(), RepoError>;
+    /// Deletes up to `limit` sessions that ended (expired or revoked) before `before`;
+    /// returns how many.
+    async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError>;
 }
 
 #[allow(async_fn_in_trait)]

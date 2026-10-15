@@ -19,6 +19,7 @@ hypha-orders = { path = "../hypha-orders" }
 hypha-checkout = { path = "../hypha-checkout" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
+hypha-dispatch = { path = "../hypha-dispatch" }
 hypha-media = { path = "../hypha-media" }
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-shipping = { path = "../hypha-shipping" }

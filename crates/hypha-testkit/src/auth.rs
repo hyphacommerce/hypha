@@ -4,7 +4,7 @@ use hypha_auth::{
     ApiKey, ApiKeyRepo, CredentialKind, Identity, IdentityRepo, PasswordReset, PasswordResetRepo,
     Principal, PrincipalKind, Session, SessionRepo, TokenHash, keys,
 };
-use hypha_core::{ApiKeyId, IdentityId, PasswordResetId, RepoError, SessionId};
+use hypha_core::{ApiKeyId, IdentityId, PasswordResetId, RepoError, SessionId, Timestamp};
 
 use crate::table::Table;
 
@@ -87,6 +87,21 @@ impl InMemorySessionRepo {
 impl SessionRepo for InMemorySessionRepo {
     async fn get(&self, id: SessionId) -> Result<Option<Session>, RepoError> {
         Ok(self.sessions.get(&id))
+    }
+
+    async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError> {
+        let ended: Vec<SessionId> = self
+            .sessions
+            .all()
+            .iter()
+            .filter(|s| s.expires_at() < before || s.revoked_at().is_some_and(|at| at < before))
+            .map(Session::id)
+            .take(limit as usize)
+            .collect();
+        for id in &ended {
+            self.sessions.remove(id);
+        }
+        Ok(ended.len() as u32)
     }
 
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<Session>, RepoError> {

@@ -19,6 +19,30 @@ where
     keys_are_per_actor(&make().await).await;
     scenario("idempotency: a key the actor already used fails, keeping the first");
     duplicate_key(&make().await).await;
+    scenario("idempotency: prune deletes records created before a time, up to a limit");
+    prunes(&make().await).await;
+}
+
+async fn prunes<S>(ports: &S)
+where
+    S: HasBatch + HasIdempotency,
+    S::Batch: StageIdempotency,
+{
+    let at = |micros: i64| {
+        let mut r = record(user(), &format!("k{micros}"), micros as u128);
+        r.created_at = Timestamp::from_unix_micros(micros);
+        r
+    };
+    write(ports, vec![at(1), at(2), at(3), at(10)])
+        .await
+        .unwrap();
+    let repo = ports.idempotency();
+    let cutoff = Timestamp::from_unix_micros(10);
+    assert_eq!(repo.prune(cutoff, 2).await, Ok(2));
+    assert_eq!(repo.prune(cutoff, 10).await, Ok(1));
+    assert_eq!(repo.prune(cutoff, 10).await, Ok(0));
+    assert!(repo.get(user(), &key("k10")).await.unwrap().is_some());
+    assert_eq!(repo.get(user(), &key("k1")).await, Ok(None));
 }
 
 fn user() -> Actor {

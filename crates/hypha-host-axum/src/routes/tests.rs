@@ -410,6 +410,88 @@ async fn responses_show_when_an_aggregate_was_created_and_changed() {
 }
 
 #[tokio::test]
+async fn the_dispatcher_cleans_up_after_a_removed_variant() {
+    use hypha_core::{
+        BasisPoints, Currency, Money, OptionId, OptionValueId, Price, PriceListId, ProductId,
+        VariantId,
+    };
+    use hypha_markets::{HasPriceLists, PriceList, PriceListRepo};
+    use hypha_products::{
+        HasProducts, NewVariant, OptionValue, Product, ProductOption, ProductRepo,
+    };
+    let app = app().await;
+    let id = |n: u128| uuid::Uuid::from_u128(n);
+    let eur = |a: i64| Price::new(Money::new(a, Currency::Eur).unwrap()).unwrap();
+    let (s, l) = (VariantId::from_uuid(id(11)), VariantId::from_uuid(id(12)));
+    let product = ProductId::from_uuid(id(1));
+    let list = PriceListId::from_uuid(id(5));
+    {
+        let ports = app.state.public_ports().await.unwrap();
+        let size = ProductOption::new(
+            OptionId::from_uuid(id(20)),
+            "Size".to_string(),
+            vec![
+                OptionValue::new(OptionValueId::from_uuid(id(21)), "S".to_string()),
+                OptionValue::new(OptionValueId::from_uuid(id(22)), "L".to_string()),
+            ],
+        );
+        let variant = |v, value| NewVariant {
+            id: v,
+            sku: None,
+            price: eur(1000),
+            selections: vec![OptionValueId::from_uuid(id(value))],
+        };
+        let mut shirt = Product::new_configurable(
+            product,
+            hypha_products::Handle::new("shirt").unwrap(),
+            "Shirt".to_string(),
+            vec![size],
+            variant(s, 21),
+        )
+        .unwrap();
+        shirt.add_variant(variant(l, 22)).unwrap();
+        ProductRepo::insert(ports.products(), &mut shirt)
+            .await
+            .unwrap();
+        let mut prices = PriceList::new(list, Currency::Eur, BasisPoints::new(0).unwrap());
+        PriceListRepo::insert(ports.price_lists(), &mut prices)
+            .await
+            .unwrap();
+        ports
+            .price_lists()
+            .set_fixed_prices(list, &[(s, eur(900)), (l, eur(1100))])
+            .await
+            .unwrap();
+    }
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("/admin/products/{product}/variants/{s}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    crate::jobs::dispatch(&app.state).await.unwrap();
+
+    let ports = app.state.public_ports().await.unwrap();
+    let left = ports
+        .price_lists()
+        .fixed_prices(list, &[s, l])
+        .await
+        .unwrap();
+    assert_eq!(left.keys().collect::<Vec<_>>(), [&l]);
+    let events = outbox_events(&app).await;
+    assert!(
+        events
+            .iter()
+            .any(|e| e.event_type == "price_list.prices_removed"
+                && e.actor == hypha_core::Actor::System),
+        "the cleanup's write is recorded, by the system"
+    );
+}
+
+#[tokio::test]
 async fn a_write_records_its_event_by_the_caller() {
     let app = app().await;
     let id = create_product(&app, "mug").await;

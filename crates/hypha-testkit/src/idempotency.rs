@@ -7,7 +7,8 @@ use std::{
 };
 
 use hypha_core::{
-    Actor, IdempotencyKey, IdempotencyRecord, IdempotencyRepo, RepoError, idempotency::keys,
+    Actor, IdempotencyKey, IdempotencyRecord, IdempotencyRepo, RepoError, Timestamp,
+    idempotency::keys,
 };
 
 pub(crate) type Records = HashMap<(Actor, IdempotencyKey), IdempotencyRecord>;
@@ -60,5 +61,19 @@ impl IdempotencyRepo for InMemoryIdempotencyRepo {
             return Ok(None);
         }
         Ok(self.lock().get(&(actor, key.clone())).cloned())
+    }
+
+    async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError> {
+        let mut records = self.lock();
+        let old: Vec<_> = records
+            .iter()
+            .filter(|(_, r)| r.created_at < before)
+            .map(|(id, _)| id.clone())
+            .take(limit as usize)
+            .collect();
+        for id in &old {
+            records.remove(id);
+        }
+        Ok(old.len() as u32)
     }
 }

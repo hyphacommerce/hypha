@@ -133,6 +133,10 @@ pub trait IdempotencyRepo {
         actor: Actor,
         key: &IdempotencyKey,
     ) -> Result<Option<IdempotencyRecord>, RepoError>;
+    /// Deletes up to `limit` records created before `before`; returns how many. A key
+    /// is honoured for a day (design note 0007, section 5); after that a retry is a new
+    /// request.
+    async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError>;
 }
 
 /// Whatever holds the `IdempotencyRepo`: a host's per-request ports, a test world.
@@ -240,6 +244,10 @@ mod tests {
                 Some(_) => Ok(None),
                 None => Err(RepoError::Backend("read without a record".to_string())),
             }
+        }
+
+        async fn prune(&self, _before: Timestamp, _limit: u32) -> Result<u32, RepoError> {
+            Ok(0)
         }
     }
 

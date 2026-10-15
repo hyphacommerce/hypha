@@ -878,6 +878,7 @@ dependencies = [
 name = "hypha-dispatch"
 version = "0.1.0"
 dependencies = [
+ "hypha-auth",
  "hypha-core",
  "hypha-inventory",
  "hypha-markets",
@@ -903,6 +904,7 @@ dependencies = [
  "hypha-checkout",
  "hypha-core",
  "hypha-customers",
+ "hypha-dispatch",
  "hypha-inventory",
  "hypha-markets",
  "hypha-media",

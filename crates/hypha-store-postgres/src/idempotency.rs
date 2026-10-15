@@ -3,9 +3,9 @@ use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{actor_to_db, col, micros},
+    columns::{actor_to_db, col, micros, ts},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
@@ -46,6 +46,27 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
             result: col(&row, "result")?,
             created_at: Timestamp::from_unix_micros(col(&row, "created_at")?),
         }))
+    }
+
+    async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError> {
+        let before = before.unix_micros();
+        in_transaction!(self, |tx| {
+            // `idempotency_keys_created_at` (migration 0012) serves this.
+            let deleted = tx
+                .execute_typed(
+                    &format!(
+                        "DELETE FROM idempotency_keys WHERE (actor_kind, actor_id, key) IN (
+                             SELECT actor_kind, actor_id, key FROM idempotency_keys
+                             WHERE created_at < {} LIMIT $2
+                         )",
+                        ts(1)
+                    ),
+                    &[(&before, Type::INT8), (&i64::from(limit), Type::INT8)],
+                )
+                .await
+                .map_err(repo_error)?;
+            u32::try_from(deleted).map_err(corrupt)
+        })
     }
 }
 

@@ -1,6 +1,7 @@
 mod client_ip;
 mod error;
 mod extract;
+mod jobs;
 mod media;
 mod outbound;
 mod patch;
@@ -254,16 +255,7 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         }
     };
     tracing::info!("Hypha listening on http://{addr}");
-    S::spawn_media_sweep(Arc::clone(&state));
-    // Drop idle rate-limit keys every minute, so rotating addresses can't grow memory.
-    let sweeper = Arc::clone(&state);
-    tokio::spawn(async move {
-        let mut every = tokio::time::interval(std::time::Duration::from_secs(60));
-        loop {
-            every.tick().await;
-            sweeper.limiter.forget_idle();
-        }
-    });
+    let jobs = S::start_jobs(Arc::clone(&state));
     // `with_connect_info` records each connection's peer address for `ClientIp`.
     let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     if let Err(e) = axum::serve(listener, app)
@@ -273,7 +265,11 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         tracing::error!("server error: {e}");
         std::process::exit(1);
     }
-    // Requests are done; let work they started (password reset emails) finish too.
+    // Requests are done; stop the jobs after the step each is in, and let work the
+    // requests started (password reset emails) finish too.
+    if !jobs.stop(std::time::Duration::from_secs(10)).await {
+        tracing::warn!("stopping with background jobs unfinished");
+    }
     if !state
         .background
         .drain(std::time::Duration::from_secs(10))
