@@ -22,7 +22,7 @@ import {
   PhotoIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { type DragEvent, useEffect, useState, useTransition } from "react";
+import { type DragEvent, useEffect, useRef, useState, useTransition } from "react";
 
 import { ACCEPT_PRODUCT_MEDIA, MAX_BYTES, uploadFile } from "../../media/upload";
 import { libraryPage, setProductMedia } from "../actions";
@@ -65,6 +65,19 @@ function moved<T>(list: T[], from: number, to: number): T[] {
  */
 export function MediaSection({ id, media }: { id: string; media: Item[] }) {
   const [items, setItems] = useState(media);
+  // The server's list after each save, taken in while staying mounted: a remount would
+  // drop the errors and running uploads of this section.
+  const [stored, setStored] = useState(media);
+  if (media !== stored) {
+    setStored(media);
+    setItems(media);
+  }
+  // The list as last rendered, for an upload finishing after other changes were saved:
+  // it appends to that, not to the list it started with.
+  const latest = useRef(items);
+  useEffect(() => {
+    latest.current = items;
+  });
   const [dragged, setDragged] = useState<number>();
   const [error, setError] = useState<string>();
   const [isSaving, startSaving] = useTransition();
@@ -87,11 +100,10 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
     });
   };
 
-  /** Appends assets by ID; the response's items replace these placeholders on reload. */
-  const attach = async (assets: string[]) => {
-    const ids = [...items.map((item) => item.asset_id), ...assets];
-    const result = await setProductMedia(id, ids);
-    if (result.error) setError(result.error);
+  /** Appends assets to the current list; a message if that failed. */
+  const attach = async (assets: string[]): Promise<string | undefined> => {
+    const ids = [...latest.current.map((item) => item.asset_id), ...assets];
+    return (await setProductMedia(id, ids)).error;
   };
 
   const uploadAll = async (selected: File | File[] | null) => {
@@ -107,7 +119,10 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
       if ("error" in result) failed.push(`${file.name}: ${result.error}`);
       else uploaded.push(result.id);
     }
-    if (uploaded.length > 0) await attach(uploaded);
+    if (uploaded.length > 0) {
+      const error = await attach(uploaded);
+      if (error) failed.push(error);
+    }
     if (failed.length > 0) setError(failed.join(" · "));
     setUploads([]);
     setIsUploading(false);
@@ -242,7 +257,7 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
           room={MAX_ITEMS - items.length}
           onClose={() => setIsPicking(false)}
           onPick={async (assets) => {
-            await attach(assets);
+            setError(await attach(assets));
             setIsPicking(false);
           }}
         />

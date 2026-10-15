@@ -16,8 +16,9 @@ import { VariantsSection } from "./variants-section";
 
 /**
  * A product, edited in sections that each save on their own (design note 0014, section
- * 8). Each section is keyed by the data it edits, so after a save the page's fresh
- * render resets it to what the API stored.
+ * 8). After a save, each section takes in what the API stored: the forms are keyed by
+ * the data they edit (a remount resets them), and the media section, which has uploads
+ * running, takes the new list while staying mounted.
  */
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -49,7 +50,6 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         />
 
         <MediaSection
-          key={product.media.map((item) => item.asset_id).join()}
           id={product.id}
           media={product.media}
         />
