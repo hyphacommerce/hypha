@@ -3,8 +3,9 @@
 - **Status:** Proposed (2026-10-15). Danilo set the direction in conversation: media is a
   first-class part of Hypha, like Shopify's; MinIO in Docker for local development, so S3
   incompatibilities show up early; every asset knows where it is used; proper image
-  metadata; a CDN story for every host; others can bring their own DAM. Items marked
-  *Open* need his answer before building.
+  metadata; a CDN story for every host; others can bring their own DAM. Answers given
+  on 2026-10-15 are marked *Decided*; items marked *Open* need his answer before
+  building.
 - **Scope:** the `Asset` aggregate and the `hypha-media` crate, uploads, storage behind
   the S3 API, delivery URLs and image sizes (the CDN), private files, attaching media to
   products and variants, usage tracking, external DAMs, the admin media library, local
@@ -30,7 +31,8 @@
 | M8 | **Usage is recorded, not derived**: each attachment writes an `AssetUsage` (asset, owner, role) in the same batch as the owner's write. "Used by" is one query for any owner, including spores, and an asset in use can't be deleted (section 6) |
 | M9 | **External DAMs plug in as asset sources.** A spore creates Hypha assets that point at its own files and URLs and keeps their metadata in sync; products attach them like uploads (section 7) |
 | M10 | **S3 API for storage**: Cloudflare R2, AWS S3 and MinIO with one adapter. **MinIO in `compose.yaml` for local development** and for the `BlobStore` contract, like Postgres for the repositories (section 8) |
-| M11 | **Alt text and title live on the asset**, so they are written once and follow it everywhere. *Open:* a per-usage alt override (the same photo described differently on two products) can be added to `AssetUsage` later without breaking anything |
+| M11 | **Alt text and title live on the asset**, so they are written once and follow it everywhere. A per-usage alt override (the same photo described differently on two products) can be added to `AssetUsage` later without breaking anything. *Decided* |
+| M12 | **No SVG uploads until we can sanitise them.** SVG files can carry scripts; refusing them is the safe default, and supporting them later is additive. *Decided* |
 
 ## 1. Why core with ports, not a media spore
 
@@ -97,9 +99,8 @@ admin ──POST /admin/assets/{id}/complete──▶ Hypha ──HEAD + ranged 
   format and dimensions from the file's header. A file whose bytes aren't the declared
   kind makes the asset `failed` and the object is deleted.
 - **Limits** (configurable): images up to 20 MB, videos up to 1 GB, other files up to
-  100 MB; image types JPEG, PNG, WebP, AVIF, GIF, SVG. *Open:* SVG can carry scripts;
-  it is served only from the media domain (never the admin's origin) with
-  `Content-Security-Policy: default-src 'none'`, or refused until we sanitise it.
+  100 MB; image types JPEG, PNG, WebP, AVIF, GIF. SVG is refused
+  (`unsupported_media_type`) until we can sanitise it (M12).
 - **Abandoned uploads:** pending assets older than a day are deleted by a background
   sweep (with their objects, if any).
 - **Imports by URL** (`POST /admin/assets {source_url}`): the host downloads the file and
@@ -131,7 +132,7 @@ URLs that cache well; any CDN in front then works.
   serves; `BlobStore::signed_get(key, ttl)` gives a short-lived URL to someone allowed to
   see the file.
 - **Why a separate media domain:** caching rules of its own, and files uploaded by staff
-  (SVG, PDFs) never run on the admin's or storefront's origin.
+  (PDFs, and SVG once supported) never run on the admin's or storefront's origin.
 
 ## 5. Attaching media to products (M7)
 
