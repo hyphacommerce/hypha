@@ -1,11 +1,11 @@
 use hypha_core::{RepoError, StoreId, Version, Versioned};
 use hypha_stores::{Store, StoreRepo, StoreSnapshot};
-use tokio_postgres::{Row, types::Type};
+use tokio_postgres::{GenericClient, Row, types::Type};
 
 use crate::{
     columns::{version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, in_transaction},
 };
 
 fn store_from_row(row: &Row) -> Result<Store, RepoError> {
@@ -45,36 +45,50 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
 
     async fn insert(&self, store: &mut Store) -> Result<(), RepoError> {
         let s = store.snapshot();
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "INSERT INTO stores (id, version, name) VALUES ($1, 1, $2)",
-                &[(&s.id.as_uuid(), Type::UUID), (&s.name, Type::TEXT)],
-            )
-            .await
-            .map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_store(tx, &s).await)?;
         store.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, store: &mut Store) -> Result<(), RepoError> {
         let s = store.snapshot();
-        let mut conn = self.conn().await;
-        let bumped = conn
-            .client()
-            .query_typed_opt(
-                "UPDATE stores SET version = version + 1, name = $3
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.name, Type::TEXT),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let row = bumped.ok_or(RepoError::StaleVersion)?;
-        store.set_version(version_from_db(row.get(0))?);
+        let version = in_transaction!(self, |tx| update_store(tx, &s).await)?;
+        store.set_version(version);
         Ok(())
     }
+}
+
+/// `StoreRepo::insert` inside the caller's transaction.
+pub(crate) async fn insert_store(
+    tx: &impl GenericClient,
+    s: &StoreSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO stores (id, version, name) VALUES ($1, 1, $2)",
+        &[(&s.id.as_uuid(), Type::UUID), (&s.name, Type::TEXT)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
+/// `StoreRepo::update` inside the caller's transaction; the new version.
+pub(crate) async fn update_store(
+    tx: &impl GenericClient,
+    s: &StoreSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE stores SET version = version + 1, name = $3
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.name, Type::TEXT),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    version_from_db(row.get(0))
 }

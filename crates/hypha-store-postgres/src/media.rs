@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     columns::{micros, ts, version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, in_transaction},
 };
 
 /// `assets`' columns in the order `asset_from_db` reads them.
@@ -112,67 +112,83 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
 
     async fn insert(&self, asset: &mut Asset) -> Result<(), RepoError> {
         let s = asset.snapshot();
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                &format!(
-                    "INSERT INTO assets (id, version, status, kind, filename, blob_key,
-                         file_version, mime_type, byte_size, checksum, width, height, alt,
-                         title, visibility, created_at, updated_at)
-                     VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                         {}, {})",
-                    ts(15),
-                    ts(16),
-                ),
-                &RowValues::new(&s)?.params(),
-            )
-            .await
-            .map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_asset(tx, &s).await)?;
         asset.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, asset: &mut Asset) -> Result<(), RepoError> {
         let s = asset.snapshot();
-        let expected = version_to_db(s.version)?;
-        let values = RowValues::new(&s)?;
-        let mut params = values.params();
-        params.push((&expected, Type::INT8));
-        let mut conn = self.conn().await;
-        let bumped = conn
-            .client()
-            .query_typed_opt(
-                &format!(
-                    "UPDATE assets SET version = version + 1, status = $2, kind = $3,
-                         filename = $4, blob_key = $5, file_version = $6, mime_type = $7,
-                         byte_size = $8, checksum = $9, width = $10, height = $11, alt = $12,
-                         title = $13, visibility = $14, created_at = {}, updated_at = {}
-                     WHERE id = $1 AND version = $17 RETURNING version",
-                    ts(15),
-                    ts(16),
-                ),
-                &params,
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            return Err(RepoError::StaleVersion);
-        };
-        asset.set_version(version_from_db(row.get(0))?);
+        let version = in_transaction!(self, |tx| update_asset(tx, &s).await)?;
+        asset.set_version(version);
         Ok(())
     }
 
     async fn delete(&self, id: AssetId) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "DELETE FROM assets WHERE id = $1",
-                &[(&id.as_uuid(), Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?;
-        Ok(())
+        in_transaction!(self, |tx| delete_asset(tx, id).await)
     }
+}
+
+/// `AssetRepo::insert` inside the caller's transaction.
+pub(crate) async fn insert_asset(
+    tx: &impl GenericClient,
+    s: &AssetSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        &format!(
+            "INSERT INTO assets (id, version, status, kind, filename, blob_key,
+                 file_version, mime_type, byte_size, checksum, width, height, alt,
+                 title, visibility, created_at, updated_at)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                 {}, {})",
+            ts(15),
+            ts(16),
+        ),
+        &RowValues::new(s)?.params(),
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
+/// `AssetRepo::update` inside the caller's transaction; the new version.
+pub(crate) async fn update_asset(
+    tx: &impl GenericClient,
+    s: &AssetSnapshot,
+) -> Result<Version, RepoError> {
+    let expected = version_to_db(s.version)?;
+    let values = RowValues::new(s)?;
+    let mut params = values.params();
+    params.push((&expected, Type::INT8));
+    let bumped = tx
+        .query_typed_opt(
+            &format!(
+                "UPDATE assets SET version = version + 1, status = $2, kind = $3,
+                     filename = $4, blob_key = $5, file_version = $6, mime_type = $7,
+                     byte_size = $8, checksum = $9, width = $10, height = $11, alt = $12,
+                     title = $13, visibility = $14, created_at = {}, updated_at = {}
+                 WHERE id = $1 AND version = $17 RETURNING version",
+                ts(15),
+                ts(16),
+            ),
+            &params,
+        )
+        .await
+        .map_err(repo_error)?;
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    version_from_db(row.get(0))
+}
+
+/// `AssetRepo::delete` inside the caller's transaction. An asset in use is refused by
+/// the usage reference (`RepoError::Reference`).
+pub(crate) async fn delete_asset(tx: &impl GenericClient, id: AssetId) -> Result<(), RepoError> {
+    tx.query_typed(
+        "DELETE FROM assets WHERE id = $1",
+        &[(&id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
 }
 
 impl<C: PgConnection> AssetUsageRepo for PgStore<C> {

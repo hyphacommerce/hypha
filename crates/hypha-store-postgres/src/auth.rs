@@ -20,7 +20,7 @@ use crate::{
         version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 fn principal_to_db(p: Principal) -> (&'static str, Uuid) {
@@ -99,20 +99,14 @@ impl<C: PgConnection> IdentityRepo for PgStore<C> {
 
     async fn insert(&self, identity: &mut Identity) -> Result<(), RepoError> {
         let s = identity.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        insert_identity(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_identity(tx, &s).await)?;
         identity.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, identity: &mut Identity) -> Result<(), RepoError> {
         let s = identity.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        let version = update_identity(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        let version = in_transaction!(self, |tx| update_identity(tx, &s).await)?;
         identity.set_version(version);
         Ok(())
     }
@@ -308,15 +302,15 @@ impl<C: PgConnection> SessionRepo for PgStore<C> {
     }
 
     async fn insert(&self, session: &mut Session) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        insert_session(conn.client(), &session.snapshot()).await?;
+        let s = session.snapshot();
+        in_transaction!(self, |tx| insert_session(tx, &s).await)?;
         session.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, session: &mut Session) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        let version = update_session(conn.client(), &session.snapshot()).await?;
+        let s = session.snapshot();
+        let version = in_transaction!(self, |tx| update_session(tx, &s).await)?;
         session.set_version(version);
         Ok(())
     }
@@ -481,64 +475,76 @@ impl<C: PgConnection> ApiKeyRepo for PgStore<C> {
 
     async fn insert(&self, key: &mut ApiKey) -> Result<(), RepoError> {
         let s = key.snapshot();
-        let (by_kind, by_id) = actor_to_db(s.created_by);
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                &format!(
-                    "INSERT INTO api_keys (id, version, kind, name, token_hash, last_four,
-                         scopes, created_by_kind, created_by_id, created_at, revoked_at)
-                     VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, {}, {})",
-                    ts(9),
-                    ts(10)
-                ),
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&s.kind.as_str(), Type::TEXT),
-                    (&s.name, Type::TEXT),
-                    (&s.token_hash.as_bytes().as_slice(), Type::BYTEA),
-                    (&s.last_four, Type::TEXT),
-                    (&scopes_to_db(&s.scopes), Type::TEXT_ARRAY),
-                    (&by_kind, Type::TEXT),
-                    (&by_id, Type::UUID),
-                    (&s.created_at.unix_micros(), Type::INT8),
-                    (&opt_micros(s.revoked_at), Type::INT8),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_api_key(tx, &s).await)?;
         key.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, key: &mut ApiKey) -> Result<(), RepoError> {
         let s = key.snapshot();
-        let mut conn = self.conn().await;
-        let row = conn
-            .client()
-            .query_typed_opt(
-                &format!(
-                    "UPDATE api_keys SET version = version + 1, name = $3, scopes = $4,
-                         revoked_at = {}
-                     WHERE id = $1 AND version = $2 RETURNING version",
-                    ts(5)
-                ),
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.name, Type::TEXT),
-                    (&scopes_to_db(&s.scopes), Type::TEXT_ARRAY),
-                    (&opt_micros(s.revoked_at), Type::INT8),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = row else {
-            return Err(RepoError::StaleVersion);
-        };
-        key.set_version(version_from_db(row.get(0))?);
+        let version = in_transaction!(self, |tx| update_api_key(tx, &s).await)?;
+        key.set_version(version);
         Ok(())
     }
+}
+
+/// `ApiKeyRepo::insert` inside the caller's transaction.
+pub(crate) async fn insert_api_key(
+    tx: &impl GenericClient,
+    s: &ApiKeySnapshot,
+) -> Result<(), RepoError> {
+    let (by_kind, by_id) = actor_to_db(s.created_by);
+    tx.query_typed(
+        &format!(
+            "INSERT INTO api_keys (id, version, kind, name, token_hash, last_four,
+                 scopes, created_by_kind, created_by_id, created_at, revoked_at)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, {}, {})",
+            ts(9),
+            ts(10)
+        ),
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.kind.as_str(), Type::TEXT),
+            (&s.name, Type::TEXT),
+            (&s.token_hash.as_bytes().as_slice(), Type::BYTEA),
+            (&s.last_four, Type::TEXT),
+            (&scopes_to_db(&s.scopes), Type::TEXT_ARRAY),
+            (&by_kind, Type::TEXT),
+            (&by_id, Type::UUID),
+            (&s.created_at.unix_micros(), Type::INT8),
+            (&opt_micros(s.revoked_at), Type::INT8),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
+/// `ApiKeyRepo::update` inside the caller's transaction; the new version.
+pub(crate) async fn update_api_key(
+    tx: &impl GenericClient,
+    s: &ApiKeySnapshot,
+) -> Result<Version, RepoError> {
+    let row = tx
+        .query_typed_opt(
+            &format!(
+                "UPDATE api_keys SET version = version + 1, name = $3, scopes = $4,
+                     revoked_at = {}
+                 WHERE id = $1 AND version = $2 RETURNING version",
+                ts(5)
+            ),
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.name, Type::TEXT),
+                (&scopes_to_db(&s.scopes), Type::TEXT_ARRAY),
+                (&opt_micros(s.revoked_at), Type::INT8),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let row = row.ok_or(RepoError::StaleVersion)?;
+    version_from_db(row.get(0))
 }
 
 // ---------- password resets ----------
@@ -602,8 +608,8 @@ impl<C: PgConnection> PasswordResetRepo for PgStore<C> {
     }
 
     async fn insert(&self, reset: &mut PasswordReset) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        insert_password_reset(conn.client(), &reset.snapshot()).await?;
+        let s = reset.snapshot();
+        in_transaction!(self, |tx| insert_password_reset(tx, &s).await)?;
         reset.set_version(Version::NEW.next());
         Ok(())
     }

@@ -19,7 +19,7 @@ use crate::{
         version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> OrderRepo for PgStore<C> {
@@ -79,74 +79,15 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
 
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {
         let s = order.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        insert_order(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_order(tx, &s).await)?;
         order.set_version(Version::NEW.next());
         Ok(())
     }
 
-    /// Writes the whole order like every other repo, not only what today's commands
-    /// change (the statuses), so the next field that becomes editable can't be dropped
-    /// here while the in-memory repo keeps it. Lines are replaced after the version check.
     async fn update(&self, order: &mut Order) -> Result<(), RepoError> {
         let s = order.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        let bumped = tx
-            .query_typed_opt(
-                &format!(
-                    "UPDATE orders SET version = version + 1, number = $3,
-                     placed_at = {},
-                     cart_id = $5, market_id = $6, currency = $7, country = $8,
-                     taxes_included = $9, customer_id = $10, email = $11, subtotal = $12,
-                     tax_total = $13, total = $14, financial_status = $15,
-                     fulfillment_status = $16
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                    ts(4),
-                ),
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.number.value(), Type::INT8),
-                    (&s.placed_at.unix_micros(), Type::INT8),
-                    (&s.cart.as_uuid(), Type::UUID),
-                    (&s.market.as_uuid(), Type::UUID),
-                    (&s.currency.as_str(), Type::TEXT),
-                    (&s.country.as_str(), Type::TEXT),
-                    (&s.taxes_included, Type::BOOL),
-                    (&s.customer.as_uuid(), Type::UUID),
-                    (&s.email.as_str(), Type::TEXT),
-                    (&s.subtotal.amount(), Type::INT8),
-                    (&s.tax_total.amount(), Type::INT8),
-                    (&s.total.amount(), Type::INT8),
-                    (&s.financial_status.as_str(), Type::TEXT),
-                    (&s.fulfillment_status.as_str(), Type::TEXT),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            return Err(RepoError::StaleVersion);
-        };
-        let new_version = version_from_db(row.get(0))?;
-        tx.query_typed(
-            "DELETE FROM order_lines WHERE order_id = $1",
-            &[(&s.id.as_uuid(), Type::UUID)],
-        )
-        .await
-        .map_err(repo_error)?;
-        insert_lines(&tx, s.id, &s.lines).await?;
-        tx.query_typed(
-            "DELETE FROM order_shipping_lines WHERE order_id = $1",
-            &[(&s.id.as_uuid(), Type::UUID)],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_shipping(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
-        order.set_version(new_version);
+        let version = in_transaction!(self, |tx| update_order(tx, &s).await)?;
+        order.set_version(version);
         Ok(())
     }
 
@@ -162,6 +103,65 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         tx.commit().await.map_err(repo_error)?;
         OrderNumber::new(row.get(0)).map_err(corrupt)
     }
+}
+
+/// `OrderRepo::update` inside the caller's transaction; the new version. Writes the
+/// whole order like every other repo, not only what today's commands change (the
+/// statuses), so the next field that becomes editable can't be dropped here while the
+/// in-memory repo keeps it. Lines are replaced after the version check.
+pub(crate) async fn update_order(
+    tx: &impl GenericClient,
+    s: &OrderSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            &format!(
+                "UPDATE orders SET version = version + 1, number = $3,
+                 placed_at = {},
+                 cart_id = $5, market_id = $6, currency = $7, country = $8,
+                 taxes_included = $9, customer_id = $10, email = $11, subtotal = $12,
+                 tax_total = $13, total = $14, financial_status = $15,
+                 fulfillment_status = $16
+             WHERE id = $1 AND version = $2 RETURNING version",
+                ts(4),
+            ),
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.number.value(), Type::INT8),
+                (&s.placed_at.unix_micros(), Type::INT8),
+                (&s.cart.as_uuid(), Type::UUID),
+                (&s.market.as_uuid(), Type::UUID),
+                (&s.currency.as_str(), Type::TEXT),
+                (&s.country.as_str(), Type::TEXT),
+                (&s.taxes_included, Type::BOOL),
+                (&s.customer.as_uuid(), Type::UUID),
+                (&s.email.as_str(), Type::TEXT),
+                (&s.subtotal.amount(), Type::INT8),
+                (&s.tax_total.amount(), Type::INT8),
+                (&s.total.amount(), Type::INT8),
+                (&s.financial_status.as_str(), Type::TEXT),
+                (&s.fulfillment_status.as_str(), Type::TEXT),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    tx.query_typed(
+        "DELETE FROM order_lines WHERE order_id = $1",
+        &[(&s.id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    insert_lines(tx, s.id, &s.lines).await?;
+    tx.query_typed(
+        "DELETE FROM order_shipping_lines WHERE order_id = $1",
+        &[(&s.id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_shipping(tx, s).await?;
+    version_from_db(row.get(0))
 }
 
 /// `OrderRepo::insert` inside the caller's transaction (also used by `PgBatch`): the

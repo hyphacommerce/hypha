@@ -16,7 +16,7 @@ use crate::{
         version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 // ---------- locations ----------
@@ -49,60 +49,68 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
 
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError> {
         let s = location.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        tx.query_typed(
-            "INSERT INTO locations (id, version, name, priority) VALUES ($1, 1, $2, $3)",
-            &[
-                (&s.id.as_uuid(), Type::UUID),
-                (&s.name, Type::TEXT),
-                (&i64::from(s.priority), Type::INT8),
-            ],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_location_markets(&tx, s.id, &s.markets).await?;
-        write_location_address(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_location(tx, &s).await)?;
         location.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, location: &mut Location) -> Result<(), RepoError> {
         let s = location.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        // The version check comes first; the markets are only replaced if it passes.
-        let bumped = tx
-            .query_typed_opt(
-                "UPDATE locations SET version = version + 1, name = $3, priority = $4
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.name, Type::TEXT),
-                    (&i64::from(s.priority), Type::INT8),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            tx.rollback().await.map_err(repo_error)?;
-            return Err(RepoError::StaleVersion);
-        };
-        let new_version = version_from_db(row.get(0))?;
-        tx.query_typed(
-            "DELETE FROM location_markets WHERE location_id = $1",
-            &[(&s.id.as_uuid(), Type::UUID)],
+        let version = in_transaction!(self, |tx| update_location(tx, &s).await)?;
+        location.set_version(version);
+        Ok(())
+    }
+}
+
+/// `LocationRepo::insert` inside the caller's transaction: the row, its markets and
+/// address.
+pub(crate) async fn insert_location(
+    tx: &impl GenericClient,
+    s: &LocationSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO locations (id, version, name, priority) VALUES ($1, 1, $2, $3)",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.name, Type::TEXT),
+            (&i64::from(s.priority), Type::INT8),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_location_markets(tx, s.id, &s.markets).await?;
+    write_location_address(tx, s).await
+}
+
+/// `LocationRepo::update` inside the caller's transaction; the new version. The version
+/// check comes first; the markets are only replaced if it passes.
+pub(crate) async fn update_location(
+    tx: &impl GenericClient,
+    s: &LocationSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE locations SET version = version + 1, name = $3, priority = $4
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.name, Type::TEXT),
+                (&i64::from(s.priority), Type::INT8),
+            ],
         )
         .await
         .map_err(repo_error)?;
-        write_location_markets(&tx, s.id, &s.markets).await?;
-        write_location_address(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
-        location.set_version(new_version);
-        Ok(())
-    }
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    tx.query_typed(
+        "DELETE FROM location_markets WHERE location_id = $1",
+        &[(&s.id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_location_markets(tx, s.id, &s.markets).await?;
+    write_location_address(tx, s).await?;
+    version_from_db(row.get(0))
 }
 
 /// All of a location's markets in one statement; `WITH ORDINALITY` keeps their order.
@@ -234,22 +242,7 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
 
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         let s = item.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        tx.query_typed(
-            "INSERT INTO inventory_items (id, version, variant_id, tracked, continue_selling)
-             VALUES ($1, 1, $2, $3, $4)",
-            &[
-                (&s.id.as_uuid(), Type::UUID),
-                (&s.variant.as_uuid(), Type::UUID),
-                (&s.tracked, Type::BOOL),
-                (&s.continue_selling, Type::BOOL),
-            ],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_children(&tx, std::slice::from_ref(&s)).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_item(tx, &s).await)?;
         item.set_version(Version::NEW.next());
         Ok(())
     }
@@ -265,11 +258,7 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
             return Ok(());
         }
         let snapshots: Vec<InventoryItemSnapshot> = items.iter().map(|i| i.snapshot()).collect();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        let new_versions = update_items(&tx, snapshots).await?;
-        tx.commit().await.map_err(repo_error)?;
-
+        let new_versions = in_transaction!(self, |tx| update_items(tx, snapshots).await)?;
         for item in items.iter_mut() {
             if let Some(version) = new_versions.get(&item.id().as_uuid()) {
                 item.set_version(*version);
@@ -277,6 +266,27 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         }
         Ok(())
     }
+}
+
+/// `InventoryItemRepo::insert` inside the caller's transaction: the row, then its levels
+/// and reservations.
+pub(crate) async fn insert_item(
+    tx: &impl GenericClient,
+    s: &InventoryItemSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO inventory_items (id, version, variant_id, tracked, continue_selling)
+         VALUES ($1, 1, $2, $3, $4)",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.variant.as_uuid(), Type::UUID),
+            (&s.tracked, Type::BOOL),
+            (&s.continue_selling, Type::BOOL),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_children(tx, std::slice::from_ref(s)).await
 }
 
 /// `InventoryItemRepo::update_many` inside the caller's transaction (also used by

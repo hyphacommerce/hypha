@@ -14,7 +14,7 @@ use crate::{
         version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore},
+    store::{PgConnection, PgStore, in_transaction},
 };
 
 // ---------- users ----------
@@ -94,15 +94,15 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
     }
 
     async fn insert(&self, user: &mut User) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        insert_user(conn.client(), &user.snapshot()).await?;
+        let s = user.snapshot();
+        in_transaction!(self, |tx| insert_user(tx, &s).await)?;
         user.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, user: &mut User) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        let version = update_user(conn.client(), &user.snapshot()).await?;
+        let s = user.snapshot();
+        let version = in_transaction!(self, |tx| update_user(tx, &s).await)?;
         user.set_version(version);
         Ok(())
     }
@@ -226,15 +226,15 @@ impl<C: PgConnection> RoleRepo for PgStore<C> {
     }
 
     async fn insert(&self, role: &mut Role) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        insert_role(conn.client(), &role.snapshot()).await?;
+        let s = role.snapshot();
+        in_transaction!(self, |tx| insert_role(tx, &s).await)?;
         role.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, role: &mut Role) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        let version = update_role(conn.client(), &role.snapshot()).await?;
+        let s = role.snapshot();
+        let version = in_transaction!(self, |tx| update_role(tx, &s).await)?;
         role.set_version(version);
         Ok(())
     }
@@ -344,42 +344,49 @@ impl<C: PgConnection> InviteRepo for PgStore<C> {
 
     async fn insert(&self, invite: &mut Invite) -> Result<(), RepoError> {
         let s = invite.snapshot();
-        let (by_kind, by_id) = actor_to_db(s.invited_by);
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                &format!(
-                    "INSERT INTO invites (id, version, email, role_id, token_hash,
-                         invited_by_kind, invited_by_id, created_at, expires_at, accepted_at)
-                     VALUES ($1, 1, $2, $3, $4, $5, $6, {}, {}, {})",
-                    ts(7),
-                    ts(8),
-                    ts(9)
-                ),
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&s.email.as_str(), Type::TEXT),
-                    (&s.role.as_uuid(), Type::UUID),
-                    (&s.token_hash.as_bytes().as_slice(), Type::BYTEA),
-                    (&by_kind, Type::TEXT),
-                    (&by_id, Type::UUID),
-                    (&s.created_at.unix_micros(), Type::INT8),
-                    (&s.expires_at.unix_micros(), Type::INT8),
-                    (&s.accepted_at.map(Timestamp::unix_micros), Type::INT8),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_invite(tx, &s).await)?;
         invite.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, invite: &mut Invite) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        let version = update_invite(conn.client(), &invite.snapshot()).await?;
+        let s = invite.snapshot();
+        let version = in_transaction!(self, |tx| update_invite(tx, &s).await)?;
         invite.set_version(version);
         Ok(())
     }
+}
+
+/// `InviteRepo::insert` inside the caller's transaction.
+pub(crate) async fn insert_invite(
+    tx: &impl GenericClient,
+    s: &InviteSnapshot,
+) -> Result<(), RepoError> {
+    let (by_kind, by_id) = actor_to_db(s.invited_by);
+    tx.query_typed(
+        &format!(
+            "INSERT INTO invites (id, version, email, role_id, token_hash,
+                 invited_by_kind, invited_by_id, created_at, expires_at, accepted_at)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, {}, {}, {})",
+            ts(7),
+            ts(8),
+            ts(9)
+        ),
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.email.as_str(), Type::TEXT),
+            (&s.role.as_uuid(), Type::UUID),
+            (&s.token_hash.as_bytes().as_slice(), Type::BYTEA),
+            (&by_kind, Type::TEXT),
+            (&by_id, Type::UUID),
+            (&s.created_at.unix_micros(), Type::INT8),
+            (&s.expires_at.unix_micros(), Type::INT8),
+            (&s.accepted_at.map(Timestamp::unix_micros), Type::INT8),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
 }
 
 pub(crate) async fn update_invite(

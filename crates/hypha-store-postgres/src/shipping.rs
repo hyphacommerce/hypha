@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::{
     columns::{currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 // ---------- zones ----------
@@ -59,67 +59,83 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
 
     async fn insert(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
         let s = zone.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        tx.query_typed(
-            "INSERT INTO shipping_zones (id, version, name) VALUES ($1, 1, $2)",
-            &[(&s.id.as_uuid(), Type::UUID), (&s.name, Type::TEXT)],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_zone_children(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_zone(tx, &s).await)?;
         zone.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
         let s = zone.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        // The version check comes first; nothing else is touched if it fails.
-        let bumped = tx
-            .query_typed_opt(
-                "UPDATE shipping_zones SET version = version + 1, name = $3
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.name, Type::TEXT),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            return Err(RepoError::StaleVersion);
-        };
-        let new_version = version_from_db(row.get(0))?;
-        // Children are replaced wholesale; tiers go with their options (CASCADE).
-        for sql in [
-            "DELETE FROM shipping_zone_countries WHERE zone_id = $1",
-            "DELETE FROM shipping_options WHERE zone_id = $1",
-        ] {
-            tx.query_typed(sql, &[(&s.id.as_uuid(), Type::UUID)])
-                .await
-                .map_err(repo_error)?;
-        }
-        write_zone_children(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
-        zone.set_version(new_version);
+        let version = in_transaction!(self, |tx| update_zone(tx, &s).await)?;
+        zone.set_version(version);
         Ok(())
     }
 
     async fn delete(&self, id: ShippingZoneId) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "DELETE FROM shipping_zones WHERE id = $1",
-                &[(&id.as_uuid(), Type::UUID)],
-            )
+        in_transaction!(self, |tx| delete_zone(tx, id).await)
+    }
+}
+
+/// `ShippingZoneRepo::insert` inside the caller's transaction: the row, then its
+/// countries, options and tiers.
+pub(crate) async fn insert_zone(
+    tx: &impl GenericClient,
+    s: &ShippingZoneSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO shipping_zones (id, version, name) VALUES ($1, 1, $2)",
+        &[(&s.id.as_uuid(), Type::UUID), (&s.name, Type::TEXT)],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_zone_children(tx, s).await
+}
+
+/// `ShippingZoneRepo::update` inside the caller's transaction; the new version. The
+/// version check comes first; nothing else is touched if it fails.
+pub(crate) async fn update_zone(
+    tx: &impl GenericClient,
+    s: &ShippingZoneSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE shipping_zones SET version = version + 1, name = $3
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.name, Type::TEXT),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    // Children are replaced wholesale; tiers go with their options (CASCADE).
+    for sql in [
+        "DELETE FROM shipping_zone_countries WHERE zone_id = $1",
+        "DELETE FROM shipping_options WHERE zone_id = $1",
+    ] {
+        tx.query_typed(sql, &[(&s.id.as_uuid(), Type::UUID)])
             .await
             .map_err(repo_error)?;
-        Ok(())
     }
+    write_zone_children(tx, s).await?;
+    version_from_db(row.get(0))
+}
+
+/// `ShippingZoneRepo::delete` inside the caller's transaction; its children go with it
+/// (CASCADE).
+pub(crate) async fn delete_zone(
+    tx: &impl GenericClient,
+    id: ShippingZoneId,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "DELETE FROM shipping_zones WHERE id = $1",
+        &[(&id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
 }
 
 /// Countries, options and tiers, a statement each however many there are.
@@ -403,14 +419,59 @@ impl<C: PgConnection> AppProviderRepo for PgStore<C> {
 
     async fn insert(&self, provider: &mut AppProvider) -> Result<(), RepoError> {
         let s = provider.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        tx.query_typed(
-            "INSERT INTO shipping_app_providers
-                (key, version, name, callback_url, timeout_ms, secret, enabled)
-             VALUES ($1, 1, $2, $3, $4, $5, $6)",
+        in_transaction!(self, |tx| insert_provider(tx, &s).await)?;
+        provider.set_version(Version::NEW.next());
+        Ok(())
+    }
+
+    async fn update(&self, provider: &mut AppProvider) -> Result<(), RepoError> {
+        let s = provider.snapshot();
+        let version = in_transaction!(self, |tx| update_provider(tx, &s).await)?;
+        provider.set_version(version);
+        Ok(())
+    }
+
+    async fn delete(&self, key: &ProviderKey) -> Result<(), RepoError> {
+        in_transaction!(self, |tx| delete_provider(tx, key).await)
+    }
+}
+
+/// `AppProviderRepo::insert` inside the caller's transaction: the row, then its services.
+pub(crate) async fn insert_provider(
+    tx: &impl GenericClient,
+    s: &AppProviderSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO shipping_app_providers
+            (key, version, name, callback_url, timeout_ms, secret, enabled)
+         VALUES ($1, 1, $2, $3, $4, $5, $6)",
+        &[
+            (&s.key, Type::TEXT),
+            (&s.name, Type::TEXT),
+            (&s.callback_url, Type::TEXT),
+            (&timeout_to_db(s.timeout_ms)?, Type::INT4),
+            (&s.secret.as_bytes(), Type::BYTEA),
+            (&s.enabled, Type::BOOL),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_services(tx, s).await
+}
+
+/// `AppProviderRepo::update` inside the caller's transaction; the new version.
+pub(crate) async fn update_provider(
+    tx: &impl GenericClient,
+    s: &AppProviderSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE shipping_app_providers SET version = version + 1, name = $3,
+                    callback_url = $4, timeout_ms = $5, secret = $6, enabled = $7
+             WHERE key = $1 AND version = $2 RETURNING version",
             &[
                 (&s.key, Type::TEXT),
+                (&version_to_db(s.version)?, Type::INT8),
                 (&s.name, Type::TEXT),
                 (&s.callback_url, Type::TEXT),
                 (&timeout_to_db(s.timeout_ms)?, Type::INT4),
@@ -420,60 +481,29 @@ impl<C: PgConnection> AppProviderRepo for PgStore<C> {
         )
         .await
         .map_err(repo_error)?;
-        write_services(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
-        provider.set_version(Version::NEW.next());
-        Ok(())
-    }
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    tx.query_typed(
+        "DELETE FROM shipping_app_provider_services WHERE provider_key = $1",
+        &[(&s.key, Type::TEXT)],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_services(tx, s).await?;
+    version_from_db(row.get(0))
+}
 
-    async fn update(&self, provider: &mut AppProvider) -> Result<(), RepoError> {
-        let s = provider.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        let bumped = tx
-            .query_typed_opt(
-                "UPDATE shipping_app_providers SET version = version + 1, name = $3,
-                        callback_url = $4, timeout_ms = $5, secret = $6, enabled = $7
-                 WHERE key = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.key, Type::TEXT),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.name, Type::TEXT),
-                    (&s.callback_url, Type::TEXT),
-                    (&timeout_to_db(s.timeout_ms)?, Type::INT4),
-                    (&s.secret.as_bytes(), Type::BYTEA),
-                    (&s.enabled, Type::BOOL),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            return Err(RepoError::StaleVersion);
-        };
-        let new_version = version_from_db(row.get(0))?;
-        tx.query_typed(
-            "DELETE FROM shipping_app_provider_services WHERE provider_key = $1",
-            &[(&s.key, Type::TEXT)],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_services(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
-        provider.set_version(new_version);
-        Ok(())
-    }
-
-    async fn delete(&self, key: &ProviderKey) -> Result<(), RepoError> {
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "DELETE FROM shipping_app_providers WHERE key = $1",
-                &[(&key.as_str(), Type::TEXT)],
-            )
-            .await
-            .map_err(repo_error)?;
-        Ok(())
-    }
+/// `AppProviderRepo::delete` inside the caller's transaction.
+pub(crate) async fn delete_provider(
+    tx: &impl GenericClient,
+    key: &ProviderKey,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "DELETE FROM shipping_app_providers WHERE key = $1",
+        &[(&key.as_str(), Type::TEXT)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
 }
 
 fn timeout_to_db(ms: u32) -> Result<i32, RepoError> {

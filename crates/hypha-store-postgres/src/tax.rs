@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::{
     columns::{tax_rate_from_db, tax_rate_to_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 // ---------- classes ----------
@@ -39,14 +39,7 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
 
     async fn insert(&self, class: &mut TaxClass) -> Result<(), RepoError> {
         let s = class.snapshot();
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "INSERT INTO tax_classes (id, version, name) VALUES ($1, 1, $2)",
-                &[(&s.id.as_uuid(), Type::UUID), (&s.name, Type::TEXT)],
-            )
-            .await
-            .map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_tax_class(tx, &s).await)?;
         class.set_version(Version::NEW.next());
         Ok(())
     }
@@ -56,29 +49,7 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
         products: &[ProductId],
         class: Option<TaxClassId>,
     ) -> Result<(), RepoError> {
-        let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
-        let mut conn = self.conn().await;
-        let client = conn.client();
-        match class {
-            // One statement either way, so a batch is all or nothing.
-            Some(class) => client
-                .query_typed(
-                    "INSERT INTO product_tax_classes (product_id, tax_class_id)
-                     SELECT product_id, $2 FROM unnest($1::uuid[]) AS t (product_id)
-                     ON CONFLICT (product_id) DO UPDATE SET tax_class_id = EXCLUDED.tax_class_id",
-                    &[(&ids, Type::UUID_ARRAY), (&class.as_uuid(), Type::UUID)],
-                )
-                .await
-                .map_err(repo_error)?,
-            None => client
-                .query_typed(
-                    "DELETE FROM product_tax_classes WHERE product_id = ANY($1)",
-                    &[(&ids, Type::UUID_ARRAY)],
-                )
-                .await
-                .map_err(repo_error)?,
-        };
-        Ok(())
+        in_transaction!(self, |tx| assign_tax_class(tx, products, class).await)
     }
 
     async fn classes_for(
@@ -111,6 +82,48 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
     }
 }
 
+/// `TaxClassRepo::insert` inside the caller's transaction.
+pub(crate) async fn insert_tax_class(
+    tx: &impl GenericClient,
+    s: &TaxClassSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO tax_classes (id, version, name) VALUES ($1, 1, $2)",
+        &[(&s.id.as_uuid(), Type::UUID), (&s.name, Type::TEXT)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
+/// `TaxClassRepo::assign` inside the caller's transaction: one statement either way.
+pub(crate) async fn assign_tax_class(
+    tx: &impl GenericClient,
+    products: &[ProductId],
+    class: Option<TaxClassId>,
+) -> Result<(), RepoError> {
+    let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
+    match class {
+        Some(class) => tx
+            .query_typed(
+                "INSERT INTO product_tax_classes (product_id, tax_class_id)
+                 SELECT product_id, $2 FROM unnest($1::uuid[]) AS t (product_id)
+                 ON CONFLICT (product_id) DO UPDATE SET tax_class_id = EXCLUDED.tax_class_id",
+                &[(&ids, Type::UUID_ARRAY), (&class.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?,
+        None => tx
+            .query_typed(
+                "DELETE FROM product_tax_classes WHERE product_id = ANY($1)",
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?,
+    };
+    Ok(())
+}
+
 // ---------- regions ----------
 
 impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
@@ -130,58 +143,65 @@ impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
 
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
         let s = region.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        tx.query_typed(
-            "INSERT INTO tax_regions (id, version, country, default_rate) VALUES ($1, 1, $2, $3)",
-            &[
-                (&s.id.as_uuid(), Type::UUID),
-                (&s.country.as_str(), Type::TEXT),
-                (&tax_rate_to_db(s.default_rate)?, Type::INT4),
-            ],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_class_rates(&tx, s.id, &s.class_rates).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_tax_region(tx, &s).await)?;
         region.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
         let s = region.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        // The version check comes first; the rates are only replaced if it passes.
-        let bumped = tx
-            .query_typed_opt(
-                "UPDATE tax_regions SET version = version + 1, country = $3, default_rate = $4
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.country.as_str(), Type::TEXT),
-                    (&tax_rate_to_db(s.default_rate)?, Type::INT4),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            tx.rollback().await.map_err(repo_error)?;
-            return Err(RepoError::StaleVersion);
-        };
-        let new_version = version_from_db(row.get(0))?;
-        tx.query_typed(
-            "DELETE FROM tax_region_class_rates WHERE tax_region_id = $1",
-            &[(&s.id.as_uuid(), Type::UUID)],
+        let version = in_transaction!(self, |tx| update_tax_region(tx, &s).await)?;
+        region.set_version(version);
+        Ok(())
+    }
+}
+
+/// `TaxRegionRepo::insert` inside the caller's transaction: the row, then its rates.
+pub(crate) async fn insert_tax_region(
+    tx: &impl GenericClient,
+    s: &TaxRegionSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO tax_regions (id, version, country, default_rate) VALUES ($1, 1, $2, $3)",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.country.as_str(), Type::TEXT),
+            (&tax_rate_to_db(s.default_rate)?, Type::INT4),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_class_rates(tx, s.id, &s.class_rates).await
+}
+
+/// `TaxRegionRepo::update` inside the caller's transaction; the new version. The
+/// version check comes first; the rates are only replaced if it passes.
+pub(crate) async fn update_tax_region(
+    tx: &impl GenericClient,
+    s: &TaxRegionSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE tax_regions SET version = version + 1, country = $3, default_rate = $4
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.country.as_str(), Type::TEXT),
+                (&tax_rate_to_db(s.default_rate)?, Type::INT4),
+            ],
         )
         .await
         .map_err(repo_error)?;
-        write_class_rates(&tx, s.id, &s.class_rates).await?;
-        tx.commit().await.map_err(repo_error)?;
-        region.set_version(new_version);
-        Ok(())
-    }
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    tx.query_typed(
+        "DELETE FROM tax_region_class_rates WHERE tax_region_id = $1",
+        &[(&s.id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_class_rates(tx, s.id, &s.class_rates).await?;
+    version_from_db(row.get(0))
 }
 
 /// All class rates in one statement; `WITH ORDINALITY` keeps their order.

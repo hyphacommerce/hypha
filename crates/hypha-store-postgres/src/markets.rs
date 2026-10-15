@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::{
     columns::{currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 // ---------- markets ----------
@@ -51,59 +51,69 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
 
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {
         let s = market.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        tx.query_typed(
-            "INSERT INTO markets (id, version, name, currency, prices_include_tax) VALUES ($1, 1, $2, $3, $4)",
-            &[
-                (&s.id.as_uuid(), Type::UUID),
-                (&s.name, Type::TEXT),
-                (&s.currency.as_str(), Type::TEXT),
-                (&s.prices_include_tax, Type::BOOL)
-            ],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_countries(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_market(tx, &s).await)?;
         market.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, market: &mut Market) -> Result<(), RepoError> {
         let s = market.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        let bumped = tx
-            .query_typed_opt(
-                "UPDATE markets SET version = version + 1, name = $3, currency = $4, prices_include_tax = $5
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.name, Type::TEXT),
-                    (&s.currency.as_str(), Type::TEXT),
-                    (&s.prices_include_tax, Type::BOOL)
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            tx.rollback().await.map_err(repo_error)?;
-            return Err(RepoError::StaleVersion);
-        };
-        let new_version = version_from_db(row.get(0))?;
-        tx.query_typed(
-            "DELETE FROM market_countries WHERE market_id = $1",
-            &[(&s.id.as_uuid(), Type::UUID)],
+        let version = in_transaction!(self, |tx| update_market(tx, &s).await)?;
+        market.set_version(version);
+        Ok(())
+    }
+}
+
+/// `MarketRepo::insert` inside the caller's transaction: the row, then its countries.
+pub(crate) async fn insert_market(
+    tx: &impl GenericClient,
+    s: &MarketSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO markets (id, version, name, currency, prices_include_tax)
+         VALUES ($1, 1, $2, $3, $4)",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.name, Type::TEXT),
+            (&s.currency.as_str(), Type::TEXT),
+            (&s.prices_include_tax, Type::BOOL),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_countries(tx, s).await
+}
+
+/// `MarketRepo::update` inside the caller's transaction; the new version. The version
+/// check comes first; the countries are only replaced if it passes.
+pub(crate) async fn update_market(
+    tx: &impl GenericClient,
+    s: &MarketSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE markets SET version = version + 1, name = $3, currency = $4,
+                 prices_include_tax = $5
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.name, Type::TEXT),
+                (&s.currency.as_str(), Type::TEXT),
+                (&s.prices_include_tax, Type::BOOL),
+            ],
         )
         .await
         .map_err(repo_error)?;
-        write_countries(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
-        market.set_version(new_version);
-        Ok(())
-    }
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    tx.query_typed(
+        "DELETE FROM market_countries WHERE market_id = $1",
+        &[(&s.id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_countries(tx, s).await?;
+    version_from_db(row.get(0))
 }
 
 async fn write_countries(tx: &impl GenericClient, s: &MarketSnapshot) -> Result<(), RepoError> {
@@ -222,44 +232,15 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
 
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
         let s = catalog.snapshot();
-        let (kind, context_id) = context_to_db(s.context);
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "INSERT INTO catalogs (id, version, context_kind, context_id, price_list_id)
-                 VALUES ($1, 1, $2, $3, $4)",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&kind, Type::TEXT),
-                    (&context_id, Type::UUID),
-                    (&s.price_list.map(|p| p.as_uuid()), Type::UUID),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_catalog(tx, &s).await)?;
         catalog.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
         let s = catalog.snapshot();
-        let mut conn = self.conn().await;
-        // A single statement is atomic on its own; membership rows are untouched.
-        let bumped = conn
-            .client()
-            .query_typed_opt(
-                "UPDATE catalogs SET version = version + 1, price_list_id = $3
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.price_list.map(|p| p.as_uuid()), Type::UUID),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let row = bumped.ok_or(RepoError::StaleVersion)?;
-        catalog.set_version(version_from_db(row.get(0))?);
+        let version = in_transaction!(self, |tx| update_catalog(tx, &s).await)?;
+        catalog.set_version(version);
         Ok(())
     }
 
@@ -268,18 +249,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
         catalog: CatalogId,
         products: &[ProductId],
     ) -> Result<(), RepoError> {
-        let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "INSERT INTO catalog_products (catalog_id, product_id)
-                 SELECT $1, product_id FROM unnest($2::uuid[]) AS t (product_id)
-                 ON CONFLICT DO NOTHING",
-                &[(&catalog.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
-            )
-            .await
-            .map_err(repo_error)?;
-        Ok(())
+        in_transaction!(self, |tx| add_catalog_products(tx, catalog, products).await)
     }
 
     async fn remove_products(
@@ -287,16 +257,8 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
         catalog: CatalogId,
         products: &[ProductId],
     ) -> Result<(), RepoError> {
-        let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "DELETE FROM catalog_products WHERE catalog_id = $1 AND product_id = ANY($2)",
-                &[(&catalog.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
-            )
-            .await
-            .map_err(repo_error)?;
-        Ok(())
+        in_transaction!(self, |tx| remove_catalog_products(tx, catalog, products)
+            .await)
     }
 
     async fn included_products(
@@ -324,6 +286,83 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
     }
 }
 
+/// `CatalogRepo::insert` inside the caller's transaction.
+pub(crate) async fn insert_catalog(
+    tx: &impl GenericClient,
+    s: &CatalogSnapshot,
+) -> Result<(), RepoError> {
+    let (kind, context_id) = context_to_db(s.context);
+    tx.query_typed(
+        "INSERT INTO catalogs (id, version, context_kind, context_id, price_list_id)
+         VALUES ($1, 1, $2, $3, $4)",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&kind, Type::TEXT),
+            (&context_id, Type::UUID),
+            (&s.price_list.map(|p| p.as_uuid()), Type::UUID),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
+/// `CatalogRepo::update` inside the caller's transaction; the new version. Membership
+/// rows are untouched.
+pub(crate) async fn update_catalog(
+    tx: &impl GenericClient,
+    s: &CatalogSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE catalogs SET version = version + 1, price_list_id = $3
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.price_list.map(|p| p.as_uuid()), Type::UUID),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    version_from_db(row.get(0))
+}
+
+/// `CatalogRepo::add_products` inside the caller's transaction.
+pub(crate) async fn add_catalog_products(
+    tx: &impl GenericClient,
+    catalog: CatalogId,
+    products: &[ProductId],
+) -> Result<(), RepoError> {
+    let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
+    tx.query_typed(
+        "INSERT INTO catalog_products (catalog_id, product_id)
+         SELECT $1, product_id FROM unnest($2::uuid[]) AS t (product_id)
+         ON CONFLICT DO NOTHING",
+        &[(&catalog.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
+/// `CatalogRepo::remove_products` inside the caller's transaction.
+pub(crate) async fn remove_catalog_products(
+    tx: &impl GenericClient,
+    catalog: CatalogId,
+    products: &[ProductId],
+) -> Result<(), RepoError> {
+    let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
+    tx.query_typed(
+        "DELETE FROM catalog_products WHERE catalog_id = $1 AND product_id = ANY($2)",
+        &[(&catalog.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
 // ---------- price lists ----------
 
 impl<C: PgConnection> PriceListRepo for PgStore<C> {
@@ -349,41 +388,15 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
         let s = price_list.snapshot();
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "INSERT INTO price_lists (id, version, currency, adjustment) VALUES ($1, 1, $2, $3)",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&s.currency.as_str(), Type::TEXT),
-                    (&s.adjustment.value(), Type::INT4),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_price_list(tx, &s).await)?;
         price_list.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
         let s = price_list.snapshot();
-        let mut conn = self.conn().await;
-        let bumped = conn
-            .client()
-            .query_typed_opt(
-                "UPDATE price_lists SET version = version + 1, currency = $3, adjustment = $4
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.currency.as_str(), Type::TEXT),
-                    (&s.adjustment.value(), Type::INT4),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let row = bumped.ok_or(RepoError::StaleVersion)?;
-        price_list.set_version(version_from_db(row.get(0))?);
+        let version = in_transaction!(self, |tx| update_price_list(tx, &s).await)?;
+        price_list.set_version(version);
         Ok(())
     }
 
@@ -392,29 +405,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         list: PriceListId,
         prices: &[(VariantId, Price)],
     ) -> Result<(), RepoError> {
-        let variants: Vec<Uuid> = prices.iter().map(|(v, _)| v.as_uuid()).collect();
-        let amounts: Vec<i64> = prices.iter().map(|(_, p)| p.money().amount()).collect();
-        let currencies: Vec<&str> = prices
-            .iter()
-            .map(|(_, p)| p.money().currency().as_str())
-            .collect();
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "INSERT INTO price_list_prices (price_list_id, variant_id, amount, currency)
-                 SELECT $1, v, a, c FROM unnest($2::uuid[], $3::bigint[], $4::text[]) AS t (v, a, c)
-                 ON CONFLICT (price_list_id, variant_id)
-                 DO UPDATE SET amount = EXCLUDED.amount, currency = EXCLUDED.currency",
-                &[
-                    (&list.as_uuid(), Type::UUID),
-                    (&variants, Type::UUID_ARRAY),
-                    (&amounts, Type::INT8_ARRAY),
-                    (&currencies, Type::TEXT_ARRAY),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        Ok(())
+        in_transaction!(self, |tx| set_fixed_prices(tx, list, prices).await)
     }
 
     async fn remove_fixed_prices(
@@ -422,16 +413,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         list: PriceListId,
         variants: &[VariantId],
     ) -> Result<(), RepoError> {
-        let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
-        let mut conn = self.conn().await;
-        conn.client()
-            .query_typed(
-                "DELETE FROM price_list_prices WHERE price_list_id = $1 AND variant_id = ANY($2)",
-                &[(&list.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
-            )
-            .await
-            .map_err(repo_error)?;
-        Ok(())
+        in_transaction!(self, |tx| remove_fixed_prices(tx, list, variants).await)
     }
 
     async fn fixed_prices(
@@ -462,4 +444,89 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             })
             .collect()
     }
+}
+
+/// `PriceListRepo::insert` inside the caller's transaction.
+pub(crate) async fn insert_price_list(
+    tx: &impl GenericClient,
+    s: &PriceListSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO price_lists (id, version, currency, adjustment) VALUES ($1, 1, $2, $3)",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.currency.as_str(), Type::TEXT),
+            (&s.adjustment.value(), Type::INT4),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
+/// `PriceListRepo::update` inside the caller's transaction; the new version.
+pub(crate) async fn update_price_list(
+    tx: &impl GenericClient,
+    s: &PriceListSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE price_lists SET version = version + 1, currency = $3, adjustment = $4
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.currency.as_str(), Type::TEXT),
+                (&s.adjustment.value(), Type::INT4),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    version_from_db(row.get(0))
+}
+
+/// `PriceListRepo::set_fixed_prices` inside the caller's transaction.
+pub(crate) async fn set_fixed_prices(
+    tx: &impl GenericClient,
+    list: PriceListId,
+    prices: &[(VariantId, Price)],
+) -> Result<(), RepoError> {
+    let variants: Vec<Uuid> = prices.iter().map(|(v, _)| v.as_uuid()).collect();
+    let amounts: Vec<i64> = prices.iter().map(|(_, p)| p.money().amount()).collect();
+    let currencies: Vec<&str> = prices
+        .iter()
+        .map(|(_, p)| p.money().currency().as_str())
+        .collect();
+    tx.query_typed(
+        "INSERT INTO price_list_prices (price_list_id, variant_id, amount, currency)
+         SELECT $1, v, a, c FROM unnest($2::uuid[], $3::bigint[], $4::text[]) AS t (v, a, c)
+         ON CONFLICT (price_list_id, variant_id)
+         DO UPDATE SET amount = EXCLUDED.amount, currency = EXCLUDED.currency",
+        &[
+            (&list.as_uuid(), Type::UUID),
+            (&variants, Type::UUID_ARRAY),
+            (&amounts, Type::INT8_ARRAY),
+            (&currencies, Type::TEXT_ARRAY),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
+/// `PriceListRepo::remove_fixed_prices` inside the caller's transaction.
+pub(crate) async fn remove_fixed_prices(
+    tx: &impl GenericClient,
+    list: PriceListId,
+    variants: &[VariantId],
+) -> Result<(), RepoError> {
+    let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
+    tx.query_typed(
+        "DELETE FROM price_list_prices WHERE price_list_id = $1 AND variant_id = ANY($2)",
+        &[(&list.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
 }

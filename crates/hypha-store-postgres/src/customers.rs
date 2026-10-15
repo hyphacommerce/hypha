@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{
     columns::{address_columns, address_from_row, version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> CustomerRepo for PgStore<C> {
@@ -28,54 +28,53 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
 
     async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError> {
         let s = customer.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        insert_customer(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_customer(tx, &s).await)?;
         customer.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, customer: &mut Customer) -> Result<(), RepoError> {
         let s = customer.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        // The version check comes first; the addresses are only replaced if it passes.
-        let bumped = tx
-            .query_typed_opt(
-                "UPDATE customers SET version = version + 1, email = $3, first_name = $4,
-                     last_name = $5, phone = $6, default_shipping_address_id = $7,
-                     default_billing_address_id = $8
-                 WHERE id = $1 AND version = $2 RETURNING version",
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&version_to_db(s.version)?, Type::INT8),
-                    (&s.email.as_str(), Type::TEXT),
-                    (&s.first_name, Type::TEXT),
-                    (&s.last_name, Type::TEXT),
-                    (&s.phone, Type::TEXT),
-                    (&s.default_shipping.map(|a| a.as_uuid()), Type::UUID),
-                    (&s.default_billing.map(|a| a.as_uuid()), Type::UUID),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let Some(row) = bumped else {
-            tx.rollback().await.map_err(repo_error)?;
-            return Err(RepoError::StaleVersion);
-        };
-        let new_version = version_from_db(row.get(0))?;
-        tx.query_typed(
-            "DELETE FROM customer_addresses WHERE customer_id = $1",
-            &[(&s.id.as_uuid(), Type::UUID)],
+        let version = in_transaction!(self, |tx| update_customer(tx, &s).await)?;
+        customer.set_version(version);
+        Ok(())
+    }
+}
+
+/// `CustomerRepo::update` inside the caller's transaction; the new version. The version
+/// check comes first; the addresses are only replaced if it passes.
+pub(crate) async fn update_customer(
+    tx: &impl GenericClient,
+    s: &CustomerSnapshot,
+) -> Result<Version, RepoError> {
+    let bumped = tx
+        .query_typed_opt(
+            "UPDATE customers SET version = version + 1, email = $3, first_name = $4,
+                 last_name = $5, phone = $6, default_shipping_address_id = $7,
+                 default_billing_address_id = $8
+             WHERE id = $1 AND version = $2 RETURNING version",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&version_to_db(s.version)?, Type::INT8),
+                (&s.email.as_str(), Type::TEXT),
+                (&s.first_name, Type::TEXT),
+                (&s.last_name, Type::TEXT),
+                (&s.phone, Type::TEXT),
+                (&s.default_shipping.map(|a| a.as_uuid()), Type::UUID),
+                (&s.default_billing.map(|a| a.as_uuid()), Type::UUID),
+            ],
         )
         .await
         .map_err(repo_error)?;
-        write_addresses(&tx, s.id, &s.addresses).await?;
-        tx.commit().await.map_err(repo_error)?;
-        customer.set_version(new_version);
-        Ok(())
-    }
+    let row = bumped.ok_or(RepoError::StaleVersion)?;
+    tx.query_typed(
+        "DELETE FROM customer_addresses WHERE customer_id = $1",
+        &[(&s.id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_addresses(tx, s.id, &s.addresses).await?;
+    version_from_db(row.get(0))
 }
 
 /// `CustomerRepo::insert` inside the caller's transaction (also used by `PgBatch`).

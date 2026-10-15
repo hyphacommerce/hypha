@@ -16,7 +16,7 @@ use crate::{
         currency_from_db, id_and_address, micros, ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> CartRepo for PgStore<C> {
@@ -27,20 +27,14 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
 
     async fn insert(&self, cart: &mut Cart) -> Result<(), RepoError> {
         let s = cart.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        insert_cart(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_cart(tx, &s).await)?;
         cart.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, cart: &mut Cart) -> Result<(), RepoError> {
         let s = cart.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        let new_version = update_cart(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        let new_version = in_transaction!(self, |tx| update_cart(tx, &s).await)?;
         cart.set_version(new_version);
         Ok(())
     }

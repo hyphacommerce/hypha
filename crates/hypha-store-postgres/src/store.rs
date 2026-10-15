@@ -97,7 +97,7 @@ macro_rules! consistent_read {
         let read = $crate::store::begin_consistent_read($client).await?;
         let $tx = &read;
         let value: Result<_, hypha_core::RepoError> = async { $body }.await;
-        $crate::store::end_consistent_read(read, value).await
+        $crate::store::end_transaction(read, value).await
     }};
 }
 pub(crate) use consistent_read;
@@ -114,13 +114,36 @@ pub(crate) async fn begin_consistent_read(
         .map_err(repo_error)
 }
 
-/// Commits the read if it succeeded; on error the transaction is dropped, which rolls
-/// it back.
-pub(crate) async fn end_consistent_read<T>(
-    read: Transaction<'_>,
+/// Runs a repository write as a batch of one (design note 0016, EV2): `body` (which
+/// returns `Result<_, RepoError>`) gets `tx: &Transaction` and calls the same
+/// `insert_x` / `update_x` functions `PgBatch::commit` does, then the transaction
+/// commits. On an error the transaction is dropped, which rolls it back, so a write
+/// that fails half-way (a stale version after some child rows) leaves nothing behind.
+/// A macro for the same reason as `consistent_read!`.
+///
+/// `in_transaction!(store, |tx| body)`.
+macro_rules! in_transaction {
+    ($store:expr, |$tx:ident| $body:expr) => {{
+        let mut conn = $store.conn().await;
+        let transaction = conn
+            .client()
+            .transaction()
+            .await
+            .map_err($crate::error::repo_error)?;
+        let $tx = &transaction;
+        let value: Result<_, hypha_core::RepoError> = async { $body }.await;
+        $crate::store::end_transaction(transaction, value).await
+    }};
+}
+pub(crate) use in_transaction;
+
+/// Commits a read or write if it succeeded; on error the transaction is dropped, which
+/// rolls it back.
+pub(crate) async fn end_transaction<T>(
+    tx: Transaction<'_>,
     value: Result<T, RepoError>,
 ) -> Result<T, RepoError> {
     let value = value?;
-    read.commit().await.map_err(repo_error)?;
+    tx.commit().await.map_err(repo_error)?;
     Ok(value)
 }

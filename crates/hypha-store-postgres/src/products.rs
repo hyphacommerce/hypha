@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::{
     columns::{currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
-    store::{PgConnection, PgStore, consistent_read},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> ProductRepo for PgStore<C> {
@@ -137,35 +137,36 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
 
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
         let s = product.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        tx.query_typed(
-            "INSERT INTO products (id, version, handle, title, status) VALUES ($1, 1, $2, $3, $4)",
-            &[
-                (&s.id.as_uuid(), Type::UUID),
-                (&s.handle, Type::TEXT),
-                (&s.title, Type::TEXT),
-                (&s.status.as_str(), Type::TEXT),
-            ],
-        )
-        .await
-        .map_err(repo_error)?;
-        write_children(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
+        in_transaction!(self, |tx| insert_product(tx, &s).await)?;
         product.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, product: &mut Product) -> Result<(), RepoError> {
         let s = product.snapshot();
-        let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        // Dropping the transaction on an error rolls it back.
-        let new_version = update_product(&tx, &s).await?;
-        tx.commit().await.map_err(repo_error)?;
-        product.set_version(new_version);
+        let version = in_transaction!(self, |tx| update_product(tx, &s).await)?;
+        product.set_version(version);
         Ok(())
     }
+}
+
+/// `ProductRepo::insert` inside the caller's transaction: the row, then its children.
+pub(crate) async fn insert_product(
+    tx: &impl GenericClient,
+    s: &ProductSnapshot,
+) -> Result<(), RepoError> {
+    tx.query_typed(
+        "INSERT INTO products (id, version, handle, title, status) VALUES ($1, 1, $2, $3, $4)",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&s.handle, Type::TEXT),
+            (&s.title, Type::TEXT),
+            (&s.status.as_str(), Type::TEXT),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_children(tx, s).await
 }
 
 /// `ProductRepo::update` inside a transaction (also a batch's): returns the new version.
