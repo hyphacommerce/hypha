@@ -1114,6 +1114,8 @@ export interface components {
         AddVariantRequest: {
             /** @description The base price, before markets and price lists. */
             price: components["schemas"]["Money"];
+            /** @description Defaults to `true`. */
+            requires_shipping?: boolean;
             /**
              * @description One value per option, in the order of the product's `options`; empty for a
              *     product without options.
@@ -1121,6 +1123,8 @@ export interface components {
             selections?: components["schemas"]["OptionValueId"][];
             /** @description Unique across the store when set. */
             sku?: string | null;
+            /** Format: int32 */
+            weight_grams?: number | null;
         };
         /**
          * @description A AddressId: `addr_` and 32 hex digits.
@@ -1557,6 +1561,7 @@ export interface components {
          */
         LocationId: string;
         LocationResponse: {
+            address?: components["schemas"]["PostalAddressResponse"] | null;
             id: components["schemas"]["LocationId"];
             markets: components["schemas"]["MarketId"][];
             name: string;
@@ -1735,6 +1740,35 @@ export interface components {
         };
         PasswordResetRequest: {
             email: string;
+        };
+        /**
+         * @description Sent: checked by `Address::new` (last name, first line and city required; text is
+         *     trimmed, at most 255 characters per field).
+         */
+        PostalAddressRequest: {
+            city: string;
+            company?: string | null;
+            /** @description ISO 3166-1 alpha-2, e.g. `HR`. */
+            country: string;
+            first_name?: string | null;
+            last_name: string;
+            line1: string;
+            line2?: string | null;
+            phone?: string | null;
+            postal_code?: string | null;
+            province?: string | null;
+        };
+        PostalAddressResponse: {
+            city: string;
+            company?: string | null;
+            country: components["schemas"]["CountryCode"];
+            first_name?: string | null;
+            last_name: string;
+            line1: string;
+            line2?: string | null;
+            phone?: string | null;
+            postal_code?: string | null;
+            province?: string | null;
         };
         /**
          * @description A PriceListId: `pl_` and 32 hex digits.
@@ -1979,6 +2013,7 @@ export interface components {
         };
         /** @description Every field optional: only the ones sent change. */
         UpdateLocationRequest: {
+            address?: components["schemas"]["PostalAddressRequest"] | null;
             markets?: components["schemas"]["MarketId"][];
             name?: string;
             /** Format: int32 */
@@ -2016,10 +2051,16 @@ export interface components {
         /** @description A variant's SKU, price and option values (JSON Merge Patch). */
         UpdateVariantRequest: {
             price?: components["schemas"]["Money"];
+            requires_shipping?: boolean;
             /** @description One value per option, in option order; another variant can't have them. */
             selections?: components["schemas"]["OptionValueId"][];
             /** @description `null` clears it. */
             sku?: string | null;
+            /**
+             * Format: int32
+             * @description `null` clears it.
+             */
+            weight_grams?: number | null;
         };
         /** @description A request for the client to send itself, with the file as its body. */
         UploadRequestResponse: {
@@ -2061,11 +2102,18 @@ export interface components {
             media_asset_id?: components["schemas"]["AssetId"] | null;
             /** @description The base price, before markets and price lists. */
             price: components["schemas"]["Money"];
+            /** @description `false` for what is never shipped (downloads, gift cards). */
+            requires_shipping: boolean;
             /** @description One value per option, in the order of `options`. */
             selections: components["schemas"]["OptionValueId"][];
             sku?: string | null;
             /** @description Its option values ("M / Blue"); `null` for a product without options. */
             title?: string | null;
+            /**
+             * Format: int32
+             * @description `null` when not entered; carriers and weight-tiered rates need it.
+             */
+            weight_grams?: number | null;
         };
         /**
          * @description `Visibility` on the wire.

@@ -1,6 +1,7 @@
 //! HTTP routes. Each module owns its request/response shapes (the API's own types,
 //! separate from domain types) and thin handlers that call one domain command.
 
+mod address;
 mod api_keys;
 mod assets;
 mod auth;

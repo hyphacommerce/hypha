@@ -62,6 +62,8 @@ pub async fn location_repo<R: LocationRepo>(make: impl AsyncFn() -> R) {
     location_stale(&make().await).await;
     scenario("location: serving lists a market's locations by priority, then ID");
     location_serving(&make().await).await;
+    scenario("location: an address round trips, every field, and can be removed");
+    location_address(&make().await).await;
 }
 
 async fn location_round_trips<R: LocationRepo>(repo: &R) {
@@ -325,4 +327,45 @@ async fn item_variant_on_update<R: InventoryItemRepo>(repo: &R) {
         Err(RepoError::Duplicate(keys::INVENTORY_ITEM_VARIANT))
     );
     assert_eq!(repo.get(item_id(2)).await, Ok(Some(other)));
+}
+
+async fn location_address<R: LocationRepo>(repo: &R) {
+    let full = hypha_core::Address::new(hypha_core::AddressParts {
+        first_name: Some("Ana".to_string()),
+        last_name: "Warehouse".to_string(),
+        company: Some("Hypha d.o.o.".to_string()),
+        line1: "Ilica 1".to_string(),
+        line2: Some("Ulaz B".to_string()),
+        city: "Zagreb".to_string(),
+        province: Some("Grad Zagreb".to_string()),
+        postal_code: Some("10000".to_string()),
+        country: "HR".to_string(),
+        phone: Some("+385 1 234 5678".to_string()),
+    })
+    .unwrap();
+    let mut l = location(1, &[1], 0);
+    l.set_address(Some(full));
+    repo.insert(&mut l).await.unwrap();
+    assert_eq!(repo.get(l.id()).await, Ok(Some(l.clone())));
+
+    // Only the required fields, then none.
+    let minimal = hypha_core::Address::new(hypha_core::AddressParts {
+        first_name: None,
+        last_name: "Store".to_string(),
+        company: None,
+        line1: "Main St 1".to_string(),
+        line2: None,
+        city: "Ljubljana".to_string(),
+        province: None,
+        postal_code: None,
+        country: "SI".to_string(),
+        phone: None,
+    })
+    .unwrap();
+    l.set_address(Some(minimal));
+    repo.update(&mut l).await.unwrap();
+    assert_eq!(repo.get(l.id()).await, Ok(Some(l.clone())));
+    l.set_address(None);
+    repo.update(&mut l).await.unwrap();
+    assert_eq!(repo.get(l.id()).await, Ok(Some(l)));
 }

@@ -209,6 +209,12 @@ impl Product {
         if let Some(selections) = patch.selections {
             variant.set_selections(selections);
         }
+        if let Some(weight) = patch.weight {
+            variant.set_weight(weight);
+        }
+        if let Some(requires) = patch.requires_shipping {
+            variant.set_requires_shipping(requires);
+        }
         Ok(())
     }
 
@@ -272,7 +278,7 @@ impl Product {
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use hypha_core::{Currency, Money, Price, ProductId, TextError};
+    use hypha_core::{Currency, Money, Price, ProductId, TextError, Weight};
     use uuid::Uuid;
 
     use super::*;
@@ -738,6 +744,31 @@ mod tests {
         assert_eq!(p.update_variant(var(1), to(vec![val(11), val(21)])), Ok(()));
         assert_eq!(p.update_variant(var(1), to(vec![val(12), val(21)])), Ok(()));
         assert_eq!(p.variant_title(var(1)), Some("M / Red".to_string()));
+    }
+
+    #[test]
+    fn a_variant_has_no_weight_and_requires_shipping_until_told_otherwise() {
+        let mut p = shirt();
+        let v = p.variant(var(1)).unwrap();
+        assert_eq!((v.weight(), v.requires_shipping()), (None, true));
+        let patch = VariantPatch {
+            weight: Some(Some(Weight::from_grams(320))),
+            requires_shipping: Some(false),
+            ..VariantPatch::default()
+        };
+        assert_eq!(p.update_variant(var(1), patch), Ok(()));
+        let v = p.variant(var(1)).unwrap();
+        assert_eq!(
+            (v.weight(), v.requires_shipping()),
+            (Some(Weight::from_grams(320)), false)
+        );
+
+        let clear = VariantPatch {
+            weight: Some(None),
+            ..VariantPatch::default()
+        };
+        assert_eq!(p.update_variant(var(1), clear), Ok(()));
+        assert_eq!(p.variant(var(1)).unwrap().weight(), None);
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, LocationId, MarketId, Quantity,
-    RepoError, Scope, VariantId, report_duplicate,
+    Address, AddressParts, AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, LocationId,
+    MarketId, Quantity, RepoError, Scope, VariantId, report_duplicate,
 };
 use thiserror::Error;
 
@@ -101,6 +101,8 @@ pub struct UpdateLocation {
     pub name: Option<String>,
     pub markets: Option<Vec<MarketId>>,
     pub priority: Option<u32>,
+    /// `Some(None)` removes the address.
+    pub address: Option<Option<AddressParts>>,
 }
 
 pub async fn update_location<L: LocationRepo>(
@@ -120,6 +122,10 @@ pub async fn update_location<L: LocationRepo>(
     }
     if let Some(priority) = input.priority {
         location.set_priority(priority);
+    }
+    if let Some(address) = input.address {
+        let address = address.map(Address::new).transpose();
+        location.set_address(address.map_err(InventoryError::from)?);
     }
     locations.update(&mut location).await?;
     Ok(location)

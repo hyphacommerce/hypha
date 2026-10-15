@@ -34,6 +34,8 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     list_pages(&make().await).await;
     scenario("product: media and variant media round trip, in order");
     media_round_trips(&make().await).await;
+    scenario("product: variant weight and requires_shipping round trip");
+    shipping_facts_round_trip(&make().await).await;
     scenario("product: get_by_sku matches the exact SKU");
     sku_lookup(&make().await).await;
     scenario("product: SKUs stay unique across products, on insert and update");
@@ -488,4 +490,38 @@ async fn sku_key<R: ProductRepo>(repo: &R) {
         .unwrap();
     repo.update(&mut first).await.unwrap();
     assert_eq!(repo.get(pid(1)).await, Ok(Some(first)));
+}
+
+async fn shipping_facts_round_trip<R: ProductRepo>(repo: &R) {
+    let mut p = shirt(1, "shirt");
+    p.update_variant(
+        vid(101),
+        VariantPatch {
+            weight: Some(Some(hypha_core::Weight::from_grams(u32::MAX))),
+            ..VariantPatch::default()
+        },
+    )
+    .unwrap();
+    p.update_variant(
+        vid(102),
+        VariantPatch {
+            weight: Some(Some(hypha_core::Weight::ZERO)),
+            requires_shipping: Some(false),
+            ..VariantPatch::default()
+        },
+    )
+    .unwrap();
+    repo.insert(&mut p).await.unwrap();
+    assert_eq!(repo.get(p.id()).await, Ok(Some(p.clone())));
+
+    p.update_variant(
+        vid(101),
+        VariantPatch {
+            weight: Some(None),
+            ..VariantPatch::default()
+        },
+    )
+    .unwrap();
+    repo.update(&mut p).await.unwrap();
+    assert_eq!(repo.get(p.id()).await, Ok(Some(p)));
 }

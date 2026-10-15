@@ -9,7 +9,7 @@ use crate::{
     error::ProductError,
     handle::Handle,
     option::{OptionValue, ProductOption},
-    variant::{NewVariant, Variant},
+    variant::{NewVariant, Variant, VariantPatch},
 };
 
 mod edit;
@@ -359,6 +359,8 @@ pub struct VariantSnapshot {
     pub selections: Vec<OptionValueId>,
     /// One of the product's `media`.
     pub media: Option<AssetId>,
+    pub weight: Option<hypha_core::Weight>,
+    pub requires_shipping: bool,
 }
 
 impl Product {
@@ -395,6 +397,8 @@ impl Product {
                     base_price: v.base_price().money(),
                     selections: v.selections().to_vec(),
                     media: v.media(),
+                    weight: v.weight(),
+                    requires_shipping: v.requires_shipping(),
                 })
                 .collect(),
             media: self.media.clone(),
@@ -441,6 +445,14 @@ impl Product {
                 selections: v.selections,
             })?;
             product.set_variant_media(v.id, v.media)?;
+            product.update_variant(
+                v.id,
+                VariantPatch {
+                    weight: Some(v.weight),
+                    requires_shipping: Some(v.requires_shipping),
+                    ..VariantPatch::default()
+                },
+            )?;
         }
         if product.variants.is_empty() {
             return Err(ProductError::NoVariants);
@@ -785,6 +797,21 @@ mod tests {
     }
 
     #[test]
+    fn restore_round_trips_shipping_facts() {
+        let mut p = shirt();
+        p.update_variant(
+            var(1),
+            VariantPatch {
+                weight: Some(Some(hypha_core::Weight::from_grams(500))),
+                requires_shipping: Some(false),
+                ..VariantPatch::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(Product::restore(p.snapshot()), Ok(p));
+    }
+
+    #[test]
     fn restore_round_trips_simple_product() {
         let p = simple();
         assert_eq!(Product::restore(p.snapshot()), Ok(p));
@@ -837,6 +864,8 @@ mod tests {
             base_price: price().money(),
             selections: vec![],
             media: None,
+            weight: None,
+            requires_shipping: true,
         });
         assert_eq!(Product::restore(s), Err(ProductError::DuplicateCombination));
     }

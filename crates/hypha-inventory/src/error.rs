@@ -1,4 +1,6 @@
-use hypha_core::{ErrorCode, LocationId, MarketId, QuantityError, TextError, VariantId};
+use hypha_core::{
+    AddressError, ErrorCode, LocationId, MarketId, QuantityError, TextError, VariantId,
+};
 use thiserror::Error;
 
 use crate::{MAX_STOCK, ReservationRef};
@@ -7,6 +9,8 @@ use crate::{MAX_STOCK, ReservationRef};
 pub enum InventoryError {
     #[error(transparent)]
     Text(#[from] TextError),
+    #[error(transparent)]
+    Address(#[from] AddressError),
     #[error("market {0} is listed more than once")]
     DuplicateMarket(MarketId),
     #[error("stock must be between -{MAX_STOCK} and {MAX_STOCK}, got {0}")]
@@ -48,6 +52,7 @@ impl ErrorCode for InventoryError {
     fn code(&self) -> &'static str {
         match self {
             InventoryError::Text(e) => e.code(),
+            InventoryError::Address(e) => e.code(),
             InventoryError::DuplicateMarket(_) => "duplicate_market",
             InventoryError::StockOutOfRange(_) => "stock_out_of_range",
             InventoryError::OnHandChanged { .. } => "on_hand_changed",

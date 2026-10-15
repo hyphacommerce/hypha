@@ -515,6 +515,7 @@ impl From<hypha_inventory::CommandError> for ApiError {
             }
             E::Inventory(
                 I::Text(_)
+                | I::Address(_)
                 | I::DuplicateMarket(_)
                 | I::StockOutOfRange(_)
                 | I::Quantity(_)

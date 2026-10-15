@@ -1,4 +1,4 @@
-use hypha_core::{AssetId, OptionValueId, Price, VariantId};
+use hypha_core::{AssetId, OptionValueId, Price, VariantId, Weight};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variant {
@@ -7,8 +7,14 @@ pub struct Variant {
     base_price: Price,
     selections: Vec<OptionValueId>,
     media: Option<AssetId>,
+    /// A fact about the product, read by shipping (design note 0015, SH11); `None` when
+    /// not entered.
+    weight: Option<Weight>,
+    /// `false` for what is never shipped (downloads, gift cards).
+    requires_shipping: bool,
 }
 
+/// A new variant has no weight and requires shipping; `VariantPatch` changes either.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewVariant {
     pub id: VariantId,
@@ -23,6 +29,9 @@ pub struct VariantPatch {
     pub sku: Option<Option<String>>,
     pub price: Option<Price>,
     pub selections: Option<Vec<OptionValueId>>,
+    /// `Some(None)` clears the weight.
+    pub weight: Option<Option<Weight>>,
+    pub requires_shipping: Option<bool>,
 }
 
 impl Variant {
@@ -38,6 +47,8 @@ impl Variant {
             base_price,
             selections,
             media: None,
+            weight: None,
+            requires_shipping: true,
         }
     }
 
@@ -57,6 +68,12 @@ impl Variant {
     pub fn media(&self) -> Option<AssetId> {
         self.media
     }
+    pub fn weight(&self) -> Option<Weight> {
+        self.weight
+    }
+    pub fn requires_shipping(&self) -> bool {
+        self.requires_shipping
+    }
 
     pub(crate) fn set_sku(&mut self, sku: Option<String>) {
         self.sku = sku;
@@ -69,5 +86,11 @@ impl Variant {
     }
     pub(crate) fn set_media(&mut self, media: Option<AssetId>) {
         self.media = media;
+    }
+    pub(crate) fn set_weight(&mut self, weight: Option<Weight>) {
+        self.weight = weight;
+    }
+    pub(crate) fn set_requires_shipping(&mut self, requires: bool) {
+        self.requires_shipping = requires;
     }
 }

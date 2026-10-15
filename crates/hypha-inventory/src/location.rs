@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use hypha_core::{LocationId, MarketId, Version, Versioned, required_text};
+use hypha_core::{Address, AddressParts, LocationId, MarketId, Version, Versioned, required_text};
 
 use crate::InventoryError;
 
@@ -17,6 +17,8 @@ pub struct Location {
     name: String,
     markets: Vec<MarketId>,
     priority: u32,
+    /// Where it ships from: the origin carriers quote from (design note 0015, SH11).
+    address: Option<Address>,
 }
 
 impl Versioned for Location {
@@ -42,6 +44,7 @@ impl Location {
             name: String::new(),
             markets: Vec::new(),
             priority,
+            address: None,
         };
         location.set_name(name)?;
         location.set_markets(markets)?;
@@ -67,6 +70,10 @@ impl Location {
         self.priority = priority;
     }
 
+    pub fn set_address(&mut self, address: Option<Address>) {
+        self.address = address;
+    }
+
     pub fn serves(&self, market: MarketId) -> bool {
         self.markets.contains(&market)
     }
@@ -86,6 +93,10 @@ impl Location {
     pub fn priority(&self) -> u32 {
         self.priority
     }
+
+    pub fn address(&self) -> Option<&Address> {
+        self.address.as_ref()
+    }
 }
 
 /// Plain-data form of a `Location` for storage adapters (design note 0001, 3.4).
@@ -96,6 +107,8 @@ pub struct LocationSnapshot {
     pub name: String,
     pub markets: Vec<MarketId>,
     pub priority: u32,
+    /// Checked by `Address::new` on restore.
+    pub address: Option<AddressParts>,
 }
 
 impl Location {
@@ -106,12 +119,14 @@ impl Location {
             name: self.name.clone(),
             markets: self.markets.clone(),
             priority: self.priority,
+            address: self.address.as_ref().map(|a| a.parts().clone()),
         }
     }
 
     /// Rebuilds a location from storage, with the same checks as `new`.
     pub fn restore(s: LocationSnapshot) -> Result<Location, InventoryError> {
         let mut location = Location::new(s.id, s.name, s.markets, s.priority)?;
+        location.address = s.address.map(Address::new).transpose()?;
         location.version = s.version;
         Ok(location)
     }

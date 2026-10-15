@@ -112,6 +112,8 @@ fn variant(sku: Option<&str>, selections: Vec<OptionValueId>) -> AddVariant {
         sku: sku.map(str::to_string),
         price: eur(1200),
         selections,
+        weight: None,
+        requires_shipping: true,
     }
 }
 

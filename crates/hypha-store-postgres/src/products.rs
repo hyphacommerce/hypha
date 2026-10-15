@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use hypha_core::{
     AssetId, Money, OptionId, OptionValueId, Page, PageRequest, Price, ProductId, RepoError,
-    VariantId, Version, Versioned,
+    VariantId, Version, Versioned, Weight,
 };
 use hypha_products::{
     Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductRepo, ProductSnapshot,
@@ -277,14 +277,23 @@ async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<
         .iter()
         .map(|v| v.media.map(|id| id.as_uuid()))
         .collect();
+    let weights: Vec<Option<i64>> = s
+        .variants
+        .iter()
+        .map(|v| v.weight.map(|w| i64::from(w.grams())))
+        .collect();
+    let requires_shipping: Vec<bool> = s.variants.iter().map(|v| v.requires_shipping).collect();
     tx.query_typed(
         "INSERT INTO variants
             (id, product_id, position, sku, price_amount, price_currency, selections,
-             media_asset_id)
+             media_asset_id, weight_grams, requires_shipping)
          SELECT v.id, $1, v.ord - 1, v.sku, v.amount, v.currency,
-                ($7::uuid[])[(v.ord - 1) * $6 + 1 : v.ord * $6], v.media
-         FROM unnest($2::uuid[], $3::text[], $4::int8[], $5::text[], $8::uuid[])
-              WITH ORDINALITY AS v(id, sku, amount, currency, media, ord)",
+                ($7::uuid[])[(v.ord - 1) * $6 + 1 : v.ord * $6], v.media, v.weight,
+                v.requires_shipping
+         FROM unnest($2::uuid[], $3::text[], $4::int8[], $5::text[], $8::uuid[], $9::int8[],
+                     $10::bool[])
+              WITH ORDINALITY AS v(id, sku, amount, currency, media, weight,
+                                   requires_shipping, ord)",
         &[
             (&product_id, Type::UUID),
             (&variant_ids, Type::UUID_ARRAY),
@@ -294,6 +303,8 @@ async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<
             (&per_variant, Type::INT8),
             (&selections, Type::UUID_ARRAY),
             (&media, Type::UUID_ARRAY),
+            (&weights, Type::INT8_ARRAY),
+            (&requires_shipping, Type::BOOL_ARRAY),
         ],
     )
     .await
@@ -373,7 +384,8 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
     let mut variants: HashMap<Uuid, Vec<VariantSnapshot>> = HashMap::new();
     for row in client
         .query_typed(
-            "SELECT product_id, id, sku, price_amount, price_currency, selections, media_asset_id
+            "SELECT product_id, id, sku, price_amount, price_currency, selections, media_asset_id,
+                    weight_grams, requires_shipping
              FROM variants WHERE product_id = ANY($1) ORDER BY product_id, position",
             &param,
         )
@@ -395,6 +407,12 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
                     .map(OptionValueId::from_uuid)
                     .collect(),
                 media: row.get::<_, Option<Uuid>>(6).map(AssetId::from_uuid),
+                weight: row
+                    .get::<_, Option<i64>>(7)
+                    .map(|g| u32::try_from(g).map(Weight::from_grams))
+                    .transpose()
+                    .map_err(corrupt)?,
+                requires_shipping: row.get(8),
             });
     }
 

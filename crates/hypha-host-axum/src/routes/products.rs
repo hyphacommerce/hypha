@@ -1,5 +1,5 @@
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AssetId, Money, OptionId, OptionValueId, ProductId, VariantId};
+use hypha_core::{AssetId, Money, OptionId, OptionValueId, ProductId, VariantId, Weight};
 use hypha_media::{Asset, HasAssets};
 use hypha_merchandising::{
     ProductSummaryView, ProductView, get_product_view, list_product_views, set_product_media,
@@ -165,6 +165,10 @@ pub(super) struct VariantResponse {
     selections: Vec<OptionValueId>,
     /// The item of the product's `media` this variant shows (an image), if any.
     media_asset_id: Option<AssetId>,
+    /// `null` when not entered; carriers and weight-tiered rates need it.
+    weight_grams: Option<u32>,
+    /// `false` for what is never shipped (downloads, gift cards).
+    requires_shipping: bool,
 }
 
 impl ProductResponse {
@@ -201,6 +205,8 @@ impl ProductResponse {
                     title: p.variant_title(v.id()),
                     selections: v.selections().to_vec(),
                     media_asset_id: v.media(),
+                    weight_grams: v.weight().map(Weight::grams),
+                    requires_shipping: v.requires_shipping(),
                 })
                 .collect(),
             media: media_items(&view.media, media).await?,
@@ -567,6 +573,15 @@ pub(super) struct AddVariantRequest {
     /// product without options.
     #[serde(default)]
     selections: Vec<OptionValueId>,
+    #[serde(default)]
+    weight_grams: Option<u32>,
+    /// Defaults to `true`.
+    #[serde(default = "shipped")]
+    requires_shipping: bool,
+}
+
+fn shipped() -> bool {
+    true
 }
 
 /// Adds a variant: one combination of option values that isn't taken yet.
@@ -590,6 +605,8 @@ pub(super) async fn add_variant<S: Storage>(
         sku: req.sku,
         price: req.price,
         selections: req.selections,
+        weight: req.weight_grams.map(Weight::from_grams),
+        requires_shipping: req.requires_shipping,
     };
     let product = add_product_variant(&ctx, ports.products(), &state.ids, id, input).await?;
     Ok((StatusCode::CREATED, respond(&state, &ports, product).await?))
@@ -610,6 +627,13 @@ pub(super) struct UpdateVariantRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = Vec<OptionValueId>, required = false)]
     selections: Option<Vec<OptionValueId>>,
+    /// `null` clears it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<u32>, required = false)]
+    weight_grams: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = bool, required = false)]
+    requires_shipping: Option<bool>,
 }
 
 /// Changes a variant.
@@ -633,6 +657,8 @@ pub(super) async fn update_variant<S: Storage>(
         sku: req.sku,
         price: req.price,
         selections: req.selections,
+        weight: req.weight_grams.map(|w| w.map(Weight::from_grams)),
+        requires_shipping: req.requires_shipping,
     };
     let product = update_product_variant(&ctx, ports.products(), id, variant, input).await?;
     respond(&state, &ports, product).await

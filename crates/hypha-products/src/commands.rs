@@ -1,6 +1,6 @@
 use hypha_core::{
     AuthError, Ctx, ErrorCode, IdGenerator, Money, MoneyError, OptionValueId, Page, PageRequest,
-    Price, ProductId, RepoError, Scope, VariantId, report_duplicate,
+    Price, ProductId, RepoError, Scope, VariantId, Weight, report_duplicate,
 };
 use thiserror::Error;
 
@@ -188,6 +188,9 @@ pub struct AddVariant {
     pub price: Money,
     /// One value per option, in option order.
     pub selections: Vec<OptionValueId>,
+    pub weight: Option<Weight>,
+    /// `true` unless the variant is never shipped (design note 0015, SH11).
+    pub requires_shipping: bool,
 }
 
 /// Adds one variant: the combination a merchant sells, never all of them (E5).
@@ -208,6 +211,14 @@ pub async fn add_product_variant<R: ProductRepo, I: IdGenerator>(
         price,
         selections: input.selections,
     })?;
+    product.update_variant(
+        variant,
+        VariantPatch {
+            weight: Some(input.weight),
+            requires_shipping: Some(input.requires_shipping),
+            ..VariantPatch::default()
+        },
+    )?;
     let sku = product
         .variant(variant)
         .and_then(|v| v.sku())
@@ -222,6 +233,9 @@ pub struct UpdateVariant {
     pub sku: Option<Option<String>>,
     pub price: Option<Money>,
     pub selections: Option<Vec<OptionValueId>>,
+    /// `Some(None)` clears the weight.
+    pub weight: Option<Option<Weight>>,
+    pub requires_shipping: Option<bool>,
 }
 
 pub async fn update_product_variant<R: ProductRepo>(
@@ -244,6 +258,8 @@ pub async fn update_product_variant<R: ProductRepo>(
             sku: input.sku,
             price,
             selections: input.selections,
+            weight: input.weight,
+            requires_shipping: input.requires_shipping,
         },
     )?;
     let sku = product

@@ -10,6 +10,7 @@ use hypha_inventory::{
 };
 use serde::{Deserialize, Serialize};
 
+use super::address::{PostalAddressRequest, PostalAddressResponse};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
@@ -47,6 +48,10 @@ pub(super) struct UpdateLocationRequest {
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = u32, required = false)]
     priority: Option<u32>,
+    /// Where it ships from; `null` removes it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<PostalAddressRequest>, required = false)]
+    address: Option<Option<PostalAddressRequest>>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -55,6 +60,8 @@ pub(super) struct LocationResponse {
     name: String,
     markets: Vec<MarketId>,
     priority: u32,
+    /// Where it ships from: carriers quote from it. `null` until set.
+    address: Option<PostalAddressResponse>,
 }
 
 impl From<&Location> for LocationResponse {
@@ -64,6 +71,7 @@ impl From<&Location> for LocationResponse {
             name: l.name().to_string(),
             markets: l.markets().to_vec(),
             priority: l.priority(),
+            address: l.address().map(PostalAddressResponse::from),
         }
     }
 }
@@ -133,6 +141,7 @@ pub(super) async fn update_location_handler<S: Storage>(
         name: req.name,
         markets: req.markets,
         priority: req.priority,
+        address: req.address.map(|a| a.map(Into::into)),
     };
     let location = update_location(&ctx, ports.locations(), id, input)
         .await

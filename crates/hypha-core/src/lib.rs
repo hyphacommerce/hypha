@@ -15,6 +15,7 @@ pub mod scope;
 pub mod text;
 pub mod time;
 pub mod version;
+pub mod weight;
 
 pub use address::{Address, AddressError, AddressParts};
 pub use country::{CountryCode, CountryError};
@@ -41,3 +42,4 @@ pub use scope::Scope;
 pub use text::{MAX_TEXT_LEN, TextError, optional_text, required_text};
 pub use time::Timestamp;
 pub use version::{Version, Versioned};
+pub use weight::{TotalWeight, Weight};

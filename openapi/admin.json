@@ -9128,6 +9128,10 @@
             "$ref": "#/components/schemas/Money",
             "description": "The base price, before markets and price lists."
           },
+          "requires_shipping": {
+            "type": "boolean",
+            "description": "Defaults to `true`."
+          },
           "selections": {
             "type": "array",
             "items": {
@@ -9141,6 +9145,14 @@
               "null"
             ],
             "description": "Unique across the store when set."
+          },
+          "weight_grams": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -10536,6 +10548,17 @@
           "priority"
         ],
         "properties": {
+          "address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressResponse",
+                "description": "Where it ships from: carriers quote from it. `null` until set."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "$ref": "#/components/schemas/LocationId"
           },
@@ -11105,6 +11128,127 @@
           }
         },
         "additionalProperties": false
+      },
+      "PostalAddressRequest": {
+        "type": "object",
+        "description": "Sent: checked by `Address::new` (last name, first line and city required; text is\ntrimmed, at most 255 characters per field).",
+        "required": [
+          "last_name",
+          "line1",
+          "city",
+          "country"
+        ],
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string",
+            "description": "ISO 3166-1 alpha-2, e.g. `HR`."
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "PostalAddressResponse": {
+        "type": "object",
+        "required": [
+          "last_name",
+          "line1",
+          "city",
+          "country"
+        ],
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "PriceListId": {
         "type": "string",
@@ -11808,6 +11952,17 @@
         "type": "object",
         "description": "Every field optional: only the ones sent change.",
         "properties": {
+          "address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressRequest",
+                "description": "Where it ships from; `null` removes it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "markets": {
             "type": "array",
             "items": {
@@ -11909,6 +12064,9 @@
           "price": {
             "$ref": "#/components/schemas/Money"
           },
+          "requires_shipping": {
+            "type": "boolean"
+          },
           "selections": {
             "type": "array",
             "items": {
@@ -11922,6 +12080,15 @@
               "null"
             ],
             "description": "`null` clears it."
+          },
+          "weight_grams": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "`null` clears it.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -12026,7 +12193,8 @@
         "required": [
           "id",
           "price",
-          "selections"
+          "selections",
+          "requires_shipping"
         ],
         "properties": {
           "id": {
@@ -12047,6 +12215,10 @@
             "$ref": "#/components/schemas/Money",
             "description": "The base price, before markets and price lists."
           },
+          "requires_shipping": {
+            "type": "boolean",
+            "description": "`false` for what is never shipped (downloads, gift cards)."
+          },
           "selections": {
             "type": "array",
             "items": {
@@ -12066,6 +12238,15 @@
               "null"
             ],
             "description": "Its option values (\"M / Blue\"); `null` for a product without options."
+          },
+          "weight_grams": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "`null` when not entered; carriers and weight-tiered rates need it.",
+            "minimum": 0
           }
         }
       },
