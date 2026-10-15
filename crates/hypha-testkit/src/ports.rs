@@ -56,9 +56,9 @@ impl Default for InMemoryPorts {
         Self {
             carts: InMemoryCartRepo::default(),
             products: InMemoryProductRepo::sharing(&outbox),
-            markets: InMemoryMarketRepo::default(),
-            catalogs: InMemoryCatalogRepo::default(),
-            price_lists: InMemoryPriceListRepo::default(),
+            markets: InMemoryMarketRepo::sharing(&outbox),
+            catalogs: InMemoryCatalogRepo::sharing(&outbox),
+            price_lists: InMemoryPriceListRepo::sharing(&outbox),
             tax_classes: InMemoryTaxClassRepo::default(),
             tax_regions: InMemoryTaxRegionRepo::default(),
             inventory_items: InMemoryInventoryItemRepo::default(),

@@ -12,7 +12,7 @@ use hypha_markets::{
     set_fixed_prices, update_market,
 };
 use hypha_testkit::{
-    InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo, SequentialIds,
+    InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPorts, InMemoryPriceListRepo, SequentialIds,
 };
 use pollster::block_on;
 use uuid::Uuid;
@@ -217,13 +217,14 @@ fn create_price_list_requires_pricing_write() {
 
 #[test]
 fn set_fixed_prices_stores_them() {
-    let lists = InMemoryPriceListRepo::default();
+    let ports = InMemoryPorts::default();
+    let lists = &ports.price_lists;
     let ids = SequentialIds::default();
-    let list = stored_list(&lists, &ids);
+    let list = stored_list(lists, &ids);
 
     block_on(set_fixed_prices(
         &Ctx::system(),
-        &lists,
+        &ports,
         list,
         vec![fixed(1, 900, Currency::Eur), fixed(2, 0, Currency::Eur)],
     ))
@@ -237,14 +238,15 @@ fn set_fixed_prices_stores_them() {
 
 #[test]
 fn set_fixed_prices_rejects_negative_price_and_stores_nothing() {
-    let lists = InMemoryPriceListRepo::default();
+    let ports = InMemoryPorts::default();
+    let lists = &ports.price_lists;
     let ids = SequentialIds::default();
-    let list = stored_list(&lists, &ids);
+    let list = stored_list(lists, &ids);
 
     assert_eq!(
         block_on(set_fixed_prices(
             &Ctx::system(),
-            &lists,
+            &ports,
             list,
             vec![fixed(1, 900, Currency::Eur), fixed(2, -1, Currency::Eur)]
         )),
@@ -258,14 +260,15 @@ fn set_fixed_prices_rejects_negative_price_and_stores_nothing() {
 
 #[test]
 fn set_fixed_prices_rejects_duplicate_variant() {
-    let lists = InMemoryPriceListRepo::default();
+    let ports = InMemoryPorts::default();
+    let lists = &ports.price_lists;
     let ids = SequentialIds::default();
-    let list = stored_list(&lists, &ids);
+    let list = stored_list(lists, &ids);
 
     assert_eq!(
         block_on(set_fixed_prices(
             &Ctx::system(),
-            &lists,
+            &ports,
             list,
             vec![fixed(1, 900, Currency::Eur), fixed(1, 800, Currency::Eur)]
         )),
@@ -277,14 +280,15 @@ fn set_fixed_prices_rejects_duplicate_variant() {
 
 #[test]
 fn set_fixed_prices_rejects_other_currency_and_stores_nothing() {
-    let lists = InMemoryPriceListRepo::default();
+    let ports = InMemoryPorts::default();
+    let lists = &ports.price_lists;
     let ids = SequentialIds::default();
-    let list = stored_list(&lists, &ids);
+    let list = stored_list(lists, &ids);
 
     assert_eq!(
         block_on(set_fixed_prices(
             &Ctx::system(),
-            &lists,
+            &ports,
             list,
             vec![fixed(1, 900, Currency::Eur), fixed(2, 900, Currency::Usd)]
         )),
@@ -304,25 +308,26 @@ fn set_fixed_prices_rejects_other_currency_and_stores_nothing() {
 
 #[test]
 fn set_fixed_prices_rejects_unknown_list() {
-    let lists = InMemoryPriceListRepo::default();
+    let ports = InMemoryPorts::default();
     let unknown = PriceListId::from_uuid(Uuid::from_u128(99));
 
     assert_eq!(
-        block_on(set_fixed_prices(&Ctx::system(), &lists, unknown, vec![])),
+        block_on(set_fixed_prices(&Ctx::system(), &ports, unknown, vec![])),
         Err(CommandError::PriceListNotFound(unknown))
     );
 }
 
 #[test]
 fn set_fixed_prices_requires_pricing_write() {
-    let lists = InMemoryPriceListRepo::default();
+    let ports = InMemoryPorts::default();
+    let lists = &ports.price_lists;
     let ids = SequentialIds::default();
-    let list = stored_list(&lists, &ids);
+    let list = stored_list(lists, &ids);
 
     assert_eq!(
         block_on(set_fixed_prices(
             &user(vec![Scope::PricingRead]),
-            &lists,
+            &ports,
             list,
             vec![]
         )),
@@ -334,12 +339,13 @@ fn set_fixed_prices_requires_pricing_write() {
 
 #[test]
 fn remove_fixed_prices_deletes_them() {
-    let lists = InMemoryPriceListRepo::default();
+    let ports = InMemoryPorts::default();
+    let lists = &ports.price_lists;
     let ids = SequentialIds::default();
-    let list = stored_list(&lists, &ids);
+    let list = stored_list(lists, &ids);
     block_on(set_fixed_prices(
         &Ctx::system(),
-        &lists,
+        &ports,
         list,
         vec![fixed(1, 900, Currency::Eur), fixed(2, 800, Currency::Eur)],
     ))
@@ -347,7 +353,7 @@ fn remove_fixed_prices_deletes_them() {
 
     block_on(remove_fixed_prices(
         &Ctx::system(),
-        &lists,
+        &ports,
         list,
         vec![vid(1)],
     ))
@@ -356,6 +362,14 @@ fn remove_fixed_prices_deletes_them() {
     assert_eq!(
         block_on(lists.fixed_prices(list, &[vid(1), vid(2)])),
         Ok(HashMap::from([(vid(2), eur(800))]))
+    );
+    assert_eq!(
+        ports.outbox.types(),
+        [
+            "price_list.changed",
+            "price_list.prices_set",
+            "price_list.prices_removed"
+        ]
     );
 }
 
@@ -591,19 +605,20 @@ fn stored_catalog(catalogs: &InMemoryCatalogRepo) -> CatalogId {
 
 #[test]
 fn add_and_remove_catalog_products() {
-    let catalogs = InMemoryCatalogRepo::default();
-    let catalog = stored_catalog(&catalogs);
+    let ports = InMemoryPorts::default();
+    let catalogs = &ports.catalogs;
+    let catalog = stored_catalog(catalogs);
 
     block_on(add_catalog_products(
         &Ctx::system(),
-        &catalogs,
+        &ports,
         catalog,
         vec![pid(1), pid(2)],
     ))
     .unwrap();
     block_on(remove_catalog_products(
         &Ctx::system(),
-        &catalogs,
+        &ports,
         catalog,
         vec![pid(1)],
     ))
@@ -613,17 +628,31 @@ fn add_and_remove_catalog_products() {
         block_on(catalogs.included_products(catalog, &[pid(1), pid(2)])),
         Ok(HashSet::from([pid(2)]))
     );
+    let events = ports.outbox.events();
+    let types: Vec<&str> = events.iter().map(|e| e.event_type.as_str()).collect();
+    assert_eq!(
+        types,
+        [
+            "catalog.changed",
+            "catalog.products_added",
+            "catalog.products_removed"
+        ]
+    );
+    assert_eq!(
+        events[1].data["products"],
+        serde_json::json!([pid(1).to_string(), pid(2).to_string()])
+    );
 }
 
 #[test]
 fn add_catalog_products_rejects_unknown_catalog() {
-    let catalogs = InMemoryCatalogRepo::default();
+    let ports = InMemoryPorts::default();
     let unknown = CatalogId::from_uuid(Uuid::from_u128(99));
 
     assert_eq!(
         block_on(add_catalog_products(
             &Ctx::system(),
-            &catalogs,
+            &ports,
             unknown,
             vec![pid(1)]
         )),
@@ -633,13 +662,14 @@ fn add_catalog_products_rejects_unknown_catalog() {
 
 #[test]
 fn add_catalog_products_requires_markets_write() {
-    let catalogs = InMemoryCatalogRepo::default();
-    let catalog = stored_catalog(&catalogs);
+    let ports = InMemoryPorts::default();
+    let catalogs = &ports.catalogs;
+    let catalog = stored_catalog(catalogs);
 
     assert_eq!(
         block_on(add_catalog_products(
             &user(vec![Scope::MarketsRead]),
-            &catalogs,
+            &ports,
             catalog,
             vec![pid(1)]
         )),

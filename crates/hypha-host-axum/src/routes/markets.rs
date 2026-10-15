@@ -261,7 +261,7 @@ pub(super) async fn set_fixed_prices_handler<S: Storage>(
             price: f.price,
         })
         .collect();
-    set_fixed_prices(&ctx, ports.price_lists(), id, prices)
+    set_fixed_prices(&ctx, &ports, id, prices)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
     Ok(StatusCode::NO_CONTENT)
@@ -284,7 +284,7 @@ pub(super) async fn remove_fixed_prices_handler<S: Storage>(
 ) -> Result<StatusCode, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    remove_fixed_prices(&ctx, ports.price_lists(), id, req.variants)
+    remove_fixed_prices(&ctx, &ports, id, req.variants)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
     Ok(StatusCode::NO_CONTENT)
@@ -368,7 +368,7 @@ pub(super) async fn add_products_handler<S: Storage>(
 ) -> Result<StatusCode, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    add_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
+    add_catalog_products(&ctx, &ports, id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -389,7 +389,7 @@ pub(super) async fn remove_products_handler<S: Storage>(
 ) -> Result<StatusCode, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    remove_catalog_products(&ctx, ports.catalogs(), id, req.products).await?;
+    remove_catalog_products(&ctx, &ports, id, req.products).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

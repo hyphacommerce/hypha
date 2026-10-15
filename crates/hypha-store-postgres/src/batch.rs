@@ -6,11 +6,13 @@ use hypha_auth::{
 };
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_core::{
-    HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Recorded, RepoError, SessionId,
-    StageEvents, StageIdempotency, Timestamp, Version, Versioned,
+    CatalogId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId,
+    ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, Timestamp, VariantId,
+    Version, Versioned,
 };
 use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
+use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_orders::{Order, OrderSnapshot, StageOrders};
 use hypha_products::{Product, ProductSnapshot, StageProducts};
@@ -29,6 +31,9 @@ use crate::{
     error::repo_error,
     idempotency::insert_records,
     inventory::update_items,
+    markets::{
+        add_catalog_products, remove_catalog_products, remove_fixed_prices, set_fixed_prices,
+    },
     media::replace_usages,
     orders::insert_order,
     outbox::insert_events,
@@ -68,6 +73,10 @@ enum Staged {
     PasswordReset(PasswordResetSnapshot),
     UsedUpResets(IdentityId, Timestamp),
     InventoryItem(InventoryItemSnapshot),
+    /// Catalog membership: added (`true`) or removed.
+    CatalogProducts(CatalogId, Vec<ProductId>, bool),
+    /// Fixed prices set (`Some` price) or removed (`None`), per variant.
+    FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
     /// Events about the aggregate staged just before, with the version that write gives
     /// it, or staged on their own (`StageEvents`, no version).
     Events(Vec<PendingEvent>, Option<Version>),
@@ -101,10 +110,12 @@ impl Staged {
             Staged::PasswordReset(_) => 17,
             Staged::UsedUpResets(..) => 18,
             // These two are gathered and written in one statement each, last.
-            Staged::Idempotency(_) => 19,
-            Staged::InventoryItem(_) => 20,
+            Staged::CatalogProducts(..) => 19,
+            Staged::FixedPrices(..) => 20,
+            Staged::Idempotency(_) => 21,
+            Staged::InventoryItem(_) => 22,
             // Inserts into a table nothing else locks: anywhere would do.
-            Staged::Events(..) => 21,
+            Staged::Events(..) => 23,
         }
     }
 
@@ -135,6 +146,8 @@ impl Staged {
                 (Staged::NewPasswordReset(a), Staged::NewPasswordReset(b))
                 | (Staged::PasswordReset(a), Staged::PasswordReset(b)) => a.id.cmp(&b.id),
                 (Staged::InventoryItem(a), Staged::InventoryItem(b)) => a.id.cmp(&b.id),
+                (Staged::CatalogProducts(a, ..), Staged::CatalogProducts(b, ..)) => a.cmp(b),
+                (Staged::FixedPrices(a, _), Staged::FixedPrices(b, _)) => a.cmp(b),
                 _ => Ordering::Equal,
             })
     }
@@ -357,6 +370,29 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     use_up_password_resets(&tx, identity, at).await?
                 }
                 Staged::InventoryItem(s) => items.push(s),
+                Staged::CatalogProducts(catalog, products, true) => {
+                    add_catalog_products(&tx, catalog, &products).await?
+                }
+                Staged::CatalogProducts(catalog, products, false) => {
+                    remove_catalog_products(&tx, catalog, &products).await?
+                }
+                Staged::FixedPrices(list, changes) => {
+                    let set: Vec<(VariantId, Price)> = changes
+                        .iter()
+                        .filter_map(|(v, p)| p.map(|p| (*v, p)))
+                        .collect();
+                    let removed: Vec<VariantId> = changes
+                        .iter()
+                        .filter(|(_, p)| p.is_none())
+                        .map(|(v, _)| *v)
+                        .collect();
+                    if !set.is_empty() {
+                        set_fixed_prices(&tx, list, &set).await?;
+                    }
+                    if !removed.is_empty() {
+                        remove_fixed_prices(&tx, list, &removed).await?;
+                    }
+                }
                 Staged::Events(events, version) => {
                     insert_events(&tx, &events, version, self.actor()).await?
                 }
@@ -365,5 +401,27 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         insert_records(&tx, &records).await?;
         update_items(&tx, items).await?;
         tx.commit().await.map_err(repo_error)
+    }
+}
+
+impl StageCatalogProducts for PgBatch {
+    fn add_catalog_products(&mut self, catalog: CatalogId, products: &[ProductId]) {
+        self.stage(Staged::CatalogProducts(catalog, products.to_vec(), true));
+    }
+
+    fn remove_catalog_products(&mut self, catalog: CatalogId, products: &[ProductId]) {
+        self.stage(Staged::CatalogProducts(catalog, products.to_vec(), false));
+    }
+}
+
+impl StageFixedPrices for PgBatch {
+    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, Price)]) {
+        let changes = prices.iter().map(|(v, p)| (*v, Some(*p))).collect();
+        self.stage(Staged::FixedPrices(list, changes));
+    }
+
+    fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]) {
+        let changes = variants.iter().map(|v| (*v, None)).collect();
+        self.stage(Staged::FixedPrices(list, changes));
     }
 }

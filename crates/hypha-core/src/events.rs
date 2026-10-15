@@ -70,6 +70,18 @@ impl Recorder {
         self.0.push(PendingEvent::new(subject, event));
     }
 
+    /// Records `event` unless one of its type about `subject` is pending already: for
+    /// "something changed" events, so a write that changes several things is one event.
+    pub fn record_once<E: Event>(&mut self, subject: Subject, event: &E) {
+        if !self
+            .0
+            .iter()
+            .any(|e| e.event_type == E::TYPE && e.subject == subject)
+        {
+            self.record(subject, event);
+        }
+    }
+
     pub fn pending(&self) -> &[PendingEvent] {
         &self.0
     }
@@ -196,6 +208,24 @@ mod tests {
                 data: serde_json::json!({"title": "Mug"}),
             }]
         );
+    }
+
+    #[test]
+    fn recording_once_keeps_the_first_of_a_type_per_subject() {
+        let mut recorder = Recorder::default();
+        let renamed = |title: &str| Renamed {
+            title: title.to_string(),
+        };
+        recorder.record_once(subject(), &renamed("a"));
+        recorder.record_once(subject(), &renamed("b"));
+        let other = Subject::new("thing", Uuid::from_u128(8));
+        recorder.record_once(other, &renamed("c"));
+        let titles: Vec<&serde_json::Value> = recorder
+            .pending()
+            .iter()
+            .map(|e| &e.data["title"])
+            .collect();
+        assert_eq!(titles, ["a", "c"]);
     }
 
     #[test]

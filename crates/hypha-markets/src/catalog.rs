@@ -1,6 +1,10 @@
 use std::fmt;
 
-use hypha_core::{CatalogId, MarketId, PriceListId, Version, Versioned};
+use hypha_core::{
+    CatalogId, MarketId, PendingEvent, PriceListId, Recorded, Recorder, Subject, Version, Versioned,
+};
+
+use crate::events::{CATALOG, CatalogChanged};
 
 /// Where a catalog applies. An enum so other contexts (e.g. B2B companies) can be added later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,6 +31,13 @@ pub struct Catalog {
     version: Version,
     context: CatalogContext,
     price_list: Option<PriceListId>,
+    events: Recorder,
+}
+
+impl Recorded for Catalog {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
 }
 
 impl Versioned for Catalog {
@@ -41,16 +52,28 @@ impl Versioned for Catalog {
 
 impl Catalog {
     pub fn new(id: CatalogId, context: CatalogContext, price_list: Option<PriceListId>) -> Self {
-        Self {
+        let mut catalog = Self {
             id,
             version: Version::NEW,
             context,
             price_list,
-        }
+            events: Recorder::default(),
+        };
+        catalog.changed();
+        catalog
+    }
+
+    fn changed(&mut self) {
+        let event = CatalogChanged { catalog: self.id };
+        self.events
+            .record_once(Subject::new(CATALOG, self.id.as_uuid()), &event);
     }
 
     pub fn set_price_list(&mut self, price_list: Option<PriceListId>) {
-        self.price_list = price_list;
+        if self.price_list != price_list {
+            self.price_list = price_list;
+            self.changed();
+        }
     }
 
     pub fn id(&self) -> CatalogId {
@@ -93,6 +116,7 @@ impl Catalog {
             version: s.version,
             context: s.context,
             price_list: s.price_list,
+            events: Recorder::default(),
         }
     }
 }

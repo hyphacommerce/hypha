@@ -1,19 +1,49 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::Mutex,
+    sync::{Mutex, MutexGuard},
 };
 
-use hypha_core::{CatalogId, ProductId, RepoError};
+use hypha_core::{CatalogId, ProductId, Recorded, RepoError, Versioned};
 use hypha_markets::{Catalog, CatalogContext, CatalogRepo, repo::keys};
 
-use crate::table::{Table, missing};
+use crate::{
+    InMemoryOutbox,
+    table::{Table, missing},
+};
 
 #[derive(Default)]
 pub struct InMemoryCatalogRepo {
     catalogs: Table<CatalogId, Catalog>,
     /// Catalog membership, stored apart from the catalog like a separate table would be.
     products: Mutex<HashMap<CatalogId, HashSet<ProductId>>>,
+    pub(crate) outbox: InMemoryOutbox,
 }
+
+impl InMemoryCatalogRepo {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+
+    /// The events this repo wrote (into its outbox, shared or not).
+    pub fn outbox(&self) -> &InMemoryOutbox {
+        &self.outbox
+    }
+
+    /// Catalog membership, locked, for a batch (`InMemoryPorts::commit`).
+    pub(crate) fn lock_products(&self) -> MutexGuard<'_, Memberships> {
+        self.products.lock().unwrap()
+    }
+
+    pub(crate) fn exists(&self, id: CatalogId) -> bool {
+        self.catalogs.get(&id).is_some()
+    }
+}
+
+pub(crate) type Memberships = HashMap<CatalogId, HashSet<ProductId>>;
 
 /// At most one catalog per context.
 fn unique(new: &Catalog, other: &Catalog) -> Option<&'static str> {
@@ -39,12 +69,18 @@ impl CatalogRepo for InMemoryCatalogRepo {
     }
 
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
+        let events = catalog.take_events();
         self.catalogs
-            .insert(catalog.id(), catalog, keys::CATALOG_ID, &unique)
+            .insert(catalog.id(), catalog, keys::CATALOG_ID, &unique)?;
+        self.outbox.write(events, Some(catalog.version()));
+        Ok(())
     }
 
     async fn update(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
-        self.catalogs.update(catalog.id(), catalog, &unique)
+        let events = catalog.take_events();
+        self.catalogs.update(catalog.id(), catalog, &unique)?;
+        self.outbox.write(events, Some(catalog.version()));
+        Ok(())
     }
 
     async fn add_products(

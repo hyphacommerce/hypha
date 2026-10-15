@@ -8,6 +8,7 @@ use hypha_auth::{
     SecretBox, XChaChaBox,
 };
 use hypha_checkout::CheckoutPorts;
+use hypha_core::HasBatch;
 use hypha_core::{Clock, IdGenerator, Notifier, NotifyError, Random, StoreId, Timestamp};
 use hypha_store_postgres::{CORE, PgConnection, PgStore, database_config, migrate};
 use hypha_stores::StoreRepo;
@@ -276,6 +277,11 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_shipping::HasAppProviders
         + hypha_core::HasOutbox
         + hypha_core::ActingAs
+        + HasBatch<
+            Batch: hypha_core::StageEvents
+                       + hypha_markets::StageCatalogProducts
+                       + hypha_markets::StageFixedPrices,
+        >
     where
         Self: 'a;
     type Directory<'a>: StoreRepo

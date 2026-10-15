@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod commands;
 pub mod error;
+pub mod events;
 pub mod market;
 pub mod price_list;
 pub mod repo;
@@ -13,6 +14,13 @@ pub use commands::{
     set_fixed_prices, update_market,
 };
 pub use error::{MarketError, MismatchedPrice, PriceListError};
+pub use events::{
+    CatalogChanged, CatalogProductsAdded, CatalogProductsRemoved, MarketChanged, PriceListChanged,
+    PricesRemoved, PricesSet,
+};
 pub use market::{Market, MarketSnapshot};
 pub use price_list::{PriceList, PriceListSnapshot};
-pub use repo::{CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, MarketRepo, PriceListRepo};
+pub use repo::{
+    CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, MarketRepo, PriceListRepo,
+    StageCatalogProducts, StageFixedPrices,
+};

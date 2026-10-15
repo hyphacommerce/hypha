@@ -940,6 +940,8 @@ dependencies = [
  "hypha-core",
  "hypha-testkit",
  "pollster",
+ "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]

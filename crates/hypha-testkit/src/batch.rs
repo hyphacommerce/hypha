@@ -4,11 +4,13 @@ use hypha_auth::{
 };
 use hypha_cart::{Cart, StageCarts, repo::keys as cart_keys};
 use hypha_core::{
-    HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Recorded, RepoError, SessionId,
-    StageEvents, StageIdempotency, Timestamp, Version, Versioned,
+    CatalogId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId,
+    ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, Timestamp, VariantId,
+    Version, Versioned,
 };
 use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
+use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
 use hypha_products::{Product, StageProducts};
@@ -23,7 +25,7 @@ use crate::{
     media::replace_usages,
     orders::unique as unique_order,
     products::unique as unique_product,
-    table::{insert_row, no_unique_keys, update_row},
+    table::{insert_row, missing, no_unique_keys, update_row},
     users::{unique_invite, unique_role, unique_user},
 };
 
@@ -57,6 +59,8 @@ enum Staged {
     NewPasswordReset(PasswordReset),
     PasswordReset(PasswordReset),
     UsedUpResets(IdentityId, Timestamp),
+    CatalogProducts(CatalogId, Vec<ProductId>, bool),
+    FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
     Events(Vec<PendingEvent>, Option<Version>),
 }
 
@@ -244,6 +248,10 @@ impl HasBatch for InMemoryPorts {
         let assets = self.assets.assets.lock();
         let mut usages = self.assets.lock_usages();
         let usages_before = usages.clone();
+        let mut memberships = self.catalogs.lock_products();
+        let memberships_before = memberships.clone();
+        let mut fixed_prices = self.price_lists.lock_fixed_prices();
+        let fixed_prices_before = fixed_prices.clone();
         let before = (
             orders.clone(),
             carts.clone(),
@@ -375,6 +383,31 @@ impl HasBatch for InMemoryPorts {
                             reset.set_version(reset.version().next());
                         }
                     }
+                    Staged::CatalogProducts(catalog, products, add) => {
+                        if !self.catalogs.exists(catalog) {
+                            return Err(missing("catalog", catalog));
+                        }
+                        let included = memberships.entry(catalog).or_default();
+                        for product in products {
+                            if add {
+                                included.insert(product);
+                            } else {
+                                included.remove(&product);
+                            }
+                        }
+                    }
+                    Staged::FixedPrices(list, changes) => {
+                        if !self.price_lists.exists(list) {
+                            return Err(missing("price list", list));
+                        }
+                        let prices = fixed_prices.entry(list).or_default();
+                        for (variant, price) in changes {
+                            match price {
+                                Some(price) => prices.insert(variant, price),
+                                None => prices.remove(&variant),
+                            };
+                        }
+                    }
                     Staged::Events(staged, version) => events.push((staged, version)),
                 }
             }
@@ -388,8 +421,32 @@ impl HasBatch for InMemoryPorts {
         if written.is_err() {
             (*orders, *carts, *products, *items, *customers, *records) = before;
             *usages = usages_before;
+            *memberships = memberships_before;
+            *fixed_prices = fixed_prices_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written
+    }
+}
+
+impl StageCatalogProducts for InMemoryBatch {
+    fn add_catalog_products(&mut self, catalog: CatalogId, products: &[ProductId]) {
+        self.stage(Staged::CatalogProducts(catalog, products.to_vec(), true));
+    }
+
+    fn remove_catalog_products(&mut self, catalog: CatalogId, products: &[ProductId]) {
+        self.stage(Staged::CatalogProducts(catalog, products.to_vec(), false));
+    }
+}
+
+impl StageFixedPrices for InMemoryBatch {
+    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, Price)]) {
+        let changes = prices.iter().map(|(v, p)| (*v, Some(*p))).collect();
+        self.stage(Staged::FixedPrices(list, changes));
+    }
+
+    fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]) {
+        let changes = variants.iter().map(|v| (*v, None)).collect();
+        self.stage(Staged::FixedPrices(list, changes));
     }
 }

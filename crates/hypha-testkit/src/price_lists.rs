@@ -1,16 +1,49 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, MutexGuard},
+};
 
-use hypha_core::{Price, PriceListId, RepoError, VariantId};
+use hypha_core::{Price, PriceListId, Recorded, RepoError, VariantId, Versioned};
 use hypha_markets::{PriceList, PriceListRepo, repo::keys};
 
-use crate::table::{Table, missing, no_unique_keys};
+use crate::{
+    InMemoryOutbox,
+    table::{Table, missing, no_unique_keys},
+};
 
 #[derive(Default)]
 pub struct InMemoryPriceListRepo {
     price_lists: Table<PriceListId, PriceList>,
     /// Fixed prices, stored apart from the list like a separate table would be.
     fixed_prices: Mutex<HashMap<PriceListId, HashMap<VariantId, Price>>>,
+    pub(crate) outbox: InMemoryOutbox,
 }
+
+impl InMemoryPriceListRepo {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+
+    /// The events this repo wrote (into its outbox, shared or not).
+    pub fn outbox(&self) -> &InMemoryOutbox {
+        &self.outbox
+    }
+
+    /// Fixed prices, locked, for a batch (`InMemoryPorts::commit`).
+    pub(crate) fn lock_fixed_prices(&self) -> MutexGuard<'_, FixedPrices> {
+        self.fixed_prices.lock().unwrap()
+    }
+
+    pub(crate) fn exists(&self, id: PriceListId) -> bool {
+        self.price_lists.get(&id).is_some()
+    }
+}
+
+pub(crate) type FixedPrices = HashMap<PriceListId, HashMap<VariantId, Price>>;
 
 impl PriceListRepo for InMemoryPriceListRepo {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError> {
@@ -18,17 +51,23 @@ impl PriceListRepo for InMemoryPriceListRepo {
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        let events = price_list.take_events();
         self.price_lists.insert(
             price_list.id(),
             price_list,
             keys::PRICE_LIST_ID,
             &no_unique_keys,
-        )
+        )?;
+        self.outbox.write(events, Some(price_list.version()));
+        Ok(())
     }
 
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        let events = price_list.take_events();
         self.price_lists
-            .update(price_list.id(), price_list, &no_unique_keys)
+            .update(price_list.id(), price_list, &no_unique_keys)?;
+        self.outbox.write(events, Some(price_list.version()));
+        Ok(())
     }
 
     async fn set_fixed_prices(

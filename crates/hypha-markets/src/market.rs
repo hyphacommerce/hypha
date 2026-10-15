@@ -1,8 +1,14 @@
 use std::collections::HashSet;
 
-use hypha_core::{CountryCode, Currency, MarketId, Version, Versioned, required_text};
+use hypha_core::{
+    CountryCode, Currency, MarketId, PendingEvent, Recorded, Recorder, Subject, Version, Versioned,
+    required_text,
+};
 
-use crate::error::MarketError;
+use crate::{
+    error::MarketError,
+    events::{MARKET, MarketChanged},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Market {
@@ -12,6 +18,13 @@ pub struct Market {
     countries: Vec<CountryCode>,
     currency: Currency,
     prices_include_tax: bool,
+    events: Recorder,
+}
+
+impl Recorded for Market {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
 }
 
 impl Versioned for Market {
@@ -42,18 +55,30 @@ impl Market {
             }
         }
 
-        Ok(Self {
+        let mut market = Self {
             id,
             version: Version::NEW,
             name: required_text("name", &name)?,
             countries,
             currency,
             prices_include_tax: false,
-        })
+            events: Recorder::default(),
+        };
+        market.changed();
+        Ok(market)
+    }
+
+    fn changed(&mut self) {
+        let event = MarketChanged { market: self.id };
+        self.events
+            .record_once(Subject::new(MARKET, self.id.as_uuid()), &event);
     }
 
     pub fn set_prices_include_tax(&mut self, include: bool) {
-        self.prices_include_tax = include;
+        if self.prices_include_tax != include {
+            self.prices_include_tax = include;
+            self.changed();
+        }
     }
 
     pub fn covers(&self, country: CountryCode) -> bool {
@@ -66,6 +91,7 @@ impl Market {
         }
 
         self.countries.push(country);
+        self.changed();
         Ok(())
     }
 
@@ -79,7 +105,7 @@ impl Market {
         }
 
         self.countries.retain(|c| *c != country);
-
+        self.changed();
         Ok(())
     }
 
@@ -132,6 +158,8 @@ impl Market {
         let mut market = Market::new(s.id, s.name, s.countries, s.currency)?;
         market.prices_include_tax = s.prices_include_tax;
         market.version = s.version;
+        // Built through `new`, which records a change that didn't happen.
+        market.events = Recorder::default();
         Ok(market)
     }
 }

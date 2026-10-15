@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    BasisPoints, CatalogId, CountryCode, MarketId, Price, PriceListId, ProductId, RepoError,
-    VariantId, Version, Versioned,
+    BasisPoints, CatalogId, CountryCode, MarketId, Price, PriceListId, ProductId, Recorded,
+    RepoError, VariantId, Version, Versioned,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, Market, MarketRepo, MarketSnapshot,
@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::{
     columns::{col, currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -51,14 +52,26 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
 
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {
         let s = market.snapshot();
-        in_transaction!(self, |tx| insert_market(tx, &s).await)?;
-        market.set_version(Version::NEW.next());
+        let events = market.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_market(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        market.set_version(version);
         Ok(())
     }
 
     async fn update(&self, market: &mut Market) -> Result<(), RepoError> {
         let s = market.snapshot();
-        let version = in_transaction!(self, |tx| update_market(tx, &s).await)?;
+        let events = market.take_events();
+        let actor = self.actor();
+        let version = in_transaction!(self, |tx| {
+            let version = update_market(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await?;
+            Ok(version)
+        })?;
         market.set_version(version);
         Ok(())
     }
@@ -235,14 +248,26 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
 
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
         let s = catalog.snapshot();
-        in_transaction!(self, |tx| insert_catalog(tx, &s).await)?;
-        catalog.set_version(Version::NEW.next());
+        let events = catalog.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_catalog(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        catalog.set_version(version);
         Ok(())
     }
 
     async fn update(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
         let s = catalog.snapshot();
-        let version = in_transaction!(self, |tx| update_catalog(tx, &s).await)?;
+        let events = catalog.take_events();
+        let actor = self.actor();
+        let version = in_transaction!(self, |tx| {
+            let version = update_catalog(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await?;
+            Ok(version)
+        })?;
         catalog.set_version(version);
         Ok(())
     }
@@ -390,14 +415,26 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
         let s = price_list.snapshot();
-        in_transaction!(self, |tx| insert_price_list(tx, &s).await)?;
-        price_list.set_version(Version::NEW.next());
+        let events = price_list.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_price_list(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        price_list.set_version(version);
         Ok(())
     }
 
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
         let s = price_list.snapshot();
-        let version = in_transaction!(self, |tx| update_price_list(tx, &s).await)?;
+        let events = price_list.take_events();
+        let actor = self.actor();
+        let version = in_transaction!(self, |tx| {
+            let version = update_price_list(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await?;
+            Ok(version)
+        })?;
         price_list.set_version(version);
         Ok(())
     }

@@ -1,6 +1,11 @@
 use hypha_core::{
-    ActingAs, Actor, Currency, Event, HasBatch, HasOutbox, Money, OutboxRepo, PendingEvent, Price,
-    ProductId, RepoError, StageEvents, StoredEvent, Subject, UserId, VariantId, Version, Versioned,
+    ActingAs, Actor, BasisPoints, CatalogId, Currency, Event, HasBatch, HasOutbox, MarketId, Money,
+    OutboxRepo, PendingEvent, Price, PriceListId, ProductId, RepoError, StageEvents, StoredEvent,
+    Subject, UserId, VariantId, Version, Versioned,
+};
+use hypha_markets::{
+    Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasPriceLists, PriceList, PriceListRepo,
+    StageCatalogProducts, StageFixedPrices,
 };
 use hypha_products::{Handle, HasProducts, Product, ProductRepo, StageProducts};
 use serde::Serialize;
@@ -13,8 +18,8 @@ use super::scenario;
 /// with the actor the ports act as and the version the write gave the aggregate.
 pub async fn outbox<S>(make: impl AsyncFn() -> S)
 where
-    S: HasProducts + HasOutbox + HasBatch + ActingAs,
-    S::Batch: StageProducts + StageEvents,
+    S: HasProducts + HasCatalogs + HasPriceLists + HasOutbox + HasBatch + ActingAs,
+    S::Batch: StageProducts + StageCatalogProducts + StageFixedPrices + StageEvents,
 {
     scenario("outbox: an insert writes its events, by the actor, at version 1");
     insert_writes_events(&make().await).await;
@@ -26,6 +31,8 @@ where
     batch_writes_events(&make().await).await;
     scenario("outbox: a failed batch writes no events");
     failed_batch_writes_none(&make().await).await;
+    scenario("outbox: staged membership and prices commit with their events, or neither");
+    set_based_writes(&make().await).await;
     scenario("outbox: events_after reads after a seq, up to a limit");
     events_after_pages(&make().await).await;
 }
@@ -197,4 +204,78 @@ async fn events_after_pages<S: HasProducts + HasOutbox>(store: &S) {
     assert_eq!(page, [events[1].clone()]);
     let ids: std::collections::HashSet<Uuid> = events.iter().map(|e| e.id).collect();
     assert_eq!(ids.len(), 3, "event IDs are unique");
+}
+
+async fn set_based_writes<S>(store: &S)
+where
+    S: HasProducts + HasCatalogs + HasPriceLists + HasOutbox + HasBatch,
+    S::Batch: StageProducts + StageCatalogProducts + StageFixedPrices + StageEvents,
+{
+    let market = MarketId::from_uuid(Uuid::from_u128(5));
+    let mut catalog = Catalog::new(
+        CatalogId::from_uuid(Uuid::from_u128(6)),
+        CatalogContext::Market(market),
+        None,
+    );
+    store.catalogs().insert(&mut catalog).await.unwrap();
+    let mut list = PriceList::new(
+        PriceListId::from_uuid(Uuid::from_u128(7)),
+        Currency::Eur,
+        BasisPoints::new(0).unwrap(),
+    );
+    store.price_lists().insert(&mut list).await.unwrap();
+    let member = ProductId::from_uuid(Uuid::from_u128(1));
+    let variant = VariantId::from_uuid(Uuid::from_u128(101));
+    let price = Price::new(Money::new(900, Currency::Eur).unwrap()).unwrap();
+
+    let mut batch = store.batch();
+    batch.add_catalog_products(catalog.id(), &[member]);
+    batch.set_fixed_prices(list.id(), &[(variant, price)]);
+    batch.record_events(vec![tagged("set")]);
+    store.commit(batch).await.unwrap();
+    let included = store
+        .catalogs()
+        .included_products(catalog.id(), &[member])
+        .await
+        .unwrap();
+    assert!(included.contains(&member));
+    let prices = store
+        .price_lists()
+        .fixed_prices(list.id(), &[variant])
+        .await
+        .unwrap();
+    assert_eq!(prices.get(&variant), Some(&price));
+
+    // A failure later in the batch takes the membership, prices and event with it.
+    let mut stale = product(2, "stale");
+    store.products().insert(&mut stale).await.unwrap();
+    let mut older = stale.clone();
+    stale.rename("Fresh").unwrap();
+    store.products().update(&mut stale).await.unwrap();
+    older.rename("Older").unwrap();
+    let mut batch = store.batch();
+    batch.remove_catalog_products(catalog.id(), &[member]);
+    batch.remove_fixed_prices(list.id(), &[variant]);
+    batch.record_events(vec![tagged("undone")]);
+    batch.update_product(&mut older);
+    assert_eq!(store.commit(batch).await, Err(RepoError::StaleVersion));
+    let included = store
+        .catalogs()
+        .included_products(catalog.id(), &[member])
+        .await
+        .unwrap();
+    assert!(included.contains(&member), "membership rolled back");
+    let prices = store
+        .price_lists()
+        .fixed_prices(list.id(), &[variant])
+        .await
+        .unwrap();
+    assert_eq!(prices.get(&variant), Some(&price), "price rolled back");
+    let tags: Vec<serde_json::Value> = all(store)
+        .await
+        .iter()
+        .filter(|e| e.event_type == "contract.tagged")
+        .map(|e| e.data["tag"].clone())
+        .collect();
+    assert_eq!(tags, ["set"]);
 }

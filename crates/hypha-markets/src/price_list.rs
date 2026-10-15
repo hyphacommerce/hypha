@@ -1,8 +1,14 @@
 use std::collections::HashSet;
 
-use hypha_core::{BasisPoints, Currency, Price, PriceListId, VariantId, Version, Versioned};
+use hypha_core::{
+    BasisPoints, Currency, PendingEvent, Price, PriceListId, Recorded, Recorder, Subject,
+    VariantId, Version, Versioned,
+};
 
-use crate::error::{MismatchedPrice, PriceListError};
+use crate::{
+    error::{MismatchedPrice, PriceListError},
+    events::{PRICE_LIST, PriceListChanged},
+};
 
 /// A price list: a currency, a percentage adjustment, and fixed per-variant prices.
 ///
@@ -15,6 +21,13 @@ pub struct PriceList {
     version: Version,
     currency: Currency,
     adjustment: BasisPoints,
+    events: Recorder,
+}
+
+impl Recorded for PriceList {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
 }
 
 impl Versioned for PriceList {
@@ -30,12 +43,23 @@ impl Versioned for PriceList {
 impl PriceList {
     /// The adjustment is a `BasisPoints`, so it is valid by construction.
     pub fn new(id: PriceListId, currency: Currency, adjustment: BasisPoints) -> Self {
-        Self {
+        let mut list = Self {
             id,
             version: Version::NEW,
             currency,
             adjustment,
-        }
+            events: Recorder::default(),
+        };
+        list.changed();
+        list
+    }
+
+    fn changed(&mut self) {
+        let event = PriceListChanged {
+            price_list: self.id,
+        };
+        self.events
+            .record_once(Subject::new(PRICE_LIST, self.id.as_uuid()), &event);
     }
 
     /// Validates fixed prices before they are stored for this list:
@@ -71,7 +95,10 @@ impl PriceList {
     }
 
     pub fn set_adjustment(&mut self, adjustment: BasisPoints) {
-        self.adjustment = adjustment;
+        if self.adjustment != adjustment {
+            self.adjustment = adjustment;
+            self.changed();
+        }
     }
 
     pub fn id(&self) -> PriceListId {
@@ -114,6 +141,7 @@ impl PriceList {
             version: s.version,
             currency: s.currency,
             adjustment: s.adjustment,
+            events: Recorder::default(),
         }
     }
 }

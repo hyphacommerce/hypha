@@ -48,7 +48,9 @@ pub trait CatalogRepo {
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
     async fn update(&self, catalog: &mut Catalog) -> Result<(), RepoError>;
 
-    /// Adds products to the catalog. Products already in it are ignored.
+    /// Adds products to the catalog. Products already in it are ignored. Records no
+    /// event: commands stage it (`StageCatalogProducts`) with `catalog.products_added`;
+    /// this is for setting up data.
     ///
     /// Precondition: the catalog exists (commands load it first). Otherwise adapters
     /// fail with `Backend` rather than store orphaned membership.
@@ -57,7 +59,8 @@ pub trait CatalogRepo {
         catalog: CatalogId,
         products: &[ProductId],
     ) -> Result<(), RepoError>;
-    /// Removes products from the catalog. Products not in it are ignored.
+    /// Removes products from the catalog. Products not in it are ignored. Records no
+    /// event, like `add_products`.
     async fn remove_products(
         &self,
         catalog: CatalogId,
@@ -83,7 +86,9 @@ pub trait PriceListRepo {
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
 
-    /// Inserts or replaces fixed prices for the given variants.
+    /// Inserts or replaces fixed prices for the given variants. Records no event:
+    /// commands stage it (`StageFixedPrices`) with `price_list.prices_set`; this is for
+    /// setting up data.
     ///
     /// Preconditions: the list exists and each variant appears once
     /// (`PriceList::check_fixed_prices` reports duplicates precisely). Otherwise adapters
@@ -93,7 +98,8 @@ pub trait PriceListRepo {
         list: PriceListId,
         prices: &[(VariantId, Price)],
     ) -> Result<(), RepoError>;
-    /// Removes fixed prices. Variants without one are ignored.
+    /// Removes fixed prices. Variants without one are ignored. Records no event, like
+    /// `set_fixed_prices`.
     async fn remove_fixed_prices(
         &self,
         list: PriceListId,
@@ -153,4 +159,19 @@ impl<T: HasPriceLists + ?Sized> HasPriceLists for &T {
     fn price_lists(&self) -> &Self::PriceLists {
         (**self).price_lists()
     }
+}
+
+/// Catalog membership as a batch writes it (design note 0016, EV3), so the change and
+/// its event commit together. Same preconditions as `CatalogRepo::add_products` and
+/// `remove_products`.
+pub trait StageCatalogProducts {
+    fn add_catalog_products(&mut self, catalog: CatalogId, products: &[ProductId]);
+    fn remove_catalog_products(&mut self, catalog: CatalogId, products: &[ProductId]);
+}
+
+/// Fixed prices as a batch writes them. Same preconditions as
+/// `PriceListRepo::set_fixed_prices` and `remove_fixed_prices`.
+pub trait StageFixedPrices {
+    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, Price)]);
+    fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]);
 }

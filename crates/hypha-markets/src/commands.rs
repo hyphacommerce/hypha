@@ -1,13 +1,17 @@
 use hypha_core::{
     AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, ErrorCode,
-    IdGenerator, MarketId, Money, MoneyError, Price, PriceListId, ProductId, RepoError, Scope,
-    VariantId, report_duplicate,
+    HasBatch, IdGenerator, MarketId, Money, MoneyError, PendingEvent, Price, PriceListId,
+    ProductId, RepoError, Scope, StageEvents, Subject, VariantId, report_duplicate,
 };
 use thiserror::Error;
 
 use crate::{
-    Catalog, CatalogContext, CatalogRepo, Market, MarketError, MarketRepo, PriceList,
-    PriceListError, PriceListRepo, repo::keys,
+    Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasPriceLists, Market, MarketError,
+    MarketRepo, PriceList, PriceListError, PriceListRepo, StageCatalogProducts, StageFixedPrices,
+    events::{
+        CATALOG, CatalogProductsAdded, CatalogProductsRemoved, PRICE_LIST, PricesRemoved, PricesSet,
+    },
+    repo::keys,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -273,15 +277,19 @@ pub struct FixedPrice {
 /// All prices are validated before anything is stored: non-negative, in the list's
 /// currency, each variant once. Variant IDs are not checked against the products crate
 /// (markets is a leaf domain); a price for an unknown variant is simply never used.
-pub async fn set_fixed_prices<P: PriceListRepo>(
+pub async fn set_fixed_prices<S>(
     ctx: &Ctx,
-    price_lists: &P,
+    ports: &S,
     list_id: PriceListId,
     prices: Vec<FixedPrice>,
-) -> Result<(), CommandError> {
+) -> Result<(), CommandError>
+where
+    S: HasPriceLists + HasBatch<Batch: StageFixedPrices + StageEvents>,
+{
     ctx.require(Scope::PricingWrite)?;
 
-    let list = price_lists
+    let list = ports
+        .price_lists()
         .get(list_id)
         .await?
         .ok_or(CommandError::PriceListNotFound(list_id))?;
@@ -291,24 +299,47 @@ pub async fn set_fixed_prices<P: PriceListRepo>(
         .collect::<Result<Vec<_>, MoneyError>>()?;
     list.check_fixed_prices(&prices)?;
 
-    price_lists.set_fixed_prices(list_id, &prices).await?;
-    Ok(())
+    let event = PricesSet {
+        price_list: list_id,
+        variants: prices.iter().map(|(v, _)| *v).collect(),
+    };
+    let mut batch = ports.batch();
+    batch.set_fixed_prices(list_id, &prices);
+    batch.record_events(vec![PendingEvent::new(price_list_subject(list_id), &event)]);
+    Ok(ports.commit(batch).await?)
+}
+
+fn price_list_subject(list: PriceListId) -> Subject {
+    Subject::new(PRICE_LIST, list.as_uuid())
+}
+
+fn catalog_subject(catalog: CatalogId) -> Subject {
+    Subject::new(CATALOG, catalog.as_uuid())
 }
 
 /// Removes fixed prices from a price list; those variants fall back to the adjustment.
-pub async fn remove_fixed_prices<P: PriceListRepo>(
+pub async fn remove_fixed_prices<S>(
     ctx: &Ctx,
-    price_lists: &P,
+    ports: &S,
     list_id: PriceListId,
     variants: Vec<VariantId>,
-) -> Result<(), CommandError> {
+) -> Result<(), CommandError>
+where
+    S: HasPriceLists + HasBatch<Batch: StageFixedPrices + StageEvents>,
+{
     ctx.require(Scope::PricingWrite)?;
 
-    if price_lists.get(list_id).await?.is_none() {
+    if ports.price_lists().get(list_id).await?.is_none() {
         return Err(CommandError::PriceListNotFound(list_id));
     }
-    price_lists.remove_fixed_prices(list_id, &variants).await?;
-    Ok(())
+    let mut batch = ports.batch();
+    batch.remove_fixed_prices(list_id, &variants);
+    let event = PricesRemoved {
+        price_list: list_id,
+        variants,
+    };
+    batch.record_events(vec![PendingEvent::new(price_list_subject(list_id), &event)]);
+    Ok(ports.commit(batch).await?)
 }
 
 pub struct CreateCatalog {
@@ -364,33 +395,51 @@ async fn catalog_exists<C: CatalogRepo>(
 ///
 /// Product IDs are not checked against the products crate: markets is a leaf domain
 /// and can't depend on it. Unknown products simply never resolve to a price.
-pub async fn add_catalog_products<C: CatalogRepo>(
+pub async fn add_catalog_products<S>(
     ctx: &Ctx,
-    catalogs: &C,
+    ports: &S,
     catalog_id: CatalogId,
     products: Vec<ProductId>,
-) -> Result<(), CommandError> {
+) -> Result<(), CommandError>
+where
+    S: HasCatalogs + HasBatch<Batch: StageCatalogProducts + StageEvents>,
+{
     ctx.require(Scope::MarketsWrite)?;
 
-    if catalogs.get(catalog_id).await?.is_none() {
+    if ports.catalogs().get(catalog_id).await?.is_none() {
         return Err(CommandError::CatalogNotFound(catalog_id));
     }
-    catalogs.add_products(catalog_id, &products).await?;
-    Ok(())
+    let mut batch = ports.batch();
+    batch.add_catalog_products(catalog_id, &products);
+    let event = CatalogProductsAdded {
+        catalog: catalog_id,
+        products,
+    };
+    batch.record_events(vec![PendingEvent::new(catalog_subject(catalog_id), &event)]);
+    Ok(ports.commit(batch).await?)
 }
 
 /// Stops selling products in the catalog's context. Products not included are ignored.
-pub async fn remove_catalog_products<C: CatalogRepo>(
+pub async fn remove_catalog_products<S>(
     ctx: &Ctx,
-    catalogs: &C,
+    ports: &S,
     catalog_id: CatalogId,
     products: Vec<ProductId>,
-) -> Result<(), CommandError> {
+) -> Result<(), CommandError>
+where
+    S: HasCatalogs + HasBatch<Batch: StageCatalogProducts + StageEvents>,
+{
     ctx.require(Scope::MarketsWrite)?;
 
-    if catalogs.get(catalog_id).await?.is_none() {
+    if ports.catalogs().get(catalog_id).await?.is_none() {
         return Err(CommandError::CatalogNotFound(catalog_id));
     }
-    catalogs.remove_products(catalog_id, &products).await?;
-    Ok(())
+    let mut batch = ports.batch();
+    batch.remove_catalog_products(catalog_id, &products);
+    let event = CatalogProductsRemoved {
+        catalog: catalog_id,
+        products,
+    };
+    batch.record_events(vec![PendingEvent::new(catalog_subject(catalog_id), &event)]);
+    Ok(ports.commit(batch).await?)
 }

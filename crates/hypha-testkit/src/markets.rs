@@ -1,11 +1,27 @@
-use hypha_core::{CountryCode, MarketId, RepoError};
+use hypha_core::{CountryCode, MarketId, Recorded, RepoError, Versioned};
 use hypha_markets::{Market, MarketRepo, repo::keys};
 
-use crate::table::Table;
+use crate::{InMemoryOutbox, table::Table};
 
 #[derive(Default)]
 pub struct InMemoryMarketRepo {
     markets: Table<MarketId, Market>,
+    pub(crate) outbox: InMemoryOutbox,
+}
+
+impl InMemoryMarketRepo {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+
+    /// The events this repo wrote (into its outbox, shared or not).
+    pub fn outbox(&self) -> &InMemoryOutbox {
+        &self.outbox
+    }
 }
 
 /// A country belongs to at most one market.
@@ -39,12 +55,18 @@ impl MarketRepo for InMemoryMarketRepo {
     }
 
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {
+        let events = market.take_events();
         self.markets
-            .insert(market.id(), market, keys::MARKET_ID, &unique)
+            .insert(market.id(), market, keys::MARKET_ID, &unique)?;
+        self.outbox.write(events, Some(market.version()));
+        Ok(())
     }
 
     async fn update(&self, market: &mut Market) -> Result<(), RepoError> {
-        self.markets.update(market.id(), market, &unique)
+        let events = market.take_events();
+        self.markets.update(market.id(), market, &unique)?;
+        self.outbox.write(events, Some(market.version()));
+        Ok(())
     }
 }
 
