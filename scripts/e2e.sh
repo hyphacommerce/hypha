@@ -263,9 +263,9 @@ contains "the cart names its order" "\"order\":\"$ORDER\""
 step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/storefront/carts/$KEYED/lines" \
     -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "get the order" 200 - "$BASE/admin/orders/$ORDER"
+contains "it has a placed_at" '"placed_at":"20'
 step "list orders" 200 - "$BASE/admin/orders?limit=1"
 contains "the order is listed first" "\"items\":[{\"id\":\"$ORDER\""
-contains "it has a placed_at" '"placed_at":"20'
 step "mark it paid" 200 - -X POST "$BASE/admin/orders/$ORDER/paid"
 contains "it is paid" '"financial_status":"paid"'
 step "mark it paid again" 200 - -X POST "$BASE/admin/orders/$ORDER/paid"
