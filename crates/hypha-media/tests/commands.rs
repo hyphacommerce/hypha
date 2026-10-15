@@ -1,6 +1,6 @@
 use hypha_core::{
-    Actor, AssetId, AuthError, Ctx, PageRequest, Scope, TextError, Timestamp, UserId, Version,
-    Versioned,
+    Actor, AssetId, AuthError, Ctx, PageRequest, RepoError, Scope, TextError, Timestamp, UserId,
+    Version, Versioned,
 };
 use hypha_media::{
     AssetRepo, AssetStatus, BlobStore, CommandError, CreateUpload, MediaError, MimeType,
@@ -380,4 +380,84 @@ fn reading_needs_media_read_and_changing_needs_media_write() {
             Scope::MediaWrite
         )))
     );
+}
+
+/// An asset repo whose first `get` returns `stale`: the asset as one `complete_upload`
+/// loaded it, before a racing call completed it.
+struct LoadedBeforeTheRaceWasLost {
+    repo: InMemoryAssetRepo,
+    stale: std::cell::RefCell<Option<hypha_media::Asset>>,
+}
+
+impl AssetRepo for LoadedBeforeTheRaceWasLost {
+    async fn get(&self, id: AssetId) -> Result<Option<hypha_media::Asset>, RepoError> {
+        // Taken in its own statement, so the borrow isn't held across the `.await`.
+        let stale = self.stale.borrow_mut().take();
+        match stale {
+            Some(stale) => Ok(Some(stale)),
+            None => self.repo.get(id).await,
+        }
+    }
+    async fn list(
+        &self,
+        kind: Option<hypha_media::AssetKind>,
+        page: PageRequest<AssetId>,
+    ) -> Result<hypha_core::Page<hypha_media::Asset>, RepoError> {
+        self.repo.list(kind, page).await
+    }
+    async fn insert(&self, asset: &mut hypha_media::Asset) -> Result<(), RepoError> {
+        self.repo.insert(asset).await
+    }
+    async fn update(&self, asset: &mut hypha_media::Asset) -> Result<(), RepoError> {
+        self.repo.update(asset).await
+    }
+    async fn delete(&self, id: AssetId) -> Result<(), RepoError> {
+        self.repo.delete(id).await
+    }
+}
+
+#[test]
+fn completing_twice_at_once_succeeds_both_times() {
+    let world = World::new();
+    let (asset, upload) = block_on(create_upload(
+        &Ctx::system(),
+        &world.assets,
+        &world.blobs,
+        &world.ids,
+        &world.clock,
+        shirt_png(),
+    ))
+    .unwrap();
+    assert!(world.blobs.upload(&upload, png(100), FixedClock::DEFAULT));
+    let pending = block_on(world.assets.get(asset.id())).unwrap();
+    // The other call wins: the asset is ready and the upload key empty.
+    block_on(complete_upload(
+        &Ctx::system(),
+        &world.assets,
+        &world.blobs,
+        &world.clock,
+        asset.id(),
+    ))
+    .unwrap();
+
+    let World {
+        assets,
+        blobs,
+        clock,
+        ..
+    } = world;
+    let racing = LoadedBeforeTheRaceWasLost {
+        repo: assets,
+        stale: std::cell::RefCell::new(pending),
+    };
+    let completed = block_on(complete_upload(
+        &Ctx::system(),
+        &racing,
+        &blobs,
+        &clock,
+        asset.id(),
+    ))
+    .unwrap();
+    assert_eq!(completed.status(), AssetStatus::Ready);
+    assert_eq!(completed.version(), Version::new(2));
 }

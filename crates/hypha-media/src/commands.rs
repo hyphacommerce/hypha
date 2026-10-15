@@ -105,9 +105,13 @@ pub async fn create_upload<R: AssetRepo, B: BlobStore>(
 }
 
 /// Checks the uploaded file against what `create_upload` declared, copies it to the key
-/// it is served from and makes the asset ready, with its dimensions read from the file. A file that doesn't match is deleted
-/// and the asset becomes `failed` (`UploadMismatch`). Completing a ready asset again
-/// returns it unchanged, so a retry is safe.
+/// it is served from and makes the asset ready, with its dimensions read from the file.
+/// A file that doesn't match is deleted and the asset becomes `failed`
+/// (`UploadMismatch`).
+///
+/// Safe to retry, even while an earlier call still runs: completing a ready asset
+/// returns it unchanged, and a call that loses the race to another (its write is stale,
+/// or the upload was already moved) returns the asset the winner made ready.
 pub async fn complete_upload<R: AssetRepo, B: BlobStore>(
     ctx: &Ctx,
     assets: &R,
@@ -116,7 +120,23 @@ pub async fn complete_upload<R: AssetRepo, B: BlobStore>(
     id: AssetId,
 ) -> Result<Asset, CommandError> {
     ctx.require(Scope::MediaWrite)?;
-    let mut asset = load(assets, id).await?;
+    let asset = load(assets, id).await?;
+    match check_and_store(assets, blobs, clock, asset).await {
+        Ok(asset) => Ok(asset),
+        Err(error) => match assets.get(id).await? {
+            Some(asset) if asset.status() == AssetStatus::Ready => Ok(asset),
+            _ => Err(error),
+        },
+    }
+}
+
+/// `complete_upload` on the asset as loaded.
+async fn check_and_store<R: AssetRepo, B: BlobStore>(
+    assets: &R,
+    blobs: &B,
+    clock: &impl Clock,
+    mut asset: Asset,
+) -> Result<Asset, CommandError> {
     match asset.status() {
         AssetStatus::Ready => return Ok(asset),
         AssetStatus::Failed => {
@@ -129,7 +149,7 @@ pub async fn complete_upload<R: AssetRepo, B: BlobStore>(
     }
     let upload_key = asset.upload_key();
     let Some(stored) = blobs.head(&upload_key).await? else {
-        return Err(CommandError::UploadMissing(id));
+        return Err(CommandError::UploadMissing(asset.id()));
     };
     let head = blobs.read_range(&upload_key, 0, HEAD_BYTES).await?;
     match asset.verify_upload(stored.size, &head) {
