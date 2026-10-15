@@ -41,6 +41,11 @@ pnpm admin:dev
   action has Hypha check the stored file. The file never passes through the admin, and
   the session token stays server-side (design note 0013). Lists page
   forward with the API's opaque cursors (`components/pager.tsx`, design note 0012).
+- **The look** is the Hypha theme (`theme/hyphaTheme.ts`, from the brand book): it
+  extends Astryx's Neutral with Foxfire lime on moss-grey neutrals and Geist / Geist Mono
+  (self-hosted from npm). After editing it, `pnpm theme:build`; `pnpm theme:check` fails
+  while the built `theme/hypha.css` and `hypha.js` are stale. Logos and favicons live in
+  `public/` (`components/wordmark.tsx` picks the light or dark wordmark).
 - **Money and dates** go through `lib/format.ts`: integer minor units, a fixed locale
   and UTC, so server and browser render the same text.
 - **Screens** start from Astryx templates (`pnpm exec astryx template --list`): the

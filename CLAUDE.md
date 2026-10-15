@@ -43,6 +43,7 @@ The repo is also a pnpm workspace (`pnpm-workspace.yaml`): `apps/admin` (the adm
 - After the OpenAPI documents change: `pnpm sdk:generate` (committed; `pnpm sdk:check` fails while stale).
 - The admin is a backend for its own frontend: only its server code (`apps/admin/lib/hypha.ts`) calls the API, and the staff session stays in an httpOnly cookie. Standard Next.js APIs only (no vinext-specific ones), so `pnpm exec next build` keeps working too.
 - Astryx is 0.x: versions are pinned exactly; `pnpm exec astryx component <Name>` / `astryx template --list` document components and page templates.
+- The admin's look is the Hypha theme, `apps/admin/theme/hyphaTheme.ts` (extends Astryx Neutral with the brand's tokens; brand assets in `apps/admin/public/`). After editing it, `pnpm --filter admin theme:build` (its built `hypha.css` / `hypha.js` are committed; `theme:check` fails while stale). Use Astryx's token names (`pnpm exec astryx docs tokens`); a variable Astryx doesn't read does nothing.
 
 ## Architecture (hexagonal / ports and adapters)
 

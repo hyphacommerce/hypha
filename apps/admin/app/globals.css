@@ -1,10 +1,38 @@
-/* Astryx's pre-built CSS (design note 0011, P3): reset, components, theme. The order maps
-   to its cascade layers, so keep it. */
+/* Astryx's pre-built CSS (design note 0011, P3): reset, components, then the Hypha
+   theme (theme/hyphaTheme.ts, built to theme/hypha.css). The order maps to Astryx's
+   cascade layers, so keep it. */
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
-@import "@astryxdesign/theme-neutral/theme.css";
+@import "../theme/hypha.css";
+
+/* The brand's typefaces, self-hosted from npm (SIL OFL): Geist and Geist Mono. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 
 html,
 body {
   height: 100%;
+}
+
+/* The wordmark for the colour mode (components/wordmark.tsx): Astryx sets data-theme on
+   <html> when a mode is chosen, and leaves it off to follow the system. */
+.hypha-wordmark-light {
+  display: block;
+}
+.hypha-wordmark-dark {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .hypha-wordmark-light {
+    display: none;
+  }
+  html:not([data-theme="light"]) .hypha-wordmark-dark {
+    display: block;
+  }
+}
+html[data-theme="dark"] .hypha-wordmark-light {
+  display: none;
+}
+html[data-theme="dark"] .hypha-wordmark-dark {
+  display: block;
 }

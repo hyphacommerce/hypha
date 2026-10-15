@@ -5,10 +5,7 @@
 
 import { AppShell } from "@astryxdesign/core/AppShell";
 import { DropdownMenu, DropdownMenuItem } from "@astryxdesign/core/DropdownMenu";
-import { Icon } from "@astryxdesign/core/Icon";
-import { HStack } from "@astryxdesign/core/Layout";
 import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
-import { Text } from "@astryxdesign/core/Text";
 import { TopNav } from "@astryxdesign/core/TopNav";
 import {
   ArrowRightStartOnRectangleIcon,
@@ -19,11 +16,12 @@ import {
   KeyIcon,
   PhotoIcon,
   ShoppingBagIcon,
-  SparklesIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import { usePathname } from "next/navigation";
 import { startTransition, type ReactNode } from "react";
+
+import { Wordmark } from "@/components/wordmark";
 
 import { logout } from "../login/actions";
 
@@ -75,14 +73,7 @@ export function AdminShell({
       topNav={
         <TopNav
           label="Hypha admin"
-          heading={
-            <HStack gap={2} vAlign="center">
-              <Icon icon={SparklesIcon} />
-              <Text type="body" weight="bold">
-                Hypha
-              </Text>
-            </HStack>
-          }
+          heading={<Wordmark />}
           endContent={
             <DropdownMenu
               button={{ label: userName, variant: "ghost", size: "sm" }}

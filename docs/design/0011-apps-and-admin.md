@@ -74,6 +74,15 @@ So: Next.js, run with vinext, standard APIs only. The admin uses none of the kno
   needed and tested under vinext.
 - **Risk:** 0.x means breaking changes. Exact versions, upgraded deliberately with
   `astryx upgrade` (codemods).
+- **Brand theme** (2026-10-15): the admin uses the Hypha theme, `apps/admin/theme/
+  hyphaTheme.ts`, made from the brand book. It `extends` Neutral, so it only sets what
+  the brand changes: colours (Foxfire lime `#B8E948` with brand-950 ink, moss-tinted
+  greys, emerald success), Geist and Geist Mono, dark mode raising surfaces instead of
+  shadows. `astryx theme build` compiles it to one self-contained `hypha.css` and
+  `hypha.js` (committed, checked with `--check`). The brand book named some tokens Astryx
+  doesn't have (`--color-background-brand`, `--color-border-default`); they are mapped onto
+  Astryx's own (`--color-accent`, `--color-border`), since unknown variables do nothing.
+  A merchant's theme replaces it the same way.
 
 ## 4. How the admin authenticates (P4)
 
