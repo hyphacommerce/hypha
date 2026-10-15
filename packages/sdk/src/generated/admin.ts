@@ -1373,14 +1373,6 @@ export interface components {
             /** @description The variant's option values ("M / Blue"); `null` for a product without options. */
             variant_title?: string | null;
         };
-        /** @description A page of orders, newest first (design note 0012). */
-        OrderPage: {
-            /** @description Whether there are more after these. */
-            has_more: boolean;
-            items: components["schemas"]["OrderSummaryResponse"][];
-            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
-            next_cursor?: string | null;
-        };
         OrderResponse: {
             cart: components["schemas"]["CartId"];
             country: components["schemas"]["CountryCode"];
@@ -1405,6 +1397,14 @@ export interface components {
             /** @description Whether line prices include tax (the market decided, at checkout). */
             taxes_included: boolean;
             total: components["schemas"]["Money"];
+        };
+        /** @description A page of a list, newest first (design note 0012). */
+        OrderSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["OrderSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
         };
         /** @description An order in a list: what a table of orders shows, without lines. */
         OrderSummaryResponse: {
@@ -1453,7 +1453,7 @@ export interface components {
          * @example prod_0190f1a2b3c47d8e9f00112233445566
          */
         ProductId: string;
-        /** @description A page of products, newest first (design note 0012). */
+        /** @description A page of a list, newest first (design note 0012). */
         ProductPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -5274,7 +5274,7 @@ export interface operations {
             query?: {
                 /** @description The previous page's `next_cursor`; absent for the first page. */
                 cursor?: string;
-                /** @description Orders per page, 1 to 100 (default 50). */
+                /** @description Items per page, 1 to 100 (default 50). */
                 limit?: number;
             };
             header?: never;
@@ -5289,7 +5289,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OrderPage"];
+                    "application/json": components["schemas"]["OrderSummaryPage"];
                 };
             };
             /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
@@ -5791,12 +5791,12 @@ export interface operations {
     "admin.products.list": {
         parameters: {
             query?: {
-                /** @description Only products in this status. */
-                status?: components["schemas"]["ProductStatus"];
                 /** @description The previous page's `next_cursor`; absent for the first page. */
                 cursor?: string;
-                /** @description Products per page, 1 to 100 (default 50). */
+                /** @description Items per page, 1 to 100 (default 50). */
                 limit?: number;
+                /** @description Only products in this status. */
+                status?: components["schemas"]["ProductStatus"];
             };
             header?: never;
             path?: never;

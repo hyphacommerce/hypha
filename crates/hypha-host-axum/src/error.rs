@@ -12,7 +12,7 @@
 
 use axum::{
     Json,
-    extract::rejection::{JsonRejection, PathRejection, QueryRejection},
+    extract::rejection::{JsonRejection, PathRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -148,6 +148,21 @@ impl ApiError {
         self
     }
 
+    /// The code, for tests outside this module.
+    #[cfg(test)]
+    pub(crate) fn code(&self) -> &'static str {
+        self.code
+    }
+
+    /// A query string that doesn't parse, or has parameters the route doesn't take.
+    pub fn invalid_query(message: impl std::fmt::Display) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_query",
+            format!("invalid query string: {message}"),
+        )
+    }
+
     /// A list's `?cursor=` that isn't one the list handed out.
     pub fn invalid_cursor() -> Self {
         Self::new(
@@ -253,16 +268,6 @@ impl From<JsonRejection> for ApiError {
 impl From<PathRejection> for ApiError {
     fn from(rejection: PathRejection) -> Self {
         Self::new(rejection.status(), "invalid_path", rejection.body_text())
-    }
-}
-
-impl From<QueryRejection> for ApiError {
-    fn from(rejection: QueryRejection) -> Self {
-        Self::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_query",
-            rejection.body_text(),
-        )
     }
 }
 

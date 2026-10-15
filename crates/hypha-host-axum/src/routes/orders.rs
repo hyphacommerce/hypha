@@ -10,10 +10,13 @@ use hypha_orders::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{next_cursor, page_request, rfc3339};
+use super::{
+    page::{ListQuery, PageParams, PageResponse},
+    rfc3339,
+};
 use crate::{
     error::ApiError,
-    extract::{Caller, KeyedJson, PathId, QueryParams, Storefront, idempotent_response},
+    extract::{Caller, KeyedJson, PathId, Storefront, idempotent_response},
     state::{SharedState, Storage},
 };
 
@@ -222,53 +225,28 @@ impl OrderSummaryResponse {
     }
 }
 
-#[derive(Deserialize, utoipa::IntoParams)]
-#[serde(deny_unknown_fields)]
-#[into_params(parameter_in = Query)]
-pub(super) struct ListOrdersQuery {
-    /// The previous page's `next_cursor`; absent for the first page.
-    cursor: Option<String>,
-    /// Orders per page, 1 to 100 (default 50).
-    #[param(minimum = 1, maximum = 100)]
-    limit: Option<u32>,
-}
-
-/// A page of orders, newest first (design note 0012).
-#[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct OrderPage {
-    items: Vec<OrderSummaryResponse>,
-    /// Whether there are more after these.
-    has_more: bool,
-    /// Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.
-    next_cursor: Option<String>,
-}
+/// A page of orders (named for the documents: utoipa's `body =` takes a plain name).
+type OrderPage = PageResponse<OrderSummaryResponse>;
 
 /// Orders, newest first.
 #[utoipa::path(
     get,
     path = "/admin/orders",
-    params(ListOrdersQuery),
+    params(PageParams),
     responses((status = 200, description = "OK", body = OrderPage)),
     extensions(("x-hypha-scopes" = json!(["orders:read"]))),
 )]
 pub(super) async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    query: QueryParams<ListOrdersQuery>,
+    query: ListQuery,
 ) -> Result<Json<OrderPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let query = query.parse()?;
-    let page = page_request(query.cursor.as_deref(), query.limit)?;
+    let (page, _) = query.parse()?;
     let page = list_orders(&ctx, ports.orders(), page).await?;
-    Ok(Json(OrderPage {
-        items: page
-            .items
-            .iter()
-            .map(OrderSummaryResponse::new)
-            .collect::<Result<_, _>>()?,
-        has_more: page.has_more,
-        next_cursor: next_cursor(&page, Order::id),
-    }))
+    Ok(Json(PageResponse::new(page, Order::id, |o| {
+        OrderSummaryResponse::new(&o)
+    })?))
 }
 
 /// An order.

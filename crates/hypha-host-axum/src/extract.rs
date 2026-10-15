@@ -87,32 +87,6 @@ fn is_json(content_type: Option<&HeaderValue>) -> bool {
 #[from_request(via(axum::extract::Path), rejection(ApiError))]
 pub struct PathId<T>(pub T);
 
-/// A query string, read but not yet parsed: call `parse` after authenticating, like
-/// `JsonBody`. Parsed with axum's `Query` rules; unknown parameters are refused when
-/// `T` denies them, the same as unknown body fields.
-pub struct QueryParams<T> {
-    uri: axum::http::Uri,
-    _query: PhantomData<fn() -> T>,
-}
-
-impl<S: Send + Sync, T> FromRequestParts<S> for QueryParams<T> {
-    type Rejection = std::convert::Infallible;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        Ok(Self {
-            uri: parts.uri.clone(),
-            _query: PhantomData,
-        })
-    }
-}
-
-impl<T: DeserializeOwned> QueryParams<T> {
-    pub fn parse(self) -> Result<T, ApiError> {
-        let axum::extract::Query(query) = axum::extract::Query::<T>::try_from_uri(&self.uri)?;
-        Ok(query)
-    }
-}
-
 /// Who is calling: the credentials a request carries (design note 0008, section 3).
 /// The extractor only reads headers; the handler's first step is `authenticate`, which
 /// opens the request's ports (one pooled connection per request) and resolves the

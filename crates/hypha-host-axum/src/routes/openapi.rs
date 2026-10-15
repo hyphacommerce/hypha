@@ -11,6 +11,7 @@
 use std::{collections::BTreeMap, sync::OnceLock};
 
 use axum::{extract::State, http::header::CONTENT_TYPE, response::IntoResponse};
+use hypha_core::PageLimit;
 use utoipa::{
     PartialSchema, ToSchema,
     openapi::{
@@ -22,6 +23,7 @@ use utoipa::{
     },
 };
 
+use super::page;
 use crate::{error::ApiErrorBody, state::SharedState};
 
 /// Which document.
@@ -189,6 +191,10 @@ fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
         })
         .collect();
     let writes = row.method != "GET";
+    let invalid_limit = format!(
+        "A `limit` outside 1 to {} (`invalid_limit`).",
+        PageLimit::MAX
+    );
     let mut errors: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     if has_path_params {
         errors
@@ -206,17 +212,12 @@ fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
             .or_default()
             .push("An unknown or malformed query parameter (`invalid_query`).");
     }
-    if query.contains(&"cursor") {
+    if is_list(op) {
         errors
             .entry("400")
             .or_default()
             .push("A `cursor` this list didn't return (`invalid_cursor`).");
-    }
-    if query.contains(&"limit") {
-        errors
-            .entry("422")
-            .or_default()
-            .push("A `limit` outside 1 to 100 (`invalid_limit`).");
+        errors.entry("422").or_default().push(&invalid_limit);
     }
     if has_body {
         errors
@@ -262,6 +263,17 @@ fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
             .entry(status.to_string())
             .or_insert_with(|| error_response(&lines.join(" ")));
     }
+}
+
+/// Whether the operation is a list: it takes `PageParams`' parameters, exactly (a route
+/// with an unrelated `limit` is not one).
+fn is_list(op: &Operation) -> bool {
+    let params = op.parameters.as_deref().unwrap_or_default();
+    page::page_params().into_iter().all(|wanted| {
+        params
+            .iter()
+            .any(|p| matches!(p, RefOr::T(p) if *p == wanted))
+    })
 }
 
 /// Whether the operation needs credentials: annotated `security(())` means none.
@@ -387,6 +399,22 @@ mod tests {
             operation_id("storefront", "products", "fetch_storefront"),
             "storefront.products.fetch"
         );
+    }
+
+    #[test]
+    fn only_lists_get_the_paging_errors() {
+        let json: Value = serde_json::from_str(cached(Doc::Admin)).unwrap();
+        let mut lists = Vec::new();
+        for (path, item) in json["paths"].as_object().unwrap() {
+            for (method, op) in item.as_object().unwrap() {
+                let errors = op["responses"].to_string();
+                if errors.contains("invalid_cursor") {
+                    assert!(errors.contains("invalid_limit"), "{method} {path}");
+                    lists.push(format!("{method} {path}"));
+                }
+            }
+        }
+        assert_eq!(lists, ["get /admin/orders", "get /admin/products"]);
     }
 
     #[test]

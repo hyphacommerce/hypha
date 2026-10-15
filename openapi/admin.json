@@ -4579,7 +4579,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Orders per page, 1 to 100 (default 50).",
+            "description": "Items per page, 1 to 100 (default 50).",
             "required": false,
             "schema": {
               "type": "integer",
@@ -4595,7 +4595,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrderPage"
+                  "$ref": "#/components/schemas/OrderSummaryPage"
                 }
               }
             }
@@ -5239,15 +5239,6 @@
         "operationId": "admin.products.list",
         "parameters": [
           {
-            "name": "status",
-            "in": "query",
-            "description": "Only products in this status.",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/ProductStatus"
-            }
-          },
-          {
             "name": "cursor",
             "in": "query",
             "description": "The previous page's `next_cursor`; absent for the first page.",
@@ -5259,13 +5250,22 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Products per page, 1 to 100 (default 50).",
+            "description": "Items per page, 1 to 100 (default 50).",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
               "maximum": 100,
               "minimum": 1
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only products in this status.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ProductStatus"
             }
           }
         ],
@@ -8849,33 +8849,6 @@
           }
         }
       },
-      "OrderPage": {
-        "type": "object",
-        "description": "A page of orders, newest first (design note 0012).",
-        "required": [
-          "items",
-          "has_more"
-        ],
-        "properties": {
-          "has_more": {
-            "type": "boolean",
-            "description": "Whether there are more after these."
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrderSummaryResponse"
-            }
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it."
-          }
-        }
-      },
       "OrderResponse": {
         "type": "object",
         "required": [
@@ -8952,6 +8925,33 @@
           },
           "total": {
             "$ref": "#/components/schemas/Money"
+          }
+        }
+      },
+      "OrderSummaryPage": {
+        "type": "object",
+        "description": "A page of a list, newest first (design note 0012).",
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether there are more after these."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderSummaryResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it."
           }
         }
       },
@@ -9086,7 +9086,7 @@
       },
       "ProductPage": {
         "type": "object",
-        "description": "A page of products, newest first (design note 0012).",
+        "description": "A page of a list, newest first (design note 0012).",
         "required": [
           "items",
           "has_more"

@@ -6,10 +6,10 @@ use hypha_products::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{next_cursor, page_request};
+use super::page::{ListQuery, PageParams, PageResponse};
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId, QueryParams, Storefront},
+    extract::{Caller, JsonBody, PathId, Storefront},
     state::{SharedState, Storage},
 };
 
@@ -136,48 +136,34 @@ impl From<&Product> for ProductResponse {
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
-pub(super) struct ListProductsQuery {
+pub(super) struct ProductFilters {
     /// Only products in this status.
     status: Option<StatusDto>,
-    /// The previous page's `next_cursor`; absent for the first page.
-    cursor: Option<String>,
-    /// Products per page, 1 to 100 (default 50).
-    #[param(minimum = 1, maximum = 100)]
-    limit: Option<u32>,
 }
 
-/// A page of products, newest first (design note 0012).
-#[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ProductPage {
-    items: Vec<ProductResponse>,
-    /// Whether there are more after these.
-    has_more: bool,
-    /// Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.
-    next_cursor: Option<String>,
-}
+/// A page of products (named for the documents: utoipa's `body =` takes a plain name).
+type ProductPage = PageResponse<ProductResponse>;
 
 /// Products in any status, newest first, optionally of one status.
 #[utoipa::path(
     get,
     path = "/admin/products",
-    params(ListProductsQuery),
+    params(PageParams, ProductFilters),
     responses((status = 200, description = "OK", body = ProductPage)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
 pub(super) async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    query: QueryParams<ListProductsQuery>,
+    query: ListQuery<ProductFilters>,
 ) -> Result<Json<ProductPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let query = query.parse()?;
-    let page = page_request(query.cursor.as_deref(), query.limit)?;
-    let page = list_products(&ctx, ports.products(), query.status.map(Into::into), page).await?;
-    Ok(Json(ProductPage {
-        items: page.items.iter().map(ProductResponse::from).collect(),
-        has_more: page.has_more,
-        next_cursor: next_cursor(&page, Product::id),
-    }))
+    let (page, filters) = query.parse()?;
+    let status = filters.status.map(Into::into);
+    let page = list_products(&ctx, ports.products(), status, page).await?;
+    Ok(Json(PageResponse::new(page, Product::id, |p| {
+        Ok(ProductResponse::from(&p))
+    })?))
 }
 
 /// Creates a product with one variant, as a draft.

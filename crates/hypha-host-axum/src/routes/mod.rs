@@ -12,6 +12,7 @@ mod inventory;
 mod markets;
 mod me;
 mod orders;
+mod page;
 mod products;
 mod staff;
 mod stores;
@@ -22,9 +23,7 @@ use axum::{
     routing::{MethodFilter, on},
 };
 
-use std::{fmt::Display, str::FromStr};
-
-use hypha_core::{Page, PageLimit, PageRequest, Timestamp};
+use hypha_core::Timestamp;
 
 use crate::{
     error::ApiError,
@@ -36,32 +35,6 @@ pub(crate) fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
     jiff::Timestamp::from_microsecond(at.unix_micros())
         .map(|t| t.to_string())
         .map_err(ApiError::internal)
-}
-
-/// The page a list route's `?cursor=&limit=` asks for (design note 0012). No `limit` is
-/// `PageLimit::DEFAULT`, one out of range is `422 invalid_limit`; a cursor this list
-/// didn't hand out is `400 invalid_cursor`.
-///
-/// Cursors are opaque to clients. Today one is the last item's ID; a list sorted by
-/// something else would encode its sort key too, without changing the API.
-pub(crate) fn page_request<Id: FromStr>(
-    cursor: Option<&str>,
-    limit: Option<u32>,
-) -> Result<PageRequest<Id>, ApiError> {
-    let after = cursor
-        .map(|c| c.parse().map_err(|_| ApiError::invalid_cursor()))
-        .transpose()?;
-    Ok(PageRequest {
-        after,
-        limit: limit.map(PageLimit::new).transpose()?.unwrap_or_default(),
-    })
-}
-
-/// The cursor of the page after `page`, if it has items (see `page_request`).
-pub(crate) fn next_cursor<T, Id: Display>(page: &Page<T>, id: impl Fn(&T) -> Id) -> Option<String> {
-    page.has_more
-        .then(|| page.items.last().map(|item| id(item).to_string()))
-        .flatten()
 }
 
 /// Every route, once (design note 0010, S7): `[surface, METHOD, "path", handler]`.
