@@ -3,12 +3,15 @@
 //! `ListQuery<Filters>` (or `ListQuery` without filters), lists `PageParams` and its
 //! filters in `params(...)`, and answers with a `PageResponse<ItemDto>`.
 //!
-//! Cursors are opaque to clients. Today one is the last item's ID; a list sorted by
-//! something else would encode its sort key too, without changing the API.
+//! Cursors are opaque to clients (design note 0016, section 9): base64url of a small
+//! JSON object with a version, the last item's ID and the list's filters, so a cursor
+//! only continues the list it came from, and a later sort order can add its sort key
+//! without changing the API.
 
 use std::{borrow::Cow, fmt::Display, marker::PhantomData, str::FromStr};
 
 use axum::{extract::FromRequestParts, http::request::Parts};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hypha_core::{Page, PageLimit, PageRequest};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use utoipa::{
@@ -37,13 +40,14 @@ pub(crate) struct PageResponse<T> {
 
 impl<T> PageResponse<T> {
     /// The response for `page`: each item turned into its DTO by `item`, and the cursor
-    /// of the next page made from the last item's `id`.
+    /// of the next page made from the last item's `id` and the list's `scope`.
     pub(crate) fn new<U, Id: Display>(
         page: Page<U>,
+        scope: &ListScope,
         id: impl Fn(&U) -> Id,
         item: impl FnMut(U) -> Result<T, ApiError>,
     ) -> Result<Self, ApiError> {
-        let next_cursor = next_cursor(&page, id);
+        let next_cursor = next_cursor(&page, scope, id)?;
         Ok(Self {
             items: page.items.into_iter().map(item).collect::<Result<_, _>>()?,
             has_more: page.has_more,
@@ -55,22 +59,72 @@ impl<T> PageResponse<T> {
     /// async (asset URLs): one per page item, in order.
     pub(crate) fn with_items<U, Id: Display>(
         page: &Page<U>,
+        scope: &ListScope,
         id: impl Fn(&U) -> Id,
         items: Vec<T>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ApiError> {
+        Ok(Self {
             items,
             has_more: page.has_more,
-            next_cursor: next_cursor(page, id),
-        }
+            next_cursor: next_cursor(page, scope, id)?,
+        })
     }
 }
 
-/// The cursor of the page after `page`: its last item's ID, when there are more.
-fn next_cursor<U, Id: Display>(page: &Page<U>, id: impl Fn(&U) -> Id) -> Option<String> {
-    page.has_more
-        .then(|| page.items.last().map(|last| id(last).to_string()))
-        .flatten()
+/// What a request's filters were, so the next page's cursor only continues this list.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct ListScope {
+    /// The filter parameters, sorted, so their order in the URL doesn't matter.
+    filters: Vec<(String, String)>,
+}
+
+/// A cursor's content: `v` is the format (bumped if it changes), `after` the last
+/// item's ID. Encoded as base64url JSON; clients never read it.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Cursor {
+    v: u8,
+    after: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    filters: Vec<(String, String)>,
+}
+
+impl Cursor {
+    const VERSION: u8 = 1;
+
+    fn encode(&self) -> Result<String, ApiError> {
+        let json = serde_json::to_vec(self).map_err(ApiError::internal)?;
+        Ok(URL_SAFE_NO_PAD.encode(json))
+    }
+
+    /// The ID after which `scope`'s list continues, or `None` for a cursor that isn't
+    /// one of ours, is from another version, or was made with other filters.
+    fn decode<Id: FromStr>(cursor: &str, scope: &ListScope) -> Option<Id> {
+        let json = URL_SAFE_NO_PAD.decode(cursor).ok()?;
+        let cursor: Cursor = serde_json::from_slice(&json).ok()?;
+        if cursor.v != Self::VERSION || cursor.filters != scope.filters {
+            return None;
+        }
+        cursor.after.parse().ok()
+    }
+}
+
+/// The cursor of the page after `page`, when there are more.
+fn next_cursor<U, Id: Display>(
+    page: &Page<U>,
+    scope: &ListScope,
+    id: impl Fn(&U) -> Id,
+) -> Result<Option<String>, ApiError> {
+    let Some(last) = page.items.last().filter(|_| page.has_more) else {
+        return Ok(None);
+    };
+    Cursor {
+        v: Cursor::VERSION,
+        after: id(last).to_string(),
+        filters: scope.filters.clone(),
+    }
+    .encode()
+    .map(Some)
 }
 
 /// Written out rather than derived: utoipa's derive names a generic schema
@@ -144,10 +198,11 @@ impl<S: Send + Sync, F> FromRequestParts<S> for ListQuery<F> {
 }
 
 impl<F: DeserializeOwned> ListQuery<F> {
-    /// The page asked for and the filters. No `limit` is `PageLimit::DEFAULT`, one out of
-    /// range is `422 invalid_limit`; a cursor this list didn't hand out is
-    /// `400 invalid_cursor`; anything malformed or unknown is `400 invalid_query`.
-    pub(crate) fn parse<Id: FromStr>(self) -> Result<(PageRequest<Id>, F), ApiError> {
+    /// The page asked for, the filters, and the scope to make the next cursor with. No
+    /// `limit` is `PageLimit::DEFAULT`, one out of range is `422 invalid_limit`; a cursor
+    /// this list (with these filters) didn't hand out is `400 invalid_cursor`; anything
+    /// malformed or unknown is `400 invalid_query`.
+    pub(crate) fn parse<Id: FromStr>(self) -> Result<(PageRequest<Id>, F, ListScope), ApiError> {
         let pairs: Vec<(String, String)> =
             serde_urlencoded::from_str(self.query.as_deref().unwrap_or(""))
                 .map_err(ApiError::invalid_query)?;
@@ -166,8 +221,12 @@ impl<F: DeserializeOwned> ListQuery<F> {
             }
         }
 
+        filters.sort();
+        let scope = ListScope {
+            filters: filters.clone(),
+        };
         let after = cursor
-            .map(|c| c.parse().map_err(|_| ApiError::invalid_cursor()))
+            .map(|c| Cursor::decode(&c, &scope).ok_or_else(ApiError::invalid_cursor))
             .transpose()?;
         let limit = match limit {
             None => PageLimit::DEFAULT,
@@ -181,7 +240,7 @@ impl<F: DeserializeOwned> ListQuery<F> {
         // Back into a query string, so the filters parse with the same rules as any query.
         let rest = serde_urlencoded::to_string(&filters).map_err(ApiError::internal)?;
         let filters = serde_urlencoded::from_str(&rest).map_err(ApiError::invalid_query)?;
-        Ok((PageRequest { after, limit }, filters))
+        Ok((PageRequest { after, limit }, filters, scope))
     }
 }
 
@@ -242,11 +301,26 @@ mod tests {
     }
 
     fn parse<F: DeserializeOwned>(query: &str) -> Result<(PageRequest<ProductId>, F), ApiError> {
+        parse_scoped(query).map(|(page, filters, _)| (page, filters))
+    }
+
+    fn parse_scoped<F: DeserializeOwned>(
+        query: &str,
+    ) -> Result<(PageRequest<ProductId>, F, ListScope), ApiError> {
         ListQuery::<F> {
             query: Some(query.to_string()),
             _filters: PhantomData,
         }
         .parse()
+    }
+
+    /// The cursor a page of `ids` (with more after it) hands out under `scope`.
+    fn cursor_after(id: ProductId, scope: &ListScope) -> String {
+        let page = Page {
+            items: vec![id],
+            has_more: true,
+        };
+        next_cursor(&page, scope, |id| *id).unwrap().unwrap()
     }
 
     fn code<T>(result: Result<T, ApiError>) -> Option<&'static str> {
@@ -256,8 +330,10 @@ mod tests {
     #[test]
     fn the_page_and_the_filters_are_read_apart() {
         let id = ProductId::from_uuid(Uuid::from_u128(7));
+        let (_, _, scope) = parse_scoped::<Filters>("status=draft").unwrap();
+        let cursor = cursor_after(id, &scope);
         let (page, filters) =
-            parse::<Filters>(&format!("status=draft&cursor={id}&limit=2")).unwrap();
+            parse::<Filters>(&format!("status=draft&cursor={cursor}&limit=2")).unwrap();
         assert_eq!(
             page,
             PageRequest {
@@ -302,11 +378,64 @@ mod tests {
         assert_eq!(code(parse::<NoFilters>("limit=-1")), Some("invalid_query"));
         assert_eq!(code(parse::<NoFilters>("limit=0")), Some("invalid_limit"));
         assert_eq!(code(parse::<NoFilters>("limit=101")), Some("invalid_limit"));
-        let order = "ord_00000000000000000000000000000001";
+        // A raw ID, as cursors were before 0016, isn't one any more.
+        let product = "prod_00000000000000000000000000000001";
         assert_eq!(
-            code(parse::<NoFilters>(&format!("cursor={order}"))),
+            code(parse::<NoFilters>(&format!("cursor={product}"))),
             Some("invalid_cursor")
         );
+        assert_eq!(
+            code(parse::<NoFilters>("cursor=%%%")),
+            Some("invalid_cursor")
+        );
+        assert_eq!(
+            code(parse::<NoFilters>("cursor=bm9wZQ")),
+            Some("invalid_cursor")
+        );
+    }
+
+    #[test]
+    fn a_cursor_is_opaque_and_continues_only_its_own_list() {
+        let id = ProductId::from_uuid(Uuid::from_u128(7));
+        let scope = ListScope::default();
+        let cursor = cursor_after(id, &scope);
+        assert!(!cursor.contains("prod_"), "{cursor}");
+        let (page, _) = parse::<NoFilters>(&format!("cursor={cursor}")).unwrap();
+        assert_eq!(page.after, Some(id));
+        // Made with other filters: refused rather than continuing a different list.
+        assert_eq!(
+            code(parse::<Filters>(&format!("status=draft&cursor={cursor}"))),
+            Some("invalid_cursor")
+        );
+        // Another list's IDs don't parse as this list's.
+        let order = hypha_core::OrderId::from_uuid(Uuid::from_u128(7));
+        let other = Cursor {
+            v: Cursor::VERSION,
+            after: order.to_string(),
+            filters: vec![],
+        }
+        .encode()
+        .unwrap();
+        assert_eq!(
+            code(parse::<NoFilters>(&format!("cursor={other}"))),
+            Some("invalid_cursor")
+        );
+    }
+
+    #[test]
+    fn filters_in_another_order_are_the_same_list() {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Two {
+            a: Option<String>,
+            b: Option<String>,
+        }
+        let id = ProductId::from_uuid(Uuid::from_u128(7));
+        let (_, _, scope) = parse_scoped::<Two>("b=2&a=1").unwrap();
+        let cursor = cursor_after(id, &scope);
+        let (page, _) = parse::<Two>(&format!("a=1&b=2&cursor={cursor}")).unwrap();
+        assert_eq!(page.after, Some(id));
     }
 
     #[test]

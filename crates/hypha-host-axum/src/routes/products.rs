@@ -300,7 +300,7 @@ pub(super) async fn list<S: Storage>(
     query: ListQuery<ProductFilters>,
 ) -> Result<Json<ProductSummaryPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, filters) = query.parse()?;
+    let (page, filters, scope) = query.parse()?;
     let status = filters.status.map(Into::into);
     let page = list_product_views(&ctx, &ports, status, page).await?;
     let mut items = Vec::with_capacity(page.items.len());
@@ -309,9 +309,10 @@ pub(super) async fn list<S: Storage>(
     }
     Ok(Json(PageResponse::with_items(
         &page,
+        &scope,
         |v| v.summary.id,
         items,
-    )))
+    )?))
 }
 
 /// Creates a product with one variant, as a draft.

@@ -296,10 +296,11 @@ pub(super) async fn list<S: Storage>(
     query: ListQuery,
 ) -> Result<Json<OrderPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, _) = query.parse()?;
+    let (page, _, scope) = query.parse()?;
     let page = list_orders(&ctx, ports.orders(), page).await?;
     Ok(Json(PageResponse::new(
         page,
+        &scope,
         |o| o.id,
         OrderSummaryResponse::new,
     )?))

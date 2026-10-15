@@ -15,7 +15,7 @@
 | | Decision |
 | --- | --- |
 | L1 | **Cursor pages, newest first.** IDs are UUIDv7, so ordering by ID is ordering by creation; a page asks for items below the last ID it saw. One indexed range scan, and items added while paging don't shift pages the way offsets do |
-| L2 | **Opaque cursors.** `?cursor=` takes the previous page's `next_cursor`. Today it is the last item's ID; clients must not rely on that, so a later sort (by title, by update) can put its sort key in the cursor without an API change. A cursor the list didn't hand out is `400 invalid_cursor`. *Hard to reverse* |
+| L2 | **Opaque cursors.** `?cursor=` takes the previous page's `next_cursor`. Since 0016 (section 9) it is base64url JSON of a format version, the last item's ID and the request's filters; clients must not read it, so a later sort (by title, by update) can put its sort key in the cursor without an API change. A cursor the list didn't hand out, or made with other filters, is `400 invalid_cursor`. *Hard to reverse* |
 | L3 | **Response shape `{items, has_more, next_cursor}`.** `next_cursor` is `null` on the last page. No total count: counting a large catalog is a full scan on every page. *Hard to reverse* |
 | L4 | **`limit` from 1 to 100, default 50.** Out of range is `422 invalid_limit`, not clamped, so a client asking for 500 finds out instead of silently getting 100 |
 | L5 | **Filters are typed query parameters**, refused when unknown (`400 invalid_query`), like unknown body fields. Products filter by `status` |

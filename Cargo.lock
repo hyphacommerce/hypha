@@ -877,6 +877,7 @@ name = "hypha-host-axum"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "deadpool-postgres",
  "getrandom 0.4.3",
  "governor",

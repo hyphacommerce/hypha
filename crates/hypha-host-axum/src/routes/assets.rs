@@ -296,14 +296,19 @@ pub(super) async fn list<S: Storage>(
     query: ListQuery<AssetFilters>,
 ) -> Result<Json<AssetPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, filters) = query.parse()?;
+    let (page, filters, scope) = query.parse()?;
     let media = media(&state)?;
     let page = list_assets(&ctx, ports.assets(), filters.kind.map(Into::into), page).await?;
     let mut items = Vec::with_capacity(page.items.len());
     for asset in &page.items {
         items.push(AssetResponse::new(asset, media).await?);
     }
-    Ok(Json(PageResponse::with_items(&page, Asset::id, items)))
+    Ok(Json(PageResponse::with_items(
+        &page,
+        &scope,
+        Asset::id,
+        items,
+    )?))
 }
 
 /// An asset, in any status.
@@ -431,10 +436,11 @@ pub(super) async fn usages<S: Storage>(
     query: ListQuery,
 ) -> Result<Json<AssetUsagePage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, _) = query.parse::<UsageOwner>()?;
+    let (page, _, scope) = query.parse::<UsageOwner>()?;
     let page = list_asset_usages(&ctx, &ports, id, page).await?;
     Ok(Json(PageResponse::new(
         page,
+        &scope,
         |u| u.owner.clone(),
         |u| Ok((&u).into()),
     )?))

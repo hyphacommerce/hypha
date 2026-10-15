@@ -399,12 +399,12 @@ async fn products_list_newest_first_in_pages() {
     let (status, first) = send(&app, "GET", "/admin/products?limit=2", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(ids(&first), [c.as_str(), b.as_str()]);
-    assert_eq!(
-        (&first["has_more"], &first["next_cursor"]),
-        (&json!(true), &json!(b))
-    );
+    assert_eq!(first["has_more"], json!(true));
+    // Opaque (design note 0016, section 9): not the last item's raw ID.
+    let cursor = first["next_cursor"].as_str().unwrap();
+    assert!(!cursor.contains("prod_"), "{cursor}");
 
-    let uri = format!("/admin/products?limit=2&cursor={b}");
+    let uri = format!("/admin/products?limit=2&cursor={cursor}");
     let (_, second) = send(&app, "GET", &uri, None).await;
     assert_eq!(ids(&second), [a.as_str()]);
     assert_eq!(
