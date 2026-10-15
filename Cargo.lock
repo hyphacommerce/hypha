@@ -912,6 +912,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-merchandising"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-media",
+ "hypha-products",
+ "hypha-testkit",
+ "pollster",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-orders"
 version = "0.1.0"
 dependencies = [
