@@ -622,7 +622,10 @@ export interface components {
         UnavailableOptionResponse: {
             name: string;
             option: components["schemas"]["ShippingOptionId"];
-            /** @description `no_price_in_currency`, `weight_unknown`, `provider_failed` or `service_not_quoted`. */
+            /**
+             * @description `no_price_in_currency`, `weight_unknown`, `provider_failed`, `service_not_quoted`,
+             *     or `backup_not_needed` (a backup while a regular option is offered).
+             */
             reason: string;
         };
         /**
@@ -1486,6 +1489,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Over a rate limit per client address (`rate_limited`); see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description A server failure (`internal_error`). */
             500: {
                 headers: {
@@ -1587,6 +1599,15 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Over a rate limit per client address (`rate_limited`); see `Retry-After` */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

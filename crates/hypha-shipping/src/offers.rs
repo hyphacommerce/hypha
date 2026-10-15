@@ -3,7 +3,7 @@
 //! asked once for all its options, all providers at once. A provider that fails leaves
 //! its options out with the reason, never failing the cart (SH7).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use futures_util::future::join_all;
 use hypha_core::{Money, ShippingOptionId, TaxClassId, TotalWeight};
@@ -44,6 +44,8 @@ pub enum NotOffered {
     ProviderFailed(ProviderError),
     /// Its provider answered without this service.
     ServiceNotQuoted,
+    /// A backup, and a regular option is offered: backups only stand in when none is.
+    BackupNotNeeded,
 }
 
 impl NotOffered {
@@ -54,6 +56,7 @@ impl NotOffered {
             NotOffered::WeightUnknown => "weight_unknown",
             NotOffered::ProviderFailed(_) => "provider_failed",
             NotOffered::ServiceNotQuoted => "service_not_quoted",
+            NotOffered::BackupNotNeeded => "backup_not_needed",
         }
     }
 }
@@ -69,8 +72,10 @@ pub enum OfferOutcome {
 }
 
 /// The offers for one group of a cart going to a country `zone` covers, in the zone's
-/// option order. Backup options appear only when the zone has provider options and none
-/// of them could be offered.
+/// option order. Backup options are offered only when no regular option is (disabled,
+/// failed or missing alike), and listed as `BackupNotNeeded` otherwise, so selecting one
+/// says why. Each provider is asked once, all at once; providers only backups use are
+/// asked only when the backups are needed.
 pub async fn offers<P: RateProvider>(
     zone: &ShippingZone,
     providers: &P,
@@ -78,28 +83,79 @@ pub async fn offers<P: RateProvider>(
 ) -> Vec<OfferOutcome> {
     let weight = total_weight(request);
     let enabled: Vec<&ShippingOption> = zone.options().iter().filter(|o| o.enabled()).collect();
+    let (backups, regular): (Vec<&ShippingOption>, Vec<&ShippingOption>) =
+        enabled.iter().partition(|o| o.is_backup());
 
-    // One quote per provider, all at once.
-    let mut by_provider: BTreeMap<&ProviderKey, ()> = BTreeMap::new();
-    for option in &enabled {
-        if let OptionRate::Provider { provider, .. } = option.rate() {
-            by_provider.insert(provider, ());
-        }
-    }
-    let keys: Vec<&ProviderKey> = by_provider.into_keys().collect();
-    let quotes = join_all(keys.iter().map(|key| providers.quote(key, request))).await;
-    let quotes: BTreeMap<&ProviderKey, Result<Vec<Rate>, ProviderError>> = keys
-        .into_iter()
-        .zip(quotes)
-        .map(|(key, quote)| {
-            (
-                key,
-                quote.and_then(|rates| same_currency(key, request, rates)),
-            )
-        })
+    let mut quotes = BTreeMap::new();
+    quote_all(&regular, providers, request, &mut quotes).await;
+    let regular: Vec<(&ShippingOption, OfferOutcome)> = regular
+        .iter()
+        .map(|o| (*o, outcome(o, request, weight, &quotes)))
         .collect();
+    let needs_backups = !regular
+        .iter()
+        .any(|(_, result)| matches!(result, OfferOutcome::Offered(_)));
 
-    let outcome = |option: &ShippingOption| match option.rate() {
+    let backups: Vec<(&ShippingOption, OfferOutcome)> = if needs_backups {
+        quote_all(&backups, providers, request, &mut quotes).await;
+        backups
+            .iter()
+            .map(|o| (*o, outcome(o, request, weight, &quotes)))
+            .collect()
+    } else {
+        backups
+            .iter()
+            .map(|o| (*o, not_offered(o, NotOffered::BackupNotNeeded)))
+            .collect()
+    };
+
+    // Back in the zone's order.
+    enabled
+        .iter()
+        .filter_map(|o| {
+            regular
+                .iter()
+                .chain(&backups)
+                .find(|(r, _)| r.id() == o.id())
+                .map(|(_, result)| result.clone())
+        })
+        .collect()
+}
+
+type Quotes<'a> = BTreeMap<&'a ProviderKey, Result<Vec<Rate>, ProviderError>>;
+
+/// Asks every provider `options` use and `quotes` doesn't have yet, all at once.
+async fn quote_all<'a, P: RateProvider>(
+    options: &[&'a ShippingOption],
+    providers: &P,
+    request: &RateRequest,
+    quotes: &mut Quotes<'a>,
+) {
+    let keys: Vec<&ProviderKey> = options
+        .iter()
+        .filter_map(|o| match o.rate() {
+            OptionRate::Provider { provider, .. } => Some(provider),
+            OptionRate::Builtin(_) => None,
+        })
+        .filter(|key| !quotes.contains_key(key))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let answers = join_all(keys.iter().map(|key| providers.quote(key, request))).await;
+    for (key, answer) in keys.into_iter().zip(answers) {
+        let answer = answer.and_then(|rates| same_currency(key, request, rates));
+        quotes.insert(key, answer);
+    }
+}
+
+/// `option` priced: computed, or from its provider's quote.
+fn outcome(
+    option: &ShippingOption,
+    request: &RateRequest,
+    weight: Option<TotalWeight>,
+    quotes: &Quotes<'_>,
+) -> OfferOutcome {
+    match option.rate() {
         OptionRate::Builtin(rate) => match rate.price(request.subtotal, weight) {
             Ok(price) => offered(option, price.money(), option.estimate(), None),
             Err(Unpriced::NoPriceInCurrency) => not_offered(option, NotOffered::NoPriceInCurrency),
@@ -120,37 +176,10 @@ pub async fn offers<P: RateProvider>(
                 None => not_offered(option, NotOffered::ServiceNotQuoted),
             },
             Some(Err(e)) => not_offered(option, NotOffered::ProviderFailed(e.clone())),
-            // Every provider option's key was quoted above.
+            // `quote_all` asked every provider of the options it was given.
             None => not_offered(option, NotOffered::ServiceNotQuoted),
         },
-    };
-
-    let regular: Vec<(&ShippingOption, OfferOutcome)> = enabled
-        .iter()
-        .filter(|o| !o.is_backup())
-        .map(|o| (*o, outcome(o)))
-        .collect();
-    let has_provider_options = regular
-        .iter()
-        .any(|(o, _)| matches!(o.rate(), OptionRate::Provider { .. }));
-    let every_provider_option_failed = has_provider_options
-        && regular.iter().all(|(o, result)| {
-            !matches!(o.rate(), OptionRate::Provider { .. })
-                || matches!(result, OfferOutcome::NotOffered { .. })
-        });
-
-    // Back in the zone's order, backups included only when needed.
-    enabled
-        .iter()
-        .filter(|o| !o.is_backup() || every_provider_option_failed)
-        .map(|o| {
-            regular
-                .iter()
-                .find(|(r, _)| r.id() == o.id())
-                .map(|(_, result)| result.clone())
-                .unwrap_or_else(|| outcome(o))
-        })
-        .collect()
+    }
 }
 
 /// The group's weight, when every line's is known.
@@ -220,9 +249,16 @@ mod tests {
     use super::*;
     use crate::{BuiltinRate, NewOption, RateBasis, RateItem, RateTable, ServiceInfo, Tier};
 
-    /// Providers by key: their rates, or the error they fail with.
+    /// Providers by key: their rates, or the error they fail with. Records who was asked.
     #[derive(Default)]
-    struct Fake(HashMap<String, Result<Vec<Rate>, ProviderError>>);
+    struct Fake(
+        HashMap<String, Result<Vec<Rate>, ProviderError>>,
+        std::cell::RefCell<Vec<String>>,
+    );
+
+    fn fake<const N: usize>(answers: [(String, Result<Vec<Rate>, ProviderError>); N]) -> Fake {
+        Fake(HashMap::from(answers), Default::default())
+    }
 
     impl RateProvider for Fake {
         async fn services(&self, _: &ProviderKey) -> Result<Vec<ServiceInfo>, ProviderError> {
@@ -233,6 +269,7 @@ mod tests {
             key: &ProviderKey,
             _: &RateRequest,
         ) -> Result<Vec<Rate>, ProviderError> {
+            self.1.borrow_mut().push(key.as_str().to_string());
             self.0
                 .get(key.as_str())
                 .cloned()
@@ -348,10 +385,10 @@ mod tests {
             option(1, by("app_dhl", "express"), false),
             option(2, flat(490), false),
         ]);
-        let providers = Fake(HashMap::from([(
+        let providers = fake([(
             "app_dhl".to_string(),
             Ok(vec![rate("economy", eur(300)), rate("express", eur(1290))]),
-        )]));
+        )]);
         let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
         assert_eq!(offered_ids(&outcomes), vec![oid(1), oid(2)]);
         let OfferOutcome::Offered(express) = quote(&outcomes, oid(1)) else {
@@ -375,10 +412,7 @@ mod tests {
             option(2, flat(990), true),
         ]);
         let failing = ProviderError::Timeout(key("app_dhl"));
-        let providers = Fake(HashMap::from([(
-            "app_dhl".to_string(),
-            Err(failing.clone()),
-        )]));
+        let providers = fake([("app_dhl".to_string(), Err(failing.clone()))]);
         let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
         assert_eq!(offered_ids(&outcomes), vec![oid(2)]);
         assert_eq!(
@@ -398,25 +432,64 @@ mod tests {
             option(2, by("app_gls", "parcel"), false),
             option(3, flat(990), true),
         ]);
-        let providers = Fake(HashMap::from([
+        let providers = fake([
             (
                 "app_dhl".to_string(),
                 Err(ProviderError::Timeout(key("app_dhl"))),
             ),
             ("app_gls".to_string(), Ok(vec![rate("parcel", eur(450))])),
-        ]));
+        ]);
         let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
         assert_eq!(offered_ids(&outcomes), vec![oid(2)]);
-        assert_eq!(outcomes.len(), 2, "the backup isn't listed at all");
+        assert!(matches!(
+            quote(&outcomes, oid(3)),
+            OfferOutcome::NotOffered {
+                reason: NotOffered::BackupNotNeeded,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn backups_stay_hidden_while_a_built_in_option_is_offered() {
+        let z = zone(vec![
+            option(1, by("app_dhl", "express"), false),
+            option(2, flat(490), false),
+            option(3, flat(990), true),
+        ]);
+        let providers = fake([(
+            "app_dhl".to_string(),
+            Err(ProviderError::Timeout(key("app_dhl"))),
+        )]);
+        let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
+        assert_eq!(offered_ids(&outcomes), vec![oid(2)]);
+    }
+
+    #[test]
+    fn backups_are_offered_when_every_regular_option_is_disabled() {
+        let mut disabled = option(1, by("app_dhl", "express"), false);
+        disabled.enabled = false;
+        let z = zone(vec![disabled, option(2, flat(990), true)]);
+        let outcomes = pollster::block_on(offers(&z, &fake([]), &request(None)));
+        assert_eq!(offered_ids(&outcomes), vec![oid(2)]);
+    }
+
+    #[test]
+    fn a_backups_provider_is_asked_only_when_backups_are_needed() {
+        let z = zone(vec![
+            option(1, flat(490), false),
+            option(2, by("app_post", "parcel"), true),
+        ]);
+        let providers = fake([("app_post".to_string(), Ok(vec![rate("parcel", eur(300))]))]);
+        let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
+        assert_eq!(offered_ids(&outcomes), vec![oid(1)]);
+        assert!(providers.1.borrow().is_empty(), "app_post wasn't asked");
     }
 
     #[test]
     fn a_service_the_provider_didnt_quote_isnt_offered() {
         let z = zone(vec![option(1, by("app_dhl", "overnight"), false)]);
-        let providers = Fake(HashMap::from([(
-            "app_dhl".to_string(),
-            Ok(vec![rate("express", eur(1290))]),
-        )]));
+        let providers = fake([("app_dhl".to_string(), Ok(vec![rate("express", eur(1290))]))]);
         let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
         assert!(matches!(
             quote(&outcomes, oid(1)),
@@ -431,10 +504,7 @@ mod tests {
     fn rates_in_another_currency_fail_the_provider() {
         let z = zone(vec![option(1, by("app_dhl", "express"), false)]);
         let usd = Price::new(Money::new(1000, Currency::Usd).unwrap()).unwrap();
-        let providers = Fake(HashMap::from([(
-            "app_dhl".to_string(),
-            Ok(vec![rate("express", usd)]),
-        )]));
+        let providers = fake([("app_dhl".to_string(), Ok(vec![rate("express", usd)]))]);
         let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
         assert!(matches!(
             quote(&outcomes, oid(1)),

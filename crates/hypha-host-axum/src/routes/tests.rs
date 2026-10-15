@@ -1740,11 +1740,22 @@ async fn shipping_setup_needs_shipping_scopes() {
     );
 }
 
-/// What the fake rate app saw: the signature header and the body, per request.
-type Seen = Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+/// What the fake rate app saw, per request: the signature, the request ID and the body.
+type Seen = Arc<std::sync::Mutex<Vec<(String, String, Vec<u8>)>>>;
 
-/// A rate app on a free local port that answers every POST with one "express" rate.
-async fn rate_app() -> (String, Seen) {
+/// One "express" rate at 7 EUR, as a rate app answers.
+fn express_rate() -> String {
+    json!({"rates": [{
+        "service": "express", "name": "Courier Express",
+        "amount": {"amount": 700, "currency": "EUR"},
+        "estimate": {"min_days": 1, "max_days": 1},
+        "reference": "quote-42"
+    }]})
+    .to_string()
+}
+
+/// A rate app on a free local port that answers every POST with `answer`.
+async fn rate_app(answer: String) -> (String, Seen) {
     use axum::{body::Bytes, http::HeaderMap, routing::post};
     let seen: Seen = Default::default();
     let log = Arc::clone(&seen);
@@ -1752,19 +1763,21 @@ async fn rate_app() -> (String, Seen) {
         "/rates",
         post(move |headers: HeaderMap, body: Bytes| {
             let log = Arc::clone(&log);
+            let answer = answer.clone();
             async move {
-                let signature = headers
-                    .get(crate::shipping::SIGNATURE_HEADER)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or_default()
-                    .to_string();
-                log.lock().unwrap().push((signature, body.to_vec()));
-                axum::Json(json!({"rates": [{
-                    "service": "express", "name": "Courier Express",
-                    "amount": {"amount": 700, "currency": "EUR"},
-                    "estimate": {"min_days": 1, "max_days": 1},
-                    "reference": "quote-42"
-                }]}))
+                let header = |name: &str| {
+                    headers
+                        .get(name)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                log.lock().unwrap().push((
+                    header(crate::shipping::SIGNATURE_HEADER),
+                    header(crate::shipping::REQUEST_ID_HEADER),
+                    body.to_vec(),
+                ));
+                ([(CONTENT_TYPE, "application/json")], answer)
             }
         }),
     );
@@ -1814,7 +1827,7 @@ async fn shop_selling_a_mug(app: &TestApp) -> String {
 async fn a_cart_ships_by_an_app_providers_signed_quote() {
     let app = app().await;
     let mug = shop_selling_a_mug(&app).await;
-    let (callback, seen) = rate_app().await;
+    let (callback, seen) = rate_app(express_rate()).await;
 
     let body = json!({"key": "app_courier", "name": "Courier", "callback_url": callback});
     let (status, created) = send(
@@ -1920,7 +1933,7 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
     // Every call was signed with the secret over "<t>.<body>".
     {
         let seen = seen.lock().unwrap();
-        let (signature, body) = seen.last().unwrap();
+        let (signature, request_id, body) = seen.last().unwrap();
         let at: i64 = signature
             .strip_prefix("t=")
             .and_then(|s| s.split(',').next())
@@ -1930,6 +1943,9 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
         let sent: Value = serde_json::from_slice(body).unwrap();
         assert_eq!(sent["request"]["destination"]["city"], "Zagreb");
         assert_eq!(sent["request"]["items"][0]["quantity"], 2);
+        // One ID for the request, in the header and the body.
+        assert!(request_id.starts_with("rreq_"));
+        assert_eq!(sent["id"], request_id.as_str());
     }
 
     let select = format!("{cart_path}/shipping/{group}");
@@ -2065,6 +2081,116 @@ async fn a_failing_provider_brings_out_the_backup() {
     let group = &offers["groups"][0];
     assert_eq!(group["offers"][0]["code"], "post");
     assert_eq!(group["unavailable"][0]["reason"], "provider_failed");
+}
+
+#[tokio::test]
+async fn an_oversized_answer_fails_the_rate_app() {
+    let app = app().await;
+    let mug = shop_selling_a_mug(&app).await;
+    let huge = format!(
+        r#"{{"rates": [], "padding": "{}"}}"#,
+        "x".repeat(300 * 1024)
+    );
+    let (callback, _) = rate_app(huge).await;
+    let body = json!({"key": "app_big", "name": "Big", "callback_url": callback});
+    send(
+        &app,
+        "POST",
+        "/admin/shipping-providers",
+        Some(&body.to_string()),
+    )
+    .await;
+    let (_, zone) = send(
+        &app,
+        "POST",
+        "/admin/shipping-zones",
+        Some(r#"{"name":"Croatia","countries":["HR"]}"#),
+    )
+    .await;
+    let options = format!(
+        "/admin/shipping-zones/{}/options",
+        zone["id"].as_str().unwrap()
+    );
+    let express = json!({"name": "Express", "code": "express",
+        "rate": {"type": "provider", "provider": "app_big", "service": "express"}});
+    send(&app, "POST", &options, Some(&express.to_string())).await;
+
+    let pk = publishable(&app).await;
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let cart_path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let line = json!({"variant": mug, "quantity": 1}).to_string();
+    send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/lines"),
+        Some(&line),
+    )
+    .await;
+    let address =
+        r#"{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}"#;
+    send_as(
+        &app,
+        &pk,
+        "PUT",
+        &format!("{cart_path}/shipping-address"),
+        Some(address),
+    )
+    .await;
+    let (status, offers) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("{cart_path}/shipping-options"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{offers}");
+    assert_eq!(
+        offers["groups"][0]["unavailable"][0]["reason"],
+        "provider_failed"
+    );
+}
+
+#[tokio::test]
+async fn asking_for_shipping_options_is_rate_limited_per_address() {
+    let app = app().await;
+    let pk = publishable(&app).await;
+    let path = format!("/storefront/carts/cart_{}/shipping-options", "0".repeat(32));
+    for _ in 0..30 {
+        let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+    }
+    let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+}
+
+#[tokio::test]
+async fn a_callback_url_cannot_hide_its_host_behind_credentials() {
+    let app = app().await;
+    let body = json!({"key": "app_sneaky", "name": "Sneaky",
+        "callback_url": "http://localhost:80@evil.example/rates"});
+    let (status, json) = send(
+        &app,
+        "POST",
+        "/admin/shipping-providers",
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_callback_url")
+    );
 }
 
 // ---------- the route table (design note 0010) ----------

@@ -6,33 +6,37 @@ use hypha_core::{Sealed, Version, Versioned, required_text};
 
 use crate::{ProviderKey, ProviderKind, ServiceInfo, ShippingError};
 
-/// The callback URL: `https://`, or `http://` to a local host for development.
+/// The callback URL: `https://`, or `http://` to a local host for development. No
+/// credentials in it (the request is signed instead).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallbackUrl(String);
 
 impl CallbackUrl {
     pub const MAX_LEN: usize = 2048;
 
+    /// Parsed with the WHATWG rules HTTP clients follow, so the host checked here is the
+    /// host called: splitting the text by hand let `http://localhost:80@evil.example`
+    /// through as "localhost", while a client sends it to `evil.example`.
     pub fn new(url: &str) -> Result<Self, ShippingError> {
         let url = url.trim();
-        let rest = if let Some(rest) = url.strip_prefix("https://") {
-            rest
-        } else if let Some(rest) = url.strip_prefix("http://") {
-            let host = rest.split(['/', ':', '?']).next().unwrap_or("");
-            if !matches!(host, "localhost" | "127.0.0.1" | "[::1]") && !host.ends_with(".localhost")
-            {
-                return Err(ShippingError::InvalidCallbackUrl(url.to_string()));
-            }
-            rest
-        } else {
-            return Err(ShippingError::InvalidCallbackUrl(url.to_string()));
+        let invalid = || ShippingError::InvalidCallbackUrl(url.to_string());
+        if url.len() > Self::MAX_LEN || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(invalid());
+        }
+        let parsed = url::Url::parse(url).map_err(|_| invalid())?;
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err(invalid());
+        }
+        let is_local = match parsed.host() {
+            Some(url::Host::Domain(name)) => name == "localhost" || name.ends_with(".localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => return Err(invalid()),
         };
-        let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-        if url.len() > Self::MAX_LEN
-            || host.is_empty()
-            || url.chars().any(|c| c.is_whitespace() || c.is_control())
-        {
-            return Err(ShippingError::InvalidCallbackUrl(url.to_string()));
+        match parsed.scheme() {
+            "https" => {}
+            "http" if is_local => {}
+            _ => return Err(invalid()),
         }
         Ok(Self(url.to_string()))
     }
@@ -208,5 +212,54 @@ impl AppProvider {
         provider.enabled = s.enabled;
         provider.version = s.version;
         Ok(provider)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn invalid(url: &str) -> Result<CallbackUrl, ShippingError> {
+        Err(ShippingError::InvalidCallbackUrl(url.to_string()))
+    }
+
+    #[test]
+    fn credentials_cannot_disguise_another_host_as_local() {
+        let url = "http://localhost:80@evil.example/rates";
+        assert_eq!(CallbackUrl::new(url), invalid(url));
+    }
+
+    #[test]
+    fn credentials_are_refused_over_https_too() {
+        let url = "https://user:pass@rates.example/hypha";
+        assert_eq!(CallbackUrl::new(url), invalid(url));
+    }
+
+    #[test]
+    fn plain_http_to_loopback_is_allowed() {
+        for url in [
+            "http://localhost:4000/rates",
+            "http://127.0.0.1:4000/rates",
+            "http://[::1]:4000/rates",
+            "http://rates.localhost/hypha",
+        ] {
+            assert!(CallbackUrl::new(url).is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn plain_http_elsewhere_is_refused() {
+        for url in [
+            "http://rates.example/hypha",
+            "http://localhost.example/rates",
+        ] {
+            assert_eq!(CallbackUrl::new(url), invalid(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn other_schemes_are_refused() {
+        let url = "ftp://localhost/rates";
+        assert_eq!(CallbackUrl::new(url), invalid(url));
     }
 }

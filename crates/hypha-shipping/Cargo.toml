@@ -10,6 +10,9 @@ thiserror.workspace = true
 # `join_all` only (no runtime), so provider quotes for one cart run concurrently on
 # every host, Workers included.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Parses callback URLs the way the HTTP client will (WHATWG rules), so the host checked
+# is the host called. Pure Rust, builds for wasm.
+url = "2.5"
 
 [dev-dependencies]
 uuid.workspace = true

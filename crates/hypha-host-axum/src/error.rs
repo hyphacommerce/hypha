@@ -50,7 +50,7 @@ pub struct ApiErrorBody {
 /// - `duplicate_option_combination` (removing an option): `{"variants": ["var_…", "var_…"]}`
 /// - `sku_taken` (another product): `{"sku", "product": "prod_…"}`
 /// - `shipping_option_not_offered`: `{"reason"}`: `no_price_in_currency`, `weight_unknown`,
-///   `provider_failed` or `service_not_quoted`
+///   `provider_failed`, `service_not_quoted` or `backup_not_needed`
 /// - `shipping_option_unavailable` (checkout): `{"reason"}`: `shipping_option_unavailable`,
 ///   `no_price_in_currency`, `weight_unknown` or a money error code; pick again
 /// - `asset_in_use`: `{"usages": [{"owner": {"kind", "id"}, "role"}], "has_more"}`, the first

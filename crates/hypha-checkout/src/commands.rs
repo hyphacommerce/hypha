@@ -146,8 +146,11 @@ pub async fn checkout<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvide
     }
 
     let mut tries = 1;
+    // A quote renewed by an attempt that then lost a race: the next attempt uses it
+    // rather than asking the provider again.
+    let mut renewed = None;
     loop {
-        let e = match attempt(ctx, ports, ids, clock, rates, &input).await {
+        let e = match attempt(ctx, ports, ids, clock, rates, &input, &mut renewed).await {
             Err(e) => e,
             placed => return placed,
         };
@@ -185,6 +188,7 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvider>(
     clock: &C,
     rates: &P,
     input: &Checkout,
+    renewed: &mut Option<SelectedShipping>,
 ) -> Result<Idempotent<Order>, CommandError> {
     let mut cart = ports
         .carts()
@@ -198,20 +202,35 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvider>(
         });
     }
 
+    if let Some(choice) = renewed.as_ref()
+        && cart.shipping().map(|c| c.option) == Some(choice.option)
+    {
+        cart.select_shipping(Some(choice.clone()))
+            .map_err(hypha_cart::CommandError::from)?;
+    }
+
     let reading = read_cart(ports, &cart).await?;
-    let reading = renew_expired_quote(ports, rates, clock, &mut cart, reading, input).await?;
-    let CartReading { priced, stock, .. } = reading;
-    if priced.lines.is_empty() {
+    // The cart's own problems first: renewing a quote can't fix them, and their codes
+    // are what clients act on.
+    if reading.priced.lines.is_empty() {
         return Err(CommandError::EmptyCart(cart.id()));
     }
-    let email = priced
+    let email = reading
+        .priced
         .email
         .clone()
         .ok_or(CommandError::MissingEmail(cart.id()))?;
-    let unavailable: Vec<VariantId> = priced.unavailable_lines().map(|l| l.variant).collect();
+    let unavailable: Vec<VariantId> = reading
+        .priced
+        .unavailable_lines()
+        .map(|l| l.variant)
+        .collect();
     if !unavailable.is_empty() {
         return Err(CommandError::Unavailable { lines: unavailable });
     }
+    let reading =
+        renew_expired_quote(ports, rates, clock, &mut cart, reading, input, renewed).await?;
+    let CartReading { priced, stock, .. } = reading;
     check_shipping(&cart, &priced)?;
     if let Some(expected) = input.expected_total
         && expected != priced.total
@@ -347,6 +366,7 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     cart: &mut Cart,
     reading: CartReading,
     input: &Checkout,
+    renewed_quote: &mut Option<SelectedShipping>,
 ) -> Result<CartReading, CommandError> {
     let now = clock.now();
     let Some(choice) = cart.shipping().cloned() else {
@@ -355,22 +375,32 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     let Some(old) = choice.quote.as_ref().filter(|q| q.expires_at() <= now) else {
         return Ok(reading);
     };
-    let offers = group_offers(cart, &reading, rates).await?;
+    // Nothing ships any more: the old choice is moot, and `check_shipping` passes.
+    if reading.priced.shipping_groups.is_empty() {
+        return Ok(reading);
+    }
+    let unavailable =
+        || CommandError::ShippingUnavailable(ShippingProblem::OptionUnavailable(choice.option));
+    // The zone gone, the address cleared: to the buyer, the option they chose is gone and
+    // they pick again (`shipping_option_unavailable`), whatever the cause.
+    let offers = match group_offers(cart, &reading, rates).await {
+        Ok(offers) => offers,
+        Err(hypha_cart::CommandError::Repo(e)) => return Err(e.into()),
+        Err(_) => return Err(unavailable()),
+    };
     let renewed = offers.iter().flat_map(|g| &g.offers).find_map(|o| match o {
         OfferOutcome::Offered(offer) if offer.option == choice.option => Some(offer),
         _ => None,
     });
     let Some(offer) = renewed else {
-        return Err(CommandError::ShippingUnavailable(
-            ShippingProblem::OptionUnavailable(choice.option),
-        ));
+        return Err(unavailable());
     };
     let Some(source) = &offer.quote else {
         // The option is built-in now: its price follows the cart without a quote.
         return Ok(reading);
     };
     let amount = hypha_core::Price::new(offer.amount).map_err(hypha_cart::CommandError::from)?;
-    cart.select_shipping(Some(SelectedShipping {
+    let selection = SelectedShipping {
         option: choice.option,
         quote: Some(StoredQuote {
             amount,
@@ -379,8 +409,10 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
             reference: source.reference.clone(),
             quoted_at: now,
         }),
-    }))
-    .map_err(hypha_cart::CommandError::from)?;
+    };
+    cart.select_shipping(Some(selection.clone()))
+        .map_err(hypha_cart::CommandError::from)?;
+    *renewed_quote = Some(selection);
     let renewed = read_cart(ports, cart).await?;
     if amount != old.amount
         && let Some(expected) = input.expected_total

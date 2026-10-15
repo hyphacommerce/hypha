@@ -401,41 +401,47 @@ function OptionDialog({
         title={option ? `Edit ${option.name}` : `Add an option to ${zone.name}`}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
-      <VStack gap={4} padding={4}>
-        {error && <Banner status="error" title={error} />}
-        <HStack gap={3}>
-          <TextInput label="Name" description="What shoppers see." placeholder="Standard" value={name} onChange={setName} />
-          <TextInput
-            label="Code"
-            description="Stable, for apps and reports."
-            value={shownCode}
-            onChange={setCode}
+      {/* The fields scroll (tier lists grow); the buttons stay in view below them. A flex
+          item keeps its content's height unless allowed to shrink (`minHeight: 0`). */}
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+        <VStack gap={4} padding={4}>
+          <HStack gap={3}>
+            <TextInput label="Name" description="What shoppers see." placeholder="Standard" value={name} onChange={setName} />
+            <TextInput
+              label="Code"
+              description="Stable, for apps and reports."
+              value={shownCode}
+              onChange={setCode}
+            />
+          </HStack>
+          <Selector
+            label="Price"
+            options={RATE_KINDS.map((kind) => ({
+              value: kind.value,
+              label: kind.label,
+              description: kind.description,
+              disabled: kind.value === "provider" && providers.length === 0,
+            }))}
+            value={draft.kind}
+            onChange={(kind) =>
+              setDraft(emptyDraft(kind as RateKind, "prices" in draft ? draft.prices[0].currency : "EUR"))
+            }
           />
-        </HStack>
-        <Selector
-          label="Price"
-          options={RATE_KINDS.map((kind) => ({
-            value: kind.value,
-            label: kind.label,
-            description: kind.description,
-            disabled: kind.value === "provider" && providers.length === 0,
-          }))}
-          value={draft.kind}
-          onChange={(kind) =>
-            setDraft(emptyDraft(kind as RateKind, "prices" in draft ? draft.prices[0].currency : "EUR"))
-          }
-        />
-        <RateEditor draft={draft} providers={providers} onChange={setDraft} />
-        <HStack gap={3}>
-          <TextInput label="Delivery, days from" placeholder="2" value={minDays} onChange={setMinDays} width={180} />
-          <TextInput label="Days to" placeholder="4" value={maxDays} onChange={setMaxDays} width={180} />
-        </HStack>
-        <CheckboxInput
-          label="Backup"
-          description="Offered only when every rate app option of this zone fails, so an outage doesn't stop sales."
-          value={isBackup}
-          onChange={setIsBackup}
-        />
+          <RateEditor draft={draft} providers={providers} onChange={setDraft} />
+          <HStack gap={3}>
+            <TextInput label="Delivery, days from" placeholder="2" value={minDays} onChange={setMinDays} width={180} />
+            <TextInput label="Days to" placeholder="4" value={maxDays} onChange={setMaxDays} width={180} />
+          </HStack>
+          <CheckboxInput
+            label="Backup"
+            description="Offered only when every rate app option of this zone fails, so an outage doesn't stop sales."
+            value={isBackup}
+            onChange={setIsBackup}
+          />
+        </VStack>
+      </div>
+      <VStack gap={3} padding={4}>
+        {error && <Banner status="error" title={error} />}
         <HStack gap={2} hAlign="end">
           <Button label="Cancel" variant="ghost" onClick={onClose} />
           <Button

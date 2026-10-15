@@ -1161,6 +1161,16 @@
               }
             }
           },
+          "429": {
+            "description": "Over a rate limit per client address (`rate_limited`); see `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "A server failure (`internal_error`).",
             "content": {
@@ -1300,6 +1310,16 @@
           },
           "422": {
             "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Over a rate limit per client address (`rate_limited`); see `Retry-After`",
             "content": {
               "application/json": {
                 "schema": {
@@ -2742,7 +2762,7 @@
           },
           "reason": {
             "type": "string",
-            "description": "`no_price_in_currency`, `weight_unknown`, `provider_failed` or `service_not_quoted`."
+            "description": "`no_price_in_currency`, `weight_unknown`, `provider_failed`, `service_not_quoted`,\nor `backup_not_needed` (a backup while a regular option is offered)."
           }
         }
       },

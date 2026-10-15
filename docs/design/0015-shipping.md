@@ -100,7 +100,7 @@
 | `rate` | `Builtin(BuiltinRate)` or `Provider { provider, service }` |
 | `estimate` | Optional delivery days, `min`–`max` (a provider's quote can override them) |
 | `tax_class` | Optional (SH10) |
-| `is_backup` | Shown only when all of the zone's provider options failed (SH7) |
+| `is_backup` | Offered only when no regular option of the zone is (disabled, failed or missing alike) (SH7) |
 | `enabled`, `position` | Order of display |
 
 **Built-in rates** (SH4). *Changed while building:* the four kinds are one type,
@@ -180,8 +180,10 @@ pub trait RateProvider {
 - **The rate callback (external apps)**, as built (`crates/hypha-host-axum/src/shipping.rs`):
   - `POST <callback_url>`, `content-type: application/json`, with headers
     `Hypha-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the
-    secret>` (Stripe's scheme, reused by webhooks in 0016) and `Hypha-Request-Id`. The
-    app should check the signature and refuse a `t` more than a few minutes old.
+    secret>` (Stripe's scheme, reused by webhooks in 0016) and `Hypha-Request-Id` (the
+    body's `id`). The app should check the signature and refuse a `t` more than a few
+    minutes old. The callback URL is parsed with WHATWG rules and may not carry
+    credentials, so the host checked is the host called.
   - Body (amounts are `Money`, `{"amount": <minor units>, "currency": "EUR"}`; addresses
     are the API's postal address shape):
 
@@ -207,11 +209,11 @@ pub trait RateProvider {
                   "reference": "quote-42" | absent }] }
     ```
 
-    within the provider's timeout (default 3000 ms, 100 to 10000). A timeout, a refused
-    connection, a non-2xx status (redirects aren't followed), a body that doesn't parse,
-    a negative amount or another currency are failures for that request (SH7): its
-    options are left out with `provider_failed`, and the zone's backups appear if no
-    provider option was offered.
+    within the provider's timeout (default 3000 ms, 100 to 10000) and in at most 256 KiB.
+    A timeout, a refused connection, a non-2xx status (redirects aren't followed), a
+    bigger answer, a body that doesn't parse, a negative amount or another currency are
+    failures for that request (SH7): its options are left out with `provider_failed`, and
+    the zone's backups appear if no regular option was offered.
   - `services` is `GET <callback_url>/services` with the same headers (body empty, so
     the signed string is `"<t>."`), answered with `{"services": [{"code", "name"}]}`;
     an app that registered a fixed `services` list isn't asked.
@@ -228,18 +230,25 @@ pub trait RateProvider {
 - `GET /storefront/carts/{id}/shipping-options` returns, per group, the options offered
   for the cart's shipping address, each with its price (built-in rates computed now,
   provider rates quoted now) and estimate, and the options that couldn't be offered with
-  a reason (`provider_failed`, `weight_unknown`, `no_price_in_currency`). Provider calls
-  for one cart run concurrently, each under its timeout.
+  a reason (`provider_failed`, `weight_unknown`, `no_price_in_currency`,
+  `service_not_quoted`, `backup_not_needed`). Provider calls for one cart run
+  concurrently, each under its timeout. It and selecting are rate limited per client
+  address (`Rule::ShippingQuotesIp`), since each may wait on rate apps.
 - `PUT /storefront/carts/{id}/shipping/{group}` `{"option": "shipopt_…"}` selects one.
   For a provider option the quote is stored on the cart (amount, reference, quoted at).
 - **Priced carts** include the selected option: built-in prices are recomputed on every
   read (cheap, and they follow the cart's subtotal); a provider quote is used as stored,
   and the cart shows when it expires (`quote_expires_at`, 15 minutes after quoting).
-- **Checkout** re-quotes an expired provider quote. If the new price differs, checkout
-  refuses with `total_changed` (the client shows the new total and retries with it);
-  if the option is no longer offered, `shipping_option_unavailable` (409).
-- **Backup options** (`is_backup`) appear only when every provider option of the zone
-  failed for this cart, so a carrier's outage doesn't stop sales.
+- **Checkout** re-quotes an expired provider quote, after the cart's own checks (empty,
+  email, unavailable lines), and once per checkout even when it retries after losing a
+  race. If the new price differs, checkout refuses with `total_changed` (the client
+  shows the new total and retries with it); if the option is no longer offered, for any
+  reason (the zone gone, the provider failing), `shipping_option_unavailable` (409).
+- **Backup options** (`is_backup`) are offered only when no regular option of the zone
+  is, whether those are disabled, failing or missing, so a carrier's outage (or a
+  merchant switching options off) doesn't stop sales. Otherwise they're listed as
+  `backup_not_needed`, and selecting one says so (409). A provider only backups use is
+  asked only when the backups are needed.
 
 ## 7. Carts, tax and orders
 
@@ -294,6 +303,13 @@ weight and "requires shipping" in the product page's variant table.
 - **Provinces and postal codes** in zones; changing a cart's country.
 - **Fulfilment providers** (labels, tracking): the same providers gain a second port in
   0017, and a quote's `reference` buys its label.
+- **Rate apps without a held connection.** Offers, selecting and checkout call rate apps
+  (up to 10 s each) while the request holds its pooled Postgres connection, so slow apps
+  under load can starve the pool for every route. For now a per-address rate limit
+  bounds the storefront routes (§6). The fix: read the cart, release the connection,
+  call the apps, then take a connection again to write (re-checking the cart's version,
+  as checkout's retry already does). It changes how hosts hand ports to these commands
+  (two short borrows instead of one per request), so it's its own change.
 
 ## 10. Open decisions
 

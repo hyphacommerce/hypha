@@ -379,3 +379,36 @@ fn a_disabled_option_stops_checkout() {
         ))
     );
 }
+
+#[test]
+fn an_unavailable_line_is_reported_before_an_expired_quote_is_renewed() {
+    let w = World::new();
+    let cart = w.cart_with(mug());
+    w.ship_to_zagreb(cart);
+    w.choose(cart, express());
+    w.clock.set(FixedClock::DEFAULT.plus_secs(60 * 60));
+    let id = ProductId::from_uuid(Uuid::from_u128(1100));
+    let mut product = block_on(w.ports.products.get(id)).unwrap().unwrap();
+    product.set_status(ProductStatus::Archived).unwrap();
+    block_on(w.ports.products.update(&mut product)).unwrap();
+    assert_eq!(
+        w.check_out(cart, None).map(|_| ()),
+        Err(CommandError::Unavailable { lines: vec![mug()] })
+    );
+}
+
+#[test]
+fn an_expired_quote_whose_zone_is_gone_means_choosing_again() {
+    let w = World::new();
+    let cart = w.cart_with(mug());
+    w.ship_to_zagreb(cart);
+    w.choose(cart, express());
+    w.clock.set(FixedClock::DEFAULT.plus_secs(60 * 60));
+    block_on(w.ports.shipping_zones.delete(zone_id())).unwrap();
+    assert_eq!(
+        w.check_out(cart, None).map(|_| ()),
+        Err(CommandError::ShippingUnavailable(
+            hypha_cart::ShippingProblem::OptionUnavailable(express())
+        ))
+    );
+}

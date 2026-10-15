@@ -18,8 +18,10 @@ use super::{
     shipping::DeliveryEstimateDto,
 };
 use crate::{
-    error::ApiError,
+    client_ip::ClientIp,
+    error::{ApiError, ApiErrorBody},
     extract::{Caller, JsonBody, KeyedJson, PathId, Storefront, idempotent_response},
+    rate_limit::{self, Rule},
     state::{SharedState, Storage},
 };
 
@@ -471,7 +473,8 @@ pub(super) struct OfferResponse {
 pub(super) struct UnavailableOptionResponse {
     option: ShippingOptionId,
     name: String,
-    /// `no_price_in_currency`, `weight_unknown`, `provider_failed` or `service_not_quoted`.
+    /// `no_price_in_currency`, `weight_unknown`, `provider_failed`, `service_not_quoted`,
+    /// or `backup_not_needed` (a backup while a regular option is offered).
     reason: &'static str,
 }
 
@@ -513,14 +516,17 @@ impl From<&GroupOffers> for GroupOffersResponse {
     get,
     path = "/storefront/carts/{id}/shipping-options",
     params(("id" = CartId, Path)),
-    responses((status = 200, description = "OK", body = ShippingOptionsResponse)),
+    responses((status = 200, description = "OK", body = ShippingOptionsResponse), (status = 429, description = "Over a rate limit per client address (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:read"]))),
 )]
 pub(super) async fn shipping_options<S: Storage>(
     State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
 ) -> Result<Json<ShippingOptionsResponse>, ApiError> {
+    // Before anything takes a pool connection.
+    rate_limit::enforce(&state.limiter, Rule::ShippingQuotesIp, &ip).await?;
     let (ports, ctx) = caller.authenticate(&state).await?;
     let rates = state.rates(ports.app_providers());
     let groups = shipping_offers(&ctx, &ports, &rates, id).await?;
@@ -543,15 +549,17 @@ pub(super) struct SelectShippingRequest {
     path = "/storefront/carts/{id}/shipping/{group_id}",
     params(("id" = CartId, Path), ("group_id" = ShippingGroupId, Path)),
     request_body = SelectShippingRequest,
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse), (status = 429, description = "Over a rate limit per client address (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub(super) async fn select<S: Storage>(
     State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
     caller: Caller<Storefront>,
     PathId((id, group)): PathId<(CartId, ShippingGroupId)>,
     body: JsonBody<SelectShippingRequest>,
 ) -> Result<Json<CartResponse>, ApiError> {
+    rate_limit::enforce(&state.limiter, Rule::ShippingQuotesIp, &ip).await?;
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let rates = state.rates(ports.app_providers());

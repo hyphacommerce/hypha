@@ -310,8 +310,9 @@ function LibraryPicker({
         subtitle="Images and videos, newest first."
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
+      {/* The library scrolls; the buttons stay in view (see the shipping option dialog). */}
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
       <VStack gap={4} padding={4}>
-        {error && <Banner status="error" title={error} />}
         {assets === undefined ? (
           <HStack hAlign="center" padding={6}>
             <Spinner aria-label="Loading the library" />
@@ -361,22 +362,24 @@ function LibraryPicker({
             })}
           </Grid>
         )}
-        <HStack gap={2} hAlign="between" vAlign="center">
-          {next ? (
+        {next && (
+          <HStack hAlign="center">
             <Button label="Load more" variant="ghost" isLoading={isLoading} onClick={() => load(next)} />
-          ) : (
-            <span />
-          )}
-          <HStack gap={2}>
-            <Button label="Cancel" variant="ghost" onClick={onClose} />
-            <Button
-              label={picked.length > 0 ? `Add ${picked.length}` : "Add"}
-              variant="primary"
-              isDisabled={picked.length === 0}
-              isLoading={isAdding}
-              onClick={() => startAdding(() => onPick(picked))}
-            />
           </HStack>
+        )}
+      </VStack>
+      </div>
+      <VStack gap={3} padding={4}>
+        {error && <Banner status="error" title={error} />}
+        <HStack gap={2} hAlign="end">
+          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button
+            label={picked.length > 0 ? `Add ${picked.length}` : "Add"}
+            variant="primary"
+            isDisabled={picked.length === 0}
+            isLoading={isAdding}
+            onClick={() => startAdding(() => onPick(picked))}
+          />
         </HStack>
       </VStack>
     </Dialog>

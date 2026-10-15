@@ -25,8 +25,12 @@ use crate::{
 /// The header carrying a callback's signature: `t=<unix seconds>,v1=<hex HMAC-SHA256 of
 /// "<t>.<body>" under the provider's secret>` (Stripe's scheme; webhooks reuse it).
 pub const SIGNATURE_HEADER: &str = "Hypha-Signature";
-/// The ID of one rate request, for the app's logs and de-duplication.
+/// The ID of one rate request (`rreq_…`, the body's `id` too), for the app's logs and
+/// de-duplication.
 pub const REQUEST_ID_HEADER: &str = "Hypha-Request-Id";
+/// The most of an app's answer read: rates for a cart are a few kilobytes, and a bigger
+/// answer counts as a failure rather than filling memory.
+pub const MAX_ANSWER_BYTES: usize = 256 * 1024;
 
 /// One `RateProvider` per request: the store's app providers, the shared HTTP client,
 /// and the host's key to open their secrets.
@@ -50,7 +54,7 @@ impl<A: AppProviderRepo> RateProvider for HostRates<'_, A> {
                     app.callback_url().as_str().trim_end_matches('/')
                 );
                 let body = self
-                    .call(&app, reqwest::Method::GET, &url, Vec::new())
+                    .call(&app, reqwest::Method::GET, &url, &request_id(), Vec::new())
                     .await?;
                 let parsed: ServicesResponse = serde_json::from_slice(&body)
                     .map_err(|e| failed(key, format!("unreadable services: {e}")))?;
@@ -76,7 +80,7 @@ impl<A: AppProviderRepo> RateProvider for HostRates<'_, A> {
         match key.kind() {
             ProviderKind::App => {
                 let app = self.app(key).await?;
-                let id = format!("rreq_{}", uuid::Uuid::now_v7().simple());
+                let id = request_id();
                 let payload = CallbackRequest {
                     id: id.clone(),
                     sent_at: rfc3339(self.clock.now()).map_err(|_| failed(key, "bad clock"))?,
@@ -88,6 +92,7 @@ impl<A: AppProviderRepo> RateProvider for HostRates<'_, A> {
                         &app,
                         reqwest::Method::POST,
                         app.callback_url().as_str(),
+                        &id,
                         body,
                     )
                     .await?;
@@ -120,6 +125,7 @@ impl<A: AppProviderRepo> HostRates<'_, A> {
         app: &AppProvider,
         method: reqwest::Method,
         url: &str,
+        id: &str,
         body: Vec<u8>,
     ) -> Result<Vec<u8>, ProviderError> {
         let key = app.key();
@@ -132,7 +138,7 @@ impl<A: AppProviderRepo> HostRates<'_, A> {
             .timeout(Duration::from_millis(u64::from(app.timeout_ms())))
             .header("content-type", "application/json")
             .header(SIGNATURE_HEADER, signature)
-            .header(REQUEST_ID_HEADER, uuid::Uuid::now_v7().simple().to_string())
+            .header(REQUEST_ID_HEADER, id)
             .body(body)
             .send()
             .await
@@ -147,15 +153,35 @@ impl<A: AppProviderRepo> HostRates<'_, A> {
         if !status.is_success() {
             return Err(failed(key, format!("answered HTTP {}", status.as_u16())));
         }
-        let bytes = response.bytes().await.map_err(|e| {
+        // Read chunk by chunk so an endless answer stops at the cap, not at the timeout.
+        let too_big = || failed(key, format!("answered more than {MAX_ANSWER_BYTES} bytes"));
+        if response
+            .content_length()
+            .is_some_and(|len| len > MAX_ANSWER_BYTES as u64)
+        {
+            return Err(too_big());
+        }
+        let mut response = response;
+        let mut answer = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|e| {
             if e.is_timeout() {
                 ProviderError::Timeout(key.clone())
             } else {
                 failed(key, e.to_string())
             }
-        })?;
-        Ok(bytes.to_vec())
+        })? {
+            if answer.len() + chunk.len() > MAX_ANSWER_BYTES {
+                return Err(too_big());
+            }
+            answer.extend_from_slice(&chunk);
+        }
+        Ok(answer)
     }
+}
+
+/// A new rate request ID: `rreq_` and a UUIDv7, in the header and the body alike.
+fn request_id() -> String {
+    format!("rreq_{}", uuid::Uuid::now_v7().simple())
 }
 
 /// `t=<at>,v1=<hex HMAC-SHA256 of "<at>.<body>">`.

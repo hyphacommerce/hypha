@@ -325,7 +325,7 @@ fn offers_price_built_in_and_provider_options() {
 }
 
 #[test]
-fn a_failing_provider_brings_in_the_backup() {
+fn the_backup_stays_hidden_while_a_regular_option_is_offered() {
     let w = World::new();
     let cart = w.cart_with(mug(), 1);
     w.ship_to(cart, "HR").unwrap();
@@ -336,9 +336,20 @@ fn a_failing_provider_brings_in_the_backup() {
         cart,
     ))
     .unwrap();
+    assert_eq!(offered(&offers[0].offers), vec![(standard(), eur(400))]);
+}
+
+#[test]
+fn a_hidden_backup_is_not_offered_rather_than_unknown() {
+    let w = World::new();
+    let cart = w.cart_with(mug(), 1);
+    w.ship_to(cart, "HR").unwrap();
     assert_eq!(
-        offered(&offers[0].offers),
-        vec![(standard(), eur(400)), (backup(), eur(900))]
+        w.select(&Dhl::quoting(1290), cart, backup()).map(|_| ()),
+        Err(CommandError::ShippingOptionNotOffered {
+            option: backup(),
+            reason: NotOffered::BackupNotNeeded,
+        })
     );
 }
 

@@ -1,4 +1,5 @@
-//! Rate limits on the routes that need no credentials (design note 0009).
+//! Rate limits on the routes that need no credentials (design note 0009), and on the
+//! storefront routes that call rate apps (design note 0015).
 //!
 //! `RateLimiter` is the port: one `check` per rule and key. `MemoryRateLimiter` keeps the
 //! counts in this process with `governor` (GCRA, a smooth token bucket); a shared
@@ -43,11 +44,15 @@ pub enum Rule {
     ResetConfirmIp,
     /// `POST /admin/invites/accept`, per client address.
     InviteIp,
+    /// `GET /storefront/carts/{id}/shipping-options` and `PUT …/shipping/{group_id}`, per
+    /// client address: each may call rate apps for seconds while holding a database
+    /// connection, so a flood would starve the pool (0015, section 9).
+    ShippingQuotesIp,
 }
 
 impl Rule {
     /// In declaration order: `MemoryRateLimiter` indexes by `rule as usize`.
-    pub const ALL: [Rule; 8] = [
+    pub const ALL: [Rule; 9] = [
         Rule::LoginIp,
         Rule::LoginEmailFromIp,
         Rule::LoginEmail,
@@ -56,6 +61,7 @@ impl Rule {
         Rule::ResetEmailFromIp,
         Rule::ResetConfirmIp,
         Rule::InviteIp,
+        Rule::ShippingQuotesIp,
     ];
 
     /// `(burst, one more every)`: the starting numbers from 0009, section 3.
@@ -69,6 +75,8 @@ impl Rule {
             Rule::LoginEmail => (50, Duration::from_secs(72)),
             Rule::ResetIp => (5, Duration::from_secs(60)),
             Rule::ResetEmailFromIp => (3, Duration::from_secs(5 * 60)),
+            // A checkout asks a few times; a page polling every second doesn't need to.
+            Rule::ShippingQuotesIp => (30, Duration::from_secs(2)),
         }
     }
 

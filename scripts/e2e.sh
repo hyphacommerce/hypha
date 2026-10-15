@@ -331,6 +331,8 @@ step "a rate app, unreachable" 201 - -X POST "$BASE/admin/shipping-providers" -H
 contains "its secret is shown once" '"secret":"hypha_shs_'
 step "the same key again" 409 shipping_provider_exists -X POST "$BASE/admin/shipping-providers" -H "$JSON" \
     -d '{"key":"app_courier","name":"Courier","callback_url":"http://127.0.0.1:9/rates"}'
+step "a local host hiding another behind credentials" 422 invalid_callback_url -X POST "$BASE/admin/shipping-providers" \
+    -H "$JSON" -d '{"key":"app_sneaky","name":"Sneaky","callback_url":"http://localhost:80@evil.example/rates"}'
 step "a callback over plain HTTP elsewhere" 422 invalid_callback_url -X POST "$BASE/admin/shipping-providers" -H "$JSON" \
     -d '{"key":"app_plain","name":"Plain","callback_url":"http://rates.example.com"}'
 step "get the provider" 200 - "$BASE/admin/shipping-providers/app_courier"
@@ -340,6 +342,7 @@ step "express by the courier" 201 - -X POST "$OPTIONS" -H "$JSON" \
     -d '{"name":"Express","code":"express","rate":{"type":"provider","provider":"app_courier","service":"express"}}'
 step "post, the backup" 201 - -X POST "$OPTIONS" -H "$JSON" \
     -d '{"name":"Post","code":"post","is_backup":true,"rate":{"type":"builtin","basis":"flat","tables":[{"currency":"EUR","tiers":[{"amount":300}]}]}}'
+POST_OPTION=$(shipopt)
 step "list zones" 200 - "$BASE/admin/shipping-zones"
 contains "with three options" '"code":"standard"'
 
@@ -357,8 +360,11 @@ step "ship to Zagreb" 200 - -X PUT "$SHIP/shipping-address" -H "$JSON" \
 contains "the cart has the address" '"city":"Zagreb"'
 step "the offers" 200 - "$SHIP/shipping-options"
 contains "standard costs 4.90 under 10 EUR" '"code":"standard","name":"Standard","amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
-contains "the courier is down, so the backup shows" '"code":"post","name":"Post","amount":{"amount":300'
-contains "and express says why" '"name":"Express","reason":"provider_failed"'
+contains "the courier is down, and express says why" '"name":"Express","reason":"provider_failed"'
+contains "standard is offered, so the backup isn't needed" '"name":"Post","reason":"backup_not_needed"'
+step "the backup can't be picked" 409 shipping_option_not_offered -X PUT "$SHIP/shipping/$SHGRP" -H "$JSON" \
+    -d "{\"option\":\"$POST_OPTION\"}"
+contains "and says why" '"details":{"reason":"backup_not_needed"}'
 step "an unknown option" 422 shipping_option_unknown -X PUT "$SHIP/shipping/$SHGRP" -H "$JSON" \
     -d '{"option":"shipopt_00000000000000000000000000000000"}'
 step "an unknown group" 404 shipping_group_not_found -X PUT "$SHIP/shipping/shgrp_00000000000000000000000000000000" \
