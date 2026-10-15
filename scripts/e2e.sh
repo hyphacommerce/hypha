@@ -97,6 +97,22 @@ fresh() {
     fi
 }
 
+# wait_for NAME URL TEXT: asks URL once a second, up to 20 times, until its body
+# contains TEXT (for what the dispatcher does every 2 seconds). Leaves the body in $BODY.
+wait_for() {
+    local name=$1 url=$2 text=$3 n
+    for n in $(seq 1 20); do
+        BODY=$(curl -s ${AUTH[@]+"${AUTH[@]}"} "$url")
+        if [[ $BODY == *"$text"* ]]; then
+            echo "ok   $name"
+            return
+        fi
+        sleep 1
+    done
+    echo "FAIL $name: expected body to contain $text within 20 s: $BODY"
+    FAILED=$((FAILED + 1))
+}
+
 # The top-level "id" of the last response (always the first "id" key).
 id() { sed -E 's/^[^"]*"id":"([^"]+)".*/\1/' <<<"$BODY"; }
 # The first address id of the last customer response.
@@ -326,17 +342,20 @@ step "a last tier with a bound" 422 invalid_shipping_rate -X POST "$OPTIONS" -H 
     -d '{"name":"Bad","code":"bad","rate":{"type":"builtin","basis":"weight","tables":[{"currency":"EUR","tiers":[{"up_to":1000,"amount":490}]}]}}'
 step "a second option with the same code" 422 shipping_option_code_taken -X POST "$OPTIONS" -H "$JSON" \
     -d '{"name":"Again","code":"standard","rate":{"type":"builtin","basis":"flat","tables":[{"currency":"EUR","tiers":[{"amount":100}]}]}}'
-step "a rate app, unreachable" 201 - -X POST "$BASE/admin/shipping-providers" -H "$JSON" \
-    -d '{"key":"app_courier","name":"Courier","callback_url":"http://127.0.0.1:9/rates","timeout_ms":500}'
-contains "its secret is shown once" '"secret":"hypha_shs_'
+step "an app for rates" 201 - -X POST "$BASE/admin/apps" -H "$JSON" -d '{"key":"app_courier","name":"Courier"}'
+contains "its secret is shown once" '"secret":"hypha_as_'
+step "its rates, unreachable" 201 - -X POST "$BASE/admin/shipping-providers" -H "$JSON" \
+    -d '{"key":"app_courier","callback_url":"http://127.0.0.1:9/rates","timeout_ms":500}'
 step "the same key again" 409 shipping_provider_exists -X POST "$BASE/admin/shipping-providers" -H "$JSON" \
-    -d '{"key":"app_courier","name":"Courier","callback_url":"http://127.0.0.1:9/rates"}'
+    -d '{"key":"app_courier","callback_url":"http://127.0.0.1:9/rates"}'
+step "rates for an app that doesn't exist" 422 provider_app_not_found -X POST "$BASE/admin/shipping-providers" \
+    -H "$JSON" -d '{"key":"app_ghost","callback_url":"https://rates.example.com"}'
 step "a local host hiding another behind credentials" 422 invalid_callback_url -X POST "$BASE/admin/shipping-providers" \
-    -H "$JSON" -d '{"key":"app_sneaky","name":"Sneaky","callback_url":"http://localhost:80@evil.example/rates"}'
+    -H "$JSON" -d '{"key":"app_sneaky","callback_url":"http://localhost:80@evil.example/rates"}'
 step "a callback over plain HTTP elsewhere" 422 invalid_callback_url -X POST "$BASE/admin/shipping-providers" -H "$JSON" \
-    -d '{"key":"app_plain","name":"Plain","callback_url":"http://rates.example.com"}'
+    -d '{"key":"app_plain","callback_url":"http://rates.example.com"}'
 step "get the provider" 200 - "$BASE/admin/shipping-providers/app_courier"
-contains "without its secret" '"key":"app_courier","name":"Courier","callback_url":"http://127.0.0.1:9/rates","timeout_ms":500,"services":[],"enabled":true}'
+contains "without a secret" '"key":"app_courier","callback_url":"http://127.0.0.1:9/rates","timeout_ms":500,"services":[]}'
 step "its services, unreachable" 502 shipping_provider_failed "$BASE/admin/shipping-providers/app_courier/services"
 step "express by the courier" 201 - -X POST "$OPTIONS" -H "$JSON" \
     -d '{"name":"Express","code":"express","rate":{"type":"provider","provider":"app_courier","service":"express"}}'
@@ -622,6 +641,84 @@ step "the first order is unchanged" 200 - "$BASE/admin/orders/$SHOP_ORDER"
 step "stop tracking lamps again" 200 - -X PATCH "$BASE/admin/inventory-items/$LAMP_ITEM" -H "$JSON" \
     -d '{"tracked":false}'
 
+echo "## apps and webhooks (design note 0016)"
+# A webhook receiver when python3 is here (it is in CI): the host must run with
+# HYPHA_ALLOW_PRIVATE_CALLBACKS=true to reach it. Without one, the delivery fails and the
+# script checks that instead.
+HOOK_PORT=${E2E_HOOK_PORT:-3199}
+HOOKS_FILE=$(mktemp)
+HOOKS=''
+if command -v python3 >/dev/null 2>&1; then
+    python3 - "$HOOK_PORT" "$HOOKS_FILE" <<'PY' &
+import http.server, sys
+
+port, out = int(sys.argv[1]), sys.argv[2]
+
+class Hook(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("content-length", 0)))
+        with open(out, "ab") as f:
+            f.write(self.headers.get("hypha-event-type", "").encode() + b" " + body + b"\n")
+        self.send_response(204)
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+http.server.HTTPServer(("127.0.0.1", port), Hook).serve_forever()
+PY
+    HOOKS=$!
+    # Not a job of this shell any more, so killing it at the end prints nothing.
+    disown "$HOOKS"
+    trap 'kill $HOOKS 2>/dev/null; rm -f "$HOOKS_FILE"' EXIT
+    sleep 1
+fi
+HOOK_URL="http://127.0.0.1:$HOOK_PORT/hooks"
+step "an app with a webhook" 201 - -X POST "$BASE/admin/apps" -H "$JSON" \
+    -d "{\"key\":\"app_erp\",\"name\":\"ERP\",\"subscriptions\":[\"product.created\"],\"webhook\":{\"url\":\"$HOOK_URL\",\"timeout_ms\":2000}}"
+contains "its secret is shown once" '"secret":"hypha_as_'
+step "the same key again" 409 app_exists -X POST "$BASE/admin/apps" -H "$JSON" -d '{"key":"app_erp","name":"Again"}'
+step "a key without app_" 422 invalid_app_key -X POST "$BASE/admin/apps" -H "$JSON" -d '{"key":"erp","name":"ERP"}'
+step "an event type that can't be" 422 invalid_subscription -X POST "$BASE/admin/apps" -H "$JSON" \
+    -d '{"key":"app_bad","name":"Bad","subscriptions":["Orders"]}'
+step "a webhook timeout out of range" 422 invalid_timeout -X POST "$BASE/admin/apps" -H "$JSON" \
+    -d '{"key":"app_bad","name":"Bad","webhook":{"url":"https://bad.example.com","timeout_ms":50}}'
+step "list apps" 200 - "$BASE/admin/apps"
+contains "the courier from shipping is one" '"key":"app_courier","name":"Courier","enabled":true'
+step "get the app" 200 - "$BASE/admin/apps/app_erp"
+contains "with its webhook, without its secret" "\"webhook\":{\"url\":\"$HOOK_URL\",\"timeout_ms\":2000}"
+step "an unknown app" 404 app_not_found "$BASE/admin/apps/app_none"
+step "a product the app hears about" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
+    -d '{"handle":"webhook-mug","title":"Webhook mug","price":{"amount":1000,"currency":"EUR"}}'
+if [[ -n $HOOKS ]]; then
+    wait_for "the dispatcher delivers it" "$BASE/admin/apps/app_erp/deliveries?status=succeeded" '"event_type":"product.created"'
+    if grep -q '"handle":"webhook-mug"' "$HOOKS_FILE"; then
+        echo "ok   the receiver got the envelope"
+    else
+        echo "FAIL the receiver got the envelope: $(cat "$HOOKS_FILE")"
+        FAILED=$((FAILED + 1))
+    fi
+else
+    wait_for "the delivery fails, to be retried" "$BASE/admin/apps/app_erp/deliveries?status=pending" '"attempts":1'
+fi
+DELIVERY=$(sed -E 's/.*"id":"(dlv_[0-9a-f]+)".*/\1/' <<<"$BODY")
+EVENT=$(sed -E 's/.*"event_id":"(evt_[0-9a-f]+)".*/\1/' <<<"$BODY")
+step "retry it" 200 - -X POST "$BASE/admin/apps/app_erp/deliveries/$DELIVERY/retry"
+contains "due again" '"status":"pending"'
+step "deliveries of a status that isn't one" 400 invalid_query "$BASE/admin/apps/app_erp/deliveries?status=lost"
+step "retry a delivery that isn't the app's" 404 delivery_not_found \
+    -X POST "$BASE/admin/apps/app_erp/deliveries/dlv_00000000000000000000000000000000/retry"
+step "the event as sent" 200 - "$BASE/admin/events/$EVENT"
+contains "its envelope" '"type":"product.created","version":1,"subject":{"type":"product"'
+step "an unknown event" 404 event_not_found "$BASE/admin/events/evt_00000000000000000000000000000000"
+step "remove the webhook" 200 - -X PATCH "$BASE/admin/apps/app_erp" -H "$JSON" -d '{"webhook":null}'
+contains "it has none" '"webhook":null'
+step "a new secret" 200 - -X POST "$BASE/admin/apps/app_erp/secret"
+contains "shown once" '"secret":"hypha_as_'
+step "delete the app" 204 - -X DELETE "$BASE/admin/apps/app_erp"
+step "it's gone" 404 app_not_found "$BASE/admin/apps/app_erp"
+
+echo
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
 step "wrong method" 405 method_not_allowed -X DELETE "$BASE/admin/products/$MUG"

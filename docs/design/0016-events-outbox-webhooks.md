@@ -334,6 +334,31 @@ pub struct App {
 - **The admin** gets Settings → Apps: create an app, set its webhook and subscriptions,
   see deliveries and retry failed ones. Shipping's provider list links to the app.
 
+As built (2026-10-16):
+
+- `App` keeps its subscriptions as patterns (`order.placed`, `product.*`, `*`), checked
+  for shape but not against the catalog, since `hypha-apps` is a leaf and can't see the
+  other domains' event types. An unknown type simply never matches. `App::wants` is true
+  for an enabled app with a webhook and a matching pattern. Fan-out asks it as the apps
+  are at that moment.
+- **Storage links shipping to apps.** `0029_apps.sql` moves name, `enabled` and the secret
+  (unchanged, so `hypha_shs_` secrets keep verifying) into `apps`. A foreign key
+  `shipping_provider_app` makes a provider need its app (`provider_app_not_found`, 422)
+  and go when the app is deleted. The host's `HostRates` reads both. A disabled app
+  quotes no rates.
+- **The envelope** adds the subject's version (`subject: {type, id, version}`, EV7). The
+  actor is `{type, id}`, with a null `id` for the system. Subject IDs are prefixed for the
+  catalog's kinds; any other kind (a spore's) keeps its bare UUID. `GET /admin/events/{id}`
+  returns the same envelope.
+- **A delivery to an app that's gone, disabled or without a webhook fails for good at
+  once**, rather than being retried for 3 days. It can be retried from the admin once the
+  app is back.
+- **Retry** (`POST …/deliveries/{id}/retry`) makes a delivery due now and keeps its
+  attempts. A failed one therefore gets exactly one more try. A delivery that's leased
+  (running) is left alone. Deliveries are listed by their event's `seq`, unique per
+  destination, since delivery IDs are random v4. The page cursor carries that `seq`.
+- Event and delivery IDs are `evt_…` and `dlv_…` (`EventId`, `DeliveryId` in core).
+
 ## 9. Contract fixes that come first (EV13)
 
 Before any external consumer reads events or lists:
@@ -430,6 +455,6 @@ the tables small; longer helps debugging.
 4. **Jobs and dispatch:** `hypha-dispatch` with `fan_out`, `deliver_due`, pruning and
    `variant_cleanup`; the host's job runner replacing the ad-hoc spawns.
 5. **Apps and webhooks:** `hypha-apps`, the shipping migration, routes, the sender, the
-   admin's Settings → Apps.
+   admin's Settings → Apps. *(Built.)*
 6. **e2e** steps for every new route; a webhook delivered to a local receiver
-   (`HYPHA_ALLOW_PRIVATE_CALLBACKS=true` in e2e).
+   (`HYPHA_ALLOW_PRIVATE_CALLBACKS=true` in e2e). *(Built, with step 5.)*
