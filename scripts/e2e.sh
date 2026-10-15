@@ -162,6 +162,7 @@ contains "with a cursor for the next page" '"has_more":true,"next_cursor":"'
 NEXT=$(sed -E 's/.*"next_cursor":"([^"]+)".*/\1/' <<<"$BODY")
 step "the next page" 200 - "$BASE/admin/products?limit=1&cursor=$NEXT"
 contains "is the mug" "\"id\":\"$MUG\""
+contains "as a summary" '"variant_count":1,"price_ranges":[{"min":'
 step "active products" 200 - "$BASE/admin/products?status=active"
 step "a page too large" 422 invalid_limit "$BASE/admin/products?limit=500"
 step "an unknown filter" 400 invalid_query "$BASE/admin/products?sort=title"

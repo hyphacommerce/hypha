@@ -34,16 +34,14 @@ function asStatus(value: string | string[] | undefined): Status | undefined {
   return FILTERS.find((f) => f.status === value)?.status;
 }
 
-/** "€9.50" for one variant, "€9.50 – €14.00" for several prices. */
-function priceRange(product: AdminSchemas["ProductResponse"]): string {
-  const amounts = product.variants.map((v) => v.price.amount);
-  const first = product.variants[0];
-  if (!first) return "—";
-  const low = { ...first.price, amount: Math.min(...amounts) };
-  const high = { ...first.price, amount: Math.max(...amounts) };
-  return low.amount === high.amount
-    ? formatMoney(low)
-    : `${formatMoney(low)} – ${formatMoney(high)}`;
+/** "€9.50", "€9.50 – €14.00" for several prices, one range per currency. */
+function priceRanges(product: AdminSchemas["ProductSummaryResponse"]): string {
+  if (product.price_ranges.length === 0) return "—";
+  return product.price_ranges
+    .map(({ min, max }) =>
+      min.amount === max.amount ? formatMoney(min) : `${formatMoney(min)} – ${formatMoney(max)}`,
+    )
+    .join(", ");
 }
 
 export default async function ProductsPage({
@@ -120,8 +118,8 @@ export default async function ProductsPage({
                   <TableCell>
                     <ProductStatusBadge status={product.status} />
                   </TableCell>
-                  <TableCell>{product.variants.length}</TableCell>
-                  <TableCell>{priceRange(product)}</TableCell>
+                  <TableCell>{product.variant_count}</TableCell>
+                  <TableCell>{priceRanges(product)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

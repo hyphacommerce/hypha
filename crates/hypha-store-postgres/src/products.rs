@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    Money, OptionId, OptionValueId, Page, PageRequest, ProductId, RepoError, VariantId, Version,
-    Versioned,
+    Money, OptionId, OptionValueId, Page, PageRequest, Price, ProductId, RepoError, VariantId,
+    Version, Versioned,
 };
 use hypha_products::{
-    Handle, OptionSnapshot, OptionValueSnapshot, Product, ProductRepo, ProductSnapshot,
-    ProductStatus, VariantSnapshot,
+    Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductRepo, ProductSnapshot,
+    ProductStatus, ProductSummary, VariantSnapshot,
 };
-use tokio_postgres::{GenericClient, types::Type};
+use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
@@ -34,36 +34,52 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         consistent_read!(conn.client(), |tx| load(tx, &ids).await)
     }
 
+    /// One query whatever the page holds: each product's variant count and price ranges
+    /// are aggregated in SQL (per product, only for the rows the limit keeps), so no
+    /// variant rows leave the database.
     async fn list(
         &self,
         status: Option<ProductStatus>,
         page: PageRequest<ProductId>,
-    ) -> Result<Page<Product>, RepoError> {
+    ) -> Result<Page<ProductSummary>, RepoError> {
         let status = status.map(|s| s.as_str());
         let after = page.after.map(|id| id.as_uuid());
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
-            let ids: Vec<Uuid> = tx
-                .query_typed(
-                    "SELECT id FROM products
-                     WHERE ($1::text IS NULL OR status = $1) AND ($2::uuid IS NULL OR id < $2)
-                     ORDER BY id DESC LIMIT $3",
-                    &[
-                        (&status, Type::TEXT),
-                        (&after, Type::UUID),
-                        (&fetch, Type::INT8),
-                    ],
-                )
-                .await
-                .map_err(repo_error)?
-                .iter()
-                .map(|row| row.get(0))
-                .collect();
-            let mut products = load(tx, &ids).await?;
-            products.sort_by_key(|p| std::cmp::Reverse(p.id().as_uuid()));
-            Ok(Page::from_overfetch(products, page.limit))
-        })
+        let rows = conn
+            .client()
+            .query_typed(
+                "SELECT p.id, p.handle, p.title, p.status, c.variants,
+                        r.currencies, r.mins, r.maxes
+                 FROM products p
+                 CROSS JOIN LATERAL (
+                     SELECT count(*) AS variants FROM variants WHERE product_id = p.id
+                 ) c
+                 CROSS JOIN LATERAL (
+                     SELECT array_agg(currency ORDER BY currency) AS currencies,
+                            array_agg(low ORDER BY currency) AS mins,
+                            array_agg(high ORDER BY currency) AS maxes
+                     FROM (
+                         SELECT price_currency AS currency, min(price_amount) AS low,
+                                max(price_amount) AS high
+                         FROM variants WHERE product_id = p.id GROUP BY price_currency
+                     ) by_currency
+                 ) r
+                 WHERE ($1::text IS NULL OR p.status = $1) AND ($2::uuid IS NULL OR p.id < $2)
+                 ORDER BY p.id DESC LIMIT $3",
+                &[
+                    (&status, Type::TEXT),
+                    (&after, Type::UUID),
+                    (&fetch, Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        let summaries = rows
+            .iter()
+            .map(summary_from_db)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Page::from_overfetch(summaries, page.limit))
     }
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {
@@ -356,4 +372,45 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
             Product::restore(snapshot).map_err(|e| corrupt(format!("product {id}: {e}")))
         })
         .collect()
+}
+
+/// A product summary from `list`'s row: the product's columns, its variant count and
+/// three arrays (currency codes, lowest and highest amounts), aligned and ordered by
+/// currency code.
+fn summary_from_db(row: &Row) -> Result<ProductSummary, RepoError> {
+    let id: Uuid = row.get(0);
+    let handle: String = row.get(1);
+    let status: String = row.get(3);
+    let variants: i64 = row.get(4);
+    // `array_agg` over no rows is NULL; every product has a variant, but no need to rely
+    // on that here.
+    let currencies: Vec<String> = row.get::<_, Option<_>>(5).unwrap_or_default();
+    let mins: Vec<i64> = row.get::<_, Option<_>>(6).unwrap_or_default();
+    let maxes: Vec<i64> = row.get::<_, Option<_>>(7).unwrap_or_default();
+    let price = |amount: i64, currency| {
+        Money::new(amount, currency)
+            .and_then(Price::new)
+            .map_err(|e| corrupt(format!("product {id} price: {e}")))
+    };
+    let price_ranges = currencies
+        .iter()
+        .zip(mins.iter().zip(&maxes))
+        .map(|(code, (&min, &max))| {
+            let currency = currency_from_db(code)?;
+            Ok(PriceRange {
+                min: price(min, currency)?,
+                max: price(max, currency)?,
+            })
+        })
+        .collect::<Result<Vec<_>, RepoError>>()?;
+    Ok(ProductSummary {
+        id: ProductId::from_uuid(id),
+        handle: Handle::new(&handle).map_err(|e| corrupt(format!("product {id}: {e}")))?,
+        title: row.get(2),
+        status: status
+            .parse()
+            .map_err(|s| corrupt(format!("product status {s:?}")))?,
+        variant_count: usize::try_from(variants).map_err(corrupt)?,
+        price_ranges,
+    })
 }

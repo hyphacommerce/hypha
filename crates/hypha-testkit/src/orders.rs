@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use hypha_core::{OrderId, Page, PageRequest, RepoError};
-use hypha_orders::{Order, OrderNumber, OrderRepo, repo::keys};
+use hypha_orders::{Order, OrderNumber, OrderRepo, OrderSummary, repo::keys};
 
 use crate::table::Table;
 
@@ -44,8 +44,8 @@ impl OrderRepo for InMemoryOrderRepo {
         Ok(self.orders.find(|o| o.number() == number))
     }
 
-    async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<Order>, RepoError> {
-        Ok(self.orders.page(|_| true, page, Clone::clone))
+    async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<OrderSummary>, RepoError> {
+        Ok(self.orders.page(|_| true, page, Order::summary))
     }
 
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {

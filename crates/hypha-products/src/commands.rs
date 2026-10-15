@@ -4,7 +4,9 @@ use hypha_core::{
 };
 use thiserror::Error;
 
-use crate::{Handle, Product, ProductError, ProductRepo, ProductStatus, repo::keys};
+use crate::{
+    Handle, Product, ProductError, ProductRepo, ProductStatus, ProductSummary, repo::keys,
+};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -84,14 +86,14 @@ async fn handle_taken<R: ProductRepo>(
         }))
 }
 
-/// A page of products, newest first, only those with `status` when given (design note
-/// 0012).
+/// A page of product summaries, newest first, only those with `status` when given
+/// (design note 0012).
 pub async fn list_products<R: ProductRepo>(
     ctx: &Ctx,
     repo: &R,
     status: Option<ProductStatus>,
     page: PageRequest<ProductId>,
-) -> Result<Page<Product>, CommandError> {
+) -> Result<Page<ProductSummary>, CommandError> {
     ctx.require(Scope::ProductsRead)?;
     Ok(repo.list(status, page).await?)
 }

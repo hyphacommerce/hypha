@@ -20,7 +20,7 @@
 | L4 | **`limit` from 1 to 100, default 50.** Out of range is `422 invalid_limit`, not clamped, so a client asking for 500 finds out instead of silently getting 100 |
 | L5 | **Filters are typed query parameters**, refused when unknown (`400 invalid_query`), like unknown body fields. Products filter by `status` |
 | L6 | **Lists live in the repository port** (`ProductRepo::list`, `OrderRepo::list`) taking `PageRequest<Id>` and returning `Page<T>` from `hypha-core`; adapters fetch `limit + 1` rows so `has_more` costs nothing extra |
-| L7 | **Order lists return summaries** (number, date, email, country, statuses, total, item count), not whole orders: a table needs no lines. Product lists return the same product as `GET /admin/products/{id}` |
+| L7 | **Lists return summaries, not aggregates**, from the repository itself: `ProductSummary` (handle, title, status, variant count, a price range per currency) and `OrderSummary` (number, date, email, country, statuses, total, item count). A table needs no variants or lines, and with large catalogs a page of whole products could be megabytes. Each domain defines its summary next to the aggregate (`Product::summary`); adapters may compute it in storage, and the contract checks the two agree. The same for every later list. *Hard to reverse* (the item shapes) |
 
 ## 1. Core types (`hypha-core/src/page.rs`)
 
@@ -31,24 +31,30 @@
 
 ## 2. Storage
 
-- **Postgres:** `SELECT id … WHERE (filter) AND ($after IS NULL OR id < $after) ORDER BY
-  id DESC LIMIT n + 1`, then the existing batched loaders (4 queries for products, 2 for
-  orders, whatever the page size), inside one consistent read. The product status filter
-  has an index on `(status, id)` (migration 0017).
+- **Postgres:** one query per page: `… WHERE (filter) AND ($after IS NULL OR id < $after)
+  ORDER BY id DESC LIMIT n + 1`, with the summary's aggregates (variant count, price
+  ranges, item count) in per-row subqueries, which run only for the rows the limit keeps.
+  No child rows leave the database. The product status filter has an index on
+  `(status, id)` (migration 0017).
 - **In memory:** `Table::page` does the same over its rows.
 - **Contract:** `product_repo` and `order_repo` check order, cursors (including one that
-  no longer exists), exact-limit pages, filters and whole aggregates.
+  no longer exists), exact-limit pages, filters, and that each summary equals the stored
+  aggregate's (a product priced in two currencies, an item count over 2³²).
 
 ## 3. HTTP
 
 | Route | Scope | Notes |
 | --- | --- | --- |
-| `GET /admin/products?status&cursor&limit` | `products:read` | `ProductPage` |
-| `GET /admin/orders?cursor&limit` | `orders:read` | `OrderPage` of `OrderSummaryResponse` |
+| `GET /admin/products?status&cursor&limit` | `products:read` | `ProductSummaryPage` of `ProductSummaryResponse` |
+| `GET /admin/orders?cursor&limit` | `orders:read` | `OrderSummaryPage` of `OrderSummaryResponse` |
 | `PATCH /admin/store` | `stores:write` | `{"name"}`, Merge Patch; `null` refused |
 
-- The query is read after authentication (`QueryParams`, like `JsonBody`), so a bad
-  token is a 401 whatever the query says.
+- Every list shares `routes/page.rs`: `ListQuery<Filters>` reads `cursor` and `limit`
+  apart from the list's own filters (which refuse unknown parameters), after
+  authentication like `JsonBody`, so a bad token is a 401 whatever the query says.
+  `PageParams` documents the two parameters from `PageLimit`'s constants, and
+  `PageResponse<Item>` is the response, named after its items in the documents
+  (`ProductSummaryResponse` → `ProductSummaryPage`).
 - The admin product response grows `options` and, per variant, `sku`, `title` ("M /
   Blue") and `selections`: what a product page shows. Additive.
 
@@ -68,3 +74,6 @@
   simpler to read but rules out other sort orders without a breaking change.
 - **Newest first as the only order:** adding sort orders later is additive (a `sort`
   parameter with the current order as default).
+- **L7, the summaries:** fields can be added later, not removed. A product's price
+  ranges are a list (one per currency) because nothing yet stops variants of one
+  product being priced in different currencies; one range would have to pick.

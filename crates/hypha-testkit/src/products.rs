@@ -1,6 +1,6 @@
 use hypha_core::{Page, PageRequest, ProductId, RepoError, VariantId};
 use hypha_products::{
-    Handle, Product, ProductStatus,
+    Handle, Product, ProductStatus, ProductSummary,
     repo::{ProductRepo, keys},
 };
 
@@ -45,11 +45,11 @@ impl ProductRepo for InMemoryProductRepo {
         &self,
         status: Option<ProductStatus>,
         page: PageRequest<ProductId>,
-    ) -> Result<Page<Product>, RepoError> {
+    ) -> Result<Page<ProductSummary>, RepoError> {
         Ok(self.products.page(
             |p| status.is_none_or(|s| p.status() == s),
             page,
-            Clone::clone,
+            Product::summary,
         ))
     }
 

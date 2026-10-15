@@ -216,7 +216,7 @@ fn list_products_filters_by_status() {
     .unwrap();
 
     let all = block_on(list_products(&ctx, &repo, None, PageRequest::default())).unwrap();
-    assert_eq!(all.items, vec![cup.clone(), mug]);
+    assert_eq!(all.items, vec![cup.summary(), mug.summary()]);
     let active = block_on(list_products(
         &ctx,
         &repo,
@@ -224,7 +224,7 @@ fn list_products_filters_by_status() {
         PageRequest::default(),
     ))
     .unwrap();
-    assert_eq!(active.items, vec![cup]);
+    assert_eq!(active.items, vec![cup.summary()]);
 }
 
 #[test]

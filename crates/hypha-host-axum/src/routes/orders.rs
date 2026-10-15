@@ -5,8 +5,8 @@ use hypha_core::{
     ProductId, TaxClassId, TaxRate, VariantId,
 };
 use hypha_orders::{
-    FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, get_order, list_orders,
-    mark_order_paid,
+    FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, OrderSummary, get_order,
+    list_orders, mark_order_paid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -205,22 +205,18 @@ pub(super) struct OrderSummaryResponse {
 }
 
 impl OrderSummaryResponse {
-    fn new(order: &Order) -> Result<Self, ApiError> {
+    fn new(o: OrderSummary) -> Result<Self, ApiError> {
         Ok(Self {
-            id: order.id(),
-            number: order.number().value(),
-            placed_at: rfc3339(order.placed_at())?,
-            customer: order.customer(),
-            email: order.email().clone(),
-            country: order.country(),
-            financial_status: order.financial_status().into(),
-            fulfillment_status: order.fulfillment_status().into(),
-            total: order.total(),
-            item_count: order
-                .lines()
-                .iter()
-                .map(|l| u64::from(l.quantity.value()))
-                .sum(),
+            id: o.id,
+            number: o.number.value(),
+            placed_at: rfc3339(o.placed_at)?,
+            customer: o.customer,
+            email: o.email,
+            country: o.country,
+            financial_status: o.financial_status.into(),
+            fulfillment_status: o.fulfillment_status.into(),
+            total: o.total,
+            item_count: o.item_count,
         })
     }
 }
@@ -244,9 +240,11 @@ pub(super) async fn list<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, _) = query.parse()?;
     let page = list_orders(&ctx, ports.orders(), page).await?;
-    Ok(Json(PageResponse::new(page, Order::id, |o| {
-        OrderSummaryResponse::new(&o)
-    })?))
+    Ok(Json(PageResponse::new(
+        page,
+        |o| o.id,
+        OrderSummaryResponse::new,
+    )?))
 }
 
 /// An order.

@@ -4,6 +4,7 @@ pub mod handle;
 pub mod option;
 pub mod product;
 pub mod repo;
+pub mod summary;
 pub mod variant;
 
 pub use commands::{
@@ -17,4 +18,5 @@ pub use product::{
     OptionSnapshot, OptionValueSnapshot, Product, ProductSnapshot, ProductStatus, VariantSnapshot,
 };
 pub use repo::{HasProducts, ProductRepo};
+pub use summary::{PriceRange, ProductSummary};
 pub use variant::{NewVariant, Variant};

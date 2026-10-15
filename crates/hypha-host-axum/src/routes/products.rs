@@ -1,8 +1,8 @@
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{Money, OptionId, OptionValueId, ProductId, VariantId};
 use hypha_products::{
-    CreateSimpleProduct, HasProducts, Product, ProductStatus, create_simple_product, get_product,
-    list_products, set_product_status,
+    CreateSimpleProduct, HasProducts, Product, ProductStatus, ProductSummary,
+    create_simple_product, get_product, list_products, set_product_status,
 };
 use serde::{Deserialize, Serialize};
 
@@ -141,29 +141,68 @@ pub(super) struct ProductFilters {
     status: Option<StatusDto>,
 }
 
+/// A product in a list: what a table of products shows, without options or variants
+/// (design note 0012, L7). `GET /admin/products/{id}` has the rest.
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct ProductSummaryResponse {
+    id: ProductId,
+    handle: String,
+    title: String,
+    status: StatusDto,
+    variant_count: u64,
+    /// The lowest and highest variant price in each currency the variants are priced
+    /// in, ordered by currency code: usually one.
+    price_ranges: Vec<PriceRangeResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct PriceRangeResponse {
+    min: Money,
+    /// Equal to `min` when every variant in this currency costs the same.
+    max: Money,
+}
+
+impl From<ProductSummary> for ProductSummaryResponse {
+    fn from(p: ProductSummary) -> Self {
+        Self {
+            id: p.id,
+            handle: p.handle.as_str().to_string(),
+            title: p.title,
+            status: p.status.into(),
+            variant_count: p.variant_count as u64,
+            price_ranges: p
+                .price_ranges
+                .iter()
+                .map(|r| PriceRangeResponse {
+                    min: r.min.money(),
+                    max: r.max.money(),
+                })
+                .collect(),
+        }
+    }
+}
+
 /// A page of products (named for the documents: utoipa's `body =` takes a plain name).
-type ProductPage = PageResponse<ProductResponse>;
+type ProductSummaryPage = PageResponse<ProductSummaryResponse>;
 
 /// Products in any status, newest first, optionally of one status.
 #[utoipa::path(
     get,
     path = "/admin/products",
     params(PageParams, ProductFilters),
-    responses((status = 200, description = "OK", body = ProductPage)),
+    responses((status = 200, description = "OK", body = ProductSummaryPage)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
 pub(super) async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     query: ListQuery<ProductFilters>,
-) -> Result<Json<ProductPage>, ApiError> {
+) -> Result<Json<ProductSummaryPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, filters) = query.parse()?;
     let status = filters.status.map(Into::into);
     let page = list_products(&ctx, ports.products(), status, page).await?;
-    Ok(Json(PageResponse::new(page, Product::id, |p| {
-        Ok(ProductResponse::from(&p))
-    })?))
+    Ok(Json(PageResponse::new(page, |p| p.id, |p| Ok(p.into()))?))
 }
 
 /// Creates a product with one variant, as a draft.

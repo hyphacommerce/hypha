@@ -115,6 +115,39 @@ fn shirt(n: u128, handle: &str) -> Product {
     p
 }
 
+/// A shirt with Size (S, M, L) and three variants: S at 15.00 EUR, M at 17.00 EUR and
+/// L at 20.00 USD, so its prices span two currencies.
+fn shirt_in_two_currencies(n: u128) -> Product {
+    let b = n * 100;
+    let size = ProductOption::new(
+        oid(b + 10),
+        "Size".to_string(),
+        vec![
+            OptionValue::new(val(b + 11), "S".to_string()),
+            OptionValue::new(val(b + 12), "M".to_string()),
+            OptionValue::new(val(b + 13), "L".to_string()),
+        ],
+    );
+    let variant = |v: u128, price: Price| NewVariant {
+        id: vid(b + v),
+        sku: None,
+        price,
+        selections: vec![val(b + 10 + v)],
+    };
+    let mut p = Product::new_configurable(
+        pid(n),
+        Handle::new("shirt").unwrap(),
+        "Shirt".to_string(),
+        vec![size],
+        variant(1, eur(1500)),
+    )
+    .unwrap();
+    p.add_variant(variant(2, eur(1700))).unwrap();
+    let usd = Price::new(Money::new(2000, Currency::Usd).unwrap()).unwrap();
+    p.add_variant(variant(3, usd)).unwrap();
+    p
+}
+
 fn sorted(mut products: Vec<Product>) -> Vec<Product> {
     products.sort_by_key(|p| p.id().as_uuid());
     products
@@ -291,16 +324,17 @@ async fn listed<R: ProductRepo>(
     limit: u32,
 ) -> (Vec<ProductId>, bool) {
     let page = repo.list(status, page(after, limit)).await.unwrap();
-    (page.items.iter().map(Product::id).collect(), page.has_more)
+    (page.items.iter().map(|p| p.id).collect(), page.has_more)
 }
 
 async fn list_pages<R: ProductRepo>(repo: &R) {
     assert_eq!(listed(repo, None, None, 10).await, (vec![], false));
 
     // Products 1 to 5, inserted out of order; 2 and 4 active (updated, so version 2).
+    // 5 has variants priced in two currencies.
     for n in [3, 1, 5, 2, 4] {
         let mut p = if n == 5 {
-            shirt(n, "shirt")
+            shirt_in_two_currencies(n)
         } else {
             simple(n, &format!("p{n}"))
         };
@@ -311,14 +345,21 @@ async fn list_pages<R: ProductRepo>(repo: &R) {
         }
     }
 
-    // Whole aggregates come back, children included.
+    // Summaries of the stored products.
     let first = repo.list(None, page(None, 2)).await.unwrap();
     assert_eq!(
         first.items,
         vec![
-            repo.get(pid(5)).await.unwrap().unwrap(),
-            repo.get(pid(4)).await.unwrap().unwrap(),
+            repo.get(pid(5)).await.unwrap().unwrap().summary(),
+            repo.get(pid(4)).await.unwrap().unwrap().summary(),
         ]
+    );
+    assert_eq!(
+        (
+            first.items[0].variant_count,
+            first.items[0].price_ranges.len()
+        ),
+        (3, 2)
     );
     assert!(first.has_more);
 

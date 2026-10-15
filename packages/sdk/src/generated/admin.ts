@@ -1448,19 +1448,16 @@ export interface components {
             currency: components["schemas"]["Currency"];
             id: components["schemas"]["PriceListId"];
         };
+        PriceRangeResponse: {
+            /** @description Equal to `min` when every variant in this currency costs the same. */
+            max: components["schemas"]["Money"];
+            min: components["schemas"]["Money"];
+        };
         /**
          * @description A ProductId: `prod_` and 32 hex digits.
          * @example prod_0190f1a2b3c47d8e9f00112233445566
          */
         ProductId: string;
-        /** @description A page of a list, newest first (design note 0012). */
-        ProductPage: {
-            /** @description Whether there are more after these. */
-            has_more: boolean;
-            items: components["schemas"]["ProductResponse"][];
-            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
-            next_cursor?: string | null;
-        };
         ProductResponse: {
             handle: string;
             id: components["schemas"]["ProductId"];
@@ -1479,6 +1476,31 @@ export interface components {
          * @enum {string}
          */
         ProductStatus: "draft" | "active" | "archived";
+        /** @description A page of a list, newest first (design note 0012). */
+        ProductSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["ProductSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /**
+         * @description A product in a list: what a table of products shows, without options or variants
+         *     (design note 0012, L7). `GET /admin/products/{id}` has the rest.
+         */
+        ProductSummaryResponse: {
+            handle: string;
+            id: components["schemas"]["ProductId"];
+            /**
+             * @description The lowest and highest variant price in each currency the variants are priced
+             *     in, ordered by currency code: usually one.
+             */
+            price_ranges: components["schemas"]["PriceRangeResponse"][];
+            status: components["schemas"]["ProductStatus"];
+            title: string;
+            /** Format: int64 */
+            variant_count: number;
+        };
         RecoveryCodesResponse: {
             /** @description Shown only now: each works once if the authenticator is lost. */
             recovery_codes: string[];
@@ -5810,7 +5832,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductPage"];
+                    "application/json": components["schemas"]["ProductSummaryPage"];
                 };
             };
             /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */

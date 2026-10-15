@@ -1,6 +1,6 @@
 use hypha_core::{Page, PageRequest, ProductId, RepoError, VariantId};
 
-use crate::{Handle, Product, ProductStatus};
+use crate::{Handle, Product, ProductStatus, ProductSummary};
 
 /// Uniqueness rules a `ProductRepo` enforces, reported as `RepoError::Duplicate(key)`.
 /// Adapters map their constraint names to these.
@@ -23,13 +23,14 @@ pub trait ProductRepo {
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError>;
     /// The product that owns `variant`.
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError>;
-    /// A page of products, newest first (by ID; design note 0012), only those with
-    /// `status` when given.
+    /// A page of product summaries, newest first (by ID; design note 0012), only those
+    /// with `status` when given. Each equals `Product::summary` of the stored product;
+    /// an adapter may compute them without loading whole products.
     async fn list(
         &self,
         status: Option<ProductStatus>,
         page: PageRequest<ProductId>,
-    ) -> Result<Page<Product>, RepoError>;
+    ) -> Result<Page<ProductSummary>, RepoError>;
     /// Stores a new product and sets its version to 1. Fails with `Duplicate` on any
     /// key in `keys`.
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError>;

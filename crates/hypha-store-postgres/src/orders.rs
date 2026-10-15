@@ -6,7 +6,7 @@ use hypha_core::{
     VariantId, Version, Versioned,
 };
 use hypha_orders::{
-    Order, OrderLine, OrderNumber, OrderRepo, OrderSnapshot, OrderTax, OrderTaxSource,
+    Order, OrderLine, OrderNumber, OrderRepo, OrderSnapshot, OrderSummary, OrderTax, OrderTaxSource,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -25,26 +25,31 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         })
     }
 
-    async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<Order>, RepoError> {
+    /// One query whatever the page holds: each order's item count is summed in SQL (per
+    /// order, only for the rows the limit keeps), so no line rows leave the database.
+    async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<OrderSummary>, RepoError> {
         let after = page.after.map(|id| id.as_uuid());
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
-            let ids: Vec<Uuid> = tx
-                .query_typed(
-                    "SELECT id FROM orders WHERE ($1::uuid IS NULL OR id < $1)
-                     ORDER BY id DESC LIMIT $2",
-                    &[(&after, Type::UUID), (&fetch, Type::INT8)],
-                )
-                .await
-                .map_err(repo_error)?
-                .iter()
-                .map(|row| row.get(0))
-                .collect();
-            let mut orders = load(tx, &ids).await?;
-            orders.sort_by_key(|o| std::cmp::Reverse(o.id().as_uuid()));
-            Ok(Page::from_overfetch(orders, page.limit))
-        })
+        let rows = conn
+            .client()
+            .query_typed(
+                "SELECT o.id, o.number, (extract(epoch FROM o.placed_at) * 1000000)::bigint,
+                     o.customer_id, o.email, o.country, o.currency, o.total,
+                     o.financial_status, o.fulfillment_status,
+                     (SELECT coalesce(sum(quantity), 0) FROM order_lines
+                      WHERE order_id = o.id)::bigint
+                 FROM orders o WHERE ($1::uuid IS NULL OR o.id < $1)
+                 ORDER BY o.id DESC LIMIT $2",
+                &[(&after, Type::UUID), (&fetch, Type::INT8)],
+            )
+            .await
+            .map_err(repo_error)?;
+        let summaries = rows
+            .iter()
+            .map(summary_from_db)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Page::from_overfetch(summaries, page.limit))
     }
 
     async fn get_by_number(&self, number: OrderNumber) -> Result<Option<Order>, RepoError> {
@@ -338,6 +343,29 @@ fn order_from_db(row: &Row, line_rows: Vec<Row>) -> Result<Order, RepoError> {
         fulfillment_status: fulfillment.parse().map_err(corrupt)?,
     };
     Order::restore(snapshot).map_err(corrupt)
+}
+
+/// An order summary from `list`'s row.
+fn summary_from_db(row: &Row) -> Result<OrderSummary, RepoError> {
+    let id: Uuid = row.get(0);
+    let email: String = row.get(4);
+    let country: String = row.get(5);
+    let currency: String = row.get(6);
+    let financial: String = row.get(8);
+    let fulfillment: String = row.get(9);
+    let items: i64 = row.get(10);
+    Ok(OrderSummary {
+        id: OrderId::from_uuid(id),
+        number: OrderNumber::new(row.get(1)).map_err(corrupt)?,
+        placed_at: Timestamp::from_unix_micros(row.get(2)),
+        customer: CustomerId::from_uuid(row.get(3)),
+        email: Email::new(&email).map_err(corrupt)?,
+        country: CountryCode::new(&country).map_err(corrupt)?,
+        financial_status: financial.parse().map_err(corrupt)?,
+        fulfillment_status: fulfillment.parse().map_err(corrupt)?,
+        total: Money::new(row.get(7), currency_from_db(&currency)?).map_err(corrupt)?,
+        item_count: u64::try_from(items).map_err(|_| corrupt(format!("order {id} item count")))?,
+    })
 }
 
 fn line_from_db(

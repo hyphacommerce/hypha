@@ -4,8 +4,8 @@ use hypha_core::{
     VariantId, Version, Versioned,
 };
 use hypha_orders::{
-    CommandError, FinancialStatus, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, get_order,
-    list_orders, mark_order_paid,
+    CommandError, FinancialStatus, NewOrder, Order, OrderLine, OrderNumber, OrderRepo,
+    OrderSummary, get_order, list_orders, mark_order_paid,
 };
 use hypha_testkit::InMemoryOrderRepo;
 use pollster::block_on;
@@ -138,7 +138,10 @@ impl OrderRepo for LoadedBeforeAChange {
     ) -> Result<Option<Order>, hypha_core::RepoError> {
         self.repo.get_by_number(number).await
     }
-    async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<Order>, hypha_core::RepoError> {
+    async fn list(
+        &self,
+        page: PageRequest<OrderId>,
+    ) -> Result<Page<OrderSummary>, hypha_core::RepoError> {
         self.repo.list(page).await
     }
     async fn insert(&self, order: &mut Order) -> Result<(), hypha_core::RepoError> {
@@ -176,7 +179,7 @@ fn list_orders_returns_a_page() {
     assert_eq!(
         page,
         Page {
-            items: vec![stored],
+            items: vec![stored.summary()],
             has_more: false
         }
     );

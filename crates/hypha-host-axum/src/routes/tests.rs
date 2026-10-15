@@ -341,6 +341,27 @@ async fn products_list_newest_first_in_pages() {
 }
 
 #[tokio::test]
+async fn a_listed_product_is_a_summary() {
+    let app = app().await;
+    let id = create_product(&app, "mug").await;
+    let (_, page) = send(&app, "GET", "/admin/products", None).await;
+    assert_eq!(
+        page["items"][0],
+        json!({
+            "id": id,
+            "handle": "mug",
+            "title": "mug",
+            "status": "draft",
+            "variant_count": 1,
+            "price_ranges": [{
+                "min": { "amount": 1000, "currency": "EUR" },
+                "max": { "amount": 1000, "currency": "EUR" },
+            }],
+        })
+    );
+}
+
+#[tokio::test]
 async fn orders_list_starts_empty() {
     let app = app().await;
     let (status, page) = send(&app, "GET", "/admin/orders", None).await;

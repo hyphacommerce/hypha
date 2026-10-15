@@ -217,7 +217,7 @@ async fn listed<R: OrderRepo>(repo: &R, after: Option<u128>, limit: u32) -> (Vec
         })
         .await
         .unwrap();
-    (page.items.iter().map(Order::id).collect(), page.has_more)
+    (page.items.iter().map(|o| o.id).collect(), page.has_more)
 }
 
 async fn list_pages<R: OrderRepo>(repo: &R) {
@@ -231,7 +231,8 @@ async fn list_pages<R: OrderRepo>(repo: &R) {
         repo.insert(&mut order(n)).await.unwrap();
     }
 
-    // Whole aggregates come back, lines included.
+    // Summaries of the stored orders: item counts add up line quantities (order 3's
+    // first line has the largest quantity, so a 32-bit sum would overflow).
     let first = repo
         .list(PageRequest {
             after: None,
@@ -242,10 +243,11 @@ async fn list_pages<R: OrderRepo>(repo: &R) {
     assert_eq!(
         first.items,
         vec![
-            repo.get(oid(3)).await.unwrap().unwrap(),
-            repo.get(oid(2)).await.unwrap().unwrap(),
+            repo.get(oid(3)).await.unwrap().unwrap().summary(),
+            repo.get(oid(2)).await.unwrap().unwrap().summary(),
         ]
     );
+    assert_eq!(first.items[0].item_count, u64::from(u32::MAX) + 1);
     assert!(first.has_more);
 
     assert_eq!(listed(repo, Some(2), 2).await, (vec![oid(1)], false));

@@ -5275,7 +5275,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProductPage"
+                  "$ref": "#/components/schemas/ProductSummaryPage"
                 }
               }
             }
@@ -9076,6 +9076,22 @@
           }
         }
       },
+      "PriceRangeResponse": {
+        "type": "object",
+        "required": [
+          "min",
+          "max"
+        ],
+        "properties": {
+          "max": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Equal to `min` when every variant in this currency costs the same."
+          },
+          "min": {
+            "$ref": "#/components/schemas/Money"
+          }
+        }
+      },
       "ProductId": {
         "type": "string",
         "description": "A ProductId: `prod_` and 32 hex digits.",
@@ -9083,33 +9099,6 @@
           "prod_0190f1a2b3c47d8e9f00112233445566"
         ],
         "pattern": "^prod_[0-9a-f]{32}$"
-      },
-      "ProductPage": {
-        "type": "object",
-        "description": "A page of a list, newest first (design note 0012).",
-        "required": [
-          "items",
-          "has_more"
-        ],
-        "properties": {
-          "has_more": {
-            "type": "boolean",
-            "description": "Whether there are more after these."
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ProductResponse"
-            }
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it."
-          }
-        }
       },
       "ProductResponse": {
         "type": "object",
@@ -9157,6 +9146,71 @@
           "active",
           "archived"
         ]
+      },
+      "ProductSummaryPage": {
+        "type": "object",
+        "description": "A page of a list, newest first (design note 0012).",
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether there are more after these."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductSummaryResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it."
+          }
+        }
+      },
+      "ProductSummaryResponse": {
+        "type": "object",
+        "description": "A product in a list: what a table of products shows, without options or variants\n(design note 0012, L7). `GET /admin/products/{id}` has the rest.",
+        "required": [
+          "id",
+          "handle",
+          "title",
+          "status",
+          "variant_count",
+          "price_ranges"
+        ],
+        "properties": {
+          "handle": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "price_ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceRangeResponse"
+            },
+            "description": "The lowest and highest variant price in each currency the variants are priced\nin, ordered by currency code: usually one."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProductStatus"
+          },
+          "title": {
+            "type": "string"
+          },
+          "variant_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "RecoveryCodesResponse": {
         "type": "object",

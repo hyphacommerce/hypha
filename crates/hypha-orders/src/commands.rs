@@ -1,7 +1,7 @@
 use hypha_core::{AuthError, Ctx, ErrorCode, OrderId, Page, PageRequest, RepoError, Scope};
 use thiserror::Error;
 
-use crate::{FinancialStatus, Order, OrderRepo};
+use crate::{FinancialStatus, Order, OrderRepo, OrderSummary};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -23,12 +23,12 @@ impl ErrorCode for CommandError {
     }
 }
 
-/// A page of orders, newest first (design note 0012).
+/// A page of order summaries, newest first (design note 0012).
 pub async fn list_orders<R: OrderRepo>(
     ctx: &Ctx,
     orders: &R,
     page: PageRequest<OrderId>,
-) -> Result<Page<Order>, CommandError> {
+) -> Result<Page<OrderSummary>, CommandError> {
     ctx.require(Scope::OrdersRead)?;
     Ok(orders.list(page).await?)
 }
