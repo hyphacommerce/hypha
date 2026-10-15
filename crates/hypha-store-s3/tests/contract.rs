@@ -35,7 +35,7 @@ async fn blob_store() {
         secret_access_key: env("HYPHA_S3_SECRET_ACCESS_KEY"),
     };
     let endpoint = config.endpoint.clone();
-    let store = S3BlobStore::new(config, ReqwestClient::default(), SystemClock);
+    let store = S3BlobStore::new(config, ReqwestClient::new().unwrap(), SystemClock);
     store.ensure_bucket().await.unwrap_or_else(|e| {
         panic!("the S3 tests need a server at {endpoint} (`docker compose up -d`): {e}")
     });

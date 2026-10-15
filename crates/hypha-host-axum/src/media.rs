@@ -89,7 +89,7 @@ impl Media {
             }
         };
         Ok(Some(Media {
-            blobs: S3BlobStore::new(config, ReqwestClient::default(), SystemClock),
+            blobs: S3BlobStore::new(config, ReqwestClient::new()?, SystemClock),
             urls: MediaUrls {
                 public_base: std::env::var("HYPHA_MEDIA_URL")
                     .ok()

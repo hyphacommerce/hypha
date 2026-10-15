@@ -20,6 +20,9 @@ pub struct HttpRequest {
     pub method: &'static str,
     pub url: String,
     pub headers: Vec<(String, String)>,
+    /// Read at most this many bytes of the response body, then stop: a server that
+    /// ignores `Range` must not make the host hold a whole video in memory.
+    pub body_limit: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,12 +106,14 @@ impl<H: HttpClient, C: Clock> S3BlobStore<H, C> {
         }
     }
 
-    /// Signs and sends a request without a body for `key`.
+    /// Signs and sends a request without a body for `key`, reading at most `body_limit`
+    /// bytes of the answer.
     async fn send(
         &self,
         method: &'static str,
         key: &BlobKey,
         headers: Vec<(String, String)>,
+        body_limit: Option<u64>,
     ) -> Result<HttpResponse, BlobError> {
         let path = self.config.path(key);
         let mut all = headers.clone();
@@ -124,6 +129,7 @@ impl<H: HttpClient, C: Clock> S3BlobStore<H, C> {
                 method,
                 url: self.config.url(&path),
                 headers: all,
+                body_limit,
             })
             .await
             .map_err(|e| BlobError::Backend(format!("{method} {key}: {e}")))
@@ -148,6 +154,7 @@ impl<H: HttpClient, C: Clock> S3BlobStore<H, C> {
                 method: "PUT",
                 url: self.config.url(&path),
                 headers,
+                body_limit: Some(ERROR_BODY_LIMIT),
             })
             .await
             .map_err(|e| BlobError::Backend(format!("create bucket: {e}")))?;
@@ -167,6 +174,9 @@ impl<H: HttpClient, C: Clock> S3BlobStore<H, C> {
         }
     }
 }
+
+/// Enough of an answer's body for S3's error document (or `CopyObject`'s result).
+const ERROR_BODY_LIMIT: u64 = 64 * 1024;
 
 /// An unexpected answer, with the start of S3's error document for the logs.
 fn unexpected(what: &str, key: &BlobKey, response: &HttpResponse) -> BlobError {
@@ -219,7 +229,7 @@ impl<H: HttpClient, C: Clock> BlobStore for S3BlobStore<H, C> {
     }
 
     async fn head(&self, key: &BlobKey) -> Result<Option<BlobHead>, BlobError> {
-        let response = self.send("HEAD", key, vec![]).await?;
+        let response = self.send("HEAD", key, vec![], Some(0)).await?;
         match response.status {
             200 => {
                 let size = response
@@ -244,7 +254,11 @@ impl<H: HttpClient, C: Clock> BlobStore for S3BlobStore<H, C> {
         }
         let last = start.saturating_add(len - 1);
         let range = vec![("range".to_string(), format!("bytes={start}-{last}"))];
-        let response = self.send("GET", key, range).await?;
+        // A 206 holds at most `len` bytes; a 200 (range ignored) starts at 0, so read
+        // through `start + len` and no further.
+        let response = self
+            .send("GET", key, range, Some(start.saturating_add(len)))
+            .await?;
         match response.status {
             // 200 when the server ignores the range: cut it here.
             200 => Ok(response
@@ -265,7 +279,12 @@ impl<H: HttpClient, C: Clock> BlobStore for S3BlobStore<H, C> {
         // keeps the content type and cache control.
         let source = encode_path(&format!("/{}/{}", self.config.bucket, from));
         let response = self
-            .send("PUT", to, vec![("x-amz-copy-source".to_string(), source)])
+            .send(
+                "PUT",
+                to,
+                vec![("x-amz-copy-source".to_string(), source)],
+                Some(ERROR_BODY_LIMIT),
+            )
             .await?;
         // S3 may answer 200 and still report a failure in the body.
         let failed = String::from_utf8_lossy(&response.body).contains("<Error>");
@@ -276,7 +295,9 @@ impl<H: HttpClient, C: Clock> BlobStore for S3BlobStore<H, C> {
     }
 
     async fn delete(&self, key: &BlobKey) -> Result<(), BlobError> {
-        let response = self.send("DELETE", key, vec![]).await?;
+        let response = self
+            .send("DELETE", key, vec![], Some(ERROR_BODY_LIMIT))
+            .await?;
         match response.status {
             200 | 204 | 404 => Ok(()),
             _ => Err(unexpected("DELETE", key, &response)),
@@ -306,13 +327,26 @@ impl<H: HttpClient, C: Clock> BlobStore for S3BlobStore<H, C> {
 
 /// `HttpClient` on `reqwest`, for native hosts and tests.
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ReqwestClient(reqwest::Client);
 
 #[cfg(not(target_arch = "wasm32"))]
 impl ReqwestClient {
-    pub fn new(client: reqwest::Client) -> Self {
-        Self(client)
+    /// How long opening a connection may take.
+    pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+    /// How long a whole request may take. Generous for a `CopyObject` of a 1 GB video,
+    /// short enough that a stalled store fails requests instead of holding them (and
+    /// their database connections) forever.
+    pub const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+    /// A client with `CONNECT_TIMEOUT` and `REQUEST_TIMEOUT`.
+    pub fn new() -> Result<Self, String> {
+        reqwest::Client::builder()
+            .connect_timeout(Self::CONNECT_TIMEOUT)
+            .timeout(Self::REQUEST_TIMEOUT)
+            .build()
+            .map(Self)
+            .map_err(|e| format!("cannot build the HTTP client: {e}"))
     }
 }
 
@@ -332,11 +366,85 @@ impl HttpClient for ReqwestClient {
             .iter()
             .filter_map(|(n, v)| Some((n.to_string(), v.to_str().ok()?.to_string())))
             .collect();
-        let body = response.bytes().await.map_err(|e| e.to_string())?.to_vec();
+        let limit = request
+            .body_limit
+            .map_or(usize::MAX, |l| usize::try_from(l).unwrap_or(usize::MAX));
+        let mut response = response;
+        let mut body = Vec::new();
+        while body.len() < limit {
+            let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? else {
+                break;
+            };
+            body.extend_from_slice(&chunk);
+        }
+        // Dropping the rest of the response closes the connection.
+        body.truncate(limit);
         Ok(HttpResponse {
             status,
             headers,
             body,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use super::*;
+
+    /// Answers every request with `status` and `body` (cut to the request's limit, as
+    /// the real client does) and keeps the requests.
+    struct FakeHttp {
+        status: u16,
+        body: Vec<u8>,
+        requests: RefCell<Vec<HttpRequest>>,
+    }
+
+    impl HttpClient for FakeHttp {
+        async fn send(&self, request: HttpRequest) -> Result<HttpResponse, String> {
+            let limit = request.body_limit.map_or(usize::MAX, |l| l as usize);
+            self.requests.borrow_mut().push(request);
+            Ok(HttpResponse {
+                status: self.status,
+                headers: vec![],
+                body: self.body.iter().copied().take(limit).collect(),
+            })
+        }
+    }
+
+    struct Epoch;
+
+    impl Clock for Epoch {
+        fn now(&self) -> Timestamp {
+            Timestamp::from_unix_micros(0)
+        }
+    }
+
+    fn store(status: u16, body: Vec<u8>) -> S3BlobStore<FakeHttp, Epoch> {
+        let config = S3Config {
+            endpoint: "http://localhost:8333".to_string(),
+            region: "us-east-1".to_string(),
+            bucket: "media".to_string(),
+            access_key_id: "key".to_string(),
+            secret_access_key: "secret".to_string(),
+        };
+        let http = FakeHttp {
+            status,
+            body,
+            requests: RefCell::new(vec![]),
+        };
+        S3BlobStore::new(config, http, Epoch)
+    }
+
+    #[test]
+    fn a_server_ignoring_the_range_is_read_only_as_far_as_needed() {
+        // A "1 GB" file the server sends whole, with 200 instead of 206.
+        let file: Vec<u8> = (0..=255u8).cycle().take(1 << 20).collect();
+        let store = store(200, file.clone());
+        let key = BlobKey::restore("uploads/1/1/a.mp4".to_string());
+        let read = pollster::block_on(store.read_range(&key, 10, 100)).unwrap();
+        assert_eq!(read, file[10..110]);
+        assert_eq!(store.http.requests.borrow()[0].body_limit, Some(110));
     }
 }
