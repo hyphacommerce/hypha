@@ -1,9 +1,9 @@
-use hypha_core::{RepoError, StoreId, Version, Versioned};
+use hypha_core::{RepoError, StoreId, Version, Versioned, stamp_insert, stamp_update};
 use hypha_stores::{Store, StoreRepo, StoreSnapshot};
 use tokio_postgres::{GenericClient, Row, types::Type};
 
 use crate::{
-    columns::{col, version_from_db, version_to_db},
+    columns::{col, stamp_columns, stamps_from_row, version_from_db, version_to_db, write_stamps},
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, in_transaction},
 };
@@ -13,6 +13,7 @@ fn store_from_row(row: &Row) -> Result<Store, RepoError> {
     Store::restore(StoreSnapshot {
         id,
         version: version_from_db(col(row, "version")?)?,
+        stamps: stamps_from_row(row)?,
         name: col(row, "name")?,
     })
     .map_err(|e| corrupt(format!("store {id}: {e}")))
@@ -24,7 +25,10 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
         let row = conn
             .client()
             .query_typed_opt(
-                "SELECT id, version, name FROM stores WHERE id = $1",
+                &format!(
+                    "SELECT id, version, name, {} FROM stores WHERE id = $1",
+                    stamp_columns(""),
+                ),
                 &[(&id.as_uuid(), Type::UUID)],
             )
             .await
@@ -35,7 +39,13 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
     async fn list_all(&self) -> Result<Vec<Store>, RepoError> {
         let mut conn = self.conn().await;
         conn.client()
-            .query_typed("SELECT id, version, name FROM stores", &[])
+            .query_typed(
+                &format!(
+                    "SELECT id, version, name, {} FROM stores",
+                    stamp_columns("")
+                ),
+                &[],
+            )
             .await
             .map_err(repo_error)?
             .iter()
@@ -44,6 +54,7 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
     }
 
     async fn insert(&self, store: &mut Store) -> Result<(), RepoError> {
+        stamp_insert(store, self.now());
         let s = store.snapshot();
         in_transaction!(self, |tx| insert_store(tx, &s).await)?;
         store.set_version(Version::NEW.next());
@@ -51,6 +62,7 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
     }
 
     async fn update(&self, store: &mut Store) -> Result<(), RepoError> {
+        stamp_update(store, self.now());
         let s = store.snapshot();
         let version = in_transaction!(self, |tx| update_store(tx, &s).await)?;
         store.set_version(version);
@@ -69,7 +81,9 @@ pub(crate) async fn insert_store(
     )
     .await
     .map_err(repo_error)?;
-    Ok(())
+    let written = ();
+    write_stamps(tx, "stores", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }
 
 /// `StoreRepo::update` inside the caller's transaction; the new version.
@@ -90,5 +104,7 @@ pub(crate) async fn update_store(
         .await
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(tx, "stores", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }

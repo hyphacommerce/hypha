@@ -76,10 +76,13 @@ async fn a_load_never_mixes_two_versions_of_a_customer() {
     customer
         .add_address(aid(1), address(1), true, true)
         .unwrap();
-    PgStore::new(setup).insert(&mut customer).await.unwrap();
+    PgStore::new(setup, clock())
+        .insert(&mut customer)
+        .await
+        .unwrap();
 
-    let writer = PgStore::new(connect(&url).await);
-    let reader = PgStore::new(connect(&url).await);
+    let writer = PgStore::new(connect(&url).await, clock());
+    let reader = PgStore::new(connect(&url).await, clock());
 
     let write = tokio::spawn(async move {
         for n in 2..=ROUNDS {
@@ -113,4 +116,9 @@ async fn write_done(store: &PgStore<Client>) -> bool {
         store.get(id).await,
         Ok(Some(c)) if c.default_shipping() == Some(aid(ROUNDS))
     )
+}
+
+/// Writes are stamped with a fixed time in these tests.
+fn clock() -> std::sync::Arc<hypha_testkit::FixedClock> {
+    std::sync::Arc::new(hypha_testkit::FixedClock::default())
 }

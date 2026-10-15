@@ -3,7 +3,9 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use hypha_core::{Price, PriceListId, Recorded, RepoError, VariantId, Versioned};
+use hypha_core::{
+    Price, PriceListId, Recorded, RepoError, VariantId, Versioned, stamp_insert, stamp_update,
+};
 use hypha_markets::{PriceList, PriceListRepo, repo::keys};
 
 use crate::{
@@ -51,6 +53,7 @@ impl PriceListRepo for InMemoryPriceListRepo {
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        stamp_insert(price_list, self.outbox.now());
         let events = price_list.take_events();
         self.price_lists.insert(
             price_list.id(),
@@ -63,6 +66,7 @@ impl PriceListRepo for InMemoryPriceListRepo {
     }
 
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        stamp_update(price_list, self.outbox.now());
         let events = price_list.take_events();
         self.price_lists
             .update(price_list.id(), price_list, &no_unique_keys)?;

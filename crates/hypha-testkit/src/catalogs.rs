@@ -3,7 +3,9 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use hypha_core::{CatalogId, ProductId, Recorded, RepoError, Versioned};
+use hypha_core::{
+    CatalogId, ProductId, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
+};
 use hypha_markets::{Catalog, CatalogContext, CatalogRepo, repo::keys};
 
 use crate::{
@@ -69,6 +71,7 @@ impl CatalogRepo for InMemoryCatalogRepo {
     }
 
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
+        stamp_insert(catalog, self.outbox.now());
         let events = catalog.take_events();
         self.catalogs
             .insert(catalog.id(), catalog, keys::CATALOG_ID, &unique)?;
@@ -77,6 +80,7 @@ impl CatalogRepo for InMemoryCatalogRepo {
     }
 
     async fn update(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
+        stamp_update(catalog, self.outbox.now());
         let events = catalog.take_events();
         self.catalogs.update(catalog.id(), catalog, &unique)?;
         self.outbox.write(events, Some(catalog.version()));

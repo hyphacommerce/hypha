@@ -1,4 +1,4 @@
-use hypha_core::{CustomerId, Email, Recorded, RepoError, Versioned};
+use hypha_core::{CustomerId, Email, Recorded, RepoError, Versioned, stamp_insert, stamp_update};
 use hypha_customers::{Customer, CustomerRepo, repo::keys};
 
 use crate::{InMemoryOutbox, table::Table};
@@ -48,6 +48,7 @@ impl CustomerRepo for InMemoryCustomerRepo {
     }
 
     async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError> {
+        stamp_insert(customer, self.outbox.now());
         let events = customer.take_events();
         self.customers
             .insert(customer.id(), customer, keys::CUSTOMER_ID, &unique)?;
@@ -56,6 +57,7 @@ impl CustomerRepo for InMemoryCustomerRepo {
     }
 
     async fn update(&self, customer: &mut Customer) -> Result<(), RepoError> {
+        stamp_update(customer, self.outbox.now());
         let events = customer.take_events();
         self.customers.update(customer.id(), customer, &unique)?;
         self.outbox.write(events, Some(customer.version()));

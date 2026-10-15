@@ -1,12 +1,16 @@
 use hypha_core::{
     Address, AddressId, AddressParts, CustomerId, Email, Recorded, RepoError, Version, Versioned,
+    stamp_insert, stamp_update,
 };
 use hypha_customers::{Customer, CustomerRepo, CustomerSnapshot, SavedAddress};
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{address_columns, address_from_row, col, version_from_db, version_to_db},
+    columns::{
+        address_columns, address_from_row, col, stamp_columns, stamps_from_row, version_from_db,
+        version_to_db, write_stamps,
+    },
     error::{corrupt, repo_error},
     outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -28,6 +32,7 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
     }
 
     async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError> {
+        stamp_insert(customer, self.now());
         let s = customer.snapshot();
         let events = customer.take_events();
         let actor = self.actor();
@@ -41,6 +46,7 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
     }
 
     async fn update(&self, customer: &mut Customer) -> Result<(), RepoError> {
+        stamp_update(customer, self.now());
         let s = customer.snapshot();
         let events = customer.take_events();
         let actor = self.actor();
@@ -87,7 +93,9 @@ pub(crate) async fn update_customer(
     .await
     .map_err(repo_error)?;
     write_addresses(tx, s.id, &s.addresses).await?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(tx, "customers", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }
 
 /// `CustomerRepo::insert` inside the caller's transaction (also used by `PgBatch`).
@@ -111,7 +119,9 @@ pub(crate) async fn insert_customer(
     )
     .await
     .map_err(repo_error)?;
-    write_addresses(tx, s.id, &s.addresses).await
+    write_addresses(tx, s.id, &s.addresses).await?;
+    write_stamps(tx, "customers", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(())
 }
 
 /// All addresses in one statement; `WITH ORDINALITY` keeps their order.
@@ -172,8 +182,9 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
         .query_typed_opt(
             &format!(
                 "SELECT id, version, email, first_name, last_name, phone,
-                     default_shipping_address_id, default_billing_address_id
-                 FROM customers WHERE {filter}"
+                     default_shipping_address_id, default_billing_address_id, {}
+                 FROM customers WHERE {filter}",
+                stamp_columns(""),
             ),
             &[(value, value_type)],
         )
@@ -201,6 +212,7 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
     let snapshot = CustomerSnapshot {
         id: CustomerId::from_uuid(id),
         version: version_from_db(col(&row, "version")?)?,
+        stamps: stamps_from_row(&row)?,
         email: Email::new(&email).map_err(corrupt)?,
         first_name: col(&row, "first_name")?,
         last_name: col(&row, "last_name")?,

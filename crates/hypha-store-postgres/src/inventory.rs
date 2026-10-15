@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use hypha_core::{
     InventoryItemId, LocationId, MarketId, PendingEvent, Quantity, Recorded, RepoError, VariantId,
-    Version, Versioned,
+    Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_inventory::{
     InventoryItem, InventoryItemRepo, InventoryItemSnapshot, Level, Location, LocationRepo,
@@ -14,7 +14,8 @@ use uuid::Uuid;
 use crate::{
     columns::{
         address_assignments, address_columns, address_from_row, address_values, col,
-        id_and_address, version_from_db, version_to_db,
+        id_and_address, stamp_columns, stamps_from_row, version_from_db, version_to_db,
+        write_stamps,
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
@@ -50,6 +51,7 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
     }
 
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError> {
+        stamp_insert(location, self.now());
         let s = location.snapshot();
         in_transaction!(self, |tx| insert_location(tx, &s).await)?;
         location.set_version(Version::NEW.next());
@@ -57,6 +59,7 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
     }
 
     async fn update(&self, location: &mut Location) -> Result<(), RepoError> {
+        stamp_update(location, self.now());
         let s = location.snapshot();
         let version = in_transaction!(self, |tx| update_location(tx, &s).await)?;
         location.set_version(version);
@@ -81,7 +84,9 @@ pub(crate) async fn insert_location(
     .await
     .map_err(repo_error)?;
     write_location_markets(tx, s.id, &s.markets).await?;
-    write_location_address(tx, s).await
+    write_location_address(tx, s).await?;
+    write_stamps(tx, "locations", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(())
 }
 
 /// `LocationRepo::update` inside the caller's transaction; the new version. The version
@@ -112,7 +117,9 @@ pub(crate) async fn update_location(
     .map_err(repo_error)?;
     write_location_markets(tx, s.id, &s.markets).await?;
     write_location_address(tx, s).await?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(tx, "locations", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }
 
 /// All of a location's markets in one statement; `WITH ORDINALITY` keeps their order.
@@ -165,10 +172,11 @@ async fn load_locations(
     let rows = client
         .query_typed(
             &format!(
-                "SELECT id, version, name, priority, {}
+                "SELECT id, version, name, priority, {}, {}
                  FROM locations WHERE id = ANY($1)
                  ORDER BY priority, id",
                 address_columns("address_"),
+                stamp_columns(""),
             ),
             &[(&ids, Type::UUID_ARRAY)],
         )
@@ -204,6 +212,7 @@ async fn load_locations(
             let snapshot = LocationSnapshot {
                 id: LocationId::from_uuid(id),
                 version: version_from_db(col(r, "version")?)?,
+                stamps: stamps_from_row(r)?,
                 name: col(r, "name")?,
                 markets: markets.remove(&id).unwrap_or_default(),
                 priority: u32::try_from(priority)
@@ -246,6 +255,7 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
     }
 
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
+        stamp_insert(item, self.now());
         let s = item.snapshot();
         let events = item.take_events();
         let actor = self.actor();
@@ -267,6 +277,10 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
     async fn update_many(&self, items: &mut [InventoryItem]) -> Result<(), RepoError> {
         if items.is_empty() {
             return Ok(());
+        }
+        let now = self.now();
+        for item in items.iter_mut() {
+            stamp_update(item, now);
         }
         let snapshots: Vec<InventoryItemSnapshot> = items.iter().map(|i| i.snapshot()).collect();
         let events: Vec<(Uuid, Vec<PendingEvent>)> = items
@@ -308,7 +322,17 @@ pub(crate) async fn insert_item(
     )
     .await
     .map_err(repo_error)?;
-    write_children(tx, std::slice::from_ref(s)).await
+    write_children(tx, std::slice::from_ref(s)).await?;
+    write_stamps(
+        tx,
+        "inventory_items",
+        "id",
+        &s.id.as_uuid(),
+        Type::UUID,
+        s.stamps,
+    )
+    .await?;
+    Ok(())
 }
 
 /// `InventoryItemRepo::update_many` inside the caller's transaction (also used by
@@ -378,6 +402,34 @@ pub(crate) async fn update_items(
         .map_err(repo_error)?;
     }
     write_children(tx, &snapshots).await?;
+    // Their stamps, one statement for all.
+    let stamped: Vec<&InventoryItemSnapshot> =
+        snapshots.iter().filter(|s| s.stamps.is_some()).collect();
+    if !stamped.is_empty() {
+        let ids: Vec<Uuid> = stamped.iter().map(|s| s.id.as_uuid()).collect();
+        let created: Vec<i64> = stamped
+            .iter()
+            .filter_map(|s| s.stamps.map(|t| t.created_at.unix_micros()))
+            .collect();
+        let updated: Vec<i64> = stamped
+            .iter()
+            .filter_map(|s| s.stamps.map(|t| t.updated_at.unix_micros()))
+            .collect();
+        tx.query_typed(
+            "UPDATE inventory_items i
+             SET created_at = 'epoch'::timestamptz + t.c * interval '1 microsecond',
+                 updated_at = 'epoch'::timestamptz + t.u * interval '1 microsecond'
+             FROM unnest($1::uuid[], $2::bigint[], $3::bigint[]) AS t (id, c, u)
+             WHERE i.id = t.id",
+            &[
+                (&ids, Type::UUID_ARRAY),
+                (&created, Type::INT8_ARRAY),
+                (&updated, Type::INT8_ARRAY),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    }
     Ok(new_versions)
 }
 
@@ -452,8 +504,9 @@ async fn load_items(
     let rows = client
         .query_typed(
             &format!(
-                "SELECT id, version, variant_id, tracked, continue_selling FROM inventory_items
-                 WHERE {column} = ANY($1) ORDER BY id"
+                "SELECT id, version, variant_id, tracked, continue_selling, {}
+                 FROM inventory_items WHERE {column} = ANY($1) ORDER BY id",
+                stamp_columns(""),
             ),
             &[(&values, Type::UUID_ARRAY)],
         )
@@ -514,6 +567,7 @@ async fn load_items(
             let snapshot = InventoryItemSnapshot {
                 id: InventoryItemId::from_uuid(id),
                 version: version_from_db(col(r, "version")?)?,
+                stamps: stamps_from_row(r)?,
                 variant: VariantId::from_uuid(col(r, "variant_id")?),
                 tracked: col(r, "tracked")?,
                 continue_selling: col(r, "continue_selling")?,

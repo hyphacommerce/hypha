@@ -1,4 +1,7 @@
-use hypha_core::{Page, PageRequest, ProductId, Recorded, RepoError, VariantId, Versioned};
+use hypha_core::{
+    Page, PageRequest, ProductId, Recorded, RepoError, VariantId, Versioned, stamp_insert,
+    stamp_update,
+};
 use hypha_products::{
     Handle, Product, ProductStatus, ProductSummary,
     repo::{ProductRepo, keys},
@@ -94,6 +97,7 @@ impl ProductRepo for InMemoryProductRepo {
     }
 
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
+        stamp_insert(product, self.outbox.now());
         let events = product.take_events();
         self.products
             .insert(product.id(), product, keys::PRODUCT_ID, &unique)?;
@@ -102,6 +106,7 @@ impl ProductRepo for InMemoryProductRepo {
     }
 
     async fn update(&self, product: &mut Product) -> Result<(), RepoError> {
+        stamp_update(product, self.outbox.now());
         let events = product.take_events();
         self.products.update(product.id(), product, &unique)?;
         self.outbox.write(events, Some(product.version()));

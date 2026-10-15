@@ -8,7 +8,7 @@ use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_core::{
     CatalogId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId,
     ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId,
-    Timestamp, VariantId, Version, Versioned,
+    Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
@@ -46,9 +46,10 @@ use crate::{
 
 /// Writes staged for `PgStore::commit`, in the order they were staged: snapshots taken
 /// when each aggregate was staged, carrying the version it was loaded at.
-#[derive(Default)]
 pub struct PgBatch {
     staged: Vec<Staged>,
+    /// When the batch was made: every aggregate it stages is stamped with this.
+    now: Timestamp,
 }
 
 /// One staged write. A new aggregate a batch can write is one variant here, one arm in
@@ -258,11 +259,13 @@ impl StagePasswordResets for PgBatch {
 
 impl StageCarts for PgBatch {
     fn insert_cart(&mut self, cart: &mut Cart) {
+        stamp_insert(cart, self.now);
         self.stage(Staged::NewCart(cart.snapshot()));
         cart.set_version(Version::NEW.next());
     }
 
     fn update_cart(&mut self, cart: &mut Cart) {
+        stamp_update(cart, self.now);
         self.stage(Staged::Cart(cart.snapshot()));
         cart.set_version(cart.version().next());
     }
@@ -270,6 +273,7 @@ impl StageCarts for PgBatch {
 
 impl StageProducts for PgBatch {
     fn update_product(&mut self, product: &mut Product) {
+        stamp_update(product, self.now);
         self.stage(Staged::Product(product.snapshot()));
         let version = product.version().next();
         self.stage_events_of(product, version);
@@ -289,6 +293,7 @@ impl StageAssetUsages for PgBatch {
 
 impl StageInventoryItems for PgBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
+        stamp_update(item, self.now);
         self.stage(Staged::InventoryItem(item.snapshot()));
         let version = item.version().next();
         self.stage_events_of(item, version);
@@ -298,6 +303,7 @@ impl StageInventoryItems for PgBatch {
 
 impl StageOrders for PgBatch {
     fn insert_order(&mut self, order: &mut Order) {
+        stamp_insert(order, self.now);
         self.stage(Staged::NewOrder(order.snapshot()));
         self.stage_events_of(order, Version::NEW.next());
         order.set_version(Version::NEW.next());
@@ -306,6 +312,7 @@ impl StageOrders for PgBatch {
 
 impl StageCustomers for PgBatch {
     fn insert_customer(&mut self, customer: &mut Customer) {
+        stamp_insert(customer, self.now);
         self.stage(Staged::NewCustomer(customer.snapshot()));
         self.stage_events_of(customer, Version::NEW.next());
         customer.set_version(Version::NEW.next());
@@ -322,7 +329,10 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
     type Batch = PgBatch;
 
     fn batch(&self) -> PgBatch {
-        PgBatch::default()
+        PgBatch {
+            staged: Vec::new(),
+            now: self.now(),
+        }
     }
 
     /// One transaction, the writes in `Staged::cmp` order; idempotency records and

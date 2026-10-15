@@ -1,6 +1,6 @@
 use hypha_core::{
-    CountryCode, PendingEvent, Recorded, Recorder, Subject, TaxClassId, TaxRate, TaxRegionId,
-    Version, Versioned,
+    CountryCode, PendingEvent, Recorded, Recorder, Stamped, Stamps, Subject, TaxClassId, TaxRate,
+    TaxRegionId, Version, Versioned,
 };
 
 use crate::{
@@ -18,6 +18,8 @@ pub struct ClassRate {
 pub struct TaxRegion {
     id: TaxRegionId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     country: CountryCode,
     default_rate: TaxRate,
     class_rates: Vec<ClassRate>,
@@ -40,11 +42,22 @@ impl Versioned for TaxRegion {
     }
 }
 
+impl Stamped for TaxRegion {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl TaxRegion {
     pub fn new(id: TaxRegionId, country: CountryCode, default_rate: TaxRate) -> Self {
         let mut region = Self {
             id,
             version: Version::NEW,
+            stamps: None,
             country,
             default_rate,
             class_rates: Vec::new(),
@@ -116,6 +129,7 @@ impl TaxRegion {
 pub struct TaxRegionSnapshot {
     pub id: TaxRegionId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub country: CountryCode,
     pub default_rate: TaxRate,
     pub class_rates: Vec<ClassRate>,
@@ -126,6 +140,7 @@ impl TaxRegion {
         TaxRegionSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             country: self.country,
             default_rate: self.default_rate,
             class_rates: self.class_rates.clone(),
@@ -142,6 +157,7 @@ impl TaxRegion {
             region.class_rates.push(rate)
         }
         region.version = s.version;
+        region.stamps = s.stamps;
         // Built through `new`, which records a change that didn't happen.
         region.events = Recorder::default();
         Ok(region)

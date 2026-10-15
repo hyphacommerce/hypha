@@ -49,6 +49,6 @@ pub use retry::{Attempts, MAX_ATTEMPTS, retry_on_conflict};
 pub use scope::Scope;
 pub use secret::{SealError, Sealed, SecretBox};
 pub use text::{MAX_TEXT_LEN, TextError, optional_text, required_text};
-pub use time::Timestamp;
+pub use time::{Stamped, Stamps, Timestamp, stamp_insert, stamp_update};
 pub use version::{Version, Versioned};
 pub use weight::{TotalWeight, Weight};

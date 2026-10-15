@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    CountryCode, Currency, MarketId, PendingEvent, Recorded, Recorder, Subject, Version, Versioned,
-    required_text,
+    CountryCode, Currency, MarketId, PendingEvent, Recorded, Recorder, Stamped, Stamps, Subject,
+    Version, Versioned, required_text,
 };
 
 use crate::{
@@ -14,6 +14,8 @@ use crate::{
 pub struct Market {
     id: MarketId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     name: String,
     countries: Vec<CountryCode>,
     currency: Currency,
@@ -34,6 +36,16 @@ impl Versioned for Market {
 
     fn set_version(&mut self, version: Version) {
         self.version = version;
+    }
+}
+
+impl Stamped for Market {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
     }
 }
 
@@ -58,6 +70,7 @@ impl Market {
         let mut market = Self {
             id,
             version: Version::NEW,
+            stamps: None,
             name: required_text("name", &name)?,
             countries,
             currency,
@@ -135,6 +148,7 @@ impl Market {
 pub struct MarketSnapshot {
     pub id: MarketId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub name: String,
     pub countries: Vec<CountryCode>,
     pub currency: Currency,
@@ -146,6 +160,7 @@ impl Market {
         MarketSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             name: self.name.clone(),
             countries: self.countries.clone(),
             currency: self.currency,
@@ -158,6 +173,7 @@ impl Market {
         let mut market = Market::new(s.id, s.name, s.countries, s.currency)?;
         market.prices_include_tax = s.prices_include_tax;
         market.version = s.version;
+        market.stamps = s.stamps;
         // Built through `new`, which records a change that didn't happen.
         market.events = Recorder::default();
         Ok(market)

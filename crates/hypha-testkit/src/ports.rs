@@ -54,7 +54,7 @@ impl Default for InMemoryPorts {
     fn default() -> Self {
         let outbox = InMemoryOutbox::default();
         Self {
-            carts: InMemoryCartRepo::default(),
+            carts: InMemoryCartRepo::sharing(&outbox),
             products: InMemoryProductRepo::sharing(&outbox),
             markets: InMemoryMarketRepo::sharing(&outbox),
             catalogs: InMemoryCatalogRepo::sharing(&outbox),
@@ -62,13 +62,13 @@ impl Default for InMemoryPorts {
             tax_classes: InMemoryTaxClassRepo::sharing(&outbox),
             tax_regions: InMemoryTaxRegionRepo::sharing(&outbox),
             inventory_items: InMemoryInventoryItemRepo::sharing(&outbox),
-            locations: InMemoryLocationRepo::default(),
+            locations: InMemoryLocationRepo::sharing(&outbox),
             customers: InMemoryCustomerRepo::sharing(&outbox),
             idempotency: InMemoryIdempotencyRepo::default(),
             orders: InMemoryOrderRepo::sharing(&outbox),
             assets: InMemoryAssetRepo::default(),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
-            app_providers: InMemoryAppProviderRepo::default(),
+            app_providers: InMemoryAppProviderRepo::sharing(&outbox),
             identities: InMemoryIdentityRepo::default(),
             sessions: InMemorySessionRepo::default(),
             api_keys: InMemoryApiKeyRepo::default(),

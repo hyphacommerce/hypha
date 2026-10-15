@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use hypha_core::{
     AssetId, Money, OptionId, OptionValueId, Page, PageRequest, Price, ProductId, Recorded,
-    RepoError, VariantId, Version, Versioned, Weight,
+    RepoError, VariantId, Version, Versioned, Weight, stamp_insert, stamp_update,
 };
 use hypha_products::{
     Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductRepo, ProductSnapshot,
@@ -12,7 +12,10 @@ use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{col, currency_from_db, version_from_db, version_to_db},
+    columns::{
+        col, currency_from_db, stamp_columns, stamps_from_row, version_from_db, version_to_db,
+        write_stamps,
+    },
     error::{corrupt, repo_error},
     outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -50,7 +53,8 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         let rows = conn
             .client()
             .query_typed(
-                "SELECT p.id, p.handle, p.title, p.status, c.variants,
+                &format!(
+                    "SELECT p.id, p.handle, p.title, p.status, c.variants, {},
                         r.currencies, r.mins, r.maxes,
                         (SELECT asset_id FROM product_media
                          WHERE product_id = p.id AND position = 0) AS featured
@@ -70,6 +74,8 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                  ) r
                  WHERE ($1::text IS NULL OR p.status = $1) AND ($2::uuid IS NULL OR p.id < $2)
                  ORDER BY p.id DESC LIMIT $3",
+                    stamp_columns("p."),
+                ),
                 &[
                     (&status, Type::TEXT),
                     (&after, Type::UUID),
@@ -137,6 +143,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     }
 
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
+        stamp_insert(product, self.now());
         let s = product.snapshot();
         let events = product.take_events();
         let actor = self.actor();
@@ -150,6 +157,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     }
 
     async fn update(&self, product: &mut Product) -> Result<(), RepoError> {
+        stamp_update(product, self.now());
         let s = product.snapshot();
         let events = product.take_events();
         let actor = self.actor();
@@ -179,7 +187,9 @@ pub(crate) async fn insert_product(
     )
     .await
     .map_err(repo_error)?;
-    write_children(tx, s).await
+    write_children(tx, s).await?;
+    write_stamps(tx, "products", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(())
 }
 
 /// `ProductRepo::update` inside a transaction (also a batch's): returns the new version.
@@ -219,7 +229,9 @@ pub(crate) async fn update_product(
             .map_err(repo_error)?;
     }
     write_children(tx, s).await?;
-    Ok(new_version)
+    let written = new_version;
+    write_stamps(tx, "products", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }
 
 /// Writes options, option values, variants and media in 4 statements however many there are:
@@ -348,7 +360,10 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
 
     let products = client
         .query_typed(
-            "SELECT id, version, handle, title, status FROM products WHERE id = ANY($1)",
+            &format!(
+                "SELECT id, version, handle, title, status, {} FROM products WHERE id = ANY($1)",
+                stamp_columns(""),
+            ),
             &param,
         )
         .await
@@ -456,6 +471,7 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
             let snapshot = ProductSnapshot {
                 id: ProductId::from_uuid(id),
                 version: version_from_db(col(row, "version")?)?,
+                stamps: stamps_from_row(row)?,
                 handle: col(row, "handle")?,
                 title: col(row, "title")?,
                 status: status
@@ -509,5 +525,6 @@ fn summary_from_db(row: &Row) -> Result<ProductSummary, RepoError> {
         variant_count: usize::try_from(variants).map_err(corrupt)?,
         price_ranges,
         featured_media: col::<Option<Uuid>>(row, "featured")?.map(AssetId::from_uuid),
+        stamps: stamps_from_row(row)?,
     })
 }

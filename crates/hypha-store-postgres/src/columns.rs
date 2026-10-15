@@ -2,7 +2,8 @@
 
 use hypha_auth::TokenHash;
 use hypha_core::{
-    Actor, AddressParts, AgentId, ApiKeyId, Currency, RepoError, Scope, TaxRate, UserId, Version,
+    Actor, AddressParts, AgentId, ApiKeyId, Currency, RepoError, Scope, Stamps, TaxRate, Timestamp,
+    UserId, Version,
 };
 use tokio_postgres::{
     Row,
@@ -208,6 +209,56 @@ pub(crate) fn address_from_row(row: &Row, prefix: &str) -> Result<Option<Address
         country: col(row, &country)?,
         phone: col(row, &phone)?,
     }))
+}
+
+/// Writes an aggregate's stamps (design note 0016, Q3) on the row its write just
+/// inserted or updated, in the same transaction: `UPDATE table SET created_at, updated_at
+/// WHERE key = id`. Adapters stamp every aggregate before taking its snapshot, so `None`
+/// means a caller skipped that, and writes nothing.
+pub(crate) async fn write_stamps(
+    tx: &impl tokio_postgres::GenericClient,
+    table: &str,
+    key: &str,
+    id: &(dyn ToSql + Sync),
+    id_type: Type,
+    stamps: Option<Stamps>,
+) -> Result<(), RepoError> {
+    let Some(stamps) = stamps else {
+        return Ok(());
+    };
+    tx.query_typed(
+        &format!(
+            "UPDATE {table} SET created_at = {}, updated_at = {} WHERE {key} = $1",
+            ts(2),
+            ts(3)
+        ),
+        &[
+            (id, id_type),
+            (&stamps.created_at.unix_micros(), Type::INT8),
+            (&stamps.updated_at.unix_micros(), Type::INT8),
+        ],
+    )
+    .await
+    .map_err(crate::error::repo_error)?;
+    Ok(())
+}
+
+/// The `created_at` and `updated_at` a SELECT list read with `micros`, as `Stamps`.
+pub(crate) fn stamps_from_row(row: &Row) -> Result<Option<Stamps>, RepoError> {
+    Ok(Some(Stamps {
+        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
+        updated_at: Timestamp::from_unix_micros(col(row, "updated_at")?),
+    }))
+}
+
+/// `created_at, updated_at` as microseconds, for a SELECT list (`stamps_from_row`
+/// reads them back). `prefix` qualifies them (`"o."`), or is empty.
+pub(crate) fn stamp_columns(prefix: &str) -> String {
+    format!(
+        "{}, {}",
+        micros(&format!("{prefix}created_at")),
+        micros(&format!("{prefix}updated_at"))
+    )
 }
 
 #[cfg(test)]

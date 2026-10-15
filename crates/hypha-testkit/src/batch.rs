@@ -6,7 +6,7 @@ use hypha_cart::{Cart, StageCarts, repo::keys as cart_keys};
 use hypha_core::{
     CatalogId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId,
     ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId,
-    Timestamp, VariantId, Version, Versioned,
+    Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
@@ -33,9 +33,10 @@ use crate::{
 /// Writes staged for `InMemoryPorts::commit`, in the order they were staged: copies
 /// of the aggregates as they were staged, still carrying the version they were loaded
 /// at. Mirrors `PgBatch`'s list of staged writes (design note 0016, EV2).
-#[derive(Default)]
 pub struct InMemoryBatch {
     staged: Vec<Staged>,
+    /// When the batch was made: every aggregate it stages is stamped with this.
+    now: Timestamp,
 }
 
 enum Staged {
@@ -166,11 +167,13 @@ impl StageInvites for InMemoryBatch {
 
 impl StageCarts for InMemoryBatch {
     fn insert_cart(&mut self, cart: &mut Cart) {
+        stamp_insert(cart, self.now);
         self.stage(Staged::NewCart(cart.clone()));
         cart.set_version(Version::NEW.next());
     }
 
     fn update_cart(&mut self, cart: &mut Cart) {
+        stamp_update(cart, self.now);
         self.stage(Staged::Cart(cart.clone()));
         cart.set_version(cart.version().next());
     }
@@ -178,6 +181,7 @@ impl StageCarts for InMemoryBatch {
 
 impl StageProducts for InMemoryBatch {
     fn update_product(&mut self, product: &mut Product) {
+        stamp_update(product, self.now);
         // Events first: the copy staged (and stored) must not carry them, or a later
         // load would hand them out again.
         let version = product.version().next();
@@ -199,6 +203,7 @@ impl StageAssetUsages for InMemoryBatch {
 
 impl StageInventoryItems for InMemoryBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
+        stamp_update(item, self.now);
         let version = item.version().next();
         self.stage_events_of(item, version);
         self.stage(Staged::InventoryItem(item.clone()));
@@ -208,6 +213,7 @@ impl StageInventoryItems for InMemoryBatch {
 
 impl StageOrders for InMemoryBatch {
     fn insert_order(&mut self, order: &mut Order) {
+        stamp_insert(order, self.now);
         // The copy staged keeps no events: they're staged on their own, next.
         let events = order.take_events();
         self.stage(Staged::NewOrder(order.clone()));
@@ -218,6 +224,7 @@ impl StageOrders for InMemoryBatch {
 
 impl StageCustomers for InMemoryBatch {
     fn insert_customer(&mut self, customer: &mut Customer) {
+        stamp_insert(customer, self.now);
         let events = customer.take_events();
         self.stage(Staged::NewCustomer(customer.clone()));
         self.stage(Staged::Events(events, Some(Version::NEW.next())));
@@ -235,7 +242,10 @@ impl HasBatch for InMemoryPorts {
     type Batch = InMemoryBatch;
 
     fn batch(&self) -> InMemoryBatch {
-        InMemoryBatch::default()
+        InMemoryBatch {
+            staged: Vec::new(),
+            now: self.outbox.now(),
+        }
     }
 
     /// Locks every table a batch can write, always in this order, so two commits can't

@@ -1,5 +1,7 @@
 use futures_util::lock::{Mutex, MutexGuard};
-use hypha_core::{Actor, RepoError};
+use std::sync::Arc;
+
+use hypha_core::{Actor, Clock, RepoError, Timestamp};
 use tokio_postgres::{Client, IsolationLevel, Transaction};
 
 use crate::error::repo_error;
@@ -33,14 +35,23 @@ pub struct PgStore<C> {
     /// Q1): `Actor::System` until the host sets the caller. A plain mutex: it's held
     /// only to copy an `Actor`, never across an `.await`.
     actor: std::sync::Mutex<Actor>,
+    /// What aggregates are stamped with when written (design note 0016, Q3): the host's
+    /// clock, so a batch's aggregates carry their stamps before it commits.
+    clock: Arc<dyn Clock + Send + Sync>,
 }
 
 impl<C: PgConnection> PgStore<C> {
-    pub fn new(conn: C) -> Self {
+    pub fn new(conn: C, clock: Arc<dyn Clock + Send + Sync>) -> Self {
         Self {
             conn: Mutex::new(conn),
             actor: std::sync::Mutex::new(Actor::System),
+            clock,
         }
+    }
+
+    /// The time writes are stamped with.
+    pub(crate) fn now(&self) -> Timestamp {
+        self.clock.now()
     }
 
     pub(crate) async fn conn(&self) -> MutexGuard<'_, C> {

@@ -1,5 +1,8 @@
 //! Locations, inventory items and their stock (all live in `hypha-inventory`).
 
+use hypha_core::Stamped;
+
+use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{InventoryItemId, LocationId, MarketId, VariantId};
 use hypha_inventory::{
@@ -206,6 +209,10 @@ pub(super) struct InventoryResponse {
     tracked: bool,
     continue_selling: bool,
     levels: Vec<LevelResponse>,
+    /// When the item was created, RFC 3339 in UTC; `null` for a variant without one.
+    created_at: Option<String>,
+    /// When the item last changed; `null` for a variant without one.
+    updated_at: Option<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -218,8 +225,9 @@ pub(super) struct LevelResponse {
     available: i64,
 }
 
-impl From<&InventoryItem> for InventoryResponse {
-    fn from(i: &InventoryItem) -> Self {
+impl InventoryResponse {
+    fn new(i: &InventoryItem) -> Result<Self, ApiError> {
+        let (created_at, updated_at) = stamp_times(i.stamps())?;
         // Every location with a count or a reservation, counts first.
         let mut locations: Vec<LocationId> = i.levels().iter().map(|l| l.location).collect();
         for r in i.reservations() {
@@ -227,7 +235,9 @@ impl From<&InventoryItem> for InventoryResponse {
                 locations.push(r.location);
             }
         }
-        Self {
+        Ok(Self {
+            created_at: Some(created_at),
+            updated_at: Some(updated_at),
             id: Some(i.id()),
             variant: i.variant(),
             tracked: i.tracked(),
@@ -241,7 +251,7 @@ impl From<&InventoryItem> for InventoryResponse {
                     available: i.available(location),
                 })
                 .collect(),
-        }
+        })
     }
 }
 
@@ -253,6 +263,8 @@ impl InventoryResponse {
             tracked: false,
             continue_selling: false,
             levels: Vec::new(),
+            created_at: None,
+            updated_at: None,
         }
     }
 }
@@ -278,7 +290,7 @@ pub(super) async fn create_item<S: Storage>(
         continue_selling: req.continue_selling,
     };
     let item = create_inventory_item(&ctx, ports.inventory_items(), &state.ids, input).await?;
-    Ok((StatusCode::CREATED, Json(InventoryResponse::from(&item))))
+    Ok((StatusCode::CREATED, Json(InventoryResponse::new(&item)?)))
 }
 
 /// An inventory item with its levels per location.
@@ -296,7 +308,7 @@ pub(super) async fn fetch_item<S: Storage>(
 ) -> Result<Json<InventoryResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let item = get_inventory_item(&ctx, ports.inventory_items(), id).await?;
-    Ok(Json(InventoryResponse::from(&item)))
+    Ok(Json(InventoryResponse::new(&item)?))
 }
 
 /// Changes how an inventory item is tracked.
@@ -321,7 +333,7 @@ pub(super) async fn update_item<S: Storage>(
         continue_selling: req.continue_selling,
     };
     let item = update_inventory_item(&ctx, ports.inventory_items(), id, input).await?;
-    Ok(Json(InventoryResponse::from(&item)))
+    Ok(Json(InventoryResponse::new(&item)?))
 }
 
 /// Sets the stock on hand at a location.
@@ -350,7 +362,7 @@ pub(super) async fn set_level<S: Storage>(
     let item = set_on_hand(&ctx, ports.inventory_items(), ports.locations(), input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("location_not_found"))?;
-    Ok(Json(InventoryResponse::from(&item)))
+    Ok(Json(InventoryResponse::new(&item)?))
 }
 
 /// Adjusts the stock on hand at a location by a delta.
@@ -378,7 +390,7 @@ pub(super) async fn adjust_level<S: Storage>(
     let item = adjust_on_hand(&ctx, ports.inventory_items(), ports.locations(), input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("location_not_found"))?;
-    Ok(Json(InventoryResponse::from(&item)))
+    Ok(Json(InventoryResponse::new(&item)?))
 }
 
 /// A variant's stock, whether or not it has an item (design note 0004, I3).
@@ -396,7 +408,7 @@ pub(super) async fn fetch_variant_inventory<S: Storage>(
 ) -> Result<Json<InventoryResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let response = match get_variant_inventory(&ctx, ports.inventory_items(), variant).await? {
-        Some(item) => InventoryResponse::from(&item),
+        Some(item) => InventoryResponse::new(&item)?,
         None => InventoryResponse::untracked(variant),
     };
     Ok(Json(response))

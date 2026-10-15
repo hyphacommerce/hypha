@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    InventoryItemId, LocationId, PendingEvent, Quantity, Recorded, Subject, VariantId, Version,
-    Versioned,
+    InventoryItemId, LocationId, PendingEvent, Quantity, Recorded, Stamped, Stamps, Subject,
+    VariantId, Version, Versioned,
 };
 
 use crate::{
@@ -39,6 +39,8 @@ pub struct Reservation {
 pub struct InventoryItem {
     id: InventoryItemId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     variant: VariantId,
     tracked: bool,
     continue_selling: bool,
@@ -104,6 +106,16 @@ impl Versioned for InventoryItem {
     }
 }
 
+impl Stamped for InventoryItem {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl InventoryItem {
     pub fn new(
         id: InventoryItemId,
@@ -114,6 +126,7 @@ impl InventoryItem {
         Self {
             id,
             version: Version::NEW,
+            stamps: None,
             variant,
             tracked,
             continue_selling,
@@ -371,6 +384,7 @@ fn check_range(quantity: i128) -> Result<i64, InventoryError> {
 pub struct InventoryItemSnapshot {
     pub id: InventoryItemId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub variant: VariantId,
     pub tracked: bool,
     pub continue_selling: bool,
@@ -383,6 +397,7 @@ impl InventoryItem {
         InventoryItemSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             variant: self.variant,
             tracked: self.tracked,
             continue_selling: self.continue_selling,
@@ -413,6 +428,7 @@ impl InventoryItem {
         Ok(InventoryItem {
             id: s.id,
             version: s.version,
+            stamps: s.stamps,
             variant: s.variant,
             tracked: s.tracked,
             continue_selling: s.continue_selling,

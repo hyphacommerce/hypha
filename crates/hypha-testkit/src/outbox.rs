@@ -1,9 +1,11 @@
 use std::sync::{Arc, Mutex};
 
 use hypha_core::{
-    ActingAs, Actor, OutboxRepo, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
+    ActingAs, Actor, Clock, OutboxRepo, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
 };
 use uuid::Uuid;
+
+use crate::FixedClock;
 
 /// The outbox in memory (design note 0016). A handle: clones share the same events, so
 /// `InMemoryPorts` gives one to every repo that writes events and to its batches, and
@@ -11,9 +13,14 @@ use uuid::Uuid;
 ///
 /// Event IDs are `Uuid::from_u128(seq)` and `occurred_at` is `seq` microseconds after
 /// the epoch: deterministic, and in order, like the database's.
+///
+/// It also carries the clock the repos stamp what they write with (design note 0016,
+/// Q3), `FixedClock::DEFAULT` unless a test moves it (`clock()`): the in-memory store's
+/// shared state, like `PgStore`'s actor and clock.
 #[derive(Clone, Default)]
 pub struct InMemoryOutbox {
     inner: Arc<Mutex<State>>,
+    clock: Arc<FixedClock>,
 }
 
 struct State {
@@ -51,6 +58,16 @@ impl InMemoryOutbox {
                 data: event.data,
             });
         }
+    }
+
+    /// The time writes are stamped with now.
+    pub fn now(&self) -> Timestamp {
+        self.clock.now()
+    }
+
+    /// The clock writes are stamped with, to move in tests.
+    pub fn clock(&self) -> &FixedClock {
+        &self.clock
     }
 
     /// Every event written so far, oldest first.

@@ -3,8 +3,8 @@ use std::{collections::HashSet, fmt, str::FromStr};
 use hypha_core::{
     Address, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId,
     OrderLineId, PendingEvent, Price, ProductId, Quantity, Recorded, Recorder, ShippingGroupId,
-    ShippingOptionId, Subject, TaxClassId, TaxRate, TaxRegionId, Timestamp, VariantId, Version,
-    Versioned, required_text,
+    ShippingOptionId, Stamped, Stamps, Subject, TaxClassId, TaxRate, TaxRegionId, Timestamp,
+    VariantId, Version, Versioned, required_text,
 };
 
 use crate::{
@@ -210,6 +210,8 @@ pub struct NewOrder {
 pub struct Order {
     id: OrderId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     number: OrderNumber,
     placed_at: Timestamp,
     cart: CartId,
@@ -247,12 +249,23 @@ impl Versioned for Order {
     }
 }
 
+impl Stamped for Order {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl Order {
     /// A new order: payment pending, nothing fulfilled.
     pub fn place(new: NewOrder) -> Result<Order, OrderError> {
         let mut order = Order::restore(OrderSnapshot {
             id: new.id,
             version: Version::NEW,
+            stamps: None,
             number: new.number,
             placed_at: new.placed_at,
             cart: new.cart,
@@ -384,6 +397,7 @@ impl Order {
 pub struct OrderSnapshot {
     pub id: OrderId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub number: OrderNumber,
     pub placed_at: Timestamp,
     pub cart: CartId,
@@ -410,6 +424,7 @@ impl Order {
         OrderSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             number: self.number,
             placed_at: self.placed_at,
             cart: self.cart,
@@ -507,6 +522,7 @@ impl Order {
         Ok(Order {
             id: s.id,
             version: s.version,
+            stamps: s.stamps,
             number: s.number,
             placed_at: s.placed_at,
             cart: s.cart,

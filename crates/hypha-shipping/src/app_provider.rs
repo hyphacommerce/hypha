@@ -2,7 +2,7 @@
 //! Hypha needs to call one, and the secret it signs those calls with. The calling itself
 //! is the host's (`RateProvider`); this crate keeps the record.
 
-use hypha_core::{Sealed, Version, Versioned, required_text};
+use hypha_core::{Sealed, Stamped, Stamps, Version, Versioned, required_text};
 
 use crate::{ProviderKey, ProviderKind, ServiceInfo, ShippingError};
 
@@ -50,6 +50,8 @@ impl CallbackUrl {
 pub struct AppProvider {
     key: ProviderKey,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     name: String,
     callback_url: CallbackUrl,
     timeout_ms: u32,
@@ -67,6 +69,16 @@ impl Versioned for AppProvider {
 
     fn set_version(&mut self, version: Version) {
         self.version = version;
+    }
+}
+
+impl Stamped for AppProvider {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
     }
 }
 
@@ -92,6 +104,7 @@ impl AppProvider {
         let mut provider = Self {
             key: new.key,
             version: Version::NEW,
+            stamps: None,
             name: required_text("name", &new.name)?,
             callback_url: CallbackUrl::new(&new.callback_url)?,
             timeout_ms: Self::DEFAULT_TIMEOUT_MS,
@@ -178,6 +191,7 @@ impl AppProvider {
 pub struct AppProviderSnapshot {
     pub key: String,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub name: String,
     pub callback_url: String,
     pub timeout_ms: u32,
@@ -191,6 +205,7 @@ impl AppProvider {
         AppProviderSnapshot {
             key: self.key.as_str().to_string(),
             version: self.version,
+            stamps: self.stamps,
             name: self.name.clone(),
             callback_url: self.callback_url.as_str().to_string(),
             timeout_ms: self.timeout_ms,
@@ -211,6 +226,7 @@ impl AppProvider {
         })?;
         provider.enabled = s.enabled;
         provider.version = s.version;
+        provider.stamps = s.stamps;
         Ok(provider)
     }
 }

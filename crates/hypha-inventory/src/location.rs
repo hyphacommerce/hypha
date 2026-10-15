@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-use hypha_core::{Address, AddressParts, LocationId, MarketId, Version, Versioned, required_text};
+use hypha_core::{
+    Address, AddressParts, LocationId, MarketId, Stamped, Stamps, Version, Versioned, required_text,
+};
 
 use crate::InventoryError;
 
@@ -14,6 +16,8 @@ use crate::InventoryError;
 pub struct Location {
     id: LocationId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     name: String,
     markets: Vec<MarketId>,
     priority: u32,
@@ -31,6 +35,16 @@ impl Versioned for Location {
     }
 }
 
+impl Stamped for Location {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl Location {
     pub fn new(
         id: LocationId,
@@ -41,6 +55,7 @@ impl Location {
         let mut location = Self {
             id,
             version: Version::NEW,
+            stamps: None,
             name: String::new(),
             markets: Vec::new(),
             priority,
@@ -104,6 +119,7 @@ impl Location {
 pub struct LocationSnapshot {
     pub id: LocationId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub name: String,
     pub markets: Vec<MarketId>,
     pub priority: u32,
@@ -116,6 +132,7 @@ impl Location {
         LocationSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             name: self.name.clone(),
             markets: self.markets.clone(),
             priority: self.priority,
@@ -128,6 +145,7 @@ impl Location {
         let mut location = Location::new(s.id, s.name, s.markets, s.priority)?;
         location.address = s.address.map(Address::new).transpose()?;
         location.version = s.version;
+        location.stamps = s.stamps;
         Ok(location)
     }
 }

@@ -582,6 +582,10 @@
           "country": {
             "$ref": "#/components/schemas/CountryCode"
           },
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
           "currency": {
             "$ref": "#/components/schemas/Currency"
           },
@@ -653,6 +657,10 @@
           },
           "total": {
             "$ref": "#/components/schemas/Money"
+          },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
           }
         },
         "required": [
@@ -673,7 +681,9 @@
           "tax_total",
           "total",
           "lines",
-          "shipping_lines"
+          "shipping_lines",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },

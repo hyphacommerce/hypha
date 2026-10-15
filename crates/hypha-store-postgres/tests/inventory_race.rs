@@ -44,7 +44,7 @@ async fn buyers_racing_for_the_last_units_never_oversell() {
         .await
         .unwrap();
     migrate(&mut setup, &[CORE]).await.unwrap();
-    let setup = PgStore::new(setup);
+    let setup = PgStore::new(setup, clock());
 
     let market = MarketId::from_uuid(Uuid::from_u128(1));
     let location = LocationId::from_uuid(Uuid::from_u128(2));
@@ -59,7 +59,7 @@ async fn buyers_racing_for_the_last_units_never_oversell() {
     // 8 buyers, each on its own connection, each wanting 1 of the 3 units.
     let mut buyers = Vec::new();
     for _ in 0..8 {
-        buyers.push(PgStore::new(connect(&url).await));
+        buyers.push(PgStore::new(connect(&url).await, clock()));
     }
     let results = join_all(buyers.iter().enumerate().map(|(n, store)| async move {
         let input = ReserveStock {
@@ -99,4 +99,9 @@ async fn buyers_racing_for_the_last_units_never_oversell() {
     assert!(won <= 3, "oversold: {won} buyers got 3 units");
     assert!(stored.available(location) >= 0);
     eprintln!("{won} of 8 buyers reserved; results: {results:?}");
+}
+
+/// Writes are stamped with a fixed time in these tests.
+fn clock() -> std::sync::Arc<hypha_testkit::FixedClock> {
+    std::sync::Arc::new(hypha_testkit::FixedClock::default())
 }

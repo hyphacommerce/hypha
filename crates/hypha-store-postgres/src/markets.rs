@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
     BasisPoints, CatalogId, CountryCode, MarketId, Price, PriceListId, ProductId, Recorded,
-    RepoError, VariantId, Version, Versioned,
+    RepoError, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, Market, MarketRepo, MarketSnapshot,
@@ -12,7 +12,10 @@ use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{col, currency_from_db, version_from_db, version_to_db},
+    columns::{
+        col, currency_from_db, stamp_columns, stamps_from_row, version_from_db, version_to_db,
+        write_stamps,
+    },
     error::{corrupt, repo_error},
     outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -51,6 +54,7 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
     }
 
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {
+        stamp_insert(market, self.now());
         let s = market.snapshot();
         let events = market.take_events();
         let actor = self.actor();
@@ -64,6 +68,7 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
     }
 
     async fn update(&self, market: &mut Market) -> Result<(), RepoError> {
+        stamp_update(market, self.now());
         let s = market.snapshot();
         let events = market.take_events();
         let actor = self.actor();
@@ -94,7 +99,9 @@ pub(crate) async fn insert_market(
     )
     .await
     .map_err(repo_error)?;
-    write_countries(tx, s).await
+    write_countries(tx, s).await?;
+    write_stamps(tx, "markets", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(())
 }
 
 /// `MarketRepo::update` inside the caller's transaction; the new version. The version
@@ -126,7 +133,9 @@ pub(crate) async fn update_market(
     .await
     .map_err(repo_error)?;
     write_countries(tx, s).await?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(tx, "markets", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }
 
 async fn write_countries(tx: &impl GenericClient, s: &MarketSnapshot) -> Result<(), RepoError> {
@@ -153,7 +162,11 @@ async fn load_markets(
     )];
     let rows = client
         .query_typed(
-            "SELECT id, version, name, currency, prices_include_tax FROM markets WHERE $1::uuid IS NULL OR id = $1",
+            &format!(
+                "SELECT id, version, name, currency, prices_include_tax, {} FROM markets
+                 WHERE $1::uuid IS NULL OR id = $1",
+                stamp_columns(""),
+            ),
             &filter,
         )
         .await
@@ -181,6 +194,7 @@ async fn load_markets(
             let snapshot = MarketSnapshot {
                 id: MarketId::from_uuid(id),
                 version: version_from_db(col(row, "version")?)?,
+                stamps: stamps_from_row(row)?,
                 name: col(row, "name")?,
                 countries: countries.remove(&id).unwrap_or_default(),
                 currency: currency_from_db(col(row, "currency")?)?,
@@ -209,12 +223,19 @@ fn catalog_from_row(row: &Row) -> Result<Catalog, RepoError> {
     Ok(Catalog::restore(CatalogSnapshot {
         id: CatalogId::from_uuid(col(row, "id")?),
         version: version_from_db(col(row, "version")?)?,
+        stamps: stamps_from_row(row)?,
         context,
         price_list: price_list.map(PriceListId::from_uuid),
     }))
 }
 
-const CATALOG_COLUMNS: &str = "id, version, context_kind, context_id, price_list_id";
+/// `catalogs`' columns, as `catalog_from_row` reads them.
+fn catalog_columns() -> String {
+    format!(
+        "id, version, context_kind, context_id, price_list_id, {}",
+        stamp_columns("")
+    )
+}
 
 impl<C: PgConnection> CatalogRepo for PgStore<C> {
     async fn get(&self, id: CatalogId) -> Result<Option<Catalog>, RepoError> {
@@ -222,7 +243,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
         let row = conn
             .client()
             .query_typed_opt(
-                &format!("SELECT {CATALOG_COLUMNS} FROM catalogs WHERE id = $1"),
+                &format!("SELECT {} FROM catalogs WHERE id = $1", catalog_columns()),
                 &[(&id.as_uuid(), Type::UUID)],
             )
             .await
@@ -237,7 +258,8 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
             .client()
             .query_typed_opt(
                 &format!(
-                    "SELECT {CATALOG_COLUMNS} FROM catalogs WHERE context_kind = $1 AND context_id = $2"
+                    "SELECT {} FROM catalogs WHERE context_kind = $1 AND context_id = $2",
+                    catalog_columns(),
                 ),
                 &[(&kind, Type::TEXT), (&context_id, Type::UUID)],
             )
@@ -247,6 +269,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
     }
 
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
+        stamp_insert(catalog, self.now());
         let s = catalog.snapshot();
         let events = catalog.take_events();
         let actor = self.actor();
@@ -260,6 +283,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
     }
 
     async fn update(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
+        stamp_update(catalog, self.now());
         let s = catalog.snapshot();
         let events = catalog.take_events();
         let actor = self.actor();
@@ -331,7 +355,9 @@ pub(crate) async fn insert_catalog(
     )
     .await
     .map_err(repo_error)?;
-    Ok(())
+    let written = ();
+    write_stamps(tx, "catalogs", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }
 
 /// `CatalogRepo::update` inside the caller's transaction; the new version. Membership
@@ -353,7 +379,9 @@ pub(crate) async fn update_catalog(
         .await
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(tx, "catalogs", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }
 
 /// `CatalogRepo::add_products` inside the caller's transaction.
@@ -398,7 +426,10 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         let row = conn
             .client()
             .query_typed_opt(
-                "SELECT id, version, currency, adjustment FROM price_lists WHERE id = $1",
+                &format!(
+                    "SELECT id, version, currency, adjustment, {} FROM price_lists WHERE id = $1",
+                    stamp_columns(""),
+                ),
                 &[(&id.as_uuid(), Type::UUID)],
             )
             .await
@@ -408,12 +439,14 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         Ok(Some(PriceList::restore(PriceListSnapshot {
             id: PriceListId::from_uuid(col(&row, "id")?),
             version: version_from_db(col(&row, "version")?)?,
+            stamps: stamps_from_row(&row)?,
             currency: currency_from_db(col(&row, "currency")?)?,
             adjustment: BasisPoints::new(adjustment).map_err(corrupt)?,
         })))
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        stamp_insert(price_list, self.now());
         let s = price_list.snapshot();
         let events = price_list.take_events();
         let actor = self.actor();
@@ -427,6 +460,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
     }
 
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        stamp_update(price_list, self.now());
         let s = price_list.snapshot();
         let events = price_list.take_events();
         let actor = self.actor();
@@ -503,7 +537,17 @@ pub(crate) async fn insert_price_list(
     )
     .await
     .map_err(repo_error)?;
-    Ok(())
+    let written = ();
+    write_stamps(
+        tx,
+        "price_lists",
+        "id",
+        &s.id.as_uuid(),
+        Type::UUID,
+        s.stamps,
+    )
+    .await?;
+    Ok(written)
 }
 
 /// `PriceListRepo::update` inside the caller's transaction; the new version.
@@ -525,7 +569,17 @@ pub(crate) async fn update_price_list(
         .await
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(
+        tx,
+        "price_lists",
+        "id",
+        &s.id.as_uuid(),
+        Type::UUID,
+        s.stamps,
+    )
+    .await?;
+    Ok(written)
 }
 
 /// `PriceListRepo::set_fixed_prices` inside the caller's transaction.

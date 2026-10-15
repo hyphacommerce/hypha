@@ -347,6 +347,8 @@ fn postgres_tls() -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
 
 pub struct PgStorage {
     pool: deadpool_postgres::Pool,
+    /// What the stores stamp writes with (design note 0016, Q3).
+    clock: Arc<SystemClock>,
 }
 
 impl PgStorage {
@@ -379,14 +381,17 @@ impl PgStorage {
         migrate(&mut conn, &[CORE])
             .await
             .map_err(|e| format!("migrations failed: {e}"))?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        })
     }
 }
 
 impl PgStorage {
     async fn store(&self) -> Result<PgStore<PooledClient>, ApiError> {
         let conn = self.pool.get().await.map_err(ApiError::internal)?;
-        Ok(PgStore::new(PooledClient(conn)))
+        Ok(PgStore::new(PooledClient(conn), self.clock.clone()))
     }
 }
 

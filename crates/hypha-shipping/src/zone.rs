@@ -5,8 +5,8 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    CountryCode, PendingEvent, Recorded, Recorder, ShippingOptionId, ShippingZoneId, Subject,
-    TaxClassId, Version, Versioned, required_text,
+    CountryCode, PendingEvent, Recorded, Recorder, ShippingOptionId, ShippingZoneId, Stamped,
+    Stamps, Subject, TaxClassId, Version, Versioned, required_text,
 };
 
 use crate::{
@@ -124,6 +124,8 @@ pub struct OptionPatch {
 pub struct ShippingZone {
     id: ShippingZoneId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     name: String,
     countries: Vec<CountryCode>,
     /// In display order.
@@ -147,6 +149,16 @@ impl Versioned for ShippingZone {
     }
 }
 
+impl Stamped for ShippingZone {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl ShippingZone {
     /// Plenty for "Standard, Express, Overnight" per zone, and keeps a zone one load.
     pub const MAX_OPTIONS: usize = 50;
@@ -159,6 +171,7 @@ impl ShippingZone {
         let mut zone = Self {
             id,
             version: Version::NEW,
+            stamps: None,
             name: required_text("name", name)?,
             countries: Vec::new(),
             options: Vec::new(),
@@ -363,6 +376,7 @@ fn checked_rate(rate: OptionRate) -> Result<OptionRate, ShippingError> {
 pub struct ShippingZoneSnapshot {
     pub id: ShippingZoneId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub name: String,
     pub countries: Vec<CountryCode>,
     /// In display order.
@@ -374,6 +388,7 @@ impl ShippingZone {
         ShippingZoneSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             name: self.name.clone(),
             countries: self.countries.clone(),
             options: self
@@ -400,6 +415,7 @@ impl ShippingZone {
             zone.add_option(option)?;
         }
         zone.version = s.version;
+        zone.stamps = s.stamps;
         // Built through the editing methods; nothing happened, though.
         zone.events = Recorder::default();
         Ok(zone)

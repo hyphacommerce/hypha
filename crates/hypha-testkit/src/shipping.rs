@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
-use hypha_core::{CountryCode, Recorded, RepoError, ShippingZoneId, Version, Versioned};
+use hypha_core::{
+    CountryCode, Recorded, RepoError, ShippingZoneId, Version, Versioned, stamp_insert,
+    stamp_update,
+};
 use hypha_shipping::{
     AppProvider, AppProviderRepo, ProviderKey, ShippingZone, ShippingZoneRepo, keys,
 };
@@ -55,6 +58,7 @@ impl ShippingZoneRepo for InMemoryShippingZoneRepo {
     }
 
     async fn insert(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
+        stamp_insert(zone, self.outbox.now());
         let events = zone.take_events();
         self.zones.insert(zone.id(), zone, keys::ZONE_ID, &unique)?;
         self.outbox.write(events, Some(zone.version()));
@@ -62,6 +66,7 @@ impl ShippingZoneRepo for InMemoryShippingZoneRepo {
     }
 
     async fn update(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
+        stamp_update(zone, self.outbox.now());
         let events = zone.take_events();
         self.zones.update(zone.id(), zone, &unique)?;
         self.outbox.write(events, Some(zone.version()));
@@ -81,6 +86,18 @@ impl ShippingZoneRepo for InMemoryShippingZoneRepo {
 #[derive(Default)]
 pub struct InMemoryAppProviderRepo {
     providers: Mutex<BTreeMap<ProviderKey, AppProvider>>,
+    /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with.
+    pub(crate) outbox: InMemoryOutbox,
+}
+
+impl InMemoryAppProviderRepo {
+    /// A repo sharing `outbox`'s clock (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
 }
 
 impl AppProviderRepo for InMemoryAppProviderRepo {
@@ -93,6 +110,7 @@ impl AppProviderRepo for InMemoryAppProviderRepo {
     }
 
     async fn insert(&self, provider: &mut AppProvider) -> Result<(), RepoError> {
+        stamp_insert(provider, self.outbox.now());
         let mut providers = self.providers.lock().unwrap();
         if providers.contains_key(provider.key()) {
             return Err(RepoError::Duplicate(keys::PROVIDER_KEY));
@@ -103,6 +121,7 @@ impl AppProviderRepo for InMemoryAppProviderRepo {
     }
 
     async fn update(&self, provider: &mut AppProvider) -> Result<(), RepoError> {
+        stamp_update(provider, self.outbox.now());
         let mut providers = self.providers.lock().unwrap();
         match providers.get(provider.key()) {
             Some(stored) if stored.version() == provider.version() => {

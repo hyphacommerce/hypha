@@ -63,7 +63,7 @@ async fn shop(url: &str, schema: &str, on_hand: i64) -> (PgStore<Client>, Client
         .await
         .expect("reset schema");
     migrate(&mut client, &[CORE]).await.expect("migrate");
-    let store = PgStore::new(client);
+    let store = PgStore::new(client, clock());
 
     let hr = hypha_core::CountryCode::new("HR").unwrap();
     let mut m = Market::new(market(), "Croatia".to_string(), vec![hr], Currency::Eur).unwrap();
@@ -142,7 +142,7 @@ async fn cart(
 async fn buyers(url: &str, schema: &str, n: usize) -> Vec<PgStore<Client>> {
     let mut stores = Vec::new();
     for _ in 0..n {
-        stores.push(PgStore::new(connect(url, schema).await));
+        stores.push(PgStore::new(connect(url, schema).await, clock()));
     }
     stores
 }
@@ -371,4 +371,9 @@ async fn adding_a_line_retried_with_the_same_key_adds_it_once() {
         .map(|l| l.quantity().value())
         .collect();
     assert_eq!(quantities, vec![3]);
+}
+
+/// Writes are stamped with a fixed time in these tests.
+fn clock() -> std::sync::Arc<hypha_testkit::FixedClock> {
+    std::sync::Arc::new(hypha_testkit::FixedClock::default())
 }

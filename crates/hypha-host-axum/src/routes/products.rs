@@ -1,3 +1,6 @@
+use hypha_core::Stamped;
+
+use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{AssetId, Money, OptionId, OptionValueId, ProductId, VariantId, Weight};
 use hypha_media::{Asset, HasAssets};
@@ -82,6 +85,10 @@ pub(super) struct ProductResponse {
     variants: Vec<VariantResponse>,
     /// In order; the first is the featured item. At most 250.
     media: Vec<ProductMediaResponse>,
+    /// When it was created, RFC 3339 in UTC.
+    created_at: String,
+    /// When it last changed, RFC 3339 in UTC.
+    updated_at: String,
 }
 
 /// One item of a product's media list (design note 0014, section 7): what a page needs
@@ -174,7 +181,10 @@ pub(super) struct VariantResponse {
 impl ProductResponse {
     async fn new(view: &ProductView, media: Option<&Media>) -> Result<Self, ApiError> {
         let p = &view.product;
+        let (created_at, updated_at) = stamp_times(p.stamps())?;
         Ok(Self {
+            created_at,
+            updated_at,
             id: p.id(),
             handle: p.handle().as_str().to_string(),
             title: p.title().to_string(),
@@ -248,6 +258,10 @@ pub(super) struct ProductSummaryResponse {
     price_ranges: Vec<PriceRangeResponse>,
     /// The first item of the product's media, if it has any.
     featured_media: Option<ProductMediaResponse>,
+    /// When it was created, RFC 3339 in UTC.
+    created_at: String,
+    /// When it last changed, RFC 3339 in UTC.
+    updated_at: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -264,7 +278,10 @@ impl ProductSummaryResponse {
             None => None,
         };
         let p = &view.summary;
+        let (created_at, updated_at) = stamp_times(p.stamps)?;
         Ok(Self {
+            created_at,
+            updated_at,
             id: p.id,
             handle: p.handle.as_str().to_string(),
             title: p.title.clone(),

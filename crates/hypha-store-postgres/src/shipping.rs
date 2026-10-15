@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use hypha_core::{
     CountryCode, Currency, Money, Price, Recorded, RepoError, Sealed, ShippingOptionId,
-    ShippingZoneId, TaxClassId, Version, Versioned,
+    ShippingZoneId, TaxClassId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_shipping::{
     AppProvider, AppProviderRepo, AppProviderSnapshot, BuiltinRate, DeliveryEstimate, NewOption,
@@ -17,7 +17,10 @@ use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{col, currency_from_db, version_from_db, version_to_db},
+    columns::{
+        col, currency_from_db, stamp_columns, stamps_from_row, version_from_db, version_to_db,
+        write_stamps,
+    },
     error::{corrupt, repo_error},
     outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -59,6 +62,7 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
     }
 
     async fn insert(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
+        stamp_insert(zone, self.now());
         let s = zone.snapshot();
         let events = zone.take_events();
         let actor = self.actor();
@@ -72,6 +76,7 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
     }
 
     async fn update(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
+        stamp_update(zone, self.now());
         let s = zone.snapshot();
         let events = zone.take_events();
         let actor = self.actor();
@@ -108,7 +113,17 @@ pub(crate) async fn insert_zone(
     )
     .await
     .map_err(repo_error)?;
-    write_zone_children(tx, s).await
+    write_zone_children(tx, s).await?;
+    write_stamps(
+        tx,
+        "shipping_zones",
+        "id",
+        &s.id.as_uuid(),
+        Type::UUID,
+        s.stamps,
+    )
+    .await?;
+    Ok(())
 }
 
 /// `ShippingZoneRepo::update` inside the caller's transaction; the new version. The
@@ -140,7 +155,17 @@ pub(crate) async fn update_zone(
             .map_err(repo_error)?;
     }
     write_zone_children(tx, s).await?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(
+        tx,
+        "shipping_zones",
+        "id",
+        &s.id.as_uuid(),
+        Type::UUID,
+        s.stamps,
+    )
+    .await?;
+    Ok(written)
 }
 
 /// `ShippingZoneRepo::delete` inside the caller's transaction; its children go with it
@@ -279,8 +304,11 @@ async fn load_zones(
     let ids: Option<Vec<Uuid>> = ids.map(<[Uuid]>::to_vec);
     let zones = client
         .query_typed(
-            "SELECT id, version, name FROM shipping_zones
-             WHERE $1::uuid[] IS NULL OR id = ANY($1) ORDER BY name, id",
+            &format!(
+                "SELECT id, version, name, {} FROM shipping_zones
+                 WHERE $1::uuid[] IS NULL OR id = ANY($1) ORDER BY name, id",
+                stamp_columns(""),
+            ),
             &[(&ids, Type::UUID_ARRAY)],
         )
         .await
@@ -406,6 +434,7 @@ async fn load_zones(
             let snapshot = ShippingZoneSnapshot {
                 id: ShippingZoneId::from_uuid(id),
                 version: version_from_db(col(row, "version")?)?,
+                stamps: stamps_from_row(row)?,
                 name: col(row, "name")?,
                 countries: countries.remove(&id).unwrap_or_default(),
                 options: options.remove(&id).unwrap_or_default(),
@@ -451,6 +480,7 @@ impl<C: PgConnection> AppProviderRepo for PgStore<C> {
     }
 
     async fn insert(&self, provider: &mut AppProvider) -> Result<(), RepoError> {
+        stamp_insert(provider, self.now());
         let s = provider.snapshot();
         in_transaction!(self, |tx| insert_provider(tx, &s).await)?;
         provider.set_version(Version::NEW.next());
@@ -458,6 +488,7 @@ impl<C: PgConnection> AppProviderRepo for PgStore<C> {
     }
 
     async fn update(&self, provider: &mut AppProvider) -> Result<(), RepoError> {
+        stamp_update(provider, self.now());
         let s = provider.snapshot();
         let version = in_transaction!(self, |tx| update_provider(tx, &s).await)?;
         provider.set_version(version);
@@ -489,7 +520,17 @@ pub(crate) async fn insert_provider(
     )
     .await
     .map_err(repo_error)?;
-    write_services(tx, s).await
+    write_services(tx, s).await?;
+    write_stamps(
+        tx,
+        "shipping_app_providers",
+        "key",
+        &s.key,
+        Type::TEXT,
+        s.stamps,
+    )
+    .await?;
+    Ok(())
 }
 
 /// `AppProviderRepo::update` inside the caller's transaction; the new version.
@@ -522,7 +563,17 @@ pub(crate) async fn update_provider(
     .await
     .map_err(repo_error)?;
     write_services(tx, s).await?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(
+        tx,
+        "shipping_app_providers",
+        "key",
+        &s.key,
+        Type::TEXT,
+        s.stamps,
+    )
+    .await?;
+    Ok(written)
 }
 
 /// `AppProviderRepo::delete` inside the caller's transaction.
@@ -568,8 +619,11 @@ async fn load_providers(
 ) -> Result<Vec<AppProvider>, RepoError> {
     let rows = client
         .query_typed(
-            "SELECT key, version, name, callback_url, timeout_ms, secret, enabled
-             FROM shipping_app_providers WHERE $1::text IS NULL OR key = $1 ORDER BY key",
+            &format!(
+                "SELECT key, version, name, callback_url, timeout_ms, secret, enabled, {}
+                 FROM shipping_app_providers WHERE $1::text IS NULL OR key = $1 ORDER BY key",
+                stamp_columns(""),
+            ),
             &[(&key, Type::TEXT)],
         )
         .await
@@ -600,6 +654,7 @@ async fn load_providers(
                 services: services.remove(&key).unwrap_or_default(),
                 key: key.clone(),
                 version: version_from_db(col(row, "version")?)?,
+                stamps: stamps_from_row(row)?,
                 name: col(row, "name")?,
                 callback_url: col(row, "callback_url")?,
                 timeout_ms: u32::try_from(timeout).map_err(corrupt)?,

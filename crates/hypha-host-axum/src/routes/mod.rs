@@ -26,7 +26,7 @@ use axum::{
     routing::{MethodFilter, on},
 };
 
-use hypha_core::Timestamp;
+use hypha_core::{Stamps, Timestamp};
 
 use crate::{
     error::ApiError,
@@ -38,6 +38,14 @@ pub(crate) fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
     jiff::Timestamp::from_microsecond(at.unix_micros())
         .map(|t| t.to_string())
         .map_err(ApiError::internal)
+}
+
+/// An aggregate's `created_at` and `updated_at` as RFC 3339 (design note 0016, Q3).
+/// Responses show stored aggregates, which the adapter always stamps; one without
+/// stamps is a bug, reported as a 500.
+pub(crate) fn stamp_times(stamps: Option<Stamps>) -> Result<(String, String), ApiError> {
+    let stamps = stamps.ok_or_else(|| ApiError::internal("an aggregate without stamps"))?;
+    Ok((rfc3339(stamps.created_at)?, rfc3339(stamps.updated_at)?))
 }
 
 /// Every route, once (design note 0010, S7): `[surface, METHOD, "path", handler]`.

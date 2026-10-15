@@ -4,6 +4,7 @@ use hypha_core::{
     Address, CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, OrderLineId, Page,
     PageRequest, Price, ProductId, Quantity, Recorded, RepoError, ShippingGroupId,
     ShippingOptionId, TaxClassId, TaxRegionId, Timestamp, VariantId, Version, Versioned,
+    stamp_insert, stamp_update,
 };
 use hypha_orders::{
     Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSummary,
@@ -15,8 +16,8 @@ use uuid::Uuid;
 use crate::{
     columns::{
         ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
-        currency_from_db, id_and_address, micros, tax_rate_from_db, tax_rate_to_db, ts,
-        version_from_db, version_to_db,
+        currency_from_db, id_and_address, micros, stamp_columns, stamps_from_row, tax_rate_from_db,
+        tax_rate_to_db, ts, version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
@@ -79,6 +80,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
     }
 
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {
+        stamp_insert(order, self.now());
         let s = order.snapshot();
         let events = order.take_events();
         let actor = self.actor();
@@ -92,6 +94,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
     }
 
     async fn update(&self, order: &mut Order) -> Result<(), RepoError> {
+        stamp_update(order, self.now());
         let s = order.snapshot();
         let events = order.take_events();
         let actor = self.actor();
@@ -174,7 +177,9 @@ pub(crate) async fn update_order(
     .await
     .map_err(repo_error)?;
     write_shipping(tx, s).await?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(tx, "orders", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }
 
 /// `OrderRepo::insert` inside the caller's transaction (also used by `PgBatch`): the
@@ -212,7 +217,9 @@ pub(crate) async fn insert_order(
     .await
     .map_err(repo_error)?;
     insert_lines(tx, s.id, &s.lines).await?;
-    write_shipping(tx, s).await
+    write_shipping(tx, s).await?;
+    write_stamps(tx, "orders", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(())
 }
 
 /// The shipping address and total on the order's row, and its shipping lines.
@@ -377,10 +384,11 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, R
             &format!(
                 "SELECT id, version, number, {}, cart_id, market_id, currency, country,
                      taxes_included, customer_id, email, subtotal, tax_total, total,
-                     financial_status, fulfillment_status, {}, shipping_total
+                     financial_status, fulfillment_status, {}, shipping_total, {}
                  FROM orders WHERE id = ANY($1)",
                 micros("placed_at"),
                 address_columns("shipping_"),
+                stamp_columns(""),
             ),
             &param,
         )
@@ -465,6 +473,7 @@ fn order_from_db(
     let snapshot = OrderSnapshot {
         id: OrderId::from_uuid(col(row, "id")?),
         version: version_from_db(col(row, "version")?)?,
+        stamps: stamps_from_row(row)?,
         number: OrderNumber::new(col(row, "number")?).map_err(corrupt)?,
         placed_at: Timestamp::from_unix_micros(col(row, "placed_at")?),
         cart: CartId::from_uuid(col(row, "cart_id")?),

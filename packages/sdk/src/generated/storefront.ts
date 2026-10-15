@@ -418,6 +418,8 @@ export interface components {
         OrderResponse: {
             cart: components["schemas"]["CartId"];
             country: components["schemas"]["CountryCode"];
+            /** @description When it was created, RFC 3339 in UTC. */
+            created_at: string;
             currency: components["schemas"]["Currency"];
             customer: components["schemas"]["CustomerId"];
             email: components["schemas"]["Email"];
@@ -447,6 +449,8 @@ export interface components {
             /** @description Whether line prices include tax (the market decided, at checkout). */
             taxes_included: boolean;
             total: components["schemas"]["Money"];
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
         };
         OrderShippingLineResponse: {
             amount: components["schemas"]["Money"];

@@ -1,3 +1,6 @@
+use hypha_core::Stamped;
+
+use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_checkout::{Checkout, checkout};
 use hypha_core::{
@@ -94,6 +97,10 @@ pub(super) struct OrderResponse {
     shipping_address: Option<PostalAddressResponse>,
     /// How each group of lines ships, as charged.
     shipping_lines: Vec<OrderShippingLineResponse>,
+    /// When it was created, RFC 3339 in UTC.
+    created_at: String,
+    /// When it last changed, RFC 3339 in UTC.
+    updated_at: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -143,7 +150,10 @@ pub(super) struct OrderTaxResponse {
 
 impl OrderResponse {
     fn new(order: &Order) -> Result<Self, ApiError> {
+        let (created_at, updated_at) = stamp_times(order.stamps())?;
         Ok(Self {
+            created_at,
+            updated_at,
             id: order.id(),
             number: order.number().value(),
             placed_at: rfc3339(order.placed_at())?,

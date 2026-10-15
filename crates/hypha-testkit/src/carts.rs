@@ -1,11 +1,26 @@
 use hypha_cart::{Cart, CartRepo, repo::keys};
-use hypha_core::{CartId, RepoError};
+use hypha_core::{CartId, RepoError, stamp_insert, stamp_update};
 
-use crate::table::{Table, no_unique_keys};
+use crate::{
+    InMemoryOutbox,
+    table::{Table, no_unique_keys},
+};
 
 #[derive(Default)]
 pub struct InMemoryCartRepo {
     pub(crate) carts: Table<CartId, Cart>,
+    /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with.
+    pub(crate) outbox: InMemoryOutbox,
+}
+
+impl InMemoryCartRepo {
+    /// A repo sharing `outbox`'s clock (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
 }
 
 impl CartRepo for InMemoryCartRepo {
@@ -14,11 +29,13 @@ impl CartRepo for InMemoryCartRepo {
     }
 
     async fn insert(&self, cart: &mut Cart) -> Result<(), RepoError> {
+        stamp_insert(cart, self.outbox.now());
         self.carts
             .insert(cart.id(), cart, keys::CART_ID, &no_unique_keys)
     }
 
     async fn update(&self, cart: &mut Cart) -> Result<(), RepoError> {
+        stamp_update(cart, self.outbox.now());
         self.carts.update(cart.id(), cart, &no_unique_keys)
     }
 }

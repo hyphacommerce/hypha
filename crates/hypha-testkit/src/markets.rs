@@ -1,4 +1,6 @@
-use hypha_core::{CountryCode, MarketId, Recorded, RepoError, Versioned};
+use hypha_core::{
+    CountryCode, MarketId, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
+};
 use hypha_markets::{Market, MarketRepo, repo::keys};
 
 use crate::{InMemoryOutbox, table::Table};
@@ -55,6 +57,7 @@ impl MarketRepo for InMemoryMarketRepo {
     }
 
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {
+        stamp_insert(market, self.outbox.now());
         let events = market.take_events();
         self.markets
             .insert(market.id(), market, keys::MARKET_ID, &unique)?;
@@ -63,6 +66,7 @@ impl MarketRepo for InMemoryMarketRepo {
     }
 
     async fn update(&self, market: &mut Market) -> Result<(), RepoError> {
+        stamp_update(market, self.outbox.now());
         let events = market.take_events();
         self.markets.update(market.id(), market, &unique)?;
         self.outbox.write(events, Some(market.version()));

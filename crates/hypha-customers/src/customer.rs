@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    Address, AddressId, CustomerId, Email, PendingEvent, Recorded, Version, Versioned,
-    optional_text,
+    Address, AddressId, CustomerId, Email, PendingEvent, Recorded, Stamped, Stamps, Version,
+    Versioned, optional_text,
 };
 
 use crate::{CustomerError, RestoreError, events::Changes};
@@ -23,6 +23,8 @@ pub struct SavedAddress {
 pub struct Customer {
     id: CustomerId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     email: Email,
     first_name: Option<String>,
     last_name: Option<String>,
@@ -50,6 +52,16 @@ impl Versioned for Customer {
     }
 }
 
+impl Stamped for Customer {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl Customer {
     pub const MAX_FIELD_LEN: usize = hypha_core::MAX_TEXT_LEN;
 
@@ -57,6 +69,7 @@ impl Customer {
         Self {
             id,
             version: Version::NEW,
+            stamps: None,
             email,
             first_name: None,
             last_name: None,
@@ -212,6 +225,7 @@ impl Customer {
 pub struct CustomerSnapshot {
     pub id: CustomerId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub email: Email,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
@@ -226,6 +240,7 @@ impl Customer {
         CustomerSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             email: self.email.clone(),
             first_name: self.first_name.clone(),
             last_name: self.last_name.clone(),
@@ -261,6 +276,7 @@ impl Customer {
         customer.default_shipping = s.default_shipping;
         customer.default_billing = s.default_billing;
         customer.version = s.version;
+        customer.stamps = s.stamps;
         // Rebuilt through `new` and the setters; nothing happened, though.
         customer.changes = Changes::default();
         Ok(customer)

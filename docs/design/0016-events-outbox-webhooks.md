@@ -381,7 +381,12 @@ Before any external consumer reads events or lists:
   (products with 2048 variants).
 
 **Q3. Timestamps on aggregates in this note.** `created_at` / `updated_at` on every core
-table, filled by the database, read back into snapshots and shown in responses.
+table, read back into snapshots and shown in responses. As built: the adapter stamps an
+aggregate from the clock its ports carry when it writes or stages it (like the version),
+not the database's `now()`, so a batch's aggregates have their stamps before it commits
+and responses always show them; the columns' `DEFAULT now()` only fills rows written by
+hand. Tests stamp with a fixed clock. Each write sets them with one more statement in
+its transaction, to fold into the main INSERT/UPDATE later with the other double writes.
 - *(Decided)* Yes, as its own step here: every write path is touched for the events
   anyway, search wants `updated_at`, and 0001 §3.5 already promised it.
 

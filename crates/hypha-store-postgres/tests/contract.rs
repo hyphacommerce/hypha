@@ -36,7 +36,7 @@ async fn fresh_store(url: &str, schema: &str) -> PgStore<Client> {
         .await
         .expect("reset schema");
     migrate(&mut client, &[CORE]).await.expect("migrate");
-    PgStore::new(client)
+    PgStore::new(client, clock())
 }
 
 #[tokio::test]
@@ -201,4 +201,9 @@ async fn app_provider_repo() {
 async fn outbox() {
     let Some(url) = database_url() else { return };
     contract::outbox(async || fresh_store(&url, "contract_outbox").await).await;
+}
+
+/// Writes are stamped with a fixed time in these tests.
+fn clock() -> std::sync::Arc<hypha_testkit::FixedClock> {
+    std::sync::Arc::new(hypha_testkit::FixedClock::default())
 }

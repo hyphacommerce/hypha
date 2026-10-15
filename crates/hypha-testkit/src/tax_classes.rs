@@ -3,7 +3,7 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use hypha_core::{ProductId, Recorded, RepoError, TaxClassId, Versioned};
+use hypha_core::{ProductId, Recorded, RepoError, TaxClassId, Versioned, stamp_insert};
 use hypha_tax::{TaxClass, TaxClassRepo, repo::keys};
 
 use crate::{
@@ -44,6 +44,7 @@ impl TaxClassRepo for InMemoryTaxClassRepo {
     }
 
     async fn insert(&self, class: &mut TaxClass) -> Result<(), RepoError> {
+        stamp_insert(class, self.outbox.now());
         let events = class.take_events();
         self.classes
             .insert(class.id(), class, keys::TAX_CLASS_ID, &no_unique_keys)?;

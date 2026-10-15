@@ -1,4 +1,4 @@
-use hypha_core::{StoreId, Version, Versioned};
+use hypha_core::{Stamped, Stamps, StoreId, Version, Versioned};
 
 use crate::error::StoreError;
 
@@ -8,6 +8,8 @@ use crate::error::StoreError;
 pub struct Store {
     id: StoreId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     name: String,
 }
 
@@ -19,6 +21,7 @@ impl Store {
         Ok(Self {
             id,
             version: Version::NEW,
+            stamps: None,
             name: valid_name(name)?,
         })
     }
@@ -40,6 +43,7 @@ impl Store {
         StoreSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             name: self.name.clone(),
         }
     }
@@ -48,6 +52,7 @@ impl Store {
     pub fn restore(s: StoreSnapshot) -> Result<Store, StoreError> {
         let mut store = Store::new(s.id, &s.name)?;
         store.version = s.version;
+        store.stamps = s.stamps;
         Ok(store)
     }
 }
@@ -62,11 +67,22 @@ impl Versioned for Store {
     }
 }
 
+impl Stamped for Store {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 /// Plain-data form of a `Store` for storage adapters (design note 0001, 3.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreSnapshot {
     pub id: StoreId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub name: String,
 }
 

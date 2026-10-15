@@ -391,6 +391,25 @@ async fn outbox_events(app: &TestApp) -> Vec<hypha_core::StoredEvent> {
 }
 
 #[tokio::test]
+async fn responses_show_when_an_aggregate_was_created_and_changed() {
+    let app = app().await;
+    let id = create_product(&app, "mug").await;
+    let (_, created) = send(&app, "GET", &format!("/admin/products/{id}"), None).await;
+    let created_at = created["created_at"].as_str().unwrap().to_string();
+    assert_eq!(created["updated_at"], created_at.as_str());
+    let body = json!({"title": "Big mug"}).to_string();
+    let (status, updated) =
+        send(&app, "PATCH", &format!("/admin/products/{id}"), Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    // Created stays; updated moves on.
+    assert_eq!(updated["created_at"], created_at.as_str());
+    let time = |v: &Value| v.as_str().unwrap().parse::<jiff::Timestamp>().unwrap();
+    assert!(time(&updated["updated_at"]) > time(&created["created_at"]));
+    let (_, page) = send(&app, "GET", "/admin/products", None).await;
+    assert_eq!(page["items"][0]["updated_at"], updated["updated_at"]);
+}
+
+#[tokio::test]
 async fn a_write_records_its_event_by_the_caller() {
     let app = app().await;
     let id = create_product(&app, "mug").await;
@@ -453,7 +472,10 @@ async fn products_list_newest_first_in_pages() {
 async fn a_listed_product_is_a_summary() {
     let app = app().await;
     let id = create_product(&app, "mug").await;
-    let (_, page) = send(&app, "GET", "/admin/products", None).await;
+    let (_, mut page) = send(&app, "GET", "/admin/products", None).await;
+    // When it was made and changed: checked in their own test.
+    let item = page["items"][0].as_object_mut().unwrap();
+    assert!(item.remove("created_at").is_some() && item.remove("updated_at").is_some());
     assert_eq!(
         page["items"][0],
         json!({

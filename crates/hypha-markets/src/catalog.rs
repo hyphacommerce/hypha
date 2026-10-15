@@ -1,7 +1,8 @@
 use std::fmt;
 
 use hypha_core::{
-    CatalogId, MarketId, PendingEvent, PriceListId, Recorded, Recorder, Subject, Version, Versioned,
+    CatalogId, MarketId, PendingEvent, PriceListId, Recorded, Recorder, Stamped, Stamps, Subject,
+    Version, Versioned,
 };
 
 use crate::events::{CATALOG, CatalogChanged};
@@ -29,6 +30,8 @@ impl fmt::Display for CatalogContext {
 pub struct Catalog {
     id: CatalogId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     context: CatalogContext,
     price_list: Option<PriceListId>,
     events: Recorder,
@@ -50,11 +53,22 @@ impl Versioned for Catalog {
     }
 }
 
+impl Stamped for Catalog {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl Catalog {
     pub fn new(id: CatalogId, context: CatalogContext, price_list: Option<PriceListId>) -> Self {
         let mut catalog = Self {
             id,
             version: Version::NEW,
+            stamps: None,
             context,
             price_list,
             events: Recorder::default(),
@@ -95,6 +109,7 @@ impl Catalog {
 pub struct CatalogSnapshot {
     pub id: CatalogId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub context: CatalogContext,
     pub price_list: Option<PriceListId>,
 }
@@ -104,6 +119,7 @@ impl Catalog {
         CatalogSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             context: self.context,
             price_list: self.price_list,
         }
@@ -114,6 +130,7 @@ impl Catalog {
         Catalog {
             id: s.id,
             version: s.version,
+            stamps: s.stamps,
             context: s.context,
             price_list: s.price_list,
             events: Recorder::default(),

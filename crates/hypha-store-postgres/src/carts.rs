@@ -1,7 +1,7 @@
 use hypha_cart::{Cart, CartLineSnapshot, CartRepo, CartSnapshot, SelectedShipping, StoredQuote};
 use hypha_core::{
     CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, Price, ProductId, RepoError,
-    ShippingOptionId, Timestamp, VariantId, Version, Versioned,
+    ShippingOptionId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_shipping::ProviderKey;
 use tokio_postgres::{
@@ -13,7 +13,8 @@ use uuid::Uuid;
 use crate::{
     columns::{
         ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
-        currency_from_db, id_and_address, micros, ts, version_from_db, version_to_db,
+        currency_from_db, id_and_address, micros, stamp_columns, stamps_from_row, ts,
+        version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -26,6 +27,7 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
     }
 
     async fn insert(&self, cart: &mut Cart) -> Result<(), RepoError> {
+        stamp_insert(cart, self.now());
         let s = cart.snapshot();
         in_transaction!(self, |tx| insert_cart(tx, &s).await)?;
         cart.set_version(Version::NEW.next());
@@ -33,6 +35,7 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
     }
 
     async fn update(&self, cart: &mut Cart) -> Result<(), RepoError> {
+        stamp_update(cart, self.now());
         let s = cart.snapshot();
         let new_version = in_transaction!(self, |tx| update_cart(tx, &s).await)?;
         cart.set_version(new_version);
@@ -60,7 +63,9 @@ pub(crate) async fn insert_cart(
     .await
     .map_err(repo_error)?;
     write_shipping(tx, s).await?;
-    write_lines(tx, s.id, &s.lines).await
+    write_lines(tx, s.id, &s.lines).await?;
+    write_stamps(tx, "carts", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(())
 }
 
 /// Sets the shipping columns to the snapshot's address and choice (NULL for none).
@@ -145,7 +150,9 @@ pub(crate) async fn update_cart(
     .map_err(repo_error)?;
     write_shipping(tx, s).await?;
     write_lines(tx, s.id, &s.lines).await?;
-    Ok(new_version)
+    let written = new_version;
+    write_stamps(tx, "carts", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    Ok(written)
 }
 
 /// All lines in one statement; `WITH ORDINALITY` keeps their order.
@@ -180,10 +187,11 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
             &format!(
                 "SELECT version, market_id, country, email, customer_id, order_id, {},
                         shipping_option_id, quote_amount, quote_currency, quote_provider,
-                        quote_service, quote_reference, {}
+                        quote_service, quote_reference, {}, {}
                  FROM carts WHERE id = $1",
                 address_columns("shipping_"),
                 micros("quoted_at"),
+                stamp_columns(""),
             ),
             &[(&id.as_uuid(), Type::UUID)],
         )
@@ -216,6 +224,7 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
     let snapshot = CartSnapshot {
         id,
         version: version_from_db(col(&row, "version")?)?,
+        stamps: stamps_from_row(&row)?,
         market: MarketId::from_uuid(col(&row, "market_id")?),
         country: CountryCode::new(&country).map_err(corrupt)?,
         lines,

@@ -1,7 +1,7 @@
 use hypha_core::{
     Address, AddressParts, CartId, CountryCode, CustomerId, Email, MarketId, OrderId, Price,
-    ProductId, Quantity, ShippingGroupId, ShippingOptionId, Timestamp, VariantId, Version,
-    Versioned,
+    ProductId, Quantity, ShippingGroupId, ShippingOptionId, Stamped, Stamps, Timestamp, VariantId,
+    Version, Versioned,
 };
 use hypha_shipping::ProviderKey;
 
@@ -77,6 +77,8 @@ pub enum CartStatus {
 pub struct Cart {
     id: CartId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     market: MarketId,
     country: CountryCode,
     lines: Vec<CartLine>,
@@ -99,11 +101,22 @@ impl Versioned for Cart {
     }
 }
 
+impl Stamped for Cart {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl Cart {
     pub fn new(id: CartId, market: MarketId, country: CountryCode) -> Self {
         Self {
             id,
             version: Version::NEW,
+            stamps: None,
             market,
             country,
             lines: Vec::new(),
@@ -300,6 +313,7 @@ impl Cart {
 pub struct CartSnapshot {
     pub id: CartId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub market: MarketId,
     pub country: CountryCode,
     pub lines: Vec<CartLineSnapshot>,
@@ -324,6 +338,7 @@ impl Cart {
         CartSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             market: self.market,
             country: self.country,
             lines: self
@@ -380,6 +395,7 @@ impl Cart {
         Ok(Cart {
             id: s.id,
             version: s.version,
+            stamps: s.stamps,
             market: s.market,
             country: s.country,
             lines,

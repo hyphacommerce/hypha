@@ -47,7 +47,7 @@ async fn parallel_wrong_codes_all_count() {
         .await
         .expect("reset schema");
     migrate(&mut client, &[CORE]).await.expect("migrate");
-    let store = PgStore::new(client);
+    let store = PgStore::new(client, clock());
     let env = TestEnv::default();
 
     // An identity with 2FA on, and a pending login.
@@ -96,7 +96,7 @@ async fn parallel_wrong_codes_all_count() {
         .collect();
     let mut stores = Vec::new();
     for _ in &guesses {
-        stores.push(PgStore::new(connect(&url, schema).await));
+        stores.push(PgStore::new(connect(&url, schema).await, clock()));
     }
     let results = join_all(
         stores
@@ -146,7 +146,7 @@ async fn two_owners_disabling_each_other_leave_one_active() {
         .await
         .expect("reset schema");
     migrate(&mut client, &[CORE]).await.expect("migrate");
-    let store = PgStore::new(client);
+    let store = PgStore::new(client, clock());
     let env = TestEnv::default();
     let ana = bootstrap_owner(
         &Ctx::system(),
@@ -174,8 +174,8 @@ async fn two_owners_disabling_each_other_leave_one_active() {
     // Many rounds, since one race may happen to run one after the other.
     for _ in 0..10 {
         let (a, b) = (
-            PgStore::new(connect(&url, schema).await),
-            PgStore::new(connect(&url, schema).await),
+            PgStore::new(connect(&url, schema).await, clock()),
+            PgStore::new(connect(&url, schema).await, clock()),
         );
         let disable = || UpdateUser {
             status: Some(UserStatus::Disabled),
@@ -222,7 +222,7 @@ async fn parallel_reset_requests_make_one_link() {
         .await
         .expect("reset schema");
     migrate(&mut client, &[CORE]).await.expect("migrate");
-    let store = PgStore::new(client);
+    let store = PgStore::new(client, clock());
     let env = TestEnv::default();
     let hash = hash_new_password(&env, &Password::new(PASSWORD).unwrap())
         .await
@@ -237,7 +237,7 @@ async fn parallel_reset_requests_make_one_link() {
 
     let mut stores = Vec::new();
     for _ in 0..8 {
-        stores.push(PgStore::new(connect(&url, schema).await));
+        stores.push(PgStore::new(connect(&url, schema).await, clock()));
     }
     let results = join_all(
         stores
@@ -251,4 +251,9 @@ async fn parallel_reset_requests_make_one_link() {
         .filter(Option::is_some)
         .count();
     assert_eq!(made, 1, "parallel requests made {made} links");
+}
+
+/// Writes are stamped with a fixed time in these tests.
+fn clock() -> std::sync::Arc<hypha_testkit::FixedClock> {
+    std::sync::Arc::new(hypha_testkit::FixedClock::default())
 }

@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use hypha_core::{OrderId, Page, PageRequest, Recorded, RepoError, Versioned};
+use hypha_core::{
+    OrderId, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
+};
 use hypha_orders::{Order, OrderNumber, OrderRepo, OrderSummary, repo::keys};
 
 use crate::{InMemoryOutbox, table::Table};
@@ -66,6 +68,7 @@ impl OrderRepo for InMemoryOrderRepo {
     }
 
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {
+        stamp_insert(order, self.outbox.now());
         let events = order.take_events();
         self.orders
             .insert(order.id(), order, keys::ORDER_ID, &unique)?;
@@ -74,6 +77,7 @@ impl OrderRepo for InMemoryOrderRepo {
     }
 
     async fn update(&self, order: &mut Order) -> Result<(), RepoError> {
+        stamp_update(order, self.outbox.now());
         let events = order.take_events();
         self.orders.update(order.id(), order, &unique)?;
         self.outbox.write(events, Some(order.version()));

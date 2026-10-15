@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    BasisPoints, Currency, PendingEvent, Price, PriceListId, Recorded, Recorder, Subject,
-    VariantId, Version, Versioned,
+    BasisPoints, Currency, PendingEvent, Price, PriceListId, Recorded, Recorder, Stamped, Stamps,
+    Subject, VariantId, Version, Versioned,
 };
 
 use crate::{
@@ -19,6 +19,8 @@ use crate::{
 pub struct PriceList {
     id: PriceListId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     currency: Currency,
     adjustment: BasisPoints,
     events: Recorder,
@@ -40,12 +42,23 @@ impl Versioned for PriceList {
     }
 }
 
+impl Stamped for PriceList {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl PriceList {
     /// The adjustment is a `BasisPoints`, so it is valid by construction.
     pub fn new(id: PriceListId, currency: Currency, adjustment: BasisPoints) -> Self {
         let mut list = Self {
             id,
             version: Version::NEW,
+            stamps: None,
             currency,
             adjustment,
             events: Recorder::default(),
@@ -120,6 +133,7 @@ impl PriceList {
 pub struct PriceListSnapshot {
     pub id: PriceListId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub currency: Currency,
     pub adjustment: BasisPoints,
 }
@@ -129,6 +143,7 @@ impl PriceList {
         PriceListSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             currency: self.currency,
             adjustment: self.adjustment,
         }
@@ -139,6 +154,7 @@ impl PriceList {
         PriceList {
             id: s.id,
             version: s.version,
+            stamps: s.stamps,
             currency: s.currency,
             adjustment: s.adjustment,
             events: Recorder::default(),

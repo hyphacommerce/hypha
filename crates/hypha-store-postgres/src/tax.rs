@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use hypha_core::{
     CountryCode, ProductId, Recorded, RepoError, TaxClassId, TaxRegionId, Version, Versioned,
+    stamp_insert, stamp_update,
 };
 use hypha_tax::{
     ClassRate, TaxClass, TaxClassRepo, TaxClassSnapshot, TaxRegion, TaxRegionRepo,
@@ -11,7 +12,10 @@ use tokio_postgres::{GenericClient, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{col, tax_rate_from_db, tax_rate_to_db, version_from_db, version_to_db},
+    columns::{
+        col, stamp_columns, stamps_from_row, tax_rate_from_db, tax_rate_to_db, version_from_db,
+        version_to_db, write_stamps,
+    },
     error::{corrupt, repo_error},
     outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -25,7 +29,10 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
         let row = conn
             .client()
             .query_typed_opt(
-                "SELECT version, name FROM tax_classes WHERE id = $1",
+                &format!(
+                    "SELECT version, name, {} FROM tax_classes WHERE id = $1",
+                    stamp_columns(""),
+                ),
                 &[(&id.as_uuid(), Type::UUID)],
             )
             .await
@@ -34,6 +41,7 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
         TaxClass::restore(TaxClassSnapshot {
             id,
             version: version_from_db(col(&row, "version")?)?,
+            stamps: stamps_from_row(&row)?,
             name: col(&row, "name")?,
         })
         .map(Some)
@@ -41,6 +49,7 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
     }
 
     async fn insert(&self, class: &mut TaxClass) -> Result<(), RepoError> {
+        stamp_insert(class, self.now());
         let s = class.snapshot();
         let events = class.take_events();
         let actor = self.actor();
@@ -101,7 +110,17 @@ pub(crate) async fn insert_tax_class(
     )
     .await
     .map_err(repo_error)?;
-    Ok(())
+    let written = ();
+    write_stamps(
+        tx,
+        "tax_classes",
+        "id",
+        &s.id.as_uuid(),
+        Type::UUID,
+        s.stamps,
+    )
+    .await?;
+    Ok(written)
 }
 
 /// `TaxClassRepo::assign` inside the caller's transaction: one statement either way.
@@ -150,6 +169,7 @@ impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
     }
 
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
+        stamp_insert(region, self.now());
         let s = region.snapshot();
         let events = region.take_events();
         let actor = self.actor();
@@ -163,6 +183,7 @@ impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
     }
 
     async fn update(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
+        stamp_update(region, self.now());
         let s = region.snapshot();
         let events = region.take_events();
         let actor = self.actor();
@@ -191,7 +212,17 @@ pub(crate) async fn insert_tax_region(
     )
     .await
     .map_err(repo_error)?;
-    write_class_rates(tx, s.id, &s.class_rates).await
+    write_class_rates(tx, s.id, &s.class_rates).await?;
+    write_stamps(
+        tx,
+        "tax_regions",
+        "id",
+        &s.id.as_uuid(),
+        Type::UUID,
+        s.stamps,
+    )
+    .await?;
+    Ok(())
 }
 
 /// `TaxRegionRepo::update` inside the caller's transaction; the new version. The
@@ -221,7 +252,17 @@ pub(crate) async fn update_tax_region(
     .await
     .map_err(repo_error)?;
     write_class_rates(tx, s.id, &s.class_rates).await?;
-    version_from_db(col(&row, "version")?)
+    let written = version_from_db(col(&row, "version")?)?;
+    write_stamps(
+        tx,
+        "tax_regions",
+        "id",
+        &s.id.as_uuid(),
+        Type::UUID,
+        s.stamps,
+    )
+    .await?;
+    Ok(written)
 }
 
 /// All class rates in one statement; `WITH ORDINALITY` keeps their order.
@@ -259,7 +300,10 @@ async fn load_region<T: tokio_postgres::types::ToSql + Sync>(
 ) -> Result<Option<TaxRegion>, RepoError> {
     let Some(row) = client
         .query_typed_opt(
-            &format!("SELECT id, version, country, default_rate FROM tax_regions WHERE {filter}"),
+            &format!(
+                "SELECT id, version, country, default_rate, {} FROM tax_regions WHERE {filter}",
+                stamp_columns(""),
+            ),
             &[(&value, value_type)],
         )
         .await
@@ -288,6 +332,7 @@ async fn load_region<T: tokio_postgres::types::ToSql + Sync>(
     let snapshot = TaxRegionSnapshot {
         id: TaxRegionId::from_uuid(id),
         version: version_from_db(col(&row, "version")?)?,
+        stamps: stamps_from_row(&row)?,
         country: CountryCode::new(&country).map_err(corrupt)?,
         default_rate: tax_rate_from_db(col(&row, "default_rate")?)?,
         class_rates,

@@ -1,6 +1,9 @@
 //! Shipping setup (design note 0015, section 8): zones and their options, and the
 //! external apps that calculate rates.
 
+use hypha_core::Stamped;
+
+use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{Currency, Money, Price, ShippingOptionId, ShippingZoneId, TaxClassId};
 use hypha_shipping::{
@@ -162,6 +165,10 @@ pub(super) struct ShippingZoneResponse {
     countries: Vec<hypha_core::CountryCode>,
     /// In display order.
     options: Vec<ShippingOptionResponse>,
+    /// When it was created, RFC 3339 in UTC.
+    created_at: String,
+    /// When it last changed, RFC 3339 in UTC.
+    updated_at: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -195,14 +202,17 @@ impl From<&ShippingOption> for ShippingOptionResponse {
     }
 }
 
-impl From<&ShippingZone> for ShippingZoneResponse {
-    fn from(z: &ShippingZone) -> Self {
-        Self {
+impl ShippingZoneResponse {
+    fn new(z: &ShippingZone) -> Result<Self, ApiError> {
+        let (created_at, updated_at) = stamp_times(z.stamps())?;
+        Ok(Self {
             id: z.id(),
             name: z.name().to_string(),
             countries: z.countries().to_vec(),
             options: z.options().iter().map(Into::into).collect(),
-        }
+            created_at,
+            updated_at,
+        })
     }
 }
 
@@ -236,7 +246,7 @@ pub(super) async fn create_zone_handler<S: Storage>(
         countries: req.countries,
     };
     let zone = create_zone(&ctx, ports.shipping_zones(), &state.ids, input).await?;
-    Ok((StatusCode::CREATED, Json((&zone).into())))
+    Ok((StatusCode::CREATED, Json(ShippingZoneResponse::new(&zone)?)))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -259,7 +269,10 @@ pub(super) async fn list_zones_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let zones = list_zones(&ctx, ports.shipping_zones()).await?;
     Ok(Json(ShippingZoneList {
-        items: zones.iter().map(Into::into).collect(),
+        items: zones
+            .iter()
+            .map(ShippingZoneResponse::new)
+            .collect::<Result<_, _>>()?,
     }))
 }
 
@@ -278,7 +291,7 @@ pub(super) async fn fetch_zone<S: Storage>(
 ) -> Result<Json<ShippingZoneResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let zone = get_zone(&ctx, ports.shipping_zones(), id).await?;
-    Ok(Json((&zone).into()))
+    Ok(Json(ShippingZoneResponse::new(&zone)?))
 }
 
 /// Name and countries (JSON Merge Patch; neither can be `null`).
@@ -316,7 +329,7 @@ pub(super) async fn update_zone_handler<S: Storage>(
         countries: req.countries,
     };
     let zone = update_zone(&ctx, ports.shipping_zones(), id, input).await?;
-    Ok(Json((&zone).into()))
+    Ok(Json(ShippingZoneResponse::new(&zone)?))
 }
 
 /// Deletes a zone and its options. Carts that chose one of them choose again.
@@ -387,7 +400,7 @@ pub(super) async fn add_option_handler<S: Storage>(
         enabled: req.enabled,
     };
     let zone = add_option(&ctx, ports.shipping_zones(), &state.ids, id, input).await?;
-    Ok((StatusCode::CREATED, Json((&zone).into())))
+    Ok((StatusCode::CREATED, Json(ShippingZoneResponse::new(&zone)?)))
 }
 
 /// An option's fields (JSON Merge Patch; `estimate` and `tax_class` take `null`).
@@ -449,7 +462,7 @@ pub(super) async fn update_option_handler<S: Storage>(
     let zone = update_option(&ctx, ports.shipping_zones(), id, option, patch)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("shipping_option_not_found"))?;
-    Ok(Json((&zone).into()))
+    Ok(Json(ShippingZoneResponse::new(&zone)?))
 }
 
 /// Removes an option.
@@ -469,7 +482,7 @@ pub(super) async fn remove_option_handler<S: Storage>(
     let zone = remove_option(&ctx, ports.shipping_zones(), id, option)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("shipping_option_not_found"))?;
-    Ok(Json((&zone).into()))
+    Ok(Json(ShippingZoneResponse::new(&zone)?))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -497,7 +510,7 @@ pub(super) async fn reorder_options_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let zone = reorder_options(&ctx, ports.shipping_zones(), id, req.options).await?;
-    Ok(Json((&zone).into()))
+    Ok(Json(ShippingZoneResponse::new(&zone)?))
 }
 
 // ---------- providers ----------

@@ -1667,6 +1667,8 @@ export interface components {
         CustomerId: string;
         CustomerResponse: {
             addresses: components["schemas"]["AddressResponse"][];
+            /** @description When it was created, RFC 3339 in UTC. */
+            created_at: string;
             default_billing_address?: components["schemas"]["AddressId"] | null;
             default_shipping_address?: components["schemas"]["AddressId"] | null;
             email: components["schemas"]["Email"];
@@ -1674,6 +1676,8 @@ export interface components {
             id: components["schemas"]["CustomerId"];
             last_name?: string | null;
             phone?: string | null;
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
         };
         /** @description Delivery in days, from `min_days` to `max_days`. */
         DeliveryEstimateDto: {
@@ -1740,9 +1744,13 @@ export interface components {
          */
         InventoryResponse: {
             continue_selling: boolean;
+            /** @description When the item was created, RFC 3339 in UTC; `null` for a variant without one. */
+            created_at?: string | null;
             id?: components["schemas"]["InventoryItemId"] | null;
             levels: components["schemas"]["LevelResponse"][];
             tracked: boolean;
+            /** @description When the item last changed; `null` for a variant without one. */
+            updated_at?: string | null;
             variant: components["schemas"]["VariantId"];
         };
         /**
@@ -1932,6 +1940,8 @@ export interface components {
         OrderResponse: {
             cart: components["schemas"]["CartId"];
             country: components["schemas"]["CountryCode"];
+            /** @description When it was created, RFC 3339 in UTC. */
+            created_at: string;
             currency: components["schemas"]["Currency"];
             customer: components["schemas"]["CustomerId"];
             email: components["schemas"]["Email"];
@@ -1961,6 +1971,8 @@ export interface components {
             /** @description Whether line prices include tax (the market decided, at checkout). */
             taxes_included: boolean;
             total: components["schemas"]["Money"];
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
         };
         OrderShippingLineResponse: {
             amount: components["schemas"]["Money"];
@@ -2097,6 +2109,8 @@ export interface components {
             width?: number | null;
         };
         ProductResponse: {
+            /** @description When it was created, RFC 3339 in UTC. */
+            created_at: string;
             handle: string;
             id: components["schemas"]["ProductId"];
             /** @description In order; the first is the featured item. At most 250. */
@@ -2108,6 +2122,8 @@ export interface components {
             options: components["schemas"]["OptionResponse"][];
             status: components["schemas"]["ProductStatus"];
             title: string;
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
             variants: components["schemas"]["VariantResponse"][];
         };
         /**
@@ -2131,6 +2147,8 @@ export interface components {
          *     (design note 0012, L7). `GET /admin/products/{id}` has the rest.
          */
         ProductSummaryResponse: {
+            /** @description When it was created, RFC 3339 in UTC. */
+            created_at: string;
             featured_media?: components["schemas"]["ProductMediaResponse"] | null;
             handle: string;
             id: components["schemas"]["ProductId"];
@@ -2141,6 +2159,8 @@ export interface components {
             price_ranges: components["schemas"]["PriceRangeResponse"][];
             status: components["schemas"]["ProductStatus"];
             title: string;
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
             /** Format: int64 */
             variant_count: number;
         };
@@ -2303,10 +2323,14 @@ export interface components {
         ShippingZoneResponse: {
             /** @description A country is in at most one zone. */
             countries: components["schemas"]["CountryCode"][];
+            /** @description When it was created, RFC 3339 in UTC. */
+            created_at: string;
             id: components["schemas"]["ShippingZoneId"];
             name: string;
             /** @description In display order. */
             options: components["schemas"]["ShippingOptionResponse"][];
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
         };
         StartTotpRequest: {
             /**

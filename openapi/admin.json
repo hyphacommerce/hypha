@@ -1298,6 +1298,10 @@
             },
             "type": "array"
           },
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
           "default_billing_address": {
             "oneOf": [
               {
@@ -1341,12 +1345,18 @@
               "string",
               "null"
             ]
+          },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "email",
-          "addresses"
+          "addresses",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -1481,6 +1491,13 @@
           "continue_selling": {
             "type": "boolean"
           },
+          "created_at": {
+            "description": "When the item was created, RFC 3339 in UTC; `null` for a variant without one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "oneOf": [
               {
@@ -1499,6 +1516,13 @@
           },
           "tracked": {
             "type": "boolean"
+          },
+          "updated_at": {
+            "description": "When the item last changed; `null` for a variant without one.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "variant": {
             "$ref": "#/components/schemas/VariantId"
@@ -2111,6 +2135,10 @@
           "country": {
             "$ref": "#/components/schemas/CountryCode"
           },
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
           "currency": {
             "$ref": "#/components/schemas/Currency"
           },
@@ -2182,6 +2210,10 @@
           },
           "total": {
             "$ref": "#/components/schemas/Money"
+          },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
           }
         },
         "required": [
@@ -2202,7 +2234,9 @@
           "tax_total",
           "total",
           "lines",
-          "shipping_lines"
+          "shipping_lines",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -2634,6 +2668,10 @@
       },
       "ProductResponse": {
         "properties": {
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
           "handle": {
             "type": "string"
           },
@@ -2660,6 +2698,10 @@
           "title": {
             "type": "string"
           },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
+          },
           "variants": {
             "items": {
               "$ref": "#/components/schemas/VariantResponse"
@@ -2674,7 +2716,9 @@
           "status",
           "options",
           "variants",
-          "media"
+          "media",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -2718,6 +2762,10 @@
       "ProductSummaryResponse": {
         "description": "A product in a list: what a table of products shows, without options or variants\n(design note 0012, L7). `GET /admin/products/{id}` has the rest.",
         "properties": {
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
           "featured_media": {
             "oneOf": [
               {
@@ -2748,6 +2796,10 @@
           "title": {
             "type": "string"
           },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
+          },
           "variant_count": {
             "format": "int64",
             "minimum": 0,
@@ -2760,7 +2812,9 @@
           "title",
           "status",
           "variant_count",
-          "price_ranges"
+          "price_ranges",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -3325,6 +3379,10 @@
             },
             "type": "array"
           },
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
           "id": {
             "$ref": "#/components/schemas/ShippingZoneId"
           },
@@ -3337,13 +3395,19 @@
               "$ref": "#/components/schemas/ShippingOptionResponse"
             },
             "type": "array"
+          },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "name",
           "countries",
-          "options"
+          "options",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },

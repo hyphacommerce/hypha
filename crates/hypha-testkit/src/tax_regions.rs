@@ -1,4 +1,6 @@
-use hypha_core::{CountryCode, Recorded, RepoError, TaxRegionId, Versioned};
+use hypha_core::{
+    CountryCode, Recorded, RepoError, TaxRegionId, Versioned, stamp_insert, stamp_update,
+};
 use hypha_tax::{TaxRegion, TaxRegionRepo, repo::keys};
 
 use crate::{InMemoryOutbox, table::Table};
@@ -47,6 +49,7 @@ impl TaxRegionRepo for InMemoryTaxRegionRepo {
     }
 
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
+        stamp_insert(region, self.outbox.now());
         let events = region.take_events();
         self.regions
             .insert(region.id(), region, keys::TAX_REGION_ID, &unique)?;
@@ -55,6 +58,7 @@ impl TaxRegionRepo for InMemoryTaxRegionRepo {
     }
 
     async fn update(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
+        stamp_update(region, self.outbox.now());
         let events = region.take_events();
         self.regions.update(region.id(), region, &unique)?;
         self.outbox.write(events, Some(region.version()));

@@ -33,9 +33,86 @@ impl Timestamp {
     }
 }
 
+/// When an aggregate was first stored and last changed (design note 0016, Q3).
+///
+/// Set by the storage adapter when it writes (or stages) the aggregate, from the clock
+/// its ports carry, the same way it sets the version: an insert stamps both, an update
+/// moves `updated_at`. `None` on an aggregate that was never stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamps {
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+impl Stamps {
+    /// Created and updated `at`.
+    pub fn new(at: Timestamp) -> Self {
+        Self {
+            created_at: at,
+            updated_at: at,
+        }
+    }
+
+    /// Updated `at`; created when it was.
+    pub fn touched(self, at: Timestamp) -> Self {
+        Self {
+            updated_at: at,
+            ..self
+        }
+    }
+}
+
+/// An aggregate that carries its `Stamps`. Domain code reads them; only adapters set
+/// them, through `stamp_insert` and `stamp_update`.
+pub trait Stamped {
+    fn stamps(&self) -> Option<Stamps>;
+    fn set_stamps(&mut self, stamps: Stamps);
+}
+
+/// Stamps an aggregate about to be inserted: created and updated `now`.
+pub fn stamp_insert(aggregate: &mut impl Stamped, now: Timestamp) {
+    aggregate.set_stamps(Stamps::new(now));
+}
+
+/// Stamps an aggregate about to be updated: updated `now`, created as before (or `now`,
+/// for a row stored before stamps existed and loaded without them).
+pub fn stamp_update(aggregate: &mut impl Stamped, now: Timestamp) {
+    let stamps = aggregate
+        .stamps()
+        .map_or_else(|| Stamps::new(now), |s| s.touched(now));
+    aggregate.set_stamps(stamps);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct Thing(Option<Stamps>);
+
+    impl Stamped for Thing {
+        fn stamps(&self) -> Option<Stamps> {
+            self.0
+        }
+        fn set_stamps(&mut self, stamps: Stamps) {
+            self.0 = Some(stamps);
+        }
+    }
+
+    #[test]
+    fn an_update_moves_only_updated_at() {
+        let (one, two) = (Timestamp(1), Timestamp(2));
+        let mut thing = Thing::default();
+        stamp_insert(&mut thing, one);
+        stamp_update(&mut thing, two);
+        assert_eq!(
+            thing.0,
+            Some(Stamps {
+                created_at: one,
+                updated_at: two
+            })
+        );
+    }
 
     #[test]
     fn later_timestamps_compare_greater() {

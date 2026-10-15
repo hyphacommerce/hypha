@@ -1,5 +1,8 @@
 //! Customers and their address books (all live in `hypha-customers`).
 
+use hypha_core::Stamped;
+
+use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{AddressId, AddressParts, CountryCode, CustomerId, Email};
 use hypha_customers::{
@@ -93,6 +96,10 @@ pub(super) struct CustomerResponse {
     default_shipping_address: Option<AddressId>,
     default_billing_address: Option<AddressId>,
     addresses: Vec<AddressResponse>,
+    /// When it was created, RFC 3339 in UTC.
+    created_at: String,
+    /// When it last changed, RFC 3339 in UTC.
+    updated_at: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -129,9 +136,12 @@ impl From<&SavedAddress> for AddressResponse {
     }
 }
 
-impl From<&Customer> for CustomerResponse {
-    fn from(c: &Customer) -> Self {
-        Self {
+impl CustomerResponse {
+    fn new(c: &Customer) -> Result<Self, ApiError> {
+        let (created_at, updated_at) = stamp_times(c.stamps())?;
+        Ok(Self {
+            created_at,
+            updated_at,
             id: c.id(),
             email: c.email().clone(),
             first_name: c.first_name().map(str::to_string),
@@ -140,7 +150,7 @@ impl From<&Customer> for CustomerResponse {
             default_shipping_address: c.default_shipping(),
             default_billing_address: c.default_billing(),
             addresses: c.addresses().iter().map(AddressResponse::from).collect(),
-        }
+        })
     }
 }
 
@@ -166,7 +176,7 @@ pub(super) async fn create<S: Storage>(
         phone: req.phone,
     };
     let customer = create_customer(&ctx, ports.customers(), &state.ids, input).await?;
-    Ok((StatusCode::CREATED, Json(CustomerResponse::from(&customer))))
+    Ok((StatusCode::CREATED, Json(CustomerResponse::new(&customer)?)))
 }
 
 /// A customer with their address book.
@@ -184,7 +194,7 @@ pub(super) async fn fetch<S: Storage>(
 ) -> Result<Json<CustomerResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = get_customer(&ctx, ports.customers(), id).await?;
-    Ok(Json(CustomerResponse::from(&customer)))
+    Ok(Json(CustomerResponse::new(&customer)?))
 }
 
 /// Changes a customer's details (JSON Merge Patch).
@@ -211,7 +221,7 @@ pub(super) async fn update<S: Storage>(
         phone: req.phone,
     };
     let customer = update_customer(&ctx, ports.customers(), id, input).await?;
-    Ok(Json(CustomerResponse::from(&customer)))
+    Ok(Json(CustomerResponse::new(&customer)?))
 }
 
 /// Adds an address to a customer's address book.
@@ -232,7 +242,7 @@ pub(super) async fn add_address_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let customer = add_address(&ctx, ports.customers(), &state.ids, id, req.into()).await?;
-    Ok((StatusCode::CREATED, Json(CustomerResponse::from(&customer))))
+    Ok((StatusCode::CREATED, Json(CustomerResponse::new(&customer)?)))
 }
 
 /// Replaces a saved address.
@@ -253,7 +263,7 @@ pub(super) async fn update_address_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let customer = update_address(&ctx, ports.customers(), id, address, req.into()).await?;
-    Ok(Json(CustomerResponse::from(&customer)))
+    Ok(Json(CustomerResponse::new(&customer)?))
 }
 
 /// Removes a saved address.
@@ -271,5 +281,5 @@ pub(super) async fn remove_address_handler<S: Storage>(
 ) -> Result<Json<CustomerResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = remove_address(&ctx, ports.customers(), id, address).await?;
-    Ok(Json(CustomerResponse::from(&customer)))
+    Ok(Json(CustomerResponse::new(&customer)?))
 }

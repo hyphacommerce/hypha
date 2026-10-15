@@ -1,4 +1,6 @@
-use hypha_core::{InventoryItemId, Recorded, RepoError, VariantId, Versioned};
+use hypha_core::{
+    InventoryItemId, Recorded, RepoError, VariantId, Versioned, stamp_insert, stamp_update,
+};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, repo::keys};
 
 use crate::{InMemoryOutbox, table::Table};
@@ -57,6 +59,7 @@ impl InventoryItemRepo for InMemoryInventoryItemRepo {
     }
 
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
+        stamp_insert(item, self.outbox.now());
         let events = item.take_events();
         self.items
             .insert(item.id(), item, keys::INVENTORY_ITEM_ID, &unique)?;
@@ -65,6 +68,7 @@ impl InventoryItemRepo for InMemoryInventoryItemRepo {
     }
 
     async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
+        stamp_update(item, self.outbox.now());
         let events = item.take_events();
         self.items.update(item.id(), item, &unique)?;
         self.outbox.write(events, Some(item.version()));
@@ -72,6 +76,10 @@ impl InventoryItemRepo for InMemoryInventoryItemRepo {
     }
 
     async fn update_many(&self, items: &mut [InventoryItem]) -> Result<(), RepoError> {
+        let now = self.outbox.now();
+        for item in items.iter_mut() {
+            stamp_update(item, now);
+        }
         let events: Vec<_> = items.iter_mut().map(|i| i.take_events()).collect();
         self.items.update_many(items, InventoryItem::id, &unique)?;
         for (item, events) in items.iter().zip(events) {

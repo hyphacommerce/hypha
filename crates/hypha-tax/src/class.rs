@@ -1,6 +1,6 @@
 use hypha_core::{
-    PendingEvent, Recorded, Recorder, Subject, TaxClassId, TextError, Version, Versioned,
-    required_text,
+    PendingEvent, Recorded, Recorder, Stamped, Stamps, Subject, TaxClassId, TextError, Version,
+    Versioned, required_text,
 };
 
 use crate::events::{TAX_CLASS, TaxClassChanged};
@@ -9,6 +9,8 @@ use crate::events::{TAX_CLASS, TaxClassChanged};
 pub struct TaxClass {
     id: TaxClassId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     name: String,
     events: Recorder,
 }
@@ -29,6 +31,16 @@ impl Versioned for TaxClass {
     }
 }
 
+impl Stamped for TaxClass {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl TaxClass {
     pub fn new(id: TaxClassId, name: String) -> Result<Self, TextError> {
         let mut events = Recorder::default();
@@ -39,6 +51,7 @@ impl TaxClass {
         Ok(Self {
             id,
             version: Version::NEW,
+            stamps: None,
             name: required_text("name", &name)?,
             events,
         })
@@ -57,6 +70,7 @@ impl TaxClass {
 pub struct TaxClassSnapshot {
     pub id: TaxClassId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub name: String,
 }
 
@@ -65,6 +79,7 @@ impl TaxClass {
         TaxClassSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             name: self.name.clone(),
         }
     }
@@ -74,6 +89,7 @@ impl TaxClass {
         Ok(Self {
             id: s.id,
             version: s.version,
+            stamps: s.stamps,
             name: required_text("name", &s.name)?,
             events: Recorder::default(),
         })

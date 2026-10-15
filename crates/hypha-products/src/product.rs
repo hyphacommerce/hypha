@@ -1,8 +1,8 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
-    AssetId, Money, OptionId, OptionValueId, PendingEvent, Price, ProductId, Recorded, VariantId,
-    Version, Versioned, optional_text, required_text,
+    AssetId, Money, OptionId, OptionValueId, PendingEvent, Price, ProductId, Recorded, Stamped,
+    Stamps, VariantId, Version, Versioned, optional_text, required_text,
 };
 
 use crate::{
@@ -62,6 +62,8 @@ impl FromStr for ProductStatus {
 pub struct Product {
     id: ProductId,
     version: Version,
+    /// When it was stored and last changed, set by the adapter (design note 0016).
+    stamps: Option<Stamps>,
     handle: Handle,
     title: String,
     status: ProductStatus,
@@ -91,6 +93,16 @@ impl Versioned for Product {
     }
 }
 
+impl Stamped for Product {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
 impl Product {
     /// Keeps a product one load, however large the catalog (design note 0014, Q5).
     pub const MAX_VARIANTS: usize = 2048;
@@ -107,6 +119,7 @@ impl Product {
         Ok(Self {
             id,
             version: Version::NEW,
+            stamps: None,
             handle,
             title: required_text("title", &title)?,
             status: ProductStatus::Draft,
@@ -132,6 +145,7 @@ impl Product {
         let mut product = Self {
             id,
             version: Version::NEW,
+            stamps: None,
             handle,
             title: required_text("title", &title)?,
             status: ProductStatus::Draft,
@@ -340,6 +354,7 @@ fn validate_options(options: &[ProductOption]) -> Result<(), ProductError> {
 pub struct ProductSnapshot {
     pub id: ProductId,
     pub version: Version,
+    pub stamps: Option<Stamps>,
     pub handle: String,
     pub title: String,
     pub status: ProductStatus,
@@ -383,6 +398,7 @@ impl Product {
         ProductSnapshot {
             id: self.id,
             version: self.version,
+            stamps: self.stamps,
             handle: self.handle.as_str().to_string(),
             title: self.title.clone(),
             status: self.status,
@@ -440,6 +456,7 @@ impl Product {
         let mut product = Product {
             id: s.id,
             version: s.version,
+            stamps: s.stamps,
             handle,
             title: required_text("title", &s.title)?,
             status: s.status,
