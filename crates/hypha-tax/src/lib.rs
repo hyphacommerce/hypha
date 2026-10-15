@@ -14,4 +14,4 @@ pub use commands::{
 pub use error::{RestoreError, TaxError};
 pub use region::{ClassRate, TaxRegion, TaxRegionSnapshot};
 pub use repo::{HasTaxClasses, HasTaxRegions, TaxClassRepo, TaxRegionRepo};
-pub use resolve::{TaxContext, TaxLine, TaxSource, TaxableLine, tax_line};
+pub use resolve::{TaxContext, TaxLine, TaxSource, TaxableKind, TaxableLine, tax_line};

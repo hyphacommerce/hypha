@@ -11,9 +11,19 @@ pub struct TaxContext {
     pub product_classes: HashMap<ProductId, TaxClassId>,
 }
 
+/// What is taxed: an item (its product's tax class applies) or shipping (design note
+/// 0015, SH10: the option's tax class, or the region's default rate). Tax engines
+/// (spores, later) get the kind too, so they can apportion shipping across items as
+/// some EU states require.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaxableKind {
+    Item { product: ProductId },
+    Shipping { class: Option<TaxClassId> },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaxableLine {
-    pub product: ProductId,
+    pub kind: TaxableKind,
     pub amount: Money,
 }
 
@@ -34,7 +44,11 @@ pub fn tax_line(ctx: &TaxContext, line: &TaxableLine) -> Result<Option<TaxLine>,
     let Some(region) = &ctx.region else {
         return Ok(None);
     };
-    let (rate, class) = region.rate_for(ctx.product_classes.get(&line.product).copied());
+    let class = match line.kind {
+        TaxableKind::Item { product } => ctx.product_classes.get(&product).copied(),
+        TaxableKind::Shipping { class } => class,
+    };
+    let (rate, class) = region.rate_for(class);
     let amount = if ctx.prices_include_tax {
         rate.tax_in_gross(line.amount)?
     } else {
@@ -86,9 +100,50 @@ mod tests {
         }
     }
 
+    fn shipping(class: Option<TaxClassId>, amount: i64) -> TaxableLine {
+        TaxableLine {
+            kind: TaxableKind::Shipping { class },
+            amount: eur(amount),
+        }
+    }
+
+    #[test]
+    fn shipping_is_taxed_at_the_default_rate_without_a_class() {
+        let tax = tax_line(&croatia(false), &shipping(None, 1000))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (tax.rate, tax.class, tax.amount),
+            (rate(250_000), None, eur(250))
+        );
+    }
+
+    #[test]
+    fn shipping_with_a_class_is_taxed_at_that_class_rate() {
+        let tax = tax_line(&croatia(true), &shipping(Some(books()), 1050))
+            .unwrap()
+            .unwrap();
+        // 1050 gross at 5 %: 50 is tax.
+        assert_eq!(
+            (tax.rate, tax.class, tax.amount),
+            (rate(50_000), Some(books()), eur(50))
+        );
+    }
+
+    #[test]
+    fn shipping_isnt_taxed_where_there_is_no_tax_region() {
+        let ctx = TaxContext {
+            region: None,
+            ..croatia(false)
+        };
+        assert_eq!(tax_line(&ctx, &shipping(None, 1000)), Ok(None));
+    }
+
     fn line(product: u128, amount: i64) -> TaxableLine {
         TaxableLine {
-            product: pid(product),
+            kind: TaxableKind::Item {
+                product: pid(product),
+            },
             amount: eur(amount),
         }
     }

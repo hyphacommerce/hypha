@@ -5,7 +5,7 @@ use hypha_core::{
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, resolve_price};
 use hypha_products::{Product, ProductStatus};
-use hypha_tax::{TaxContext, TaxLine, TaxableLine, tax_line};
+use hypha_tax::{TaxContext, TaxLine, TaxableKind, TaxableLine, tax_line};
 
 use crate::{
     cart::{Cart, CartLine, CartStatus},
@@ -250,7 +250,9 @@ fn line_total(
     check_stock(stock, line.variant(), line.quantity())?;
     let total = unit_price.money().checked_mul(line.quantity().value())?;
     let taxable = TaxableLine {
-        product: line.product(),
+        kind: TaxableKind::Item {
+            product: line.product(),
+        },
         amount: total,
     };
     Ok((unit_price, total, tax_line(tax, &taxable)?))
