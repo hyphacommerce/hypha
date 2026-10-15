@@ -40,12 +40,20 @@ function drafts(options: Option[]): Draft[] {
   }));
 }
 
+/** What saving sends. A value typed but not yet added with Enter counts too: it shows
+ * in its option, so saving shouldn't drop it. */
 function request(list: Draft[]): OptionDraft[] {
-  return list.map((d) => ({
-    id: d.id,
-    name: d.name,
-    values: d.values.map((v) => ({ id: v.id, label: v.label })),
-  }));
+  return list.map((d) => {
+    const typed = d.adding.trim();
+    return {
+      id: d.id,
+      name: d.name,
+      values: [
+        ...d.values.map((v) => ({ id: v.id, label: v.label })),
+        ...(typed === "" ? [] : [{ label: typed }]),
+      ],
+    };
+  });
 }
 
 /**

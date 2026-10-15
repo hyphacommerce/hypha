@@ -23,7 +23,7 @@ import { Thumbnail } from "@astryxdesign/core/Thumbnail";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useState, useTransition } from "react";
 
-import { moneyInput } from "@/lib/format";
+import { moneyInput, parseMoney } from "@/lib/format";
 
 import { addVariant, removeVariant, setVariantMedia, updateVariant } from "../actions";
 
@@ -116,7 +116,10 @@ function VariantRow({
   const [isPickingImage, setIsPickingImage] = useState(false);
   const [isPending, startTransition] = useTransition();
 
-  const isDirty = sku !== savedSku || price !== savedPrice;
+  // Compared as the API stores them (trimmed, in minor units): "A " or "45" saved as
+  // "A" and "45.00" would otherwise look unsaved forever.
+  const isDirty =
+    sku.trim() !== savedSku || parseMoney(price, variant.price.currency) !== variant.price.amount;
   const image = images.find((item) => item.asset_id === variant.media_asset_id);
   const save = () => {
     if (!isDirty) return;
@@ -127,6 +130,7 @@ function VariantRow({
         currency: variant.price.currency,
       });
       setError(result.error);
+      if (!result.error) setSku(sku.trim());
     });
   };
 

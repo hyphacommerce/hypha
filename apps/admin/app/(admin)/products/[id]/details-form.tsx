@@ -27,11 +27,14 @@ export function DetailsForm({
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
 
-  const isDirty = title !== savedTitle || handle !== savedHandle;
+  // The title as the API stores it (trimmed), so saving " Shirt " leaves nothing unsaved.
+  const isDirty = title.trim() !== savedTitle || handle !== savedHandle;
   const save = () => {
     if (!isDirty) return;
     startTransition(async () => {
-      setError((await updateProduct(id, { title, handle })).error);
+      const result = await updateProduct(id, { title, handle });
+      setError(result.error);
+      if (!result.error) setTitle(title.trim());
     });
   };
 
