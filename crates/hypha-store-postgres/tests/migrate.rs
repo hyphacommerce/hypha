@@ -239,3 +239,110 @@ async fn a_database_from_a_newer_hypha_is_refused() {
         "{result:?}"
     );
 }
+
+/// Core up to migration 0018, before the product editing rules (design note 0014).
+const BEFORE_PRODUCT_EDITING: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(18).0,
+};
+
+/// A product with one option (`name`, one value `label`) and one variant per SKU, all
+/// selecting that value, written the way rows were before 0019 (no checks then).
+async fn old_product(client: &Client, n: u32, name: &str, label: &str, skus: &[Option<&str>]) {
+    let product = format!("00000000-0000-0000-0000-{n:012}");
+    let option = format!("00000000-0000-0000-0001-{n:012}");
+    let value = format!("00000000-0000-0000-0002-{n:012}");
+    client
+        .execute(
+            "INSERT INTO products (id, version, handle, title, status)
+             VALUES ($1::text::uuid, 1, 'p' || $2::text, 'Product', 'draft')",
+            &[&product, &n.to_string()],
+        )
+        .await
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO product_options (id, product_id, position, name)
+             VALUES ($1::text::uuid, $2::text::uuid, 0, $3)",
+            &[&option, &product, &name],
+        )
+        .await
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO product_option_values (id, option_id, position, label)
+             VALUES ($1::text::uuid, $2::text::uuid, 0, $3)",
+            &[&value, &option, &label],
+        )
+        .await
+        .unwrap();
+    for (position, sku) in skus.iter().enumerate() {
+        client
+            .execute(
+                "INSERT INTO variants (id, product_id, position, sku, price_amount, price_currency, selections)
+                 VALUES (gen_random_uuid(), $1::text::uuid, $2, $3, 100, 'EUR', ARRAY[$4::text::uuid])",
+                &[&product, &(position as i32), sku, &value],
+            )
+            .await
+            .unwrap();
+    }
+}
+
+/// Migrates rows written before 0019; the error text, if 0019 refused them.
+async fn migrate_old(schema: &str, rows: impl AsyncFnOnce(&Client)) -> Option<Result<(), String>> {
+    let mut client = fresh_schema(schema).await?;
+    migrate(&mut client, &[BEFORE_PRODUCT_EDITING])
+        .await
+        .unwrap();
+    rows(&client).await;
+    Some(
+        migrate(&mut client, &[CORE])
+            .await
+            .map_err(|e| e.to_string()),
+    )
+}
+
+#[tokio::test]
+async fn product_editing_accepts_rows_that_follow_its_rules_and_trims_skus() {
+    let Some(result) = migrate_old("migrate_0019_ok", async |c| {
+        old_product(c, 1, "Size", "S", &[Some(" SKU-1\u{a0}"), Some("  ")]).await;
+    })
+    .await
+    else {
+        return;
+    };
+    assert_eq!(result, Ok(()));
+}
+
+#[tokio::test]
+async fn product_editing_refuses_rows_that_would_stop_loading() {
+    let blank_name = migrate_old("migrate_0019_blank", async |c| {
+        old_product(c, 1, "\u{a0}\u{3000}", "S", &[None]).await;
+    });
+    let Some(result) = blank_name.await else {
+        return;
+    };
+    assert!(
+        result
+            .unwrap_err()
+            .contains("00000000-0000-0000-0000-000000000001")
+    );
+
+    // Equal once trimmed the way Rust trims (a no-break space).
+    let same_sku = migrate_old("migrate_0019_sku", async |c| {
+        old_product(c, 1, "Size", "S", &[Some("ABC")]).await;
+        old_product(c, 2, "Size", "S", &[Some("ABC\u{a0}")]).await;
+    });
+    assert!(same_sku.await.unwrap().is_err());
+
+    let too_many = migrate_old("migrate_0019_variants", async |c| {
+        old_product(c, 1, "Size", "S", &[None; 2049]).await;
+    });
+    assert!(
+        too_many
+            .await
+            .unwrap()
+            .unwrap_err()
+            .contains("000000000001")
+    );
+}
