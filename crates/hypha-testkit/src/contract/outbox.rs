@@ -1,7 +1,7 @@
 use hypha_core::{
-    ActingAs, Actor, BasisPoints, CatalogId, Currency, Event, HasBatch, HasOutbox, MarketId, Money,
-    OutboxRepo, PendingEvent, Price, PriceListId, ProductId, RepoError, StageEvents, StoredEvent,
-    Subject, UserId, VariantId, Version, Versioned,
+    ActingAs, Actor, BasisPoints, CatalogId, Currency, DeliveryOutcome, Event, HasBatch, HasOutbox,
+    MarketId, Money, OutboxRepo, PendingEvent, Price, PriceListId, ProductId, RepoError,
+    StageEvents, StoredEvent, Subject, Timestamp, UserId, VariantId, Version, Versioned,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasPriceLists, PriceList, PriceListRepo,
@@ -33,6 +33,14 @@ where
     failed_batch_writes_none(&make().await).await;
     scenario("outbox: staged membership and prices commit with their events, or neither");
     set_based_writes(&make().await).await;
+    scenario("outbox: fan_out makes a delivery per destination, once");
+    fan_out_once(&make().await).await;
+    scenario("outbox: lease_due hands a due delivery out once until its lease ends");
+    leases(&make().await).await;
+    scenario("outbox: outcomes are final or due again, with the attempts counted");
+    outcomes(&make().await).await;
+    scenario("outbox: prune_events drops old fanned-out events and their deliveries");
+    prunes(&make().await).await;
     scenario("outbox: events_after reads after a seq, up to a limit");
     events_after_pages(&make().await).await;
 }
@@ -285,4 +293,117 @@ where
         .map(|e| e.data["tag"].clone())
         .collect();
     assert_eq!(tags, ["set"]);
+}
+
+fn at(secs: i64) -> Timestamp {
+    Timestamp::from_unix_micros(1_800_000_000_000_000).plus_secs(secs)
+}
+
+/// `handler:audit` for every event, `handler:search` for products' too.
+fn routes(event_type: &str) -> Vec<String> {
+    let mut to = vec!["handler:audit".to_string()];
+    if event_type.starts_with("product.") {
+        to.push("handler:search".to_string());
+    }
+    to
+}
+
+fn audit_only(_: &str) -> Vec<String> {
+    vec!["handler:audit".to_string()]
+}
+
+async fn three_products<S: HasProducts>(store: &S) {
+    for n in 1..=3 {
+        let mut product = product(n, &format!("p{n}"));
+        store.products().insert(&mut product).await.unwrap();
+    }
+}
+
+async fn fan_out_once<S: HasProducts + HasOutbox>(store: &S) {
+    three_products(store).await;
+    let outbox = store.outbox();
+    assert_eq!(outbox.fan_out(2, at(0), &routes).await, Ok(2));
+    assert_eq!(outbox.fan_out(10, at(0), &routes).await, Ok(1));
+    assert_eq!(outbox.fan_out(10, at(0), &routes).await, Ok(0));
+    let leased = outbox.lease_due(at(0), at(60), 100).await.unwrap();
+    assert_eq!(leased.len(), 6, "two destinations for each of three events");
+    let mut seen: Vec<(i64, &str)> = leased
+        .iter()
+        .map(|d| (d.event.seq, d.destination.as_str()))
+        .collect();
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 6, "no destination twice for an event");
+    assert!(leased.iter().all(|d| d.attempts == 0));
+    assert!(
+        leased
+            .iter()
+            .all(|d| d.event.event_type == "product.created")
+    );
+}
+
+async fn leases<S: HasProducts + HasOutbox>(store: &S) {
+    three_products(store).await;
+    let outbox = store.outbox();
+    outbox.fan_out(10, at(0), &audit_only).await.unwrap();
+    let count = |leased: Result<Vec<_>, RepoError>| leased.map(|d| d.len());
+    // Not due yet.
+    assert_eq!(count(outbox.lease_due(at(-1), at(60), 10).await), Ok(0));
+    let first = outbox.lease_due(at(0), at(60), 2).await.unwrap();
+    assert_eq!(first.len(), 2);
+    // Leased: the next call only gets what's left.
+    let second = outbox.lease_due(at(1), at(60), 10).await.unwrap();
+    assert_eq!(second.len(), 1);
+    assert!(first.iter().all(|d| d.id != second[0].id));
+    assert_eq!(count(outbox.lease_due(at(30), at(90), 10).await), Ok(0));
+    // A lease that ran out (its runner died) hands them out again.
+    assert_eq!(count(outbox.lease_due(at(60), at(120), 10).await), Ok(3));
+}
+
+async fn outcomes<S: HasProducts + HasOutbox>(store: &S) {
+    three_products(store).await;
+    let outbox = store.outbox();
+    outbox.fan_out(10, at(0), &audit_only).await.unwrap();
+    let leased = outbox.lease_due(at(0), at(60), 10).await.unwrap();
+    let outcomes = vec![
+        (leased[0].id, DeliveryOutcome::Succeeded),
+        (
+            leased[1].id,
+            DeliveryOutcome::Retry {
+                error: "busy".to_string(),
+                at: at(300),
+            },
+        ),
+        (
+            leased[2].id,
+            DeliveryOutcome::Failed {
+                error: "gone".to_string(),
+            },
+        ),
+    ];
+    outbox.record_outcomes(&outcomes).await.unwrap();
+    // The lease is free, but the retry isn't due before its time.
+    let early = outbox.lease_due(at(299), at(400), 10).await.unwrap();
+    assert!(early.is_empty(), "{early:?}");
+    let again = outbox.lease_due(at(300), at(400), 10).await.unwrap();
+    assert_eq!(again.len(), 1);
+    assert_eq!((again[0].id, again[0].attempts), (leased[1].id, 1));
+    // An unknown delivery is skipped.
+    let unknown = (Uuid::from_u128(424242), DeliveryOutcome::Succeeded);
+    assert_eq!(outbox.record_outcomes(&[unknown]).await, Ok(()));
+}
+
+async fn prunes<S: HasProducts + HasOutbox>(store: &S) {
+    three_products(store).await;
+    let outbox = store.outbox();
+    // Only the first two are fanned out; the third stays until it is.
+    outbox.fan_out(2, at(0), &audit_only).await.unwrap();
+    let far_future = Timestamp::from_unix_micros(i64::MAX / 2);
+    assert_eq!(outbox.prune_events(far_future, 100).await, Ok(2));
+    assert_eq!(all(store).await.len(), 1);
+    // Their deliveries went with them.
+    let leased = outbox.lease_due(at(0), at(60), 10).await.unwrap();
+    assert!(leased.is_empty(), "{leased:?}");
+    // Nothing is older than the epoch.
+    assert_eq!(outbox.prune_events(Timestamp::UNIX_EPOCH, 100).await, Ok(0));
 }

@@ -149,13 +149,71 @@ pub struct StoredEvent {
     pub data: serde_json::Value,
 }
 
-/// The outbox, as tests and the admin read it. Delivery (claiming, leases) is the
-/// dispatcher's port, in a later step.
+/// One event on its way to one destination (design note 0016, section 5).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Delivery {
+    pub id: Uuid,
+    pub event: StoredEvent,
+    /// `handler:<name>` (in process) or `app:<key>` (a webhook).
+    pub destination: String,
+    /// Attempts made before this one.
+    pub attempts: u32,
+}
+
+/// How a delivery attempt ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeliveryOutcome {
+    Succeeded,
+    /// Failed; try again at `at`.
+    Retry {
+        error: String,
+        at: Timestamp,
+    },
+    /// Failed for the last time: no more attempts.
+    Failed {
+        error: String,
+    },
+}
+
+/// The outbox: tests and the admin read it; the dispatcher fans events out to
+/// deliveries, leases the due ones and records how they went. Each method is one short
+/// transaction, so nothing holds a connection while a destination runs (EV9).
 #[allow(async_fn_in_trait)]
 pub trait OutboxRepo {
     /// Events with `seq` greater than `after`, oldest first, at most `limit`. For tests
     /// and debugging only: not a feed, since rows can appear out of `seq` order.
     async fn events_after(&self, after: i64, limit: u32) -> Result<Vec<StoredEvent>, RepoError>;
+
+    /// Claims up to `limit` events not fanned out yet (oldest first, skipping ones
+    /// another claim holds), adds a pending delivery due at `now` for each destination
+    /// `destinations` names for the event's type, and marks them fanned out. Returns how
+    /// many events it fanned out. Running it again for an event adds nothing.
+    async fn fan_out(
+        &self,
+        limit: u32,
+        now: Timestamp,
+        destinations: &(dyn Fn(&str) -> Vec<String> + Sync),
+    ) -> Result<u32, RepoError>;
+
+    /// Up to `limit` pending deliveries due by `now` whose lease is free (none, or
+    /// expired), oldest due first, leased until `lease_until`: another call won't hand
+    /// them out before then. A runner that dies leaves the lease to expire, and the
+    /// delivery runs again (at least once, EV7).
+    async fn lease_due(
+        &self,
+        now: Timestamp,
+        lease_until: Timestamp,
+        limit: u32,
+    ) -> Result<Vec<Delivery>, RepoError>;
+
+    /// Records outcomes: each delivery's attempts go up by one and its lease is freed;
+    /// `Succeeded` and `Failed` are final, `Retry` is due again at its time. An unknown
+    /// delivery is skipped (pruned meanwhile).
+    async fn record_outcomes(&self, outcomes: &[(Uuid, DeliveryOutcome)]) -> Result<(), RepoError>;
+
+    /// Deletes up to `limit` events (and their deliveries) that occurred before
+    /// `before` and were fanned out. Returns how many.
+    async fn prune_events(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError>;
 }
 
 pub trait HasOutbox {

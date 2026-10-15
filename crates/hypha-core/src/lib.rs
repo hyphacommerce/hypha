@@ -26,8 +26,8 @@ pub use ctx::{Actor, AuthError, Ctx};
 pub use email::{Email, EmailError};
 pub use error_code::ErrorCode;
 pub use events::{
-    ActingAs, Event, HasOutbox, OutboxRepo, PendingEvent, Recorded, Recorder, StageEvents,
-    StoredEvent, Subject,
+    ActingAs, Delivery, DeliveryOutcome, Event, HasOutbox, OutboxRepo, PendingEvent, Recorded,
+    Recorder, StageEvents, StoredEvent, Subject,
 };
 pub use idempotency::{
     HasIdempotency, IdempotencyError, IdempotencyKey, IdempotencyRecord, IdempotencyRepo,
