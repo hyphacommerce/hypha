@@ -22,6 +22,7 @@ mod error;
 mod idempotency;
 mod inventory;
 mod markets;
+mod media;
 mod migrate;
 mod orders;
 mod products;

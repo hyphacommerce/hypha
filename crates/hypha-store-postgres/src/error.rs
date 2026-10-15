@@ -6,6 +6,7 @@ use hypha_core::{RepoError, idempotency::keys as idempotency_keys};
 use hypha_customers::repo::keys as customer_keys;
 use hypha_inventory::repo::keys as inventory_keys;
 use hypha_markets::repo::keys as market_keys;
+use hypha_media::repo::keys as media_keys;
 use hypha_orders::repo::keys as order_keys;
 use hypha_products::repo::keys as product_keys;
 use hypha_stores::repo::keys as store_keys;
@@ -59,6 +60,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("invites_pkey", user_keys::INVITE_ID),
     ("invite_email", user_keys::INVITE_EMAIL),
     ("invite_token", user_keys::INVITE_TOKEN),
+    ("assets_pkey", media_keys::ASSET_ID),
 ];
 
 /// Maps a driver error to the repo error the ports promise.

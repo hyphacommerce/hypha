@@ -803,6 +803,7 @@ dependencies = [
  "hypha-customers",
  "hypha-inventory",
  "hypha-markets",
+ "hypha-media",
  "hypha-orders",
  "hypha-products",
  "hypha-stores",

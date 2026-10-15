@@ -172,3 +172,9 @@ async fn staff_batch() {
     let Some(url) = database_url() else { return };
     contract::staff_batch(async || fresh_store(&url, "contract_staff_batch").await).await;
 }
+
+#[tokio::test]
+async fn asset_repo() {
+    let Some(url) = database_url() else { return };
+    contract::asset_repo(async || fresh_store(&url, "contract_assets").await).await;
+}
