@@ -8,7 +8,8 @@ import { startTransition, useActionState, useState } from "react";
 
 import { updateAsset } from "../actions";
 
-export function AssetForm(props: { id: string; alt: string; title: string }) {
+/** Alt text is for images (`hasAlt`); every asset has a title. */
+export function AssetForm(props: { id: string; alt: string; title: string; hasAlt: boolean }) {
   const [alt, setAlt] = useState(props.alt);
   const [title, setTitle] = useState(props.title);
   const [state, save, isPending] = useActionState(updateAsset, {});
@@ -23,13 +24,15 @@ export function AssetForm(props: { id: string; alt: string; title: string }) {
     <VStack gap={4}>
       {state.error && <Banner status="error" title={state.error} />}
       {state.saved && !isChanged && <Banner status="success" title="Saved." />}
-      <TextInput
-        label="Alt text"
-        description="Describes the image for screen readers and search engines. Up to 255 characters."
-        value={alt}
-        onChange={setAlt}
-        onEnter={submit}
-      />
+      {props.hasAlt && (
+        <TextInput
+          label="Alt text"
+          description="Describes the image for screen readers and search engines. Up to 255 characters."
+          value={alt}
+          onChange={setAlt}
+          onEnter={submit}
+        />
+      )}
       <TextInput
         label="Title"
         description="Your label for it in the library."

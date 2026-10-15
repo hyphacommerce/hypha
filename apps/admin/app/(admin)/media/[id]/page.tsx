@@ -57,7 +57,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           </Card>
           <VStack gap={5} width={360}>
             <Card padding={4}>
-              <AssetForm id={asset.id} alt={asset.alt ?? ""} title={asset.title ?? ""} />
+              <AssetForm
+                id={asset.id}
+                alt={asset.alt ?? ""}
+                title={asset.title ?? ""}
+                hasAlt={asset.kind === "image"}
+              />
             </Card>
             <MetadataList title="Details">
               <MetadataListItem label="File">{asset.filename}</MetadataListItem>

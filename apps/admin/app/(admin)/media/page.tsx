@@ -1,10 +1,8 @@
 import { AspectRatio } from "@astryxdesign/core/AspectRatio";
 import { Button } from "@astryxdesign/core/Button";
-import { Center } from "@astryxdesign/core/Center";
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
-import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
@@ -37,15 +35,18 @@ function asKind(value: string | string[] | undefined): Kind | undefined {
 
 /** A square preview: the thumbnail for images, the kind's icon for the rest. */
 function Preview({ asset }: { asset: Asset }) {
+  const KindIcon = KIND_ICONS[asset.kind];
   return (
-    <AspectRatio ratio={1} fit={asset.thumbnail_url ? "cover" : undefined}>
+    <AspectRatio ratio={1} fit={asset.thumbnail_url ? "cover" : "center"}>
       {asset.thumbnail_url ? (
         // A plain <img>: the media URLs resize, so no Next.js image pipeline (0011 §2).
         <img src={asset.thumbnail_url} alt={asset.alt ?? ""} loading="lazy" />
       ) : (
-        <Center>
-          <Icon icon={KIND_ICONS[asset.kind]} size="lg" color="secondary" />
-        </Center>
+        // The heroicon itself, rendered here: a server component can hand a client
+        // component (Astryx's `Icon`) elements, not component functions.
+        <Text color="secondary">
+          <KindIcon width={40} aria-hidden />
+        </Text>
       )}
     </AspectRatio>
   );
