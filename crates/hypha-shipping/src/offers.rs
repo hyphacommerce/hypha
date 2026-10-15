@@ -74,8 +74,10 @@ pub enum OfferOutcome {
 /// The offers for one group of a cart going to a country `zone` covers, in the zone's
 /// option order. Backup options are offered only when no regular option is (disabled,
 /// failed or missing alike), and listed as `BackupNotNeeded` otherwise, so selecting one
-/// says why. Each provider is asked once, all at once; providers only backups use are
-/// asked only when the backups are needed.
+/// says why. Each provider is asked once, all at once: a built-in regular option that's
+/// offered means backups aren't needed, and then only regular options' providers are
+/// asked; otherwise backups' providers are asked together with them, so a slow regular
+/// provider's timeout isn't followed by a second wait for the backups'.
 pub async fn offers<P: RateProvider>(
     zone: &ShippingZone,
     providers: &P,
@@ -86,8 +88,19 @@ pub async fn offers<P: RateProvider>(
     let (backups, regular): (Vec<&ShippingOption>, Vec<&ShippingOption>) =
         enabled.iter().partition(|o| o.is_backup());
 
+    // Built-in prices need no provider: computed first, they tell whether the backups'
+    // providers can be skipped.
+    let no_quotes = BTreeMap::new();
+    let builtin_offered = regular.iter().any(|o| {
+        matches!(o.rate(), OptionRate::Builtin(_))
+            && matches!(
+                outcome(o, request, weight, &no_quotes),
+                OfferOutcome::Offered(_)
+            )
+    });
     let mut quotes = BTreeMap::new();
-    quote_all(&regular, providers, request, &mut quotes).await;
+    let asked = if builtin_offered { &regular } else { &enabled };
+    quote_all(asked, providers, request, &mut quotes).await;
     let regular: Vec<(&ShippingOption, OfferOutcome)> = regular
         .iter()
         .map(|o| (*o, outcome(o, request, weight, &quotes)))
@@ -96,8 +109,9 @@ pub async fn offers<P: RateProvider>(
         .iter()
         .any(|(_, result)| matches!(result, OfferOutcome::Offered(_)));
 
+    // Needed means no regular option was offered, built-in ones included, so every
+    // backup's provider was asked above.
     let backups: Vec<(&ShippingOption, OfferOutcome)> = if needs_backups {
-        quote_all(&backups, providers, request, &mut quotes).await;
         backups
             .iter()
             .map(|o| (*o, outcome(o, request, weight, &quotes)))
@@ -484,6 +498,58 @@ mod tests {
         let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
         assert_eq!(offered_ids(&outcomes), vec![oid(1)]);
         assert!(providers.1.borrow().is_empty(), "app_post wasn't asked");
+    }
+
+    /// Like `Fake`, but each answer waits one poll, and it records how many calls were
+    /// waiting at once.
+    #[derive(Default)]
+    struct Slow {
+        waiting: std::cell::Cell<usize>,
+        most_waiting: std::cell::Cell<usize>,
+    }
+
+    impl RateProvider for Slow {
+        async fn services(&self, _: &ProviderKey) -> Result<Vec<ServiceInfo>, ProviderError> {
+            Ok(vec![])
+        }
+        async fn quote(
+            &self,
+            key: &ProviderKey,
+            _: &RateRequest,
+        ) -> Result<Vec<Rate>, ProviderError> {
+            self.waiting.set(self.waiting.get() + 1);
+            self.most_waiting
+                .set(self.most_waiting.get().max(self.waiting.get()));
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            self.waiting.set(self.waiting.get() - 1);
+            match key.as_str() {
+                "app_post" => Ok(vec![rate("parcel", eur(300))]),
+                _ => Err(ProviderError::Timeout(key.clone())),
+            }
+        }
+    }
+
+    #[test]
+    fn without_a_built_in_offer_backups_providers_are_asked_with_the_regular_ones() {
+        let z = zone(vec![
+            option(1, by("app_dhl", "express"), false),
+            option(2, by("app_post", "parcel"), true),
+        ]);
+        let providers = Slow::default();
+        let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
+        assert_eq!(offered_ids(&outcomes), vec![oid(2)]);
+        // One round: DHL's timeout and the post's answer were awaited together.
+        assert_eq!(providers.most_waiting.get(), 2);
     }
 
     #[test]

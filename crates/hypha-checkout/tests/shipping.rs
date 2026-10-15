@@ -3,14 +3,16 @@
 use std::sync::Mutex;
 
 use hypha_cart::{
-    AddLine, CartRepo, CreateCart, add_line, create_cart, get_cart, select_shipping,
-    set_cart_email, set_shipping_address,
+    AddLine, CartRepo, CreateCart, SelectedShipping, StoredQuote, add_line, create_cart, get_cart,
+    select_shipping, set_cart_email, set_shipping_address,
 };
 use hypha_checkout::{Checkout, CommandError, checkout};
 use hypha_core::{
-    AddressParts, BasisPoints, CartId, CatalogId, CountryCode, Ctx, Currency, MarketId, Money,
-    Price, PriceListId, ProductId, ShippingGroupId, ShippingOptionId, ShippingZoneId, VariantId,
+    AddressParts, BasisPoints, CartId, CatalogId, Clock, CountryCode, Ctx, Currency, CustomerId,
+    Email, MarketId, Money, Price, PriceListId, ProductId, Quantity, ShippingGroupId,
+    ShippingOptionId, ShippingZoneId, VariantId,
 };
+use hypha_customers::{Customer, CustomerRepo};
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo,
 };
@@ -411,4 +413,126 @@ fn an_expired_quote_whose_zone_is_gone_means_choosing_again() {
             hypha_cart::ShippingProblem::OptionUnavailable(express())
         ))
     );
+}
+
+/// What another request does while checkout waits for DHL's first answer.
+enum Race {
+    /// The buyer sets the mugs to 2 and picks Express again, at DHL's 20.00 for two.
+    CartChanged,
+    /// Someone creates the guest's customer, so checkout's commit fails on its email.
+    CustomerCreated,
+}
+
+/// DHL answering 12.90, then 20.00; the race happens during the first call.
+struct Racing<'a> {
+    ports: &'a InMemoryPorts,
+    clock: &'a FixedClock,
+    cart: CartId,
+    race: Race,
+    calls: Mutex<u32>,
+}
+
+impl RateProvider for Racing<'_> {
+    async fn services(&self, _: &ProviderKey) -> Result<Vec<ServiceInfo>, ProviderError> {
+        Ok(vec![])
+    }
+    async fn quote(&self, _: &ProviderKey, _: &RateRequest) -> Result<Vec<Rate>, ProviderError> {
+        let call = {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            *calls
+        };
+        if call == 1 {
+            match self.race {
+                Race::CartChanged => {
+                    let mut cart = self.ports.carts.get(self.cart).await.unwrap().unwrap();
+                    cart.set_quantity(mug(), Quantity::new(2).unwrap()).unwrap();
+                    let quote = StoredQuote {
+                        amount: price(2000),
+                        provider: dhl(),
+                        service: "express".to_string(),
+                        reference: None,
+                        quoted_at: self.clock.now(),
+                    };
+                    cart.select_shipping(Some(SelectedShipping {
+                        option: express(),
+                        quote: Some(quote),
+                    }))
+                    .unwrap();
+                    self.ports.carts.update(&mut cart).await.unwrap();
+                }
+                Race::CustomerCreated => {
+                    let email = Email::new("ana@example.hr").unwrap();
+                    let mut customer =
+                        Customer::new(CustomerId::from_uuid(Uuid::from_u128(9000)), email);
+                    self.ports.customers.insert(&mut customer).await.unwrap();
+                }
+            }
+        }
+        Ok(vec![Rate {
+            service: "express".to_string(),
+            name: "Express".to_string(),
+            amount: price(if call == 1 { 1290 } else { 2000 }),
+            estimate: None,
+            reference: None,
+        }])
+    }
+}
+
+impl World {
+    /// Checks out a cart whose Express quote expired, while `race` happens.
+    fn check_out_racing(
+        &self,
+        cart: CartId,
+        race: Race,
+    ) -> (Result<hypha_orders::Order, CommandError>, u32) {
+        let rates = Racing {
+            ports: &self.ports,
+            clock: &self.clock,
+            cart,
+            race,
+            calls: Mutex::new(0),
+        };
+        let input = Checkout {
+            cart,
+            expected_total: None,
+            idempotency: None,
+        };
+        let placed = block_on(checkout(
+            &Ctx::system(),
+            &self.ports,
+            &self.ids,
+            &self.clock,
+            &rates,
+            input,
+        ))
+        .map(|o| o.value);
+        (placed, *rates.calls.lock().unwrap())
+    }
+}
+
+#[test]
+fn a_quote_renewed_for_a_cart_that_changed_meanwhile_is_not_reused() {
+    let w = World::new();
+    let cart = w.cart_with(mug());
+    w.ship_to_zagreb(cart);
+    w.choose(cart, express());
+    w.clock.set(FixedClock::DEFAULT.plus_secs(60 * 60));
+    let (placed, _) = w.check_out_racing(cart, Race::CartChanged);
+    let order = placed.unwrap();
+    // Two mugs at the quote for two, not the 12.90 renewed for one.
+    assert_eq!(order.lines()[0].quantity.value(), 2);
+    assert_eq!(order.shipping_total(), eur(2000));
+}
+
+#[test]
+fn a_quote_renewed_for_an_unchanged_cart_is_reused_after_a_lost_race() {
+    let w = World::new();
+    let cart = w.cart_with(mug());
+    w.ship_to_zagreb(cart);
+    w.choose(cart, express());
+    w.clock.set(FixedClock::DEFAULT.plus_secs(60 * 60));
+    let (placed, calls) = w.check_out_racing(cart, Race::CustomerCreated);
+    assert_eq!(placed.unwrap().shipping_total(), eur(1290));
+    assert_eq!(calls, 1);
 }

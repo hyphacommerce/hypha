@@ -383,6 +383,16 @@
               }
             }
           },
+          "429": {
+            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "A server failure (`internal_error`).",
             "content": {
@@ -1162,7 +1172,7 @@
             }
           },
           "429": {
-            "description": "Over a rate limit per client address (`rate_limited`); see `Retry-After`",
+            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`",
             "content": {
               "application/json": {
                 "schema": {
@@ -1319,7 +1329,7 @@
             }
           },
           "429": {
-            "description": "Over a rate limit per client address (`rate_limited`); see `Retry-After`",
+            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`",
             "content": {
               "application/json": {
                 "schema": {

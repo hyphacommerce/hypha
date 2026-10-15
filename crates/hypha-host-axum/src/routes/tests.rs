@@ -2160,19 +2160,32 @@ async fn an_oversized_answer_fails_the_rate_app() {
 }
 
 #[tokio::test]
-async fn asking_for_shipping_options_is_rate_limited_per_address() {
+async fn asking_for_shipping_options_is_rate_limited_per_cart() {
     let app = app().await;
     let pk = publishable(&app).await;
-    let path = format!("/storefront/carts/cart_{}/shipping-options", "0".repeat(32));
-    for _ in 0..30 {
+    let cart = |n: u8| format!("/storefront/carts/cart_{}", format!("{n:x}").repeat(32));
+    for _ in 0..10 {
+        let path = format!("{}/shipping-options", cart(1));
         let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
     }
-    let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
+    // Checkout may renew quotes too, so it counts against the same cart.
+    let (status, json) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{}/checkout", cart(1)),
+        Some("{}"),
+    )
+    .await;
     assert_eq!(
         (status, code(&json)),
         (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
     );
+    // Another cart, from the same address (a server-rendered storefront), is unaffected.
+    let path = format!("{}/shipping-options", cart(2));
+    let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
 }
 
 #[tokio::test]

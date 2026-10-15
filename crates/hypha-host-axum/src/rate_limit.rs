@@ -44,10 +44,12 @@ pub enum Rule {
     ResetConfirmIp,
     /// `POST /admin/invites/accept`, per client address.
     InviteIp,
-    /// `GET /storefront/carts/{id}/shipping-options` and `PUT …/shipping/{group_id}`, per
-    /// client address: each may call rate apps for seconds while holding a database
-    /// connection, so a flood would starve the pool (0015, section 9).
-    ShippingQuotesIp,
+    /// `GET /storefront/carts/{id}/shipping-options`, `PUT …/shipping/{group_id}` and
+    /// `POST …/checkout`, per cart: each may call rate apps for seconds while holding a
+    /// database connection, so a flood would starve the pool (0015, section 9). Per cart
+    /// rather than per address, since a server-rendered storefront sends every shopper's
+    /// requests from one address.
+    ShippingQuotesCart,
 }
 
 impl Rule {
@@ -61,7 +63,7 @@ impl Rule {
         Rule::ResetEmailFromIp,
         Rule::ResetConfirmIp,
         Rule::InviteIp,
-        Rule::ShippingQuotesIp,
+        Rule::ShippingQuotesCart,
     ];
 
     /// `(burst, one more every)`: the starting numbers from 0009, section 3.
@@ -76,7 +78,7 @@ impl Rule {
             Rule::ResetIp => (5, Duration::from_secs(60)),
             Rule::ResetEmailFromIp => (3, Duration::from_secs(5 * 60)),
             // A checkout asks a few times; a page polling every second doesn't need to.
-            Rule::ShippingQuotesIp => (30, Duration::from_secs(2)),
+            Rule::ShippingQuotesCart => (10, Duration::from_secs(2)),
         }
     }
 

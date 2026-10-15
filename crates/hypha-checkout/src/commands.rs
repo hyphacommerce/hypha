@@ -1,11 +1,12 @@
 use hypha_cart::{
-    Cart, CartPorts, CartReading, CartRepo, CartStatus, LineStatus, PricedCart, PricedLine,
-    SelectedShipping, ShippingProblem, StageCarts, StoredQuote, group_offers, read_cart,
+    Cart, CartError, CartPorts, CartReading, CartRepo, CartStatus, LineStatus, PricedCart,
+    PricedLine, SelectedShipping, ShippingProblem, StageCarts, StoredQuote, group_offers,
+    read_cart,
 };
 use hypha_core::{
     AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
     IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Money, OrderId,
-    OrderLineId, RepoError, Scope, StageIdempotency, VariantId, earlier_result,
+    OrderLineId, RepoError, Scope, StageIdempotency, VariantId, Version, Versioned, earlier_result,
 };
 use hypha_customers::{Customer, CustomerRepo, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{
@@ -147,7 +148,7 @@ pub async fn checkout<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvide
 
     let mut tries = 1;
     // A quote renewed by an attempt that then lost a race: the next attempt uses it
-    // rather than asking the provider again.
+    // rather than asking the provider again, if the cart hasn't changed since.
     let mut renewed = None;
     loop {
         let e = match attempt(ctx, ports, ids, clock, rates, &input, &mut renewed).await {
@@ -188,7 +189,7 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvider>(
     clock: &C,
     rates: &P,
     input: &Checkout,
-    renewed: &mut Option<SelectedShipping>,
+    renewed: &mut Option<Renewal>,
 ) -> Result<Idempotent<Order>, CommandError> {
     let mut cart = ports
         .carts()
@@ -200,13 +201,6 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvider>(
             cart: input.cart,
             order,
         });
-    }
-
-    if let Some(choice) = renewed.as_ref()
-        && cart.shipping().map(|c| c.option) == Some(choice.option)
-    {
-        cart.select_shipping(Some(choice.clone()))
-            .map_err(hypha_cart::CommandError::from)?;
     }
 
     let reading = read_cart(ports, &cart).await?;
@@ -355,6 +349,13 @@ fn check_shipping(cart: &Cart, priced: &PricedCart) -> Result<(), CommandError> 
     Ok(())
 }
 
+/// A quote renewed for the cart at `version`. Only that version may reuse it: a cart
+/// changed since (other lines, another address, a fresh choice) needs its own quote.
+struct Renewal {
+    version: Version,
+    selection: SelectedShipping,
+}
+
 /// A provider's quote holds 15 minutes (design note 0015, SH9). Past that, the provider
 /// is asked again: the new quote replaces the old on the cart, and a changed price
 /// fails with `total_changed` when the buyer confirmed a total, after storing the new
@@ -366,7 +367,7 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     cart: &mut Cart,
     reading: CartReading,
     input: &Checkout,
-    renewed_quote: &mut Option<SelectedShipping>,
+    carried: &mut Option<Renewal>,
 ) -> Result<CartReading, CommandError> {
     let now = clock.now();
     let Some(choice) = cart.shipping().cloned() else {
@@ -379,28 +380,69 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     if reading.priced.shipping_groups.is_empty() {
         return Ok(reading);
     }
+    let version = cart.version();
+    let selection = match carried.take().filter(|r| r.version == version) {
+        Some(earlier) => earlier.selection,
+        None => match ask_again(cart, &reading, rates, &choice, now).await? {
+            Some(selection) => selection,
+            // The option is built-in now: its price follows the cart without a quote.
+            None => return Ok(reading),
+        },
+    };
+    let amount = selection.quote.as_ref().map_or(old.amount, |q| q.amount);
+    cart.select_shipping(Some(selection.clone()))
+        .map_err(hypha_cart::CommandError::from)?;
+    *carried = Some(Renewal { version, selection });
+    let renewed = read_cart(ports, cart).await?;
+    if amount != old.amount
+        && let Some(expected) = input.expected_total
+        && expected != renewed.priced.total
+    {
+        // Kept, so the buyer's next try sees (and confirms) the new price. Losing a race
+        // here retries the whole checkout, which renews again for the changed cart.
+        ports.carts().update(cart).await?;
+        return Err(CommandError::TotalChanged {
+            expected,
+            actual: renewed.priced.total,
+        });
+    }
+    Ok(renewed)
+}
+
+/// The chosen option's new quote, or `None` when it's built-in now. Only reasons the
+/// option can't be offered become `shipping_option_unavailable` (the buyer picks again);
+/// anything else (storage, money overflow) is reported as itself.
+async fn ask_again<P: RateProvider>(
+    cart: &Cart,
+    reading: &CartReading,
+    rates: &P,
+    choice: &SelectedShipping,
+    now: hypha_core::Timestamp,
+) -> Result<Option<SelectedShipping>, CommandError> {
     let unavailable =
         || CommandError::ShippingUnavailable(ShippingProblem::OptionUnavailable(choice.option));
-    // The zone gone, the address cleared: to the buyer, the option they chose is gone and
-    // they pick again (`shipping_option_unavailable`), whatever the cause.
-    let offers = match group_offers(cart, &reading, rates).await {
+    let offers = match group_offers(cart, reading, rates).await {
         Ok(offers) => offers,
-        Err(hypha_cart::CommandError::Repo(e)) => return Err(e.into()),
-        Err(_) => return Err(unavailable()),
+        // No zone serves the country any more: to the buyer, the option is gone.
+        Err(hypha_cart::CommandError::NoShippingToCountry(_)) => return Err(unavailable()),
+        Err(hypha_cart::CommandError::Cart(CartError::ShippingAddressRequired)) => {
+            return Err(CommandError::ShippingAddressRequired(cart.id()));
+        }
+        Err(e) => return Err(e.into()),
     };
-    let renewed = offers.iter().flat_map(|g| &g.offers).find_map(|o| match o {
-        OfferOutcome::Offered(offer) if offer.option == choice.option => Some(offer),
-        _ => None,
-    });
-    let Some(offer) = renewed else {
-        return Err(unavailable());
-    };
+    let offer = offers
+        .iter()
+        .flat_map(|g| &g.offers)
+        .find_map(|o| match o {
+            OfferOutcome::Offered(offer) if offer.option == choice.option => Some(offer),
+            _ => None,
+        })
+        .ok_or_else(unavailable)?;
     let Some(source) = &offer.quote else {
-        // The option is built-in now: its price follows the cart without a quote.
-        return Ok(reading);
+        return Ok(None);
     };
     let amount = hypha_core::Price::new(offer.amount).map_err(hypha_cart::CommandError::from)?;
-    let selection = SelectedShipping {
+    Ok(Some(SelectedShipping {
         option: choice.option,
         quote: Some(StoredQuote {
             amount,
@@ -409,23 +451,7 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
             reference: source.reference.clone(),
             quoted_at: now,
         }),
-    };
-    cart.select_shipping(Some(selection.clone()))
-        .map_err(hypha_cart::CommandError::from)?;
-    *renewed_quote = Some(selection);
-    let renewed = read_cart(ports, cart).await?;
-    if amount != old.amount
-        && let Some(expected) = input.expected_total
-        && expected != renewed.priced.total
-    {
-        // Kept, so the buyer's next try sees (and confirms) the new price.
-        ports.carts().update(cart).await?;
-        return Err(CommandError::TotalChanged {
-            expected,
-            actual: renewed.priced.total,
-        });
-    }
-    Ok(renewed)
+    }))
 }
 
 /// The groups' choices as the order keeps them (design note 0015, SH12), each naming the

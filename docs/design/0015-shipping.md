@@ -232,8 +232,10 @@ pub trait RateProvider {
   provider rates quoted now) and estimate, and the options that couldn't be offered with
   a reason (`provider_failed`, `weight_unknown`, `no_price_in_currency`,
   `service_not_quoted`, `backup_not_needed`). Provider calls for one cart run
-  concurrently, each under its timeout. It and selecting are rate limited per client
-  address (`Rule::ShippingQuotesIp`), since each may wait on rate apps.
+  concurrently, each under its timeout. It, selecting and checkout are rate limited per
+  cart (`Rule::ShippingQuotesCart`), since each may wait on rate apps; per cart rather
+  than per address, because a server-rendered storefront sends every shopper's requests
+  from one address.
 - `PUT /storefront/carts/{id}/shipping/{group}` `{"option": "shipopt_…"}` selects one.
   For a provider option the quote is stored on the cart (amount, reference, quoted at).
 - **Priced carts** include the selected option: built-in prices are recomputed on every
@@ -247,8 +249,10 @@ pub trait RateProvider {
 - **Backup options** (`is_backup`) are offered only when no regular option of the zone
   is, whether those are disabled, failing or missing, so a carrier's outage (or a
   merchant switching options off) doesn't stop sales. Otherwise they're listed as
-  `backup_not_needed`, and selecting one says so (409). A provider only backups use is
-  asked only when the backups are needed.
+  `backup_not_needed`, and selecting one says so (409). Built-in prices are computed
+  first: when a regular built-in option is offered, providers only backups use aren't
+  asked; otherwise every provider is asked at once, so a regular provider's timeout
+  isn't followed by a second wait for the backups'.
 
 ## 7. Carts, tax and orders
 
@@ -305,8 +309,9 @@ weight and "requires shipping" in the product page's variant table.
   0017, and a quote's `reference` buys its label.
 - **Rate apps without a held connection.** Offers, selecting and checkout call rate apps
   (up to 10 s each) while the request holds its pooled Postgres connection, so slow apps
-  under load can starve the pool for every route. For now a per-address rate limit
-  bounds the storefront routes (§6). The fix: read the cart, release the connection,
+  under load can starve the pool for every route. For now a per-cart rate limit
+  bounds the storefront routes (§6); it doesn't bound a flood of new carts (cart
+  creation has no limit yet either). The fix: read the cart, release the connection,
   call the apps, then take a connection again to write (re-checking the cart's version,
   as checkout's retry already does). It changes how hosts hand ports to these commands
   (two short borrows instead of one per request), so it's its own change.

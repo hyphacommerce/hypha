@@ -17,8 +17,9 @@ use super::{
     shipping::DeliveryEstimateDto,
 };
 use crate::{
-    error::ApiError,
+    error::{ApiError, ApiErrorBody},
     extract::{Caller, KeyedJson, PathId, Storefront, idempotent_response},
+    rate_limit::{self, Rule},
     state::{SharedState, Storage},
 };
 
@@ -216,7 +217,7 @@ impl From<&OrderLine> for OrderLineResponse {
     path = "/storefront/carts/{id}/checkout",
     params(("id" = CartId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CheckoutRequest,
-    responses((status = 201, description = "Created", body = OrderResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`.")))),
+    responses((status = 201, description = "Created", body = OrderResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub(super) async fn checkout_handler<S: Storage>(
@@ -225,6 +226,8 @@ pub(super) async fn checkout_handler<S: Storage>(
     PathId(cart): PathId<CartId>,
     req: KeyedJson<CheckoutRequest>,
 ) -> Result<Response, ApiError> {
+    // Renewing an expired quote calls rate apps, like asking for options.
+    rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &cart.to_string()).await?;
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = req.parse()?;
     let input = Checkout {
