@@ -47,7 +47,7 @@ impl From<PostalAddressRequest> for AddressParts {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct PostalAddressResponse {
+pub(crate) struct PostalAddressResponse {
     first_name: Option<String>,
     last_name: String,
     company: Option<String>,

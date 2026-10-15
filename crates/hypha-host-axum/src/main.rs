@@ -219,6 +219,13 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         store: store.id(),
         store_name: store.name().to_string(),
         media,
+        http: match state::rate_callback_client() {
+            Ok(client) => client,
+            Err(e) => {
+                tracing::error!("{e}");
+                std::process::exit(1);
+            }
+        },
     });
     if let Err(e) = ensure_owner(&state).await {
         tracing::error!("owner setup failed: {e}");

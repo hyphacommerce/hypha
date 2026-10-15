@@ -108,6 +108,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/carts/{id}/shipping-address": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Sets where the cart ships. */
+        put: operations["storefront.carts.set_address"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/carts/{id}/shipping-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What each shipping group can pick, priced now: built-in rates computed, rate
+         *     providers asked. Needs a shipping address and a zone for the cart's country.
+         */
+        get: operations["storefront.carts.shipping_options"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/carts/{id}/shipping/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Picks a group's shipping option. A provider's price is kept with the choice for 15
+         *     minutes; checkout asks again after that.
+         */
+        put: operations["storefront.carts.select"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/products/{id}": {
         parameters: {
             query?: never;
@@ -179,9 +236,22 @@ export interface components {
             /** @description Picked from the country when the cart was created; it sets the currency. */
             market: components["schemas"]["MarketId"];
             order?: components["schemas"]["OrderId"] | null;
+            shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
+            /**
+             * @description The groups of lines that ship together, each needing a chosen option before
+             *     checkout; empty when nothing ships.
+             */
+            shipping_groups: components["schemas"]["ShippingGroupResponse"][];
+            /** @description Whether every group has an option priced now (checkout requires it). */
+            shipping_ready: boolean;
+            /** @description The chosen shipping, priced now; zero until chosen. Part of `total`. */
+            shipping_total: components["schemas"]["Money"];
             /** @description Sum of the available lines, as priced. All totals count available lines only. */
             subtotal: components["schemas"]["Money"];
-            /** @description Tax on the available lines: part of `subtotal` if `taxes_included`, else on top. */
+            /**
+             * @description Tax on the available lines and on shipping: part of `subtotal` and
+             *     `shipping_total` if `taxes_included`, else on top.
+             */
             tax_total: components["schemas"]["Money"];
             /** @description Whether line prices include tax (set on the market). */
             taxes_included: boolean;
@@ -207,6 +277,13 @@ export interface components {
          * @example cus_0190f1a2b3c47d8e9f00112233445566
          */
         CustomerId: string;
+        /** @description Delivery in days, from `min_days` to `max_days`. */
+        DeliveryEstimateDto: {
+            /** Format: int32 */
+            max_days: number;
+            /** Format: int32 */
+            min_days: number;
+        };
         /**
          * Format: email
          * @description An email address; stored trimmed and lowercased, so responses show it that way.
@@ -236,6 +313,16 @@ export interface components {
          * @enum {string}
          */
         FulfillmentStatusDto: "unfulfilled";
+        GroupOffersResponse: {
+            group: components["schemas"]["ShippingGroupId"];
+            /** @description What the buyer can pick, in the store's order, priced now. */
+            offers: components["schemas"]["OfferResponse"][];
+            /**
+             * @description Options of the zone not offered right now, and why: for diagnostics, never shown
+             *     as choices.
+             */
+            unavailable: components["schemas"]["UnavailableOptionResponse"][];
+        };
         LineResponse: components["schemas"]["LineState"] & {
             product: components["schemas"]["ProductId"];
             /**
@@ -284,6 +371,14 @@ export interface components {
             /** @enum {string} */
             currency: "EUR" | "USD" | "RSD";
         };
+        OfferResponse: {
+            /** @description Before tax if the market's prices exclude it. */
+            amount: components["schemas"]["Money"];
+            code: string;
+            estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
+            name: string;
+            option: components["schemas"]["ShippingOptionId"];
+        };
         /**
          * @description A OrderId: `ord_` and 32 hex digits.
          * @example ord_0190f1a2b3c47d8e9f00112233445566
@@ -326,18 +421,71 @@ export interface components {
             number: number;
             /** @description RFC 3339, UTC. */
             placed_at: string;
+            shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
+            /** @description How each group of lines ships, as charged. */
+            shipping_lines: components["schemas"]["OrderShippingLineResponse"][];
+            /** @description What shipping was charged, as part of `total`. */
+            shipping_total: components["schemas"]["Money"];
             subtotal: components["schemas"]["Money"];
-            /** @description Part of `subtotal` if `taxes_included`, else on top. */
+            /**
+             * @description Tax on lines and shipping: part of `subtotal` and `shipping_total` if
+             *     `taxes_included`, else on top.
+             */
             tax_total: components["schemas"]["Money"];
             /** @description Whether line prices include tax (the market decided, at checkout). */
             taxes_included: boolean;
             total: components["schemas"]["Money"];
+        };
+        OrderShippingLineResponse: {
+            amount: components["schemas"]["Money"];
+            code: string;
+            estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
+            group: components["schemas"]["ShippingGroupId"];
+            /** @description The order lines this ships. */
+            lines: components["schemas"]["OrderLineId"][];
+            name: string;
+            option: components["schemas"]["ShippingOptionId"];
+            /** @description `app_…` or `spore_…`; `null` for a built-in rate. */
+            provider?: string | null;
+            /** @description The provider's quote ID. */
+            reference?: string | null;
+            service?: string | null;
+            tax?: components["schemas"]["OrderTaxResponse"] | null;
         };
         OrderTaxResponse: {
             amount: components["schemas"]["Money"];
             /** @description Parts per million: 250000 = 25%. */
             rate_ppm: components["schemas"]["TaxRate"];
             tax_class?: components["schemas"]["TaxClassId"] | null;
+        };
+        /**
+         * @description Sent: checked by `Address::new` (last name, first line and city required; text is
+         *     trimmed, at most 255 characters per field).
+         */
+        PostalAddressRequest: {
+            city: string;
+            company?: string | null;
+            /** @description ISO 3166-1 alpha-2, e.g. `HR`. */
+            country: string;
+            first_name?: string | null;
+            last_name: string;
+            line1: string;
+            line2?: string | null;
+            phone?: string | null;
+            postal_code?: string | null;
+            province?: string | null;
+        };
+        PostalAddressResponse: {
+            city: string;
+            company?: string | null;
+            country: components["schemas"]["CountryCode"];
+            first_name?: string | null;
+            last_name: string;
+            line1: string;
+            line2?: string | null;
+            phone?: string | null;
+            postal_code?: string | null;
+            province?: string | null;
         };
         /**
          * @description A ProductId: `prod_` and 32 hex digits.
@@ -373,6 +521,23 @@ export interface components {
             /** Format: int32 */
             width?: number | null;
         };
+        SelectShippingRequest: {
+            /** @description One of the group's offers. */
+            option: components["schemas"]["ShippingOptionId"];
+        };
+        SelectedShippingResponse: {
+            amount: components["schemas"]["Money"];
+            code: string;
+            estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
+            name: string;
+            option: components["schemas"]["ShippingOptionId"];
+            /**
+             * @description RFC 3339: for a provider's rate, when checkout asks the provider again (and may
+             *     answer `total_changed`). `null` for built-in rates, which are always current.
+             */
+            quote_expires_at?: string | null;
+            tax?: components["schemas"]["TaxLineResponse"] | null;
+        };
         SetEmailRequest: {
             /** @description `null` clears it. */
             email?: string | null;
@@ -383,6 +548,35 @@ export interface components {
              * @description At least 1; `DELETE` the line to take it out.
              */
             quantity: number;
+        };
+        SetShippingAddressRequest: {
+            address?: components["schemas"]["PostalAddressRequest"] | null;
+        };
+        /**
+         * @description A ShippingGroupId: `shgrp_` and 32 hex digits.
+         * @example shgrp_0190f1a2b3c47d8e9f00112233445566
+         */
+        ShippingGroupId: string;
+        ShippingGroupResponse: {
+            /** @description Stable for the cart: what `PUT …/shipping/{group_id}` names. */
+            id: components["schemas"]["ShippingGroupId"];
+            /** @description The available lines that ship in this group. */
+            lines: components["schemas"]["VariantId"][];
+            /**
+             * @description Why the chosen option can't be charged now; pick again from the offers.
+             *     `shipping_option_unavailable`, `no_price_in_currency`, `weight_unknown`, or a money
+             *     error code.
+             */
+            problem?: string | null;
+            selected?: components["schemas"]["SelectedShippingResponse"] | null;
+        };
+        /**
+         * @description A ShippingOptionId: `shipopt_` and 32 hex digits.
+         * @example shipopt_0190f1a2b3c47d8e9f00112233445566
+         */
+        ShippingOptionId: string;
+        ShippingOptionsResponse: {
+            groups: components["schemas"]["GroupOffersResponse"][];
         };
         /**
          * @description A product as a storefront sees it (design note 0010, S5): active products only, without
@@ -425,6 +619,12 @@ export interface components {
          * @description A tax rate in parts per million: 250000 is 25 %.
          */
         TaxRate: number;
+        UnavailableOptionResponse: {
+            name: string;
+            option: components["schemas"]["ShippingOptionId"];
+            /** @description `no_price_in_currency`, `weight_unknown`, `provider_failed` or `service_not_quoted`. */
+            reason: string;
+        };
         /**
          * @description A VariantId: `var_` and 32 hex digits.
          * @example var_0190f1a2b3c47d8e9f00112233445566
@@ -1105,6 +1305,288 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.carts.set_address": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CartId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetShippingAddressRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.carts.shipping_options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CartId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShippingOptionsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.carts.select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CartId"];
+                group_id: components["schemas"]["ShippingGroupId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelectShippingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

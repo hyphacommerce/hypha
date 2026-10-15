@@ -105,6 +105,10 @@ address() { sed -E 's/.*"addresses":\[\{"id":"(addr_[0-9a-f]+)".*/\1/' <<<"$BODY
 customer() { sed -E 's/.*"customer":"(cus_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 # The "token" of the last response (a session, a challenge or a new key).
 token() { sed -E 's/.*"token":"(hypha_[a-z]+_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
+# The last shipping option's id in the last zone response.
+shipopt() { sed -E 's/.*"id":"(shipopt_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
+# The first shipping group's id of the last cart response.
+shgrp() { sed -E 's/.*"shipping_groups":\[\{"id":"(shgrp_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 # The first variant's id of the last product response.
 variant() { sed -E 's/.*"variants":\[[^]]*"id":"(var_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 
@@ -308,12 +312,73 @@ contains "the retry didn't add the mugs again" '"quantity":2,'
 replayed "the add retry is marked replayed" -X POST "$BASE/storefront/carts/$KEYED/lines" -H "$JSON" \
     -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 
+echo "## shipping (design note 0015)"
+step "a zone for Croatia and Germany" 201 - -X POST "$BASE/admin/shipping-zones" -H "$JSON" \
+    -d '{"name":"Eurozone","countries":["HR","DE"]}'
+ZONE=$(id)
+OPTIONS="$BASE/admin/shipping-zones/$ZONE/options"
+step "a country in two zones" 409 country_in_other_zone -X POST "$BASE/admin/shipping-zones" -H "$JSON" \
+    -d '{"name":"Again","countries":["HR"]}'
+step "standard: 4.90, free from 10 EUR" 201 - -X POST "$OPTIONS" -H "$JSON" \
+    -d '{"name":"Standard","code":"standard","rate":{"type":"builtin","basis":"subtotal","tables":[{"currency":"EUR","tiers":[{"up_to":1000,"amount":490},{"amount":0}]}]},"estimate":{"min_days":2,"max_days":4}}'
+STANDARD=$(shipopt)
+step "a last tier with a bound" 422 invalid_shipping_rate -X POST "$OPTIONS" -H "$JSON" \
+    -d '{"name":"Bad","code":"bad","rate":{"type":"builtin","basis":"weight","tables":[{"currency":"EUR","tiers":[{"up_to":1000,"amount":490}]}]}}'
+step "a second option with the same code" 422 shipping_option_code_taken -X POST "$OPTIONS" -H "$JSON" \
+    -d '{"name":"Again","code":"standard","rate":{"type":"builtin","basis":"flat","tables":[{"currency":"EUR","tiers":[{"amount":100}]}]}}'
+step "a rate app, unreachable" 201 - -X POST "$BASE/admin/shipping-providers" -H "$JSON" \
+    -d '{"key":"app_courier","name":"Courier","callback_url":"http://127.0.0.1:9/rates","timeout_ms":500}'
+contains "its secret is shown once" '"secret":"hypha_shs_'
+step "the same key again" 409 shipping_provider_exists -X POST "$BASE/admin/shipping-providers" -H "$JSON" \
+    -d '{"key":"app_courier","name":"Courier","callback_url":"http://127.0.0.1:9/rates"}'
+step "a callback over plain HTTP elsewhere" 422 invalid_callback_url -X POST "$BASE/admin/shipping-providers" -H "$JSON" \
+    -d '{"key":"app_plain","name":"Plain","callback_url":"http://rates.example.com"}'
+step "get the provider" 200 - "$BASE/admin/shipping-providers/app_courier"
+contains "without its secret" '"key":"app_courier","name":"Courier","callback_url":"http://127.0.0.1:9/rates","timeout_ms":500,"services":[],"enabled":true}'
+step "its services, unreachable" 502 shipping_provider_failed "$BASE/admin/shipping-providers/app_courier/services"
+step "express by the courier" 201 - -X POST "$OPTIONS" -H "$JSON" \
+    -d '{"name":"Express","code":"express","rate":{"type":"provider","provider":"app_courier","service":"express"}}'
+step "post, the backup" 201 - -X POST "$OPTIONS" -H "$JSON" \
+    -d '{"name":"Post","code":"post","is_backup":true,"rate":{"type":"builtin","basis":"flat","tables":[{"currency":"EUR","tiers":[{"amount":300}]}]}}'
+step "list zones" 200 - "$BASE/admin/shipping-zones"
+contains "with three options" '"code":"standard"'
+
+step "a shipping cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+SHIP_CART=$(id)
+SHIP="$BASE/storefront/carts/$SHIP_CART"
+step "add a mug" 200 - -X POST "$SHIP/lines" -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+contains "it ships in one group, not chosen yet" '"selected":null,"problem":null}],"shipping_ready":false'
+SHGRP=$(shgrp)
+step "offers need an address" 409 shipping_address_required "$SHIP/shipping-options"
+step "an address in Slovenia" 422 address_country_mismatch -X PUT "$SHIP/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Novak","line1":"Slovenska 1","city":"Ljubljana","country":"SI"}}'
+step "ship to Zagreb" 200 - -X PUT "$SHIP/shipping-address" -H "$JSON" \
+    -d '{"address":{"first_name":"Ana","last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+contains "the cart has the address" '"city":"Zagreb"'
+step "the offers" 200 - "$SHIP/shipping-options"
+contains "standard costs 4.90 under 10 EUR" '"code":"standard","name":"Standard","amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
+contains "the courier is down, so the backup shows" '"code":"post","name":"Post","amount":{"amount":300'
+contains "and express says why" '"name":"Express","reason":"provider_failed"'
+step "an unknown option" 422 shipping_option_unknown -X PUT "$SHIP/shipping/$SHGRP" -H "$JSON" \
+    -d '{"option":"shipopt_00000000000000000000000000000000"}'
+step "an unknown group" 404 shipping_group_not_found -X PUT "$SHIP/shipping/shgrp_00000000000000000000000000000000" \
+    -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+step "an email" 200 - -X PUT "$SHIP/email" -H "$JSON" -d '{"email":"shipping@example.hr"}'
+step "checkout before choosing" 409 shipping_option_required -X POST "$SHIP/checkout" -H "$JSON" -d '{}'
+step "pick standard" 200 - -X PUT "$SHIP/shipping/$SHGRP" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+contains "shipping is in the total" '"subtotal":{"amount":900,"currency":"EUR"},"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
+contains "and ready" '"shipping_ready":true'
+
 echo "## checkout"
 CHECKOUT="$BASE/storefront/carts/$KEYED/checkout"
 step "checkout an unknown cart" 404 cart_not_found -X POST \
     "$BASE/storefront/carts/cart_00000000000000000000000000000063/checkout" -H "$JSON" -d '{}'
 step "checkout with an unknown field" 422 invalid_body -X POST "$CHECKOUT" -H "$JSON" \
     -d '{"total":1}'
+step "ship the keyed cart to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$KEYED/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+step "standard, free from 10 EUR" 200 - -X PUT "$BASE/storefront/carts/$KEYED/shipping/$(shgrp)" -H "$JSON" \
+    -d "{\"option\":\"$STANDARD\"}"
 step "checkout without an email" 409 cart_email_missing -X POST "$CHECKOUT" -H "$JSON" -d '{}'
 step "give the cart an email" 200 - -X PUT "$BASE/storefront/carts/$KEYED/email" -H "$JSON" \
     -d '{"email":"checkout@example.hr"}'
@@ -358,6 +423,10 @@ step "an order ID of the wrong kind" 400 invalid_path "$BASE/admin/orders/$CART"
 step "a new cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 contains "an open cart has no order" '"order":null'
 step "checkout an empty cart" 409 cart_empty -X POST "$BASE/storefront/carts/$(id)/checkout" -H "$JSON" -d '{}'
+step "checkout the shipping cart" 201 - -X POST "$SHIP/checkout" -H "$JSON" -d '{}'
+contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
+contains "it copies the address" '"shipping_address":{"first_name":"Ana","last_name":"Horvat"'
+contains "and the shipping line" '"code":"standard","name":"Standard","provider":null,"service":null,"reference":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
 
 step "archive mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
 step "get cart" 200 - "$BASE/storefront/carts/$CART"
@@ -398,10 +467,10 @@ TAX_CART=$(id)
 step "add 2 books" 200 - -X POST "$BASE/storefront/carts/$TAX_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$BOOK_VAR\",\"quantity\":2}"
 contains "book line pays 5% of 1800" "\"tax\":{\"rate_ppm\":50000,\"amount\":{\"amount\":90,\"currency\":\"EUR\"},\"tax_class\":\"$BOOKS\"}"
-contains "tax is added on top" '"taxes_included":false,"subtotal":{"amount":1800,"currency":"EUR"},"tax_total":{"amount":90,"currency":"EUR"},"total":{"amount":1890'
+contains "tax is added on top" '"taxes_included":false,"subtotal":{"amount":1800,"currency":"EUR"},"shipping_total":{"amount":0,"currency":"EUR"},"tax_total":{"amount":90,"currency":"EUR"},"total":{"amount":1890'
 step "prices include tax" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
 step "get taxed cart" 200 - "$BASE/storefront/carts/$TAX_CART"
-contains "tax is extracted (1800 x 5/105 = 85.7)" '"taxes_included":true,"subtotal":{"amount":1800,"currency":"EUR"},"tax_total":{"amount":86,"currency":"EUR"},"total":{"amount":1800'
+contains "tax is extracted (1800 x 5/105 = 85.7)" '"taxes_included":true,"subtotal":{"amount":1800,"currency":"EUR"},"shipping_total":{"amount":0,"currency":"EUR"},"tax_total":{"amount":86,"currency":"EUR"},"total":{"amount":1800'
 step "remove books rate" 200 - -X DELETE "$BASE/admin/tax-regions/$REGION/class-rates/$BOOKS"
 contains "no class rates left" '"class_rates":[]'
 step "get taxed cart" 200 - "$BASE/storefront/carts/$TAX_CART"
@@ -507,11 +576,15 @@ step "add a book" 200 - -X POST "$BASE/storefront/carts/$SHOP_CART/lines" -H "$J
     -d "{\"variant\":\"$BOOK_VAR\",\"quantity\":1}"
 step "a guest's email" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
+step "ship to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+step "standard (free)" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/shipping/$(shgrp)" -H "$JSON" \
+    -d "{\"option\":\"$STANDARD\"}"
 step "checkout" 201 - -X POST "$BASE/storefront/carts/$SHOP_CART/checkout" -H "$JSON" -d '{}'
 SHOP_ORDER=$(id)
 GUEST=$(customer)
 contains "the order copies the tax line" '"tax":{"rate_ppm":130000,"amount":{"amount":117,"currency":"EUR"},"tax_class":null}'
-contains "and adds tax on top" '"subtotal":{"amount":2700,"currency":"EUR"},"tax_total":{"amount":351,"currency":"EUR"},"total":{"amount":3051'
+contains "and adds tax on top" '"subtotal":{"amount":2700,"currency":"EUR"},"shipping_total":{"amount":0,"currency":"EUR"},"tax_total":{"amount":351,"currency":"EUR"},"total":{"amount":3051'
 step "the guest became a customer" 200 - "$BASE/admin/customers/$GUEST"
 contains "with the cart's email" '"email":"guest@example.hr"'
 step "the lamps are reserved" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
@@ -524,6 +597,10 @@ step "add 3 lamps" 200 - -X POST "$BASE/storefront/carts/$AGAIN_CART/lines" -H "
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":3}"
 step "same email" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
+step "ship to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+step "standard (free)" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/shipping/$(shgrp)" -H "$JSON" \
+    -d "{\"option\":\"$STANDARD\"}"
 step "a lamp broke (4 on hand, 2 reserved)" 200 - -X PUT \
     "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":4,"expected_on_hand":5}'
 step "checkout with too few lamps" 409 cart_unavailable -X POST "$BASE/storefront/carts/$AGAIN_CART/checkout" \

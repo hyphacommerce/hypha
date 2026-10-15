@@ -1,15 +1,22 @@
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_cart::{
-    AddLine, CreateCart, LineStatus, PricedCart, SetLineQuantity, add_line, create_cart,
-    remove_cart_line, set_cart_customer, set_cart_email, set_line_quantity,
+    AddLine, CreateCart, GroupOffers, LineStatus, PricedCart, PricedShippingGroup, SetLineQuantity,
+    add_line, create_cart, remove_cart_line, select_shipping, set_cart_customer, set_cart_email,
+    set_line_quantity, set_shipping_address, shipping_offers,
 };
 use hypha_core::{
     CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, OrderId,
-    ProductId, TaxClassId, TaxRate, VariantId,
+    ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
+use hypha_shipping::{HasAppProviders, OfferOutcome};
 use hypha_tax::TaxLine;
 use serde::{Deserialize, Serialize};
 
+use super::{
+    address::{PostalAddressRequest, PostalAddressResponse},
+    rfc3339,
+    shipping::DeliveryEstimateDto,
+};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, KeyedJson, PathId, Storefront, idempotent_response},
@@ -61,13 +68,71 @@ pub(super) struct CartResponse {
     taxes_included: bool,
     /// Sum of the available lines, as priced. All totals count available lines only.
     subtotal: Money,
-    /// Tax on the available lines: part of `subtotal` if `taxes_included`, else on top.
+    /// The chosen shipping, priced now; zero until chosen. Part of `total`.
+    shipping_total: Money,
+    /// Tax on the available lines and on shipping: part of `subtotal` and
+    /// `shipping_total` if `taxes_included`, else on top.
     tax_total: Money,
     /// What the buyer pays.
     total: Money,
     /// False when any line is unavailable; checkout should refuse such a cart.
     fully_available: bool,
     lines: Vec<LineResponse>,
+    /// Where it ships: in the cart's country. Required at checkout when something ships.
+    shipping_address: Option<PostalAddressResponse>,
+    /// The groups of lines that ship together, each needing a chosen option before
+    /// checkout; empty when nothing ships.
+    shipping_groups: Vec<ShippingGroupResponse>,
+    /// Whether every group has an option priced now (checkout requires it).
+    shipping_ready: bool,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct ShippingGroupResponse {
+    /// Stable for the cart: what `PUT …/shipping/{group_id}` names.
+    id: ShippingGroupId,
+    /// The available lines that ship in this group.
+    lines: Vec<VariantId>,
+    /// The buyer's choice at its price now; `null` until chosen, or when `problem` is set.
+    selected: Option<SelectedShippingResponse>,
+    /// Why the chosen option can't be charged now; pick again from the offers.
+    /// `shipping_option_unavailable`, `no_price_in_currency`, `weight_unknown`, or a money
+    /// error code.
+    problem: Option<&'static str>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct SelectedShippingResponse {
+    option: ShippingOptionId,
+    code: String,
+    name: String,
+    amount: Money,
+    /// `null` when the cart's country has no tax rates.
+    tax: Option<TaxLineResponse>,
+    estimate: Option<DeliveryEstimateDto>,
+    /// RFC 3339: for a provider's rate, when checkout asks the provider again (and may
+    /// answer `total_changed`). `null` for built-in rates, which are always current.
+    quote_expires_at: Option<String>,
+}
+
+impl From<&PricedShippingGroup> for ShippingGroupResponse {
+    fn from(g: &PricedShippingGroup) -> Self {
+        Self {
+            id: g.id,
+            lines: g.lines.clone(),
+            selected: g.selected.as_ref().map(|s| SelectedShippingResponse {
+                option: s.option,
+                code: s.code.clone(),
+                name: s.name.clone(),
+                amount: s.amount,
+                tax: s.tax.as_ref().map(TaxLineResponse::from),
+                estimate: s.estimate.map(Into::into),
+                // A clock reading plus 15 minutes is always in RFC 3339's range.
+                quote_expires_at: s.quote.as_ref().and_then(|q| rfc3339(q.expires_at()).ok()),
+            }),
+            problem: g.problem.as_ref().map(|p| p.code()),
+        }
+    }
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -132,9 +197,16 @@ impl From<&PricedCart> for CartResponse {
             order: cart.order,
             taxes_included: cart.taxes_included,
             subtotal: cart.subtotal,
+            shipping_total: cart.shipping_total,
             tax_total: cart.tax_total,
             total: cart.total,
             fully_available: cart.is_fully_available(),
+            shipping_address: cart
+                .shipping_address
+                .as_ref()
+                .map(PostalAddressResponse::from),
+            shipping_groups: cart.shipping_groups.iter().map(Into::into).collect(),
+            shipping_ready: cart.is_shipping_ready(),
             lines: cart
                 .lines
                 .iter()
@@ -337,5 +409,152 @@ pub(super) async fn remove_line<S: Storage>(
     let priced = remove_cart_line(&ctx, &ports, id, variant)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
+    Ok(Json(CartResponse::from(&priced)))
+}
+
+// ---------- shipping (design note 0015) ----------
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SetShippingAddressRequest {
+    /// In the cart's country; `null` clears it. A new address drops the chosen shipping.
+    address: Option<PostalAddressRequest>,
+}
+
+/// Sets where the cart ships.
+#[utoipa::path(
+    put,
+    path = "/storefront/carts/{id}/shipping-address",
+    params(("id" = CartId, Path)),
+    request_body = SetShippingAddressRequest,
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
+pub(super) async fn set_address<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<CartId>,
+    body: JsonBody<SetShippingAddressRequest>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let priced = set_shipping_address(&ctx, &ports, id, req.address.map(Into::into)).await?;
+    Ok(Json(CartResponse::from(&priced)))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct ShippingOptionsResponse {
+    groups: Vec<GroupOffersResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct GroupOffersResponse {
+    group: ShippingGroupId,
+    /// What the buyer can pick, in the store's order, priced now.
+    offers: Vec<OfferResponse>,
+    /// Options of the zone not offered right now, and why: for diagnostics, never shown
+    /// as choices.
+    unavailable: Vec<UnavailableOptionResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct OfferResponse {
+    option: ShippingOptionId,
+    code: String,
+    name: String,
+    /// Before tax if the market's prices exclude it.
+    amount: Money,
+    estimate: Option<DeliveryEstimateDto>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct UnavailableOptionResponse {
+    option: ShippingOptionId,
+    name: String,
+    /// `no_price_in_currency`, `weight_unknown`, `provider_failed` or `service_not_quoted`.
+    reason: &'static str,
+}
+
+impl From<&GroupOffers> for GroupOffersResponse {
+    fn from(g: &GroupOffers) -> Self {
+        let mut offers = Vec::new();
+        let mut unavailable = Vec::new();
+        for outcome in &g.offers {
+            match outcome {
+                OfferOutcome::Offered(o) => offers.push(OfferResponse {
+                    option: o.option,
+                    code: o.code.clone(),
+                    name: o.name.clone(),
+                    amount: o.amount,
+                    estimate: o.estimate.map(Into::into),
+                }),
+                OfferOutcome::NotOffered {
+                    option,
+                    name,
+                    reason,
+                } => unavailable.push(UnavailableOptionResponse {
+                    option: *option,
+                    name: name.clone(),
+                    reason: reason.code(),
+                }),
+            }
+        }
+        Self {
+            group: g.group,
+            offers,
+            unavailable,
+        }
+    }
+}
+
+/// What each shipping group can pick, priced now: built-in rates computed, rate
+/// providers asked. Needs a shipping address and a zone for the cart's country.
+#[utoipa::path(
+    get,
+    path = "/storefront/carts/{id}/shipping-options",
+    params(("id" = CartId, Path)),
+    responses((status = 200, description = "OK", body = ShippingOptionsResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:read"]))),
+)]
+pub(super) async fn shipping_options<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<CartId>,
+) -> Result<Json<ShippingOptionsResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let rates = state.rates(ports.app_providers());
+    let groups = shipping_offers(&ctx, &ports, &rates, id).await?;
+    Ok(Json(ShippingOptionsResponse {
+        groups: groups.iter().map(Into::into).collect(),
+    }))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SelectShippingRequest {
+    /// One of the group's offers.
+    option: ShippingOptionId,
+}
+
+/// Picks a group's shipping option. A provider's price is kept with the choice for 15
+/// minutes; checkout asks again after that.
+#[utoipa::path(
+    put,
+    path = "/storefront/carts/{id}/shipping/{group_id}",
+    params(("id" = CartId, Path), ("group_id" = ShippingGroupId, Path)),
+    request_body = SelectShippingRequest,
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
+pub(super) async fn select<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId((id, group)): PathId<(CartId, ShippingGroupId)>,
+    body: JsonBody<SelectShippingRequest>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let rates = state.rates(ports.app_providers());
+    let priced = select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;
     Ok(Json(CartResponse::from(&priced)))
 }

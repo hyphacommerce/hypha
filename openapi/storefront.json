@@ -954,6 +954,381 @@
         ]
       }
     },
+    "/storefront/carts/{id}/shipping-address": {
+      "put": {
+        "tags": [
+          "carts"
+        ],
+        "summary": "Sets where the cart ships.",
+        "operationId": "storefront.carts.set_address",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetShippingAddressRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/shipping-options": {
+      "get": {
+        "tags": [
+          "carts"
+        ],
+        "summary": "What each shipping group can pick, priced now: built-in rates computed, rate\nproviders asked. Needs a shipping address and a zone for the cart's country.",
+        "operationId": "storefront.carts.shipping_options",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingOptionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "carts:read"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/shipping/{group_id}": {
+      "put": {
+        "tags": [
+          "carts"
+        ],
+        "summary": "Picks a group's shipping option. A provider's price is kept with the choice for 15\nminutes; checkout asks again after that.",
+        "operationId": "storefront.carts.select",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          },
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingGroupId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectShippingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
     "/storefront/products/{id}": {
       "get": {
         "tags": [
@@ -1157,10 +1532,13 @@
           "country",
           "taxes_included",
           "subtotal",
+          "shipping_total",
           "tax_total",
           "total",
           "fully_available",
-          "lines"
+          "lines",
+          "shipping_groups",
+          "shipping_ready"
         ],
         "properties": {
           "country": {
@@ -1219,13 +1597,39 @@
               }
             ]
           },
+          "shipping_address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressResponse",
+                "description": "Where it ships: in the cart's country. Required at checkout when something ships."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipping_groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShippingGroupResponse"
+            },
+            "description": "The groups of lines that ship together, each needing a chosen option before\ncheckout; empty when nothing ships."
+          },
+          "shipping_ready": {
+            "type": "boolean",
+            "description": "Whether every group has an option priced now (checkout requires it)."
+          },
+          "shipping_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The chosen shipping, priced now; zero until chosen. Part of `total`."
+          },
           "subtotal": {
             "$ref": "#/components/schemas/Money",
             "description": "Sum of the available lines, as priced. All totals count available lines only."
           },
           "tax_total": {
             "$ref": "#/components/schemas/Money",
-            "description": "Tax on the available lines: part of `subtotal` if `taxes_included`, else on top."
+            "description": "Tax on the available lines and on shipping: part of `subtotal` and\n`shipping_total` if `taxes_included`, else on top."
           },
           "taxes_included": {
             "type": "boolean",
@@ -1291,6 +1695,27 @@
         ],
         "pattern": "^cus_[0-9a-f]{32}$"
       },
+      "DeliveryEstimateDto": {
+        "type": "object",
+        "description": "Delivery in days, from `min_days` to `max_days`.",
+        "required": [
+          "min_days",
+          "max_days"
+        ],
+        "properties": {
+          "max_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "min_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "Email": {
         "type": "string",
         "format": "email",
@@ -1335,6 +1760,33 @@
         "enum": [
           "unfulfilled"
         ]
+      },
+      "GroupOffersResponse": {
+        "type": "object",
+        "required": [
+          "group",
+          "offers",
+          "unavailable"
+        ],
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/ShippingGroupId"
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfferResponse"
+            },
+            "description": "What the buyer can pick, in the store's order, priced now."
+          },
+          "unavailable": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnavailableOptionResponse"
+            },
+            "description": "Options of the zone not offered right now, and why: for diagnostics, never shown\nas choices."
+          }
+        }
       },
       "LineResponse": {
         "allOf": [
@@ -1483,6 +1935,40 @@
           }
         ]
       },
+      "OfferResponse": {
+        "type": "object",
+        "required": [
+          "option",
+          "code",
+          "name",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Before tax if the market's prices exclude it."
+          },
+          "code": {
+            "type": "string"
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryEstimateDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "option": {
+            "$ref": "#/components/schemas/ShippingOptionId"
+          }
+        }
+      },
       "OrderId": {
         "type": "string",
         "description": "A OrderId: `ord_` and 32 hex digits.",
@@ -1576,9 +2062,11 @@
           "fulfillment_status",
           "taxes_included",
           "subtotal",
+          "shipping_total",
           "tax_total",
           "total",
-          "lines"
+          "lines",
+          "shipping_lines"
         ],
         "properties": {
           "cart": {
@@ -1623,12 +2111,34 @@
             "type": "string",
             "description": "RFC 3339, UTC."
           },
+          "shipping_address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressResponse",
+                "description": "`null` when nothing in the order ships."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipping_lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderShippingLineResponse"
+            },
+            "description": "How each group of lines ships, as charged."
+          },
+          "shipping_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What shipping was charged, as part of `total`."
+          },
           "subtotal": {
             "$ref": "#/components/schemas/Money"
           },
           "tax_total": {
             "$ref": "#/components/schemas/Money",
-            "description": "Part of `subtotal` if `taxes_included`, else on top."
+            "description": "Tax on lines and shipping: part of `subtotal` and `shipping_total` if\n`taxes_included`, else on top."
           },
           "taxes_included": {
             "type": "boolean",
@@ -1636,6 +2146,83 @@
           },
           "total": {
             "$ref": "#/components/schemas/Money"
+          }
+        }
+      },
+      "OrderShippingLineResponse": {
+        "type": "object",
+        "required": [
+          "group",
+          "lines",
+          "option",
+          "code",
+          "name",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "code": {
+            "type": "string"
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryEstimateDto",
+                "description": "As estimated at checkout."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "$ref": "#/components/schemas/ShippingGroupId"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderLineId"
+            },
+            "description": "The order lines this ships."
+          },
+          "name": {
+            "type": "string"
+          },
+          "option": {
+            "$ref": "#/components/schemas/ShippingOptionId"
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`app_…` or `spore_…`; `null` for a built-in rate."
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The provider's quote ID."
+          },
+          "service": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderTaxResponse",
+                "description": "`null` when the country had no tax rates."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -1662,6 +2249,127 @@
               {
                 "type": "null"
               }
+            ]
+          }
+        }
+      },
+      "PostalAddressRequest": {
+        "type": "object",
+        "description": "Sent: checked by `Address::new` (last name, first line and city required; text is\ntrimmed, at most 255 characters per field).",
+        "required": [
+          "last_name",
+          "line1",
+          "city",
+          "country"
+        ],
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string",
+            "description": "ISO 3166-1 alpha-2, e.g. `HR`."
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "PostalAddressResponse": {
+        "type": "object",
+        "required": [
+          "last_name",
+          "line1",
+          "city",
+          "country"
+        ],
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "type": [
+              "string",
+              "null"
             ]
           }
         }
@@ -1730,6 +2438,70 @@
           }
         }
       },
+      "SelectShippingRequest": {
+        "type": "object",
+        "required": [
+          "option"
+        ],
+        "properties": {
+          "option": {
+            "$ref": "#/components/schemas/ShippingOptionId",
+            "description": "One of the group's offers."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SelectedShippingResponse": {
+        "type": "object",
+        "required": [
+          "option",
+          "code",
+          "name",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "code": {
+            "type": "string"
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryEstimateDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "option": {
+            "$ref": "#/components/schemas/ShippingOptionId"
+          },
+          "quote_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 3339: for a provider's rate, when checkout asks the provider again (and may\nanswer `total_changed`). `null` for built-in rates, which are always current."
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaxLineResponse",
+                "description": "`null` when the cart's country has no tax rates."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "SetEmailRequest": {
         "type": "object",
         "properties": {
@@ -1757,6 +2529,91 @@
           }
         },
         "additionalProperties": false
+      },
+      "SetShippingAddressRequest": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressRequest",
+                "description": "In the cart's country; `null` clears it. A new address drops the chosen shipping."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ShippingGroupId": {
+        "type": "string",
+        "description": "A ShippingGroupId: `shgrp_` and 32 hex digits.",
+        "examples": [
+          "shgrp_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^shgrp_[0-9a-f]{32}$"
+      },
+      "ShippingGroupResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "lines"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ShippingGroupId",
+            "description": "Stable for the cart: what `PUT …/shipping/{group_id}` names."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VariantId"
+            },
+            "description": "The available lines that ship in this group."
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the chosen option can't be charged now; pick again from the offers.\n`shipping_option_unavailable`, `no_price_in_currency`, `weight_unknown`, or a money\nerror code."
+          },
+          "selected": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SelectedShippingResponse",
+                "description": "The buyer's choice at its price now; `null` until chosen, or when `problem` is set."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ShippingOptionId": {
+        "type": "string",
+        "description": "A ShippingOptionId: `shipopt_` and 32 hex digits.",
+        "examples": [
+          "shipopt_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^shipopt_[0-9a-f]{32}$"
+      },
+      "ShippingOptionsResponse": {
+        "type": "object",
+        "required": [
+          "groups"
+        ],
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupOffersResponse"
+            }
+          }
+        }
       },
       "StorefrontProductResponse": {
         "type": "object",
@@ -1868,6 +2725,26 @@
         "description": "A tax rate in parts per million: 250000 is 25 %.",
         "maximum": 1000000,
         "minimum": 0
+      },
+      "UnavailableOptionResponse": {
+        "type": "object",
+        "required": [
+          "option",
+          "name",
+          "reason"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "option": {
+            "$ref": "#/components/schemas/ShippingOptionId"
+          },
+          "reason": {
+            "type": "string",
+            "description": "`no_price_in_currency`, `weight_unknown`, `provider_failed` or `service_not_quoted`."
+          }
+        }
       },
       "VariantId": {
         "type": "string",

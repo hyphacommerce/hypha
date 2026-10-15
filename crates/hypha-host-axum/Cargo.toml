@@ -40,12 +40,14 @@ uuid = { workspace = true, features = ["v7"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.11"
+hmac = "0.13"
+# Rate callbacks to external apps (design note 0015, section 5).
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 jiff = "0.2"
 tower-http = { version = "0.6", features = ["trace"] }
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 
 [lints]
 workspace = true

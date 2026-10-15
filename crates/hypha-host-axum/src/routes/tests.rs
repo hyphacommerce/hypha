@@ -138,6 +138,7 @@ async fn app_from(trusted_proxies: TrustedProxies, media: Option<Media>) -> Test
         store: store.id(),
         store_name: store.name().to_string(),
         media,
+        http: crate::state::rate_callback_client().unwrap(),
     });
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {
@@ -1603,6 +1604,469 @@ async fn the_address_limit_comes_before_the_body_is_parsed() {
     );
 }
 
+// ---------- shipping (design note 0015) ----------
+
+#[tokio::test]
+async fn shipping_zones_and_options_over_http() {
+    let app = app().await;
+    let (status, zone) = send(
+        &app,
+        "POST",
+        "/admin/shipping-zones",
+        Some(r#"{"name":"Croatia","countries":["HR"]}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{zone}");
+    let zone_path = format!("/admin/shipping-zones/{}", zone["id"].as_str().unwrap());
+
+    let (status, json) = send(
+        &app,
+        "POST",
+        "/admin/shipping-zones",
+        Some(r#"{"name":"Balkans","countries":["HR","SI"]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "country_in_other_zone")
+    );
+
+    // Free over 50 EUR, else 4.90.
+    let free_over = json!({
+        "name": "Standard", "code": "standard",
+        "rate": {"type": "builtin", "basis": "subtotal", "tables": [
+            {"currency": "EUR", "tiers": [{"up_to": 5000, "amount": 490}, {"amount": 0}]}
+        ]},
+        "estimate": {"min_days": 2, "max_days": 4}
+    });
+    let options = format!("{zone_path}/options");
+    let (status, json) = send(&app, "POST", &options, Some(&free_over.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+    assert_eq!(
+        json["options"][0]["rate"]["tables"][0]["tiers"][1]["up_to"],
+        Value::Null
+    );
+    assert_eq!(json["options"][0]["enabled"], true);
+    let standard = json["options"][0]["id"].as_str().unwrap().to_string();
+
+    let express = json!({
+        "name": "Express", "code": "express",
+        "rate": {"type": "provider", "provider": "app_courier", "service": "express"}
+    });
+    let (_, json) = send(&app, "POST", &options, Some(&express.to_string())).await;
+    let express = json["options"][1]["id"].as_str().unwrap().to_string();
+
+    let unbounded_tier = json!({
+        "name": "Bad", "code": "bad",
+        "rate": {"type": "builtin", "basis": "weight", "tables": [
+            {"currency": "EUR", "tiers": [{"up_to": 1000, "amount": 490}]}
+        ]}
+    });
+    let (status, json) = send(&app, "POST", &options, Some(&unbounded_tier.to_string())).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_shipping_rate")
+    );
+    let negative = json!({
+        "name": "Bad", "code": "bad",
+        "rate": {"type": "builtin", "basis": "flat", "tables": [
+            {"currency": "EUR", "tiers": [{"amount": -1}]}
+        ]}
+    });
+    let (status, json) = send(&app, "POST", &options, Some(&negative.to_string())).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "negative_amount")
+    );
+
+    let order = json!({ "options": [express, standard] }).to_string();
+    let (status, json) = send(&app, "PUT", &format!("{options}/order"), Some(&order)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["options"][0]["code"], "express");
+
+    // `null` clears the estimate; absent fields stay.
+    let one = format!("{options}/{standard}");
+    let (status, json) = send(&app, "PATCH", &one, Some(r#"{"estimate":null}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["options"][1]["estimate"], Value::Null);
+    assert_eq!(json["options"][1]["name"], "Standard");
+
+    let missing = format!("{options}/shipopt_{}", "0".repeat(32));
+    let (status, json) = send(&app, "PATCH", &missing, Some(r#"{"enabled":false}"#)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "shipping_option_not_found")
+    );
+
+    let (status, json) = send(&app, "DELETE", &one, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["options"].as_array().unwrap().len(), 1);
+
+    let (status, json) = send(&app, "GET", "/admin/shipping-zones", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["items"][0]["countries"], json!(["HR"]));
+
+    let (status, _) = send(&app, "DELETE", &zone_path, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, json) = send(&app, "GET", &zone_path, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "shipping_zone_not_found")
+    );
+}
+
+#[tokio::test]
+async fn shipping_setup_needs_shipping_scopes() {
+    let app = app().await;
+    let read_only = key(
+        &app,
+        json!({"kind": "secret", "name": "Reader", "scopes": ["shipping:read"]}),
+    )
+    .await;
+    let (status, _) = send_as(&app, &read_only, "GET", "/admin/shipping-zones", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = r#"{"name":"Croatia","countries":["HR"]}"#;
+    let (status, json) = send_as(
+        &app,
+        &read_only,
+        "POST",
+        "/admin/shipping-zones",
+        Some(body),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+}
+
+/// What the fake rate app saw: the signature header and the body, per request.
+type Seen = Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+
+/// A rate app on a free local port that answers every POST with one "express" rate.
+async fn rate_app() -> (String, Seen) {
+    use axum::{body::Bytes, http::HeaderMap, routing::post};
+    let seen: Seen = Default::default();
+    let log = Arc::clone(&seen);
+    let app = Router::new().route(
+        "/rates",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let log = Arc::clone(&log);
+            async move {
+                let signature = headers
+                    .get(crate::shipping::SIGNATURE_HEADER)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+                log.lock().unwrap().push((signature, body.to_vec()));
+                axum::Json(json!({"rates": [{
+                    "service": "express", "name": "Courier Express",
+                    "amount": {"amount": 700, "currency": "EUR"},
+                    "estimate": {"min_days": 1, "max_days": 1},
+                    "reference": "quote-42"
+                }]}))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/rates", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    (url, seen)
+}
+
+/// A market for HR in EUR selling one active 10 EUR mug; returns the mug's variant.
+async fn shop_selling_a_mug(app: &TestApp) -> String {
+    let (_, market) = send(
+        app,
+        "POST",
+        "/admin/markets",
+        Some(r#"{"name":"Croatia","countries":["HR"],"currency":"EUR"}"#),
+    )
+    .await;
+    let (_, mug) = send(
+        app,
+        "POST",
+        "/admin/products",
+        Some(r#"{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}"#),
+    )
+    .await;
+    let mug_id = mug["id"].as_str().unwrap();
+    send(
+        app,
+        "PATCH",
+        &format!("/admin/products/{mug_id}/status"),
+        Some(r#"{"status":"active"}"#),
+    )
+    .await;
+    let body = json!({ "market": market["id"] }).to_string();
+    let (_, catalog) = send(app, "POST", "/admin/catalogs", Some(&body)).await;
+    let path = format!(
+        "/admin/catalogs/{}/products",
+        catalog["id"].as_str().unwrap()
+    );
+    let body = json!({ "products": [mug_id] }).to_string();
+    let (status, _) = send(app, "POST", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    mug["variants"][0]["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn a_cart_ships_by_an_app_providers_signed_quote() {
+    let app = app().await;
+    let mug = shop_selling_a_mug(&app).await;
+    let (callback, seen) = rate_app().await;
+
+    let body = json!({"key": "app_courier", "name": "Courier", "callback_url": callback});
+    let (status, created) = send(
+        &app,
+        "POST",
+        "/admin/shipping-providers",
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let secret = created["secret"].as_str().unwrap().to_string();
+    assert!(secret.starts_with("hypha_shs_"));
+    let (_, fetched) = send(&app, "GET", "/admin/shipping-providers/app_courier", None).await;
+    assert!(fetched.get("secret").is_none());
+
+    let (_, zone) = send(
+        &app,
+        "POST",
+        "/admin/shipping-zones",
+        Some(r#"{"name":"Croatia","countries":["HR"]}"#),
+    )
+    .await;
+    let options = format!(
+        "/admin/shipping-zones/{}/options",
+        zone["id"].as_str().unwrap()
+    );
+    let express = json!({"name": "Express", "code": "express",
+        "rate": {"type": "provider", "provider": "app_courier", "service": "express"}});
+    send(&app, "POST", &options, Some(&express.to_string())).await;
+    let backup = json!({"name": "Post", "code": "post", "is_backup": true,
+        "rate": {"type": "builtin", "basis": "flat", "tables": [
+            {"currency": "EUR", "tiers": [{"amount": 500}]}]}});
+    let (_, zone) = send(&app, "POST", &options, Some(&backup.to_string())).await;
+    let express_id = zone["options"][0]["id"].as_str().unwrap().to_string();
+
+    let pk = publishable(&app).await;
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let cart_path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let line = json!({"variant": mug, "quantity": 2}).to_string();
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/lines"),
+        Some(&line),
+    )
+    .await;
+    let group = cart["shipping_groups"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(cart["shipping_ready"], false);
+
+    let (status, json) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("{cart_path}/shipping-options"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "shipping_address_required")
+    );
+    let address = |country: &str| {
+        json!({"address": {"last_name": "Horvat", "line1": "Ilica 1", "city": "Zagreb",
+            "country": country}})
+        .to_string()
+    };
+    let set_address = format!("{cart_path}/shipping-address");
+    let (status, json) = send_as(&app, &pk, "PUT", &set_address, Some(&address("SI"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
+    let (status, json) = send_as(&app, &pk, "PUT", &set_address, Some(&address("HR"))).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["shipping_address"]["city"], "Zagreb");
+
+    // The provider quotes; the backup stays hidden while it does.
+    let (status, offers) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("{cart_path}/shipping-options"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{offers}");
+    let group_offers = &offers["groups"][0];
+    assert_eq!(group_offers["group"], group.as_str());
+    assert_eq!(group_offers["offers"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        group_offers["offers"][0]["amount"],
+        json!({"amount": 700, "currency": "EUR"})
+    );
+
+    // Every call was signed with the secret over "<t>.<body>".
+    {
+        let seen = seen.lock().unwrap();
+        let (signature, body) = seen.last().unwrap();
+        let at: i64 = signature
+            .strip_prefix("t=")
+            .and_then(|s| s.split(',').next())
+            .and_then(|t| t.parse().ok())
+            .unwrap();
+        assert_eq!(*signature, crate::shipping::sign(&secret, at, body));
+        let sent: Value = serde_json::from_slice(body).unwrap();
+        assert_eq!(sent["request"]["destination"]["city"], "Zagreb");
+        assert_eq!(sent["request"]["items"][0]["quantity"], 2);
+    }
+
+    let select = format!("{cart_path}/shipping/{group}");
+    let unknown = json!({"option": format!("shipopt_{}", "0".repeat(32))}).to_string();
+    let (status, json) = send_as(&app, &pk, "PUT", &select, Some(&unknown)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "shipping_option_unknown")
+    );
+    let pick = json!({"option": express_id}).to_string();
+    let (status, cart) = send_as(&app, &pk, "PUT", &select, Some(&pick)).await;
+    assert_eq!(status, StatusCode::OK, "{cart}");
+    assert_eq!(cart["shipping_ready"], true);
+    assert_eq!(
+        cart["shipping_total"],
+        json!({"amount": 700, "currency": "EUR"})
+    );
+    assert_eq!(cart["total"], json!({"amount": 2700, "currency": "EUR"}));
+    assert!(cart["shipping_groups"][0]["selected"]["quote_expires_at"].is_string());
+
+    send_as(
+        &app,
+        &pk,
+        "PUT",
+        &format!("{cart_path}/email"),
+        Some(r#"{"email":"a@example.hr"}"#),
+    )
+    .await;
+    let (status, order) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{order}");
+    let shipped = &order["shipping_lines"][0];
+    assert_eq!(shipped["provider"], "app_courier");
+    assert_eq!(shipped["reference"], "quote-42");
+    assert_eq!(shipped["amount"], json!({"amount": 700, "currency": "EUR"}));
+    assert_eq!(
+        order["shipping_total"],
+        json!({"amount": 700, "currency": "EUR"})
+    );
+    assert_eq!(order["total"], json!({"amount": 2700, "currency": "EUR"}));
+}
+
+#[tokio::test]
+async fn a_failing_provider_brings_out_the_backup() {
+    let app = app().await;
+    let mug = shop_selling_a_mug(&app).await;
+    // Nothing listens on port 9 (discard) here: the connection is refused.
+    let body =
+        json!({"key": "app_down", "name": "Down", "callback_url": "http://127.0.0.1:9/rates"});
+    send(
+        &app,
+        "POST",
+        "/admin/shipping-providers",
+        Some(&body.to_string()),
+    )
+    .await;
+    let (status, json) = send(
+        &app,
+        "GET",
+        "/admin/shipping-providers/app_down/services",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::BAD_GATEWAY, "shipping_provider_failed")
+    );
+
+    let (_, zone) = send(
+        &app,
+        "POST",
+        "/admin/shipping-zones",
+        Some(r#"{"name":"Croatia","countries":["HR"]}"#),
+    )
+    .await;
+    let options = format!(
+        "/admin/shipping-zones/{}/options",
+        zone["id"].as_str().unwrap()
+    );
+    let express = json!({"name": "Express", "code": "express",
+        "rate": {"type": "provider", "provider": "app_down", "service": "express"}});
+    send(&app, "POST", &options, Some(&express.to_string())).await;
+    let backup = json!({"name": "Post", "code": "post", "is_backup": true,
+        "rate": {"type": "builtin", "basis": "flat", "tables": [
+            {"currency": "EUR", "tiers": [{"amount": 500}]}]}});
+    send(&app, "POST", &options, Some(&backup.to_string())).await;
+
+    let pk = publishable(&app).await;
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let cart_path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let line = json!({"variant": mug, "quantity": 1}).to_string();
+    send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/lines"),
+        Some(&line),
+    )
+    .await;
+    let address =
+        r#"{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}"#;
+    send_as(
+        &app,
+        &pk,
+        "PUT",
+        &format!("{cart_path}/shipping-address"),
+        Some(address),
+    )
+    .await;
+
+    let (status, offers) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("{cart_path}/shipping-options"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{offers}");
+    let group = &offers["groups"][0];
+    assert_eq!(group["offers"][0]["code"], "post");
+    assert_eq!(group["unavailable"][0]["reason"], "provider_failed");
+}
+
 // ---------- the route table (design note 0010) ----------
 
 #[test]
@@ -1623,9 +2087,12 @@ fn every_documented_route_is_listed_once_under_its_surface() {
     }
 }
 
-/// A value matching a path parameter's schema in `doc`: an ID from its prefix pattern
-/// (`^prod_[0-9a-f]{32}$`), or a country code.
+/// A value matching a path parameter's schema in `doc`: its example if it has one, an
+/// ID from its prefix pattern (`^prod_[0-9a-f]{32}$`), or a country code.
 fn example_for(doc: &Value, param: &Value) -> String {
+    if let Some(example) = param["example"].as_str() {
+        return example.to_string();
+    }
     let schema = &param["schema"];
     let schema = match schema["$ref"].as_str() {
         Some(r) => &doc["components"]["schemas"][r.trim_start_matches("#/components/schemas/")],

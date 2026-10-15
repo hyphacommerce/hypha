@@ -1,7 +1,7 @@
 //! HTTP routes. Each module owns its request/response shapes (the API's own types,
 //! separate from domain types) and thin handlers that call one domain command.
 
-mod address;
+pub(crate) mod address;
 mod api_keys;
 mod assets;
 mod auth;
@@ -16,6 +16,7 @@ mod me;
 mod orders;
 mod page;
 mod products;
+mod shipping;
 mod staff;
 mod stores;
 mod taxes;
@@ -134,6 +135,23 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/tax-regions/{id}", taxes::update_region],
             [admin, PUT, "/admin/tax-regions/{id}/class-rates/{class_id}", taxes::set_region_class_rate],
             [admin, DELETE, "/admin/tax-regions/{id}/class-rates/{class_id}", taxes::remove_region_class_rate],
+            // shipping (design note 0015)
+            [admin, GET, "/admin/shipping-zones", shipping::list_zones_handler],
+            [admin, POST, "/admin/shipping-zones", shipping::create_zone_handler],
+            [admin, GET, "/admin/shipping-zones/{id}", shipping::fetch_zone],
+            [admin, PATCH, "/admin/shipping-zones/{id}", shipping::update_zone_handler],
+            [admin, DELETE, "/admin/shipping-zones/{id}", shipping::delete_zone_handler],
+            [admin, POST, "/admin/shipping-zones/{id}/options", shipping::add_option_handler],
+            [admin, PUT, "/admin/shipping-zones/{id}/options/order", shipping::reorder_options_handler],
+            [admin, PATCH, "/admin/shipping-zones/{id}/options/{option_id}", shipping::update_option_handler],
+            [admin, DELETE, "/admin/shipping-zones/{id}/options/{option_id}", shipping::remove_option_handler],
+            [admin, GET, "/admin/shipping-providers", shipping::list_providers_handler],
+            [admin, POST, "/admin/shipping-providers", shipping::create_provider_handler],
+            [admin, GET, "/admin/shipping-providers/{key}", shipping::fetch_provider],
+            [admin, PATCH, "/admin/shipping-providers/{key}", shipping::update_provider_handler],
+            [admin, DELETE, "/admin/shipping-providers/{key}", shipping::delete_provider_handler],
+            [admin, POST, "/admin/shipping-providers/{key}/secret", shipping::rotate_secret_handler],
+            [admin, GET, "/admin/shipping-providers/{key}/services", shipping::provider_services_handler],
             // inventory
             [admin, POST, "/admin/locations", inventory::create_location_handler],
             [admin, GET, "/admin/locations/{id}", inventory::fetch_location],
@@ -154,6 +172,9 @@ macro_rules! route_table {
             [storefront, PUT, "/storefront/carts/{id}/lines/{variant}", carts::set_quantity],
             [storefront, DELETE, "/storefront/carts/{id}/lines/{variant}", carts::remove_line],
             [storefront, PUT, "/storefront/carts/{id}/email", carts::set_email],
+            [storefront, PUT, "/storefront/carts/{id}/shipping-address", carts::set_address],
+            [storefront, GET, "/storefront/carts/{id}/shipping-options", carts::shipping_options],
+            [storefront, PUT, "/storefront/carts/{id}/shipping/{group_id}", carts::select],
             [storefront, POST, "/storefront/carts/{id}/checkout", orders::checkout_handler],
         }
     };

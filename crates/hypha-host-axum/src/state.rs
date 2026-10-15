@@ -219,6 +219,9 @@ pub struct AppState<S> {
     /// File storage and asset URLs (design note 0013); `None` without
     /// `HYPHA_S3_ENDPOINT`, and the asset routes then answer 503.
     pub media: Option<crate::media::Media>,
+    /// For rate callbacks to external apps (design note 0015); each call sets its own
+    /// timeout, the provider's.
+    pub http: reqwest::Client,
 }
 
 impl<S: Storage> AppState<S> {
@@ -232,6 +235,32 @@ impl<S: Storage> AppState<S> {
     pub async fn public_ports(&self) -> Result<S::Ports<'_>, ApiError> {
         self.storage.ports(self.store).await
     }
+}
+
+impl<S> AppState<S> {
+    /// The shipping rate providers for a request's ports (design note 0015).
+    pub fn rates<'a, P: hypha_shipping::AppProviderRepo>(
+        &'a self,
+        apps: &'a P,
+    ) -> crate::shipping::HostRates<'a, P> {
+        crate::shipping::HostRates {
+            apps,
+            http: &self.http,
+            env: &self.env,
+            clock: &self.clock,
+        }
+    }
+}
+
+/// The client rate callbacks use: no overall timeout (each request sets its provider's),
+/// a short connect one, and no redirects: a signed request goes only where the merchant
+/// pointed it, and a redirect answer counts as a failure.
+pub fn rate_callback_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("cannot build the HTTP client: {e}"))
 }
 
 pub type SharedState<S> = Arc<AppState<S>>;
@@ -251,6 +280,8 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_media::HasAssets
         + hypha_media::HasAssetUsages
         + hypha_merchandising::MerchandisingPorts
+        + hypha_shipping::HasShippingZones
+        + hypha_shipping::HasAppProviders
     where
         Self: 'a;
     type Directory<'a>: StoreRepo

@@ -2,8 +2,9 @@
 //! and the external apps that calculate rates (design note 0015, section 8).
 
 use hypha_core::{
-    AuthError, CountryCode, CountryError, Ctx, ErrorCode, IdGenerator, Random, RepoError, Scope,
-    SealError, SecretBox, ShippingOptionId, ShippingZoneId, TaxClassId, report_duplicate,
+    AuthError, CountryCode, CountryError, Ctx, ErrorCode, IdGenerator, MoneyError, Random,
+    RepoError, Scope, SealError, SecretBox, ShippingOptionId, ShippingZoneId, TaxClassId,
+    report_duplicate,
 };
 use thiserror::Error;
 
@@ -21,6 +22,9 @@ pub enum CommandError {
     Shipping(#[from] ShippingError),
     #[error(transparent)]
     Country(#[from] CountryError),
+    /// A tier amount out of range, from the host building a rate.
+    #[error(transparent)]
+    Money(#[from] MoneyError),
     #[error(transparent)]
     Repo(#[from] RepoError),
     #[error(transparent)]
@@ -47,6 +51,7 @@ impl ErrorCode for CommandError {
             CommandError::Auth(e) => e.code(),
             CommandError::Shipping(e) => e.code(),
             CommandError::Country(e) => e.code(),
+            CommandError::Money(e) => e.code(),
             CommandError::Repo(e) => e.code(),
             CommandError::Provider(e) => e.code(),
             CommandError::ZoneNotFound(_) => "shipping_zone_not_found",

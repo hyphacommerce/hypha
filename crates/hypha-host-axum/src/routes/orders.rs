@@ -2,7 +2,7 @@ use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_checkout::{Checkout, checkout};
 use hypha_core::{
     CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId, OrderLineId,
-    ProductId, TaxClassId, TaxRate, VariantId,
+    ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
 use hypha_orders::{
     FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, OrderSummary, get_order,
@@ -11,8 +11,10 @@ use hypha_orders::{
 use serde::{Deserialize, Serialize};
 
 use super::{
+    address::PostalAddressResponse,
     page::{ListQuery, PageParams, PageResponse},
     rfc3339,
+    shipping::DeliveryEstimateDto,
 };
 use crate::{
     error::ApiError,
@@ -80,10 +82,37 @@ pub(super) struct OrderResponse {
     /// Whether line prices include tax (the market decided, at checkout).
     taxes_included: bool,
     subtotal: Money,
-    /// Part of `subtotal` if `taxes_included`, else on top.
+    /// What shipping was charged, as part of `total`.
+    shipping_total: Money,
+    /// Tax on lines and shipping: part of `subtotal` and `shipping_total` if
+    /// `taxes_included`, else on top.
     tax_total: Money,
     total: Money,
     lines: Vec<OrderLineResponse>,
+    /// `null` when nothing in the order ships.
+    shipping_address: Option<PostalAddressResponse>,
+    /// How each group of lines ships, as charged.
+    shipping_lines: Vec<OrderShippingLineResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct OrderShippingLineResponse {
+    group: ShippingGroupId,
+    /// The order lines this ships.
+    lines: Vec<OrderLineId>,
+    option: ShippingOptionId,
+    code: String,
+    name: String,
+    /// `app_…` or `spore_…`; `null` for a built-in rate.
+    provider: Option<String>,
+    service: Option<String>,
+    /// The provider's quote ID.
+    reference: Option<String>,
+    amount: Money,
+    /// As estimated at checkout.
+    estimate: Option<DeliveryEstimateDto>,
+    /// `null` when the country had no tax rates.
+    tax: Option<OrderTaxResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -127,9 +156,34 @@ impl OrderResponse {
             fulfillment_status: order.fulfillment_status().into(),
             taxes_included: order.taxes_included(),
             subtotal: order.subtotal(),
+            shipping_total: order.shipping_total(),
             tax_total: order.tax_total(),
             total: order.total(),
             lines: order.lines().iter().map(OrderLineResponse::from).collect(),
+            shipping_address: order.shipping_address().map(PostalAddressResponse::from),
+            shipping_lines: order
+                .shipping_lines()
+                .iter()
+                .map(|s| OrderShippingLineResponse {
+                    group: s.group,
+                    lines: s.lines.clone(),
+                    option: s.option,
+                    code: s.code.clone(),
+                    name: s.name.clone(),
+                    provider: s.provider.clone(),
+                    service: s.service.clone(),
+                    reference: s.reference.clone(),
+                    amount: s.amount.money(),
+                    estimate: s
+                        .estimate_days
+                        .map(|(min_days, max_days)| DeliveryEstimateDto { min_days, max_days }),
+                    tax: s.tax.map(|t| OrderTaxResponse {
+                        rate_ppm: t.rate,
+                        amount: t.amount,
+                        tax_class: t.class,
+                    }),
+                })
+                .collect(),
         })
     }
 }
@@ -178,7 +232,7 @@ pub(super) async fn checkout_handler<S: Storage>(
         expected_total: req.body.expected_total,
         idempotency: req.idempotency,
     };
-    let rates = crate::shipping::HostRates;
+    let rates = state.rates(hypha_shipping::HasAppProviders::app_providers(&ports));
     let placed = checkout(&ctx, &ports, &state.ids, &state.clock, &rates, input).await?;
     Ok(idempotent_response(
         StatusCode::CREATED,

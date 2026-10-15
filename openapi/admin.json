@@ -7749,6 +7749,1723 @@
         ]
       }
     },
+    "/admin/shipping-providers": {
+      "get": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "The external apps registered as rate providers.",
+        "operationId": "admin.shipping.list_providers",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppProviderList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:read"
+        ]
+      },
+      "post": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Registers an external app that calculates rates (design note 0015, section 5).\nHypha POSTs it signed rate requests; its secret is returned here, once.",
+        "operationId": "admin.shipping.create_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAppProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppProviderSecretResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      }
+    },
+    "/admin/shipping-providers/{key}": {
+      "get": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "An external app provider.",
+        "operationId": "admin.shipping.fetch_provider",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "`app_<name>` or `spore_<name>`",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$"
+            },
+            "example": "app_shipcalc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppProviderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:read"
+        ]
+      },
+      "delete": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Removes an external app provider; options naming it stop being offered.",
+        "operationId": "admin.shipping.delete_provider",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "`app_<name>` or `spore_<name>`",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$"
+            },
+            "example": "app_shipcalc"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      },
+      "patch": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Changes an external app provider.",
+        "operationId": "admin.shipping.update_provider",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "`app_<name>` or `spore_<name>`",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$"
+            },
+            "example": "app_shipcalc"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAppProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppProviderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      }
+    },
+    "/admin/shipping-providers/{key}/secret": {
+      "post": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Replaces the signing secret and returns the new one, once. The old one stops working.",
+        "operationId": "admin.shipping.rotate_secret",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "`app_<name>` or `spore_<name>`",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$"
+            },
+            "example": "app_shipcalc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppProviderSecretResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      }
+    },
+    "/admin/shipping-providers/{key}/services": {
+      "get": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "The services a provider (app or spore) can quote, for the option editor.",
+        "operationId": "admin.shipping.provider_services",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "`app_<name>` or `spore_<name>`",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$"
+            },
+            "example": "app_shipcalc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:read"
+        ]
+      }
+    },
+    "/admin/shipping-zones": {
+      "get": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Every shipping zone, with its options.",
+        "operationId": "admin.shipping.list_zones",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingZoneList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:read"
+        ]
+      },
+      "post": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Creates a shipping zone.",
+        "operationId": "admin.shipping.create_zone",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateZoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingZoneResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      }
+    },
+    "/admin/shipping-zones/{id}": {
+      "get": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "A shipping zone, with its options.",
+        "operationId": "admin.shipping.fetch_zone",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingZoneId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingZoneResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:read"
+        ]
+      },
+      "delete": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Deletes a zone and its options. Carts that chose one of them choose again.",
+        "operationId": "admin.shipping.delete_zone",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingZoneId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      },
+      "patch": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Renames a zone or changes its countries.",
+        "operationId": "admin.shipping.update_zone",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingZoneId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateZoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingZoneResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      }
+    },
+    "/admin/shipping-zones/{id}/options": {
+      "post": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Adds an option to a zone, last.",
+        "operationId": "admin.shipping.add_option",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingZoneId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddOptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingZoneResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      }
+    },
+    "/admin/shipping-zones/{id}/options/order": {
+      "put": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Puts a zone's options in a new order.",
+        "operationId": "admin.shipping.reorder_options",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingZoneId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderOptionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingZoneResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      }
+    },
+    "/admin/shipping-zones/{id}/options/{option_id}": {
+      "delete": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Removes an option.",
+        "operationId": "admin.shipping.remove_option",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingZoneId"
+            }
+          },
+          {
+            "name": "option_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingOptionId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingZoneResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      },
+      "patch": {
+        "tags": [
+          "shipping"
+        ],
+        "summary": "Changes an option.",
+        "operationId": "admin.shipping.update_option",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingZoneId"
+            }
+          },
+          {
+            "name": "option_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShippingOptionId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingZoneResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "shipping:write"
+        ]
+      }
+    },
     "/admin/store": {
       "get": {
         "tags": [
@@ -9118,6 +10835,53 @@
         },
         "additionalProperties": false
       },
+      "AddOptionRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "code",
+          "rate"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to `true`."
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryEstimateDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_backup": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rate": {
+            "$ref": "#/components/schemas/RateDto"
+          },
+          "tax_class": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaxClassId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "AddVariantRequest": {
         "type": "object",
         "required": [
@@ -9358,6 +11122,77 @@
           }
         }
       },
+      "AppProviderList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppProviderResponse"
+            },
+            "description": "By key."
+          }
+        }
+      },
+      "AppProviderResponse": {
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "callback_url",
+          "timeout_ms",
+          "services",
+          "enabled"
+        ],
+        "properties": {
+          "callback_url": {
+            "type": "string",
+            "description": "Where Hypha POSTs rate requests (signed with the secret)."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string",
+            "description": "`app_<name>`: what options name it by."
+          },
+          "name": {
+            "type": "string"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceDto"
+            },
+            "description": "Declared up front; empty means Hypha asks `<callback_url>/services`."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "AppProviderSecretResponse": {
+        "type": "object",
+        "description": "A provider with its signing secret: returned once, when created or rotated.",
+        "required": [
+          "provider",
+          "secret"
+        ],
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/AppProviderResponse"
+          },
+          "secret": {
+            "type": "string",
+            "description": "`hypha_shs_…`: verify `Hypha-Signature` with it. Shown only now."
+          }
+        }
+      },
       "AssetId": {
         "type": "string",
         "description": "A AssetId: `asset_` and 32 hex digits.",
@@ -9595,6 +11430,14 @@
         },
         "additionalProperties": false
       },
+      "BasisDto": {
+        "type": "string",
+        "enum": [
+          "flat",
+          "subtotal",
+          "weight"
+        ]
+      },
       "CartId": {
         "type": "string",
         "description": "A CartId: `cart_` and 32 hex digits.",
@@ -9612,10 +11455,13 @@
           "country",
           "taxes_included",
           "subtotal",
+          "shipping_total",
           "tax_total",
           "total",
           "fully_available",
-          "lines"
+          "lines",
+          "shipping_groups",
+          "shipping_ready"
         ],
         "properties": {
           "country": {
@@ -9674,13 +11520,39 @@
               }
             ]
           },
+          "shipping_address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressResponse",
+                "description": "Where it ships: in the cart's country. Required at checkout when something ships."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipping_groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShippingGroupResponse"
+            },
+            "description": "The groups of lines that ship together, each needing a chosen option before\ncheckout; empty when nothing ships."
+          },
+          "shipping_ready": {
+            "type": "boolean",
+            "description": "Whether every group has an option priced now (checkout requires it)."
+          },
+          "shipping_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The chosen shipping, priced now; zero until chosen. Part of `total`."
+          },
           "subtotal": {
             "$ref": "#/components/schemas/Money",
             "description": "Sum of the available lines, as priced. All totals count available lines only."
           },
           "tax_total": {
             "$ref": "#/components/schemas/Money",
-            "description": "Tax on the available lines: part of `subtotal` if `taxes_included`, else on top."
+            "description": "Tax on the available lines and on shipping: part of `subtotal` and\n`shipping_total` if `taxes_included`, else on top."
           },
           "taxes_included": {
             "type": "boolean",
@@ -9853,6 +11725,43 @@
               "$ref": "#/components/schemas/Scope"
             },
             "description": "Required for a secret key; a publishable key always has the storefront scopes."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateAppProviderRequest": {
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "callback_url"
+        ],
+        "properties": {
+          "callback_url": {
+            "type": "string",
+            "description": "`https://`, or `http://localhost` for development."
+          },
+          "key": {
+            "type": "string",
+            "description": "`app_<name>`: lowercase letters, digits and `_`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceDto"
+            }
+          },
+          "timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "100 to 10000; defaults to 3000.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -10107,6 +12016,26 @@
         },
         "additionalProperties": false
       },
+      "CreateZoneRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "countries"
+        ],
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "ISO 3166-1 alpha-2 codes, each in no other zone."
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "CreatedApiKeyResponse": {
         "allOf": [
           {
@@ -10201,6 +12130,27 @@
             ]
           }
         }
+      },
+      "DeliveryEstimateDto": {
+        "type": "object",
+        "description": "Delivery in days, from `min_days` to `max_days`.",
+        "required": [
+          "min_days",
+          "max_days"
+        ],
+        "properties": {
+          "max_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "min_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "Email": {
         "type": "string",
@@ -10946,9 +12896,11 @@
           "fulfillment_status",
           "taxes_included",
           "subtotal",
+          "shipping_total",
           "tax_total",
           "total",
-          "lines"
+          "lines",
+          "shipping_lines"
         ],
         "properties": {
           "cart": {
@@ -10993,12 +12945,34 @@
             "type": "string",
             "description": "RFC 3339, UTC."
           },
+          "shipping_address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressResponse",
+                "description": "`null` when nothing in the order ships."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipping_lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderShippingLineResponse"
+            },
+            "description": "How each group of lines ships, as charged."
+          },
+          "shipping_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What shipping was charged, as part of `total`."
+          },
           "subtotal": {
             "$ref": "#/components/schemas/Money"
           },
           "tax_total": {
             "$ref": "#/components/schemas/Money",
-            "description": "Part of `subtotal` if `taxes_included`, else on top."
+            "description": "Tax on lines and shipping: part of `subtotal` and `shipping_total` if\n`taxes_included`, else on top."
           },
           "taxes_included": {
             "type": "boolean",
@@ -11006,6 +12980,83 @@
           },
           "total": {
             "$ref": "#/components/schemas/Money"
+          }
+        }
+      },
+      "OrderShippingLineResponse": {
+        "type": "object",
+        "required": [
+          "group",
+          "lines",
+          "option",
+          "code",
+          "name",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "code": {
+            "type": "string"
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryEstimateDto",
+                "description": "As estimated at checkout."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "$ref": "#/components/schemas/ShippingGroupId"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderLineId"
+            },
+            "description": "The order lines this ships."
+          },
+          "name": {
+            "type": "string"
+          },
+          "option": {
+            "$ref": "#/components/schemas/ShippingOptionId"
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`app_…` or `spore_…`; `null` for a built-in rate."
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The provider's quote ID."
+          },
+          "service": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderTaxResponse",
+                "description": "`null` when the country had no tax rates."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -11489,6 +13540,80 @@
           }
         }
       },
+      "RateDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Computed by Hypha: a table of tiers per currency over a basis. Flat is one open\ntier; free over a subtotal is two subtotal tiers, the second costing 0.",
+            "required": [
+              "basis",
+              "tables",
+              "type"
+            ],
+            "properties": {
+              "basis": {
+                "$ref": "#/components/schemas/BasisDto"
+              },
+              "tables": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RateTableDto"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "builtin"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One service of a provider (`app_<name>` or `spore_<name>`), quoted when offered.",
+            "required": [
+              "provider",
+              "service",
+              "type"
+            ],
+            "properties": {
+              "provider": {
+                "type": "string"
+              },
+              "service": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "provider"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "How an option's price is found: one of a provider's services, or a built-in rate."
+      },
+      "RateTableDto": {
+        "type": "object",
+        "required": [
+          "currency",
+          "tiers"
+        ],
+        "properties": {
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TierDto"
+            },
+            "description": "Ascending; the last has no `up_to`."
+          }
+        },
+        "additionalProperties": false
+      },
       "RecoveryCodesResponse": {
         "type": "object",
         "required": [
@@ -11515,6 +13640,22 @@
             "items": {
               "$ref": "#/components/schemas/VariantId"
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReorderOptionsRequest": {
+        "type": "object",
+        "required": [
+          "options"
+        ],
+        "properties": {
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShippingOptionId"
+            },
+            "description": "Every option of the zone, once, in the new order."
           }
         },
         "additionalProperties": false
@@ -11585,6 +13726,87 @@
           "shipping:read",
           "shipping:write"
         ]
+      },
+      "SelectedShippingResponse": {
+        "type": "object",
+        "required": [
+          "option",
+          "code",
+          "name",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "code": {
+            "type": "string"
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryEstimateDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "option": {
+            "$ref": "#/components/schemas/ShippingOptionId"
+          },
+          "quote_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 3339: for a provider's rate, when checkout asks the provider again (and may\nanswer `total_changed`). `null` for built-in rates, which are always current."
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaxLineResponse",
+                "description": "`null` when the cart's country has no tax rates."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ServiceDto": {
+        "type": "object",
+        "required": [
+          "code",
+          "name"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ServiceList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceDto"
+            }
+          }
+        }
       },
       "SessionResponse": {
         "type": "object",
@@ -11737,6 +13959,168 @@
         },
         "additionalProperties": false
       },
+      "ShippingGroupId": {
+        "type": "string",
+        "description": "A ShippingGroupId: `shgrp_` and 32 hex digits.",
+        "examples": [
+          "shgrp_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^shgrp_[0-9a-f]{32}$"
+      },
+      "ShippingGroupResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "lines"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ShippingGroupId",
+            "description": "Stable for the cart: what `PUT …/shipping/{group_id}` names."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VariantId"
+            },
+            "description": "The available lines that ship in this group."
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the chosen option can't be charged now; pick again from the offers.\n`shipping_option_unavailable`, `no_price_in_currency`, `weight_unknown`, or a money\nerror code."
+          },
+          "selected": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SelectedShippingResponse",
+                "description": "The buyer's choice at its price now; `null` until chosen, or when `problem` is set."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ShippingOptionId": {
+        "type": "string",
+        "description": "A ShippingOptionId: `shipopt_` and 32 hex digits.",
+        "examples": [
+          "shipopt_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^shipopt_[0-9a-f]{32}$"
+      },
+      "ShippingOptionResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "code",
+          "rate",
+          "is_backup",
+          "enabled"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable, for apps and analytics; unique within the zone."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryEstimateDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/ShippingOptionId"
+          },
+          "is_backup": {
+            "type": "boolean",
+            "description": "Offered only when every provider option of the zone failed."
+          },
+          "name": {
+            "type": "string"
+          },
+          "rate": {
+            "$ref": "#/components/schemas/RateDto"
+          },
+          "tax_class": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaxClassId",
+                "description": "Shipping by this option is taxed at this class's rate; the region's default\notherwise."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ShippingZoneId": {
+        "type": "string",
+        "description": "A ShippingZoneId: `szone_` and 32 hex digits.",
+        "examples": [
+          "szone_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^szone_[0-9a-f]{32}$"
+      },
+      "ShippingZoneList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShippingZoneResponse"
+            },
+            "description": "By name. A store has a handful, so there are no pages."
+          }
+        }
+      },
+      "ShippingZoneResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "countries",
+          "options"
+        ],
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CountryCode"
+            },
+            "description": "A country is in at most one zone."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ShippingZoneId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShippingOptionResponse"
+            },
+            "description": "In display order."
+          }
+        }
+      },
       "StartTotpRequest": {
         "type": "object",
         "required": [
@@ -11871,6 +14255,29 @@
           }
         }
       },
+      "TierDto": {
+        "type": "object",
+        "required": [
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "In minor units of the table's currency."
+          },
+          "up_to": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The tier applies while the basis is below this (exclusive); `null` on the last.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "TotpSetupResponse": {
         "type": "object",
         "required": [
@@ -11887,6 +14294,33 @@
             "description": "`otpauth://…`, for a QR code."
           }
         }
+      },
+      "UpdateAppProviderRequest": {
+        "type": "object",
+        "description": "Name, callback, timeout, services, enabled (JSON Merge Patch; none take `null`).",
+        "properties": {
+          "callback_url": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceDto"
+            }
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "UpdateAssetRequest": {
         "type": "object",
@@ -11991,6 +14425,48 @@
         },
         "additionalProperties": false
       },
+      "UpdateOptionRequest": {
+        "type": "object",
+        "description": "An option's fields (JSON Merge Patch; `estimate` and `tax_class` take `null`).",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryEstimateDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_backup": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rate": {
+            "$ref": "#/components/schemas/RateDto"
+          },
+          "tax_class": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaxClassId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateProductRequest": {
         "type": "object",
         "description": "Title and handle (JSON Merge Patch; neither can be `null`).",
@@ -12091,6 +14567,23 @@
             "format": "int32",
             "description": "`null` clears it.",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateZoneRequest": {
+        "type": "object",
+        "description": "Name and countries (JSON Merge Patch; neither can be `null`).",
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replaces the zone's countries."
+          },
+          "name": {
+            "type": "string"
           }
         },
         "additionalProperties": false

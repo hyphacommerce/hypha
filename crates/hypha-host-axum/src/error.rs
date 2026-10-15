@@ -1,12 +1,13 @@
 //! Maps every crate's errors to HTTP statuses. An unknown ID in a body is 422 and one
 //! in the URL is 404 (`not_found_if`).
 //!
-//! Exception: five routes store IDs from *another* domain without checking them, because
+//! Exception: these routes store IDs from *another* domain without checking them, because
 //! a leaf crate can't see other domains: variants in fixed prices
 //! (`PUT /admin/price-lists/{id}/fixed-prices`), products in catalogs (`POST
 //! /admin/catalogs/{id}/products`), products in tax assignments (`PUT
 //! /admin/tax-assignments`), markets
-//! of a location, and the variant of a new inventory item. An unknown one is stored and
+//! of a location, the variant of a new inventory item, and the tax class of a shipping
+//! option (`POST`/`PATCH /admin/shipping-zones/{id}/options…`). An unknown one is stored and
 //! simply never matches. Checking them belongs in a composing layer (like `hypha-cart`),
 //! not in these crates.
 
@@ -50,6 +51,8 @@ pub struct ApiErrorBody {
 /// - `sku_taken` (another product): `{"sku", "product": "prod_…"}`
 /// - `shipping_option_not_offered`: `{"reason"}`: `no_price_in_currency`, `weight_unknown`,
 ///   `provider_failed` or `service_not_quoted`
+/// - `shipping_option_unavailable` (checkout): `{"reason"}`: `shipping_option_unavailable`,
+///   `no_price_in_currency`, `weight_unknown` or a money error code; pick again
 /// - `asset_in_use`: `{"usages": [{"owner": {"kind", "id"}, "role"}], "has_more"}`, the first
 ///   25; `GET /admin/assets/{id}/usages` pages through all of them
 ///
@@ -681,6 +684,34 @@ impl From<hypha_checkout::CommandError> for ApiError {
             _ => None,
         };
         Self::domain(status, e).with_details(details)
+    }
+}
+
+impl From<hypha_shipping::CommandError> for ApiError {
+    fn from(e: hypha_shipping::CommandError) -> Self {
+        use hypha_shipping::{CommandError as E, ProviderError as P};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Zones and providers only ever arrive in URLs; options in a URL are mapped
+            // by their routes (`not_found_if`), in a body (reordering) they're 422.
+            E::ZoneNotFound(_) | E::ProviderNotFound(_) | E::Provider(P::Unknown(_)) => {
+                StatusCode::NOT_FOUND
+            }
+            E::CountryInOtherZone { .. } | E::ProviderExists(_) | E::Provider(P::Disabled(_)) => {
+                StatusCode::CONFLICT
+            }
+            // The app answered badly or not at all: the request was fine.
+            E::Provider(P::Timeout(_) | P::Failed { .. } | P::WrongCurrency { .. }) => {
+                StatusCode::BAD_GATEWAY
+            }
+            E::Shipping(_) | E::Country(_) | E::Money(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            // Another `HYPHA_SECRET_KEY` than the one that sealed it.
+            E::Seal(_) | E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
     }
 }
 

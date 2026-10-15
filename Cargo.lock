@@ -845,6 +845,7 @@ dependencies = [
  "deadpool-postgres",
  "getrandom 0.4.3",
  "governor",
+ "hmac",
  "hypha-auth",
  "hypha-cart",
  "hypha-checkout",
