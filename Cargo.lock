@@ -817,6 +817,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-store-s3"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "hmac",
+ "hypha-core",
+ "hypha-media",
+ "sha2",
+]
+
+[[package]]
 name = "hypha-stores"
 version = "0.1.0"
 dependencies = [

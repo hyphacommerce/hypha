@@ -22,7 +22,7 @@ Run all four before considering work done (the tests need Postgres: `docker comp
 cargo fmt --all
 cargo clippy --workspace --all-targets
 cargo test --workspace
-cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-tax -p hypha-inventory -p hypha-customers -p hypha-stores -p hypha-orders -p hypha-checkout -p hypha-auth -p hypha-users -p hypha-media -p hypha-store-postgres --target wasm32-unknown-unknown
+cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-tax -p hypha-inventory -p hypha-customers -p hypha-stores -p hypha-orders -p hypha-checkout -p hypha-auth -p hypha-users -p hypha-media -p hypha-store-postgres -p hypha-store-s3 --target wasm32-unknown-unknown
 ```
 
 Extend the wasm build list when a domain crate or storage adapter is added.
@@ -53,7 +53,7 @@ Domain crates are layered; a crate may only depend on layers below it (Cargo rej
 | Layer | Crates | May depend on |
 | --- | --- | --- |
 | Hosts | `hypha-host-axum` | anything |
-| Storage adapters | `hypha-store-postgres` (tokio-postgres; native and Workers via Hyperdrive) | domain crates, core; never hosts |
+| Storage adapters | `hypha-store-postgres` (tokio-postgres; native and Workers via Hyperdrive), `hypha-store-s3` (files over the S3 API: R2, S3; HTTP through its `HttpClient` port) | domain crates, core; never hosts |
 | Workflows | `hypha-checkout` (cart → order) | composing and leaf domains, core |
 | Composing domains | `hypha-cart`, `hypha-users` | leaf domains, core (`hypha-users` → `hypha-auth` only) |
 | Leaf domains | `hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-tax`, `hypha-inventory`, `hypha-customers`, `hypha-stores`, `hypha-orders`, `hypha-auth`, `hypha-media` | core; `hypha-pricing` → `hypha-markets` only |
