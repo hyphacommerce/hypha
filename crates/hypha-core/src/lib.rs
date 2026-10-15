@@ -12,6 +12,7 @@ pub mod page;
 pub mod ports;
 pub mod quantity;
 pub mod scope;
+pub mod secret;
 pub mod text;
 pub mod time;
 pub mod version;
@@ -39,6 +40,7 @@ pub use ports::{
 };
 pub use quantity::{Quantity, QuantityError};
 pub use scope::Scope;
+pub use secret::{SealError, Sealed, SecretBox};
 pub use text::{MAX_TEXT_LEN, TextError, optional_text, required_text};
 pub use time::Timestamp;
 pub use version::{Version, Versioned};

@@ -8,46 +8,10 @@ use chacha20poly1305::{
     KeyInit, XChaCha20Poly1305, XNonce,
     aead::{Aead, Payload},
 };
-use thiserror::Error;
 
-/// Encrypted bytes as stored: a format version, the nonce, then the ciphertext with its
-/// authentication tag. The version byte lets a later key or algorithm coexist with
-/// what's already stored.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Sealed(Vec<u8>);
-
-impl Sealed {
-    /// For storage adapters reading it back.
-    pub fn from_bytes(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl fmt::Debug for Sealed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Sealed({} bytes)", self.0.len())
-    }
-}
-
-/// `open` failed: the wrong key, tampered or truncated data, or data sealed for another
-/// record (`context`). Reported as a server error.
-#[derive(Debug, Clone, Error, PartialEq, Eq)]
-#[error("cannot open sealed data: {0}")]
-pub struct SealError(pub &'static str);
-
-/// Seals and opens secrets with a key only the host knows (`HYPHA_SECRET_KEY`).
-///
-/// `context` is bound into the ciphertext (authenticated, not encrypted), e.g. the
-/// identity's ID, so a sealed value copied onto another record fails to open.
-pub trait SecretBox {
-    /// `nonce` must never repeat under one key; it comes from `hypha_core::Random`.
-    fn seal(&self, plaintext: &[u8], context: &[u8], nonce: [u8; 24]) -> Sealed;
-    fn open(&self, sealed: &Sealed, context: &[u8]) -> Result<Vec<u8>, SealError>;
-}
+// The port and its types live in `hypha-core` (other leaf crates seal secrets too:
+// shipping's callback secrets, design note 0015); this crate keeps the cipher.
+pub use hypha_core::{SealError, Sealed, SecretBox};
 
 /// XChaCha20-Poly1305 under one 32-byte key. Its 24-byte nonce is long enough to pick at
 /// random without ever repeating in practice.
@@ -87,11 +51,11 @@ impl SecretBox for XChaChaBox {
         out.push(Self::VERSION);
         out.extend_from_slice(&nonce);
         out.extend_from_slice(&ciphertext);
-        Sealed(out)
+        Sealed::from_bytes(out)
     }
 
     fn open(&self, sealed: &Sealed, context: &[u8]) -> Result<Vec<u8>, SealError> {
-        let (version, rest) = sealed.0.split_first().ok_or(SealError("empty"))?;
+        let (version, rest) = sealed.as_bytes().split_first().ok_or(SealError("empty"))?;
         if *version != Self::VERSION {
             return Err(SealError("unknown format version"));
         }
