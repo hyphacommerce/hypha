@@ -290,7 +290,9 @@ impl StageAssetUsages for PgBatch {
 impl StageInventoryItems for PgBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
         self.stage(Staged::InventoryItem(item.snapshot()));
-        item.set_version(item.version().next());
+        let version = item.version().next();
+        self.stage_events_of(item, version);
+        item.set_version(version);
     }
 }
 

@@ -1,8 +1,14 @@
 use std::collections::HashSet;
 
-use hypha_core::{InventoryItemId, LocationId, Quantity, VariantId, Version, Versioned};
+use hypha_core::{
+    InventoryItemId, LocationId, PendingEvent, Quantity, Recorded, Subject, VariantId, Version,
+    Versioned,
+};
 
-use crate::{InventoryError, Location, ReservationRef, RestoreError};
+use crate::{
+    InventoryError, Location, ReservationRef, RestoreError,
+    events::{Available, INVENTORY_ITEM, InventoryItemChanged},
+};
 
 /// Largest stock count, either way: 2⁵³ − 1, like `Money::MAX_AMOUNT`, so JSON clients
 /// and D1 represent every count exactly.
@@ -38,6 +44,54 @@ pub struct InventoryItem {
     continue_selling: bool,
     levels: Vec<Level>,
     reservations: Vec<Reservation>,
+    /// Whether anything changed since it was loaded: its event is built from the item
+    /// as it is when written (design note 0016).
+    changed: Changed,
+}
+
+/// A flag that compares as always equal, so it never makes two items unequal.
+#[derive(Debug, Clone, Copy, Default)]
+struct Changed(bool);
+
+impl PartialEq for Changed {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Changed {}
+
+impl Recorded for InventoryItem {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        if !std::mem::take(&mut self.changed).0 {
+            return Vec::new();
+        }
+        let mut locations: Vec<LocationId> = self
+            .levels
+            .iter()
+            .map(|l| l.location)
+            .chain(self.reservations.iter().map(|r| r.location))
+            .collect();
+        locations.sort();
+        locations.dedup();
+        let event = InventoryItemChanged {
+            inventory_item: self.id,
+            variant: self.variant,
+            tracked: self.tracked,
+            continue_selling: self.continue_selling,
+            available: locations
+                .into_iter()
+                .map(|location| Available {
+                    location,
+                    available: self.available(location),
+                })
+                .collect(),
+        };
+        vec![PendingEvent::new(
+            Subject::new(INVENTORY_ITEM, self.id.as_uuid()),
+            &event,
+        )]
+    }
 }
 
 impl Versioned for InventoryItem {
@@ -65,18 +119,25 @@ impl InventoryItem {
             continue_selling,
             levels: Vec::new(),
             reservations: Vec::new(),
+            changed: Changed(true),
         }
     }
 
     /// Untracked stock is always available and never reserved (I3). Existing levels
     /// and reservations are kept, so turning tracking back on picks up where it was.
     pub fn set_tracked(&mut self, tracked: bool) {
-        self.tracked = tracked;
+        if self.tracked != tracked {
+            self.tracked = tracked;
+            self.changed = Changed(true);
+        }
     }
 
     /// Keep selling when stock runs out (I5).
     pub fn set_continue_selling(&mut self, continue_selling: bool) {
-        self.continue_selling = continue_selling;
+        if self.continue_selling != continue_selling {
+            self.continue_selling = continue_selling;
+            self.changed = Changed(true);
+        }
     }
 
     pub fn on_hand(&self, location: LocationId) -> i64 {
@@ -134,9 +195,11 @@ impl InventoryItem {
 
     fn write_level(&mut self, location: LocationId, on_hand: i64) {
         match self.levels.iter_mut().find(|l| l.location == location) {
+            Some(level) if level.on_hand == on_hand => return,
             Some(level) => level.on_hand = on_hand,
             None => self.levels.push(Level { location, on_hand }),
         }
+        self.changed = Changed(true);
     }
 
     /// Where `quantity` would be reserved from `locations`: `Ok` with the allocation, or
@@ -254,6 +317,7 @@ impl InventoryItem {
                 quantity,
             });
         }
+        self.changed = Changed(true);
         Ok(true)
     }
 
@@ -262,7 +326,11 @@ impl InventoryItem {
     pub fn release(&mut self, reference: &ReservationRef) -> bool {
         let before = self.reservations.len();
         self.reservations.retain(|r| r.reference != *reference);
-        self.reservations.len() != before
+        let released = self.reservations.len() != before;
+        if released {
+            self.changed = Changed(true);
+        }
+        released
     }
 
     pub fn id(&self) -> InventoryItemId {
@@ -350,6 +418,7 @@ impl InventoryItem {
             continue_selling: s.continue_selling,
             levels: s.levels,
             reservations: s.reservations,
+            changed: Changed(false),
         })
     }
 }

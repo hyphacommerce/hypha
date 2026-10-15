@@ -1,11 +1,27 @@
-use hypha_core::{InventoryItemId, RepoError, VariantId};
+use hypha_core::{InventoryItemId, Recorded, RepoError, VariantId, Versioned};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, repo::keys};
 
-use crate::table::Table;
+use crate::{InMemoryOutbox, table::Table};
 
 #[derive(Default)]
 pub struct InMemoryInventoryItemRepo {
     pub(crate) items: Table<InventoryItemId, InventoryItem>,
+    pub(crate) outbox: InMemoryOutbox,
+}
+
+impl InMemoryInventoryItemRepo {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+
+    /// The events this repo wrote (into its outbox, shared or not).
+    pub fn outbox(&self) -> &InMemoryOutbox {
+        &self.outbox
+    }
 }
 
 /// One item per variant.
@@ -41,15 +57,26 @@ impl InventoryItemRepo for InMemoryInventoryItemRepo {
     }
 
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
+        let events = item.take_events();
         self.items
-            .insert(item.id(), item, keys::INVENTORY_ITEM_ID, &unique)
+            .insert(item.id(), item, keys::INVENTORY_ITEM_ID, &unique)?;
+        self.outbox.write(events, Some(item.version()));
+        Ok(())
     }
 
     async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
-        self.items.update(item.id(), item, &unique)
+        let events = item.take_events();
+        self.items.update(item.id(), item, &unique)?;
+        self.outbox.write(events, Some(item.version()));
+        Ok(())
     }
 
     async fn update_many(&self, items: &mut [InventoryItem]) -> Result<(), RepoError> {
-        self.items.update_many(items, InventoryItem::id, &unique)
+        let events: Vec<_> = items.iter_mut().map(|i| i.take_events()).collect();
+        self.items.update_many(items, InventoryItem::id, &unique)?;
+        for (item, events) in items.iter().zip(events) {
+            self.outbox.write(events, Some(item.version()));
+        }
+        Ok(())
     }
 }

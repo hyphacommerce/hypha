@@ -199,8 +199,10 @@ impl StageAssetUsages for InMemoryBatch {
 
 impl StageInventoryItems for InMemoryBatch {
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
+        let version = item.version().next();
+        self.stage_events_of(item, version);
         self.stage(Staged::InventoryItem(item.clone()));
-        item.set_version(item.version().next());
+        item.set_version(version);
     }
 }
 

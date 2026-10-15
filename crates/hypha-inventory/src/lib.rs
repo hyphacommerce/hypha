@@ -4,6 +4,7 @@
 
 pub mod commands;
 pub mod error;
+pub mod events;
 pub mod item;
 pub mod location;
 pub mod reference;
@@ -18,6 +19,7 @@ pub use commands::{
     update_inventory_item, update_location,
 };
 pub use error::{InventoryError, RestoreError};
+pub use events::{Available, InventoryItemChanged};
 pub use item::{InventoryItem, InventoryItemSnapshot, Level, MAX_STOCK, Reservation};
 pub use location::{Location, LocationSnapshot};
 pub use reference::ReservationRef;

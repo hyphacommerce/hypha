@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    InventoryItemId, LocationId, MarketId, Quantity, RepoError, VariantId, Version, Versioned,
+    InventoryItemId, LocationId, MarketId, PendingEvent, Quantity, Recorded, RepoError, VariantId,
+    Version, Versioned,
 };
 use hypha_inventory::{
     InventoryItem, InventoryItemRepo, InventoryItemSnapshot, Level, Location, LocationRepo,
@@ -16,6 +17,7 @@ use crate::{
         id_and_address, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -245,8 +247,14 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
 
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         let s = item.snapshot();
-        in_transaction!(self, |tx| insert_item(tx, &s).await)?;
-        item.set_version(Version::NEW.next());
+        let events = item.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_item(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        item.set_version(version);
         Ok(())
     }
 
@@ -261,7 +269,18 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
             return Ok(());
         }
         let snapshots: Vec<InventoryItemSnapshot> = items.iter().map(|i| i.snapshot()).collect();
-        let new_versions = in_transaction!(self, |tx| update_items(tx, snapshots).await)?;
+        let events: Vec<(Uuid, Vec<PendingEvent>)> = items
+            .iter_mut()
+            .map(|i| (i.id().as_uuid(), i.take_events()))
+            .collect();
+        let actor = self.actor();
+        let new_versions = in_transaction!(self, |tx| {
+            let versions = update_items(tx, snapshots).await?;
+            for (id, events) in &events {
+                insert_events(tx, events, versions.get(id).copied(), actor).await?;
+            }
+            Ok(versions)
+        })?;
         for item in items.iter_mut() {
             if let Some(version) = new_versions.get(&item.id().as_uuid()) {
                 item.set_version(*version);

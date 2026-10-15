@@ -61,7 +61,7 @@ impl Default for InMemoryPorts {
             price_lists: InMemoryPriceListRepo::sharing(&outbox),
             tax_classes: InMemoryTaxClassRepo::sharing(&outbox),
             tax_regions: InMemoryTaxRegionRepo::sharing(&outbox),
-            inventory_items: InMemoryInventoryItemRepo::default(),
+            inventory_items: InMemoryInventoryItemRepo::sharing(&outbox),
             locations: InMemoryLocationRepo::default(),
             customers: InMemoryCustomerRepo::sharing(&outbox),
             idempotency: InMemoryIdempotencyRepo::default(),

@@ -325,6 +325,24 @@ fn set_on_hand_stores_the_count() {
 }
 
 #[test]
+fn a_count_records_what_is_available_now() {
+    let world = World::new();
+    let (item, location) = (world.item(), world.location());
+    world.set(item, location, 5, None).unwrap();
+    let events = world.items.outbox().events();
+    let types: Vec<&str> = events.iter().map(|e| e.event_type.as_str()).collect();
+    // Created, then counted.
+    assert_eq!(types, ["inventory_item.changed", "inventory_item.changed"]);
+    assert_eq!(
+        events[1].data["available"],
+        serde_json::json!([{ "location": location.to_string(), "available": 5 }])
+    );
+    // Counting the same again changes nothing, and records nothing.
+    world.set(item, location, 5, None).unwrap();
+    assert_eq!(world.items.outbox().events().len(), 2);
+}
+
+#[test]
 fn set_on_hand_refuses_a_moved_count() {
     let world = World::new();
     let (item, location) = (world.item(), world.location());
