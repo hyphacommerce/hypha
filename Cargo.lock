@@ -748,6 +748,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-media"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "imagesize",
+ "pollster",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-orders"
 version = "0.1.0"
 dependencies = [
@@ -835,12 +847,14 @@ dependencies = [
  "hypha-customers",
  "hypha-inventory",
  "hypha-markets",
+ "hypha-media",
  "hypha-orders",
  "hypha-products",
  "hypha-stores",
  "hypha-tax",
  "hypha-users",
  "pollster",
+ "sha2",
  "uuid",
 ]
 
@@ -855,6 +869,12 @@ dependencies = [
  "thiserror",
  "uuid",
 ]
+
+[[package]]
+name = "imagesize"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "indexmap"

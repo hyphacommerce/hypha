@@ -135,6 +135,8 @@ define_id!(SessionId, "sess");
 define_id!(ApiKeyId, "key");
 define_id!(PasswordResetId, "pwr");
 
+define_id!(AssetId, "asset");
+
 #[cfg(test)]
 mod tests {
     use super::*;

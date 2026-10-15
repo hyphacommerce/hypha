@@ -1,10 +1,11 @@
 //! The in-memory repos must pass the same contract as every storage adapter.
 
+use hypha_core::Timestamp;
 use hypha_testkit::{
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryInventoryItemRepo,
-    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryOrderRepo, InMemoryPorts,
-    InMemoryPriceListRepo, InMemoryProductRepo, InMemoryStoreRepo, InMemoryTaxClassRepo,
-    InMemoryTaxRegionRepo, contract,
+    InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCatalogRepo,
+    InMemoryCustomerRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo, InMemoryMarketRepo,
+    InMemoryOrderRepo, InMemoryPorts, InMemoryPriceListRepo, InMemoryProductRepo,
+    InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
 };
 use pollster::block_on;
 
@@ -150,4 +151,21 @@ fn invite_repo() {
 #[test]
 fn staff_batch() {
     block_on(contract::staff_batch(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn asset_repo() {
+    block_on(contract::asset_repo(async || InMemoryAssetRepo::default()));
+}
+
+#[test]
+fn blob_store() {
+    let store = InMemoryBlobStore::default();
+    let now = Timestamp::from_unix_micros(1_767_225_600_000_000);
+    block_on(contract::blob_store(
+        &store,
+        now,
+        async |upload, body| store.upload(upload, body, now),
+        async |url| store.download(url, now),
+    ));
 }

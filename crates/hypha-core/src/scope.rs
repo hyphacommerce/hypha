@@ -55,6 +55,11 @@ pub enum Scope {
     ApiKeysRead,
     #[serde(rename = "api_keys:write")]
     ApiKeysWrite,
+    /// The media library: assets and their files (design note 0013).
+    #[serde(rename = "media:read")]
+    MediaRead,
+    #[serde(rename = "media:write")]
+    MediaWrite,
 }
 
 impl Scope {
@@ -84,6 +89,8 @@ impl Scope {
             Scope::UsersWrite => "users:write",
             Scope::ApiKeysRead => "api_keys:read",
             Scope::ApiKeysWrite => "api_keys:write",
+            Scope::MediaRead => "media:read",
+            Scope::MediaWrite => "media:write",
         }
     }
 
@@ -103,6 +110,7 @@ impl Scope {
             Scope::OrdersRead => Some(Scope::OrdersWrite),
             Scope::UsersRead => Some(Scope::UsersWrite),
             Scope::ApiKeysRead => Some(Scope::ApiKeysWrite),
+            Scope::MediaRead => Some(Scope::MediaWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -114,7 +122,8 @@ impl Scope {
             | Scope::OrdersWrite
             | Scope::Checkout
             | Scope::UsersWrite
-            | Scope::ApiKeysWrite => None,
+            | Scope::ApiKeysWrite
+            | Scope::MediaWrite => None,
         }
     }
 
@@ -130,7 +139,7 @@ impl Scope {
         Scope::Checkout,
     ];
 
-    pub const ALL: [Scope; 23] = [
+    pub const ALL: [Scope; 25] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -154,6 +163,8 @@ impl Scope {
         Scope::UsersWrite,
         Scope::ApiKeysRead,
         Scope::ApiKeysWrite,
+        Scope::MediaRead,
+        Scope::MediaWrite,
     ];
 }
 

@@ -4,21 +4,21 @@ use hypha_core::HasIdempotency;
 use hypha_customers::HasCustomers;
 use hypha_inventory::{HasInventoryItems, HasLocations};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
+use hypha_media::HasAssets;
 use hypha_orders::HasOrders;
 use hypha_products::HasProducts;
 use hypha_tax::{HasTaxClasses, HasTaxRegions};
 use hypha_users::{HasInvites, HasRoles, HasUsers};
 
 use crate::{
-    InMemoryApiKeyRepo, InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo,
-    InMemoryIdempotencyRepo, InMemoryIdentityRepo, InMemoryInventoryItemRepo, InMemoryInviteRepo,
-    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryOrderRepo, InMemoryPasswordResetRepo,
-    InMemoryPriceListRepo, InMemoryProductRepo, InMemoryRoleRepo, InMemorySessionRepo,
-    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
+    InMemoryApiKeyRepo, InMemoryAssetRepo, InMemoryCartRepo, InMemoryCatalogRepo,
+    InMemoryCustomerRepo, InMemoryIdempotencyRepo, InMemoryIdentityRepo, InMemoryInventoryItemRepo,
+    InMemoryInviteRepo, InMemoryLocationRepo, InMemoryMarketRepo, InMemoryOrderRepo,
+    InMemoryPasswordResetRepo, InMemoryPriceListRepo, InMemoryProductRepo, InMemoryRoleRepo,
+    InMemorySessionRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
 };
 
-/// Every repository of one store, in memory: the in-memory host's storage and the
-/// tests' world. It has every accessor, so it is `hypha_cart::CartPorts`; the fields are
+/// Every repository of one store, in memory: the tests' world. It has every accessor, so it is `hypha_cart::CartPorts`; the fields are
 /// public so tests can set data up directly.
 #[derive(Default)]
 pub struct InMemoryPorts {
@@ -34,6 +34,7 @@ pub struct InMemoryPorts {
     pub customers: InMemoryCustomerRepo,
     pub idempotency: InMemoryIdempotencyRepo,
     pub orders: InMemoryOrderRepo,
+    pub assets: InMemoryAssetRepo,
     // Staff and keys live in the store's database (design note 0006, T4).
     pub identities: InMemoryIdentityRepo,
     pub sessions: InMemorySessionRepo,
@@ -118,6 +119,13 @@ impl HasIdempotency for InMemoryPorts {
     type Idempotency = InMemoryIdempotencyRepo;
     fn idempotency(&self) -> &InMemoryIdempotencyRepo {
         &self.idempotency
+    }
+}
+
+impl HasAssets for InMemoryPorts {
+    type Assets = InMemoryAssetRepo;
+    fn assets(&self) -> &InMemoryAssetRepo {
+        &self.assets
     }
 }
 
