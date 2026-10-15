@@ -108,20 +108,39 @@ export async function addVariant(
   return {};
 }
 
+/** Grams from what someone typed: a whole number, or null for a blank (not entered). */
+function parseGrams(input: string): number | null | undefined {
+  const text = input.trim();
+  if (text === "") return null;
+  if (!/^\d+$/.test(text)) return undefined;
+  const grams = Number(text);
+  return grams <= 4_294_967_295 ? grams : undefined;
+}
+
 export async function updateVariant(
   id: string,
   variant: string,
-  input: { sku: string; price: string; currency: AdminSchemas["Currency"] },
+  input: {
+    sku: string;
+    price: string;
+    currency: AdminSchemas["Currency"];
+    weight: string;
+    requiresShipping: boolean;
+  },
 ): Promise<EditResult> {
   const amount = parseMoney(input.price, input.currency);
   if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
+  const grams = parseGrams(input.weight);
+  if (grams === undefined) return { error: "Enter the weight in whole grams, like 350." };
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/products/{id}/variants/{variant_id}", {
     params: { path: { id, variant_id: variant } },
-    // A blank SKU clears it (`null` in a Merge Patch).
+    // A blank SKU or weight clears it (`null` in a Merge Patch).
     body: {
       sku: input.sku.trim() === "" ? null : input.sku,
       price: { amount, currency: input.currency },
+      weight_grams: grams,
+      requires_shipping: input.requiresShipping,
     },
   });
   if (error) return failed(error);

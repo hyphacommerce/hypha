@@ -97,6 +97,30 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                   <TableCell />
                   <TableCell>{formatMoney(order.subtotal)}</TableCell>
                 </TableRow>
+                {order.shipping_lines.map((shipping) => (
+                  <TableRow key={shipping.group}>
+                    <TableCell>
+                      <VStack gap={0.5}>
+                        <Text>Shipping: {shipping.name}</Text>
+                        {shipping.provider && (
+                          <Text type="supporting" color="secondary">
+                            {[shipping.provider, shipping.service, shipping.reference]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </Text>
+                        )}
+                      </VStack>
+                    </TableCell>
+                    <TableCell />
+                    <TableCell />
+                    <TableCell>
+                      {shipping.tax
+                        ? `${formatMoney(shipping.tax.amount)} (${percent(shipping.tax.rate_ppm)})`
+                        : "—"}
+                    </TableCell>
+                    <TableCell>{formatMoney(shipping.amount)}</TableCell>
+                  </TableRow>
+                ))}
                 <TableRow>
                   <TableCell>{order.taxes_included ? "Tax (included)" : "Tax"}</TableCell>
                   <TableCell />
@@ -123,6 +147,35 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
             </Table>
           </VStack>
         </Card>
+
+        {order.shipping_address && (
+          <Card>
+            <MetadataList title="Ships to">
+              <MetadataListItem label="Name">
+                {[order.shipping_address.first_name, order.shipping_address.last_name]
+                  .filter(Boolean)
+                  .join(" ")}
+              </MetadataListItem>
+              <MetadataListItem label="Address">
+                {[
+                  order.shipping_address.company,
+                  order.shipping_address.line1,
+                  order.shipping_address.line2,
+                  [order.shipping_address.postal_code, order.shipping_address.city]
+                    .filter(Boolean)
+                    .join(" "),
+                  order.shipping_address.province,
+                  order.shipping_address.country,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+              </MetadataListItem>
+              {order.shipping_address.phone && (
+                <MetadataListItem label="Phone">{order.shipping_address.phone}</MetadataListItem>
+              )}
+            </MetadataList>
+          </Card>
+        )}
 
         <Card>
           <MetadataList title="Customer">

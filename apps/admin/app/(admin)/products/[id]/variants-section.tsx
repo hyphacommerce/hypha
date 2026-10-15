@@ -1,6 +1,7 @@
 "use client";
 
 import { AspectRatio } from "@astryxdesign/core/AspectRatio";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -32,8 +33,8 @@ type Variant = AdminSchemas["VariantResponse"];
 type Item = AdminSchemas["ProductMediaResponse"];
 
 /**
- * The variants (design note 0014, section 8): SKU and price edited in place and saved
- * per row, an image per variant from the product's media, and Add variant for one
+ * The variants (design note 0014, section 8): SKU, price, weight and whether it ships
+ * (design note 0015) edited in place and saved per row, an image per variant from the product's media, and Add variant for one
  * combination at a time. Nothing generates every combination of the options.
  */
 export function VariantsSection({ product }: { product: Product }) {
@@ -70,6 +71,8 @@ export function VariantsSection({ product }: { product: Product }) {
               <TableHeaderCell>Variant</TableHeaderCell>
               <TableHeaderCell>SKU</TableHeaderCell>
               <TableHeaderCell>Price</TableHeaderCell>
+              <TableHeaderCell>Weight (g)</TableHeaderCell>
+              <TableHeaderCell>Ships</TableHeaderCell>
               <TableHeaderCell>
                 <span />
               </TableHeaderCell>
@@ -78,7 +81,7 @@ export function VariantsSection({ product }: { product: Product }) {
           <TableBody>
             {product.variants.map((variant) => (
               <VariantRow
-                key={`${variant.id}:${variant.sku}:${variant.price.amount}:${variant.media_asset_id}`}
+                key={`${variant.id}:${variant.sku}:${variant.price.amount}:${variant.media_asset_id}:${variant.weight_grams}:${variant.requires_shipping}`}
                 productId={product.id}
                 variant={variant}
                 title={variant.title ?? (hasOptions ? "—" : "Default")}
@@ -109,8 +112,11 @@ function VariantRow({
 }) {
   const savedSku = variant.sku ?? "";
   const savedPrice = moneyInput(variant.price);
+  const savedWeight = variant.weight_grams == null ? "" : String(variant.weight_grams);
   const [sku, setSku] = useState(savedSku);
   const [price, setPrice] = useState(savedPrice);
+  const [weight, setWeight] = useState(savedWeight);
+  const [ships, setShips] = useState(variant.requires_shipping);
   const [error, setError] = useState<string>();
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isPickingImage, setIsPickingImage] = useState(false);
@@ -119,7 +125,10 @@ function VariantRow({
   // Compared as the API stores them (trimmed, in minor units): "A " or "45" saved as
   // "A" and "45.00" would otherwise look unsaved forever.
   const isDirty =
-    sku.trim() !== savedSku || parseMoney(price, variant.price.currency) !== variant.price.amount;
+    sku.trim() !== savedSku ||
+    parseMoney(price, variant.price.currency) !== variant.price.amount ||
+    weight.trim() !== savedWeight ||
+    ships !== variant.requires_shipping;
   const image = images.find((item) => item.asset_id === variant.media_asset_id);
   const save = () => {
     if (!isDirty) return;
@@ -128,9 +137,14 @@ function VariantRow({
         sku,
         price,
         currency: variant.price.currency,
+        weight,
+        requiresShipping: ships,
       });
       setError(result.error);
-      if (!result.error) setSku(sku.trim());
+      if (!result.error) {
+        setSku(sku.trim());
+        setWeight(weight.trim());
+      }
     });
   };
 
@@ -165,7 +179,7 @@ function VariantRow({
           onChange={setSku}
           onEnter={save}
           placeholder="—"
-          width={180}
+          width={130}
         />
       </TableCell>
       <TableCell>
@@ -179,6 +193,27 @@ function VariantRow({
           width={110}
           status={error ? { type: "error", message: error } : undefined}
           statusVariant="tooltip"
+        />
+      </TableCell>
+      <TableCell>
+        <TextInput
+          label={`Weight of ${title} in grams`}
+          isLabelHidden
+          size="sm"
+          value={weight}
+          onChange={setWeight}
+          onEnter={save}
+          placeholder="—"
+          width={80}
+        />
+      </TableCell>
+      <TableCell>
+        <CheckboxInput
+          label={`${title} is shipped`}
+          isLabelHidden
+          size="sm"
+          value={ships}
+          onChange={setShips}
         />
       </TableCell>
       <TableCell>

@@ -15,6 +15,9 @@ const MINOR_DIGITS: Record<Money["currency"], number> = {
   RSD: 2,
 };
 
+/** Every currency the API takes, for pickers. */
+export const CURRENCIES = Object.keys(MINOR_DIGITS) as Money["currency"][];
+
 /** "€18.00". Amounts are integers in minor units, never floats (CLAUDE.md, Money). */
 export function formatMoney({ amount, currency }: Money): string {
   const digits = MINOR_DIGITS[currency];

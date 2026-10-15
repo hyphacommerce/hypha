@@ -139,6 +139,31 @@ export function describe(error: ApiError): string {
       return "That file hasn't finished uploading.";
     case "asset_kind_not_allowed":
       return "Products take images and videos; a variant shows an image.";
+    case "country_in_other_zone":
+      return "A country you listed is already in another zone. A country ships from one zone.";
+    case "invalid_country_code":
+      return "Countries are two-letter codes, like HR or DE.";
+    case "duplicate_country":
+      return "A country is listed twice.";
+    case "shipping_option_code_taken":
+      return "Another option of this zone has that code.";
+    case "invalid_shipping_option_code":
+      return "Codes are lowercase letters, digits, '_' and '-', like standard or next-day.";
+    case "invalid_shipping_rate":
+      return `${error.error.charAt(0).toUpperCase()}${error.error.slice(1)}.`;
+    case "too_many_shipping_options":
+      return "A zone has at most 50 options.";
+    case "invalid_shipping_provider_key":
+      return "Keys are app_ followed by lowercase letters, digits and '_', like app_courier.";
+    case "shipping_provider_exists":
+      return "A rate app with that key already exists.";
+    case "invalid_callback_url":
+      return "The callback URL must start with https:// (http:// only for localhost).";
+    case "invalid_callback_timeout":
+      return "The timeout is between 100 and 10,000 milliseconds.";
+    case "shipping_provider_failed":
+    case "shipping_provider_timeout":
+      return `The rate app didn't answer properly: ${error.error}.`;
     case "field_required":
     case "field_too_long":
       return error.error.charAt(0).toUpperCase() + error.error.slice(1) + ".";
