@@ -27,7 +27,7 @@
 | EV2 | **Every repository write is a batch of one inside the adapter.** Each aggregate gets `insert_x`/`update_x(tx, …)` functions; the repo methods and the batch both call them. Batches become one ordered list of staged writes, so a new aggregate (or the outbox) is one variant, not nine edits |
 | EV3 | **Set-based writes go through batches** with a `StageEvents` step: catalog membership, fixed prices, tax-class assignment and `update_many` today skip aggregates, so their commands stage the write and its event together |
 | EV4 | **Event payloads are contract types in their domain crate** (`events.rs`), plain serializable data, never the aggregate. Each has a stable dotted name (`product.variant_removed`) and a version. *Hard to reverse* |
-| EV5 | **The envelope** is `{id: "evt_…", type, version, subject: {type, id}, actor, occurred_at, data}`. `occurred_at` is the commit time. Every event carries the `Actor` that caused it, so agent actions are audited for free |
+| EV5 | **The envelope** is `{id: "evt_…", type, version, subject: {type, id}, actor, occurred_at, data}`. `occurred_at` is the writing transaction's time. Every event carries the `Actor` that caused it, so agent actions are audited for free |
 | EV6 | **The outbox orders by a `bigint` identity, not by UUIDv7**, and is read by claiming undelivered rows (`FOR UPDATE SKIP LOCKED`), never through an "after this ID" cursor: IDs aren't in commit order, so a cursor would skip events from transactions that commit late |
 | EV7 | **Delivery is at least once, with no ordering guarantee.** Each event carries its subject's version when it has one; consumers use it to drop stale ones. Handlers must be idempotent (section 6) |
 | EV8 | **One delivery row per event and destination**, with attempts, the next attempt time and the last error, retried with backoff. In-process handlers and webhooks are both destinations, so they retry, fail and show up the same way |
@@ -95,7 +95,7 @@ pub struct Recorder(Vec<PendingEvent>);
   `Caller::authenticate`, the one place that also builds its `Ctx`, and the ports stamp
   every event they write with that actor. Jobs use `Actor::System`. (Q1, *Decided*.)
 - **Event IDs and times come from storage:** the outbox row's `id` is
-  `gen_random_uuid()` and its `occurred_at` is the transaction's commit time (`now()`), so
+  `gen_random_uuid()` and its `occurred_at` is the writing transaction's time (`now()`), so
   aggregates need neither an ID generator nor a clock to record. Business times that
   matter (`placed_at`) are in the payload.
 
@@ -156,18 +156,31 @@ aggregate's events; claiming skips rows another claim holds.
 Small payloads: the subject and the facts of the change, not the whole resource. A
 consumer that needs the resource fetches it (Q2, *Decided*).
 
+Every payload names its subject (`product`, `catalog`, …) as a prefixed ID. As built
+(2026-10-15):
+
 | Event | Data | Recorded by |
 | --- | --- | --- |
-| `product.created` | `handle`, `status` | `create_product` |
-| `product.updated` | `fields` changed (`title`, `handle`, `status`, `options`, `media`) | product edits |
-| `product.variant_added` / `…_updated` / `…_removed` | `variant`, changed `fields` | variant edits |
-| `catalog.products_added` / `…_removed` | `catalog`, `products` | catalog membership |
-| `price_list.prices_set` / `…_removed` | `price_list`, `variants` | fixed prices |
-| `inventory_item.changed` | `variant`, `available` per location | levels, adjustments, reservations |
-| `order.placed` | `number`, `customer`, `total`, `placed_at` | checkout |
-| `order.paid` | `amount`, `reference` | `mark_order_paid` (moves to a batch, 0007 §10) |
-| `customer.created` / `customer.updated` | `fields` | customers |
-| `market.changed`, `tax.changed`, `shipping_zone.changed` | the subject | configuration edits (search and caches) |
+| `product.created` | `handle`, `status` | creating a product |
+| `product.updated` | `fields` changed (`title`, `handle`, `status`, `options`, `media`) | product edits, one per write |
+| `product.variant_added` / `…_removed` | `variant` | variant edits and `set_options` |
+| `product.variant_updated` | `variant`, `fields` (`sku`, `price`, `selections`, `weight`, `requires_shipping`, `media`) | one per variant per write |
+| `catalog.changed` | (subject) | created, price list assigned |
+| `catalog.products_added` / `…_removed` | `products` | catalog membership (staged, EV3) |
+| `price_list.changed` | (subject) | created, adjustment changed |
+| `price_list.prices_set` / `…_removed` | `variants` | fixed prices (staged) |
+| `market.changed` | (subject) | created, countries or tax setting changed |
+| `tax_class.changed`, `tax_region.changed` | (subject) | created; a region's rates changed |
+| `product.tax_class_set` | `tax_class` (`null`: the default rate) | tax-class assignment (staged), one per product |
+| `shipping_zone.changed` / `shipping_zone.deleted` | (subject) | any zone edit; deleting it |
+| `inventory_item.changed` | `variant`, `tracked`, `continue_selling`, `available` per location | counts, adjustments, reservations, settings; built from the item as written |
+| `order.placed` | `number`, `customer`, `total` | checkout |
+| `order.paid` | `amount` | `mark_order_paid` (a payment `reference` comes with payment spores, as a version 2) |
+| `customer.created` / `customer.updated` | `fields` (names only: `email`, `first_name`, `last_name`, `phone`, `addresses`, `defaults`) | customers, checkout's new guest |
+
+Customer payloads never carry the values: an email or address is personal data, and a
+consumer with `customers:read` fetches it. An edit that changes nothing records nothing.
+"Changed" events are recorded once per write (`Recorder::record_once`).
 
 Not events: cart edits (noise; abandoned carts come with a cart age), staff and auth
 changes (an audit log is a separate thing; sessions and keys mustn't leak into
