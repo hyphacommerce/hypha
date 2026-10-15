@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use hypha_core::{CountryCode, ProductId, RepoError, TaxClassId, TaxRegionId, Version, Versioned};
+use hypha_core::{
+    CountryCode, ProductId, Recorded, RepoError, TaxClassId, TaxRegionId, Version, Versioned,
+};
 use hypha_tax::{
     ClassRate, TaxClass, TaxClassRepo, TaxClassSnapshot, TaxRegion, TaxRegionRepo,
     TaxRegionSnapshot,
@@ -11,6 +13,7 @@ use uuid::Uuid;
 use crate::{
     columns::{col, tax_rate_from_db, tax_rate_to_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -39,8 +42,14 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
 
     async fn insert(&self, class: &mut TaxClass) -> Result<(), RepoError> {
         let s = class.snapshot();
-        in_transaction!(self, |tx| insert_tax_class(tx, &s).await)?;
-        class.set_version(Version::NEW.next());
+        let events = class.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_tax_class(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        class.set_version(version);
         Ok(())
     }
 
@@ -142,14 +151,26 @@ impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
 
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
         let s = region.snapshot();
-        in_transaction!(self, |tx| insert_tax_region(tx, &s).await)?;
-        region.set_version(Version::NEW.next());
+        let events = region.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_tax_region(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        region.set_version(version);
         Ok(())
     }
 
     async fn update(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
         let s = region.snapshot();
-        let version = in_transaction!(self, |tx| update_tax_region(tx, &s).await)?;
+        let events = region.take_events();
+        let actor = self.actor();
+        let version = in_transaction!(self, |tx| {
+            let version = update_tax_region(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await?;
+            Ok(version)
+        })?;
         region.set_version(version);
         Ok(())
     }

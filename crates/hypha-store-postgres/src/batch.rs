@@ -7,8 +7,8 @@ use hypha_auth::{
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_core::{
     CatalogId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId,
-    ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, Timestamp, VariantId,
-    Version, Versioned,
+    ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId,
+    Timestamp, VariantId, Version, Versioned,
 };
 use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
@@ -16,6 +16,7 @@ use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_orders::{Order, OrderSnapshot, StageOrders};
 use hypha_products::{Product, ProductSnapshot, StageProducts};
+use hypha_tax::StageTaxAssignments;
 use hypha_users::{
     Invite, InviteSnapshot, Role, RoleSnapshot, StageInvites, StageRoles, StageUsers, User,
     UserSnapshot,
@@ -39,6 +40,7 @@ use crate::{
     outbox::insert_events,
     products::update_product,
     store::{PgConnection, PgStore},
+    tax::assign_tax_class,
     users::{insert_role, insert_user, update_invite, update_role, update_user},
 };
 
@@ -73,6 +75,8 @@ enum Staged {
     PasswordReset(PasswordResetSnapshot),
     UsedUpResets(IdentityId, Timestamp),
     InventoryItem(InventoryItemSnapshot),
+    /// Products' tax class (`None`: the default rate).
+    TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
     /// Catalog membership: added (`true`) or removed.
     CatalogProducts(CatalogId, Vec<ProductId>, bool),
     /// Fixed prices set (`Some` price) or removed (`None`), per variant.
@@ -112,10 +116,11 @@ impl Staged {
             // These two are gathered and written in one statement each, last.
             Staged::CatalogProducts(..) => 19,
             Staged::FixedPrices(..) => 20,
-            Staged::Idempotency(_) => 21,
-            Staged::InventoryItem(_) => 22,
+            Staged::TaxAssignment(..) => 21,
+            Staged::Idempotency(_) => 22,
+            Staged::InventoryItem(_) => 23,
             // Inserts into a table nothing else locks: anywhere would do.
-            Staged::Events(..) => 23,
+            Staged::Events(..) => 24,
         }
     }
 
@@ -370,6 +375,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     use_up_password_resets(&tx, identity, at).await?
                 }
                 Staged::InventoryItem(s) => items.push(s),
+                Staged::TaxAssignment(products, class) => {
+                    assign_tax_class(&tx, &products, class).await?
+                }
                 Staged::CatalogProducts(catalog, products, true) => {
                     add_catalog_products(&tx, catalog, &products).await?
                 }
@@ -423,5 +431,11 @@ impl StageFixedPrices for PgBatch {
     fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]) {
         let changes = variants.iter().map(|v| (*v, None)).collect();
         self.stage(Staged::FixedPrices(list, changes));
+    }
+}
+
+impl StageTaxAssignments for PgBatch {
+    fn assign_tax_class(&mut self, products: &[ProductId], class: Option<TaxClassId>) {
+        self.stage(Staged::TaxAssignment(products.to_vec(), class));
     }
 }

@@ -280,7 +280,8 @@ pub trait Storage: Send + Sync + 'static {
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts
-                       + hypha_markets::StageFixedPrices,
+                       + hypha_markets::StageFixedPrices
+                       + hypha_tax::StageTaxAssignments,
         >
     where
         Self: 'a;

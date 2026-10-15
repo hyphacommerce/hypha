@@ -205,10 +205,12 @@ async fn zone_lookups<R: ShippingZoneRepo>(repo: &R) {
         repo.list().await,
         Ok(vec![domestic.clone(), eu.clone(), also_eu.clone()])
     );
-    repo.delete(zid(1)).await.unwrap();
+    let mut gone = eu.clone();
+    gone.delete();
+    repo.delete(&mut gone).await.unwrap();
     assert_eq!(repo.get(zid(1)).await, Ok(None));
     assert_eq!(repo.get_by_country(country("HR")).await, Ok(None));
-    assert_eq!(repo.delete(zid(1)).await, Ok(()));
+    assert_eq!(repo.delete(&mut eu.clone()).await, Ok(()));
     // Its countries are free again.
     repo.insert(&mut zone(4, "New EU", &["HR"])).await.unwrap();
 }

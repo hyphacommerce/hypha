@@ -5,10 +5,14 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    CountryCode, ShippingOptionId, ShippingZoneId, TaxClassId, Version, Versioned, required_text,
+    CountryCode, PendingEvent, Recorded, Recorder, ShippingOptionId, ShippingZoneId, Subject,
+    TaxClassId, Version, Versioned, required_text,
 };
 
-use crate::{BuiltinRate, DeliveryEstimate, ProviderKey, ShippingError};
+use crate::{
+    BuiltinRate, DeliveryEstimate, ProviderKey, ShippingError,
+    events::{SHIPPING_ZONE, ShippingZoneChanged, ShippingZoneDeleted},
+};
 
 /// How an option's price is found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +128,13 @@ pub struct ShippingZone {
     countries: Vec<CountryCode>,
     /// In display order.
     options: Vec<ShippingOption>,
+    events: Recorder,
+}
+
+impl Recorded for ShippingZone {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
 }
 
 impl Versioned for ShippingZone {
@@ -151,13 +162,36 @@ impl ShippingZone {
             name: required_text("name", name)?,
             countries: Vec::new(),
             options: Vec::new(),
+            events: Recorder::default(),
         };
         zone.set_countries(countries)?;
         Ok(zone)
     }
 
+    fn subject(&self) -> Subject {
+        Subject::new(SHIPPING_ZONE, self.id.as_uuid())
+    }
+
+    fn changed(&mut self) {
+        let event = ShippingZoneChanged {
+            shipping_zone: self.id,
+        };
+        self.events.record_once(self.subject(), &event);
+    }
+
+    /// Records that the zone is being deleted; the repository's `delete` writes it.
+    pub fn delete(&mut self) {
+        let event = ShippingZoneDeleted {
+            shipping_zone: self.id,
+        };
+        // Whatever else changed is moot now.
+        self.events.take();
+        self.events.record(self.subject(), &event);
+    }
+
     pub fn rename(&mut self, name: &str) -> Result<(), ShippingError> {
         self.name = required_text("name", name)?;
+        self.changed();
         Ok(())
     }
 
@@ -169,6 +203,7 @@ impl ShippingZone {
             return Err(ShippingError::DuplicateCountry(*twice));
         }
         self.countries = countries;
+        self.changed();
         Ok(())
     }
 
@@ -193,6 +228,7 @@ impl ShippingZone {
             is_backup: new.is_backup,
             enabled: new.enabled,
         });
+        self.changed();
         Ok(())
     }
 
@@ -234,12 +270,14 @@ impl ShippingZone {
         if let Some(enabled) = patch.enabled {
             option.enabled = enabled;
         }
+        self.changed();
         Ok(())
     }
 
     pub fn remove_option(&mut self, id: ShippingOptionId) -> Result<(), ShippingError> {
         let index = self.index_of(id)?;
         self.options.remove(index);
+        self.changed();
         Ok(())
     }
 
@@ -255,6 +293,7 @@ impl ShippingZone {
         }
         self.options
             .sort_by_key(|o| order.iter().position(|id| *id == o.id));
+        self.changed();
         Ok(())
     }
 
@@ -361,6 +400,8 @@ impl ShippingZone {
             zone.add_option(option)?;
         }
         zone.version = s.version;
+        // Built through the editing methods; nothing happened, though.
+        zone.events = Recorder::default();
         Ok(zone)
     }
 }
@@ -504,5 +545,24 @@ mod tests {
         z.add_option(option(1, "standard")).unwrap();
         z.set_version(Version::new(4));
         assert_eq!(ShippingZone::restore(z.snapshot()), Ok(z));
+    }
+
+    #[test]
+    fn a_restored_zone_records_nothing_and_a_deleted_one_only_its_deletion() {
+        let mut zone = ShippingZone::new(
+            ShippingZoneId::from_uuid(Uuid::from_u128(1)),
+            "EU",
+            vec![country("HR")],
+        )
+        .unwrap();
+        let types = |events: Vec<PendingEvent>| -> Vec<&'static str> {
+            events.into_iter().map(|e| e.event_type).collect()
+        };
+        assert_eq!(types(zone.take_events()), ["shipping_zone.changed"]);
+        let mut restored = ShippingZone::restore(zone.snapshot()).unwrap();
+        assert!(restored.take_events().is_empty());
+        restored.rename("Europe").unwrap();
+        restored.delete();
+        assert_eq!(types(restored.take_events()), ["shipping_zone.deleted"]);
     }
 }

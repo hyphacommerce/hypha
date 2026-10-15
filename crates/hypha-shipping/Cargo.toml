@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 hypha-core.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 # `join_all` only (no runtime), so provider quotes for one cart run concurrently on
 # every host, Workers included.

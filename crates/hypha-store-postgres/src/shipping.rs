@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    CountryCode, Currency, Money, Price, RepoError, Sealed, ShippingOptionId, ShippingZoneId,
-    TaxClassId, Version, Versioned,
+    CountryCode, Currency, Money, Price, Recorded, RepoError, Sealed, ShippingOptionId,
+    ShippingZoneId, TaxClassId, Version, Versioned,
 };
 use hypha_shipping::{
     AppProvider, AppProviderRepo, AppProviderSnapshot, BuiltinRate, DeliveryEstimate, NewOption,
@@ -19,6 +19,7 @@ use uuid::Uuid;
 use crate::{
     columns::{col, currency_from_db, version_from_db, version_to_db},
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -59,20 +60,39 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
 
     async fn insert(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
         let s = zone.snapshot();
-        in_transaction!(self, |tx| insert_zone(tx, &s).await)?;
-        zone.set_version(Version::NEW.next());
+        let events = zone.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_zone(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        zone.set_version(version);
         Ok(())
     }
 
     async fn update(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
         let s = zone.snapshot();
-        let version = in_transaction!(self, |tx| update_zone(tx, &s).await)?;
+        let events = zone.take_events();
+        let actor = self.actor();
+        let version = in_transaction!(self, |tx| {
+            let version = update_zone(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await?;
+            Ok(version)
+        })?;
         zone.set_version(version);
         Ok(())
     }
 
-    async fn delete(&self, id: ShippingZoneId) -> Result<(), RepoError> {
-        in_transaction!(self, |tx| delete_zone(tx, id).await)
+    async fn delete(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
+        let id = zone.id();
+        let events = zone.take_events();
+        let actor = self.actor();
+        in_transaction!(self, |tx| {
+            delete_zone(tx, id).await?;
+            // No version: the zone is gone.
+            insert_events(tx, &events, None, actor).await
+        })
     }
 }
 

@@ -1,11 +1,13 @@
 use hypha_core::{
-    AuthError, CountryCode, CountryError, Ctx, ErrorCode, IdGenerator, MoneyError, ProductId,
-    RepoError, Scope, TaxClassId, TaxRate, TaxRegionId, TextError, report_duplicate,
+    AuthError, CountryCode, CountryError, Ctx, ErrorCode, HasBatch, IdGenerator, MoneyError,
+    PendingEvent, ProductId, RepoError, Scope, StageEvents, Subject, TaxClassId, TaxRate,
+    TaxRegionId, TextError, report_duplicate,
 };
 use thiserror::Error;
 
 use crate::{
-    TaxClass, TaxError, TaxRegion,
+    HasTaxClasses, StageTaxAssignments, TaxClass, TaxError, TaxRegion,
+    events::{PRODUCT, ProductTaxClassSet},
     repo::{TaxClassRepo, TaxRegionRepo, keys},
 };
 
@@ -72,20 +74,36 @@ pub struct AssignTaxClass {
     pub class: Option<TaxClassId>,
 }
 
-pub async fn assign_tax_class<C: TaxClassRepo>(
+pub async fn assign_tax_class<S>(
     ctx: &Ctx,
-    classes: &C,
+    ports: &S,
     input: AssignTaxClass,
-) -> Result<(), CommandError> {
+) -> Result<(), CommandError>
+where
+    S: HasTaxClasses + HasBatch<Batch: StageTaxAssignments + StageEvents>,
+{
     ctx.require(Scope::TaxesWrite)?;
 
     if let Some(class) = input.class
-        && classes.get(class).await?.is_none()
+        && ports.tax_classes().get(class).await?.is_none()
     {
         return Err(CommandError::TaxClassNotFound(class));
     }
-    classes.assign(&input.products, input.class).await?;
-    Ok(())
+    let events = input
+        .products
+        .iter()
+        .map(|product| {
+            let event = ProductTaxClassSet {
+                product: *product,
+                tax_class: input.class,
+            };
+            PendingEvent::new(Subject::new(PRODUCT, product.as_uuid()), &event)
+        })
+        .collect();
+    let mut batch = ports.batch();
+    batch.assign_tax_class(&input.products, input.class);
+    batch.record_events(events);
+    Ok(ports.commit(batch).await?)
 }
 
 pub struct CreateTaxRegion {

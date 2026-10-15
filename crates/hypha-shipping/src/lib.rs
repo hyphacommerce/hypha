@@ -7,6 +7,7 @@
 pub mod app_provider;
 pub mod commands;
 pub mod error;
+pub mod events;
 pub mod offers;
 pub mod provider;
 pub mod rate;
@@ -22,6 +23,7 @@ pub use commands::{
     update_zone,
 };
 pub use error::ShippingError;
+pub use events::{ShippingZoneChanged, ShippingZoneDeleted};
 pub use offers::{NotOffered, Offer, OfferOutcome, QuoteSource, offers};
 pub use provider::{
     DeliveryEstimate, ProviderError, ProviderKey, ProviderKind, Rate, RateItem, RateProvider,

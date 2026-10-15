@@ -14,6 +14,9 @@ pub mod keys {
 pub trait TaxClassRepo {
     async fn get(&self, id: TaxClassId) -> Result<Option<TaxClass>, RepoError>;
     async fn insert(&self, class: &mut TaxClass) -> Result<(), RepoError>;
+    /// Sets the products' class (`None`: the default rate). Records no event: commands
+    /// stage it (`StageTaxAssignments`) with `product.tax_class_set`; this is for
+    /// setting up data.
     async fn assign(
         &self,
         products: &[ProductId],
@@ -63,4 +66,10 @@ impl<T: HasTaxRegions + ?Sized> HasTaxRegions for &T {
     fn tax_regions(&self) -> &Self::TaxRegions {
         (**self).tax_regions()
     }
+}
+
+/// Tax-class assignments as a batch writes them (design note 0016, EV3), so the change
+/// and its events commit together.
+pub trait StageTaxAssignments {
+    fn assign_tax_class(&mut self, products: &[ProductId], class: Option<TaxClassId>);
 }

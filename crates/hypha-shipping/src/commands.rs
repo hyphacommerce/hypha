@@ -147,8 +147,9 @@ pub async fn delete_zone<R: ShippingZoneRepo>(
     id: ShippingZoneId,
 ) -> Result<(), CommandError> {
     ctx.require(Scope::ShippingWrite)?;
-    load_zone(zones, id).await?;
-    Ok(zones.delete(id).await?)
+    let mut zone = load_zone(zones, id).await?;
+    zone.delete();
+    Ok(zones.delete(&mut zone).await?)
 }
 
 // ---------- options ----------

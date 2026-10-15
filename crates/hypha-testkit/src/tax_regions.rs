@@ -1,11 +1,27 @@
-use hypha_core::{CountryCode, RepoError, TaxRegionId};
+use hypha_core::{CountryCode, Recorded, RepoError, TaxRegionId, Versioned};
 use hypha_tax::{TaxRegion, TaxRegionRepo, repo::keys};
 
-use crate::table::Table;
+use crate::{InMemoryOutbox, table::Table};
 
 #[derive(Default)]
 pub struct InMemoryTaxRegionRepo {
     regions: Table<TaxRegionId, TaxRegion>,
+    pub(crate) outbox: InMemoryOutbox,
+}
+
+impl InMemoryTaxRegionRepo {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+
+    /// The events this repo wrote (into its outbox, shared or not).
+    pub fn outbox(&self) -> &InMemoryOutbox {
+        &self.outbox
+    }
 }
 
 fn unique(new: &TaxRegion, other: &TaxRegion) -> Option<&'static str> {
@@ -31,11 +47,17 @@ impl TaxRegionRepo for InMemoryTaxRegionRepo {
     }
 
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
+        let events = region.take_events();
         self.regions
-            .insert(region.id(), region, keys::TAX_REGION_ID, &unique)
+            .insert(region.id(), region, keys::TAX_REGION_ID, &unique)?;
+        self.outbox.write(events, Some(region.version()));
+        Ok(())
     }
 
     async fn update(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
-        self.regions.update(region.id(), region, &unique)
+        let events = region.take_events();
+        self.regions.update(region.id(), region, &unique)?;
+        self.outbox.write(events, Some(region.version()));
+        Ok(())
     }
 }

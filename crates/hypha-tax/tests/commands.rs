@@ -9,7 +9,7 @@ use hypha_tax::{
     TaxError, TaxRegion, TaxRegionRepo, assign_tax_class, create_tax_class, create_tax_region,
     get_tax_region, remove_class_rate, set_class_rate, set_default_rate,
 };
-use hypha_testkit::{InMemoryTaxClassRepo, InMemoryTaxRegionRepo, SequentialIds};
+use hypha_testkit::{InMemoryPorts, InMemoryTaxRegionRepo, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
 
@@ -29,16 +29,14 @@ fn reader() -> Ctx {
 }
 
 struct World {
-    classes: InMemoryTaxClassRepo,
-    regions: InMemoryTaxRegionRepo,
+    ports: InMemoryPorts,
     ids: SequentialIds,
 }
 
 impl World {
     fn new() -> Self {
         Self {
-            classes: InMemoryTaxClassRepo::default(),
-            regions: InMemoryTaxRegionRepo::default(),
+            ports: InMemoryPorts::default(),
             ids: SequentialIds::default(),
         }
     }
@@ -49,7 +47,7 @@ impl World {
         };
         block_on(create_tax_class(
             &Ctx::system(),
-            &self.classes,
+            &self.ports.tax_classes,
             &self.ids,
             input,
         ))
@@ -64,7 +62,7 @@ impl World {
         };
         block_on(create_tax_region(
             &Ctx::system(),
-            &self.regions,
+            &self.ports.tax_regions,
             &self.ids,
             input,
         ))
@@ -82,8 +80,8 @@ impl World {
     ) -> Result<TaxRegion, CommandError> {
         block_on(set_class_rate(
             &Ctx::system(),
-            &self.regions,
-            &self.classes,
+            &self.ports.tax_regions,
+            &self.ports.tax_classes,
             region,
             class,
             rate,
@@ -91,7 +89,9 @@ impl World {
     }
 
     fn stored(&self, region: TaxRegionId) -> TaxRegion {
-        block_on(self.regions.get(region)).unwrap().unwrap()
+        block_on(self.ports.tax_regions.get(region))
+            .unwrap()
+            .unwrap()
     }
 }
 
@@ -102,7 +102,7 @@ fn create_tax_class_stores_it() {
     let world = World::new();
     let id = world.class("Books");
     assert_eq!(
-        block_on(world.classes.get(id))
+        block_on(world.ports.tax_classes.get(id))
             .unwrap()
             .map(|c| c.name().to_string()),
         Some("Books".to_string())
@@ -118,7 +118,7 @@ fn create_tax_class_requires_taxes_write() {
     assert_eq!(
         block_on(create_tax_class(
             &reader(),
-            &world.classes,
+            &world.ports.tax_classes,
             &world.ids,
             input
         )),
@@ -136,7 +136,7 @@ fn assign_tax_class_assigns_and_unassigns() {
 
     block_on(assign_tax_class(
         &ctx,
-        &world.classes,
+        &world.ports,
         AssignTaxClass {
             products: vec![pid(1), pid(2)],
             class: Some(books),
@@ -145,7 +145,7 @@ fn assign_tax_class_assigns_and_unassigns() {
     .unwrap();
     block_on(assign_tax_class(
         &ctx,
-        &world.classes,
+        &world.ports,
         AssignTaxClass {
             products: vec![pid(2)],
             class: None,
@@ -154,9 +154,22 @@ fn assign_tax_class_assigns_and_unassigns() {
     .unwrap();
 
     assert_eq!(
-        block_on(world.classes.classes_for(&[pid(1), pid(2)])),
+        block_on(world.ports.tax_classes.classes_for(&[pid(1), pid(2)])),
         Ok(HashMap::from([(pid(1), books)]))
     );
+    let events = world.ports.outbox.events();
+    let set: Vec<(&serde_json::Value, &serde_json::Value)> = events
+        .iter()
+        .filter(|e| e.event_type == "product.tax_class_set")
+        .map(|e| (&e.data["product"], &e.data["tax_class"]))
+        .collect();
+    let (one, two, books) = (
+        serde_json::json!(pid(1)),
+        serde_json::json!(pid(2)),
+        serde_json::json!(books),
+    );
+    let none = serde_json::Value::Null;
+    assert_eq!(set, [(&one, &books), (&two, &books), (&two, &none)]);
 }
 
 #[test]
@@ -166,7 +179,7 @@ fn assign_tax_class_rejects_unknown_class() {
     assert_eq!(
         block_on(assign_tax_class(
             &Ctx::system(),
-            &world.classes,
+            &world.ports,
             AssignTaxClass {
                 products: vec![pid(1)],
                 class: Some(unknown),
@@ -175,7 +188,7 @@ fn assign_tax_class_rejects_unknown_class() {
         Err(CommandError::TaxClassNotFound(unknown))
     );
     assert_eq!(
-        block_on(world.classes.classes_for(&[pid(1)])),
+        block_on(world.ports.tax_classes.classes_for(&[pid(1)])),
         Ok(HashMap::new())
     );
 }
@@ -222,7 +235,7 @@ fn get_tax_region_needs_only_taxes_read() {
     let world = World::new();
     let id = world.region("HR");
     assert_eq!(
-        block_on(get_tax_region(&reader(), &world.regions, id)),
+        block_on(get_tax_region(&reader(), &world.ports.tax_regions, id)),
         Ok(world.stored(id))
     );
 }
@@ -232,7 +245,11 @@ fn get_unknown_tax_region_is_not_found() {
     let world = World::new();
     let unknown = TaxRegionId::from_uuid(Uuid::from_u128(99));
     assert_eq!(
-        block_on(get_tax_region(&Ctx::system(), &world.regions, unknown)),
+        block_on(get_tax_region(
+            &Ctx::system(),
+            &world.ports.tax_regions,
+            unknown
+        )),
         Err(CommandError::TaxRegionNotFound(unknown))
     );
 }
@@ -243,7 +260,7 @@ fn set_default_rate_stores_it() {
     let id = world.region("HR");
     block_on(set_default_rate(
         &Ctx::system(),
-        &world.regions,
+        &world.ports.tax_regions,
         id,
         130_000,
     ))
@@ -289,11 +306,22 @@ fn remove_class_rate_removes_it_once() {
     world.set_class_rate(region, books, 50_000).unwrap();
     let ctx = Ctx::system();
 
-    block_on(remove_class_rate(&ctx, &world.regions, region, books)).unwrap();
+    block_on(remove_class_rate(
+        &ctx,
+        &world.ports.tax_regions,
+        region,
+        books,
+    ))
+    .unwrap();
 
     assert!(world.stored(region).class_rates().is_empty());
     assert_eq!(
-        block_on(remove_class_rate(&ctx, &world.regions, region, books)),
+        block_on(remove_class_rate(
+            &ctx,
+            &world.ports.tax_regions,
+            region,
+            books
+        )),
         Err(CommandError::Tax(TaxError::ClassRateNotFound(books)))
     );
 }

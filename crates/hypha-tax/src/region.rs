@@ -1,6 +1,12 @@
-use hypha_core::{CountryCode, TaxClassId, TaxRate, TaxRegionId, Version, Versioned};
+use hypha_core::{
+    CountryCode, PendingEvent, Recorded, Recorder, Subject, TaxClassId, TaxRate, TaxRegionId,
+    Version, Versioned,
+};
 
-use crate::{RestoreError, TaxError};
+use crate::{
+    RestoreError, TaxError,
+    events::{TAX_REGION, TaxRegionChanged},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClassRate {
@@ -15,6 +21,13 @@ pub struct TaxRegion {
     country: CountryCode,
     default_rate: TaxRate,
     class_rates: Vec<ClassRate>,
+    events: Recorder,
+}
+
+impl Recorded for TaxRegion {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
 }
 
 impl Versioned for TaxRegion {
@@ -29,24 +42,40 @@ impl Versioned for TaxRegion {
 
 impl TaxRegion {
     pub fn new(id: TaxRegionId, country: CountryCode, default_rate: TaxRate) -> Self {
-        Self {
+        let mut region = Self {
             id,
             version: Version::NEW,
             country,
             default_rate,
             class_rates: Vec::new(),
-        }
+            events: Recorder::default(),
+        };
+        region.changed();
+        region
+    }
+
+    fn changed(&mut self) {
+        let event = TaxRegionChanged {
+            tax_region: self.id,
+        };
+        self.events
+            .record_once(Subject::new(TAX_REGION, self.id.as_uuid()), &event);
     }
 
     pub fn set_default_rate(&mut self, rate: TaxRate) {
-        self.default_rate = rate;
+        if self.default_rate != rate {
+            self.default_rate = rate;
+            self.changed();
+        }
     }
 
     pub fn set_class_rate(&mut self, class: TaxClassId, rate: TaxRate) {
         match self.class_rates.iter_mut().find(|r| r.class == class) {
+            Some(existing) if existing.rate == rate => return,
             Some(existing) => existing.rate = rate,
             None => self.class_rates.push(ClassRate { class, rate }),
         }
+        self.changed();
     }
 
     pub fn remove_class_rate(&mut self, class: TaxClassId) -> Result<(), TaxError> {
@@ -55,6 +84,7 @@ impl TaxRegion {
         if self.class_rates.len() == before {
             return Err(TaxError::ClassRateNotFound(class));
         }
+        self.changed();
         Ok(())
     }
 
@@ -112,6 +142,8 @@ impl TaxRegion {
             region.class_rates.push(rate)
         }
         region.version = s.version;
+        // Built through `new`, which records a change that didn't happen.
+        region.events = Recorder::default();
         Ok(region)
     }
 }

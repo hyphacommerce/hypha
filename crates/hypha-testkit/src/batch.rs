@@ -5,8 +5,8 @@ use hypha_auth::{
 use hypha_cart::{Cart, StageCarts, repo::keys as cart_keys};
 use hypha_core::{
     CatalogId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId,
-    ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, Timestamp, VariantId,
-    Version, Versioned,
+    ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId,
+    Timestamp, VariantId, Version, Versioned,
 };
 use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
@@ -14,6 +14,7 @@ use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
 use hypha_products::{Product, StageProducts};
+use hypha_tax::StageTaxAssignments;
 use hypha_users::{Invite, Role, StageInvites, StageRoles, StageUsers, User, keys as user_keys};
 
 use crate::{
@@ -60,6 +61,7 @@ enum Staged {
     PasswordReset(PasswordReset),
     UsedUpResets(IdentityId, Timestamp),
     CatalogProducts(CatalogId, Vec<ProductId>, bool),
+    TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
     FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
     Events(Vec<PendingEvent>, Option<Version>),
 }
@@ -252,6 +254,8 @@ impl HasBatch for InMemoryPorts {
         let memberships_before = memberships.clone();
         let mut fixed_prices = self.price_lists.lock_fixed_prices();
         let fixed_prices_before = fixed_prices.clone();
+        let mut tax_classes = self.tax_classes.lock_assignments();
+        let tax_classes_before = tax_classes.clone();
         let before = (
             orders.clone(),
             carts.clone(),
@@ -396,6 +400,14 @@ impl HasBatch for InMemoryPorts {
                             }
                         }
                     }
+                    Staged::TaxAssignment(products, class) => {
+                        for product in products {
+                            match class {
+                                Some(class) => tax_classes.insert(product, class),
+                                None => tax_classes.remove(&product),
+                            };
+                        }
+                    }
                     Staged::FixedPrices(list, changes) => {
                         if !self.price_lists.exists(list) {
                             return Err(missing("price list", list));
@@ -423,6 +435,7 @@ impl HasBatch for InMemoryPorts {
             *usages = usages_before;
             *memberships = memberships_before;
             *fixed_prices = fixed_prices_before;
+            *tax_classes = tax_classes_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written
@@ -448,5 +461,11 @@ impl StageFixedPrices for InMemoryBatch {
     fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]) {
         let changes = variants.iter().map(|v| (*v, None)).collect();
         self.stage(Staged::FixedPrices(list, changes));
+    }
+}
+
+impl StageTaxAssignments for InMemoryBatch {
+    fn assign_tax_class(&mut self, products: &[ProductId], class: Option<TaxClassId>) {
+        self.stage(Staged::TaxAssignment(products.to_vec(), class));
     }
 }

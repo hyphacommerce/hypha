@@ -1,6 +1,7 @@
 pub mod class;
 pub mod commands;
 pub mod error;
+pub mod events;
 pub mod region;
 pub mod repo;
 pub mod resolve;
@@ -12,6 +13,7 @@ pub use commands::{
     set_default_rate,
 };
 pub use error::{RestoreError, TaxError};
+pub use events::{ProductTaxClassSet, TaxClassChanged, TaxRegionChanged};
 pub use region::{ClassRate, TaxRegion, TaxRegionSnapshot};
-pub use repo::{HasTaxClasses, HasTaxRegions, TaxClassRepo, TaxRegionRepo};
+pub use repo::{HasTaxClasses, HasTaxRegions, StageTaxAssignments, TaxClassRepo, TaxRegionRepo};
 pub use resolve::{TaxContext, TaxLine, TaxSource, TaxableKind, TaxableLine, tax_line};

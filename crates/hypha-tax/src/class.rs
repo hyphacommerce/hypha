@@ -1,10 +1,22 @@
-use hypha_core::{TaxClassId, TextError, Version, Versioned, required_text};
+use hypha_core::{
+    PendingEvent, Recorded, Recorder, Subject, TaxClassId, TextError, Version, Versioned,
+    required_text,
+};
+
+use crate::events::{TAX_CLASS, TaxClassChanged};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaxClass {
     id: TaxClassId,
     version: Version,
     name: String,
+    events: Recorder,
+}
+
+impl Recorded for TaxClass {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
 }
 
 impl Versioned for TaxClass {
@@ -19,10 +31,16 @@ impl Versioned for TaxClass {
 
 impl TaxClass {
     pub fn new(id: TaxClassId, name: String) -> Result<Self, TextError> {
+        let mut events = Recorder::default();
+        events.record(
+            Subject::new(TAX_CLASS, id.as_uuid()),
+            &TaxClassChanged { tax_class: id },
+        );
         Ok(Self {
             id,
             version: Version::NEW,
             name: required_text("name", &name)?,
+            events,
         })
     }
 
@@ -57,6 +75,7 @@ impl TaxClass {
             id: s.id,
             version: s.version,
             name: required_text("name", &s.name)?,
+            events: Recorder::default(),
         })
     }
 }

@@ -382,7 +382,10 @@ fn offers_need_an_address_and_something_to_ship() {
 #[test]
 fn a_country_without_a_zone_has_no_shipping() {
     let w = World::new();
-    block_on(w.ports.shipping_zones.delete(zone_id())).unwrap();
+    let mut zone = block_on(w.ports.shipping_zones.get(zone_id()))
+        .unwrap()
+        .unwrap();
+    block_on(w.ports.shipping_zones.delete(&mut zone)).unwrap();
     let cart = w.cart_with(mug(), 1);
     w.ship_to(cart, "HR").unwrap();
     assert_eq!(

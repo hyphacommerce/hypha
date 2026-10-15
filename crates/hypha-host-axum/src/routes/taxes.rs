@@ -86,7 +86,7 @@ pub(super) async fn assign_class<S: Storage>(
         products: req.products,
         class: req.tax_class,
     };
-    assign_tax_class(&ctx, ports.tax_classes(), input).await?;
+    assign_tax_class(&ctx, &ports, input).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

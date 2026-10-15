@@ -1,15 +1,31 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
-use hypha_core::{CountryCode, RepoError, ShippingZoneId, Version, Versioned};
+use hypha_core::{CountryCode, Recorded, RepoError, ShippingZoneId, Version, Versioned};
 use hypha_shipping::{
     AppProvider, AppProviderRepo, ProviderKey, ShippingZone, ShippingZoneRepo, keys,
 };
 
-use crate::table::Table;
+use crate::{InMemoryOutbox, table::Table};
 
 #[derive(Default)]
 pub struct InMemoryShippingZoneRepo {
     zones: Table<ShippingZoneId, ShippingZone>,
+    pub(crate) outbox: InMemoryOutbox,
+}
+
+impl InMemoryShippingZoneRepo {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+
+    /// The events this repo wrote (into its outbox, shared or not).
+    pub fn outbox(&self) -> &InMemoryOutbox {
+        &self.outbox
+    }
 }
 
 /// The unique keys `new` would break against `other`: a shared country.
@@ -39,15 +55,23 @@ impl ShippingZoneRepo for InMemoryShippingZoneRepo {
     }
 
     async fn insert(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
-        self.zones.insert(zone.id(), zone, keys::ZONE_ID, &unique)
+        let events = zone.take_events();
+        self.zones.insert(zone.id(), zone, keys::ZONE_ID, &unique)?;
+        self.outbox.write(events, Some(zone.version()));
+        Ok(())
     }
 
     async fn update(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
-        self.zones.update(zone.id(), zone, &unique)
+        let events = zone.take_events();
+        self.zones.update(zone.id(), zone, &unique)?;
+        self.outbox.write(events, Some(zone.version()));
+        Ok(())
     }
 
-    async fn delete(&self, id: ShippingZoneId) -> Result<(), RepoError> {
-        self.zones.remove(&id);
+    async fn delete(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
+        let events = zone.take_events();
+        self.zones.remove(&zone.id());
+        self.outbox.write(events, None);
         Ok(())
     }
 }

@@ -406,7 +406,10 @@ fn an_expired_quote_whose_zone_is_gone_means_choosing_again() {
     w.ship_to_zagreb(cart);
     w.choose(cart, express());
     w.clock.set(FixedClock::DEFAULT.plus_secs(60 * 60));
-    block_on(w.ports.shipping_zones.delete(zone_id())).unwrap();
+    let mut zone = block_on(w.ports.shipping_zones.get(zone_id()))
+        .unwrap()
+        .unwrap();
+    block_on(w.ports.shipping_zones.delete(&mut zone)).unwrap();
     assert_eq!(
         w.check_out(cart, None).map(|_| ()),
         Err(CommandError::ShippingUnavailable(
