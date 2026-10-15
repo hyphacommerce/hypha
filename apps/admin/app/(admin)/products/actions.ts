@@ -167,17 +167,24 @@ export async function setVariantMedia(
   return {};
 }
 
-/** A page of the library's images and videos, for picking media for a product. */
+/**
+ * A page of the library's images and videos, for picking media for a product. The
+ * library lists one kind or all, so PDFs are dropped here; pages of only PDFs are read
+ * past (a few at most), so a page is empty only when the library has nothing more.
+ */
 export async function libraryPage(
   cursor?: string,
 ): Promise<{ items: AdminSchemas["AssetResponse"][]; next?: string } | { error: string }> {
   const client = await sessionClient();
-  const { data, error } = await client.GET("/admin/assets", {
-    params: { query: { cursor, limit: 60 } },
-  });
-  if (error) return { error: describe(error) };
-  return {
-    items: data.items.filter((a) => a.kind !== "file"),
-    next: data.next_cursor ?? undefined,
-  };
+  let next = cursor;
+  for (let read = 0; read < 5; read++) {
+    const { data, error } = await client.GET("/admin/assets", {
+      params: { query: { cursor: next, limit: 60 } },
+    });
+    if (error) return { error: describe(error) };
+    const items = data.items.filter((a) => a.kind !== "file");
+    next = data.next_cursor ?? undefined;
+    if (items.length > 0 || !next) return { items, next };
+  }
+  return { items: [], next };
 }
