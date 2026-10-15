@@ -187,7 +187,7 @@ SIZE_M=$(sed -E 's/.*"id":"(optval_[0-9a-f]+)","label":"M".*/\1/' <<<"$BODY")
 ADD_M="{\"sku\":\"SHIRT-M\",\"price\":{\"amount\":1600,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_M\"]}"
 step "add the M variant" 201 - -X POST "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d "$ADD_M"
 SHIRT_M=$(sed -E 's/.*"id":"(var_[0-9a-f]+)","price":\{[^}]*\},"sku":"SHIRT-M".*/\1/' <<<"$BODY")
-step "M twice" 422 duplicate_option_combination -X POST "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d "$ADD_M"
+step "M twice" 409 duplicate_option_combination -X POST "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d "$ADD_M"
 step "remove the M variant" 200 - -X DELETE "$BASE/admin/products/$SHIRT/variants/$SHIRT_M"
 step "and add it back" 201 - -X POST "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d "$ADD_M"
 SHIRT_M=$(sed -E 's/.*"id":"(var_[0-9a-f]+)","price":\{[^}]*\},"sku":"SHIRT-M".*/\1/' <<<"$BODY")

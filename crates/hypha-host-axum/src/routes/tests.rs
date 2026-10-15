@@ -480,10 +480,7 @@ async fn a_product_is_edited_over_http() {
     let (status, body) = send(&app, "POST", &variants, Some(&body.to_string())).await;
     assert_eq!(
         (status, code(&body)),
-        (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "duplicate_option_combination"
-        )
+        (StatusCode::CONFLICT, "duplicate_option_combination")
     );
 
     let first_url = format!("{variants}/{first}");

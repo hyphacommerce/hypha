@@ -337,8 +337,10 @@ fn product_status(e: &hypha_products::ProductError) -> StatusCode {
         // Every route that names a variant names it in its URL.
         P::VariantNotFound(_) => StatusCode::NOT_FOUND,
         // What the product already has: other variants, their SKUs, its last variant.
+        // Both ways to the same combination conflict alike (`duplicate_option_combination`).
         P::OptionValueInUse { .. }
         | P::VariantsCollide { .. }
+        | P::DuplicateCombination
         | P::DuplicateSku(_)
         | P::NoVariants => StatusCode::CONFLICT,
         P::InvalidHandle(_)
@@ -346,7 +348,6 @@ fn product_status(e: &hypha_products::ProductError) -> StatusCode {
         | P::DuplicateVariantId(_)
         | P::SelectionCountMismatch { .. }
         | P::UnknownOptionValue(_)
-        | P::DuplicateCombination
         | P::NoOptions
         | P::EmptyOption(_)
         | P::DuplicateOptionName(_)
