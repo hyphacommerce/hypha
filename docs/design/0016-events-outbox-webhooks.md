@@ -350,14 +350,23 @@ As built (2026-10-16):
   actor is `{type, id}`, with a null `id` for the system. Subject IDs are prefixed for the
   catalog's kinds; any other kind (a spore's) keeps its bare UUID. `GET /admin/events/{id}`
   returns the same envelope.
-- **A delivery to an app that's gone, disabled or without a webhook fails for good at
-  once**, rather than being retried for 3 days. It can be retried from the admin once the
-  app is back.
+- **A delivery to an app without a webhook fails for good at once**, rather than being
+  retried for 3 days; the admin can retry it once the webhook is back. A disabled app's
+  deliveries wait on the retry schedule instead, so pausing an app keeps its backlog.
+  Deleting an app deletes its deliveries too, so an app made later under the same key
+  starts clean.
+- **Leases bound a run.** A delivery is leased for 120 s and carries its lease. A runner
+  starts one only with at least 45 s of it left (`has_time`: the longest webhook timeout,
+  30 s, and room), and `record_outcomes` skips an outcome whose lease isn't current any
+  more. So a slow batch never sends past its lease, and an expired lease can be taken or
+  retried safely. The host loads the app with a pooled connection and lets it go before
+  sending (`prepare`, then `send`; EV9).
 - **Retry** (`POST …/deliveries/{id}/retry`) makes a delivery due now and keeps its
   attempts. A failed one therefore gets exactly one more try. A delivery that's leased
   (running) is left alone. Deliveries are listed by their event's `seq`, unique per
   destination, since delivery IDs are random v4. The page cursor carries that `seq`.
-- Event and delivery IDs are `evt_…` and `dlv_…` (`EventId`, `DeliveryId` in core).
+- Event and delivery IDs are `evt_…` and `dlv_…` (`EventId`, `DeliveryId` in core). A
+  key in a URL that can't be an app key is `404 app_not_found`, like a missing app.
 
 ## 9. Contract fixes that come first (EV13)
 

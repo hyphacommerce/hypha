@@ -29,7 +29,7 @@ pub use email::{Email, EmailError};
 pub use error_code::ErrorCode;
 pub use events::{
     ActingAs, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, Event, HasOutbox,
-    OutboxRepo, PendingEvent, Recorded, Recorder, StageEvents, StoredEvent, Subject,
+    OutboxRepo, Outcome, PendingEvent, Recorded, Recorder, StageEvents, StoredEvent, Subject,
 };
 pub use idempotency::{
     HasIdempotency, IdempotencyError, IdempotencyKey, IdempotencyRecord, IdempotencyRepo,

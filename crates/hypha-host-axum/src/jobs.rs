@@ -8,8 +8,10 @@
 
 use std::{future::Future, sync::Arc, time::Duration};
 
+use hypha_core::Outcome;
 use hypha_dispatch::{
-    fan_out, lease_due, prune_events, prune_idempotency_keys, prune_sessions, record, run,
+    Prepared, fan_out, handle, has_time, lease_due, prepare, prune_events, prune_idempotency_keys,
+    prune_sessions, record, send,
 };
 use tokio::{sync::watch, task::JoinHandle};
 
@@ -137,8 +139,10 @@ where
 }
 
 /// Fans out new events, then runs the due deliveries. The lease and the outcomes each
-/// take a connection briefly; every delivery gets its own ports while it runs, so none is
-/// held longer than its handler or webhook needs it (design note 0016, EV9).
+/// take a connection briefly; each delivery gets ports to load its app or run its
+/// handler, and lets them go before a webhook is sent, so no connection waits on another
+/// server (design note 0016, EV9). Deliveries the lease can't cover any more are left
+/// for the next lease (`has_time`).
 pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
     let no_connection = |_| "no connection".to_string();
     let (fanned, leased) = {
@@ -152,9 +156,20 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
         (fanned, leased)
     };
     let mut outcomes = Vec::with_capacity(leased.len());
-    for delivery in &leased {
-        let ports = state.public_ports().await.map_err(no_connection)?;
-        let outcome = run(&ports, &state.clock, &state.webhooks(), delivery).await;
+    for delivery in leased.iter().take_while(|d| has_time(d, &state.clock)) {
+        let prepared = {
+            let ports = state.public_ports().await.map_err(no_connection)?;
+            match prepare(&ports, &state.clock, delivery).await {
+                Prepared::Handler => Prepared::Done(handle(&ports, &state.clock, delivery).await),
+                other => other,
+            }
+        };
+        let outcome = match prepared {
+            Prepared::Webhook(app) => send(&state.webhooks(), &state.clock, &app, delivery).await,
+            Prepared::Done(outcome) => outcome,
+            // Handled above, with the ports.
+            Prepared::Handler => continue,
+        };
         if let hypha_core::DeliveryOutcome::Failed { error } = &outcome {
             tracing::warn!(
                 destination = delivery.destination,
@@ -162,7 +177,7 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
                 "jobs: delivery failed for good: {error}"
             );
         }
-        outcomes.push((delivery.id, outcome));
+        outcomes.push(Outcome::of(delivery, outcome));
     }
     let ports = state.public_ports().await.map_err(no_connection)?;
     record(&ports, &outcomes).await.map_err(|e| e.to_string())?;

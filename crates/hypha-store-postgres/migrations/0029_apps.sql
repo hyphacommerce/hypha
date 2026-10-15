@@ -29,3 +29,7 @@ ALTER TABLE shipping_app_providers
     -- A provider is an app's rate settings: it needs its app and goes with it.
     ADD CONSTRAINT shipping_provider_app FOREIGN KEY (key) REFERENCES apps (key)
         ON DELETE CASCADE;
+
+-- An app's deliveries, newest first (`GET /admin/apps/{key}/deliveries`), and deleting
+-- them with the app.
+CREATE INDEX event_deliveries_destination ON event_deliveries (destination, event_seq DESC);

@@ -87,6 +87,13 @@ impl<C: PgConnection> AppRepo for PgStore<C> {
             tx.query_typed("DELETE FROM apps WHERE key = $1", &[(&key, Type::TEXT)])
                 .await
                 .map_err(repo_error)?;
+            // And its deliveries, so an app made later under the key starts clean.
+            tx.query_typed(
+                "DELETE FROM event_deliveries WHERE destination = 'app:' || $1",
+                &[(&key, Type::TEXT)],
+            )
+            .await
+            .map_err(repo_error)?;
             Ok(())
         })
     }

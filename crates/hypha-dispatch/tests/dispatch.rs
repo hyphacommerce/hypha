@@ -382,7 +382,7 @@ fn a_failing_webhook_is_retried() {
 }
 
 #[test]
-fn a_webhook_with_nowhere_to_go_fails_at_once() {
+fn a_webhook_with_nowhere_to_go_fails_at_once_and_a_paused_app_waits() {
     let ports = world();
     let clock = FixedClock::default();
     for mut app in [
@@ -421,18 +421,28 @@ fn a_webhook_with_nowhere_to_go_fails_at_once() {
                 1,
                 Some("app app_bare has no webhook".to_string())
             ),
-            (
-                "app:app_gone".to_string(),
-                "failed",
-                1,
-                Some("there is no app app_gone".to_string())
-            ),
+            // app_gone's went with it.
+            // A paused app keeps its backlog, on the retry schedule.
             (
                 "app:app_off".to_string(),
-                "failed",
+                "pending",
                 1,
                 Some("app app_off is disabled".to_string())
             ),
         ]
     );
+}
+
+#[test]
+fn a_delivery_starts_only_with_time_left_on_its_lease() {
+    let ports = world();
+    let clock = FixedClock::default();
+    remove(&ports, small());
+    block_on(fan_out(&ports, &clock)).unwrap();
+    let leased = block_on(hypha_dispatch::lease_due(&ports, &clock)).unwrap();
+    // Leased for 120 s; the longest run is 45 s (a 30 s webhook and room).
+    clock.set(FixedClock::DEFAULT.plus_secs(75));
+    assert!(hypha_dispatch::has_time(&leased[0], &clock));
+    clock.set(FixedClock::DEFAULT.plus_secs(76));
+    assert!(!hypha_dispatch::has_time(&leased[0], &clock));
 }

@@ -158,6 +158,29 @@ pub struct Delivery {
     pub destination: String,
     /// Attempts made before this one.
     pub attempts: u32,
+    /// Until when this runner holds it: its outcome is recorded only while the lease is
+    /// still this one, and a runner doesn't start it closer to the end than the longest
+    /// a destination may take.
+    pub leased_until: Timestamp,
+}
+
+/// How a leased delivery went, for `record_outcomes`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outcome {
+    pub delivery: Uuid,
+    /// The lease it ran under (`Delivery::leased_until`).
+    pub lease: Timestamp,
+    pub outcome: DeliveryOutcome,
+}
+
+impl Outcome {
+    pub fn of(delivery: &Delivery, outcome: DeliveryOutcome) -> Self {
+        Self {
+            delivery: delivery.id,
+            lease: delivery.leased_until,
+            outcome,
+        }
+    }
 }
 
 /// How a delivery attempt ended.
@@ -256,9 +279,10 @@ pub trait OutboxRepo {
     ) -> Result<Vec<Delivery>, RepoError>;
 
     /// Records outcomes: each delivery's attempts go up by one and its lease is freed;
-    /// `Succeeded` and `Failed` are final, `Retry` is due again at its time. An unknown
-    /// delivery is skipped (pruned meanwhile).
-    async fn record_outcomes(&self, outcomes: &[(Uuid, DeliveryOutcome)]) -> Result<(), RepoError>;
+    /// `Succeeded` and `Failed` are final, `Retry` is due again at its time. A delivery
+    /// whose lease isn't `lease` any more (leased again, or retried from the admin) is
+    /// skipped, as is an unknown one (pruned meanwhile).
+    async fn record_outcomes(&self, outcomes: &[Outcome]) -> Result<(), RepoError>;
 
     /// Deletes up to `limit` events (and their deliveries) that occurred before
     /// `before` and were fanned out. Returns how many.
@@ -279,7 +303,9 @@ pub trait OutboxRepo {
     /// Makes `destination`'s delivery `id` due at `now` (design note 0016, Q6): a
     /// failed or succeeded one goes back to pending, a pending one stops waiting for its
     /// backoff. Its attempts are kept, so a delivery that had used them all gets one
-    /// more. One that's leased (running right now) is left alone. `None` when there's
+    /// more. One whose lease hasn't ended (running right now) is left alone; one whose
+    /// lease has ended is free (runners don't start a delivery they can't finish within
+    /// its lease, and an outcome under an old lease isn't recorded). `None` when there's
     /// no such delivery to `destination`; otherwise the delivery as it is after.
     async fn retry_delivery(
         &self,

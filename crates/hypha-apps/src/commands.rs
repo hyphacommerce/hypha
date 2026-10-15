@@ -19,8 +19,10 @@ pub enum CommandError {
     Repo(#[from] RepoError),
     #[error(transparent)]
     App(#[from] AppError),
-    #[error("app {0} not found")]
-    AppNotFound(AppKey),
+    /// The key as the caller sent it: one that can't be a key is no app either, since
+    /// keys only arrive in URLs here (404, not 422).
+    #[error("app {0:?} not found")]
+    AppNotFound(String),
     #[error("app {0} exists already")]
     AppExists(AppKey),
     #[error("app {app} has no delivery {delivery}")]
@@ -226,8 +228,9 @@ pub fn open_secret(secrets: &impl SecretBox, app: &App) -> Result<String, SealEr
 }
 
 async fn load<R: AppRepo>(apps: &R, key: &str) -> Result<App, CommandError> {
-    let key = AppKey::new(key)?;
-    apps.get(&key).await?.ok_or(CommandError::AppNotFound(key))
+    let not_found = || CommandError::AppNotFound(key.to_string());
+    let parsed = AppKey::new(key).map_err(|_| not_found())?;
+    apps.get(&parsed).await?.ok_or_else(not_found)
 }
 
 /// 32 random bytes as hex after the prefix, and that string sealed with the key as

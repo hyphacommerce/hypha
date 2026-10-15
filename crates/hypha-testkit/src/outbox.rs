@@ -5,7 +5,7 @@ use std::{
 
 use hypha_core::{
     ActingAs, Actor, Clock, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, OutboxRepo,
-    Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
+    Outcome, Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
 };
 use uuid::Uuid;
 
@@ -115,6 +115,12 @@ impl InMemoryOutbox {
                 )
             })
             .collect()
+    }
+
+    /// Deletes every delivery to `destination` (an app that's deleted).
+    pub(crate) fn drop_deliveries(&self, destination: &str) {
+        let mut state = self.inner.lock().unwrap();
+        state.deliveries.retain(|d| d.destination != destination);
     }
 
     /// Just their types, for assertions that read like a story.
@@ -229,15 +235,25 @@ impl OutboxRepo for InMemoryOutbox {
                 event: event.clone(),
                 destination: row.destination.clone(),
                 attempts: row.attempts,
+                leased_until: lease_until,
             });
         }
         Ok(leased)
     }
 
-    async fn record_outcomes(&self, outcomes: &[(Uuid, DeliveryOutcome)]) -> Result<(), RepoError> {
+    async fn record_outcomes(&self, outcomes: &[Outcome]) -> Result<(), RepoError> {
         let mut state = self.inner.lock().unwrap();
-        for (id, outcome) in outcomes {
-            let Some(row) = state.deliveries.iter_mut().find(|d| d.id == *id) else {
+        for Outcome {
+            delivery,
+            lease,
+            outcome,
+        } in outcomes
+        {
+            let Some(row) = state
+                .deliveries
+                .iter_mut()
+                .find(|d| d.id == *delivery && d.leased_until == Some(*lease))
+            else {
                 continue;
             };
             row.attempts += 1;

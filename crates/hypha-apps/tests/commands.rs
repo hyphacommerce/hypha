@@ -7,7 +7,7 @@ use hypha_apps::{
 };
 use hypha_core::{
     Actor, AuthError, Ctx, DeliveryId, DeliveryOutcome, DeliveryStatus, EventId, HasBatch,
-    OutboxRepo, PageRequest, PendingEvent, Scope, StageEvents, Subject, UserId,
+    OutboxRepo, Outcome, PageRequest, PendingEvent, Scope, StageEvents, Subject, UserId,
 };
 use hypha_testkit::{FixedClock, InMemoryAppRepo, InMemoryPorts, TestEnv};
 use pollster::block_on;
@@ -166,7 +166,7 @@ fn a_deleted_app_is_gone() {
     block_on(delete_app(&Ctx::system(), &apps, "app_erp")).unwrap();
     assert_eq!(
         block_on(get_app(&reader(), &apps, "app_erp")).map(|_| ()),
-        Err(CommandError::AppNotFound(AppKey::new("app_erp").unwrap()))
+        Err(CommandError::AppNotFound("app_erp".to_string()))
     );
 }
 
@@ -194,7 +194,12 @@ fn delivered() -> (InMemoryPorts, TestEnv) {
     let failed = DeliveryOutcome::Failed {
         error: "answered HTTP 500".to_string(),
     };
-    block_on(ports.outbox.record_outcomes(&[(leased[0].id, failed)])).unwrap();
+    block_on(
+        ports
+            .outbox
+            .record_outcomes(&[Outcome::of(&leased[0], failed)]),
+    )
+    .unwrap();
     (ports, env)
 }
 
@@ -273,11 +278,20 @@ fn deliveries_are_found_under_their_own_app_only() {
             PageRequest::default()
         ))
         .map(|_| ()),
-        Err(CommandError::AppNotFound(AppKey::new("app_none").unwrap()))
+        Err(CommandError::AppNotFound("app_none".to_string()))
     );
     let missing = EventId::from_uuid(Uuid::from_u128(424242));
     assert_eq!(
         block_on(get_event(&reader(), &ports.outbox, missing)).map(|_| ()),
         Err(CommandError::EventNotFound(missing))
+    );
+}
+
+#[test]
+fn a_key_that_cant_be_one_is_no_app() {
+    let apps = InMemoryAppRepo::default();
+    assert_eq!(
+        block_on(get_app(&reader(), &apps, "erp")).map(|_| ()),
+        Err(CommandError::AppNotFound("erp".to_string()))
     );
 }

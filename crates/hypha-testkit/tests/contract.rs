@@ -198,3 +198,8 @@ fn app_provider_repo() {
 fn app_repo() {
     block_on(contract::app_repo(async || InMemoryAppRepo::default()));
 }
+
+#[test]
+fn app_deliveries() {
+    block_on(contract::app_deliveries(async || InMemoryPorts::default()));
+}

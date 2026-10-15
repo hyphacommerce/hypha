@@ -112,7 +112,9 @@ export type SecretResult = { error?: string; secret?: string };
 
 /**
  * Adds a rate app: the app (design note 0016), unless one with the key exists, then its
- * rate settings. The secret comes back only when the app is new.
+ * rate settings. The secret comes back only when the app is new; if the rate settings
+ * are refused, an app made just now is deleted again, so a retry makes it afresh and
+ * shows its secret.
  */
 export async function createProvider(input: {
   key: string;
@@ -126,7 +128,12 @@ export async function createProvider(input: {
   const { error } = await client.POST("/admin/shipping-providers", {
     body: { key: input.key, callback_url: input.callbackUrl, timeout_ms: input.timeoutMs },
   });
-  if (error) return { error: describe(error) };
+  if (error) {
+    if (app.data) {
+      await client.DELETE("/admin/apps/{key}", { params: { path: { key: input.key } } });
+    }
+    return { error: describe(error) };
+  }
   revalidatePath(PAGE);
   return { secret: app.data?.secret };
 }

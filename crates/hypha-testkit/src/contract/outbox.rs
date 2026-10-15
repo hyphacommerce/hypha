@@ -1,8 +1,8 @@
 use hypha_core::{
     ActingAs, Actor, BasisPoints, CatalogId, Currency, DeliveryOutcome, DeliveryStatus, Event,
-    HasBatch, HasOutbox, MarketId, Money, OutboxRepo, PageLimit, PageRequest, PendingEvent, Price,
-    PriceListId, ProductId, RepoError, StageEvents, StoredEvent, Subject, Timestamp, UserId,
-    VariantId, Version, Versioned,
+    HasBatch, HasOutbox, MarketId, Money, OutboxRepo, Outcome, PageLimit, PageRequest,
+    PendingEvent, Price, PriceListId, ProductId, RepoError, StageEvents, StoredEvent, Subject,
+    Timestamp, UserId, VariantId, Version, Versioned,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasPriceLists, PriceList, PriceListRepo,
@@ -40,6 +40,8 @@ where
     leases(&make().await).await;
     scenario("outbox: outcomes are final or due again, with the attempts counted");
     outcomes(&make().await).await;
+    scenario("outbox: an outcome under a lease that ran out is skipped");
+    stale_outcomes(&make().await).await;
     scenario("outbox: prune_events drops old fanned-out events and their deliveries");
     prunes(&make().await).await;
     scenario("outbox: events_after reads after a seq, up to a limit");
@@ -372,17 +374,18 @@ async fn outcomes<S: HasProducts + HasOutbox>(store: &S) {
     let outbox = store.outbox();
     outbox.fan_out(10, at(0), &audit_only).await.unwrap();
     let leased = outbox.lease_due(at(0), at(60), 10).await.unwrap();
+    assert_eq!(leased[0].leased_until, at(60));
     let outcomes = vec![
-        (leased[0].id, DeliveryOutcome::Succeeded),
-        (
-            leased[1].id,
+        Outcome::of(&leased[0], DeliveryOutcome::Succeeded),
+        Outcome::of(
+            &leased[1],
             DeliveryOutcome::Retry {
                 error: "busy".to_string(),
                 at: at(300),
             },
         ),
-        (
-            leased[2].id,
+        Outcome::of(
+            &leased[2],
             DeliveryOutcome::Failed {
                 error: "gone".to_string(),
             },
@@ -396,8 +399,55 @@ async fn outcomes<S: HasProducts + HasOutbox>(store: &S) {
     assert_eq!(again.len(), 1);
     assert_eq!((again[0].id, again[0].attempts), (leased[1].id, 1));
     // An unknown delivery is skipped.
-    let unknown = (Uuid::from_u128(424242), DeliveryOutcome::Succeeded);
+    let unknown = Outcome {
+        delivery: Uuid::from_u128(424242),
+        lease: at(60),
+        outcome: DeliveryOutcome::Succeeded,
+    };
     assert_eq!(outbox.record_outcomes(&[unknown]).await, Ok(()));
+}
+
+async fn stale_outcomes<S: HasProducts + HasOutbox>(store: &S) {
+    three_products(store).await;
+    let outbox = store.outbox();
+    outbox.fan_out(10, at(0), &audit_only).await.unwrap();
+    let first = outbox.lease_due(at(0), at(60), 1).await.unwrap();
+    // The first runner's lease runs out and another takes the delivery.
+    let second = outbox.lease_due(at(60), at(120), 10).await.unwrap();
+    let taken = second.iter().find(|d| d.id == first[0].id).unwrap();
+    let late = DeliveryOutcome::Failed {
+        error: "late".to_string(),
+    };
+    outbox
+        .record_outcomes(&[Outcome::of(&first[0], late)])
+        .await
+        .unwrap();
+    let failed = outbox
+        .deliveries_to(
+            "handler:audit",
+            Some(DeliveryStatus::Failed),
+            page(None, 10),
+        )
+        .await
+        .unwrap();
+    assert!(
+        failed.items.is_empty(),
+        "the old lease's outcome is skipped"
+    );
+    outbox
+        .record_outcomes(&[Outcome::of(taken, DeliveryOutcome::Succeeded)])
+        .await
+        .unwrap();
+    let done = outbox
+        .deliveries_to(
+            "handler:audit",
+            Some(DeliveryStatus::Succeeded),
+            page(None, 10),
+        )
+        .await
+        .unwrap();
+    assert_eq!(done.items.len(), 1);
+    assert_eq!(done.items[0].attempts, 1);
 }
 
 async fn prunes<S: HasProducts + HasOutbox>(store: &S) {
@@ -473,7 +523,7 @@ async fn deliveries_to<S: HasProducts + HasOutbox>(store: &S) {
         error: "gone".to_string(),
     };
     outbox
-        .record_outcomes(&[(failing.id, failed)])
+        .record_outcomes(&[Outcome::of(failing, failed)])
         .await
         .unwrap();
     let failed = outbox
@@ -509,7 +559,10 @@ async fn retry_delivery<S: HasProducts + HasOutbox>(store: &S) {
     let failed = DeliveryOutcome::Failed {
         error: "gone".to_string(),
     };
-    outbox.record_outcomes(&[(failing, failed)]).await.unwrap();
+    outbox
+        .record_outcomes(&[Outcome::of(&leased[0], failed)])
+        .await
+        .unwrap();
 
     let retried = outbox
         .retry_delivery("handler:audit", failing, at(500))

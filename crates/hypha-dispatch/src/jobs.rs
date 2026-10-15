@@ -2,15 +2,14 @@
 //! of ports and a clock that does a bounded amount of work and says whether there's
 //! more (`Progress`), so a runner loops while there is and sleeps when there isn't.
 
-use hypha_apps::{App, AppKey, AppRepo, HasApps};
+use hypha_apps::{App, AppKey, AppRepo, HasApps, Webhook};
 use hypha_auth::{HasSessions, SessionRepo};
 use hypha_core::{
     Clock, Delivery, DeliveryOutcome, HasBatch, HasIdempotency, HasOutbox, IdempotencyRepo,
-    OutboxRepo, RepoError, StageEvents,
+    OutboxRepo, Outcome, RepoError, StageEvents,
 };
 use hypha_inventory::HasInventoryItems;
 use hypha_markets::{HasPriceLists, StageFixedPrices};
-use uuid::Uuid;
 
 use crate::{handlers::run_handler, schedule::next_attempt};
 
@@ -64,7 +63,11 @@ impl Progress {
 /// Events fanned out, or deliveries run, per call.
 pub const BATCH: u32 = 100;
 /// How long a delivery is leased for: past this, another runner may take it.
-const LEASE_SECS: i64 = 60;
+const LEASE_SECS: i64 = 120;
+/// The longest one delivery may take: the slowest webhook timeout allowed, with room for
+/// loading the app and connecting. A runner doesn't start a delivery with less of its
+/// lease left (`has_time`), so a lease never runs out while its delivery is sending.
+const LONGEST_RUN_SECS: i64 = Webhook::MAX_TIMEOUT_MS as i64 / 1000 + 15;
 /// How long events (and their deliveries) are kept (Q7).
 const RETENTION_SECS: i64 = 30 * 24 * 3600;
 /// How long an idempotency key is honoured (design note 0007, section 5).
@@ -108,33 +111,101 @@ pub async fn lease_due<S: HasOutbox>(
         .await
 }
 
+/// Whether `delivery` can still run and be recorded within its lease. The rest of a
+/// batch that's run out of time is left: its leases end, and the next lease takes them.
+pub fn has_time(delivery: &Delivery, clock: &impl Clock) -> bool {
+    clock.now().plus_secs(LONGEST_RUN_SECS) <= delivery.leased_until
+}
+
 /// Why an attempt failed, and whether trying again could help.
 enum Failure {
     /// Tried again on the schedule.
     Retry(String),
-    /// Nothing to send to (the app is gone, disabled, or has no webhook any more): fails
-    /// for good at once. The admin can retry it once the app is back.
+    /// Nothing to send to (the app is gone or has no webhook any more): fails for good
+    /// at once. The admin can retry it once the app is back.
     Final(String),
 }
 
-/// Runs one delivery and says how it went: a failure is tried again on the schedule
-/// (`next_attempt`), or fails for good after the last attempt.
+/// What a delivery needs next, as `prepare` finds it.
+pub enum Prepared {
+    /// An in-process handler: `handle` it, with ports.
+    Handler,
+    /// A webhook to this app: `send` it, no ports needed (don't hold a connection over
+    /// the HTTP call, EV9).
+    Webhook(App),
+    /// Decided already (the app is gone, say).
+    Done(DeliveryOutcome),
+}
+
+/// Looks at `delivery`'s destination: a handler, an app to send to as the app is now,
+/// or an outcome already.
+pub async fn prepare<S: HasApps>(ports: &S, clock: &impl Clock, delivery: &Delivery) -> Prepared {
+    match delivery.destination.split_once(':') {
+        Some(("handler", _)) => Prepared::Handler,
+        Some(("app", key)) => match load_app(ports, key).await {
+            Ok(app) => Prepared::Webhook(app),
+            Err(failure) => Prepared::Done(outcome(Err(failure), clock, delivery)),
+        },
+        _ => Prepared::Done(outcome(
+            Err(Failure::Retry(format!(
+                "no way to deliver to {:?}",
+                delivery.destination
+            ))),
+            clock,
+            delivery,
+        )),
+    }
+}
+
+/// Runs a handler delivery (`Prepared::Handler`).
+pub async fn handle<S: DispatchPorts>(
+    ports: &S,
+    clock: &impl Clock,
+    delivery: &Delivery,
+) -> DeliveryOutcome {
+    let name = delivery
+        .destination
+        .strip_prefix("handler:")
+        .unwrap_or_default();
+    let result = run_handler(ports, name, &delivery.event)
+        .await
+        .map_err(Failure::Retry);
+    outcome(result, clock, delivery)
+}
+
+/// Sends a webhook delivery (`Prepared::Webhook`).
+pub async fn send(
+    webhooks: &impl WebhookSender,
+    clock: &impl Clock,
+    app: &App,
+    delivery: &Delivery,
+) -> DeliveryOutcome {
+    let result = webhooks.send(app, delivery).await.map_err(Failure::Retry);
+    outcome(result, clock, delivery)
+}
+
+/// Runs one delivery with one set of ports and says how it went: a failure is tried
+/// again on the schedule (`next_attempt`), or fails for good after the last attempt.
+/// A host with a pool uses `prepare`, `handle` and `send` instead, to let its connection
+/// go before a webhook is sent.
 pub async fn run<S: DispatchPorts>(
     ports: &S,
     clock: &impl Clock,
     webhooks: &impl WebhookSender,
     delivery: &Delivery,
 ) -> DeliveryOutcome {
-    let result = match delivery.destination.split_once(':') {
-        Some(("handler", name)) => run_handler(ports, name, &delivery.event)
-            .await
-            .map_err(Failure::Retry),
-        Some(("app", key)) => send_webhook(ports, webhooks, key, delivery).await,
-        _ => Err(Failure::Retry(format!(
-            "no way to deliver to {:?}",
-            delivery.destination
-        ))),
-    };
+    match prepare(ports, clock, delivery).await {
+        Prepared::Handler => handle(ports, clock, delivery).await,
+        Prepared::Webhook(app) => send(webhooks, clock, &app, delivery).await,
+        Prepared::Done(outcome) => outcome,
+    }
+}
+
+fn outcome(
+    result: Result<(), Failure>,
+    clock: &impl Clock,
+    delivery: &Delivery,
+) -> DeliveryOutcome {
     match result {
         Ok(()) => DeliveryOutcome::Succeeded,
         Err(Failure::Final(error)) => DeliveryOutcome::Failed { error },
@@ -145,13 +216,9 @@ pub async fn run<S: DispatchPorts>(
     }
 }
 
-/// Sends `delivery` to app `key`'s webhook, as the app is now.
-async fn send_webhook<S: HasApps>(
-    ports: &S,
-    webhooks: &impl WebhookSender,
-    key: &str,
-    delivery: &Delivery,
-) -> Result<(), Failure> {
+/// App `key` as it is now, if it can take a webhook. A disabled app's deliveries wait on
+/// the retry schedule, so pausing an app for a while keeps its backlog.
+async fn load_app<S: HasApps>(ports: &S, key: &str) -> Result<App, Failure> {
     let gone = || Failure::Final(format!("there is no app {key}"));
     let key = AppKey::new(key).map_err(|_| gone())?;
     let app = ports
@@ -161,19 +228,16 @@ async fn send_webhook<S: HasApps>(
         .map_err(|e| Failure::Retry(e.to_string()))?
         .ok_or_else(gone)?;
     if !app.enabled() {
-        return Err(Failure::Final(format!("app {key} is disabled")));
+        return Err(Failure::Retry(format!("app {key} is disabled")));
     }
     if app.webhook().is_none() {
         return Err(Failure::Final(format!("app {key} has no webhook")));
     }
-    webhooks.send(&app, delivery).await.map_err(Failure::Retry)
+    Ok(app)
 }
 
 /// Records how the deliveries `run` went. Short, like `lease_due`.
-pub async fn record<S: HasOutbox>(
-    ports: &S,
-    outcomes: &[(Uuid, DeliveryOutcome)],
-) -> Result<(), RepoError> {
+pub async fn record<S: HasOutbox>(ports: &S, outcomes: &[Outcome]) -> Result<(), RepoError> {
     ports.outbox().record_outcomes(outcomes).await
 }
 
@@ -187,8 +251,9 @@ pub async fn deliver_due<S: DispatchPorts>(
 ) -> Result<Progress, RepoError> {
     let leased = lease_due(ports, clock).await?;
     let mut outcomes = Vec::with_capacity(leased.len());
-    for delivery in &leased {
-        outcomes.push((delivery.id, run(ports, clock, webhooks, delivery).await));
+    for delivery in leased.iter().take_while(|d| has_time(d, clock)) {
+        let outcome = run(ports, clock, webhooks, delivery).await;
+        outcomes.push(Outcome::of(delivery, outcome));
     }
     record(ports, &outcomes).await?;
     Ok(Progress::of(leased.len() as u32, BATCH))

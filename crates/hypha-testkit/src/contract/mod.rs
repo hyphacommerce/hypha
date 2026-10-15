@@ -38,7 +38,7 @@ mod tax;
 mod usages;
 mod users;
 
-pub use apps::app_repo;
+pub use apps::{app_deliveries, app_repo};
 pub use auth::{api_key_repo, identity_repo, password_reset_repo, session_repo};
 pub use batch::batch;
 pub use carts::cart_repo;

@@ -82,6 +82,7 @@ impl AppRepo for InMemoryAppRepo {
 
     async fn delete(&self, key: &AppKey) -> Result<(), RepoError> {
         self.apps.lock().unwrap().remove(key.as_str());
+        self.outbox.drop_deliveries(&key.destination());
         if let Some(providers) = &self.providers {
             providers
                 .providers

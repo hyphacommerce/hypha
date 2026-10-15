@@ -2,8 +2,8 @@
 //! change that recorded them.
 
 use hypha_core::{
-    ActingAs, Actor, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, OutboxRepo, Page,
-    PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
+    ActingAs, Actor, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, OutboxRepo,
+    Outcome, Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -269,20 +269,22 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
                         event,
                         destination: col(row, "destination")?,
                         attempts: u32::try_from(attempts).map_err(corrupt)?,
+                        leased_until: lease_until,
                     })
                 })
                 .collect()
         })
     }
 
-    async fn record_outcomes(&self, outcomes: &[(Uuid, DeliveryOutcome)]) -> Result<(), RepoError> {
+    async fn record_outcomes(&self, outcomes: &[Outcome]) -> Result<(), RepoError> {
         if outcomes.is_empty() {
             return Ok(());
         }
-        let ids: Vec<Uuid> = outcomes.iter().map(|(id, _)| *id).collect();
+        let ids: Vec<Uuid> = outcomes.iter().map(|o| o.delivery).collect();
+        let leases: Vec<i64> = outcomes.iter().map(|o| o.lease.unix_micros()).collect();
         let statuses: Vec<&str> = outcomes
             .iter()
-            .map(|(_, o)| match o {
+            .map(|o| match &o.outcome {
                 DeliveryOutcome::Succeeded => "succeeded",
                 DeliveryOutcome::Retry { .. } => "pending",
                 DeliveryOutcome::Failed { .. } => "failed",
@@ -290,7 +292,7 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
             .collect();
         let errors: Vec<Option<&str>> = outcomes
             .iter()
-            .map(|(_, o)| match o {
+            .map(|o| match &o.outcome {
                 DeliveryOutcome::Succeeded => None,
                 DeliveryOutcome::Retry { error, .. } | DeliveryOutcome::Failed { error } => {
                     Some(error.as_str())
@@ -299,7 +301,7 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
             .collect();
         let retry_at: Vec<Option<i64>> = outcomes
             .iter()
-            .map(|(_, o)| match o {
+            .map(|o| match &o.outcome {
                 DeliveryOutcome::Retry { at, .. } => Some(at.unix_micros()),
                 _ => None,
             })
@@ -311,14 +313,18 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
                      last_error = t.error,
                      next_attempt_at = CASE WHEN t.at IS NULL THEN d.next_attempt_at
                          ELSE 'epoch'::timestamptz + t.at * interval '1 microsecond' END
-                 FROM unnest($1::uuid[], $2::text[], $3::text[], $4::bigint[])
-                      AS t (id, status, error, at)
-                 WHERE d.id = t.id",
+                 FROM unnest($1::uuid[], $2::text[], $3::text[], $4::bigint[], $5::bigint[])
+                      AS t (id, status, error, at, lease)
+                 -- Only under the lease it ran with: a delivery leased again or retried
+                 -- since belongs to that run now.
+                 WHERE d.id = t.id
+                   AND d.leased_until = 'epoch'::timestamptz + t.lease * interval '1 microsecond'",
                 &[
                     (&ids, Type::UUID_ARRAY),
                     (&statuses, Type::TEXT_ARRAY),
                     (&errors, Type::TEXT_ARRAY),
                     (&retry_at, Type::INT8_ARRAY),
+                    (&leases, Type::INT8_ARRAY),
                 ],
             )
             .await
@@ -410,8 +416,9 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
     ) -> Result<Option<DeliveryRecord>, RepoError> {
         let now = now.unix_micros();
         in_transaction!(self, |tx| {
-            // A running delivery (leased past `now`) is left alone; the row is locked
-            // either way, so a lease can't start between the check and the change.
+            // A running delivery (leased past `now`) is left alone. An expired lease is
+            // free: runners stop starting deliveries they can't finish within the lease,
+            // and `record_outcomes` ignores an outcome under a lease that's gone.
             tx.execute_typed(
                 &format!(
                     "UPDATE event_deliveries

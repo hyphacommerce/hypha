@@ -204,6 +204,12 @@ async fn app_repo() {
 }
 
 #[tokio::test]
+async fn app_deliveries() {
+    let Some(url) = database_url() else { return };
+    contract::app_deliveries(async || fresh_store(&url, "contract_app_deliveries").await).await;
+}
+
+#[tokio::test]
 async fn outbox() {
     let Some(url) = database_url() else { return };
     contract::outbox(async || fresh_store(&url, "contract_outbox").await).await;

@@ -19,7 +19,8 @@ pub mod schedule;
 
 pub use handlers::{HANDLERS, Handler, destinations};
 pub use jobs::{
-    BATCH, DispatchPorts, Progress, WebhookSender, deliver_due, fan_out, lease_due, prune_events,
-    prune_idempotency_keys, prune_sessions, record, run,
+    BATCH, DispatchPorts, Prepared, Progress, WebhookSender, deliver_due, fan_out, handle,
+    has_time, lease_due, prepare, prune_events, prune_idempotency_keys, prune_sessions, record,
+    run, send,
 };
 pub use schedule::{MAX_ATTEMPTS, next_attempt};

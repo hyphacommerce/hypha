@@ -17,7 +17,8 @@ pub trait AppRepo {
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
     async fn update(&self, app: &mut App) -> Result<(), RepoError>;
     /// Removes the app, with what other domains keep under its key in storage they
-    /// share with it (shipping's rate settings); one that doesn't exist is fine.
+    /// share with it (shipping's rate settings) and its deliveries in the outbox; one
+    /// that doesn't exist is fine.
     async fn delete(&self, key: &AppKey) -> Result<(), RepoError>;
 }
 

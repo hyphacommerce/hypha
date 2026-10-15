@@ -26,7 +26,11 @@ import { useState, useTransition } from "react";
 import { createProvider, deleteProvider, rotateSecret, setAppEnabled, testProvider } from "./actions";
 
 /** A provider's rate settings with its app's name and switch (design note 0016, EV11). */
-export type RateApp = AdminSchemas["AppProviderResponse"] & { name: string; enabled: boolean };
+export type RateApp = AdminSchemas["AppProviderResponse"] & {
+  name: string;
+  /** `null` when the staff member can't read apps. */
+  enabled: boolean | null;
+};
 
 type Provider = RateApp;
 
@@ -154,15 +158,17 @@ function ProviderRow({
         </VStack>
       </TableCell>
       <TableCell>
-        <Switch
-          label={`Use ${provider.name} (its webhooks too)`}
-          isLabelHidden
-          size="sm"
-          value={provider.enabled}
-          changeAction={async (enabled) =>
-            setError((await setAppEnabled(provider.key, enabled)).error)
-          }
-        />
+        {provider.enabled !== null && (
+          <Switch
+            label={`Use ${provider.name} (its webhooks too)`}
+            isLabelHidden
+            size="sm"
+            value={provider.enabled}
+            changeAction={async (enabled) =>
+              setError((await setAppEnabled(provider.key, enabled)).error)
+            }
+          />
+        )}
       </TableCell>
       <TableCell>
         <HStack gap={1} hAlign="end" vAlign="center">
