@@ -265,6 +265,27 @@ async fn the_store_can_be_renamed() {
     assert_eq!(body["name"].as_str(), Some("Lumen"));
 }
 
+#[tokio::test]
+async fn changing_the_store_needs_stores_write_even_with_nothing_to_change() {
+    let app = app().await;
+    let (_, created) = send(
+        &app,
+        "POST",
+        "/admin/api-keys",
+        Some(r#"{"kind":"secret","name":"Reader","scopes":["stores:read"]}"#),
+    )
+    .await;
+    let token = created["token"].as_str().unwrap();
+    for body in [r#"{"name":"Lumen"}"#, "{}"] {
+        let (status, json) = send_as(&app, token, "PATCH", "/admin/store", Some(body)).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::FORBIDDEN, "missing_scope"),
+            "{body}"
+        );
+    }
+}
+
 // ---------- lists (design note 0012) ----------
 
 async fn create_product(app: &TestApp, handle: &str) -> String {

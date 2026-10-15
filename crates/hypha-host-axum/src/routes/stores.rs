@@ -1,6 +1,6 @@
 use axum::{Json, extract::State};
 use hypha_core::StoreId;
-use hypha_stores::{Store, get_store, rename_store};
+use hypha_stores::{Store, UpdateStore, get_store, update_store};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -72,10 +72,8 @@ pub(super) async fn update<S: Storage>(
     let (_, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let directory = state.storage.directory().await?;
-    let store = match req.name {
-        Some(name) => rename_store(&ctx, &directory, state.store, &name).await?,
-        None => get_store(&ctx, &directory, state.store).await?,
-    };
+    let input = UpdateStore { name: req.name };
+    let store = update_store(&ctx, &directory, state.store, input).await?;
     Ok(Json(StoreResponse::from(&store)))
 }
 

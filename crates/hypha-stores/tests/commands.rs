@@ -1,7 +1,7 @@
 use hypha_core::{Actor, AuthError, Ctx, Scope, StoreId, UserId};
 use hypha_stores::{
-    CommandError, Store, StoreError, StoreRepo, create_store, ensure_single_store, get_store,
-    rename_store,
+    CommandError, Store, StoreError, StoreRepo, UpdateStore, create_store, ensure_single_store,
+    get_store, update_store,
 };
 use hypha_testkit::{InMemoryStoreRepo, SequentialIds};
 use pollster::block_on;
@@ -69,15 +69,33 @@ fn create_store_validates_the_name() {
 }
 
 #[test]
-fn rename_store_stores_the_new_name() {
+fn update_store_stores_the_new_name() {
     let repo = InMemoryStoreRepo::default();
     let ids = SequentialIds::default();
     let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
 
-    block_on(rename_store(&Ctx::system(), &repo, store.id(), "Acme EU")).unwrap();
+    let input = UpdateStore {
+        name: Some("Acme EU".to_string()),
+    };
+    block_on(update_store(&Ctx::system(), &repo, store.id(), input)).unwrap();
 
     let loaded = block_on(get_store(&Ctx::system(), &repo, store.id())).unwrap();
     assert_eq!(loaded.name(), "Acme EU");
+}
+
+#[test]
+fn update_store_with_nothing_to_change_writes_nothing() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+
+    let same = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        store.id(),
+        UpdateStore::default(),
+    ));
+    assert_eq!(same, Ok(store));
 }
 
 #[test]
@@ -102,11 +120,25 @@ fn scopes_are_required() {
         )))
     );
     assert_eq!(
-        block_on(rename_store(
+        block_on(update_store(
             &user(vec![Scope::StoresRead]),
             &repo,
             store.id(),
-            "X"
+            UpdateStore {
+                name: Some("X".to_string())
+            }
+        )),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::StoresWrite
+        )))
+    );
+    // Even with nothing to change: the scope doesn't depend on the body.
+    assert_eq!(
+        block_on(update_store(
+            &user(vec![Scope::StoresRead]),
+            &repo,
+            store.id(),
+            UpdateStore::default()
         )),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::StoresWrite

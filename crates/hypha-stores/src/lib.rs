@@ -8,7 +8,9 @@ pub mod error;
 pub mod repo;
 pub mod store;
 
-pub use commands::{CommandError, create_store, ensure_single_store, get_store, rename_store};
+pub use commands::{
+    CommandError, UpdateStore, create_store, ensure_single_store, get_store, update_store,
+};
 pub use error::StoreError;
 pub use repo::StoreRepo;
 pub use store::{Store, StoreSnapshot};

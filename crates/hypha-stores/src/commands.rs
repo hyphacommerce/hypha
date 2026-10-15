@@ -51,15 +51,27 @@ pub async fn get_store<R: StoreRepo>(
     repo.get(id).await?.ok_or(CommandError::StoreNotFound(id))
 }
 
-pub async fn rename_store<R: StoreRepo>(
+/// The store's details to change; `None` keeps a field as it is.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpdateStore {
+    pub name: Option<String>,
+}
+
+/// Changes the store's details. Needs `stores:write` even when nothing changes, so the
+/// scope a caller needs doesn't depend on the body it sends; with nothing to change it
+/// writes nothing and returns the store.
+pub async fn update_store<R: StoreRepo>(
     ctx: &Ctx,
     repo: &R,
     id: StoreId,
-    name: &str,
+    input: UpdateStore,
 ) -> Result<Store, CommandError> {
     ctx.require(Scope::StoresWrite)?;
     let mut store = repo.get(id).await?.ok_or(CommandError::StoreNotFound(id))?;
-    store.rename(name)?;
+    let Some(name) = input.name else {
+        return Ok(store);
+    };
+    store.rename(&name)?;
     repo.update(&mut store).await?;
     Ok(store)
 }
