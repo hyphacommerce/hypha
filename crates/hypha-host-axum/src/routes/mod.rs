@@ -3,6 +3,7 @@
 
 pub(crate) mod address;
 mod api_keys;
+mod apps;
 mod assets;
 mod auth;
 
@@ -158,8 +159,17 @@ macro_rules! route_table {
             [admin, GET, "/admin/shipping-providers/{key}", shipping::fetch_provider],
             [admin, PATCH, "/admin/shipping-providers/{key}", shipping::update_provider_handler],
             [admin, DELETE, "/admin/shipping-providers/{key}", shipping::delete_provider_handler],
-            [admin, POST, "/admin/shipping-providers/{key}/secret", shipping::rotate_secret_handler],
             [admin, GET, "/admin/shipping-providers/{key}/services", shipping::provider_services_handler],
+            // apps and webhooks (design note 0016)
+            [admin, GET, "/admin/apps", apps::list],
+            [admin, POST, "/admin/apps", apps::create],
+            [admin, GET, "/admin/apps/{key}", apps::fetch],
+            [admin, PATCH, "/admin/apps/{key}", apps::update],
+            [admin, DELETE, "/admin/apps/{key}", apps::delete],
+            [admin, POST, "/admin/apps/{key}/secret", apps::rotate_secret],
+            [admin, GET, "/admin/apps/{key}/deliveries", apps::deliveries],
+            [admin, POST, "/admin/apps/{key}/deliveries/{id}/retry", apps::retry],
+            [admin, GET, "/admin/events/{id}", apps::event],
             // inventory
             [admin, POST, "/admin/locations", inventory::create_location_handler],
             [admin, GET, "/admin/locations/{id}", inventory::fetch_location],

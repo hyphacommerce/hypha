@@ -138,7 +138,7 @@ where
 
 /// Fans out new events, then runs the due deliveries. The lease and the outcomes each
 /// take a connection briefly; every delivery gets its own ports while it runs, so none is
-/// held during a handler (or, later, a webhook; design note 0016, EV9).
+/// held longer than its handler or webhook needs it (design note 0016, EV9).
 pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
     let no_connection = |_| "no connection".to_string();
     let (fanned, leased) = {
@@ -154,7 +154,7 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
     let mut outcomes = Vec::with_capacity(leased.len());
     for delivery in &leased {
         let ports = state.public_ports().await.map_err(no_connection)?;
-        let outcome = run(&ports, &state.clock, delivery).await;
+        let outcome = run(&ports, &state.clock, &state.webhooks(), delivery).await;
         if let hypha_core::DeliveryOutcome::Failed { error } = &outcome {
             tracing::warn!(
                 destination = delivery.destination,

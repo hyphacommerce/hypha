@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use hypha_apps::keys as app_keys;
 use hypha_auth::keys as auth_keys;
 use hypha_cart::repo::keys as cart_keys;
 use hypha_core::{RepoError, idempotency::keys as idempotency_keys};
@@ -17,7 +18,10 @@ use tokio_postgres::error::SqlState;
 
 /// Foreign keys whose violation is a domain rule (see `migrations/`), and the repo key
 /// each reports as `RepoError::Reference`, whichever side of the reference broke it.
-const REFERENCE_KEYS: &[(&str, &str)] = &[("asset_usage_asset", media_keys::USAGE_ASSET)];
+const REFERENCE_KEYS: &[(&str, &str)] = &[
+    ("asset_usage_asset", media_keys::USAGE_ASSET),
+    ("shipping_provider_app", shipping_keys::PROVIDER_APP),
+];
 
 /// Unique constraint names (see `migrations/`) and the repo key each one reports.
 /// Postgres names the violated constraint, so this is an exact lookup, not text parsing.
@@ -70,6 +74,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("invite_email", user_keys::INVITE_EMAIL),
     ("invite_token", user_keys::INVITE_TOKEN),
     ("assets_pkey", media_keys::ASSET_ID),
+    ("app_key", app_keys::APP_KEY),
 ];
 
 /// Maps a driver error to the repo error the ports promise.

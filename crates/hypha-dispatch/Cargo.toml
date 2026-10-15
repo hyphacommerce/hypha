@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 hypha-core.workspace = true
+hypha-apps = { path = "../hypha-apps" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-markets = { path = "../hypha-markets" }
@@ -14,6 +15,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 hypha-testkit = { path = "../hypha-testkit" }
+hypha-apps = { path = "../hypha-apps" }
 pollster = "0.4"
 serde_json.workspace = true
 

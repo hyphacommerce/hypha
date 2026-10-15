@@ -113,6 +113,7 @@ accessors! {
     hypha_shipping::HasShippingZones => ShippingZones, shipping_zones;
     hypha_shipping::HasAppProviders => AppProviders, app_providers;
     hypha_core::HasOutbox => Outbox, outbox;
+    hypha_apps::HasApps => Apps, apps;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

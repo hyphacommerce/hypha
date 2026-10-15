@@ -4,8 +4,8 @@ use std::{
 };
 
 use hypha_core::{
-    ActingAs, Actor, Clock, Delivery, DeliveryOutcome, OutboxRepo, PendingEvent, RepoError,
-    StoredEvent, Timestamp, Version,
+    ActingAs, Actor, Clock, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, OutboxRepo,
+    Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
 };
 use uuid::Uuid;
 
@@ -41,18 +41,11 @@ struct DeliveryRow {
     id: Uuid,
     seq: i64,
     destination: String,
-    status: Status,
+    status: DeliveryStatus,
     attempts: u32,
     next_attempt_at: Timestamp,
     leased_until: Option<Timestamp>,
     last_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Status {
-    Pending,
-    Succeeded,
-    Failed,
 }
 
 impl Default for State {
@@ -114,14 +107,9 @@ impl InMemoryOutbox {
             .deliveries
             .iter()
             .map(|d| {
-                let status = match d.status {
-                    Status::Pending => "pending",
-                    Status::Succeeded => "succeeded",
-                    Status::Failed => "failed",
-                };
                 (
                     d.destination.clone(),
-                    status,
+                    d.status.as_str(),
                     d.attempts,
                     d.last_error.clone(),
                 )
@@ -132,6 +120,25 @@ impl InMemoryOutbox {
     /// Just their types, for assertions that read like a story.
     pub fn types(&self) -> Vec<String> {
         self.events().into_iter().map(|e| e.event_type).collect()
+    }
+}
+
+impl State {
+    /// `row` as the admin lists it; `None` if its event is gone.
+    fn record(&self, row: &DeliveryRow) -> Option<DeliveryRecord> {
+        let event = self.events.iter().find(|e| e.seq == row.seq)?;
+        Some(DeliveryRecord {
+            id: row.id,
+            event_seq: row.seq,
+            event_id: event.id,
+            event_type: event.event_type.clone(),
+            occurred_at: event.occurred_at,
+            destination: row.destination.clone(),
+            status: row.status,
+            attempts: row.attempts,
+            next_attempt_at: row.next_attempt_at,
+            last_error: row.last_error.clone(),
+        })
     }
 }
 
@@ -177,7 +184,7 @@ impl OutboxRepo for InMemoryOutbox {
                         id,
                         seq: *seq,
                         destination,
-                        status: Status::Pending,
+                        status: DeliveryStatus::Pending,
                         attempts: 0,
                         next_attempt_at: now,
                         leased_until: None,
@@ -202,7 +209,7 @@ impl OutboxRepo for InMemoryOutbox {
             .iter()
             .enumerate()
             .filter(|(_, d)| {
-                d.status == Status::Pending
+                d.status == DeliveryStatus::Pending
                     && d.next_attempt_at <= now
                     && d.leased_until.is_none_or(|until| until <= now)
             })
@@ -237,7 +244,7 @@ impl OutboxRepo for InMemoryOutbox {
             row.leased_until = None;
             match outcome {
                 DeliveryOutcome::Succeeded => {
-                    row.status = Status::Succeeded;
+                    row.status = DeliveryStatus::Succeeded;
                     row.last_error = None;
                 }
                 DeliveryOutcome::Retry { error, at } => {
@@ -245,7 +252,7 @@ impl OutboxRepo for InMemoryOutbox {
                     row.next_attempt_at = *at;
                 }
                 DeliveryOutcome::Failed { error } => {
-                    row.status = Status::Failed;
+                    row.status = DeliveryStatus::Failed;
                     row.last_error = Some(error.clone());
                 }
             }
@@ -265,5 +272,53 @@ impl OutboxRepo for InMemoryOutbox {
         state.events.retain(|e| !pruned.contains(&e.seq));
         state.deliveries.retain(|d| !pruned.contains(&d.seq));
         Ok(pruned.len() as u32)
+    }
+
+    async fn get_event(&self, id: Uuid) -> Result<Option<StoredEvent>, RepoError> {
+        Ok(self.events().into_iter().find(|e| e.id == id))
+    }
+
+    async fn deliveries_to(
+        &self,
+        destination: &str,
+        status: Option<DeliveryStatus>,
+        page: PageRequest<i64>,
+    ) -> Result<Page<DeliveryRecord>, RepoError> {
+        let state = self.inner.lock().unwrap();
+        let mut rows: Vec<DeliveryRecord> = state
+            .deliveries
+            .iter()
+            .filter(|d| d.destination == destination)
+            .filter(|d| status.is_none_or(|s| d.status == s))
+            .filter(|d| page.after.is_none_or(|after| d.seq < after))
+            .filter_map(|d| state.record(d))
+            .collect();
+        rows.sort_by_key(|d| std::cmp::Reverse(d.event_seq));
+        rows.truncate(page.limit.get() as usize + 1);
+        Ok(Page::from_overfetch(rows, page.limit))
+    }
+
+    async fn retry_delivery(
+        &self,
+        destination: &str,
+        id: Uuid,
+        now: Timestamp,
+    ) -> Result<Option<DeliveryRecord>, RepoError> {
+        let mut state = self.inner.lock().unwrap();
+        let Some(i) = state
+            .deliveries
+            .iter()
+            .position(|d| d.id == id && d.destination == destination)
+        else {
+            return Ok(None);
+        };
+        let row = &mut state.deliveries[i];
+        let running = row.leased_until.is_some_and(|until| until > now);
+        if !running {
+            row.status = DeliveryStatus::Pending;
+            row.next_attempt_at = now;
+            row.leased_until = None;
+        }
+        Ok(state.record(&state.deliveries[i]))
     }
 }

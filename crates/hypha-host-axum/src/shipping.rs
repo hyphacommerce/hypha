@@ -8,55 +8,55 @@
 
 use std::time::Duration;
 
-use hmac::{Hmac, KeyInit, Mac};
+use hypha_apps::{App, AppKey, AppRepo, HasApps, open_secret};
 use hypha_core::{Clock, Money, Price, VariantId};
 use hypha_shipping::{
-    AppProvider, AppProviderRepo, DeliveryEstimate, ProviderError, ProviderKey, ProviderKind, Rate,
-    RateProvider, RateRequest, ServiceInfo, open_secret,
+    AppProvider, AppProviderRepo, DeliveryEstimate, HasAppProviders, ProviderError, ProviderKey,
+    ProviderKind, Rate, RateProvider, RateRequest, ServiceInfo,
 };
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 
 use crate::{
-    outbound::OutboundPolicy,
+    outbound::{CallError, OutboundPolicy, SignedCall, send_signed},
     routes::{address::PostalAddressResponse, rfc3339},
     state::{HostEnv, SystemClock},
 };
 
-/// The header carrying a callback's signature: `t=<unix seconds>,v1=<hex HMAC-SHA256 of
-/// "<t>.<body>" under the provider's secret>` (Stripe's scheme; webhooks reuse it).
-pub const SIGNATURE_HEADER: &str = "Hypha-Signature";
 /// The ID of one rate request (`rreq_…`, the body's `id` too), for the app's logs and
 /// de-duplication.
 pub const REQUEST_ID_HEADER: &str = "Hypha-Request-Id";
-/// The most of an app's answer read: rates for a cart are a few kilobytes, and a bigger
-/// answer counts as a failure rather than filling memory.
-pub const MAX_ANSWER_BYTES: usize = 256 * 1024;
 
-/// One `RateProvider` per request: the store's app providers, the shared HTTP client,
-/// and the host's key to open their secrets.
-pub struct HostRates<'a, A: AppProviderRepo> {
-    pub apps: &'a A,
+/// One `RateProvider` per request: the store's apps and their rate settings, the shared
+/// HTTP client, and the host's key to open the apps' secrets.
+pub struct HostRates<'a, P: HasAppProviders + HasApps> {
+    pub ports: &'a P,
     pub http: &'a reqwest::Client,
     pub outbound: OutboundPolicy,
     pub env: &'a HostEnv,
     pub clock: &'a SystemClock,
 }
 
-impl<A: AppProviderRepo> RateProvider for HostRates<'_, A> {
+impl<P: HasAppProviders + HasApps> RateProvider for HostRates<'_, P> {
     async fn services(&self, key: &ProviderKey) -> Result<Vec<ServiceInfo>, ProviderError> {
         match key.kind() {
             ProviderKind::App => {
-                let app = self.app(key).await?;
-                if !app.services().is_empty() {
-                    return Ok(app.services().to_vec());
+                let (provider, app) = self.app(key).await?;
+                if !provider.services().is_empty() {
+                    return Ok(provider.services().to_vec());
                 }
                 let url = format!(
                     "{}/services",
-                    app.callback_url().as_str().trim_end_matches('/')
+                    provider.callback_url().as_str().trim_end_matches('/')
                 );
                 let body = self
-                    .call(&app, reqwest::Method::GET, &url, &request_id(), Vec::new())
+                    .call(
+                        &provider,
+                        &app,
+                        reqwest::Method::GET,
+                        &url,
+                        &request_id(),
+                        Vec::new(),
+                    )
                     .await?;
                 let parsed: ServicesResponse = serde_json::from_slice(&body)
                     .map_err(|e| failed(key, format!("unreadable services: {e}")))?;
@@ -81,7 +81,7 @@ impl<A: AppProviderRepo> RateProvider for HostRates<'_, A> {
     ) -> Result<Vec<Rate>, ProviderError> {
         match key.kind() {
             ProviderKind::App => {
-                let app = self.app(key).await?;
+                let (provider, app) = self.app(key).await?;
                 let id = request_id();
                 let payload = CallbackRequest {
                     id: id.clone(),
@@ -91,9 +91,10 @@ impl<A: AppProviderRepo> RateProvider for HostRates<'_, A> {
                 let body = serde_json::to_vec(&payload).map_err(|e| failed(key, e.to_string()))?;
                 let answer = self
                     .call(
+                        &provider,
                         &app,
                         reqwest::Method::POST,
-                        app.callback_url().as_str(),
+                        provider.callback_url().as_str(),
                         &id,
                         body,
                     )
@@ -107,107 +108,64 @@ impl<A: AppProviderRepo> RateProvider for HostRates<'_, A> {
     }
 }
 
-impl<A: AppProviderRepo> HostRates<'_, A> {
-    async fn app(&self, key: &ProviderKey) -> Result<AppProvider, ProviderError> {
-        let app = self
-            .apps
+impl<P: HasAppProviders + HasApps> HostRates<'_, P> {
+    /// The app's rate settings and the app itself (its secret, whether it's enabled).
+    async fn app(&self, key: &ProviderKey) -> Result<(AppProvider, App), ProviderError> {
+        let provider = self
+            .ports
+            .app_providers()
             .get(key)
+            .await
+            .map_err(|e| failed(key, e.to_string()))?
+            .ok_or_else(|| ProviderError::Unknown(key.clone()))?;
+        let app_key = AppKey::new(key.as_str()).map_err(|_| ProviderError::Unknown(key.clone()))?;
+        let app = self
+            .ports
+            .apps()
+            .get(&app_key)
             .await
             .map_err(|e| failed(key, e.to_string()))?
             .ok_or_else(|| ProviderError::Unknown(key.clone()))?;
         if !app.enabled() {
             return Err(ProviderError::Disabled(key.clone()));
         }
-        Ok(app)
+        Ok((provider, app))
     }
 
-    /// Sends a signed request within the app's timeout; the body of a 2xx answer.
+    /// Sends a signed request within the provider's timeout; the body of a 2xx answer.
     async fn call(
         &self,
-        app: &AppProvider,
+        provider: &AppProvider,
+        app: &App,
         method: reqwest::Method,
         url: &str,
         id: &str,
         body: Vec<u8>,
     ) -> Result<Vec<u8>, ProviderError> {
-        let key = app.key();
-        // Names are checked by the client's resolver; IP literals never reach it.
-        let literal = reqwest::Url::parse(url).ok().and_then(|u| {
-            let host = u.host_str()?.trim_start_matches('[').trim_end_matches(']');
-            host.parse::<std::net::IpAddr>().ok()
-        });
-        if literal.is_some_and(|ip| !self.outbound.allows(ip)) {
-            return Err(failed(key, "the callback URL is not a public address"));
-        }
+        let key = provider.key();
         let secret = open_secret(self.env, app).map_err(|e| failed(key, e.to_string()))?;
-        let at = self.clock.now().unix_micros() / 1_000_000;
-        let signature = sign(&secret, at, &body);
-        let response = self
-            .http
-            .request(method, url)
-            .timeout(Duration::from_millis(u64::from(app.timeout_ms())))
-            .header("content-type", "application/json")
-            .header(SIGNATURE_HEADER, signature)
-            .header(REQUEST_ID_HEADER, id)
-            .body(body)
-            .send()
+        let call = SignedCall {
+            method,
+            url,
+            timeout: Duration::from_millis(u64::from(provider.timeout_ms())),
+            secret: &secret,
+            at: self.clock.now().unix_micros() / 1_000_000,
+            headers: &[(REQUEST_ID_HEADER, id.to_string())],
+            body,
+            discard_answer: false,
+        };
+        send_signed(self.http, self.outbound, call)
             .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    ProviderError::Timeout(key.clone())
-                } else {
-                    // The details (refused, TLS, no public address) stay in the log: in
-                    // an answer they would map the network behind the URL.
-                    tracing::warn!(provider = %key, error = %e, "rate app unreachable");
-                    failed(key, "unreachable")
-                }
-            })?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(failed(key, format!("answered HTTP {}", status.as_u16())));
-        }
-        // Read chunk by chunk so an endless answer stops at the cap, not at the timeout.
-        let too_big = || failed(key, format!("answered more than {MAX_ANSWER_BYTES} bytes"));
-        if response
-            .content_length()
-            .is_some_and(|len| len > MAX_ANSWER_BYTES as u64)
-        {
-            return Err(too_big());
-        }
-        let mut response = response;
-        let mut answer = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|e| {
-            if e.is_timeout() {
-                ProviderError::Timeout(key.clone())
-            } else {
-                failed(key, e.to_string())
-            }
-        })? {
-            if answer.len() + chunk.len() > MAX_ANSWER_BYTES {
-                return Err(too_big());
-            }
-            answer.extend_from_slice(&chunk);
-        }
-        Ok(answer)
+            .map_err(|e| match e {
+                CallError::Timeout => ProviderError::Timeout(key.clone()),
+                CallError::Failed(reason) => failed(key, reason),
+            })
     }
 }
 
 /// A new rate request ID: `rreq_` and a UUIDv7, in the header and the body alike.
 fn request_id() -> String {
     format!("rreq_{}", uuid::Uuid::now_v7().simple())
-}
-
-/// `t=<at>,v1=<hex HMAC-SHA256 of "<at>.<body>">`.
-pub fn sign(secret: &str, at: i64, body: &[u8]) -> String {
-    // HMAC takes keys of any length.
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .unwrap_or_else(|_| unreachable!("HMAC accepts every key length"));
-    mac.update(at.to_string().as_bytes());
-    mac.update(b".");
-    mac.update(body);
-    let digest = mac.finalize().into_bytes();
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    format!("t={at},v1={hex}")
 }
 
 fn failed(key: &ProviderKey, reason: impl Into<String>) -> ProviderError {
@@ -322,7 +280,7 @@ struct WireService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::outbound::sign;
 
     #[test]
     fn a_signature_is_the_hmac_of_time_dot_body() {

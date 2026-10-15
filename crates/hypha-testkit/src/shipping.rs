@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{collections::BTreeMap, sync::Mutex};
 
 use hypha_core::{
@@ -83,9 +84,16 @@ impl ShippingZoneRepo for InMemoryShippingZoneRepo {
 
 /// App providers by key. Keys are strings, which `Table` (`Copy` keys) doesn't take, so
 /// the version rules are spelled out here.
+///
+/// A provider is an app's rate settings (design note 0016, EV11): linked to an
+/// `InMemoryAppRepo` (`crate::apps::linked`, as `InMemoryPorts` does), a provider needs
+/// its app (`RepoError::Reference(keys::PROVIDER_APP)`) and goes when the app does, like
+/// the database's foreign key. Made on its own, it checks nothing.
 #[derive(Default)]
 pub struct InMemoryAppProviderRepo {
-    providers: Mutex<BTreeMap<ProviderKey, AppProvider>>,
+    pub(crate) providers: Arc<Mutex<BTreeMap<ProviderKey, AppProvider>>>,
+    /// The apps' keys, when linked.
+    pub(crate) apps: Option<crate::apps::Apps>,
     /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with.
     pub(crate) outbox: InMemoryOutbox,
 }
@@ -111,6 +119,11 @@ impl AppProviderRepo for InMemoryAppProviderRepo {
 
     async fn insert(&self, provider: &mut AppProvider) -> Result<(), RepoError> {
         stamp_insert(provider, self.outbox.now());
+        if let Some(apps) = &self.apps
+            && !apps.lock().unwrap().contains_key(provider.key().as_str())
+        {
+            return Err(RepoError::Reference(keys::PROVIDER_APP));
+        }
         let mut providers = self.providers.lock().unwrap();
         if providers.contains_key(provider.key()) {
             return Err(RepoError::Duplicate(keys::PROVIDER_KEY));

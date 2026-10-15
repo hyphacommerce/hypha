@@ -9,6 +9,9 @@ pub mod keys {
     /// A country is in at most one zone (design note 0015, section 2).
     pub const ZONE_COUNTRY: &str = "shipping_zone_country";
     pub const PROVIDER_KEY: &str = "shipping_provider_key";
+    /// A provider's key names an existing app (`hypha-apps`), reported as
+    /// `RepoError::Reference`.
+    pub const PROVIDER_APP: &str = "shipping_provider_app";
 }
 
 /// Option IDs are generated, so they are assumed unique across zones and have no key

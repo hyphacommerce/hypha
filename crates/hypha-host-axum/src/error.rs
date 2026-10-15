@@ -690,6 +690,27 @@ impl From<hypha_checkout::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_apps::CommandError> for ApiError {
+    fn from(e: hypha_apps::CommandError) -> Self {
+        use hypha_apps::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Apps, deliveries and events only ever arrive in URLs, except a new app's
+            // key, which is a conflict when taken.
+            E::AppNotFound(_) | E::DeliveryNotFound { .. } | E::EventNotFound(_) => {
+                StatusCode::NOT_FOUND
+            }
+            E::AppExists(_) => StatusCode::CONFLICT,
+            E::App(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 impl From<hypha_shipping::CommandError> for ApiError {
     fn from(e: hypha_shipping::CommandError) -> Self {
         use hypha_shipping::{CommandError as E, ProviderError as P};
@@ -707,9 +728,11 @@ impl From<hypha_shipping::CommandError> for ApiError {
             E::Provider(P::Timeout(_) | P::Failed { .. } | P::WrongCurrency { .. }) => {
                 StatusCode::BAD_GATEWAY
             }
-            E::Shipping(_) | E::Country(_) | E::Money(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            // Another `HYPHA_SECRET_KEY` than the one that sealed it.
-            E::Seal(_) | E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            // The key is in the body when creating.
+            E::Shipping(_) | E::Country(_) | E::Money(_) | E::ProviderAppNotFound(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,

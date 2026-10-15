@@ -11,7 +11,7 @@
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{Actor, RepoError, Timestamp, Version};
+use crate::{Actor, Page, PageRequest, RepoError, Timestamp, Version};
 
 /// A domain event's payload: a contract type in its domain crate's `events.rs`, plain
 /// serializable data (IDs, strings, `Money`), never the aggregate itself. Its name and
@@ -175,6 +175,55 @@ pub enum DeliveryOutcome {
     },
 }
 
+/// Where a delivery stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryStatus {
+    /// Waiting for its next attempt (the first, or a retry).
+    Pending,
+    Succeeded,
+    /// Failed for good; the admin can retry it.
+    Failed,
+}
+
+impl DeliveryStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeliveryStatus::Pending => "pending",
+            DeliveryStatus::Succeeded => "succeeded",
+            DeliveryStatus::Failed => "failed",
+        }
+    }
+
+    /// The status named `s` (`as_str`'s inverse), for adapters and query strings.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "pending" => Some(DeliveryStatus::Pending),
+            "succeeded" => Some(DeliveryStatus::Succeeded),
+            "failed" => Some(DeliveryStatus::Failed),
+            _ => None,
+        }
+    }
+}
+
+/// A delivery as the admin lists it: which event, where it stands, what went wrong last.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryRecord {
+    pub id: Uuid,
+    /// The event's `seq`: a destination has one delivery per event, so its deliveries
+    /// are listed by this, newest first, and pages continue below it.
+    pub event_seq: i64,
+    pub event_id: Uuid,
+    pub event_type: String,
+    pub occurred_at: Timestamp,
+    pub destination: String,
+    pub status: DeliveryStatus,
+    /// Attempts made so far.
+    pub attempts: u32,
+    /// When it runs next, while pending; when it last ran or was due, otherwise.
+    pub next_attempt_at: Timestamp,
+    pub last_error: Option<String>,
+}
+
 /// The outbox: tests and the admin read it; the dispatcher fans events out to
 /// deliveries, leases the due ones and records how they went. Each method is one short
 /// transaction, so nothing holds a connection while a destination runs (EV9).
@@ -214,6 +263,30 @@ pub trait OutboxRepo {
     /// Deletes up to `limit` events (and their deliveries) that occurred before
     /// `before` and were fanned out. Returns how many.
     async fn prune_events(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError>;
+
+    /// The event with ID `id`, if it is still kept.
+    async fn get_event(&self, id: Uuid) -> Result<Option<StoredEvent>, RepoError>;
+
+    /// `destination`'s deliveries, by their event's `seq` newest first, only those in
+    /// `status` when given. `page.after` is the last `event_seq` of the previous page.
+    async fn deliveries_to(
+        &self,
+        destination: &str,
+        status: Option<DeliveryStatus>,
+        page: PageRequest<i64>,
+    ) -> Result<Page<DeliveryRecord>, RepoError>;
+
+    /// Makes `destination`'s delivery `id` due at `now` (design note 0016, Q6): a
+    /// failed or succeeded one goes back to pending, a pending one stops waiting for its
+    /// backoff. Its attempts are kept, so a delivery that had used them all gets one
+    /// more. One that's leased (running right now) is left alone. `None` when there's
+    /// no such delivery to `destination`; otherwise the delivery as it is after.
+    async fn retry_delivery(
+        &self,
+        destination: &str,
+        id: Uuid,
+        now: Timestamp,
+    ) -> Result<Option<DeliveryRecord>, RepoError>;
 }
 
 pub trait HasOutbox {

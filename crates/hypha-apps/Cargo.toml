@@ -1,0 +1,18 @@
+[package]
+name = "hypha-apps"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "0.4"
+serde_json.workspace = true
+
+[lints]
+workspace = true

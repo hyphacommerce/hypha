@@ -16,6 +16,7 @@ import {
   KeyIcon,
   PhotoIcon,
   ShoppingBagIcon,
+  PuzzlePieceIcon,
   TruckIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -47,6 +48,7 @@ const NAV: {
     items: [
       { label: "Store", href: "/settings/store", icon: BuildingStorefrontIcon, isReady: true },
       { label: "Shipping", href: "/settings/shipping", icon: TruckIcon, isReady: true },
+      { label: "Apps", href: "/settings/apps", icon: PuzzlePieceIcon, isReady: true },
       { label: "Staff", href: "/settings/staff", icon: UsersIcon, isReady: false },
       { label: "API keys", href: "/settings/api-keys", icon: KeyIcon, isReady: false },
     ],

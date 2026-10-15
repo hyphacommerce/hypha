@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    CountryCode, Currency, Money, Price, Recorded, RepoError, Sealed, ShippingOptionId,
-    ShippingZoneId, TaxClassId, Version, Versioned, stamp_insert, stamp_update,
+    CountryCode, Currency, Money, Price, Recorded, RepoError, ShippingOptionId, ShippingZoneId,
+    TaxClassId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_shipping::{
     AppProvider, AppProviderRepo, AppProviderSnapshot, BuiltinRate, DeliveryEstimate, NewOption,
@@ -506,16 +506,12 @@ pub(crate) async fn insert_provider(
     s: &AppProviderSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
-        "INSERT INTO shipping_app_providers
-            (key, version, name, callback_url, timeout_ms, secret, enabled)
-         VALUES ($1, 1, $2, $3, $4, $5, $6)",
+        "INSERT INTO shipping_app_providers (key, version, callback_url, timeout_ms)
+         VALUES ($1, 1, $2, $3)",
         &[
             (&s.key, Type::TEXT),
-            (&s.name, Type::TEXT),
             (&s.callback_url, Type::TEXT),
             (&timeout_to_db(s.timeout_ms)?, Type::INT4),
-            (&s.secret.as_bytes(), Type::BYTEA),
-            (&s.enabled, Type::BOOL),
         ],
     )
     .await
@@ -540,17 +536,14 @@ pub(crate) async fn update_provider(
 ) -> Result<Version, RepoError> {
     let bumped = tx
         .query_typed_opt(
-            "UPDATE shipping_app_providers SET version = version + 1, name = $3,
-                    callback_url = $4, timeout_ms = $5, secret = $6, enabled = $7
+            "UPDATE shipping_app_providers SET version = version + 1, callback_url = $3,
+                    timeout_ms = $4
              WHERE key = $1 AND version = $2 RETURNING version",
             &[
                 (&s.key, Type::TEXT),
                 (&version_to_db(s.version)?, Type::INT8),
-                (&s.name, Type::TEXT),
                 (&s.callback_url, Type::TEXT),
                 (&timeout_to_db(s.timeout_ms)?, Type::INT4),
-                (&s.secret.as_bytes(), Type::BYTEA),
-                (&s.enabled, Type::BOOL),
             ],
         )
         .await
@@ -620,7 +613,7 @@ async fn load_providers(
     let rows = client
         .query_typed(
             &format!(
-                "SELECT key, version, name, callback_url, timeout_ms, secret, enabled, {}
+                "SELECT key, version, callback_url, timeout_ms, {}
                  FROM shipping_app_providers WHERE $1::text IS NULL OR key = $1 ORDER BY key",
                 stamp_columns(""),
             ),
@@ -655,11 +648,8 @@ async fn load_providers(
                 key: key.clone(),
                 version: version_from_db(col(row, "version")?)?,
                 stamps: stamps_from_row(row)?,
-                name: col(row, "name")?,
                 callback_url: col(row, "callback_url")?,
                 timeout_ms: u32::try_from(timeout).map_err(corrupt)?,
-                secret: Sealed::from_bytes(col(row, "secret")?),
-                enabled: col(row, "enabled")?,
             };
             AppProvider::restore(snapshot)
                 .map_err(|e| corrupt(format!("shipping provider {key}: {e}")))

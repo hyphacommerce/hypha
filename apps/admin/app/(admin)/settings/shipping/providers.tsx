@@ -23,19 +23,17 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { KeyIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import {
-  createProvider,
-  deleteProvider,
-  rotateSecret,
-  testProvider,
-  updateProvider,
-} from "./actions";
+import { createProvider, deleteProvider, rotateSecret, setAppEnabled, testProvider } from "./actions";
 
-type Provider = AdminSchemas["AppProviderResponse"];
+/** A provider's rate settings with its app's name and switch (design note 0016, EV11). */
+export type RateApp = AdminSchemas["AppProviderResponse"] & { name: string; enabled: boolean };
+
+type Provider = RateApp;
 
 /**
  * Rate apps (design note 0015, section 5): external services Hypha asks for live rates
- * over a signed callback. Their signing secret is shown once, when created or rotated.
+ * over a signed callback. Each is an app (Settings → Apps), whose signing secret is
+ * shown once, when created or rotated.
  */
 export function ProvidersCard({ providers }: { providers: Provider[] }) {
   const [isAdding, setIsAdding] = useState(false);
@@ -157,12 +155,12 @@ function ProviderRow({
       </TableCell>
       <TableCell>
         <Switch
-          label={`Use ${provider.name}`}
+          label={`Use ${provider.name} (its webhooks too)`}
           isLabelHidden
           size="sm"
           value={provider.enabled}
           changeAction={async (enabled) =>
-            setError((await updateProvider(provider.key, { enabled })).error)
+            setError((await setAppEnabled(provider.key, enabled)).error)
           }
         />
       </TableCell>
@@ -172,7 +170,7 @@ function ProviderRow({
             <>
               <Button label="Cancel" size="sm" variant="ghost" onClick={() => setConfirming(undefined)} />
               <Button
-                label="Delete app"
+                label="Stop using"
                 size="sm"
                 variant="destructive"
                 isLoading={isPending}
@@ -224,7 +222,7 @@ function ProviderRow({
                 onClick={() => setConfirming("rotate")}
               />
               <IconButton
-                label={`Delete ${provider.name}`}
+                label={`Stop using ${provider.name} for rates`}
                 icon={<TrashIcon />}
                 size="sm"
                 variant="ghost"
@@ -263,6 +261,8 @@ function AddProviderDialog({
       const result = await createProvider({ key: shownKey, name, callbackUrl, timeoutMs });
       if (result.error) setError(result.error);
       else if (result.secret) onCreated(shownKey, result.secret);
+      // An existing app: its secret stays as it was.
+      else onClose();
     });
   };
 
@@ -270,7 +270,7 @@ function AddProviderDialog({
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={520} purpose="form">
       <DialogHeader
         title="Add rate app"
-        subtitle="Hypha POSTs each rate request to the callback, signed with a secret it shows you next."
+        subtitle="Hypha POSTs each rate request to the callback, signed with the app's secret: a new app's is shown next."
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
@@ -278,7 +278,7 @@ function AddProviderDialog({
         <TextInput label="Name" placeholder="Courier" value={name} onChange={setName} />
         <TextInput
           label="Key"
-          description="How options name it: app_ and lowercase letters, digits and _. Can't change later."
+          description="How options name it: app_ and lowercase letters, digits and _. Can't change later. An existing app's key adds rates to that app."
           value={shownKey}
           onChange={setKey}
         />

@@ -16,6 +16,7 @@ hypha-stores = { path = "../hypha-stores" }
 hypha-orders = { path = "../hypha-orders" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
+hypha-apps = { path = "../hypha-apps" }
 hypha-media = { path = "../hypha-media" }
 hypha-shipping = { path = "../hypha-shipping" }
 serde_json.workspace = true

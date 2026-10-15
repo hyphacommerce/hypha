@@ -27,8 +27,8 @@ pub const VARIANT_CLEANUP: Handler = Handler {
 /// Every handler this build has.
 pub const HANDLERS: &[Handler] = &[VARIANT_CLEANUP];
 
-/// The destinations an event of `event_type` goes to: `fan_out` asks this for each
-/// event. Apps subscribed to it join with webhooks (step 5 of 0016).
+/// The handlers an event of `event_type` goes to; `fan_out` adds the apps subscribed
+/// to it.
 pub fn destinations(event_type: &str) -> Vec<String> {
     HANDLERS
         .iter()

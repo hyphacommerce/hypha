@@ -12,7 +12,7 @@ use hypha_shipping::{
     RateBasis, RateTable, ServiceInfo, ShippingOption, ShippingZone, Tier, UpdateAppProvider,
     UpdateZone, add_option, create_app_provider, create_zone, delete_app_provider, delete_zone,
     get_app_provider, get_zone, list_app_providers, list_zones, provider_services, remove_option,
-    reorder_options, rotate_app_provider_secret, update_app_provider, update_option, update_zone,
+    reorder_options, update_app_provider, update_option, update_zone,
 };
 use serde::{Deserialize, Serialize};
 
@@ -524,22 +524,20 @@ pub(super) struct ServiceDto {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct AppProviderResponse {
-    /// `app_<name>`: what options name it by.
+    /// `app_<name>`: what options name it by, and the app (`/admin/apps/{key}`) whose
+    /// name, switch and secret apply.
     key: String,
-    name: String,
-    /// Where Hypha POSTs rate requests (signed with the secret).
+    /// Where Hypha POSTs rate requests (signed with the app's secret).
     callback_url: String,
     timeout_ms: u32,
     /// Declared up front; empty means Hypha asks `<callback_url>/services`.
     services: Vec<ServiceDto>,
-    enabled: bool,
 }
 
 impl From<&AppProvider> for AppProviderResponse {
     fn from(p: &AppProvider) -> Self {
         Self {
             key: p.key().as_str().to_string(),
-            name: p.name().to_string(),
             callback_url: p.callback_url().as_str().to_string(),
             timeout_ms: p.timeout_ms(),
             services: p
@@ -550,25 +548,15 @@ impl From<&AppProvider> for AppProviderResponse {
                     name: s.name.clone(),
                 })
                 .collect(),
-            enabled: p.enabled(),
         }
     }
-}
-
-/// A provider with its signing secret: returned once, when created or rotated.
-#[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AppProviderSecretResponse {
-    provider: AppProviderResponse,
-    /// `hypha_shs_…`: verify `Hypha-Signature` with it. Shown only now.
-    secret: String,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateAppProviderRequest {
-    /// `app_<name>`: lowercase letters, digits and `_`.
+    /// An existing app's key (`app_<name>`).
     key: String,
-    name: String,
     /// `https://`, or `http://localhost` for development.
     callback_url: String,
     /// 100 to 10000; defaults to 3000.
@@ -587,38 +575,30 @@ fn services(dtos: Vec<ServiceDto>) -> Vec<ServiceInfo> {
         .collect()
 }
 
-/// Registers an external app that calculates rates (design note 0015, section 5).
-/// Hypha POSTs it signed rate requests; its secret is returned here, once.
+/// Makes an app (design note 0016, EV11) a rate provider (design note 0015, section 5):
+/// Hypha POSTs it rate requests signed with the app's secret.
 #[utoipa::path(
     post,
     path = "/admin/shipping-providers",
     request_body = CreateAppProviderRequest,
-    responses((status = 201, description = "Created", body = AppProviderSecretResponse)),
+    responses((status = 201, description = "Created", body = AppProviderResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
 pub(super) async fn create_provider_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateAppProviderRequest>,
-) -> Result<(StatusCode, Json<AppProviderSecretResponse>), ApiError> {
+) -> Result<(StatusCode, Json<AppProviderResponse>), ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = CreateAppProvider {
         key: req.key,
-        name: req.name,
         callback_url: req.callback_url,
         timeout_ms: req.timeout_ms,
         services: services(req.services),
     };
-    let (provider, secret) =
-        create_app_provider(&ctx, ports.app_providers(), &state.env, &state.env, input).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(AppProviderSecretResponse {
-            provider: (&provider).into(),
-            secret,
-        }),
-    ))
+    let provider = create_app_provider(&ctx, ports.app_providers(), input).await?;
+    Ok((StatusCode::CREATED, Json((&provider).into())))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -663,13 +643,10 @@ pub(super) async fn fetch_provider<S: Storage>(
     Ok(Json((&provider).into()))
 }
 
-/// Name, callback, timeout, services, enabled (JSON Merge Patch; none take `null`).
+/// Callback, timeout, services (JSON Merge Patch; none take `null`).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateAppProviderRequest {
-    #[serde(default, deserialize_with = "patch::non_null")]
-    #[schema(value_type = String, required = false)]
-    name: Option<String>,
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     callback_url: Option<String>,
@@ -679,9 +656,6 @@ pub(super) struct UpdateAppProviderRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = Vec<ServiceDto>, required = false)]
     services: Option<Vec<ServiceDto>>,
-    #[serde(default, deserialize_with = "patch::non_null")]
-    #[schema(value_type = bool, required = false)]
-    enabled: Option<bool>,
 }
 
 /// Changes an external app provider.
@@ -702,17 +676,16 @@ pub(super) async fn update_provider_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = UpdateAppProvider {
-        name: req.name,
         callback_url: req.callback_url,
         timeout_ms: req.timeout_ms,
         services: req.services.map(services),
-        enabled: req.enabled,
     };
     let provider = update_app_provider(&ctx, ports.app_providers(), &key, input).await?;
     Ok(Json((&provider).into()))
 }
 
-/// Removes an external app provider; options naming it stop being offered.
+/// Stops an app being a rate provider (the app stays); options naming it stop being
+/// offered.
 #[utoipa::path(
     delete,
     path = "/admin/shipping-providers/{key}",
@@ -728,29 +701,6 @@ pub(super) async fn delete_provider_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     delete_app_provider(&ctx, ports.app_providers(), &key).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// Replaces the signing secret and returns the new one, once. The old one stops working.
-#[utoipa::path(
-    post,
-    path = "/admin/shipping-providers/{key}/secret",
-    params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_shipcalc", description = "`app_<name>` or `spore_<name>`")),
-    responses((status = 200, description = "OK", body = AppProviderSecretResponse)),
-    extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
-)]
-pub(super) async fn rotate_secret_handler<S: Storage>(
-    State(state): State<SharedState<S>>,
-    caller: Caller,
-    PathId(key): PathId<String>,
-) -> Result<Json<AppProviderSecretResponse>, ApiError> {
-    let (ports, ctx) = caller.authenticate(&state).await?;
-    let (provider, secret) =
-        rotate_app_provider_secret(&ctx, ports.app_providers(), &state.env, &state.env, &key)
-            .await?;
-    Ok(Json(AppProviderSecretResponse {
-        provider: (&provider).into(),
-        secret,
-    }))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -772,7 +722,7 @@ pub(super) async fn provider_services_handler<S: Storage>(
     PathId(key): PathId<String>,
 ) -> Result<Json<ServiceList>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let rates = state.rates(ports.app_providers());
+    let rates = state.rates(&ports);
     let found = provider_services(&ctx, &rates, &key).await?;
     Ok(Json(ServiceList {
         items: found

@@ -53,6 +53,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every app. */
+        get: operations["admin.apps.list"];
+        put?: never;
+        /** Registers an app. Its signing secret is returned here, once. */
+        post: operations["admin.apps.create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/apps/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One app. */
+        get: operations["admin.apps.fetch"];
+        put?: never;
+        post?: never;
+        /** Removes an app, its rate settings with it; deliveries still due to it fail. */
+        delete: operations["admin.apps.delete"];
+        options?: never;
+        head?: never;
+        /** Changes an app. */
+        patch: operations["admin.apps.update"];
+        trace?: never;
+    };
+    "/admin/apps/{key}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An app's webhook deliveries, newest event first, optionally of one status. Kept for
+         *     30 days.
+         */
+        get: operations["admin.apps.deliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/apps/{key}/deliveries/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sends a delivery again when the dispatcher next runs (within seconds): a failed one
+         *     gets one more attempt, a pending one stops waiting. One being sent right now is
+         *     returned as it is.
+         */
+        post: operations["admin.apps.retry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/apps/{key}/secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replaces the signing secret and returns the new one, once. Calls signed with the old
+         *     one stop verifying at once.
+         */
+        post: operations["admin.apps.rotate_secret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/assets": {
         parameters: {
             query?: never;
@@ -366,6 +464,23 @@ export interface paths {
         post?: never;
         /** Removes a saved address. */
         delete: operations["admin.customers.remove_address"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/events/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One event as apps receive it, for debugging a delivery. Kept for 30 days. */
+        get: operations["admin.apps.event"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -966,8 +1081,8 @@ export interface paths {
         get: operations["admin.shipping.list_providers"];
         put?: never;
         /**
-         * Registers an external app that calculates rates (design note 0015, section 5).
-         *     Hypha POSTs it signed rate requests; its secret is returned here, once.
+         * Makes an app (design note 0016, EV11) a rate provider (design note 0015, section 5):
+         *     Hypha POSTs it rate requests signed with the app's secret.
          */
         post: operations["admin.shipping.create_provider"];
         delete?: never;
@@ -987,29 +1102,15 @@ export interface paths {
         get: operations["admin.shipping.fetch_provider"];
         put?: never;
         post?: never;
-        /** Removes an external app provider; options naming it stop being offered. */
+        /**
+         * Stops an app being a rate provider (the app stays); options naming it stop being
+         *     offered.
+         */
         delete: operations["admin.shipping.delete_provider"];
         options?: never;
         head?: never;
         /** Changes an external app provider. */
         patch: operations["admin.shipping.update_provider"];
-        trace?: never;
-    };
-    "/admin/shipping-providers/{key}/secret": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Replaces the signing secret and returns the new one, once. The old one stops working. */
-        post: operations["admin.shipping.rotate_secret"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/admin/shipping-providers/{key}/services": {
@@ -1357,26 +1458,43 @@ export interface components {
             revoked_at?: string | null;
             scopes: components["schemas"]["Scope"][];
         };
+        AppList: {
+            /** @description By key. */
+            items: components["schemas"]["AppResponse"][];
+        };
         AppProviderList: {
             /** @description By key. */
             items: components["schemas"]["AppProviderResponse"][];
         };
         AppProviderResponse: {
-            /** @description Where Hypha POSTs rate requests (signed with the secret). */
+            /** @description Where Hypha POSTs rate requests (signed with the app's secret). */
             callback_url: string;
-            enabled: boolean;
-            /** @description `app_<name>`: what options name it by. */
+            /**
+             * @description `app_<name>`: what options name it by, and the app (`/admin/apps/{key}`) whose
+             *     name, switch and secret apply.
+             */
             key: string;
-            name: string;
             /** @description Declared up front; empty means Hypha asks `<callback_url>/services`. */
             services: components["schemas"]["ServiceDto"][];
             /** Format: int32 */
             timeout_ms: number;
         };
-        /** @description A provider with its signing secret: returned once, when created or rotated. */
-        AppProviderSecretResponse: {
-            provider: components["schemas"]["AppProviderResponse"];
-            /** @description `hypha_shs_…`: verify `Hypha-Signature` with it. Shown only now. */
+        AppResponse: {
+            created_at: string;
+            /** @description A disabled app gets no webhooks and quotes no rates. */
+            enabled: boolean;
+            /** @description `app_<name>`. */
+            key: string;
+            name: string;
+            /** @description Event types it gets: exact (`order.placed`), a kind (`product.*`) or `*`. */
+            subscriptions: string[];
+            updated_at: string;
+            webhook?: components["schemas"]["WebhookDto"] | null;
+        };
+        /** @description An app with its signing secret: returned once, when created or rotated. */
+        AppSecretResponse: {
+            app: components["schemas"]["AppResponse"];
+            /** @description Verify `Hypha-Signature` on webhooks and rate requests with it. Shown only now. */
             secret: string;
         };
         /**
@@ -1554,15 +1672,22 @@ export interface components {
         CreateAppProviderRequest: {
             /** @description `https://`, or `http://localhost` for development. */
             callback_url: string;
-            /** @description `app_<name>`: lowercase letters, digits and `_`. */
+            /** @description An existing app's key (`app_<name>`). */
             key: string;
-            name: string;
             services?: components["schemas"]["ServiceDto"][];
             /**
              * Format: int32
              * @description 100 to 10000; defaults to 3000.
              */
             timeout_ms?: number | null;
+        };
+        CreateAppRequest: {
+            /** @description `app_<name>`: lowercase letters, digits and `_`, at most 64 characters. */
+            key: string;
+            name: string;
+            /** @description Up to 50 event types, `kind.*` or `*`. */
+            subscriptions?: string[];
+            webhook?: components["schemas"]["WebhookDto"] | null;
         };
         CreateAssetRequest: {
             /**
@@ -1687,6 +1812,45 @@ export interface components {
             min_days: number;
         };
         /**
+         * @description A DeliveryId: `dlv_` and 32 hex digits.
+         * @example dlv_0190f1a2b3c47d8e9f00112233445566
+         */
+        DeliveryId: string;
+        /** @description A page of a list, newest first (design note 0012). */
+        DeliveryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["DeliveryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /** @description One event on its way to an app. */
+        DeliveryResponse: {
+            /**
+             * Format: int32
+             * @description Attempts made so far.
+             */
+            attempts: number;
+            /** @description `GET /admin/events/{id}` has the event as sent. */
+            event_id: components["schemas"]["EventId"];
+            event_type: string;
+            /** @description Sent as `Hypha-Delivery-Id`, the same on every attempt. */
+            id: components["schemas"]["DeliveryId"];
+            /** @description Why the last attempt failed. */
+            last_error?: string | null;
+            /** @description When it's tried next, while pending. */
+            next_attempt_at: string;
+            occurred_at: string;
+            status: components["schemas"]["DeliveryStatus"];
+        };
+        /**
+         * @description Where a delivery stands.
+         *
+         *     Known values: `pending`, `succeeded`, `failed`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        DeliveryStatus: string;
+        /**
          * Format: email
          * @description An email address; stored trimmed and lowercased, so responses show it that way.
          * @example ana@example.com
@@ -1703,6 +1867,51 @@ export interface components {
             details?: unknown;
             /** @description For humans; may change. */
             error: string;
+        };
+        /** @description Who caused an event. */
+        EventActor: {
+            /** @description Their prefixed ID; `null` for the system. */
+            id?: string | null;
+            /** @description `user`, `agent`, `api_key` or `system`. */
+            type: string;
+        };
+        /**
+         * @description An event as apps receive it (design note 0016, EV5), and as
+         *     `GET /admin/events/{id}` shows it.
+         */
+        EventEnvelope: {
+            actor: components["schemas"]["EventActor"];
+            /** @description The facts of the change; see the event catalog. */
+            data: Record<string, never>;
+            id: components["schemas"]["EventId"];
+            /** @description When the change committed (RFC 3339). */
+            occurred_at: string;
+            subject: components["schemas"]["EventSubject"];
+            /** @description Dotted: `product.variant_removed`. */
+            type: string;
+            /**
+             * Format: int32
+             * @description The payload's version: a reshaped payload is a new version of the same type.
+             */
+            version: number;
+        };
+        /**
+         * @description A EventId: `evt_` and 32 hex digits.
+         * @example evt_0190f1a2b3c47d8e9f00112233445566
+         */
+        EventId: string;
+        /** @description What an event is about. */
+        EventSubject: {
+            /** @description Its prefixed ID (`prod_…`). */
+            id: string;
+            /** @description `product`, `order`, … */
+            type: string;
+            /**
+             * Format: int64
+             * @description Its version after the change, when it has one: deliveries can arrive out of
+             *     order, and a consumer drops an event older than one it applied (EV7).
+             */
+            version?: number | null;
         };
         /**
          * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
@@ -2205,7 +2414,7 @@ export interface components {
             scopes: components["schemas"]["Scope"][];
         };
         /**
-         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         Scope: string;
@@ -2399,14 +2608,22 @@ export interface components {
             /** @description `otpauth://…`, for a QR code. */
             uri: string;
         };
-        /** @description Name, callback, timeout, services, enabled (JSON Merge Patch; none take `null`). */
+        /** @description Callback, timeout, services (JSON Merge Patch; none take `null`). */
         UpdateAppProviderRequest: {
             callback_url?: string;
-            enabled?: boolean;
-            name?: string;
             services?: components["schemas"]["ServiceDto"][];
             /** Format: int32 */
             timeout_ms?: number;
+        };
+        /**
+         * @description Name, switch, webhook and subscriptions (JSON Merge Patch: `webhook: null` removes
+         *     the webhook; the others take no `null`).
+         */
+        UpdateAppRequest: {
+            enabled?: boolean;
+            name?: string;
+            subscriptions?: string[];
+            webhook?: components["schemas"]["WebhookDto"] | null;
         };
         /** @description A JSON Merge Patch of an asset's metadata: absent fields stay, `null` clears. */
         UpdateAssetRequest: {
@@ -2557,6 +2774,15 @@ export interface components {
          * @enum {string}
          */
         VisibilityDto: string;
+        WebhookDto: {
+            /**
+             * Format: int32
+             * @description 1000 to 30000 milliseconds; defaults to 10000.
+             */
+            timeout_ms?: number | null;
+            /** @description Where Hypha POSTs events: `https://`, or `http://localhost` for development. */
+            url: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -2747,6 +2973,639 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiKeyResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppList"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAppRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppSecretResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_erp */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_erp */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_erp */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAppRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.deliveries": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /** @description Only deliveries in this status. */
+                status?: components["schemas"]["DeliveryStatus"];
+            };
+            header?: never;
+            path: {
+                /** @example app_erp */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryPage"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_erp */
+                key: string;
+                id: components["schemas"]["DeliveryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.rotate_secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_erp */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppSecretResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). */
@@ -4867,6 +5726,73 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.event": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["EventId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventEnvelope"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8661,7 +9587,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppProviderSecretResponse"];
+                    "application/json": components["schemas"]["AppProviderResponse"];
                 };
             };
             /** @description A body that isn't JSON (`malformed_json`). */
@@ -8980,86 +9906,6 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description A server failure (`internal_error`). */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    "admin.shipping.rotate_secret": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /**
-                 * @description `app_<name>` or `spore_<name>`
-                 * @example app_shipcalc
-                 */
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AppProviderSecretResponse"];
-                };
-            };
-            /** @description A malformed ID in the path (`invalid_path`). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };

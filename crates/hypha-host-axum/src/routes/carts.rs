@@ -8,7 +8,7 @@ use hypha_core::{
     CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, OrderId,
     ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
-use hypha_shipping::{HasAppProviders, OfferOutcome};
+use hypha_shipping::OfferOutcome;
 use hypha_tax::TaxLine;
 use serde::{Deserialize, Serialize};
 
@@ -529,7 +529,7 @@ pub(super) async fn shipping_options<S: Storage>(
     // After the key: a stranger can't use up a cart's quota.
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
-    let rates = state.rates(ports.app_providers());
+    let rates = state.rates(&ports);
     let groups = shipping_offers(&ctx, &ports, &rates, id).await?;
     Ok(Json(ShippingOptionsResponse {
         groups: groups.iter().map(Into::into).collect(),
@@ -562,7 +562,7 @@ pub(super) async fn select<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let req = body.parse()?;
-    let rates = state.rates(ports.app_providers());
+    let rates = state.rates(&ports);
     let priced = select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;
     Ok(Json(CartResponse::from(&priced)))
 }

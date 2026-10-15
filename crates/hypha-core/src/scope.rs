@@ -65,6 +65,11 @@ pub enum Scope {
     ShippingRead,
     #[serde(rename = "shipping:write")]
     ShippingWrite,
+    /// External apps: their secrets, webhooks and deliveries (design note 0016).
+    #[serde(rename = "apps:read")]
+    AppsRead,
+    #[serde(rename = "apps:write")]
+    AppsWrite,
 }
 
 impl Scope {
@@ -98,6 +103,8 @@ impl Scope {
             Scope::MediaWrite => "media:write",
             Scope::ShippingRead => "shipping:read",
             Scope::ShippingWrite => "shipping:write",
+            Scope::AppsRead => "apps:read",
+            Scope::AppsWrite => "apps:write",
         }
     }
 
@@ -119,6 +126,7 @@ impl Scope {
             Scope::ApiKeysRead => Some(Scope::ApiKeysWrite),
             Scope::MediaRead => Some(Scope::MediaWrite),
             Scope::ShippingRead => Some(Scope::ShippingWrite),
+            Scope::AppsRead => Some(Scope::AppsWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -132,7 +140,8 @@ impl Scope {
             | Scope::UsersWrite
             | Scope::ApiKeysWrite
             | Scope::MediaWrite
-            | Scope::ShippingWrite => None,
+            | Scope::ShippingWrite
+            | Scope::AppsWrite => None,
         }
     }
 
@@ -148,7 +157,7 @@ impl Scope {
         Scope::Checkout,
     ];
 
-    pub const ALL: [Scope; 27] = [
+    pub const ALL: [Scope; 29] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -176,6 +185,8 @@ impl Scope {
         Scope::MediaWrite,
         Scope::ShippingRead,
         Scope::ShippingWrite,
+        Scope::AppsRead,
+        Scope::AppsWrite,
     ];
 }
 

@@ -221,6 +221,18 @@ export function describe(error: ApiError): string {
       return "Keys are app_ followed by lowercase letters, digits and '_', like app_courier.";
     case "shipping_provider_exists":
       return "A rate app with that key already exists.";
+    case "invalid_app_key":
+      return "Keys are app_ followed by lowercase letters, digits and '_', like app_erp.";
+    case "app_exists":
+      return "An app with that key already exists.";
+    case "invalid_subscription":
+      return "Events are types like order.placed, a kind like product.*, or * for all.";
+    case "too_many_subscriptions":
+      return "An app subscribes to at most 50 event types.";
+    case "invalid_timeout":
+      return "The webhook timeout is between 1,000 and 30,000 milliseconds.";
+    case "provider_app_not_found":
+      return "There's no app with that key. Add the app first.";
     case "invalid_callback_url":
       return "The callback URL must start with https:// (http:// only for localhost).";
     case "invalid_callback_timeout":

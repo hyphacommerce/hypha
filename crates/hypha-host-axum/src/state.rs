@@ -242,12 +242,24 @@ impl<S: Storage> AppState<S> {
 
 impl<S> AppState<S> {
     /// The shipping rate providers for a request's ports (design note 0015).
-    pub fn rates<'a, P: hypha_shipping::AppProviderRepo>(
+    pub fn rates<'a, P: hypha_shipping::HasAppProviders + hypha_apps::HasApps>(
         &'a self,
-        apps: &'a P,
+        ports: &'a P,
     ) -> crate::shipping::HostRates<'a, P> {
         crate::shipping::HostRates {
-            apps,
+            ports,
+            http: &self.http,
+            outbound: self.outbound,
+            env: &self.env,
+            clock: &self.clock,
+        }
+    }
+}
+
+impl<S> AppState<S> {
+    /// The webhook sender the dispatcher delivers to apps with (design note 0016).
+    pub fn webhooks(&self) -> crate::webhooks::HostWebhooks<'_> {
+        crate::webhooks::HostWebhooks {
             http: &self.http,
             outbound: self.outbound,
             env: &self.env,
@@ -277,6 +289,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_shipping::HasAppProviders
         + hypha_core::HasOutbox
         + hypha_core::ActingAs
+        + hypha_apps::HasApps
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts

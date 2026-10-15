@@ -1,7 +1,8 @@
 use hypha_core::{
-    ActingAs, Actor, BasisPoints, CatalogId, Currency, DeliveryOutcome, Event, HasBatch, HasOutbox,
-    MarketId, Money, OutboxRepo, PendingEvent, Price, PriceListId, ProductId, RepoError,
-    StageEvents, StoredEvent, Subject, Timestamp, UserId, VariantId, Version, Versioned,
+    ActingAs, Actor, BasisPoints, CatalogId, Currency, DeliveryOutcome, DeliveryStatus, Event,
+    HasBatch, HasOutbox, MarketId, Money, OutboxRepo, PageLimit, PageRequest, PendingEvent, Price,
+    PriceListId, ProductId, RepoError, StageEvents, StoredEvent, Subject, Timestamp, UserId,
+    VariantId, Version, Versioned,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasPriceLists, PriceList, PriceListRepo,
@@ -43,6 +44,12 @@ where
     prunes(&make().await).await;
     scenario("outbox: events_after reads after a seq, up to a limit");
     events_after_pages(&make().await).await;
+    scenario("outbox: get_event finds a kept event by ID");
+    get_event(&make().await).await;
+    scenario("outbox: deliveries_to lists a destination's deliveries newest first, in pages");
+    deliveries_to(&make().await).await;
+    scenario("outbox: retry_delivery makes a delivery due now, unless it's running");
+    retry_delivery(&make().await).await;
 }
 
 fn product(n: u128, handle: &str) -> Product {
@@ -406,4 +413,141 @@ async fn prunes<S: HasProducts + HasOutbox>(store: &S) {
     assert!(leased.is_empty(), "{leased:?}");
     // Nothing is older than the epoch.
     assert_eq!(outbox.prune_events(Timestamp::UNIX_EPOCH, 100).await, Ok(0));
+}
+
+async fn get_event<S: HasProducts + HasOutbox>(store: &S) {
+    three_products(store).await;
+    let events = all(store).await;
+    let outbox = store.outbox();
+    assert_eq!(
+        outbox.get_event(events[1].id).await,
+        Ok(Some(events[1].clone()))
+    );
+    assert_eq!(outbox.get_event(Uuid::from_u128(424242)).await, Ok(None));
+}
+
+fn page(after: Option<i64>, limit: u32) -> PageRequest<i64> {
+    PageRequest {
+        after,
+        limit: PageLimit::new(limit).unwrap(),
+    }
+}
+
+async fn deliveries_to<S: HasProducts + HasOutbox>(store: &S) {
+    three_products(store).await;
+    let events = all(store).await;
+    let outbox = store.outbox();
+    outbox.fan_out(10, at(0), &routes).await.unwrap();
+    let first = outbox
+        .deliveries_to("handler:search", None, page(None, 2))
+        .await
+        .unwrap();
+    assert!(first.has_more);
+    let seqs: Vec<i64> = first.items.iter().map(|d| d.event_seq).collect();
+    assert_eq!(seqs, [events[2].seq, events[1].seq], "newest first");
+    let newest = &first.items[0];
+    assert_eq!(newest.event_id, events[2].id);
+    assert_eq!(newest.event_type, "product.created");
+    assert_eq!(newest.occurred_at, events[2].occurred_at);
+    assert_eq!(newest.destination, "handler:search");
+    assert_eq!(
+        (newest.status, newest.attempts, newest.next_attempt_at),
+        (DeliveryStatus::Pending, 0, at(0))
+    );
+    assert_eq!(newest.last_error, None);
+    let rest = outbox
+        .deliveries_to("handler:search", None, page(Some(events[1].seq), 2))
+        .await
+        .unwrap();
+    assert!(!rest.has_more);
+    let seqs: Vec<i64> = rest.items.iter().map(|d| d.event_seq).collect();
+    assert_eq!(seqs, [events[0].seq]);
+
+    // By status: one fails for good.
+    let leased = outbox.lease_due(at(0), at(60), 10).await.unwrap();
+    let failing = leased
+        .iter()
+        .find(|d| d.destination == "handler:search")
+        .unwrap();
+    let failed = DeliveryOutcome::Failed {
+        error: "gone".to_string(),
+    };
+    outbox
+        .record_outcomes(&[(failing.id, failed)])
+        .await
+        .unwrap();
+    let failed = outbox
+        .deliveries_to(
+            "handler:search",
+            Some(DeliveryStatus::Failed),
+            page(None, 10),
+        )
+        .await
+        .unwrap();
+    assert_eq!(failed.items.len(), 1);
+    assert_eq!(failed.items[0].id, failing.id);
+    assert_eq!(
+        (
+            failed.items[0].attempts,
+            failed.items[0].last_error.as_deref()
+        ),
+        (1, Some("gone"))
+    );
+    let nowhere = outbox
+        .deliveries_to("app:app_none", None, page(None, 10))
+        .await
+        .unwrap();
+    assert!(nowhere.items.is_empty());
+}
+
+async fn retry_delivery<S: HasProducts + HasOutbox>(store: &S) {
+    three_products(store).await;
+    let outbox = store.outbox();
+    outbox.fan_out(10, at(0), &audit_only).await.unwrap();
+    let leased = outbox.lease_due(at(0), at(60), 10).await.unwrap();
+    let (failing, running) = (leased[0].id, leased[1].id);
+    let failed = DeliveryOutcome::Failed {
+        error: "gone".to_string(),
+    };
+    outbox.record_outcomes(&[(failing, failed)]).await.unwrap();
+
+    let retried = outbox
+        .retry_delivery("handler:audit", failing, at(500))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (retried.status, retried.attempts, retried.next_attempt_at),
+        (DeliveryStatus::Pending, 1, at(500))
+    );
+    // Due now, with its lease free: the next lease hands it out.
+    let again = outbox.lease_due(at(500), at(560), 10).await.unwrap();
+    let ids: Vec<Uuid> = again.iter().map(|d| d.id).collect();
+    assert!(ids.contains(&failing), "{ids:?}");
+
+    // One whose lease is still running is left as it is.
+    let left = outbox
+        .retry_delivery("handler:audit", running, at(30))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(left.next_attempt_at, at(0));
+    assert_eq!(
+        outbox.lease_due(at(30), at(90), 10).await.map(|d| d.len()),
+        Ok(0)
+    );
+
+    // Another destination's delivery, or none, isn't found.
+    assert_eq!(
+        outbox
+            .retry_delivery("handler:search", failing, at(500))
+            .await,
+        Ok(None)
+    );
+    assert_eq!(
+        outbox
+            .retry_delivery("handler:audit", Uuid::from_u128(424242), at(500))
+            .await,
+        Ok(None)
+    );
 }

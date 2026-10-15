@@ -1,14 +1,15 @@
 //! Shipping zones (with their options and rate tables) and app providers (design note
 //! 0015): every field round trips, a country is in one zone, versions hold.
 
+use hypha_apps::{App, AppKey, AppRepo, HasApps, NewApp};
 use hypha_core::{
     CountryCode, Currency, Money, Price, RepoError, Sealed, ShippingOptionId, ShippingZoneId,
     TaxClassId, Version, Versioned,
 };
 use hypha_shipping::{
-    AppProvider, AppProviderRepo, BuiltinRate, DeliveryEstimate, NewAppProvider, NewOption,
-    OptionPatch, OptionRate, ProviderKey, RateBasis, RateTable, ServiceInfo, ShippingZone,
-    ShippingZoneRepo, Tier, keys,
+    AppProvider, AppProviderRepo, BuiltinRate, DeliveryEstimate, HasAppProviders, NewAppProvider,
+    NewOption, OptionPatch, OptionRate, ProviderKey, RateBasis, RateTable, ServiceInfo,
+    ShippingZone, ShippingZoneRepo, Tier, keys,
 };
 use uuid::Uuid;
 
@@ -28,12 +29,28 @@ pub async fn shipping_zone_repo<R: ShippingZoneRepo>(make: impl AsyncFn() -> R) 
     zone_stale(&make().await).await;
 }
 
-/// Runs every `AppProviderRepo` scenario, each on a fresh repo from `make`.
-pub async fn app_provider_repo<R: AppProviderRepo>(make: impl AsyncFn() -> R) {
+/// Runs every `AppProviderRepo` scenario, each on a fresh store from `make`. A provider
+/// is an app's rate settings (design note 0016, EV11), so the store has apps too.
+pub async fn app_provider_repo<S: HasAppProviders + HasApps>(make: impl AsyncFn() -> S) {
     scenario("app provider: insert stores every field; the key is unique");
     provider_round_trips(&make().await).await;
     scenario("app provider: update, stale update, list by key, delete");
     provider_updates(&make().await).await;
+    scenario("app provider: needs its app, and goes when the app does");
+    provider_needs_its_app(&make().await).await;
+}
+
+/// The app a provider's key names.
+async fn add_app<S: HasApps>(store: &S, k: &str) {
+    let mut app = App::new(NewApp {
+        key: AppKey::new(k).unwrap(),
+        name: "Acme Carrier".to_string(),
+        secret: Sealed::from_bytes(vec![1, 2, 3, 255]),
+        webhook: None,
+        subscriptions: vec![],
+    })
+    .unwrap();
+    store.apps().insert(&mut app).await.unwrap();
 }
 
 fn zid(n: u128) -> ShippingZoneId {
@@ -238,10 +255,8 @@ fn key(k: &str) -> ProviderKey {
 fn provider(k: &str, services: Vec<ServiceInfo>) -> AppProvider {
     AppProvider::new(NewAppProvider {
         key: key(k),
-        name: "Acme Carrier".to_string(),
         callback_url: "https://rates.acme.example/hypha".to_string(),
         timeout_ms: AppProvider::MAX_TIMEOUT_MS,
-        secret: Sealed::from_bytes(vec![1, 2, 3, 255]),
         services,
     })
     .unwrap()
@@ -254,10 +269,11 @@ fn service(code: &str) -> ServiceInfo {
     }
 }
 
-async fn provider_round_trips<R: AppProviderRepo>(repo: &R) {
+async fn provider_round_trips<S: HasAppProviders + HasApps>(store: &S) {
+    let repo = store.app_providers();
+    add_app(store, "app_acme").await;
     assert_eq!(repo.get(&key("app_acme")).await, Ok(None));
     let mut p = provider("app_acme", vec![service("b"), service("a")]);
-    p.set_enabled(false);
     repo.insert(&mut p).await.unwrap();
     assert_eq!(p.version(), Version::new(1));
     assert_eq!(repo.get(&key("app_acme")).await, Ok(Some(p)));
@@ -267,7 +283,10 @@ async fn provider_round_trips<R: AppProviderRepo>(repo: &R) {
     );
 }
 
-async fn provider_updates<R: AppProviderRepo>(repo: &R) {
+async fn provider_updates<S: HasAppProviders + HasApps>(store: &S) {
+    let repo = store.app_providers();
+    add_app(store, "app_zeta").await;
+    add_app(store, "app_alpha").await;
     let mut p = provider("app_zeta", vec![service("a")]);
     repo.insert(&mut p).await.unwrap();
     let mut alpha = provider("app_alpha", vec![]);
@@ -276,7 +295,7 @@ async fn provider_updates<R: AppProviderRepo>(repo: &R) {
     let stale = p.clone();
     p.set_callback_url("http://localhost:4000/rates").unwrap();
     p.set_services(vec![]).unwrap();
-    p.set_secret(Sealed::from_bytes(vec![9; 40]));
+    p.set_timeout_ms(AppProvider::MIN_TIMEOUT_MS).unwrap();
     repo.update(&mut p).await.unwrap();
     assert_eq!(p.version(), Version::new(2));
     assert_eq!(repo.get(&key("app_zeta")).await, Ok(Some(p.clone())));
@@ -289,4 +308,22 @@ async fn provider_updates<R: AppProviderRepo>(repo: &R) {
     repo.delete(&key("app_zeta")).await.unwrap();
     assert_eq!(repo.get(&key("app_zeta")).await, Ok(None));
     assert_eq!(repo.delete(&key("app_zeta")).await, Ok(()));
+}
+
+async fn provider_needs_its_app<S: HasAppProviders + HasApps>(store: &S) {
+    let repo = store.app_providers();
+    assert_eq!(
+        repo.insert(&mut provider("app_ghost", vec![])).await,
+        Err(RepoError::Reference(keys::PROVIDER_APP))
+    );
+    add_app(store, "app_acme").await;
+    repo.insert(&mut provider("app_acme", vec![service("a")]))
+        .await
+        .unwrap();
+    store
+        .apps()
+        .delete(&AppKey::new("app_acme").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(repo.get(&key("app_acme")).await, Ok(None));
 }

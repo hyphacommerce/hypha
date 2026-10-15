@@ -45,10 +45,11 @@ import {
   updateOption,
   updateZone,
 } from "./actions";
+import type { RateApp } from "./providers";
 
 type Zone = AdminSchemas["ShippingZoneResponse"];
 type Option = AdminSchemas["ShippingOptionResponse"];
-type Provider = AdminSchemas["AppProviderResponse"];
+type Provider = RateApp;
 type Currency = AdminSchemas["Currency"];
 
 export function ZonesSection({ zones, providers }: { zones: Zone[]; providers: Provider[] }) {

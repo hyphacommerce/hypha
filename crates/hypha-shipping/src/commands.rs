@@ -2,9 +2,8 @@
 //! and the external apps that calculate rates (design note 0015, section 8).
 
 use hypha_core::{
-    AuthError, CountryCode, CountryError, Ctx, ErrorCode, IdGenerator, MoneyError, Random,
-    RepoError, Scope, SealError, SecretBox, ShippingOptionId, ShippingZoneId, TaxClassId,
-    report_duplicate,
+    AuthError, CountryCode, CountryError, Ctx, ErrorCode, IdGenerator, MoneyError, RepoError,
+    Scope, ShippingOptionId, ShippingZoneId, TaxClassId, report_duplicate,
 };
 use thiserror::Error;
 
@@ -40,9 +39,9 @@ pub enum CommandError {
     ProviderNotFound(ProviderKey),
     #[error("shipping provider {0} already exists")]
     ProviderExists(ProviderKey),
-    /// The stored secret can't be opened (another `HYPHA_SECRET_KEY`): a server fault.
-    #[error(transparent)]
-    Seal(#[from] SealError),
+    /// Rate settings for an app that doesn't exist (create the app first).
+    #[error("there is no app {0}")]
+    ProviderAppNotFound(ProviderKey),
 }
 
 impl ErrorCode for CommandError {
@@ -58,7 +57,7 @@ impl ErrorCode for CommandError {
             CommandError::CountryInOtherZone { .. } => "country_in_other_zone",
             CommandError::ProviderNotFound(_) => "shipping_provider_not_found",
             CommandError::ProviderExists(_) => "shipping_provider_exists",
-            CommandError::Seal(_) => "seal_failed",
+            CommandError::ProviderAppNotFound(_) => "provider_app_not_found",
         }
     }
 }
@@ -271,37 +270,29 @@ async fn check_countries_free<R: ShippingZoneRepo>(
 
 // ---------- app providers ----------
 
-/// The prefix of callback signing secrets: recognisable in logs and secret scanners.
-pub const SECRET_PREFIX: &str = "hypha_shs_";
-
 pub struct CreateAppProvider {
-    /// `app_<name>`.
+    /// The app's key, `app_<name>` (the app comes first, `hypha-apps`).
     pub key: String,
-    pub name: String,
     pub callback_url: String,
     pub timeout_ms: Option<u32>,
     /// Services the app offers, if it lists them up front.
     pub services: Vec<ServiceInfo>,
 }
 
-/// Registers an external app that calculates rates, and returns it with its signing
-/// secret. The secret is shown this once; Hypha keeps it sealed.
+/// Gives an app rate settings: where Hypha asks it for rates. The app must exist
+/// (`provider_app_not_found` otherwise); its name, whether it's enabled and the secret
+/// calls are signed with are the app's.
 pub async fn create_app_provider<R: AppProviderRepo>(
     ctx: &Ctx,
     providers: &R,
-    random: &impl Random,
-    secrets: &impl SecretBox,
     input: CreateAppProvider,
-) -> Result<(AppProvider, String), CommandError> {
+) -> Result<AppProvider, CommandError> {
     ctx.require(Scope::ShippingWrite)?;
     let key = ProviderKey::new(&input.key)?;
-    let (secret, sealed) = new_secret(&key, random, secrets);
     let mut provider = AppProvider::new(NewAppProvider {
         key: key.clone(),
-        name: input.name,
         callback_url: input.callback_url,
         timeout_ms: input.timeout_ms.unwrap_or(AppProvider::DEFAULT_TIMEOUT_MS),
-        secret: sealed,
         services: input.services,
     })?;
     if providers.get(&key).await?.is_some() {
@@ -311,9 +302,12 @@ pub async fn create_app_provider<R: AppProviderRepo>(
         Err(RepoError::Duplicate(k)) if k == keys::PROVIDER_KEY => {
             Err(CommandError::ProviderExists(key))
         }
+        Err(RepoError::Reference(k)) if k == keys::PROVIDER_APP => {
+            Err(CommandError::ProviderAppNotFound(key))
+        }
         written => {
             written?;
-            Ok((provider, secret))
+            Ok(provider)
         }
     }
 }
@@ -338,11 +332,9 @@ pub async fn list_app_providers<R: AppProviderRepo>(
 /// Changes only the fields that are `Some`.
 #[derive(Default)]
 pub struct UpdateAppProvider {
-    pub name: Option<String>,
     pub callback_url: Option<String>,
     pub timeout_ms: Option<u32>,
     pub services: Option<Vec<ServiceInfo>>,
-    pub enabled: Option<bool>,
 }
 
 pub async fn update_app_provider<R: AppProviderRepo>(
@@ -353,9 +345,6 @@ pub async fn update_app_provider<R: AppProviderRepo>(
 ) -> Result<AppProvider, CommandError> {
     ctx.require(Scope::ShippingWrite)?;
     let mut provider = load_provider(providers, key).await?;
-    if let Some(name) = &input.name {
-        provider.rename(name)?;
-    }
     if let Some(url) = &input.callback_url {
         provider.set_callback_url(url)?;
     }
@@ -365,32 +354,12 @@ pub async fn update_app_provider<R: AppProviderRepo>(
     if let Some(services) = input.services {
         provider.set_services(services)?;
     }
-    if let Some(enabled) = input.enabled {
-        provider.set_enabled(enabled);
-    }
     providers.update(&mut provider).await?;
     Ok(provider)
 }
 
-/// Replaces the signing secret and returns the new one, shown this once. Calls signed
-/// with the old one stop verifying at once.
-pub async fn rotate_app_provider_secret<R: AppProviderRepo>(
-    ctx: &Ctx,
-    providers: &R,
-    random: &impl Random,
-    secrets: &impl SecretBox,
-    key: &str,
-) -> Result<(AppProvider, String), CommandError> {
-    ctx.require(Scope::ShippingWrite)?;
-    let mut provider = load_provider(providers, key).await?;
-    let (secret, sealed) = new_secret(provider.key(), random, secrets);
-    provider.set_secret(sealed);
-    providers.update(&mut provider).await?;
-    Ok((provider, secret))
-}
-
-/// Removes an app provider. Options that name it stop being offered
-/// (`provider_failed`: unknown provider) until they're changed.
+/// Removes an app's rate settings; the app stays. Options that name it stop being
+/// offered (`provider_failed`: unknown provider) until they're changed.
 pub async fn delete_app_provider<R: AppProviderRepo>(
     ctx: &Ctx,
     providers: &R,
@@ -412,33 +381,6 @@ pub async fn provider_services<P: RateProvider>(
     let key = ProviderKey::new(key)?;
     Ok(rates.services(&key).await?)
 }
-
-/// The signing secret in plain text, for the host's callback client. Never returned by
-/// an API: only `create_app_provider` and `rotate_app_provider_secret` show it.
-pub fn open_secret(secrets: &impl SecretBox, provider: &AppProvider) -> Result<String, SealError> {
-    let plain = secrets.open(provider.secret(), provider.key().as_str().as_bytes())?;
-    String::from_utf8(plain).map_err(|_| SealError("secret isn't UTF-8"))
-}
-
-/// 32 random bytes as hex after the prefix, and that string sealed with the key as context.
-fn new_secret(
-    key: &ProviderKey,
-    random: &impl Random,
-    secrets: &impl SecretBox,
-) -> (String, hypha_core::Sealed) {
-    let mut bytes = [0u8; 32];
-    random.fill(&mut bytes);
-    let mut secret = String::with_capacity(SECRET_PREFIX.len() + 64);
-    secret.push_str(SECRET_PREFIX);
-    for b in bytes {
-        secret.push_str(&format!("{b:02x}"));
-    }
-    let mut nonce = [0u8; 24];
-    random.fill(&mut nonce);
-    let sealed = secrets.seal(secret.as_bytes(), key.as_str().as_bytes(), nonce);
-    (secret, sealed)
-}
-
 async fn load_provider<R: AppProviderRepo>(
     providers: &R,
     key: &str,

@@ -1,6 +1,7 @@
 #[cfg(feature = "contract")]
 pub mod contract;
 
+mod apps;
 mod auth;
 mod batch;
 mod carts;
@@ -26,6 +27,7 @@ mod tax_classes;
 mod tax_regions;
 mod users;
 
+pub use apps::InMemoryAppRepo;
 pub use auth::{
     InMemoryApiKeyRepo, InMemoryIdentityRepo, InMemoryPasswordResetRepo, InMemorySessionRepo,
 };

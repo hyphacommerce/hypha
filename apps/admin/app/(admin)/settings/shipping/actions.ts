@@ -107,9 +107,13 @@ export async function reorderOptions(zone: string, options: string[]): Promise<R
   return {};
 }
 
-/** A provider's result with its secret, shown once. */
+/** A result with the app's signing secret, shown once. */
 export type SecretResult = { error?: string; secret?: string };
 
+/**
+ * Adds a rate app: the app (design note 0016), unless one with the key exists, then its
+ * rate settings. The secret comes back only when the app is new.
+ */
 export async function createProvider(input: {
   key: string;
   name: string;
@@ -117,32 +121,22 @@ export async function createProvider(input: {
   timeoutMs: number;
 }): Promise<SecretResult> {
   const client = await sessionClient();
-  const { data, error } = await client.POST("/admin/shipping-providers", {
-    body: {
-      key: input.key,
-      name: input.name,
-      callback_url: input.callbackUrl,
-      timeout_ms: input.timeoutMs,
-    },
+  const app = await client.POST("/admin/apps", { body: { key: input.key, name: input.name } });
+  if (app.error && app.error.code !== "app_exists") return { error: describe(app.error) };
+  const { error } = await client.POST("/admin/shipping-providers", {
+    body: { key: input.key, callback_url: input.callbackUrl, timeout_ms: input.timeoutMs },
   });
   if (error) return { error: describe(error) };
   revalidatePath(PAGE);
-  return { secret: data.secret };
+  return { secret: app.data?.secret };
 }
 
-export async function updateProvider(
-  key: string,
-  input: { name?: string; callbackUrl?: string; timeoutMs?: number; enabled?: boolean },
-): Promise<Result> {
+/** Turns the whole app on or off: its rates and its webhooks. */
+export async function setAppEnabled(key: string, enabled: boolean): Promise<Result> {
   const client = await sessionClient();
-  const { error } = await client.PATCH("/admin/shipping-providers/{key}", {
+  const { error } = await client.PATCH("/admin/apps/{key}", {
     params: { path: { key } },
-    body: {
-      name: input.name,
-      callback_url: input.callbackUrl,
-      timeout_ms: input.timeoutMs,
-      enabled: input.enabled,
-    },
+    body: { enabled },
   });
   if (error) return { error: describe(error) };
   revalidatePath(PAGE);
@@ -151,13 +145,14 @@ export async function updateProvider(
 
 export async function rotateSecret(key: string): Promise<SecretResult> {
   const client = await sessionClient();
-  const { data, error } = await client.POST("/admin/shipping-providers/{key}/secret", {
+  const { data, error } = await client.POST("/admin/apps/{key}/secret", {
     params: { path: { key } },
   });
   if (error) return { error: describe(error) };
   return { secret: data.secret };
 }
 
+/** Stops the app quoting rates; the app itself stays (Settings → Apps). */
 export async function deleteProvider(key: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/shipping-providers/{key}", {

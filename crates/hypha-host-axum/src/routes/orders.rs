@@ -245,7 +245,7 @@ pub(super) async fn checkout_handler<S: Storage>(
         expected_total: req.body.expected_total,
         idempotency: req.idempotency,
     };
-    let rates = state.rates(hypha_shipping::HasAppProviders::app_providers(&ports));
+    let rates = state.rates(&ports);
     let placed = checkout(&ctx, &ports, &state.ids, &state.clock, &rates, input).await?;
     Ok(idempotent_response(
         StatusCode::CREATED,

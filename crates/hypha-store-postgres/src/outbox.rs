@@ -2,8 +2,8 @@
 //! change that recorded them.
 
 use hypha_core::{
-    ActingAs, Actor, Delivery, DeliveryOutcome, OutboxRepo, PendingEvent, RepoError, StoredEvent,
-    Timestamp, Version,
+    ActingAs, Actor, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, OutboxRepo, Page,
+    PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -92,6 +92,34 @@ fn event_from_row(row: &Row) -> Result<StoredEvent, RepoError> {
         actor: actor_from_db(col(row, "actor_kind")?, col(row, "actor_id")?)?,
         occurred_at: Timestamp::from_unix_micros(col(row, "occurred_at")?),
         data: serde_json::from_str(&data).map_err(corrupt)?,
+    })
+}
+
+/// A delivery joined with its event (`d` and `e`), as `delivery_from_row` reads it.
+fn delivery_columns() -> String {
+    format!(
+        "d.id, d.event_seq, e.id AS event_id, e.type, {}, d.destination, d.status,
+         d.attempts, {}, d.last_error",
+        micros("e.occurred_at"),
+        micros("d.next_attempt_at")
+    )
+}
+
+fn delivery_from_row(row: &Row) -> Result<DeliveryRecord, RepoError> {
+    let status: &str = col(row, "status")?;
+    let attempts: i32 = col(row, "attempts")?;
+    Ok(DeliveryRecord {
+        id: col(row, "id")?,
+        event_seq: col(row, "event_seq")?,
+        event_id: col(row, "event_id")?,
+        event_type: col(row, "type")?,
+        occurred_at: Timestamp::from_unix_micros(col(row, "occurred_at")?),
+        destination: col(row, "destination")?,
+        status: DeliveryStatus::parse(status)
+            .ok_or_else(|| corrupt(format!("delivery status {status:?}")))?,
+        attempts: u32::try_from(attempts).map_err(corrupt)?,
+        next_attempt_at: Timestamp::from_unix_micros(col(row, "next_attempt_at")?),
+        last_error: col(row, "last_error")?,
     })
 }
 
@@ -317,6 +345,102 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             u32::try_from(deleted).map_err(corrupt)
+        })
+    }
+
+    async fn get_event(&self, id: Uuid) -> Result<Option<StoredEvent>, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .client()
+            .query_opt(
+                &format!(
+                    "SELECT {} FROM outbox_events WHERE id = $1",
+                    event_columns()
+                ),
+                &[&id],
+            )
+            .await
+            .map_err(repo_error)?;
+        row.as_ref().map(event_from_row).transpose()
+    }
+
+    async fn deliveries_to(
+        &self,
+        destination: &str,
+        status: Option<DeliveryStatus>,
+        page: PageRequest<i64>,
+    ) -> Result<Page<DeliveryRecord>, RepoError> {
+        let status = status.map(DeliveryStatus::as_str);
+        let mut conn = self.conn().await;
+        // `event_delivery_destination` (event_seq, destination) is unique, so a
+        // destination's deliveries are ordered by `event_seq` without ties.
+        let rows = conn
+            .client()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM event_deliveries d
+                     JOIN outbox_events e ON e.seq = d.event_seq
+                     WHERE d.destination = $1
+                       AND ($2::text IS NULL OR d.status = $2)
+                       AND ($3::bigint IS NULL OR d.event_seq < $3)
+                     ORDER BY d.event_seq DESC LIMIT $4",
+                    delivery_columns()
+                ),
+                &[
+                    (&destination, Type::TEXT),
+                    (&status, Type::TEXT),
+                    (&page.after, Type::INT8),
+                    (&(i64::from(page.limit.get()) + 1), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        let items = rows
+            .iter()
+            .map(delivery_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Page::from_overfetch(items, page.limit))
+    }
+
+    async fn retry_delivery(
+        &self,
+        destination: &str,
+        id: Uuid,
+        now: Timestamp,
+    ) -> Result<Option<DeliveryRecord>, RepoError> {
+        let now = now.unix_micros();
+        in_transaction!(self, |tx| {
+            // A running delivery (leased past `now`) is left alone; the row is locked
+            // either way, so a lease can't start between the check and the change.
+            tx.execute_typed(
+                &format!(
+                    "UPDATE event_deliveries
+                     SET status = 'pending', next_attempt_at = {now}, leased_until = NULL
+                     WHERE id = $2 AND destination = $3
+                       AND (leased_until IS NULL OR leased_until <= {now})",
+                    now = ts(1)
+                ),
+                &[
+                    (&now, Type::INT8),
+                    (&id, Type::UUID),
+                    (&destination, Type::TEXT),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+            let row = tx
+                .query_typed(
+                    &format!(
+                        "SELECT {} FROM event_deliveries d
+                         JOIN outbox_events e ON e.seq = d.event_seq
+                         WHERE d.id = $1 AND d.destination = $2",
+                        delivery_columns()
+                    ),
+                    &[(&id, Type::UUID), (&destination, Type::TEXT)],
+                )
+                .await
+                .map_err(repo_error)?;
+            row.first().map(delivery_from_row).transpose()
         })
     }
 }

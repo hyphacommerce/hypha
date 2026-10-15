@@ -14,16 +14,16 @@ pub mod rate;
 pub mod repo;
 pub mod zone;
 
-pub use app_provider::{AppProvider, AppProviderSnapshot, CallbackUrl, NewAppProvider};
+pub use app_provider::{AppProvider, AppProviderSnapshot, NewAppProvider};
 pub use commands::{
-    AddOption, CommandError, CreateAppProvider, CreateZone, SECRET_PREFIX, UpdateAppProvider,
-    UpdateZone, add_option, create_app_provider, create_zone, delete_app_provider, delete_zone,
-    get_app_provider, get_zone, list_app_providers, list_zones, open_secret, provider_services,
-    remove_option, reorder_options, rotate_app_provider_secret, update_app_provider, update_option,
-    update_zone,
+    AddOption, CommandError, CreateAppProvider, CreateZone, UpdateAppProvider, UpdateZone,
+    add_option, create_app_provider, create_zone, delete_app_provider, delete_zone,
+    get_app_provider, get_zone, list_app_providers, list_zones, provider_services, remove_option,
+    reorder_options, update_app_provider, update_option, update_zone,
 };
 pub use error::ShippingError;
 pub use events::{ShippingZoneChanged, ShippingZoneDeleted};
+pub use hypha_core::CallbackUrl;
 pub use offers::{NotOffered, Offer, OfferOutcome, QuoteSource, offers};
 pub use provider::{
     DeliveryEstimate, ProviderError, ProviderKey, ProviderKind, Rate, RateItem, RateProvider,

@@ -796,6 +796,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-apps"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-auth"
 version = "0.1.0"
 dependencies = [
@@ -858,6 +870,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "url",
  "utoipa",
  "uuid",
 ]
@@ -878,6 +891,7 @@ dependencies = [
 name = "hypha-dispatch"
 version = "0.1.0"
 dependencies = [
+ "hypha-apps",
  "hypha-auth",
  "hypha-core",
  "hypha-inventory",
@@ -899,6 +913,7 @@ dependencies = [
  "getrandom 0.4.3",
  "governor",
  "hmac",
+ "hypha-apps",
  "hypha-auth",
  "hypha-cart",
  "hypha-checkout",
@@ -1044,6 +1059,7 @@ name = "hypha-store-postgres"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "hypha-apps",
  "hypha-auth",
  "hypha-cart",
  "hypha-checkout",
@@ -1108,6 +1124,7 @@ dependencies = [
 name = "hypha-testkit"
 version = "0.1.0"
 dependencies = [
+ "hypha-apps",
  "hypha-auth",
  "hypha-cart",
  "hypha-core",

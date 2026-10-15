@@ -1912,7 +1912,7 @@ async fn rate_app(answer: String) -> (String, Seen) {
                         .to_string()
                 };
                 log.lock().unwrap().push((
-                    header(crate::shipping::SIGNATURE_HEADER),
+                    header(crate::outbound::SIGNATURE_HEADER),
                     header(crate::shipping::REQUEST_ID_HEADER),
                     body.to_vec(),
                 ));
@@ -1924,6 +1924,30 @@ async fn rate_app(answer: String) -> (String, Seen) {
     let url = format!("http://{}/rates", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, app).await });
     (url, seen)
+}
+
+/// Creates an app from `body`; returns its secret.
+async fn create_app(app: &TestApp, body: Value) -> String {
+    let (status, created) = send(app, "POST", "/admin/apps", Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let secret = created["secret"].as_str().unwrap().to_string();
+    assert!(secret.starts_with(hypha_apps::SECRET_PREFIX));
+    secret
+}
+
+/// App `key` as a rate provider calling `callback`; returns the app's secret.
+async fn rate_provider(app: &TestApp, key: &str, callback: &str) -> String {
+    let secret = create_app(app, json!({"key": key, "name": key})).await;
+    let body = json!({"key": key, "callback_url": callback});
+    let (status, created) = send(
+        app,
+        "POST",
+        "/admin/shipping-providers",
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    secret
 }
 
 /// A market for HR in EUR selling one active 10 EUR mug; returns the mug's variant.
@@ -1968,17 +1992,7 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
     let mug = shop_selling_a_mug(&app).await;
     let (callback, seen) = rate_app(express_rate()).await;
 
-    let body = json!({"key": "app_courier", "name": "Courier", "callback_url": callback});
-    let (status, created) = send(
-        &app,
-        "POST",
-        "/admin/shipping-providers",
-        Some(&body.to_string()),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
-    let secret = created["secret"].as_str().unwrap().to_string();
-    assert!(secret.starts_with("hypha_shs_"));
+    let secret = rate_provider(&app, "app_courier", &callback).await;
     let (_, fetched) = send(&app, "GET", "/admin/shipping-providers/app_courier", None).await;
     assert!(fetched.get("secret").is_none());
 
@@ -2078,7 +2092,7 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
             .and_then(|s| s.split(',').next())
             .and_then(|t| t.parse().ok())
             .unwrap();
-        assert_eq!(*signature, crate::shipping::sign(&secret, at, body));
+        assert_eq!(*signature, crate::outbound::sign(&secret, at, body));
         let sent: Value = serde_json::from_slice(body).unwrap();
         assert_eq!(sent["request"]["destination"]["city"], "Zagreb");
         assert_eq!(sent["request"]["items"][0]["quantity"], 2);
@@ -2138,15 +2152,7 @@ async fn a_failing_provider_brings_out_the_backup() {
     let app = app().await;
     let mug = shop_selling_a_mug(&app).await;
     // Nothing listens on port 9 (discard) here: the connection is refused.
-    let body =
-        json!({"key": "app_down", "name": "Down", "callback_url": "http://127.0.0.1:9/rates"});
-    send(
-        &app,
-        "POST",
-        "/admin/shipping-providers",
-        Some(&body.to_string()),
-    )
-    .await;
+    rate_provider(&app, "app_down", "http://127.0.0.1:9/rates").await;
     let (status, json) = send(
         &app,
         "GET",
@@ -2231,14 +2237,7 @@ async fn an_oversized_answer_fails_the_rate_app() {
         "x".repeat(300 * 1024)
     );
     let (callback, _) = rate_app(huge).await;
-    let body = json!({"key": "app_big", "name": "Big", "callback_url": callback});
-    send(
-        &app,
-        "POST",
-        "/admin/shipping-providers",
-        Some(&body.to_string()),
-    )
-    .await;
+    rate_provider(&app, "app_big", &callback).await;
     let (_, zone) = send(
         &app,
         "POST",
@@ -2346,8 +2345,9 @@ async fn creating_carts_is_rate_limited_per_address() {
 #[tokio::test]
 async fn a_callback_url_cannot_hide_its_host_behind_credentials() {
     let app = app().await;
-    let body = json!({"key": "app_sneaky", "name": "Sneaky",
-        "callback_url": "http://localhost:80@evil.example/rates"});
+    create_app(&app, json!({"key": "app_sneaky", "name": "Sneaky"})).await;
+    let body =
+        json!({"key": "app_sneaky", "callback_url": "http://localhost:80@evil.example/rates"});
     let (status, json) = send(
         &app,
         "POST",
@@ -2358,6 +2358,250 @@ async fn a_callback_url_cannot_hide_its_host_behind_credentials() {
     assert_eq!(
         (status, code(&json)),
         (StatusCode::UNPROCESSABLE_ENTITY, "invalid_callback_url")
+    );
+}
+
+#[tokio::test]
+async fn a_provider_needs_its_app() {
+    let app = app().await;
+    let body = json!({"key": "app_ghost", "callback_url": "https://ghost.example/rates"});
+    let (status, json) = send(
+        &app,
+        "POST",
+        "/admin/shipping-providers",
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "provider_app_not_found")
+    );
+}
+
+// ---------- apps and webhooks (design note 0016) ----------
+
+#[tokio::test]
+async fn apps_are_created_changed_and_deleted() {
+    let app = app().await;
+    let secret = create_app(
+        &app,
+        json!({"key": "app_erp", "name": "ERP", "subscriptions": ["order.*"],
+            "webhook": {"url": "https://erp.example/hooks"}}),
+    )
+    .await;
+    let (status, fetched) = send(&app, "GET", "/admin/apps/app_erp", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(fetched.get("secret").is_none());
+    assert_eq!(
+        fetched["webhook"],
+        json!({"url": "https://erp.example/hooks", "timeout_ms": 10000})
+    );
+    assert_eq!(fetched["subscriptions"], json!(["order.*"]));
+
+    let (status, json) = send(
+        &app,
+        "POST",
+        "/admin/apps",
+        Some(r#"{"key":"app_erp","name":"Again"}"#),
+    )
+    .await;
+    assert_eq!((status, code(&json)), (StatusCode::CONFLICT, "app_exists"));
+    let (status, json) = send(
+        &app,
+        "POST",
+        "/admin/apps",
+        Some(r#"{"key":"app_bad","name":"Bad","subscriptions":["Orders"]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_subscription")
+    );
+
+    // Merge patch: `webhook: null` removes it, absent fields stay.
+    let (status, patched) = send(
+        &app,
+        "PATCH",
+        "/admin/apps/app_erp",
+        Some(r#"{"webhook":null,"enabled":false}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{patched}");
+    assert_eq!(
+        (&patched["webhook"], &patched["enabled"], &patched["name"]),
+        (&Value::Null, &json!(false), &json!("ERP"))
+    );
+
+    let (status, rotated) = send(&app, "POST", "/admin/apps/app_erp/secret", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(rotated["secret"].as_str().unwrap(), secret);
+
+    // Deleting the app takes its rate settings with it.
+    let body = json!({"key": "app_erp", "callback_url": "https://erp.example/rates"});
+    send(
+        &app,
+        "POST",
+        "/admin/shipping-providers",
+        Some(&body.to_string()),
+    )
+    .await;
+    let (status, _) = send(&app, "DELETE", "/admin/apps/app_erp", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, json) = send(&app, "GET", "/admin/apps/app_erp", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "app_not_found")
+    );
+    let (status, _) = send(&app, "GET", "/admin/shipping-providers/app_erp", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, list) = send(&app, "GET", "/admin/apps", None).await;
+    assert_eq!(list["items"], json!([]));
+}
+
+/// What a webhook receiver saw: signature, event ID, event type, delivery ID, body.
+type Hooks = Arc<std::sync::Mutex<Vec<(String, String, String, String, Vec<u8>)>>>;
+
+/// A local webhook receiver answering `status`; its URL and what it saw.
+async fn webhook_receiver(status: StatusCode) -> (String, Hooks) {
+    use axum::{body::Bytes, http::HeaderMap, routing::post};
+    let seen: Hooks = Default::default();
+    let log = Arc::clone(&seen);
+    let app = Router::new().route(
+        "/hooks",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let log = Arc::clone(&log);
+            async move {
+                let header = |name: &str| {
+                    headers
+                        .get(name)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                log.lock().unwrap().push((
+                    header(crate::outbound::SIGNATURE_HEADER),
+                    header(crate::webhooks::EVENT_ID_HEADER),
+                    header(crate::webhooks::EVENT_TYPE_HEADER),
+                    header(crate::webhooks::DELIVERY_ID_HEADER),
+                    body.to_vec(),
+                ));
+                status
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/hooks", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    (url, seen)
+}
+
+#[tokio::test]
+async fn a_subscribed_app_gets_a_signed_webhook() {
+    let app = app().await;
+    let (url, seen) = webhook_receiver(StatusCode::NO_CONTENT).await;
+    let secret = create_app(
+        &app,
+        json!({"key": "app_erp", "name": "ERP", "subscriptions": ["product.created"],
+            "webhook": {"url": url}}),
+    )
+    .await;
+    let product = create_product(&app, "mug").await;
+    crate::jobs::dispatch(&app.state).await.unwrap();
+
+    let (signature, event_id, event_type, delivery_id, body) = {
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "one event, one webhook");
+        seen[0].clone()
+    };
+    let at: i64 = signature
+        .strip_prefix("t=")
+        .and_then(|s| s.split(',').next())
+        .and_then(|t| t.parse().ok())
+        .unwrap();
+    assert_eq!(signature, crate::outbound::sign(&secret, at, &body));
+    let sent: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(event_type, "product.created");
+    assert_eq!(sent["id"], event_id.as_str());
+    assert_eq!(sent["type"], "product.created");
+    assert_eq!(sent["subject"]["id"], product.as_str());
+    assert_eq!(sent["subject"]["version"], 1);
+
+    let (status, page) = send(&app, "GET", "/admin/apps/app_erp/deliveries", None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let delivery = &page["items"][0];
+    assert_eq!(delivery["id"], delivery_id.as_str());
+    assert_eq!(delivery["event_id"], event_id.as_str());
+    assert_eq!(
+        (&delivery["status"], &delivery["attempts"]),
+        (&json!("succeeded"), &json!(1))
+    );
+
+    // The event as sent, for debugging.
+    let (status, event) = send(&app, "GET", &format!("/admin/events/{event_id}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(event, sent);
+}
+
+#[tokio::test]
+async fn a_failed_webhook_is_listed_and_retried() {
+    let app = app().await;
+    let (url, seen) = webhook_receiver(StatusCode::SERVICE_UNAVAILABLE).await;
+    create_app(
+        &app,
+        json!({"key": "app_erp", "name": "ERP", "subscriptions": ["product.*"],
+            "webhook": {"url": url}}),
+    )
+    .await;
+    create_product(&app, "mug").await;
+    crate::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(seen.lock().unwrap().len(), 1);
+
+    let (_, page) = send(
+        &app,
+        "GET",
+        "/admin/apps/app_erp/deliveries?status=pending",
+        None,
+    )
+    .await;
+    let delivery = page["items"][0].clone();
+    assert_eq!(delivery["last_error"], "answered HTTP 503");
+    let (_, none) = send(
+        &app,
+        "GET",
+        "/admin/apps/app_erp/deliveries?status=succeeded",
+        None,
+    )
+    .await;
+    assert_eq!(none["items"], json!([]));
+
+    // Retried: due now, so the next run sends it again without waiting its minute.
+    let retry = format!(
+        "/admin/apps/app_erp/deliveries/{}/retry",
+        delivery["id"].as_str().unwrap()
+    );
+    let (status, retried) = send(&app, "POST", &retry, None).await;
+    assert_eq!(status, StatusCode::OK, "{retried}");
+    assert_eq!(retried["status"], "pending");
+    crate::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(seen.lock().unwrap().len(), 2);
+
+    let unknown = format!(
+        "/admin/apps/app_erp/deliveries/{}/retry",
+        hypha_core::DeliveryId::from_uuid(uuid::Uuid::from_u128(7))
+    );
+    let (status, json) = send(&app, "POST", &unknown, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "delivery_not_found")
+    );
+    let missing = format!(
+        "/admin/events/{}",
+        hypha_core::EventId::from_uuid(uuid::Uuid::from_u128(7))
+    );
+    let (status, json) = send(&app, "GET", &missing, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "event_not_found")
     );
 }
 

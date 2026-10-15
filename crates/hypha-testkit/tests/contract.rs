@@ -2,7 +2,7 @@
 
 use hypha_core::Timestamp;
 use hypha_testkit::{
-    InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCatalogRepo,
+    InMemoryAppRepo, InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCatalogRepo,
     InMemoryCustomerRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo, InMemoryMarketRepo,
     InMemoryOrderRepo, InMemoryPorts, InMemoryPriceListRepo, InMemoryProductRepo,
     InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
@@ -190,6 +190,11 @@ fn shipping_zone_repo() {
 #[test]
 fn app_provider_repo() {
     block_on(contract::app_provider_repo(async || {
-        hypha_testkit::InMemoryAppProviderRepo::default()
+        InMemoryPorts::default()
     }));
+}
+
+#[test]
+fn app_repo() {
+    block_on(contract::app_repo(async || InMemoryAppRepo::default()));
 }

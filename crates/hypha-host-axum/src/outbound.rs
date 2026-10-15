@@ -48,6 +48,123 @@ pub fn client(policy: OutboundPolicy) -> Result<reqwest::Client, String> {
         .map_err(|e| format!("cannot build the HTTP client: {e}"))
 }
 
+/// The header carrying a signed call's signature: `t=<unix seconds>,v1=<hex
+/// HMAC-SHA256 of "<t>.<body>" under the app's secret>` (Stripe's scheme), for rate
+/// callbacks and webhooks alike.
+pub const SIGNATURE_HEADER: &str = "Hypha-Signature";
+/// The most of an answer read: rates for a cart are a few kilobytes, and a bigger
+/// answer counts as a failure rather than filling memory.
+pub const MAX_ANSWER_BYTES: usize = 256 * 1024;
+
+/// A signed call to a merchant-configured URL.
+pub struct SignedCall<'a> {
+    pub method: reqwest::Method,
+    pub url: &'a str,
+    pub timeout: std::time::Duration,
+    /// The app's secret, in plain text.
+    pub secret: &'a str,
+    /// Unix seconds, for the signature.
+    pub at: i64,
+    /// Further headers (request or event IDs).
+    pub headers: &'a [(&'static str, String)],
+    pub body: Vec<u8>,
+    /// Whether the answer's body is ignored (webhooks): then a 2xx is success whatever
+    /// follows, and nothing is read.
+    pub discard_answer: bool,
+}
+
+/// Why a signed call failed. `Failed` carries what a merchant may see: transport
+/// details (refused, TLS, no public address) are only logged, since in an answer they
+/// would map the network behind the URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallError {
+    Timeout,
+    Failed(String),
+}
+
+/// Sends `call` and returns the body of a 2xx answer, read up to `MAX_ANSWER_BYTES`
+/// (empty when `discard_answer`).
+/// Refuses an IP literal that isn't public under `policy` (names are checked by the
+/// client's resolver, `client`), and doesn't follow redirects.
+pub async fn send_signed(
+    client: &reqwest::Client,
+    policy: OutboundPolicy,
+    call: SignedCall<'_>,
+) -> Result<Vec<u8>, CallError> {
+    let literal = reqwest::Url::parse(call.url).ok().and_then(|u| {
+        let host = u.host_str()?.trim_start_matches('[').trim_end_matches(']');
+        host.parse::<IpAddr>().ok()
+    });
+    if literal.is_some_and(|ip| !policy.allows(ip)) {
+        return Err(CallError::Failed(
+            "the URL is not a public address".to_string(),
+        ));
+    }
+    let mut request = client
+        .request(call.method, call.url)
+        .timeout(call.timeout)
+        .header("content-type", "application/json")
+        .header(SIGNATURE_HEADER, sign(call.secret, call.at, &call.body));
+    for (name, value) in call.headers {
+        request = request.header(*name, value);
+    }
+    let response = request.body(call.body).send().await.map_err(|e| {
+        if e.is_timeout() {
+            CallError::Timeout
+        } else {
+            tracing::warn!(url = call.url, error = %e, "outbound call: unreachable");
+            CallError::Failed("unreachable".to_string())
+        }
+    })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(CallError::Failed(format!(
+            "answered HTTP {}",
+            status.as_u16()
+        )));
+    }
+    if call.discard_answer {
+        return Ok(Vec::new());
+    }
+    // Read chunk by chunk so an endless answer stops at the cap, not at the timeout.
+    let too_big = || CallError::Failed(format!("answered more than {MAX_ANSWER_BYTES} bytes"));
+    if response
+        .content_length()
+        .is_some_and(|len| len > MAX_ANSWER_BYTES as u64)
+    {
+        return Err(too_big());
+    }
+    let mut response = response;
+    let mut answer = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| {
+        if e.is_timeout() {
+            CallError::Timeout
+        } else {
+            CallError::Failed("the answer broke off".to_string())
+        }
+    })? {
+        if answer.len() + chunk.len() > MAX_ANSWER_BYTES {
+            return Err(too_big());
+        }
+        answer.extend_from_slice(&chunk);
+    }
+    Ok(answer)
+}
+
+/// `t=<at>,v1=<hex HMAC-SHA256 of "<at>.<body>">`.
+pub fn sign(secret: &str, at: i64, body: &[u8]) -> String {
+    use hmac::{Hmac, KeyInit, Mac};
+    // HMAC takes keys of any length.
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes())
+        .unwrap_or_else(|_| unreachable!("HMAC accepts every key length"));
+    mac.update(at.to_string().as_bytes());
+    mac.update(b".");
+    mac.update(body);
+    let digest = mac.finalize().into_bytes();
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("t={at},v1={hex}")
+}
+
 /// Resolves with the system resolver and keeps only public addresses; a name with none
 /// fails to resolve.
 struct PublicOnly;

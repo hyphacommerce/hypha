@@ -1,5 +1,6 @@
 //! Delivering domain events (design note 0016, sections 5 to 7): fanning the outbox out
-//! to destinations, running the due deliveries with retries, and the in-process handlers.
+//! to destinations, running the due deliveries with retries, the in-process handlers, and
+//! webhooks to apps (through the host's `WebhookSender`).
 //!
 //! A workflow crate: handlers compose domains (cleaning up after a removed variant
 //! touches pricing and inventory), like checkout. Everything here is a plain function of
@@ -18,7 +19,7 @@ pub mod schedule;
 
 pub use handlers::{HANDLERS, Handler, destinations};
 pub use jobs::{
-    BATCH, DispatchPorts, Progress, deliver_due, fan_out, lease_due, prune_events,
+    BATCH, DispatchPorts, Progress, WebhookSender, deliver_due, fan_out, lease_due, prune_events,
     prune_idempotency_keys, prune_sessions, record, run,
 };
 pub use schedule::{MAX_ATTEMPTS, next_attempt};

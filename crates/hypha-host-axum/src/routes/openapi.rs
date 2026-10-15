@@ -492,6 +492,7 @@ mod tests {
         assert_eq!(
             lists,
             [
+                "get /admin/apps/{key}/deliveries",
                 "get /admin/assets",
                 "get /admin/assets/{id}/usages",
                 "get /admin/orders",

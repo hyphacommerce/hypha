@@ -12,12 +12,12 @@ use hypha_tax::{HasTaxClasses, HasTaxRegions};
 use hypha_users::{HasInvites, HasRoles, HasUsers};
 
 use crate::{
-    InMemoryApiKeyRepo, InMemoryAppProviderRepo, InMemoryAssetRepo, InMemoryCartRepo,
-    InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryIdempotencyRepo, InMemoryIdentityRepo,
-    InMemoryInventoryItemRepo, InMemoryInviteRepo, InMemoryLocationRepo, InMemoryMarketRepo,
-    InMemoryOrderRepo, InMemoryOutbox, InMemoryPasswordResetRepo, InMemoryPriceListRepo,
-    InMemoryProductRepo, InMemoryRoleRepo, InMemorySessionRepo, InMemoryShippingZoneRepo,
-    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
+    InMemoryApiKeyRepo, InMemoryAppProviderRepo, InMemoryAppRepo, InMemoryAssetRepo,
+    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryIdempotencyRepo,
+    InMemoryIdentityRepo, InMemoryInventoryItemRepo, InMemoryInviteRepo, InMemoryLocationRepo,
+    InMemoryMarketRepo, InMemoryOrderRepo, InMemoryOutbox, InMemoryPasswordResetRepo,
+    InMemoryPriceListRepo, InMemoryProductRepo, InMemoryRoleRepo, InMemorySessionRepo,
+    InMemoryShippingZoneRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
 };
 
 /// Every repository of one store, in memory: the tests' world. It has every accessor, so it is `hypha_cart::CartPorts`; the fields are
@@ -40,6 +40,7 @@ pub struct InMemoryPorts {
     pub assets: InMemoryAssetRepo,
     pub shipping_zones: InMemoryShippingZoneRepo,
     pub app_providers: InMemoryAppProviderRepo,
+    pub apps: InMemoryAppRepo,
     // Staff and keys live in the store's database (design note 0006, T4).
     pub identities: InMemoryIdentityRepo,
     pub sessions: InMemorySessionRepo,
@@ -53,6 +54,7 @@ pub struct InMemoryPorts {
 impl Default for InMemoryPorts {
     fn default() -> Self {
         let outbox = InMemoryOutbox::default();
+        let (apps, app_providers) = crate::apps::linked(&outbox);
         Self {
             carts: InMemoryCartRepo::sharing(&outbox),
             products: InMemoryProductRepo::sharing(&outbox),
@@ -68,7 +70,8 @@ impl Default for InMemoryPorts {
             orders: InMemoryOrderRepo::sharing(&outbox),
             assets: InMemoryAssetRepo::default(),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
-            app_providers: InMemoryAppProviderRepo::sharing(&outbox),
+            app_providers,
+            apps,
             identities: InMemoryIdentityRepo::default(),
             sessions: InMemorySessionRepo::default(),
             api_keys: InMemoryApiKeyRepo::default(),
@@ -253,5 +256,12 @@ impl HasInvites for InMemoryPorts {
     type Invites = InMemoryInviteRepo;
     fn invites(&self) -> &InMemoryInviteRepo {
         &self.invites
+    }
+}
+
+impl hypha_apps::HasApps for InMemoryPorts {
+    type Apps = InMemoryAppRepo;
+    fn apps(&self) -> &InMemoryAppRepo {
+        &self.apps
     }
 }

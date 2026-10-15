@@ -335,6 +335,21 @@
         ],
         "type": "object"
       },
+      "AppList": {
+        "properties": {
+          "items": {
+            "description": "By key.",
+            "items": {
+              "$ref": "#/components/schemas/AppResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "AppProviderList": {
         "properties": {
           "items": {
@@ -353,17 +368,11 @@
       "AppProviderResponse": {
         "properties": {
           "callback_url": {
-            "description": "Where Hypha POSTs rate requests (signed with the secret).",
+            "description": "Where Hypha POSTs rate requests (signed with the app's secret).",
             "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
           },
           "key": {
-            "description": "`app_<name>`: what options name it by.",
-            "type": "string"
-          },
-          "name": {
+            "description": "`app_<name>`: what options name it by, and the app (`/admin/apps/{key}`) whose\nname, switch and secret apply.",
             "type": "string"
           },
           "services": {
@@ -381,27 +390,73 @@
         },
         "required": [
           "key",
-          "name",
           "callback_url",
           "timeout_ms",
-          "services",
-          "enabled"
+          "services"
         ],
         "type": "object"
       },
-      "AppProviderSecretResponse": {
-        "description": "A provider with its signing secret: returned once, when created or rotated.",
+      "AppResponse": {
         "properties": {
-          "provider": {
-            "$ref": "#/components/schemas/AppProviderResponse"
+          "created_at": {
+            "type": "string"
+          },
+          "enabled": {
+            "description": "A disabled app gets no webhooks and quotes no rates.",
+            "type": "boolean"
+          },
+          "key": {
+            "description": "`app_<name>`.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subscriptions": {
+            "description": "Event types it gets: exact (`order.placed`), a kind (`product.*`) or `*`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "webhook": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WebhookDto",
+                "description": "Where its events go; `null` when it takes none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "enabled",
+          "subscriptions",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AppSecretResponse": {
+        "description": "An app with its signing secret: returned once, when created or rotated.",
+        "properties": {
+          "app": {
+            "$ref": "#/components/schemas/AppResponse"
           },
           "secret": {
-            "description": "`hypha_shs_…`: verify `Hypha-Signature` with it. Shown only now.",
+            "description": "Verify `Hypha-Signature` on webhooks and rate requests with it. Shown only now.",
             "type": "string"
           }
         },
         "required": [
-          "provider",
+          "app",
           "secret"
         ],
         "type": "object"
@@ -954,10 +1009,7 @@
             "type": "string"
           },
           "key": {
-            "description": "`app_<name>`: lowercase letters, digits and `_`.",
-            "type": "string"
-          },
-          "name": {
+            "description": "An existing app's key (`app_<name>`).",
             "type": "string"
           },
           "services": {
@@ -978,8 +1030,41 @@
         },
         "required": [
           "key",
-          "name",
           "callback_url"
+        ],
+        "type": "object"
+      },
+      "CreateAppRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "description": "`app_<name>`: lowercase letters, digits and `_`, at most 64 characters.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subscriptions": {
+            "description": "Up to 50 event types, `kind.*` or `*`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "webhook": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WebhookDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "name"
         ],
         "type": "object"
       },
@@ -1381,6 +1466,100 @@
         ],
         "type": "object"
       },
+      "DeliveryId": {
+        "description": "A DeliveryId: `dlv_` and 32 hex digits.",
+        "examples": [
+          "dlv_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^dlv_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "DeliveryPage": {
+        "description": "A page of a list, newest first (design note 0012).",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "DeliveryResponse": {
+        "description": "One event on its way to an app.",
+        "properties": {
+          "attempts": {
+            "description": "Attempts made so far.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/EventId",
+            "description": "`GET /admin/events/{id}` has the event as sent."
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/DeliveryId",
+            "description": "Sent as `Hypha-Delivery-Id`, the same on every attempt."
+          },
+          "last_error": {
+            "description": "Why the last attempt failed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_attempt_at": {
+            "description": "When it's tried next, while pending.",
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          }
+        },
+        "required": [
+          "id",
+          "event_id",
+          "event_type",
+          "occurred_at",
+          "status",
+          "attempts",
+          "next_attempt_at"
+        ],
+        "type": "object"
+      },
+      "DeliveryStatus": {
+        "description": "Where a delivery stands.\n\nKnown values: `pending`, `succeeded`, `failed`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "pending",
+          "succeeded",
+          "failed"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "Email": {
         "description": "An email address; stored trimmed and lowercased, so responses show it that way.",
         "examples": [
@@ -1408,6 +1587,103 @@
         "required": [
           "code",
           "error"
+        ],
+        "type": "object"
+      },
+      "EventActor": {
+        "description": "Who caused an event.",
+        "properties": {
+          "id": {
+            "description": "Their prefixed ID; `null` for the system.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "description": "`user`, `agent`, `api_key` or `system`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "EventEnvelope": {
+        "description": "An event as apps receive it (design note 0016, EV5), and as\n`GET /admin/events/{id}` shows it.",
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/EventActor"
+          },
+          "data": {
+            "description": "The facts of the change; see the event catalog.",
+            "type": "object"
+          },
+          "id": {
+            "$ref": "#/components/schemas/EventId"
+          },
+          "occurred_at": {
+            "description": "When the change committed (RFC 3339).",
+            "type": "string"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/EventSubject"
+          },
+          "type": {
+            "description": "Dotted: `product.variant_removed`.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The payload's version: a reshaped payload is a new version of the same type.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "version",
+          "subject",
+          "actor",
+          "occurred_at",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventId": {
+        "description": "A EventId: `evt_` and 32 hex digits.",
+        "examples": [
+          "evt_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^evt_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "EventSubject": {
+        "description": "What an event is about.",
+        "properties": {
+          "id": {
+            "description": "Its prefixed ID (`prod_…`).",
+            "type": "string"
+          },
+          "type": {
+            "description": "`product`, `order`, …",
+            "type": "string"
+          },
+          "version": {
+            "description": "Its version after the change, when it has one: deliveries can arrive out of\norder, and a consumer drops an event older than one it applied (EV7).",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "id"
         ],
         "type": "object"
       },
@@ -2974,7 +3250,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "products:read",
           "products:write",
@@ -3002,7 +3278,9 @@
           "media:read",
           "media:write",
           "shipping:read",
-          "shipping:write"
+          "shipping:write",
+          "apps:read",
+          "apps:write"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -3587,15 +3865,9 @@
       },
       "UpdateAppProviderRequest": {
         "additionalProperties": false,
-        "description": "Name, callback, timeout, services, enabled (JSON Merge Patch; none take `null`).",
+        "description": "Callback, timeout, services (JSON Merge Patch; none take `null`).",
         "properties": {
           "callback_url": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "name": {
             "type": "string"
           },
           "services": {
@@ -3608,6 +3880,35 @@
             "format": "int32",
             "minimum": 0,
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateAppRequest": {
+        "additionalProperties": false,
+        "description": "Name, switch, webhook and subscriptions (JSON Merge Patch: `webhook: null` removes\nthe webhook; the others take no `null`).",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subscriptions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "webhook": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WebhookDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object"
@@ -4043,6 +4344,28 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "WebhookDto": {
+        "additionalProperties": false,
+        "properties": {
+          "timeout_ms": {
+            "description": "1000 to 30000 milliseconds; defaults to 10000.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "url": {
+            "description": "Where Hypha POSTs events: `https://`, or `http://localhost` for development.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -4368,6 +4691,845 @@
         ],
         "x-hypha-scopes": [
           "api_keys:write"
+        ]
+      }
+    },
+    "/admin/apps": {
+      "get": {
+        "operationId": "admin.apps.list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every app.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.apps.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAppRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppSecretResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over 2 MB (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Registers an app. Its signing secret is returned here, once.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      }
+    },
+    "/admin/apps/{key}": {
+      "delete": {
+        "operationId": "admin.apps.delete",
+        "parameters": [
+          {
+            "example": "app_erp",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Removes an app, its rate settings with it; deliveries still due to it fail.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      },
+      "get": {
+        "operationId": "admin.apps.fetch",
+        "parameters": [
+          {
+            "example": "app_erp",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One app.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.apps.update",
+        "parameters": [
+          {
+            "example": "app_erp",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAppRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over 2 MB (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes an app.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      }
+    },
+    "/admin/apps/{key}/deliveries": {
+      "get": {
+        "operationId": "admin.apps.deliveries",
+        "parameters": [
+          {
+            "example": "app_erp",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only deliveries in this status.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "An app's webhook deliveries, newest event first, optionally of one status. Kept for\n30 days.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      }
+    },
+    "/admin/apps/{key}/deliveries/{id}/retry": {
+      "post": {
+        "operationId": "admin.apps.retry",
+        "parameters": [
+          {
+            "example": "app_erp",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sends a delivery again when the dispatcher next runs (within seconds): a failed one\ngets one more attempt, a pending one stops waiting. One being sent right now is\nreturned as it is.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      }
+    },
+    "/admin/apps/{key}/secret": {
+      "post": {
+        "operationId": "admin.apps.rotate_secret",
+        "parameters": [
+          {
+            "example": "app_erp",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppSecretResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Replaces the signing secret and returns the new one, once. Calls signed with the old\none stop verifying at once.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
         ]
       }
     },
@@ -7020,6 +8182,95 @@
         ],
         "x-hypha-scopes": [
           "customers:write"
+        ]
+      }
+    },
+    "/admin/events/{id}": {
+      "get": {
+        "operationId": "admin.apps.event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EventId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventEnvelope"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One event as apps receive it, for debugging a delivery. Kept for 30 days.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
         ]
       }
     },
@@ -11873,7 +13124,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppProviderSecretResponse"
+                  "$ref": "#/components/schemas/AppProviderResponse"
                 }
               }
             },
@@ -11965,7 +13216,7 @@
             "bearer": []
           }
         ],
-        "summary": "Registers an external app that calculates rates (design note 0015, section 5).\nHypha POSTs it signed rate requests; its secret is returned here, once.",
+        "summary": "Makes an app (design note 0016, EV11) a rate provider (design note 0015, section 5):\nHypha POSTs it rate requests signed with the app's secret.",
         "tags": [
           "shipping"
         ],
@@ -12060,7 +13311,7 @@
             "bearer": []
           }
         ],
-        "summary": "Removes an external app provider; options naming it stop being offered.",
+        "summary": "Stops an app being a rate provider (the app stays); options naming it stop being\noffered.",
         "tags": [
           "shipping"
         ],
@@ -12291,108 +13542,6 @@
           }
         ],
         "summary": "Changes an external app provider.",
-        "tags": [
-          "shipping"
-        ],
-        "x-hypha-scopes": [
-          "shipping:write"
-        ]
-      }
-    },
-    "/admin/shipping-providers/{key}/secret": {
-      "post": {
-        "operationId": "admin.shipping.rotate_secret",
-        "parameters": [
-          {
-            "description": "`app_<name>` or `spore_<name>`",
-            "example": "app_shipcalc",
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AppProviderSecretResponse"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "A malformed ID in the path (`invalid_path`)."
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "A server failure (`internal_error`)."
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Replaces the signing secret and returns the new one, once. The old one stops working.",
         "tags": [
           "shipping"
         ],

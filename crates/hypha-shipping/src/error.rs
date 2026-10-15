@@ -79,3 +79,9 @@ impl ErrorCode for ShippingError {
         }
     }
 }
+
+impl From<hypha_core::CallbackUrlError> for ShippingError {
+    fn from(e: hypha_core::CallbackUrlError) -> Self {
+        ShippingError::InvalidCallbackUrl(e.0)
+    }
+}

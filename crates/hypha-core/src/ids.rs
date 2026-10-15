@@ -141,6 +141,10 @@ define_id!(ShippingZoneId, "szone");
 define_id!(ShippingOptionId, "shipopt");
 define_id!(ShippingGroupId, "shgrp");
 
+// Outbox events and their deliveries (design note 0016): IDs the admin and webhooks show.
+define_id!(EventId, "evt");
+define_id!(DeliveryId, "dlv");
+
 #[cfg(test)]
 mod tests {
     use super::*;

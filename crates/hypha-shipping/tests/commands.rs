@@ -4,12 +4,13 @@ use hypha_core::{
 };
 use hypha_shipping::{
     AddOption, BuiltinRate, CommandError, CreateAppProvider, CreateZone, OptionRate, ProviderError,
-    ProviderKey, RateProvider, RateRequest, SECRET_PREFIX, ServiceInfo, ShippingError,
-    UpdateAppProvider, UpdateZone, add_option, create_app_provider, create_zone, delete_zone,
-    get_app_provider, get_zone, list_zones, open_secret, provider_services,
-    rotate_app_provider_secret, update_app_provider, update_zone,
+    ProviderKey, RateProvider, RateRequest, ServiceInfo, ShippingError, UpdateAppProvider,
+    UpdateZone, add_option, create_app_provider, create_zone, delete_zone, get_zone, list_zones,
+    provider_services, update_app_provider, update_zone,
 };
-use hypha_testkit::{InMemoryAppProviderRepo, InMemoryShippingZoneRepo, SequentialIds, TestEnv};
+use hypha_testkit::{
+    InMemoryAppProviderRepo, InMemoryPorts, InMemoryShippingZoneRepo, SequentialIds,
+};
 use pollster::block_on;
 use uuid::Uuid;
 
@@ -168,7 +169,6 @@ fn changing_zones_needs_shipping_write() {
 fn acme() -> CreateAppProvider {
     CreateAppProvider {
         key: "app_acme".to_string(),
-        name: "Acme".to_string(),
         callback_url: "https://acme.example/rates".to_string(),
         timeout_ms: None,
         services: vec![],
@@ -176,58 +176,28 @@ fn acme() -> CreateAppProvider {
 }
 
 #[test]
-fn a_provider_gets_a_secret_shown_once_and_kept_sealed() {
-    let providers = InMemoryAppProviderRepo::default();
-    let env = TestEnv::default();
-    let (provider, secret) = block_on(create_app_provider(
-        &Ctx::system(),
-        &providers,
-        &env,
-        &env,
-        acme(),
-    ))
-    .unwrap();
-    assert!(secret.starts_with(SECRET_PREFIX));
-    assert_eq!(secret.len(), SECRET_PREFIX.len() + 64);
-    assert_eq!(provider.timeout_ms(), 3_000);
-    assert_ne!(provider.secret().as_bytes(), secret.as_bytes());
-    let stored = block_on(get_app_provider(&reader(), &providers, "app_acme")).unwrap();
-    assert_eq!(open_secret(&env, &stored).as_deref(), Ok(secret.as_str()));
-
-    let (_, rotated) = block_on(rotate_app_provider_secret(
-        &Ctx::system(),
-        &providers,
-        &env,
-        &env,
-        "app_acme",
-    ))
-    .unwrap();
-    assert_ne!(rotated, secret);
-    let stored = block_on(get_app_provider(&reader(), &providers, "app_acme")).unwrap();
-    assert_eq!(open_secret(&env, &stored).as_deref(), Ok(rotated.as_str()));
+fn a_provider_needs_its_app() {
+    // Linked like the database (`InMemoryPorts`): rate settings belong to an app.
+    let ports = InMemoryPorts::default();
+    assert_eq!(
+        block_on(create_app_provider(
+            &Ctx::system(),
+            &ports.app_providers,
+            acme()
+        ))
+        .map(|_| ()),
+        Err(CommandError::ProviderAppNotFound(
+            ProviderKey::new("app_acme").unwrap()
+        ))
+    );
 }
 
 #[test]
 fn a_provider_key_is_taken_once_and_must_be_an_app_key() {
     let providers = InMemoryAppProviderRepo::default();
-    let env = TestEnv::default();
-    block_on(create_app_provider(
-        &Ctx::system(),
-        &providers,
-        &env,
-        &env,
-        acme(),
-    ))
-    .unwrap();
+    block_on(create_app_provider(&Ctx::system(), &providers, acme())).unwrap();
     assert_eq!(
-        block_on(create_app_provider(
-            &Ctx::system(),
-            &providers,
-            &env,
-            &env,
-            acme()
-        ))
-        .map(|_| ()),
+        block_on(create_app_provider(&Ctx::system(), &providers, acme())).map(|_| ()),
         Err(CommandError::ProviderExists(
             ProviderKey::new("app_acme").unwrap()
         ))
@@ -237,14 +207,7 @@ fn a_provider_key_is_taken_once_and_must_be_an_app_key() {
         ..acme()
     };
     assert_eq!(
-        block_on(create_app_provider(
-            &Ctx::system(),
-            &providers,
-            &env,
-            &env,
-            spore
-        ))
-        .map(|_| ()),
+        block_on(create_app_provider(&Ctx::system(), &providers, spore)).map(|_| ()),
         Err(CommandError::Shipping(ShippingError::NotAnAppKey(
             ProviderKey::new("spore_dhl").unwrap()
         )))
@@ -254,7 +217,6 @@ fn a_provider_key_is_taken_once_and_must_be_an_app_key() {
 #[test]
 fn a_callback_url_is_https_or_local_http() {
     let providers = InMemoryAppProviderRepo::default();
-    let env = TestEnv::default();
     for bad in [
         "http://acme.example/rates",
         "ftp://x",
@@ -266,14 +228,7 @@ fn a_callback_url_is_https_or_local_http() {
             ..acme()
         };
         assert_eq!(
-            block_on(create_app_provider(
-                &Ctx::system(),
-                &providers,
-                &env,
-                &env,
-                input
-            ))
-            .map(|_| ()),
+            block_on(create_app_provider(&Ctx::system(), &providers, input)).map(|_| ()),
             Err(CommandError::Shipping(ShippingError::InvalidCallbackUrl(
                 bad.to_string()
             ))),
@@ -284,30 +239,13 @@ fn a_callback_url_is_https_or_local_http() {
         callback_url: "http://localhost:4000/rates".to_string(),
         ..acme()
     };
-    assert!(
-        block_on(create_app_provider(
-            &Ctx::system(),
-            &providers,
-            &env,
-            &env,
-            local
-        ))
-        .is_ok()
-    );
+    assert!(block_on(create_app_provider(&Ctx::system(), &providers, local)).is_ok());
 }
 
 #[test]
 fn updating_a_provider_checks_its_timeout() {
     let providers = InMemoryAppProviderRepo::default();
-    let env = TestEnv::default();
-    block_on(create_app_provider(
-        &Ctx::system(),
-        &providers,
-        &env,
-        &env,
-        acme(),
-    ))
-    .unwrap();
+    block_on(create_app_provider(&Ctx::system(), &providers, acme())).unwrap();
     let too_long = UpdateAppProvider {
         timeout_ms: Some(10_001),
         ..UpdateAppProvider::default()
@@ -324,18 +262,18 @@ fn updating_a_provider_checks_its_timeout() {
             max: 10_000
         }))
     );
-    let off = UpdateAppProvider {
-        enabled: Some(false),
+    let faster = UpdateAppProvider {
+        timeout_ms: Some(500),
         ..UpdateAppProvider::default()
     };
     let updated = block_on(update_app_provider(
         &Ctx::system(),
         &providers,
         "app_acme",
-        off,
+        faster,
     ))
     .unwrap();
-    assert!(!updated.enabled());
+    assert_eq!(updated.timeout_ms(), 500);
 }
 
 /// A provider registry that knows one spore.

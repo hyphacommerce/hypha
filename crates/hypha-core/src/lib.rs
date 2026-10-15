@@ -1,4 +1,5 @@
 pub mod address;
+pub mod callback_url;
 pub mod country;
 pub mod ctx;
 pub mod email;
@@ -21,23 +22,25 @@ pub mod version;
 pub mod weight;
 
 pub use address::{Address, AddressError, AddressParts};
+pub use callback_url::{CallbackUrl, CallbackUrlError};
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
 pub use email::{Email, EmailError};
 pub use error_code::ErrorCode;
 pub use events::{
-    ActingAs, Delivery, DeliveryOutcome, Event, HasOutbox, OutboxRepo, PendingEvent, Recorded,
-    Recorder, StageEvents, StoredEvent, Subject,
+    ActingAs, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, Event, HasOutbox,
+    OutboxRepo, PendingEvent, Recorded, Recorder, StageEvents, StoredEvent, Subject,
 };
 pub use idempotency::{
     HasIdempotency, IdempotencyError, IdempotencyKey, IdempotencyRecord, IdempotencyRepo,
     IdempotencyRequest, Idempotent, StageIdempotency, earlier_id, earlier_result,
 };
 pub use ids::{
-    AddressId, AgentId, ApiKeyId, AssetId, CartId, CatalogId, CustomerId, IdError, IdentityId,
-    InventoryItemId, InviteId, LocationId, MarketId, OptionId, OptionValueId, OrderId, OrderLineId,
-    PasswordResetId, PriceListId, ProductId, RoleId, SessionId, ShippingGroupId, ShippingOptionId,
-    ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId, VariantId,
+    AddressId, AgentId, ApiKeyId, AssetId, CartId, CatalogId, CustomerId, DeliveryId, EventId,
+    IdError, IdentityId, InventoryItemId, InviteId, LocationId, MarketId, OptionId, OptionValueId,
+    OrderId, OrderLineId, PasswordResetId, PriceListId, ProductId, RoleId, SessionId,
+    ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId,
+    VariantId,
 };
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
 pub use page::{Page, PageError, PageLimit, PageRequest};
