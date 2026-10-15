@@ -1,5 +1,6 @@
 use hypha_cart::{
-    CartPorts, CartRepo, CartStatus, LineStatus, PricedLine, StageCarts, price_for_checkout,
+    Cart, CartPorts, CartReading, CartRepo, CartStatus, LineStatus, PricedCart, PricedLine,
+    SelectedShipping, ShippingProblem, StageCarts, StoredQuote, group_offers, read_cart,
 };
 use hypha_core::{
     AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
@@ -11,10 +12,11 @@ use hypha_inventory::{
     InventoryItem, MAX_ATTEMPTS, ReservationRef, StageInventoryItems, StockContext, reserve_lines,
 };
 use hypha_orders::{
-    HasOrders, NewOrder, Order, OrderError, OrderLine, OrderRepo, OrderTax, OrderTaxSource,
-    StageOrders, repo::keys as order_keys,
+    HasOrders, NewOrder, Order, OrderError, OrderLine, OrderRepo, OrderShippingLine, OrderTax,
+    OrderTaxSource, StageOrders, repo::keys as order_keys,
 };
-use hypha_tax::TaxSource;
+use hypha_shipping::{OfferOutcome, RateProvider};
+use hypha_tax::{TaxLine, TaxSource};
 use thiserror::Error;
 
 /// The operation name checkout's idempotency records carry.
@@ -52,6 +54,15 @@ pub enum CommandError {
         .actual.amount(), .actual.currency(), .expected.amount(), .expected.currency()
     )]
     TotalChanged { expected: Money, actual: Money },
+    /// Lines need shipping and the cart has no address (design note 0015, section 7).
+    #[error("cart {0} needs a shipping address")]
+    ShippingAddressRequired(CartId),
+    /// A group of lines that need shipping has no option chosen.
+    #[error("choose how to ship cart {0}")]
+    ShippingOptionRequired(CartId),
+    /// The chosen option can't be charged now: gone, disabled, not offered on renewal.
+    #[error("the cart's shipping option can't be used now: {}", .0.code())]
+    ShippingUnavailable(ShippingProblem),
 }
 
 impl ErrorCode for CommandError {
@@ -69,6 +80,9 @@ impl ErrorCode for CommandError {
             CommandError::MissingEmail(_) => "cart_email_missing",
             CommandError::Unavailable { .. } => "cart_unavailable",
             CommandError::TotalChanged { .. } => "total_changed",
+            CommandError::ShippingAddressRequired(_) => "shipping_address_required",
+            CommandError::ShippingOptionRequired(_) => "shipping_option_required",
+            CommandError::ShippingUnavailable(_) => "shipping_option_unavailable",
         }
     }
 }
@@ -118,11 +132,12 @@ pub struct Checkout {
 /// When another request changed something in between (stock, the cart, a customer with
 /// the same email), the commit fails and checkout runs again on fresh data, up to
 /// `MAX_ATTEMPTS` times; a real shortage or change then shows up as its own error.
-pub async fn checkout<S: CheckoutPorts, I: IdGenerator, C: Clock>(
+pub async fn checkout<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvider>(
     ctx: &Ctx,
     ports: &S,
     ids: &I,
     clock: &C,
+    rates: &P,
     input: Checkout,
 ) -> Result<Idempotent<Order>, CommandError> {
     ctx.require(Scope::Checkout)?;
@@ -132,7 +147,7 @@ pub async fn checkout<S: CheckoutPorts, I: IdGenerator, C: Clock>(
 
     let mut tries = 1;
     loop {
-        let e = match attempt(ctx, ports, ids, clock, &input).await {
+        let e = match attempt(ctx, ports, ids, clock, rates, &input).await {
             Err(e) => e,
             placed => return placed,
         };
@@ -163,11 +178,12 @@ fn lost_a_race(e: &CommandError) -> bool {
     )
 }
 
-async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock>(
+async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvider>(
     ctx: &Ctx,
     ports: &S,
     ids: &I,
     clock: &C,
+    rates: &P,
     input: &Checkout,
 ) -> Result<Idempotent<Order>, CommandError> {
     let mut cart = ports
@@ -182,7 +198,9 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock>(
         });
     }
 
-    let (priced, stock) = price_for_checkout(ports, &cart).await?;
+    let reading = read_cart(ports, &cart).await?;
+    let reading = renew_expired_quote(ports, rates, clock, &mut cart, reading, input).await?;
+    let CartReading { priced, stock, .. } = reading;
     if priced.lines.is_empty() {
         return Err(CommandError::EmptyCart(cart.id()));
     }
@@ -194,6 +212,7 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock>(
     if !unavailable.is_empty() {
         return Err(CommandError::Unavailable { lines: unavailable });
     }
+    check_shipping(&cart, &priced)?;
     if let Some(expected) = input.expected_total
         && expected != priced.total
     {
@@ -208,6 +227,8 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock>(
         .iter()
         .map(|line| order_line(line, OrderLineId::from_uuid(ids.new_uuid())))
         .collect::<Result<Vec<_>, _>>()?;
+
+    let shipping_lines = shipping_lines(&priced, &lines);
 
     // Reserve before taking a number, so a shortage doesn't use one up.
     let StockContext {
@@ -257,7 +278,10 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock>(
         customer,
         email,
         lines,
+        shipping_address: priced.shipping_address.clone(),
+        shipping_lines,
         subtotal: priced.subtotal,
+        shipping_total: priced.shipping_total,
         tax_total: priced.tax_total,
         total: priced.total,
     })?;
@@ -293,6 +317,129 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock>(
     Ok(Idempotent::fresh(order))
 }
 
+/// Lines that need shipping need an address and, in every group, an option priced now.
+fn check_shipping(cart: &Cart, priced: &PricedCart) -> Result<(), CommandError> {
+    if priced.shipping_groups.is_empty() {
+        return Ok(());
+    }
+    if priced.shipping_address.is_none() {
+        return Err(CommandError::ShippingAddressRequired(cart.id()));
+    }
+    for group in &priced.shipping_groups {
+        if let Some(problem) = &group.problem {
+            return Err(CommandError::ShippingUnavailable(problem.clone()));
+        }
+        if group.selected.is_none() {
+            return Err(CommandError::ShippingOptionRequired(cart.id()));
+        }
+    }
+    Ok(())
+}
+
+/// A provider's quote holds 15 minutes (design note 0015, SH9). Past that, the provider
+/// is asked again: the new quote replaces the old on the cart, and a changed price
+/// fails with `total_changed` when the buyer confirmed a total, after storing the new
+/// quote, so the client shows the new total and retries with it.
+async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
+    ports: &S,
+    rates: &P,
+    clock: &C,
+    cart: &mut Cart,
+    reading: CartReading,
+    input: &Checkout,
+) -> Result<CartReading, CommandError> {
+    let now = clock.now();
+    let Some(choice) = cart.shipping().cloned() else {
+        return Ok(reading);
+    };
+    let Some(old) = choice.quote.as_ref().filter(|q| q.expires_at() <= now) else {
+        return Ok(reading);
+    };
+    let offers = group_offers(cart, &reading, rates).await?;
+    let renewed = offers.iter().flat_map(|g| &g.offers).find_map(|o| match o {
+        OfferOutcome::Offered(offer) if offer.option == choice.option => Some(offer),
+        _ => None,
+    });
+    let Some(offer) = renewed else {
+        return Err(CommandError::ShippingUnavailable(
+            ShippingProblem::OptionUnavailable(choice.option),
+        ));
+    };
+    let Some(source) = &offer.quote else {
+        // The option is built-in now: its price follows the cart without a quote.
+        return Ok(reading);
+    };
+    let amount = hypha_core::Price::new(offer.amount).map_err(hypha_cart::CommandError::from)?;
+    cart.select_shipping(Some(SelectedShipping {
+        option: choice.option,
+        quote: Some(StoredQuote {
+            amount,
+            provider: source.provider.clone(),
+            service: source.service.clone(),
+            reference: source.reference.clone(),
+            quoted_at: now,
+        }),
+    }))
+    .map_err(hypha_cart::CommandError::from)?;
+    let renewed = read_cart(ports, cart).await?;
+    if amount != old.amount
+        && let Some(expected) = input.expected_total
+        && expected != renewed.priced.total
+    {
+        // Kept, so the buyer's next try sees (and confirms) the new price.
+        ports.carts().update(cart).await?;
+        return Err(CommandError::TotalChanged {
+            expected,
+            actual: renewed.priced.total,
+        });
+    }
+    Ok(renewed)
+}
+
+/// The groups' choices as the order keeps them (design note 0015, SH12), each naming the
+/// order lines it ships.
+fn shipping_lines(priced: &PricedCart, lines: &[OrderLine]) -> Vec<OrderShippingLine> {
+    priced
+        .shipping_groups
+        .iter()
+        .filter_map(|group| {
+            let selected = group.selected.as_ref()?;
+            let amount = hypha_core::Price::new(selected.amount).ok()?;
+            Some(OrderShippingLine {
+                group: group.id,
+                lines: lines
+                    .iter()
+                    .filter(|l| group.lines.contains(&l.variant))
+                    .map(|l| l.id)
+                    .collect(),
+                option: selected.option,
+                code: selected.code.clone(),
+                name: selected.name.clone(),
+                provider: selected
+                    .quote
+                    .as_ref()
+                    .map(|q| q.provider.as_str().to_string()),
+                service: selected.quote.as_ref().map(|q| q.service.clone()),
+                reference: selected.quote.as_ref().and_then(|q| q.reference.clone()),
+                amount,
+                estimate_days: selected.estimate.map(|e| (e.min_days(), e.max_days())),
+                tax: selected.tax.map(order_tax),
+            })
+        })
+        .collect()
+}
+
+fn order_tax(t: TaxLine) -> OrderTax {
+    OrderTax {
+        rate: t.rate,
+        class: t.class,
+        amount: t.amount,
+        source: match t.source {
+            TaxSource::RateTable { region } => OrderTaxSource::RateTable { region },
+        },
+    }
+}
+
 /// An available line as the order keeps it: names, prices and tax copied (0007, O4).
 fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandError> {
     // Unavailable lines were refused above, so these always match; checked anyway.
@@ -318,14 +465,7 @@ fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandEr
         sku: details.sku.clone(),
         unit_price: *unit_price,
         total: *total,
-        tax: tax.map(|t| OrderTax {
-            rate: t.rate,
-            class: t.class,
-            amount: t.amount,
-            source: match t.source {
-                TaxSource::RateTable { region } => OrderTaxSource::RateTable { region },
-            },
-        }),
+        tax: tax.map(order_tax),
     })
 }
 

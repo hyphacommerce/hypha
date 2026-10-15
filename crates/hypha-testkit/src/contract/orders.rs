@@ -25,6 +25,8 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     numbers(&make().await).await;
     scenario("order: list pages newest first, after a cursor");
     list_pages(&make().await).await;
+    scenario("order: shipping address and lines round trip, every field");
+    shipping_round_trips(&make().await).await;
 }
 
 fn eur(amount: i64) -> Money {
@@ -111,7 +113,10 @@ fn order_with(n: u128, lines: Vec<OrderLine>, taxes_included: bool) -> Order {
         customer: CustomerId::from_uuid(Uuid::from_u128(3000 + n)),
         email: Email::new("ana@example.hr").unwrap(),
         lines,
+        shipping_address: None,
+        shipping_lines: vec![],
         subtotal,
+        shipping_total: Money::zero(Currency::Eur),
         tax_total,
         total,
     })
@@ -257,4 +262,77 @@ async fn list_pages<R: OrderRepo>(repo: &R) {
     );
     assert_eq!(listed(repo, Some(1), 2).await, (vec![], false));
     assert_eq!(listed(repo, Some(99), 1).await, (vec![oid(3)], true));
+}
+
+async fn shipping_round_trips<R: OrderRepo>(repo: &R) {
+    use hypha_core::{
+        Address, AddressParts, Price, ShippingGroupId, ShippingOptionId, TaxRate, TaxRegionId,
+    };
+    use hypha_orders::{OrderShippingLine, OrderTax, OrderTaxSource};
+
+    let base = order_with(1, vec![full_line(11), plain_line(12)], false);
+    let full = OrderShippingLine {
+        group: ShippingGroupId::from_uuid(Uuid::from_u128(50)),
+        lines: vec![
+            OrderLineId::from_uuid(Uuid::from_u128(12)),
+            OrderLineId::from_uuid(Uuid::from_u128(11)),
+        ],
+        option: ShippingOptionId::from_uuid(Uuid::from_u128(51)),
+        code: "express".to_string(),
+        name: "DHL Express".to_string(),
+        provider: Some("spore_dhl".to_string()),
+        service: Some("EXPRESS".to_string()),
+        reference: Some("q-1".to_string()),
+        amount: Price::new(eur(1290)).unwrap(),
+        estimate_days: Some((0, u16::MAX)),
+        tax: Some(OrderTax {
+            rate: TaxRate::new(250_000).unwrap(),
+            class: Some(hypha_core::TaxClassId::from_uuid(Uuid::from_u128(52))),
+            amount: eur(323),
+            source: OrderTaxSource::RateTable {
+                region: TaxRegionId::from_uuid(Uuid::from_u128(53)),
+            },
+        }),
+    };
+    let plain = OrderShippingLine {
+        group: ShippingGroupId::from_uuid(Uuid::from_u128(60)),
+        lines: vec![],
+        option: ShippingOptionId::from_uuid(Uuid::from_u128(61)),
+        code: "standard".to_string(),
+        name: "Standard".to_string(),
+        provider: None,
+        service: None,
+        reference: None,
+        amount: Price::new(eur(0)).unwrap(),
+        estimate_days: None,
+        tax: None,
+    };
+    let address = Address::new(AddressParts {
+        first_name: Some("Ana".to_string()),
+        last_name: "Horvat".to_string(),
+        company: Some("Hypha".to_string()),
+        line1: "Ilica 1".to_string(),
+        line2: Some("Stan 4".to_string()),
+        city: "Zagreb".to_string(),
+        province: Some("Grad Zagreb".to_string()),
+        postal_code: Some("10000".to_string()),
+        country: "HR".to_string(),
+        phone: Some("+385".to_string()),
+    })
+    .unwrap();
+    let mut s = base.snapshot();
+    s.version = Version::NEW;
+    s.shipping_address = Some(address);
+    s.shipping_lines = vec![full, plain];
+    s.shipping_total = eur(1290);
+    s.tax_total = s.tax_total.checked_add(eur(323)).unwrap();
+    s.total = s.total.checked_add(eur(1290 + 323)).unwrap();
+    let mut order = Order::restore(s).unwrap();
+    repo.insert(&mut order).await.unwrap();
+    assert_eq!(repo.get(order.id()).await, Ok(Some(order.clone())));
+
+    // Updates keep it (the whole order is written).
+    order.mark_paid();
+    repo.update(&mut order).await.unwrap();
+    assert_eq!(repo.get(order.id()).await, Ok(Some(order)));
 }

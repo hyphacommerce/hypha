@@ -17,7 +17,7 @@ use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo};
 use hypha_markets::{Catalog, CatalogContext, CatalogRepo, Market, MarketRepo};
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus};
 use hypha_store_postgres::{CORE, PgStore, migrate};
-use hypha_testkit::{FixedClock, SequentialIds};
+use hypha_testkit::{FixedClock, NoRateProviders, SequentialIds};
 use tokio_postgres::{Client, NoTls};
 use uuid::Uuid;
 
@@ -79,6 +79,16 @@ async fn shop(url: &str, schema: &str, on_hand: i64) -> (PgStore<Client>, Client
         price,
     )
     .unwrap();
+    // The race is about stock: no shipping needed.
+    product
+        .update_variant(
+            mug(),
+            hypha_products::VariantPatch {
+                requires_shipping: Some(false),
+                ..hypha_products::VariantPatch::default()
+            },
+        )
+        .unwrap();
     product.set_status(ProductStatus::Active).unwrap();
     ProductRepo::insert(&store, &mut product).await.unwrap();
 
@@ -173,7 +183,7 @@ async fn carts_racing_for_the_last_units_never_oversell() {
             expected_total: None,
             idempotency: None,
         };
-        checkout(&ctx, store, &ids, &clock, input)
+        checkout(&ctx, store, &ids, &clock, &NoRateProviders, input)
     }))
     .await;
 
@@ -246,7 +256,7 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
             expected_total: None,
             idempotency: None,
         };
-        checkout(&ctx, store, &ids, &clock, input)
+        checkout(&ctx, store, &ids, &clock, &NoRateProviders, input)
     }))
     .await;
 
@@ -292,7 +302,7 @@ async fn retries_with_the_same_key_all_get_the_one_order() {
                 fingerprint: [7; 32],
             }),
         };
-        checkout(&ctx, store, &ids, &clock, input)
+        checkout(&ctx, store, &ids, &clock, &NoRateProviders, input)
     }))
     .await;
 

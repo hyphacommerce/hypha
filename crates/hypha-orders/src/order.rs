@@ -1,9 +1,9 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId, OrderLineId, Price,
-    ProductId, Quantity, TaxClassId, TaxRate, TaxRegionId, Timestamp, VariantId, Version,
-    Versioned, required_text,
+    Address, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId,
+    OrderLineId, Price, ProductId, Quantity, ShippingGroupId, ShippingOptionId, TaxClassId,
+    TaxRate, TaxRegionId, Timestamp, VariantId, Version, Versioned, required_text,
 };
 
 use crate::OrderError;
@@ -142,6 +142,30 @@ pub struct OrderLine {
     pub tax: Option<OrderTax>,
 }
 
+/// How one group of the order ships, as it was charged (design note 0015, SH12): copies,
+/// like lines, so the order reads the same after the option or its provider changes.
+/// Plain values, so orders don't depend on the shipping crate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderShippingLine {
+    pub group: ShippingGroupId,
+    /// The order lines this ships: what fulfilment (0017) works through.
+    pub lines: Vec<OrderLineId>,
+    pub option: ShippingOptionId,
+    pub code: String,
+    pub name: String,
+    /// The provider that quoted it (`app_…`, `spore_…`) and its service; `None` for a
+    /// built-in rate.
+    pub provider: Option<String>,
+    pub service: Option<String>,
+    /// The provider's quote ID: what fulfilment buys the label with (0017).
+    pub reference: Option<String>,
+    pub amount: Price,
+    /// Delivery in days, `min` to `max`, as estimated at checkout.
+    pub estimate_days: Option<(u16, u16)>,
+    /// `None` when the country had no tax rates.
+    pub tax: Option<OrderTax>,
+}
+
 /// What checkout knows when it places an order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewOrder {
@@ -158,9 +182,15 @@ pub struct NewOrder {
     /// The buyer's email at checkout; a later change on the customer doesn't rewrite it.
     pub email: Email,
     pub lines: Vec<OrderLine>,
+    /// Where it ships; required with shipping lines.
+    pub shipping_address: Option<Address>,
+    pub shipping_lines: Vec<OrderShippingLine>,
     /// Sum of the line totals.
     pub subtotal: Money,
-    /// Sum of the lines' tax: part of `subtotal` if `taxes_included`, otherwise on top.
+    /// Sum of the shipping lines' amounts.
+    pub shipping_total: Money,
+    /// Tax on the lines and on shipping: part of `subtotal` and `shipping_total` if
+    /// `taxes_included`, otherwise on top.
     pub tax_total: Money,
     /// What the buyer pays.
     pub total: Money,
@@ -186,7 +216,10 @@ pub struct Order {
     customer: CustomerId,
     email: Email,
     lines: Vec<OrderLine>,
+    shipping_address: Option<Address>,
+    shipping_lines: Vec<OrderShippingLine>,
     subtotal: Money,
+    shipping_total: Money,
     tax_total: Money,
     total: Money,
     financial_status: FinancialStatus,
@@ -219,7 +252,10 @@ impl Order {
             customer: new.customer,
             email: new.email,
             lines: new.lines,
+            shipping_address: new.shipping_address,
+            shipping_lines: new.shipping_lines,
             subtotal: new.subtotal,
+            shipping_total: new.shipping_total,
             tax_total: new.tax_total,
             total: new.total,
             financial_status: FinancialStatus::Pending,
@@ -283,6 +319,18 @@ impl Order {
         self.subtotal
     }
 
+    pub fn shipping_address(&self) -> Option<&Address> {
+        self.shipping_address.as_ref()
+    }
+
+    pub fn shipping_lines(&self) -> &[OrderShippingLine] {
+        &self.shipping_lines
+    }
+
+    pub fn shipping_total(&self) -> Money {
+        self.shipping_total
+    }
+
     pub fn tax_total(&self) -> Money {
         self.tax_total
     }
@@ -317,7 +365,10 @@ pub struct OrderSnapshot {
     pub email: Email,
     /// In display order.
     pub lines: Vec<OrderLine>,
+    pub shipping_address: Option<Address>,
+    pub shipping_lines: Vec<OrderShippingLine>,
     pub subtotal: Money,
+    pub shipping_total: Money,
     pub tax_total: Money,
     pub total: Money,
     pub financial_status: FinancialStatus,
@@ -339,7 +390,10 @@ impl Order {
             customer: self.customer,
             email: self.email.clone(),
             lines: self.lines.clone(),
+            shipping_address: self.shipping_address.clone(),
+            shipping_lines: self.shipping_lines.clone(),
             subtotal: self.subtotal,
+            shipping_total: self.shipping_total,
             tax_total: self.tax_total,
             total: self.total,
             financial_status: self.financial_status,
@@ -388,15 +442,35 @@ impl Order {
             }
         }
 
-        for amount in [s.subtotal, s.tax_total, s.total] {
+        if !s.shipping_lines.is_empty() && s.shipping_address.is_none() {
+            return Err(OrderError::ShippingWithoutAddress);
+        }
+        let mut shipping_total = Money::zero(currency);
+        for line in &mut s.shipping_lines {
+            if let Some(unknown) = line.lines.iter().find(|id| !seen.contains(*id)) {
+                return Err(OrderError::UnknownShippedLine(*unknown));
+            }
+            line.name = required_text("shipping name", &line.name)?;
+            in_currency(line.amount.money())?;
+            shipping_total = shipping_total.checked_add(line.amount.money())?;
+            if let Some(tax) = &line.tax {
+                in_currency(tax.amount)?;
+                tax_total = tax_total.checked_add(tax.amount)?;
+            }
+        }
+
+        for amount in [s.subtotal, s.shipping_total, s.tax_total, s.total] {
             in_currency(amount)?;
         }
+        let gross = subtotal.checked_add(shipping_total)?;
         let total = if s.taxes_included {
-            subtotal
+            gross
         } else {
-            subtotal.checked_add(tax_total)?
+            gross.checked_add(tax_total)?
         };
-        if (subtotal, tax_total, total) != (s.subtotal, s.tax_total, s.total) {
+        if (subtotal, shipping_total, tax_total, total)
+            != (s.subtotal, s.shipping_total, s.tax_total, s.total)
+        {
             return Err(OrderError::TotalsMismatch);
         }
 
@@ -413,7 +487,10 @@ impl Order {
             customer: s.customer,
             email: s.email,
             lines: s.lines,
+            shipping_address: s.shipping_address,
+            shipping_lines: s.shipping_lines,
             subtotal: s.subtotal,
+            shipping_total: s.shipping_total,
             tax_total: s.tax_total,
             total: s.total,
             financial_status: s.financial_status,
@@ -470,6 +547,84 @@ mod tests {
     }
 
     /// Two lines: 2 × 10.00 taxed 5.00, and 1 × 4.00 untaxed; taxes on top.
+    fn shipping_line(amount: i64, tax: Option<i64>) -> OrderShippingLine {
+        OrderShippingLine {
+            group: ShippingGroupId::from_uuid(Uuid::from_u128(50)),
+            lines: vec![line_id(1)],
+            option: ShippingOptionId::from_uuid(Uuid::from_u128(51)),
+            code: "standard".to_string(),
+            name: " Standard ".to_string(),
+            provider: None,
+            service: None,
+            reference: None,
+            amount: Price::new(eur(amount)).unwrap(),
+            estimate_days: Some((1, 3)),
+            tax: tax.map(|amount| OrderTax {
+                rate: TaxRate::new(250_000).unwrap(),
+                class: None,
+                amount: eur(amount),
+                source: OrderTaxSource::RateTable {
+                    region: TaxRegionId::from_uuid(Uuid::from_u128(9)),
+                },
+            }),
+        }
+    }
+
+    fn zagreb() -> Address {
+        Address::new(hypha_core::AddressParts {
+            first_name: None,
+            last_name: "Horvat".to_string(),
+            company: None,
+            line1: "Ilica 1".to_string(),
+            line2: None,
+            city: "Zagreb".to_string(),
+            province: None,
+            postal_code: None,
+            country: "HR".to_string(),
+            phone: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn shipping_counts_in_the_totals_and_its_tax_in_the_tax_total() {
+        let order = Order::place(NewOrder {
+            shipping_address: Some(zagreb()),
+            shipping_lines: vec![shipping_line(400, Some(100))],
+            shipping_total: eur(400),
+            tax_total: eur(600),
+            total: eur(3400),
+            ..new_order()
+        })
+        .unwrap();
+        assert_eq!(order.shipping_lines()[0].name, "Standard");
+        assert_eq!(
+            (order.shipping_total(), order.total()),
+            (eur(400), eur(3400))
+        );
+    }
+
+    #[test]
+    fn totals_that_leave_out_shipping_dont_add_up() {
+        let result = Order::place(NewOrder {
+            shipping_address: Some(zagreb()),
+            shipping_lines: vec![shipping_line(400, None)],
+            ..new_order()
+        });
+        assert_eq!(result, Err(OrderError::TotalsMismatch));
+    }
+
+    #[test]
+    fn shipping_lines_need_an_address() {
+        let result = Order::place(NewOrder {
+            shipping_lines: vec![shipping_line(400, None)],
+            shipping_total: eur(400),
+            total: eur(3300),
+            ..new_order()
+        });
+        assert_eq!(result, Err(OrderError::ShippingWithoutAddress));
+    }
+
     fn new_order() -> NewOrder {
         NewOrder {
             id: OrderId::from_uuid(Uuid::from_u128(1)),
@@ -483,7 +638,10 @@ mod tests {
             customer: CustomerId::from_uuid(Uuid::from_u128(4)),
             email: Email::new("ana@example.hr").unwrap(),
             lines: vec![line(1, 1000, 2, Some(500)), line(2, 400, 1, None)],
+            shipping_address: None,
+            shipping_lines: vec![],
             subtotal: eur(2400),
+            shipping_total: eur(0),
             tax_total: eur(500),
             total: eur(2900),
         }

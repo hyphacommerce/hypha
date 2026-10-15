@@ -2,10 +2,11 @@
 
 use hypha_cart::{
     Cart, CartRepo, CartStatus, HasCarts, LineDetails, LineStatus, PricedCart, PricedLine,
-    PricingPorts, price_for_checkout,
+    PricedShipping, PricedShippingGroup, PricingPorts, price_for_checkout,
 };
 use hypha_core::{CartId, Ctx, RepoError, Scope};
-use hypha_orders::{HasOrders, Order, OrderRepo, OrderTaxSource};
+use hypha_orders::{HasOrders, Order, OrderRepo, OrderTax, OrderTaxSource};
+use hypha_shipping::DeliveryEstimate;
 use hypha_tax::{TaxLine, TaxSource};
 
 use crate::CommandError;
@@ -58,14 +59,7 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
             status: LineStatus::Priced {
                 unit_price: line.unit_price,
                 total: line.total,
-                tax: line.tax.map(|tax| TaxLine {
-                    rate: tax.rate,
-                    class: tax.class,
-                    amount: tax.amount,
-                    source: match tax.source {
-                        OrderTaxSource::RateTable { region } => TaxSource::RateTable { region },
-                    },
-                }),
+                tax: line.tax.map(tax_line),
             },
         })
         .collect();
@@ -80,12 +74,46 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         lines,
         taxes_included: order.taxes_included(),
         subtotal: order.subtotal(),
-        // Orders snapshot shipping in the next step (design note 0015, SH12); until
-        // then a checked-out cart shows its address and no groups.
-        shipping_address: cart.shipping_address().cloned(),
-        shipping_groups: Vec::new(),
-        shipping_total: hypha_core::Money::zero(order.currency()),
+        shipping_address: order.shipping_address().cloned(),
+        shipping_groups: order
+            .shipping_lines()
+            .iter()
+            .map(|s| PricedShippingGroup {
+                id: s.group,
+                lines: order
+                    .lines()
+                    .iter()
+                    .filter(|l| s.lines.contains(&l.id))
+                    .map(|l| l.variant)
+                    .collect(),
+                selected: Some(PricedShipping {
+                    option: s.option,
+                    code: s.code.clone(),
+                    name: s.name.clone(),
+                    amount: s.amount.money(),
+                    tax: s.tax.map(tax_line),
+                    estimate: s
+                        .estimate_days
+                        .and_then(|(min, max)| DeliveryEstimate::new(min, max).ok()),
+                    // The order keeps the quote's reference, not the quote itself.
+                    quote: None,
+                }),
+                problem: None,
+            })
+            .collect(),
+        shipping_total: order.shipping_total(),
         tax_total: order.tax_total(),
         total: order.total(),
+    }
+}
+
+fn tax_line(tax: OrderTax) -> TaxLine {
+    TaxLine {
+        rate: tax.rate,
+        class: tax.class,
+        amount: tax.amount,
+        source: match tax.source {
+            OrderTaxSource::RateTable { region } => TaxSource::RateTable { region },
+        },
     }
 }

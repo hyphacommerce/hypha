@@ -44,7 +44,7 @@ pub use orders::InMemoryOrderRepo;
 pub use ports::InMemoryPorts;
 pub use price_lists::InMemoryPriceListRepo;
 pub use products::InMemoryProductRepo;
-pub use shipping::{InMemoryAppProviderRepo, InMemoryShippingZoneRepo};
+pub use shipping::{InMemoryAppProviderRepo, InMemoryShippingZoneRepo, NoRateProviders};
 pub use stores::InMemoryStoreRepo;
 pub use tax_classes::InMemoryTaxClassRepo;
 pub use tax_regions::InMemoryTaxRegionRepo;

@@ -5,6 +5,7 @@ mod media;
 mod patch;
 mod rate_limit;
 mod routes;
+mod shipping;
 mod state;
 
 use std::sync::Arc;

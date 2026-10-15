@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, OrderLineId, Page,
-    PageRequest, Price, ProductId, Quantity, RepoError, TaxClassId, TaxRegionId, Timestamp,
-    VariantId, Version, Versioned,
+    Address, AddressParts, CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId,
+    OrderLineId, Page, PageRequest, Price, ProductId, Quantity, RepoError, ShippingGroupId,
+    ShippingOptionId, TaxClassId, TaxRegionId, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_orders::{
-    Order, OrderLine, OrderNumber, OrderRepo, OrderSnapshot, OrderSummary, OrderTax, OrderTaxSource,
+    Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSummary,
+    OrderTax, OrderTaxSource,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -127,6 +128,13 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         .await
         .map_err(repo_error)?;
         insert_lines(&tx, s.id, &s.lines).await?;
+        tx.query_typed(
+            "DELETE FROM order_shipping_lines WHERE order_id = $1",
+            &[(&s.id.as_uuid(), Type::UUID)],
+        )
+        .await
+        .map_err(repo_error)?;
+        write_shipping(&tx, &s).await?;
         tx.commit().await.map_err(repo_error)?;
         order.set_version(new_version);
         Ok(())
@@ -178,7 +186,85 @@ pub(crate) async fn insert_order(
     )
     .await
     .map_err(repo_error)?;
-    insert_lines(tx, s.id, &s.lines).await
+    insert_lines(tx, s.id, &s.lines).await?;
+    write_shipping(tx, s).await
+}
+
+/// The shipping address and total on the order's row, and its shipping lines.
+async fn write_shipping(tx: &impl GenericClient, s: &OrderSnapshot) -> Result<(), RepoError> {
+    let a = s.shipping_address.as_ref().map(|a| a.parts());
+    let text = |f: fn(&AddressParts) -> Option<&str>| a.and_then(f);
+    tx.query_typed(
+        "UPDATE orders SET shipping_first_name = $2, shipping_last_name = $3,
+                shipping_company = $4, shipping_line1 = $5, shipping_line2 = $6,
+                shipping_city = $7, shipping_province = $8, shipping_postal_code = $9,
+                shipping_country = $10, shipping_phone = $11, shipping_total = $12
+         WHERE id = $1",
+        &[
+            (&s.id.as_uuid(), Type::UUID),
+            (&text(|p| p.first_name.as_deref()), Type::TEXT),
+            (&text(|p| Some(p.last_name.as_str())), Type::TEXT),
+            (&text(|p| p.company.as_deref()), Type::TEXT),
+            (&text(|p| Some(p.line1.as_str())), Type::TEXT),
+            (&text(|p| p.line2.as_deref()), Type::TEXT),
+            (&text(|p| Some(p.city.as_str())), Type::TEXT),
+            (&text(|p| p.province.as_deref()), Type::TEXT),
+            (&text(|p| p.postal_code.as_deref()), Type::TEXT),
+            (&text(|p| Some(p.country.as_str())), Type::TEXT),
+            (&text(|p| p.phone.as_deref()), Type::TEXT),
+            (&s.shipping_total.amount(), Type::INT8),
+        ],
+    )
+    .await
+    .map_err(repo_error)?;
+    // A handful of lines at most (one per group): one statement each.
+    for (position, line) in (0i32..).zip(&s.shipping_lines) {
+        let line_ids: Vec<Uuid> = line.lines.iter().map(|l| l.as_uuid()).collect();
+        let tax = line.tax.as_ref();
+        tx.query_typed(
+            "INSERT INTO order_shipping_lines (order_id, position, group_id, line_ids,
+                 option_id, code, name, provider, service, reference, amount,
+                 estimate_min_days, estimate_max_days, tax_rate_ppm, tax_class_id,
+                 tax_amount, tax_region_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+            &[
+                (&s.id.as_uuid(), Type::UUID),
+                (&position, Type::INT4),
+                (&line.group.as_uuid(), Type::UUID),
+                (&line_ids, Type::UUID_ARRAY),
+                (&line.option.as_uuid(), Type::UUID),
+                (&line.code, Type::TEXT),
+                (&line.name, Type::TEXT),
+                (&line.provider, Type::TEXT),
+                (&line.service, Type::TEXT),
+                (&line.reference, Type::TEXT),
+                (&line.amount.money().amount(), Type::INT8),
+                (
+                    &line.estimate_days.map(|(min, _)| i32::from(min)),
+                    Type::INT4,
+                ),
+                (
+                    &line.estimate_days.map(|(_, max)| i32::from(max)),
+                    Type::INT4,
+                ),
+                (
+                    &tax.map(|t| tax_rate_to_db(t.rate)).transpose()?,
+                    Type::INT4,
+                ),
+                (&tax.and_then(|t| t.class).map(|c| c.as_uuid()), Type::UUID),
+                (&tax.map(|t| t.amount.amount()), Type::INT8),
+                (
+                    &tax.map(|t| match t.source {
+                        OrderTaxSource::RateTable { region } => region.as_uuid(),
+                    }),
+                    Type::UUID,
+                ),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    }
+    Ok(())
 }
 
 /// All lines in one statement: each column as an array, `unnest` turns them back into
@@ -275,7 +361,10 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, R
         .query_typed(
             "SELECT id, version, number, (extract(epoch FROM placed_at) * 1000000)::bigint,
                  cart_id, market_id, currency, country, taxes_included, customer_id, email,
-                 subtotal, tax_total, total, financial_status, fulfillment_status
+                 subtotal, tax_total, total, financial_status, fulfillment_status,
+                 shipping_first_name, shipping_last_name, shipping_company, shipping_line1,
+                 shipping_line2, shipping_city, shipping_province, shipping_postal_code,
+                 shipping_country, shipping_phone, shipping_total
              FROM orders WHERE id = ANY($1)",
             &param,
         )
@@ -300,17 +389,40 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, R
         lines.entry(line.get(13)).or_default().push(line);
     }
 
+    let mut shipping: HashMap<Uuid, Vec<Row>> = HashMap::new();
+    for line in client
+        .query_typed(
+            "SELECT group_id, line_ids, option_id, code, name, provider, service, reference,
+                 amount, estimate_min_days, estimate_max_days, tax_rate_ppm, tax_class_id,
+                 tax_amount, tax_region_id, order_id
+             FROM order_shipping_lines WHERE order_id = ANY($1) ORDER BY order_id, position",
+            &param,
+        )
+        .await
+        .map_err(repo_error)?
+    {
+        shipping.entry(line.get(15)).or_default().push(line);
+    }
+
     orders
         .iter()
         .map(|row| {
             let id: Uuid = row.get(0);
-            order_from_db(row, lines.remove(&id).unwrap_or_default())
+            order_from_db(
+                row,
+                lines.remove(&id).unwrap_or_default(),
+                shipping.remove(&id).unwrap_or_default(),
+            )
         })
         .collect()
 }
 
 /// An order from its row (`load`'s columns) and its line rows, in position order.
-fn order_from_db(row: &Row, line_rows: Vec<Row>) -> Result<Order, RepoError> {
+fn order_from_db(
+    row: &Row,
+    line_rows: Vec<Row>,
+    shipping_rows: Vec<Row>,
+) -> Result<Order, RepoError> {
     let currency_code: String = row.get(6);
     let currency = currency_from_db(&currency_code)?;
     let money = |amount: i64| Money::new(amount, currency).map_err(corrupt);
@@ -318,6 +430,29 @@ fn order_from_db(row: &Row, line_rows: Vec<Row>) -> Result<Order, RepoError> {
         .iter()
         .map(|line| line_from_db(line, &money))
         .collect::<Result<Vec<_>, RepoError>>()?;
+    let shipping_lines = shipping_rows
+        .iter()
+        .map(|line| shipping_line_from_db(line, &money))
+        .collect::<Result<Vec<_>, RepoError>>()?;
+    // The check constraint keeps the required columns all set or all NULL.
+    let shipping_address = row
+        .get::<_, Option<String>>(17)
+        .map(|last_name| {
+            Address::new(AddressParts {
+                first_name: row.get(16),
+                last_name,
+                company: row.get(18),
+                line1: row.get(19),
+                line2: row.get(20),
+                city: row.get(21),
+                province: row.get(22),
+                postal_code: row.get(23),
+                country: row.get(24),
+                phone: row.get(25),
+            })
+        })
+        .transpose()
+        .map_err(corrupt)?;
 
     let country: String = row.get(7);
     let email: String = row.get(10);
@@ -336,7 +471,10 @@ fn order_from_db(row: &Row, line_rows: Vec<Row>) -> Result<Order, RepoError> {
         customer: CustomerId::from_uuid(row.get(9)),
         email: Email::new(&email).map_err(corrupt)?,
         lines,
+        shipping_address,
+        shipping_lines,
         subtotal: money(row.get(11))?,
+        shipping_total: money(row.get(26))?,
         tax_total: money(row.get(12))?,
         total: money(row.get(13))?,
         financial_status: financial.parse().map_err(corrupt)?,
@@ -365,6 +503,47 @@ fn summary_from_db(row: &Row) -> Result<OrderSummary, RepoError> {
         fulfillment_status: fulfillment.parse().map_err(corrupt)?,
         total: Money::new(row.get(7), currency_from_db(&currency)?).map_err(corrupt)?,
         item_count: u64::try_from(items).map_err(|_| corrupt(format!("order {id} item count")))?,
+    })
+}
+
+fn shipping_line_from_db(
+    line: &Row,
+    money: &impl Fn(i64) -> Result<Money, RepoError>,
+) -> Result<OrderShippingLine, RepoError> {
+    let rate: Option<i32> = line.get(11);
+    let class: Option<Uuid> = line.get(12);
+    let amount: Option<i64> = line.get(13);
+    let region: Option<Uuid> = line.get(14);
+    let tax = match (rate, amount, region) {
+        (Some(rate), Some(amount), Some(region)) => Some(OrderTax {
+            rate: tax_rate_from_db(rate)?,
+            class: class.map(TaxClassId::from_uuid),
+            amount: money(amount)?,
+            source: OrderTaxSource::RateTable {
+                region: TaxRegionId::from_uuid(region),
+            },
+        }),
+        (None, None, None) => None,
+        _ => return Err(corrupt("order shipping tax columns are partly set")),
+    };
+    let days = |i: usize| -> Result<Option<u16>, RepoError> {
+        line.get::<_, Option<i32>>(i)
+            .map(|d| u16::try_from(d).map_err(corrupt))
+            .transpose()
+    };
+    let line_ids: Vec<Uuid> = line.get(1);
+    Ok(OrderShippingLine {
+        group: ShippingGroupId::from_uuid(line.get(0)),
+        lines: line_ids.into_iter().map(OrderLineId::from_uuid).collect(),
+        option: ShippingOptionId::from_uuid(line.get(2)),
+        code: line.get(3),
+        name: line.get(4),
+        provider: line.get(5),
+        service: line.get(6),
+        reference: line.get(7),
+        amount: Price::new(money(line.get(8))?).map_err(corrupt)?,
+        estimate_days: days(9)?.zip(days(10)?),
+        tax,
     })
 }
 

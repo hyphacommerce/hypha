@@ -12,8 +12,8 @@ pub mod summary;
 pub use commands::{CommandError, get_order, list_orders, mark_order_paid};
 pub use error::OrderError;
 pub use order::{
-    FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderLine, OrderNumber, OrderSnapshot,
-    OrderTax, OrderTaxSource,
+    FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderLine, OrderNumber, OrderShippingLine,
+    OrderSnapshot, OrderTax, OrderTaxSource,
 };
 pub use repo::{HasOrders, OrderRepo, StageOrders};
 pub use summary::OrderSummary;

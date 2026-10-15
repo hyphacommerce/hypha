@@ -95,3 +95,23 @@ impl AppProviderRepo for InMemoryAppProviderRepo {
         Ok(())
     }
 }
+
+/// A `RateProvider` that knows no provider: for tests whose shipping is built-in only.
+pub struct NoRateProviders;
+
+impl hypha_shipping::RateProvider for NoRateProviders {
+    async fn services(
+        &self,
+        provider: &ProviderKey,
+    ) -> Result<Vec<hypha_shipping::ServiceInfo>, hypha_shipping::ProviderError> {
+        Err(hypha_shipping::ProviderError::Unknown(provider.clone()))
+    }
+
+    async fn quote(
+        &self,
+        provider: &ProviderKey,
+        _: &hypha_shipping::RateRequest,
+    ) -> Result<Vec<hypha_shipping::Rate>, hypha_shipping::ProviderError> {
+        Err(hypha_shipping::ProviderError::Unknown(provider.clone()))
+    }
+}

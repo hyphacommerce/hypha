@@ -178,7 +178,8 @@ pub(super) async fn checkout_handler<S: Storage>(
         expected_total: req.body.expected_total,
         idempotency: req.idempotency,
     };
-    let placed = checkout(&ctx, &ports, &state.ids, &state.clock, input).await?;
+    let rates = crate::shipping::HostRates;
+    let placed = checkout(&ctx, &ports, &state.ids, &state.clock, &rates, input).await?;
     Ok(idempotent_response(
         StatusCode::CREATED,
         OrderResponse::new(&placed.value)?,

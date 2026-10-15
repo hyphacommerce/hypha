@@ -22,6 +22,10 @@ pub enum OrderError {
     TotalsMismatch,
     #[error("order numbers start at 1, got {0}")]
     InvalidNumber(i64),
+    #[error("an order with shipping lines needs a shipping address")]
+    ShippingWithoutAddress,
+    #[error("a shipping line names order line {0}, which the order doesn't have")]
+    UnknownShippedLine(OrderLineId),
 }
 
 impl ErrorCode for OrderError {
@@ -35,6 +39,8 @@ impl ErrorCode for OrderError {
             OrderError::LineTotalMismatch(_) => "line_total_mismatch",
             OrderError::TotalsMismatch => "totals_mismatch",
             OrderError::InvalidNumber(_) => "invalid_order_number",
+            OrderError::ShippingWithoutAddress => "shipping_without_address",
+            OrderError::UnknownShippedLine(_) => "unknown_shipped_line",
         }
     }
 }

@@ -14,7 +14,7 @@ use hypha_markets::{Catalog, CatalogContext, CatalogRepo, Market, MarketRepo};
 use hypha_orders::{FinancialStatus, Order, OrderNumber, OrderRepo, OrderTaxSource};
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus};
 use hypha_tax::{TaxRegion, TaxRegionRepo};
-use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
+use hypha_testkit::{FixedClock, InMemoryPorts, NoRateProviders, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
 
@@ -92,6 +92,7 @@ impl World {
                 Price::new(eur(price)).unwrap(),
             )
             .unwrap();
+            not_shipped(&mut product, vid(name));
             product.set_status(ProductStatus::Active).unwrap();
             block_on(world.products.insert(&mut product)).unwrap();
         }
@@ -174,7 +175,14 @@ impl World {
             expected_total,
             idempotency,
         };
-        block_on(checkout(ctx, &self.ports, &self.ids, &self.clock, input))
+        block_on(checkout(
+            ctx,
+            &self.ports,
+            &self.ids,
+            &self.clock,
+            &NoRateProviders,
+            input,
+        ))
     }
 
     fn checkout(&self, cart: CartId) -> Result<Order, CommandError> {
@@ -498,6 +506,7 @@ fn long_option_labels_and_skus_are_copied_whole() {
         },
     )
     .unwrap();
+    not_shipped(&mut product, variant);
     product.set_status(ProductStatus::Active).unwrap();
     block_on(world.products.insert(&mut product)).unwrap();
     let catalog = hypha_core::CatalogId::from_uuid(Uuid::from_u128(1003));
@@ -618,4 +627,18 @@ fn a_completed_cart_is_reported_before_other_checks() {
         .map(|_| ()),
         completed
     );
+}
+
+/// These tests are about stock, tax, buyers and retries: their products aren't shipped,
+/// so checkout needs no address or option (shipping has its own tests, `shipping.rs`).
+fn not_shipped(product: &mut Product, variant: VariantId) {
+    product
+        .update_variant(
+            variant,
+            hypha_products::VariantPatch {
+                requires_shipping: Some(false),
+                ..hypha_products::VariantPatch::default()
+            },
+        )
+        .unwrap();
 }

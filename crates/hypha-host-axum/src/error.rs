@@ -662,7 +662,10 @@ impl From<hypha_checkout::CommandError> for ApiError {
             | E::EmptyCart(_)
             | E::MissingEmail(_)
             | E::Unavailable { .. }
-            | E::TotalChanged { .. } => StatusCode::CONFLICT,
+            | E::TotalChanged { .. }
+            | E::ShippingAddressRequired(_)
+            | E::ShippingOptionRequired(_)
+            | E::ShippingUnavailable(_) => StatusCode::CONFLICT,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -671,6 +674,7 @@ impl From<hypha_checkout::CommandError> for ApiError {
         let details = match &e {
             E::CartCompleted { order, .. } => completed(*order),
             E::Unavailable { lines } => Some(json!({ "lines": lines })),
+            E::ShippingUnavailable(problem) => Some(json!({ "reason": problem.code() })),
             E::TotalChanged { expected, actual } => {
                 Some(json!({ "expected": expected, "actual": actual }))
             }

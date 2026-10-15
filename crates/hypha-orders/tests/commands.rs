@@ -45,7 +45,10 @@ fn repo_with_order() -> InMemoryOrderRepo {
             total: eur(1000),
             tax: None,
         }],
+        shipping_address: None,
+        shipping_lines: vec![],
         subtotal: eur(1000),
+        shipping_total: eur(0),
         tax_total: eur(0),
         total: eur(1000),
     })
