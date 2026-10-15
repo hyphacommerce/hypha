@@ -85,25 +85,33 @@ the first version lists, searches by filename and title, and filters by kind.
 ```text
 admin ──POST /admin/assets {filename, mime_type, byte_size}──▶ Hypha   (asset: pending)
       ◀─ {asset, upload: {url, method: PUT, headers}} ─┘
-admin ──PUT file──────────────────────────────────────────────▶ R2 / S3 / SeaweedFS
+admin ──PUT file to uploads/…─────────────────────────────────▶ R2 / S3 / SeaweedFS
 admin ──POST /admin/assets/{id}/complete──▶ Hypha ──HEAD + ranged GET──▶ storage
+                                                 ──copy uploads/… → assets/…, delete──▶
       ◀─ asset: ready (type, size, dimensions read from the file) ─┘
 ```
 
 - **Presigned PUT** with `Content-Type` and `Content-Length` signed in, so storage
   refuses a different size or type than the one declared. Valid for 15 minutes.
+- **The upload goes to `uploads/…`, never to the served key** (*changed after review,
+  2026-10-15*). A presigned URL can't be made single-use everywhere, so it stays valid
+  for its 15 minutes even after the upload is checked. Completing copies the checked file
+  inside storage (`BlobStore::copy`, S3 `CopyObject`, no bytes through Hypha) to
+  `assets/…` or `private/…` and deletes the upload; a later PUT with the same URL only
+  writes `uploads/…` again, which nothing serves. Buckets should expire `uploads/` after
+  a day (a lifecycle rule on R2 and S3) for those leftovers.
 - **Why direct:** Workers limit request bodies, and proxying large files through the API
   costs time and memory on every host. The S3 signature (SigV4) is HMAC-SHA256 only, so
   signing works in Workers too.
 - **Completing checks the file, not the request:** `HEAD` confirms the size; a ranged
-  `GET` of the first 64 KB lets `imagesize` (pure Rust, builds for wasm) read the real
+  `GET` of the first 256 KB lets `imagesize` (pure Rust, builds for wasm) read the real
   format and dimensions from the file's header. A file whose bytes aren't the declared
   kind makes the asset `failed` and the object is deleted.
 - **Limits** (configurable): images up to 20 MB, videos up to 1 GB, other files up to
   100 MB; image types JPEG, PNG, WebP, AVIF, GIF. SVG is refused
   (`unsupported_media_type`) until we can sanitise it (M12).
-- **Abandoned uploads:** pending assets older than a day are deleted by a background
-  sweep (with their objects, if any).
+- **Abandoned uploads:** pending assets older than a day, and failed ones, are deleted
+  by a background sweep in the host, with their files.
 - **Imports by URL** (`POST /admin/assets {source_url}`): the host downloads the file and
   stores it as an upload. For moving catalogs from other platforms. *Later*.
 

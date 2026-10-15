@@ -233,6 +233,25 @@ pub async fn blob_store<B: BlobStore>(
         "a range past the end stops at the end"
     );
 
+    scenario("blob: an upload keeps its type and cache control");
+    let head = store.head(&file).await.unwrap().unwrap();
+    assert_eq!(
+        (head.content_type.as_deref(), head.cache_control.as_deref()),
+        (Some("image/png"), Some(Visibility::Public.cache_control()))
+    );
+
+    scenario("blob: a copy has the same bytes, type and cache control");
+    let copied = key("copied.png");
+    store.copy(&file, &copied).await.unwrap();
+    assert_eq!(store.head(&copied).await.unwrap(), Some(head.clone()));
+    assert_eq!(store.read_range(&copied, 0, 1 << 20).await.unwrap(), body);
+    store.delete(&copied).await.unwrap();
+    assert!(
+        store.copy(&key("missing.png"), &copied).await.is_err(),
+        "copying nothing fails"
+    );
+    assert_eq!(store.head(&copied).await, Ok(None));
+
     scenario("blob: a download URL returns a stored file");
     let url = store.presign_download(&file, now, 60).await.unwrap();
     assert_eq!(download(&url).await, Some(body.clone()));

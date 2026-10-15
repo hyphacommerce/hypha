@@ -2,7 +2,8 @@
 //! (`hypha-store-s3`) serves R2, S3 and MinIO; the testkit has one in memory.
 //!
 //! Files never pass through Hypha: a client uploads straight to storage with a presigned
-//! request, and Hypha only signs it and then checks what was stored.
+//! request (to an `uploads/…` key), and Hypha signs it, checks what was stored, and
+//! copies it inside storage to the key it is served from.
 
 use std::fmt;
 
@@ -55,9 +56,13 @@ pub struct PresignedUpload {
 }
 
 /// What storage knows about a stored file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobHead {
     pub size: u64,
+    /// As uploaded (`UploadTerms::content_type`), kept through `copy`.
+    pub content_type: Option<String>,
+    /// As uploaded (`UploadTerms::cache_control`), kept through `copy`.
+    pub cache_control: Option<String>,
 }
 
 /// Every call may fail with `BlobError::Backend`. `async fn` without a `Send` bound, like
@@ -75,6 +80,9 @@ pub trait BlobStore {
     async fn head(&self, key: &BlobKey) -> Result<Option<BlobHead>, BlobError>;
     /// Up to `len` bytes from `start`; fewer when the file is shorter.
     async fn read_range(&self, key: &BlobKey, start: u64, len: u64) -> Result<Vec<u8>, BlobError>;
+    /// Copies the file at `from` to `to` inside storage, with its content type and cache
+    /// control (no bytes pass through Hypha). Nothing at `from` is `Backend`.
+    async fn copy(&self, from: &BlobKey, to: &BlobKey) -> Result<(), BlobError>;
     /// Removes the file; nothing stored at `key` is fine.
     async fn delete(&self, key: &BlobKey) -> Result<(), BlobError>;
     /// A URL that downloads the file until `expires_in_secs` after `now`: for private

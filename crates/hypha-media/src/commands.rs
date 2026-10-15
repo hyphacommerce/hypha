@@ -95,13 +95,17 @@ pub async fn create_upload<R: AssetRepo, B: BlobStore>(
         cache_control: asset.visibility().cache_control(),
         expires_in_secs: UPLOAD_EXPIRES_IN_SECS,
     };
-    let upload = blobs.presign_upload(asset.key(), &terms, now).await?;
+    // To the upload key: the URL stays valid for a while, so it must never be able to
+    // write where the checked file is served from (`complete_upload` copies it there).
+    let upload = blobs
+        .presign_upload(&asset.upload_key(), &terms, now)
+        .await?;
     assets.insert(&mut asset).await?;
     Ok((asset, upload))
 }
 
-/// Checks the uploaded file against what `create_upload` declared and makes the asset
-/// ready, with its dimensions read from the file. A file that doesn't match is deleted
+/// Checks the uploaded file against what `create_upload` declared, copies it to the key
+/// it is served from and makes the asset ready, with its dimensions read from the file. A file that doesn't match is deleted
 /// and the asset becomes `failed` (`UploadMismatch`). Completing a ready asset again
 /// returns it unchanged, so a retry is safe.
 pub async fn complete_upload<R: AssetRepo, B: BlobStore>(
@@ -123,18 +127,23 @@ pub async fn complete_upload<R: AssetRepo, B: BlobStore>(
         }
         AssetStatus::Pending => {}
     }
-    let Some(stored) = blobs.head(asset.key()).await? else {
+    let upload_key = asset.upload_key();
+    let Some(stored) = blobs.head(&upload_key).await? else {
         return Err(CommandError::UploadMissing(id));
     };
-    let head = blobs.read_range(asset.key(), 0, HEAD_BYTES).await?;
+    let head = blobs.read_range(&upload_key, 0, HEAD_BYTES).await?;
     match asset.verify_upload(stored.size, &head) {
         Ok(facts) => {
+            // The checked bytes move where they are served from; a later PUT with the
+            // still-valid upload URL only writes the upload key again.
+            blobs.copy(&upload_key, asset.key()).await?;
+            blobs.delete(&upload_key).await?;
             asset.mark_ready(facts, clock.now())?;
             assets.update(&mut asset).await?;
             Ok(asset)
         }
         Err(mismatch) => {
-            blobs.delete(asset.key()).await?;
+            blobs.delete(&upload_key).await?;
             asset.mark_failed(clock.now())?;
             assets.update(&mut asset).await?;
             Err(mismatch.into())
@@ -206,6 +215,8 @@ pub async fn delete_asset<R: AssetRepo, B: BlobStore>(
     ctx.require(Scope::MediaWrite)?;
     let asset = load(assets, id).await?;
     blobs.delete(asset.key()).await?;
+    // A pending asset's file, or one uploaded again after completing.
+    blobs.delete(&asset.upload_key()).await?;
     assets.delete(id).await?;
     Ok(())
 }

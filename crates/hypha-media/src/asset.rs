@@ -302,8 +302,21 @@ impl Asset {
         &self.filename
     }
 
+    /// Where the file is served from once ready: `assets/…` or `private/…`.
     pub fn key(&self) -> &BlobKey {
         &self.key
+    }
+
+    /// Where the client uploads the file: `uploads/…`, same ID, version and name. Hypha
+    /// copies it to `key` once checked, so the upload URL (valid for a while) can never
+    /// replace a file that is being served.
+    pub fn upload_key(&self) -> BlobKey {
+        let rest = self
+            .key
+            .as_str()
+            .split_once('/')
+            .map_or(self.key.as_str(), |(_, rest)| rest);
+        BlobKey::restore(format!("uploads/{rest}"))
     }
 
     /// Starts at 1; a replaced file gets the next one, and a new key.
@@ -532,6 +545,10 @@ mod tests {
         assert_eq!(
             asset.key().as_str(),
             "assets/00000000000000000000000000000001/1/summer-shirt-front.jpg"
+        );
+        assert_eq!(
+            asset.upload_key().as_str(),
+            "uploads/00000000000000000000000000000001/1/summer-shirt-front.jpg"
         );
     }
 

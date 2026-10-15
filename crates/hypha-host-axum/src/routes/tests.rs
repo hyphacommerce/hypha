@@ -592,6 +592,22 @@ async fn an_upload_goes_straight_to_storage_and_completes_into_a_ready_asset() {
 }
 
 #[tokio::test]
+async fn the_upload_url_cant_replace_a_checked_file() {
+    let app = app_with_media().await;
+    let created = start_png_upload(&app, 100).await;
+    let id = created["asset"]["id"].as_str().unwrap();
+    assert_eq!(put_file(&created["upload"], png(100)).await, 200);
+    let (_, ready) = send(&app, "POST", &format!("/admin/assets/{id}/complete"), None).await;
+
+    // Storage still takes the URL until it expires, but only into the upload key.
+    let mut other = b"%PDF-1.7".to_vec();
+    other.resize(100, 0);
+    assert_eq!(put_file(&created["upload"], other).await, 200);
+    let served = reqwest::get(ready["url"].as_str().unwrap()).await.unwrap();
+    assert_eq!(served.bytes().await.unwrap().to_vec(), png(100));
+}
+
+#[tokio::test]
 async fn completing_checks_what_was_stored() {
     let app = app_with_media().await;
     let created = start_png_upload(&app, 100).await;

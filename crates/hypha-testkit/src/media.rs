@@ -51,15 +51,28 @@ impl AssetRepo for InMemoryAssetRepo {
 /// (or stores a file directly with `put`).
 #[derive(Default)]
 pub struct InMemoryBlobStore {
-    files: Mutex<HashMap<BlobKey, Vec<u8>>>,
+    files: Mutex<HashMap<BlobKey, StoredFile>>,
     /// Signed uploads by URL: where they go, what they allow, until when.
     signed: Mutex<HashMap<String, (BlobKey, UploadTerms, Timestamp)>>,
 }
 
+/// A stored file and the headers it was uploaded with.
+#[derive(Clone)]
+struct StoredFile {
+    body: Vec<u8>,
+    content_type: Option<String>,
+    cache_control: Option<String>,
+}
+
 impl InMemoryBlobStore {
-    /// Stores `body` at `key` as if uploaded, with no checks.
+    /// Stores `body` at `key` as if uploaded, with no checks and no headers.
     pub fn put(&self, key: &BlobKey, body: Vec<u8>) {
-        self.files.lock().unwrap().insert(key.clone(), body);
+        let file = StoredFile {
+            body,
+            content_type: None,
+            cache_control: None,
+        };
+        self.files.lock().unwrap().insert(key.clone(), file);
     }
 
     /// Sends `body` with the upload's URL and headers at `now`, as a client would.
@@ -80,7 +93,12 @@ impl InMemoryBlobStore {
         {
             return false;
         }
-        self.files.lock().unwrap().insert(key.clone(), body);
+        let file = StoredFile {
+            body,
+            content_type: Some(terms.content_type.to_string()),
+            cache_control: Some(terms.cache_control.to_string()),
+        };
+        self.files.lock().unwrap().insert(key.clone(), file);
         true
     }
 
@@ -94,7 +112,7 @@ impl InMemoryBlobStore {
             return None;
         }
         let key = BlobKey::restore(key.to_string());
-        self.files.lock().unwrap().get(&key).cloned()
+        self.files.lock().unwrap().get(&key).map(|f| f.body.clone())
     }
 }
 
@@ -131,20 +149,33 @@ impl BlobStore for InMemoryBlobStore {
 
     async fn head(&self, key: &BlobKey) -> Result<Option<BlobHead>, BlobError> {
         Ok(self.files.lock().unwrap().get(key).map(|f| BlobHead {
-            size: f.len() as u64,
+            size: f.body.len() as u64,
+            content_type: f.content_type.clone(),
+            cache_control: f.cache_control.clone(),
         }))
     }
 
     async fn read_range(&self, key: &BlobKey, start: u64, len: u64) -> Result<Vec<u8>, BlobError> {
         let files = self.files.lock().unwrap();
-        let file = files
+        let file = &files
             .get(key)
-            .ok_or_else(|| BlobError::Backend(format!("no file at {key}")))?;
+            .ok_or_else(|| BlobError::Backend(format!("no file at {key}")))?
+            .body;
         let start = usize::try_from(start).unwrap_or(usize::MAX).min(file.len());
         let end = start
             .saturating_add(usize::try_from(len).unwrap_or(usize::MAX))
             .min(file.len());
         Ok(file[start..end].to_vec())
+    }
+
+    async fn copy(&self, from: &BlobKey, to: &BlobKey) -> Result<(), BlobError> {
+        let mut files = self.files.lock().unwrap();
+        let file = files
+            .get(from)
+            .cloned()
+            .ok_or_else(|| BlobError::Backend(format!("no file at {from}")))?;
+        files.insert(to.clone(), file);
+        Ok(())
     }
 
     async fn delete(&self, key: &BlobKey) -> Result<(), BlobError> {

@@ -226,7 +226,12 @@ impl<H: HttpClient, C: Clock> BlobStore for S3BlobStore<H, C> {
                     .header("content-length")
                     .and_then(|v| v.parse().ok())
                     .ok_or_else(|| unexpected("HEAD (no content-length)", key, &response))?;
-                Ok(Some(BlobHead { size }))
+                let header = |name| response.header(name).map(str::to_string);
+                Ok(Some(BlobHead {
+                    size,
+                    content_type: header("content-type"),
+                    cache_control: header("cache-control"),
+                }))
             }
             404 => Ok(None),
             _ => Err(unexpected("HEAD", key, &response)),
@@ -252,6 +257,21 @@ impl<H: HttpClient, C: Clock> BlobStore for S3BlobStore<H, C> {
             // The range starts past the end.
             416 => Ok(Vec::new()),
             _ => Err(unexpected("GET", key, &response)),
+        }
+    }
+
+    async fn copy(&self, from: &BlobKey, to: &BlobKey) -> Result<(), BlobError> {
+        // CopyObject: a PUT naming its source; the default metadata directive (COPY)
+        // keeps the content type and cache control.
+        let source = encode_path(&format!("/{}/{}", self.config.bucket, from));
+        let response = self
+            .send("PUT", to, vec![("x-amz-copy-source".to_string(), source)])
+            .await?;
+        // S3 may answer 200 and still report a failure in the body.
+        let failed = String::from_utf8_lossy(&response.body).contains("<Error>");
+        match response.status {
+            200 if !failed => Ok(()),
+            _ => Err(unexpected("COPY", from, &response)),
         }
     }
 

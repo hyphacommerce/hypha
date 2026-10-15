@@ -139,6 +139,46 @@ fn completing_a_matching_upload_makes_the_asset_ready_with_its_dimensions() {
     let asset = block_on(world.assets.get(id)).unwrap().unwrap();
     assert_eq!(asset.status(), AssetStatus::Ready);
     assert_eq!((asset.width(), asset.height()), (Some(3), Some(2)));
+    // Served from its own key; the upload key is emptied.
+    assert_eq!(
+        block_on(world.blobs.head(asset.key()))
+            .unwrap()
+            .map(|h| h.size),
+        Some(100)
+    );
+    assert_eq!(block_on(world.blobs.head(&asset.upload_key())), Ok(None));
+}
+
+#[test]
+fn uploading_again_after_completing_doesnt_change_the_served_file() {
+    let world = World::new();
+    let (asset, upload) = block_on(create_upload(
+        &Ctx::system(),
+        &world.assets,
+        &world.blobs,
+        &world.ids,
+        &world.clock,
+        shirt_png(),
+    ))
+    .unwrap();
+    assert!(world.blobs.upload(&upload, png(100), FixedClock::DEFAULT));
+    block_on(complete_upload(
+        &Ctx::system(),
+        &world.assets,
+        &world.blobs,
+        &world.clock,
+        asset.id(),
+    ))
+    .unwrap();
+
+    // The URL still works until it expires, but it only reaches the upload key.
+    let mut other = b"%PDF-1.7".to_vec();
+    other.resize(100, 0);
+    assert!(world.blobs.upload(&upload, other, FixedClock::DEFAULT));
+    assert_eq!(
+        block_on(world.blobs.read_range(asset.key(), 0, 100)),
+        Ok(png(100))
+    );
 }
 
 #[test]
@@ -188,6 +228,7 @@ fn a_file_that_isnt_what_was_declared_fails_and_is_deleted() {
     );
     let asset = block_on(world.assets.get(id)).unwrap().unwrap();
     assert_eq!(asset.status(), AssetStatus::Failed);
+    assert_eq!(block_on(world.blobs.head(&asset.upload_key())), Ok(None));
     assert_eq!(block_on(world.blobs.head(asset.key())), Ok(None));
     assert_eq!(
         block_on(complete_upload(
