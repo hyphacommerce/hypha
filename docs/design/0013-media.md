@@ -1,11 +1,10 @@
 # 0013: Media, file storage and delivery
 
-- **Status:** Proposed (2026-10-15). Danilo set the direction in conversation: media is a
+- **Status:** Accepted (2026-10-15); building phase 1 (section 10). Danilo set the direction in conversation: media is a
   first-class part of Hypha, like Shopify's; MinIO in Docker for local development, so S3
   incompatibilities show up early; every asset knows where it is used; proper image
   metadata; a CDN story for every host; others can bring their own DAM. Answers given
-  on 2026-10-15 are marked *Decided*; items marked *Open* need his answer before
-  building.
+  on 2026-10-15 are marked *Decided*.
 - **Scope:** the `Asset` aggregate and the `hypha-media` crate, uploads, storage behind
   the S3 API, delivery URLs and image sizes (the CDN), private files, attaching media to
   products and variants, usage tracking, external DAMs, the admin media library, local
@@ -27,7 +26,7 @@
 | M4 | **Every file version has its own immutable key and URL**: `assets/{asset_id}/{version}/{filename}`. Replacing a file makes a new version, so the CDN can cache forever and nothing needs purging (section 4). *Hard to reverse* (URLs get published) |
 | M5 | **Delivery is a `MediaUrls` port**: one public base URL setting (`HYPHA_MEDIA_URL`), and image sizes as URL transforms (Cloudflare Image Transformations, imgproxy, or none). The API returns ready URLs; storefronts ask for sizes without knowing the host (section 4) |
 | M6 | **Private assets never get a public URL**: they are served through short-lived signed URLs, for digital goods and documents later (section 4) |
-| M7 | **Products own an ordered media list; a variant points at one item of it.** The first item is the featured image. Products store asset IDs unchecked, like other cross-domain IDs; a composing command checks them (section 5). *Hard to reverse* |
+| M7 | **Products own an ordered media list; a variant points at one item of it.** The first item is the featured image. Products store asset IDs unchecked, like other cross-domain IDs; the attach commands live in a new composing crate, `hypha-merchandising` (section 5). *Hard to reverse*; *Decided* |
 | M8 | **Usage is recorded, not derived**: each attachment writes an `AssetUsage` (asset, owner, role) in the same batch as the owner's write. "Used by" is one query for any owner, including spores, and an asset in use can't be deleted (section 6) |
 | M9 | **External DAMs plug in as asset sources.** A spore creates Hypha assets that point at its own files and URLs and keeps their metadata in sync; products attach them like uploads (section 7) |
 | M10 | **S3 API for storage**: Cloudflare R2, AWS S3 and MinIO with one adapter. **MinIO in `compose.yaml` for local development** and for the `BlobStore` contract, like Postgres for the repositories (section 8) |
@@ -144,10 +143,12 @@ URLs that cache well; any CDN in front then works.
   plain values only). The commands that attach, reorder and detach (`set_product_media`,
   `set_variant_media`) load the assets, check they exist, are `ready` and public, and
   write the product and its usages in one batch. They need both crates, so they live one
-  layer up. *Open, needs Danilo:* a new composing crate (`hypha-merchandising`, which
-  collections would join later) or an edge `hypha-products` → `hypha-media`, like
-  pricing → markets. I recommend the composing crate: products stays independent of
-  media, and the next owners (collections, the store's logo) go to the same place.
+  layer up, in a new composing crate **`hypha-merchandising`** (*Decided*): it holds the
+  commands that present products (media now; collections and featured products later),
+  as `hypha-cart` composes products and pricing. Products and media stay independent
+  leaf crates; the alternative, an edge `hypha-products` → `hypha-media`, would tie
+  products to media for good and leave later owners (collections, the store's logo)
+  without a shared home.
 - **API:** `ProductResponse` gains `media: [{asset, url, alt, width, height, sizes}]`
   and variants gain `media` (an asset ID); the list summary (0012 L7) gains
   `featured_media` with one small size. Storefront DTOs get the same, public assets only.
@@ -254,4 +255,5 @@ URL the admin's server got from Hypha, so the session token stays server-side (0
 - **M4:** the key and URL scheme: URLs end up in caches, search engines and emails.
 - **M8:** recording usages means every owner's commands write them; switching to derived
   usages later would mean a migration and a query per owner type.
-- **M7 layering:** where the attach commands live (*Open*, section 5).
+- **M7 layering:** a composing `hypha-merchandising` (section 5). Moving the commands
+  into products later would add the edge this avoids.
