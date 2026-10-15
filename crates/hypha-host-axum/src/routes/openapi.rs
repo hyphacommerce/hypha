@@ -418,6 +418,7 @@ mod tests {
             lists,
             [
                 "get /admin/assets",
+                "get /admin/assets/{id}/usages",
                 "get /admin/orders",
                 "get /admin/products"
             ]

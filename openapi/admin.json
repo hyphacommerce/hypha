@@ -966,6 +966,126 @@
         ]
       }
     },
+    "/admin/assets/{id}/usages": {
+      "get": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Where an asset is used (\"used by\"), by owner. An asset in use can't be deleted.",
+        "operationId": "admin.assets.usages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, 1 to 100 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetUsagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "media:read"
+        ]
+      }
+    },
     "/admin/auth/login": {
       "post": {
         "tags": [
@@ -6189,6 +6309,422 @@
         "x-hypha-scopes": [
           "products:read"
         ]
+      },
+      "patch": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Renames a product or changes its handle.",
+        "operationId": "admin.products.update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProductRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/products/{id}/media": {
+      "put": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Replaces a product's media list: attach, reorder and detach in one request.\nDetaching never deletes the asset; variants showing a detached item show none.",
+        "operationId": "admin.products.set_media",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMediaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/products/{id}/options": {
+      "put": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Replaces a product's options and their values (design note 0014, section 3).",
+        "description": "Options and values sent with their `id` are kept; the rest are new. A variant that\nuses a removed value must be listed in `remove_variants` (else `409\noption_value_in_use`, with the variants in `details`). Removing an option drops it\nfrom every variant (`409 duplicate_option_combination` if two would then be the same);\na new option gives every variant its first value.",
+        "operationId": "admin.products.set_options",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetOptionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
       }
     },
     "/admin/products/{id}/status": {
@@ -6213,6 +6749,544 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SetStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/products/{id}/variants": {
+      "post": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Adds a variant: one combination of option values that isn't taken yet.",
+        "operationId": "admin.products.add_variant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddVariantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/products/{id}/variants/{variant_id}": {
+      "delete": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Removes a variant; a product keeps at least one (`409 no_variants`). Price lists and\ninventory keep its ID until they're cleaned up; carts show it as unavailable.",
+        "operationId": "admin.products.remove_variant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          },
+          {
+            "name": "variant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/VariantId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      },
+      "patch": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Changes a variant.",
+        "operationId": "admin.products.update_variant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          },
+          {
+            "name": "variant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/VariantId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVariantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/products/{id}/variants/{variant_id}/media": {
+      "put": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Which image of its product's media a variant shows.",
+        "operationId": "admin.products.set_variant_media",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          },
+          {
+            "name": "variant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/VariantId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVariantMediaRequest"
               }
             }
           },
@@ -8044,6 +9118,33 @@
         },
         "additionalProperties": false
       },
+      "AddVariantRequest": {
+        "type": "object",
+        "required": [
+          "price"
+        ],
+        "properties": {
+          "price": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The base price, before markets and price lists."
+          },
+          "selections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionValueId"
+            },
+            "description": "One value per option, in the order of the product's `options`; empty for a\nproduct without options."
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Unique across the store when set."
+          }
+        },
+        "additionalProperties": false
+      },
       "AddressId": {
         "type": "string",
         "description": "A AddressId: `addr_` and 32 hex digits.",
@@ -8395,6 +9496,49 @@
           "ready",
           "failed"
         ]
+      },
+      "AssetUsagePage": {
+        "type": "object",
+        "description": "A page of a list, newest first (design note 0012).",
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether there are more after these."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssetUsageResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it."
+          }
+        }
+      },
+      "AssetUsageResponse": {
+        "type": "object",
+        "required": [
+          "owner",
+          "role"
+        ],
+        "properties": {
+          "owner": {
+            "$ref": "#/components/schemas/UsageOwnerResponse"
+          },
+          "role": {
+            "type": "string",
+            "description": "How the owner uses it: for a product, `featured` (its first item) or `gallery`."
+          }
+        }
       },
       "AssignPriceListRequest": {
         "type": "object",
@@ -9587,6 +10731,37 @@
         ],
         "pattern": "^opt_[0-9a-f]{32}$"
       },
+      "OptionRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "values"
+        ],
+        "properties": {
+          "id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OptionId",
+                "description": "An existing option, kept (and renamed or moved); omitted for a new one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionValueRequest"
+            },
+            "description": "In order."
+          }
+        },
+        "additionalProperties": false
+      },
       "OptionResponse": {
         "type": "object",
         "required": [
@@ -9616,6 +10791,29 @@
           "optval_0190f1a2b3c47d8e9f00112233445566"
         ],
         "pattern": "^optval_[0-9a-f]{32}$"
+      },
+      "OptionValueRequest": {
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OptionValueId",
+                "description": "An existing value of this option; omitted for a new one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "OptionValueResponse": {
         "type": "object",
@@ -9960,6 +11158,62 @@
         ],
         "pattern": "^prod_[0-9a-f]{32}$"
       },
+      "ProductMediaResponse": {
+        "type": "object",
+        "description": "One item of a product's media list (design note 0014, section 7): what a page needs\nto render it. The asset's own route has the rest.",
+        "required": [
+          "asset_id",
+          "kind",
+          "mime_type",
+          "url"
+        ],
+        "properties": {
+          "alt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The asset's alt text."
+          },
+          "asset_id": {
+            "$ref": "#/components/schemas/AssetId"
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AssetKindDto",
+            "description": "`image` or `video` today. More kinds (3D models) will come: show the ones you\nknow and skip the others."
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Images: a version at most 400 pixels wide when the media URLs can resize, else\nthe original. `null` for videos."
+          },
+          "url": {
+            "type": "string",
+            "description": "The file. Public, so it doesn't expire when served from the media URL; without\none (local development) it is signed and works for 15 minutes."
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "ProductResponse": {
         "type": "object",
         "required": [
@@ -9968,7 +11222,8 @@
           "title",
           "status",
           "options",
-          "variants"
+          "variants",
+          "media"
         ],
         "properties": {
           "handle": {
@@ -9976,6 +11231,13 @@
           },
           "id": {
             "$ref": "#/components/schemas/ProductId"
+          },
+          "media": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductMediaResponse"
+            },
+            "description": "In order; the first is the featured item. At most 250."
           },
           "options": {
             "type": "array",
@@ -10046,6 +11308,17 @@
           "price_ranges"
         ],
         "properties": {
+          "featured_media": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductMediaResponse",
+                "description": "The first item of the product's media, if it has any."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "handle": {
             "type": "string"
           },
@@ -10229,6 +11502,22 @@
         },
         "additionalProperties": false
       },
+      "SetMediaRequest": {
+        "type": "object",
+        "required": [
+          "assets"
+        ],
+        "properties": {
+          "assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssetId"
+            },
+            "description": "Every item, in order (the first is featured): ready, public images and videos,\neach at most once, up to 250."
+          }
+        },
+        "additionalProperties": false
+      },
       "SetOnHandRequest": {
         "type": "object",
         "required": [
@@ -10250,6 +11539,29 @@
         },
         "additionalProperties": false
       },
+      "SetOptionsRequest": {
+        "type": "object",
+        "required": [
+          "options"
+        ],
+        "properties": {
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionRequest"
+            },
+            "description": "Every option, in order: they replace the product's."
+          },
+          "remove_variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VariantId"
+            },
+            "description": "Variants to remove in the same write: the ones that use a value this request\nremoves (a `409 option_value_in_use` lists them)."
+          }
+        },
+        "additionalProperties": false
+      },
       "SetStatusRequest": {
         "type": "object",
         "required": [
@@ -10258,6 +11570,23 @@
         "properties": {
           "status": {
             "$ref": "#/components/schemas/ProductStatus"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetVariantMediaRequest": {
+        "type": "object",
+        "properties": {
+          "asset": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AssetId",
+                "description": "An image of the product's media list, or `null` for none."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -10505,6 +11834,20 @@
         },
         "additionalProperties": false
       },
+      "UpdateProductRequest": {
+        "type": "object",
+        "description": "Title and handle (JSON Merge Patch; neither can be `null`).",
+        "properties": {
+          "handle": {
+            "type": "string",
+            "description": "Changing it changes the product's storefront URLs; old ones aren't redirected."
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateRoleRequest": {
         "type": "object",
         "description": "JSON Merge Patch: only the fields sent change.",
@@ -10559,6 +11902,30 @@
         },
         "additionalProperties": false
       },
+      "UpdateVariantRequest": {
+        "type": "object",
+        "description": "A variant's SKU, price and option values (JSON Merge Patch).",
+        "properties": {
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "selections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionValueId"
+            },
+            "description": "One value per option, in option order; another variant can't have them."
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`null` clears it."
+          }
+        },
+        "additionalProperties": false
+      },
       "UploadRequestResponse": {
         "type": "object",
         "description": "A request for the client to send itself, with the file as its body.",
@@ -10586,6 +11953,24 @@
           },
           "url": {
             "type": "string"
+          }
+        }
+      },
+      "UsageOwnerResponse": {
+        "type": "object",
+        "description": "Something that uses an asset.",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The owner's ID, e.g. `prod_…` for a product."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`product`, or a spore's own kind of owner."
           }
         }
       },
@@ -10646,6 +12031,17 @@
         "properties": {
           "id": {
             "$ref": "#/components/schemas/VariantId"
+          },
+          "media_asset_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AssetId",
+                "description": "The item of the product's `media` this variant shows (an image), if any."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "price": {
             "$ref": "#/components/schemas/Money",

@@ -250,6 +250,7 @@ pub trait Storage: Send + Sync + 'static {
         + HasApiKeys
         + hypha_media::HasAssets
         + hypha_media::HasAssetUsages
+        + hypha_merchandising::MerchandisingPorts
     where
         Self: 'a;
     type Directory<'a>: StoreRepo

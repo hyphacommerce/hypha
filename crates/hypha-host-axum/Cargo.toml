@@ -20,6 +20,7 @@ hypha-checkout = { path = "../hypha-checkout" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
 hypha-media = { path = "../hypha-media" }
+hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 getrandom = "0.4"
 governor = "0.10"

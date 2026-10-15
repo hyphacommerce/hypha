@@ -295,43 +295,25 @@ impl From<PageError> for ApiError {
     }
 }
 
+/// A read outside a command (loading a product's assets for its response).
+impl From<RepoError> for ApiError {
+    fn from(e: RepoError) -> Self {
+        match e {
+            RepoError::Backend(_) => Self::internal(e),
+            RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_) => {
+                Self::domain(StatusCode::CONFLICT, e)
+            }
+        }
+    }
+}
+
 impl From<hypha_products::CommandError> for ApiError {
     fn from(e: hypha_products::CommandError) -> Self {
-        use hypha_products::{CommandError as E, ProductError as P};
+        use hypha_products::CommandError as E;
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
-            // Every route that names a variant names it in its URL.
-            E::Product(P::VariantNotFound(_)) => StatusCode::NOT_FOUND,
-            // What the product already has: other variants, their SKUs, its last variant.
-            E::Product(
-                P::OptionValueInUse { .. }
-                | P::VariantsCollide { .. }
-                | P::DuplicateSku(_)
-                | P::NoVariants,
-            ) => StatusCode::CONFLICT,
-            E::Product(
-                P::InvalidHandle(_)
-                | P::Text(_)
-                | P::DuplicateVariantId(_)
-                | P::SelectionCountMismatch { .. }
-                | P::UnknownOptionValue(_)
-                | P::DuplicateCombination
-                | P::NoOptions
-                | P::EmptyOption(_)
-                | P::DuplicateOptionName(_)
-                | P::DuplicateOptionValue(_)
-                | P::InvalidTransition { .. }
-                | P::InvalidPrice(_)
-                | P::TooManyVariants { .. }
-                | P::UnknownVariant(_)
-                | P::UnknownOption(_)
-                | P::DuplicateOption(_)
-                | P::DuplicateOptionLabel { .. }
-                | P::TooManyMedia { .. }
-                | P::DuplicateMedia(_)
-                | P::MediaNotInProduct(_),
-            )
-            | E::Money(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Product(p) => product_status(p),
+            E::Money(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::HandleTaken { .. } | E::SkuTaken { .. } => StatusCode::CONFLICT,
             E::ProductNotFound(_) => StatusCode::NOT_FOUND,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
@@ -340,11 +322,76 @@ impl From<hypha_products::CommandError> for ApiError {
             ) => StatusCode::CONFLICT,
         };
         let details = match &e {
-            E::Product(P::OptionValueInUse { variants }) => Some(json!({ "variants": variants })),
-            E::Product(P::VariantsCollide { first, second }) => {
-                Some(json!({ "variants": [first, second] }))
-            }
+            E::Product(p) => product_details(p),
             E::SkuTaken { sku, product } => Some(json!({ "sku": sku, "product": product })),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
+    }
+}
+
+/// A product rule's status, for the products and merchandising routes.
+fn product_status(e: &hypha_products::ProductError) -> StatusCode {
+    use hypha_products::ProductError as P;
+    match e {
+        // Every route that names a variant names it in its URL.
+        P::VariantNotFound(_) => StatusCode::NOT_FOUND,
+        // What the product already has: other variants, their SKUs, its last variant.
+        P::OptionValueInUse { .. }
+        | P::VariantsCollide { .. }
+        | P::DuplicateSku(_)
+        | P::NoVariants => StatusCode::CONFLICT,
+        P::InvalidHandle(_)
+        | P::Text(_)
+        | P::DuplicateVariantId(_)
+        | P::SelectionCountMismatch { .. }
+        | P::UnknownOptionValue(_)
+        | P::DuplicateCombination
+        | P::NoOptions
+        | P::EmptyOption(_)
+        | P::DuplicateOptionName(_)
+        | P::DuplicateOptionValue(_)
+        | P::InvalidTransition { .. }
+        | P::InvalidPrice(_)
+        | P::TooManyVariants { .. }
+        | P::UnknownVariant(_)
+        | P::UnknownOption(_)
+        | P::DuplicateOption(_)
+        | P::DuplicateOptionLabel { .. }
+        | P::TooManyMedia { .. }
+        | P::DuplicateMedia(_)
+        | P::MediaNotInProduct(_) => StatusCode::UNPROCESSABLE_ENTITY,
+    }
+}
+
+fn product_details(e: &hypha_products::ProductError) -> Option<Value> {
+    use hypha_products::ProductError as P;
+    match e {
+        P::OptionValueInUse { variants } => Some(json!({ "variants": variants })),
+        P::VariantsCollide { first, second } => Some(json!({ "variants": [first, second] })),
+        _ => None,
+    }
+}
+
+impl From<hypha_merchandising::CommandError> for ApiError {
+    fn from(e: hypha_merchandising::CommandError) -> Self {
+        use hypha_merchandising::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            E::Product(p) => product_status(p),
+            E::ProductNotFound(_) => StatusCode::NOT_FOUND,
+            // Assets arrive in the body.
+            E::AssetNotFound(_)
+            | E::AssetNotReady(_)
+            | E::AssetNotPublic(_)
+            | E::AssetKindNotAllowed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = match &e {
+            E::Product(p) => product_details(p),
             _ => None,
         };
         Self::domain(status, e).with_details(details)

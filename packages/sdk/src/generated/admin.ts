@@ -118,6 +118,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/assets/{id}/usages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Where an asset is used ("used by"), by owner. An asset in use can't be deleted. */
+        get: operations["admin.assets.usages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/auth/login": {
         parameters: {
             query?: never;
@@ -783,6 +800,51 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
+        /** Renames a product or changes its handle. */
+        patch: operations["admin.products.update"];
+        trace?: never;
+    };
+    "/admin/products/{id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replaces a product's media list: attach, reorder and detach in one request.
+         *     Detaching never deletes the asset; variants showing a detached item show none.
+         */
+        put: operations["admin.products.set_media"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/products/{id}/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replaces a product's options and their values (design note 0014, section 3).
+         * @description Options and values sent with their `id` are kept; the rest are new. A variant that
+         *     uses a removed value must be listed in `remove_variants` (else `409
+         *     option_value_in_use`, with the variants in `details`). Removing an option drops it
+         *     from every variant (`409 duplicate_option_combination` if two would then be the same);
+         *     a new option gives every variant its first value.
+         */
+        put: operations["admin.products.set_options"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -801,6 +863,61 @@ export interface paths {
         head?: never;
         /** Changes a product's status (draft, active, archived). */
         patch: operations["admin.products.set_status"];
+        trace?: never;
+    };
+    "/admin/products/{id}/variants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adds a variant: one combination of option values that isn't taken yet. */
+        post: operations["admin.products.add_variant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/products/{id}/variants/{variant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Removes a variant; a product keeps at least one (`409 no_variants`). Price lists and
+         *     inventory keep its ID until they're cleaned up; carts show it as unavailable.
+         */
+        delete: operations["admin.products.remove_variant"];
+        options?: never;
+        head?: never;
+        /** Changes a variant. */
+        patch: operations["admin.products.update_variant"];
+        trace?: never;
+    };
+    "/admin/products/{id}/variants/{variant_id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Which image of its product's media a variant shows. */
+        put: operations["admin.products.set_variant_media"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/admin/roles": {
@@ -994,6 +1111,17 @@ export interface components {
         AddCountryRequest: {
             country: string;
         };
+        AddVariantRequest: {
+            /** @description The base price, before markets and price lists. */
+            price: components["schemas"]["Money"];
+            /**
+             * @description One value per option, in the order of the product's `options`; empty for a
+             *     product without options.
+             */
+            selections?: components["schemas"]["OptionValueId"][];
+            /** @description Unique across the store when set. */
+            sku?: string | null;
+        };
         /**
          * @description A AddressId: `addr_` and 32 hex digits.
          * @example addr_0190f1a2b3c47d8e9f00112233445566
@@ -1109,6 +1237,19 @@ export interface components {
          * @enum {string}
          */
         AssetStatusDto: "pending" | "ready" | "failed";
+        /** @description A page of a list, newest first (design note 0012). */
+        AssetUsagePage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["AssetUsageResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        AssetUsageResponse: {
+            owner: components["schemas"]["UsageOwnerResponse"];
+            /** @description How the owner uses it: for a product, `featured` (its first item) or `gallery`. */
+            role: string;
+        };
         AssignPriceListRequest: {
             price_list?: components["schemas"]["PriceListId"] | null;
         };
@@ -1483,6 +1624,12 @@ export interface components {
          * @example opt_0190f1a2b3c47d8e9f00112233445566
          */
         OptionId: string;
+        OptionRequest: {
+            id?: components["schemas"]["OptionId"] | null;
+            name: string;
+            /** @description In order. */
+            values: components["schemas"]["OptionValueRequest"][];
+        };
         OptionResponse: {
             id: components["schemas"]["OptionId"];
             name: string;
@@ -1493,6 +1640,10 @@ export interface components {
          * @example optval_0190f1a2b3c47d8e9f00112233445566
          */
         OptionValueId: string;
+        OptionValueRequest: {
+            id?: components["schemas"]["OptionValueId"] | null;
+            label: string;
+        };
         OptionValueResponse: {
             id: components["schemas"]["OptionValueId"];
             label: string;
@@ -1606,9 +1757,40 @@ export interface components {
          * @example prod_0190f1a2b3c47d8e9f00112233445566
          */
         ProductId: string;
+        /**
+         * @description One item of a product's media list (design note 0014, section 7): what a page needs
+         *     to render it. The asset's own route has the rest.
+         */
+        ProductMediaResponse: {
+            /** @description The asset's alt text. */
+            alt?: string | null;
+            asset_id: components["schemas"]["AssetId"];
+            /** Format: int32 */
+            height?: number | null;
+            /**
+             * @description `image` or `video` today. More kinds (3D models) will come: show the ones you
+             *     know and skip the others.
+             */
+            kind: components["schemas"]["AssetKindDto"];
+            mime_type: string;
+            /**
+             * @description Images: a version at most 400 pixels wide when the media URLs can resize, else
+             *     the original. `null` for videos.
+             */
+            thumbnail_url?: string | null;
+            /**
+             * @description The file. Public, so it doesn't expire when served from the media URL; without
+             *     one (local development) it is signed and works for 15 minutes.
+             */
+            url: string;
+            /** Format: int32 */
+            width?: number | null;
+        };
         ProductResponse: {
             handle: string;
             id: components["schemas"]["ProductId"];
+            /** @description In order; the first is the featured item. At most 250. */
+            media: components["schemas"]["ProductMediaResponse"][];
             /**
              * @description What variants differ by (Size, Color), in display order; empty for a product
              *     with a single variant.
@@ -1637,6 +1819,7 @@ export interface components {
          *     (design note 0012, L7). `GET /admin/products/{id}` has the rest.
          */
         ProductSummaryResponse: {
+            featured_media?: components["schemas"]["ProductMediaResponse"] | null;
             handle: string;
             id: components["schemas"]["ProductId"];
             /**
@@ -1685,6 +1868,13 @@ export interface components {
         SetFixedPricesRequest: {
             fixed_prices: components["schemas"]["FixedPriceDto"][];
         };
+        SetMediaRequest: {
+            /**
+             * @description Every item, in order (the first is featured): ready, public images and videos,
+             *     each at most once, up to 250.
+             */
+            assets: components["schemas"]["AssetId"][];
+        };
         SetOnHandRequest: {
             /**
              * Format: int64
@@ -1695,8 +1885,20 @@ export interface components {
             /** Format: int64 */
             on_hand: number;
         };
+        SetOptionsRequest: {
+            /** @description Every option, in order: they replace the product's. */
+            options: components["schemas"]["OptionRequest"][];
+            /**
+             * @description Variants to remove in the same write: the ones that use a value this request
+             *     removes (a `409 option_value_in_use` lists them).
+             */
+            remove_variants?: components["schemas"]["VariantId"][];
+        };
         SetStatusRequest: {
             status: components["schemas"]["ProductStatus"];
+        };
+        SetVariantMediaRequest: {
+            asset?: components["schemas"]["AssetId"] | null;
         };
         StartTotpRequest: {
             /**
@@ -1785,6 +1987,12 @@ export interface components {
         UpdateMarketRequest: {
             prices_include_tax?: boolean;
         };
+        /** @description Title and handle (JSON Merge Patch; neither can be `null`). */
+        UpdateProductRequest: {
+            /** @description Changing it changes the product's storefront URLs; old ones aren't redirected. */
+            handle?: string;
+            title?: string;
+        };
         /** @description JSON Merge Patch: only the fields sent change. */
         UpdateRoleRequest: {
             name?: string;
@@ -1805,6 +2013,14 @@ export interface components {
             role?: components["schemas"]["RoleId"];
             status?: components["schemas"]["StatusRequest"];
         };
+        /** @description A variant's SKU, price and option values (JSON Merge Patch). */
+        UpdateVariantRequest: {
+            price?: components["schemas"]["Money"];
+            /** @description One value per option, in option order; another variant can't have them. */
+            selections?: components["schemas"]["OptionValueId"][];
+            /** @description `null` clears it. */
+            sku?: string | null;
+        };
         /** @description A request for the client to send itself, with the file as its body. */
         UploadRequestResponse: {
             /** @description RFC 3339, UTC: the URL stops working then. */
@@ -1814,6 +2030,13 @@ export interface components {
             /** @description `PUT`. */
             method: string;
             url: string;
+        };
+        /** @description Something that uses an asset. */
+        UsageOwnerResponse: {
+            /** @description The owner's ID, e.g. `prod_…` for a product. */
+            id: string;
+            /** @description `product`, or a spore's own kind of owner. */
+            kind: string;
         };
         /**
          * @description A UserId: `user_` and 32 hex digits.
@@ -1835,6 +2058,7 @@ export interface components {
         VariantId: string;
         VariantResponse: {
             id: components["schemas"]["VariantId"];
+            media_asset_id?: components["schemas"]["AssetId"] | null;
             /** @description The base price, before markets and price lists. */
             price: components["schemas"]["Money"];
             /** @description One value per option, in the order of `options`. */
@@ -2570,6 +2794,87 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.assets.usages": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetUsagePage"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6707,6 +7012,327 @@ export interface operations {
             };
         };
     };
+    "admin.products.update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProductRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.set_media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMediaRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.set_options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetOptionsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.products.set_status": {
         parameters: {
             query?: never;
@@ -6719,6 +7345,406 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SetStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.add_variant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddVariantRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.remove_variant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+                variant_id: components["schemas"]["VariantId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.update_variant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+                variant_id: components["schemas"]["VariantId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateVariantRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.set_variant_media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+                variant_id: components["schemas"]["VariantId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetVariantMediaRequest"];
             };
         };
         responses: {

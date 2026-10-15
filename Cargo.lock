@@ -851,6 +851,7 @@ dependencies = [
  "hypha-inventory",
  "hypha-markets",
  "hypha-media",
+ "hypha-merchandising",
  "hypha-orders",
  "hypha-products",
  "hypha-store-postgres",

@@ -1123,6 +1123,23 @@
         },
         "additionalProperties": false
       },
+      "AssetId": {
+        "type": "string",
+        "description": "A AssetId: `asset_` and 32 hex digits.",
+        "examples": [
+          "asset_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^asset_[0-9a-f]{32}$"
+      },
+      "AssetKindDto": {
+        "type": "string",
+        "description": "`AssetKind` on the wire.",
+        "enum": [
+          "image",
+          "video",
+          "file"
+        ]
+      },
       "CartId": {
         "type": "string",
         "description": "A CartId: `cart_` and 32 hex digits.",
@@ -1657,6 +1674,62 @@
         ],
         "pattern": "^prod_[0-9a-f]{32}$"
       },
+      "ProductMediaResponse": {
+        "type": "object",
+        "description": "One item of a product's media list (design note 0014, section 7): what a page needs\nto render it. The asset's own route has the rest.",
+        "required": [
+          "asset_id",
+          "kind",
+          "mime_type",
+          "url"
+        ],
+        "properties": {
+          "alt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The asset's alt text."
+          },
+          "asset_id": {
+            "$ref": "#/components/schemas/AssetId"
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AssetKindDto",
+            "description": "`image` or `video` today. More kinds (3D models) will come: show the ones you\nknow and skip the others."
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Images: a version at most 400 pixels wide when the media URLs can resize, else\nthe original. `null` for videos."
+          },
+          "url": {
+            "type": "string",
+            "description": "The file. Public, so it doesn't expire when served from the media URL; without\none (local development) it is signed and works for 15 minutes."
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "SetEmailRequest": {
         "type": "object",
         "properties": {
@@ -1692,7 +1765,8 @@
           "id",
           "handle",
           "title",
-          "variants"
+          "variants",
+          "media"
         ],
         "properties": {
           "handle": {
@@ -1700,6 +1774,13 @@
           },
           "id": {
             "$ref": "#/components/schemas/ProductId"
+          },
+          "media": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductMediaResponse"
+            },
+            "description": "In order; the first is the featured item."
           },
           "title": {
             "type": "string"
@@ -1732,6 +1813,17 @@
         "properties": {
           "id": {
             "$ref": "#/components/schemas/VariantId"
+          },
+          "media_asset_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AssetId",
+                "description": "The item of the product's `media` this variant shows (an image), if any."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },

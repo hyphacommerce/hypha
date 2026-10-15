@@ -168,6 +168,44 @@ step "a page too large" 422 invalid_limit "$BASE/admin/products?limit=500"
 step "an unknown filter" 400 invalid_query "$BASE/admin/products?sort=title"
 step "a cursor from another list" 400 invalid_cursor "$BASE/admin/products?cursor=ord_00000000000000000000000000000000"
 
+# product editing (design note 0014), on a product of its own
+step "create shirt" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
+    -d '{"handle":"shirt","title":"Shirt","price":{"amount":1500,"currency":"EUR"}}'
+SHIRT=$(id)
+SHIRT_S=$(variant)
+step "rename it" 200 - -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" \
+    -d '{"title":"Linen shirt","handle":"linen-shirt"}'
+contains "with its new handle" '"handle":"linen-shirt","title":"Linen shirt"'
+step "a taken handle" 409 handle_taken -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" -d '{"handle":"mug"}'
+step "a title can't be cleared" 422 - -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" -d '{"title":null}'
+step "give it a size" 200 - -X PUT "$BASE/admin/products/$SHIRT/options" -H "$JSON" \
+    -d '{"options":[{"name":"Size","values":[{"label":"S"},{"label":"M"}]}]}'
+contains "its variant is S" '"title":"S"'
+SIZE=$(sed -E 's/.*"options":\[\{"id":"(opt_[0-9a-f]+)".*/\1/' <<<"$BODY")
+SIZE_S=$(sed -E 's/.*"id":"(optval_[0-9a-f]+)","label":"S".*/\1/' <<<"$BODY")
+SIZE_M=$(sed -E 's/.*"id":"(optval_[0-9a-f]+)","label":"M".*/\1/' <<<"$BODY")
+ADD_M="{\"sku\":\"SHIRT-M\",\"price\":{\"amount\":1600,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_M\"]}"
+step "add the M variant" 201 - -X POST "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d "$ADD_M"
+SHIRT_M=$(sed -E 's/.*"id":"(var_[0-9a-f]+)","price":\{[^}]*\},"sku":"SHIRT-M".*/\1/' <<<"$BODY")
+step "M twice" 422 duplicate_option_combination -X POST "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d "$ADD_M"
+step "remove the M variant" 200 - -X DELETE "$BASE/admin/products/$SHIRT/variants/$SHIRT_M"
+step "and add it back" 201 - -X POST "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d "$ADD_M"
+SHIRT_M=$(sed -E 's/.*"id":"(var_[0-9a-f]+)","price":\{[^}]*\},"sku":"SHIRT-M".*/\1/' <<<"$BODY")
+step "the S variant's SKU and price" 200 - -X PATCH "$BASE/admin/products/$SHIRT/variants/$SHIRT_S" -H "$JSON" \
+    -d '{"sku":"SHIRT-S","price":{"amount":1400,"currency":"EUR"}}'
+contains "are stored" '"price":{"amount":1400,"currency":"EUR"},"sku":"SHIRT-S"'
+step "a SKU another variant has" 409 sku_taken -X PATCH "$BASE/admin/products/$SHIRT/variants/$SHIRT_S" -H "$JSON" \
+    -d '{"sku":"SHIRT-M"}'
+ONLY_S="{\"options\":[{\"id\":\"$SIZE\",\"name\":\"Size\",\"values\":[{\"id\":\"$SIZE_S\",\"label\":\"S\"}]}]"
+step "removing M while a variant uses it" 409 option_value_in_use -X PUT "$BASE/admin/products/$SHIRT/options" \
+    -H "$JSON" -d "$ONLY_S}"
+contains "names that variant" "\"details\":{\"variants\":[\"$SHIRT_M\"]}"
+step "removing M with its variant" 200 - -X PUT "$BASE/admin/products/$SHIRT/options" \
+    -H "$JSON" -d "$ONLY_S,\"remove_variants\":[\"$SHIRT_M\"]}"
+step "the last variant stays" 409 no_variants -X DELETE "$BASE/admin/products/$SHIRT/variants/$SHIRT_S"
+step "an unknown variant" 404 variant_not_found \
+    -X DELETE "$BASE/admin/products/$SHIRT/variants/var_00000000000000000000000000000000"
+
 # media (design note 0013): the file goes straight to storage with the signed request,
 # so that PUT is a plain curl (no admin credentials; S3 checks its own signature).
 PNG_FILE=$(mktemp)
@@ -192,6 +230,23 @@ step "set its alt text" 200 - -X PATCH "$BASE/admin/assets/$ASSET" -H "$JSON" -d
 contains "the alt text is stored" '"alt":"A blue shirt"'
 step "an SVG is refused" 422 unsupported_media_type -X POST "$BASE/admin/assets" -H "$JSON" \
     -d '{"filename":"logo.svg","mime_type":"image/svg+xml","byte_size":10}'
+step "attach it to the shirt" 200 - -X PUT "$BASE/admin/products/$SHIRT/media" -H "$JSON" \
+    -d "{\"assets\":[\"$ASSET\"]}"
+contains "with a URL and its alt text" "\"media\":[{\"asset_id\":\"$ASSET\",\"kind\":\"image\""
+contains "and its alt text" '"alt":"A blue shirt","width":3,"height":2}]'
+step "the S variant shows it" 200 - -X PUT "$BASE/admin/products/$SHIRT/variants/$SHIRT_S/media" -H "$JSON" \
+    -d "{\"asset\":\"$ASSET\"}"
+contains "by its asset" "\"media_asset_id\":\"$ASSET\""
+step "the list features it" 200 - "$BASE/admin/products?limit=1"
+contains "on the shirt's summary" "\"featured_media\":{\"asset_id\":\"$ASSET\""
+step "the asset is used by the shirt" 200 - "$BASE/admin/assets/$ASSET/usages"
+contains "as its featured item" "{\"owner\":{\"kind\":\"product\",\"id\":\"$SHIRT\"},\"role\":\"featured\"}"
+step "an asset in use isn't deleted" 409 asset_in_use -X DELETE "$BASE/admin/assets/$ASSET"
+contains "the usages are in the details" '"has_more":false'
+step "a missing asset isn't attached" 422 asset_not_found -X PUT "$BASE/admin/products/$SHIRT/media" -H "$JSON" \
+    -d '{"assets":["asset_00000000000000000000000000000000"]}'
+step "detach it" 200 - -X PUT "$BASE/admin/products/$SHIRT/media" -H "$JSON" -d '{"assets":[]}'
+contains "the variant shows nothing now" '"media_asset_id":null'
 step "delete the asset" 204 - -X DELETE "$BASE/admin/assets/$ASSET"
 step "it is gone" 404 asset_not_found "$BASE/admin/assets/$ASSET"
 

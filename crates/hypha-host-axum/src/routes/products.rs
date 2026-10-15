@@ -1,15 +1,27 @@
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{Money, OptionId, OptionValueId, ProductId, VariantId};
+use hypha_core::{AssetId, Money, OptionId, OptionValueId, ProductId, VariantId};
+use hypha_media::{Asset, HasAssets};
+use hypha_merchandising::{
+    ProductSummaryView, ProductView, get_product_view, list_product_views, set_product_media,
+    set_variant_media,
+};
 use hypha_products::{
-    CreateSimpleProduct, HasProducts, Product, ProductStatus, ProductSummary,
-    create_simple_product, get_product, list_products, set_product_status,
+    AddVariant, CreateSimpleProduct, HasProducts, OptionDraft, OptionValueDraft, Product,
+    ProductStatus, SetProductOptions, UpdateProduct, UpdateVariant, add_product_variant,
+    create_simple_product, remove_product_variant, set_product_options, set_product_status,
+    update_product, update_product_variant,
 };
 use serde::{Deserialize, Serialize};
 
-use super::page::{ListQuery, PageParams, PageResponse};
+use super::{
+    assets::AssetKindDto,
+    page::{ListQuery, PageParams, PageResponse},
+};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId, Storefront},
+    media::Media,
+    patch,
     state::{SharedState, Storage},
 };
 
@@ -68,6 +80,64 @@ pub(super) struct ProductResponse {
     /// with a single variant.
     options: Vec<OptionResponse>,
     variants: Vec<VariantResponse>,
+    /// In order; the first is the featured item. At most 250.
+    media: Vec<ProductMediaResponse>,
+}
+
+/// One item of a product's media list (design note 0014, section 7): what a page needs
+/// to render it. The asset's own route has the rest.
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct ProductMediaResponse {
+    asset_id: AssetId,
+    /// `image` or `video` today. More kinds (3D models) will come: show the ones you
+    /// know and skip the others.
+    kind: AssetKindDto,
+    mime_type: String,
+    /// The file. Public, so it doesn't expire when served from the media URL; without
+    /// one (local development) it is signed and works for 15 minutes.
+    url: String,
+    /// Images: a version at most 400 pixels wide when the media URLs can resize, else
+    /// the original. `null` for videos.
+    thumbnail_url: Option<String>,
+    /// The asset's alt text.
+    alt: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+}
+
+impl ProductMediaResponse {
+    async fn new(asset: &Asset, media: &Media) -> Result<Self, ApiError> {
+        Ok(Self {
+            asset_id: asset.id(),
+            kind: asset.kind().into(),
+            mime_type: asset.mime_type().to_string(),
+            // Only ready assets can be attached, so there is always a file.
+            url: media.url(asset).await?.ok_or_else(|| {
+                ApiError::internal(format!("attached asset {} has no file", asset.id()))
+            })?,
+            thumbnail_url: media.thumbnail_url(asset).await?,
+            alt: asset.alt().map(str::to_string),
+            width: asset.width(),
+            height: asset.height(),
+        })
+    }
+}
+
+/// The items for `assets`, in order. A deployment without file storage can still serve
+/// products without media; one with media needs it (`503 media_not_configured`).
+async fn media_items(
+    assets: &[Asset],
+    media: Option<&Media>,
+) -> Result<Vec<ProductMediaResponse>, ApiError> {
+    if assets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let media = media.ok_or_else(ApiError::media_not_configured)?;
+    let mut items = Vec::with_capacity(assets.len());
+    for asset in assets {
+        items.push(ProductMediaResponse::new(asset, media).await?);
+    }
+    Ok(items)
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -93,11 +163,14 @@ pub(super) struct VariantResponse {
     title: Option<String>,
     /// One value per option, in the order of `options`.
     selections: Vec<OptionValueId>,
+    /// The item of the product's `media` this variant shows (an image), if any.
+    media_asset_id: Option<AssetId>,
 }
 
-impl From<&Product> for ProductResponse {
-    fn from(p: &Product) -> Self {
-        Self {
+impl ProductResponse {
+    async fn new(view: &ProductView, media: Option<&Media>) -> Result<Self, ApiError> {
+        let p = &view.product;
+        Ok(Self {
             id: p.id(),
             handle: p.handle().as_str().to_string(),
             title: p.title().to_string(),
@@ -127,10 +200,24 @@ impl From<&Product> for ProductResponse {
                     sku: v.sku().map(str::to_string),
                     title: p.variant_title(v.id()),
                     selections: v.selections().to_vec(),
+                    media_asset_id: v.media(),
                 })
                 .collect(),
-        }
+            media: media_items(&view.media, media).await?,
+        })
     }
+}
+
+/// The response for a product a command just returned, with its media's assets.
+async fn respond<S: Storage>(
+    state: &SharedState<S>,
+    ports: &S::Ports<'_>,
+    product: Product,
+) -> Result<Json<ProductResponse>, ApiError> {
+    let view = ProductView::load(ports.assets(), product).await?;
+    Ok(Json(
+        ProductResponse::new(&view, state.media.as_ref()).await?,
+    ))
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -153,6 +240,8 @@ pub(super) struct ProductSummaryResponse {
     /// The lowest and highest variant price in each currency the variants are priced
     /// in, ordered by currency code: usually one.
     price_ranges: Vec<PriceRangeResponse>,
+    /// The first item of the product's media, if it has any.
+    featured_media: Option<ProductMediaResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -162,12 +251,17 @@ pub(super) struct PriceRangeResponse {
     max: Money,
 }
 
-impl From<ProductSummary> for ProductSummaryResponse {
-    fn from(p: ProductSummary) -> Self {
-        Self {
+impl ProductSummaryResponse {
+    async fn new(view: &ProductSummaryView, media: Option<&Media>) -> Result<Self, ApiError> {
+        let featured_media = match &view.featured_media {
+            Some(asset) => media_items(std::slice::from_ref(asset), media).await?.pop(),
+            None => None,
+        };
+        let p = &view.summary;
+        Ok(Self {
             id: p.id,
             handle: p.handle.as_str().to_string(),
-            title: p.title,
+            title: p.title.clone(),
             status: p.status.into(),
             variant_count: p.variant_count as u64,
             price_ranges: p
@@ -178,7 +272,8 @@ impl From<ProductSummary> for ProductSummaryResponse {
                     max: r.max.money(),
                 })
                 .collect(),
-        }
+            featured_media,
+        })
     }
 }
 
@@ -201,8 +296,16 @@ pub(super) async fn list<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, filters) = query.parse()?;
     let status = filters.status.map(Into::into);
-    let page = list_products(&ctx, ports.products(), status, page).await?;
-    Ok(Json(PageResponse::new(page, |p| p.id, |p| Ok(p.into()))?))
+    let page = list_product_views(&ctx, &ports, status, page).await?;
+    let mut items = Vec::with_capacity(page.items.len());
+    for view in &page.items {
+        items.push(ProductSummaryResponse::new(view, state.media.as_ref()).await?);
+    }
+    Ok(Json(PageResponse::with_items(
+        &page,
+        |v| v.summary.id,
+        items,
+    )))
 }
 
 /// Creates a product with one variant, as a draft.
@@ -226,7 +329,7 @@ pub(super) async fn create<S: Storage>(
         price: req.price,
     };
     let product = create_simple_product(&ctx, ports.products(), &state.ids, input).await?;
-    Ok((StatusCode::CREATED, Json(ProductResponse::from(&product))))
+    Ok((StatusCode::CREATED, respond(&state, &ports, product).await?))
 }
 
 /// A product, in any status.
@@ -243,8 +346,10 @@ pub(super) async fn fetch<S: Storage>(
     PathId(id): PathId<ProductId>,
 ) -> Result<Json<ProductResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let product = get_product(&ctx, ports.products(), id).await?;
-    Ok(Json(ProductResponse::from(&product)))
+    let view = get_product_view(&ctx, &ports, id).await?;
+    Ok(Json(
+        ProductResponse::new(&view, state.media.as_ref()).await?,
+    ))
 }
 
 /// A product as a storefront sees it (design note 0010, S5): active products only, without
@@ -260,25 +365,34 @@ pub(super) struct StorefrontProductResponse {
     handle: String,
     title: String,
     variants: Vec<StorefrontVariantResponse>,
+    /// In order; the first is the featured item.
+    media: Vec<ProductMediaResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct StorefrontVariantResponse {
     id: VariantId,
+    /// The item of the product's `media` this variant shows (an image), if any.
+    media_asset_id: Option<AssetId>,
 }
 
-impl From<&Product> for StorefrontProductResponse {
-    fn from(p: &Product) -> Self {
-        Self {
+impl StorefrontProductResponse {
+    async fn new(view: &ProductView, media: Option<&Media>) -> Result<Self, ApiError> {
+        let p = &view.product;
+        Ok(Self {
             id: p.id(),
             handle: p.handle().as_str().to_string(),
             title: p.title().to_string(),
             variants: p
                 .variants()
                 .iter()
-                .map(|v| StorefrontVariantResponse { id: v.id() })
+                .map(|v| StorefrontVariantResponse {
+                    id: v.id(),
+                    media_asset_id: v.media(),
+                })
                 .collect(),
-        }
+            media: media_items(&view.media, media).await?,
+        })
     }
 }
 
@@ -296,11 +410,13 @@ pub(super) async fn fetch_storefront<S: Storage>(
     PathId(id): PathId<ProductId>,
 ) -> Result<Json<StorefrontProductResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let product = get_product(&ctx, ports.products(), id).await?;
-    if product.status() != ProductStatus::Active {
+    let view = get_product_view(&ctx, &ports, id).await?;
+    if view.product.status() != ProductStatus::Active {
         return Err(hypha_products::CommandError::ProductNotFound(id).into());
     }
-    Ok(Json(StorefrontProductResponse::from(&product)))
+    Ok(Json(
+        StorefrontProductResponse::new(&view, state.media.as_ref()).await?,
+    ))
 }
 
 /// Changes a product's status (draft, active, archived).
@@ -321,7 +437,286 @@ pub(super) async fn set_status<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let product = set_product_status(&ctx, ports.products(), id, req.status.into()).await?;
-    Ok(Json(ProductResponse::from(&product)))
+    respond(&state, &ports, product).await
+}
+
+/// Title and handle (JSON Merge Patch; neither can be `null`).
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct UpdateProductRequest {
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = String, required = false)]
+    title: Option<String>,
+    /// Changing it changes the product's storefront URLs; old ones aren't redirected.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = String, required = false)]
+    handle: Option<String>,
+}
+
+/// Renames a product or changes its handle.
+#[utoipa::path(
+    patch,
+    path = "/admin/products/{id}",
+    params(("id" = ProductId, Path)),
+    request_body = UpdateProductRequest,
+    responses((status = 200, description = "OK", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
+pub(super) async fn update<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<ProductId>,
+    body: JsonBody<UpdateProductRequest>,
+) -> Result<Json<ProductResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let input = UpdateProduct {
+        title: req.title,
+        handle: req.handle,
+    };
+    let product = update_product(&ctx, ports.products(), id, input).await?;
+    respond(&state, &ports, product).await
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SetOptionsRequest {
+    /// Every option, in order: they replace the product's.
+    options: Vec<OptionRequest>,
+    /// Variants to remove in the same write: the ones that use a value this request
+    /// removes (a `409 option_value_in_use` lists them).
+    #[serde(default)]
+    remove_variants: Vec<VariantId>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct OptionRequest {
+    /// An existing option, kept (and renamed or moved); omitted for a new one.
+    #[serde(default)]
+    id: Option<OptionId>,
+    name: String,
+    /// In order.
+    values: Vec<OptionValueRequest>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct OptionValueRequest {
+    /// An existing value of this option; omitted for a new one.
+    #[serde(default)]
+    id: Option<OptionValueId>,
+    label: String,
+}
+
+/// Replaces a product's options and their values (design note 0014, section 3).
+///
+/// Options and values sent with their `id` are kept; the rest are new. A variant that
+/// uses a removed value must be listed in `remove_variants` (else `409
+/// option_value_in_use`, with the variants in `details`). Removing an option drops it
+/// from every variant (`409 duplicate_option_combination` if two would then be the same);
+/// a new option gives every variant its first value.
+#[utoipa::path(
+    put,
+    path = "/admin/products/{id}/options",
+    params(("id" = ProductId, Path)),
+    request_body = SetOptionsRequest,
+    responses((status = 200, description = "OK", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
+pub(super) async fn set_options<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<ProductId>,
+    body: JsonBody<SetOptionsRequest>,
+) -> Result<Json<ProductResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let input = SetProductOptions {
+        options: req
+            .options
+            .into_iter()
+            .map(|o| OptionDraft {
+                id: o.id,
+                name: o.name,
+                values: o
+                    .values
+                    .into_iter()
+                    .map(|v| OptionValueDraft {
+                        id: v.id,
+                        label: v.label,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        remove_variants: req.remove_variants,
+    };
+    let product = set_product_options(&ctx, ports.products(), &state.ids, id, input).await?;
+    respond(&state, &ports, product).await
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AddVariantRequest {
+    /// Unique across the store when set.
+    #[serde(default)]
+    sku: Option<String>,
+    /// The base price, before markets and price lists.
+    price: Money,
+    /// One value per option, in the order of the product's `options`; empty for a
+    /// product without options.
+    #[serde(default)]
+    selections: Vec<OptionValueId>,
+}
+
+/// Adds a variant: one combination of option values that isn't taken yet.
+#[utoipa::path(
+    post,
+    path = "/admin/products/{id}/variants",
+    params(("id" = ProductId, Path)),
+    request_body = AddVariantRequest,
+    responses((status = 201, description = "Created", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
+pub(super) async fn add_variant<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<ProductId>,
+    body: JsonBody<AddVariantRequest>,
+) -> Result<(StatusCode, Json<ProductResponse>), ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let input = AddVariant {
+        sku: req.sku,
+        price: req.price,
+        selections: req.selections,
+    };
+    let product = add_product_variant(&ctx, ports.products(), &state.ids, id, input).await?;
+    Ok((StatusCode::CREATED, respond(&state, &ports, product).await?))
+}
+
+/// A variant's SKU, price and option values (JSON Merge Patch).
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct UpdateVariantRequest {
+    /// `null` clears it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>, required = false)]
+    sku: Option<Option<String>>,
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = Money, required = false)]
+    price: Option<Money>,
+    /// One value per option, in option order; another variant can't have them.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = Vec<OptionValueId>, required = false)]
+    selections: Option<Vec<OptionValueId>>,
+}
+
+/// Changes a variant.
+#[utoipa::path(
+    patch,
+    path = "/admin/products/{id}/variants/{variant_id}",
+    params(("id" = ProductId, Path), ("variant_id" = VariantId, Path)),
+    request_body = UpdateVariantRequest,
+    responses((status = 200, description = "OK", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
+pub(super) async fn update_variant<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId((id, variant)): PathId<(ProductId, VariantId)>,
+    body: JsonBody<UpdateVariantRequest>,
+) -> Result<Json<ProductResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let input = UpdateVariant {
+        sku: req.sku,
+        price: req.price,
+        selections: req.selections,
+    };
+    let product = update_product_variant(&ctx, ports.products(), id, variant, input).await?;
+    respond(&state, &ports, product).await
+}
+
+/// Removes a variant; a product keeps at least one (`409 no_variants`). Price lists and
+/// inventory keep its ID until they're cleaned up; carts show it as unavailable.
+#[utoipa::path(
+    delete,
+    path = "/admin/products/{id}/variants/{variant_id}",
+    params(("id" = ProductId, Path), ("variant_id" = VariantId, Path)),
+    responses((status = 200, description = "OK", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
+pub(super) async fn remove_variant<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId((id, variant)): PathId<(ProductId, VariantId)>,
+) -> Result<Json<ProductResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let product = remove_product_variant(&ctx, ports.products(), id, variant).await?;
+    respond(&state, &ports, product).await
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SetMediaRequest {
+    /// Every item, in order (the first is featured): ready, public images and videos,
+    /// each at most once, up to 250.
+    assets: Vec<AssetId>,
+}
+
+/// Replaces a product's media list: attach, reorder and detach in one request.
+/// Detaching never deletes the asset; variants showing a detached item show none.
+#[utoipa::path(
+    put,
+    path = "/admin/products/{id}/media",
+    params(("id" = ProductId, Path)),
+    request_body = SetMediaRequest,
+    responses((status = 200, description = "OK", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
+pub(super) async fn set_media<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<ProductId>,
+    body: JsonBody<SetMediaRequest>,
+) -> Result<Json<ProductResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let view = set_product_media(&ctx, &ports, id, req.assets).await?;
+    Ok(Json(
+        ProductResponse::new(&view, state.media.as_ref()).await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SetVariantMediaRequest {
+    /// An image of the product's media list, or `null` for none.
+    asset: Option<AssetId>,
+}
+
+/// Which image of its product's media a variant shows.
+#[utoipa::path(
+    put,
+    path = "/admin/products/{id}/variants/{variant_id}/media",
+    params(("id" = ProductId, Path), ("variant_id" = VariantId, Path)),
+    request_body = SetVariantMediaRequest,
+    responses((status = 200, description = "OK", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
+pub(super) async fn set_variant_media_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId((id, variant)): PathId<(ProductId, VariantId)>,
+    body: JsonBody<SetVariantMediaRequest>,
+) -> Result<Json<ProductResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let view = set_variant_media(&ctx, &ports, id, variant, req.asset).await?;
+    Ok(Json(
+        ProductResponse::new(&view, state.media.as_ref()).await?,
+    ))
 }
 
 #[cfg(test)]

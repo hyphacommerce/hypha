@@ -4,8 +4,9 @@
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::AssetId;
 use hypha_media::{
-    Asset, AssetKind, AssetStatus, CreateUpload, HasAssets, UpdateAsset, Visibility,
-    complete_upload, create_upload, delete_asset, get_asset, list_assets, update_asset,
+    Asset, AssetKind, AssetStatus, AssetUsage, CreateUpload, HasAssets, UpdateAsset, UsageOwner,
+    Visibility, complete_upload, create_upload, delete_asset, get_asset, list_asset_usages,
+    list_assets, update_asset,
 };
 use serde::{Deserialize, Serialize};
 
@@ -382,4 +383,59 @@ pub(super) async fn remove<S: Storage>(
     let media = media(&state)?;
     delete_asset(&ctx, &ports, &media.blobs, id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Something that uses an asset.
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct UsageOwnerResponse {
+    /// `product`, or a spore's own kind of owner.
+    kind: String,
+    /// The owner's ID, e.g. `prod_…` for a product.
+    id: String,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct AssetUsageResponse {
+    owner: UsageOwnerResponse,
+    /// How the owner uses it: for a product, `featured` (its first item) or `gallery`.
+    role: String,
+}
+
+impl From<&AssetUsage> for AssetUsageResponse {
+    fn from(u: &AssetUsage) -> Self {
+        Self {
+            owner: UsageOwnerResponse {
+                kind: u.owner.kind().to_string(),
+                id: u.owner.id().to_string(),
+            },
+            role: u.role.as_str().to_string(),
+        }
+    }
+}
+
+/// A page of an asset's usages (named for the documents).
+type AssetUsagePage = PageResponse<AssetUsageResponse>;
+
+/// Where an asset is used ("used by"), by owner. An asset in use can't be deleted.
+#[utoipa::path(
+    get,
+    path = "/admin/assets/{id}/usages",
+    params(("id" = AssetId, Path), PageParams),
+    responses((status = 200, description = "OK", body = AssetUsagePage)),
+    extensions(("x-hypha-scopes" = json!(["media:read"]))),
+)]
+pub(super) async fn usages<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<AssetId>,
+    query: ListQuery,
+) -> Result<Json<AssetUsagePage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, _) = query.parse::<UsageOwner>()?;
+    let page = list_asset_usages(&ctx, &ports, id, page).await?;
+    Ok(Json(PageResponse::new(
+        page,
+        |u| u.owner.clone(),
+        |u| Ok((&u).into()),
+    )?))
 }

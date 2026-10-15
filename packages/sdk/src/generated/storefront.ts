@@ -152,6 +152,16 @@ export interface components {
             variant: components["schemas"]["VariantId"];
         };
         /**
+         * @description A AssetId: `asset_` and 32 hex digits.
+         * @example asset_0190f1a2b3c47d8e9f00112233445566
+         */
+        AssetId: string;
+        /**
+         * @description `AssetKind` on the wire.
+         * @enum {string}
+         */
+        AssetKindDto: "image" | "video" | "file";
+        /**
          * @description A CartId: `cart_` and 32 hex digits.
          * @example cart_0190f1a2b3c47d8e9f00112233445566
          */
@@ -334,6 +344,35 @@ export interface components {
          * @example prod_0190f1a2b3c47d8e9f00112233445566
          */
         ProductId: string;
+        /**
+         * @description One item of a product's media list (design note 0014, section 7): what a page needs
+         *     to render it. The asset's own route has the rest.
+         */
+        ProductMediaResponse: {
+            /** @description The asset's alt text. */
+            alt?: string | null;
+            asset_id: components["schemas"]["AssetId"];
+            /** Format: int32 */
+            height?: number | null;
+            /**
+             * @description `image` or `video` today. More kinds (3D models) will come: show the ones you
+             *     know and skip the others.
+             */
+            kind: components["schemas"]["AssetKindDto"];
+            mime_type: string;
+            /**
+             * @description Images: a version at most 400 pixels wide when the media URLs can resize, else
+             *     the original. `null` for videos.
+             */
+            thumbnail_url?: string | null;
+            /**
+             * @description The file. Public, so it doesn't expire when served from the media URL; without
+             *     one (local development) it is signed and works for 15 minutes.
+             */
+            url: string;
+            /** Format: int32 */
+            width?: number | null;
+        };
         SetEmailRequest: {
             /** @description `null` clears it. */
             email?: string | null;
@@ -357,6 +396,8 @@ export interface components {
         StorefrontProductResponse: {
             handle: string;
             id: components["schemas"]["ProductId"];
+            /** @description In order; the first is the featured item. */
+            media: components["schemas"]["ProductMediaResponse"][];
             title: string;
             variants: components["schemas"]["StorefrontVariantResponse"][];
         };
@@ -366,6 +407,7 @@ export interface components {
         };
         StorefrontVariantResponse: {
             id: components["schemas"]["VariantId"];
+            media_asset_id?: components["schemas"]["AssetId"] | null;
         };
         /**
          * @description A TaxClassId: `txc_` and 32 hex digits.

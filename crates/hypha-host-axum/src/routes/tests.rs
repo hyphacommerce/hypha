@@ -430,7 +430,112 @@ async fn a_listed_product_is_a_summary() {
                 "min": { "amount": 1000, "currency": "EUR" },
                 "max": { "amount": 1000, "currency": "EUR" },
             }],
+            "featured_media": null,
         })
+    );
+}
+
+#[tokio::test]
+async fn a_product_is_edited_over_http() {
+    let app = app().await;
+    let id = create_product(&app, "shirt").await;
+    create_product(&app, "mug").await;
+    let product = format!("/admin/products/{id}");
+
+    let (status, renamed) = send(
+        &app,
+        "PATCH",
+        &product,
+        Some(r#"{"title":"Linen shirt","handle":"linen-shirt"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, &renamed["title"], &renamed["handle"]),
+        (StatusCode::OK, &json!("Linen shirt"), &json!("linen-shirt"))
+    );
+    let (status, body) = send(&app, "PATCH", &product, Some(r#"{"handle":"mug"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "handle_taken")
+    );
+    let (status, body) = send(&app, "PATCH", &product, Some(r#"{"title":null}"#)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // Size (S, M): the first variant becomes S; then add M.
+    let options = format!("{product}/options");
+    let body = r#"{"options":[{"name":"Size","values":[{"label":"S"},{"label":"M"}]}]}"#;
+    let (status, sized) = send(&app, "PUT", &options, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{sized}");
+    assert_eq!(sized["variants"][0]["title"], "S");
+    let size = &sized["options"][0];
+    let (s, m) = (&size["values"][0]["id"], &size["values"][1]["id"]);
+    let first = sized["variants"][0]["id"].as_str().unwrap().to_string();
+
+    let variants = format!("{product}/variants");
+    let body = json!({ "sku": "SHIRT-M", "price": { "amount": 1200, "currency": "EUR" }, "selections": [m] });
+    let (status, added) = send(&app, "POST", &variants, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{added}");
+    let second = added["variants"][1]["id"].as_str().unwrap().to_string();
+    assert_eq!(added["variants"][1]["title"], "M");
+    let (status, body) = send(&app, "POST", &variants, Some(&body.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "duplicate_option_combination"
+        )
+    );
+
+    let first_url = format!("{variants}/{first}");
+    let (status, body) = send(&app, "PATCH", &first_url, Some(r#"{"sku":"SHIRT-M"}"#)).await;
+    assert_eq!((status, code(&body)), (StatusCode::CONFLICT, "sku_taken"));
+    let (status, patched) = send(
+        &app,
+        "PATCH",
+        &first_url,
+        Some(r#"{"sku":"SHIRT-S","price":{"amount":900,"currency":"EUR"}}"#),
+    )
+    .await;
+    assert_eq!(
+        (
+            status,
+            &patched["variants"][0]["sku"],
+            &patched["variants"][0]["price"]["amount"]
+        ),
+        (StatusCode::OK, &json!("SHIRT-S"), &json!(900))
+    );
+    let (status, cleared) = send(&app, "PATCH", &first_url, Some(r#"{"sku":null}"#)).await;
+    assert_eq!(
+        (status, &cleared["variants"][0]["sku"]),
+        (StatusCode::OK, &Value::Null)
+    );
+
+    // Removing M, which the second variant uses: refused, then named.
+    let only_s = json!({ "options": [{ "id": size["id"], "name": "Size", "values": [{ "id": s, "label": "S" }] }] });
+    let (status, body) = send(&app, "PUT", &options, Some(&only_s.to_string())).await;
+    assert_eq!(
+        (status, code(&body), &body["details"]),
+        (
+            StatusCode::CONFLICT,
+            "option_value_in_use",
+            &json!({ "variants": [second] })
+        )
+    );
+    let mut with_removal = only_s.clone();
+    with_removal["remove_variants"] = json!([second]);
+    let (status, body) = send(&app, "PUT", &options, Some(&with_removal.to_string())).await;
+    assert_eq!(
+        (status, body["variants"].as_array().unwrap().len()),
+        (StatusCode::OK, 1)
+    );
+
+    let (status, body) = send(&app, "DELETE", &first_url, None).await;
+    assert_eq!((status, code(&body)), (StatusCode::CONFLICT, "no_variants"));
+    let unknown = format!("{variants}/var_00000000000000000000000000000000");
+    let (status, body) = send(&app, "DELETE", &unknown, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "variant_not_found")
     );
 }
 
@@ -588,6 +693,97 @@ async fn an_upload_goes_straight_to_storage_and_completes_into_a_ready_asset() {
     assert_eq!(
         (status, code(&body)),
         (StatusCode::NOT_FOUND, "asset_not_found")
+    );
+}
+
+/// Uploads a PNG and completes it; returns the asset's ID.
+async fn ready_png(app: &TestApp) -> String {
+    let created = start_png_upload(app, 100).await;
+    let id = created["asset"]["id"].as_str().unwrap().to_string();
+    assert_eq!(put_file(&created["upload"], png(100)).await, 200);
+    let (status, _) = send(app, "POST", &format!("/admin/assets/{id}/complete"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    id
+}
+
+#[tokio::test]
+async fn media_attach_to_products_and_guard_their_assets() {
+    let app = app_with_media().await;
+    let product = create_product(&app, "shirt").await;
+    let (first, second) = (ready_png(&app).await, ready_png(&app).await);
+    let media = format!("/admin/products/{product}/media");
+
+    let body = json!({ "assets": [second, first] });
+    let (status, attached) = send(&app, "PUT", &media, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{attached}");
+    let items = attached["media"].as_array().unwrap();
+    assert_eq!(
+        (&items[0]["asset_id"], &items[1]["asset_id"]),
+        (&json!(second), &json!(first))
+    );
+    assert_eq!(
+        (&items[0]["kind"], &items[0]["width"], &items[0]["height"]),
+        (&json!("image"), &json!(3), &json!(2))
+    );
+    let file = reqwest::get(items[0]["url"].as_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(file.bytes().await.unwrap().to_vec(), png(100));
+
+    let (_, page) = send(&app, "GET", "/admin/products", None).await;
+    assert_eq!(
+        page["items"][0]["featured_media"]["asset_id"],
+        json!(second)
+    );
+
+    let variant = attached["variants"][0]["id"].as_str().unwrap();
+    let uri = format!("/admin/products/{product}/variants/{variant}/media");
+    let body = json!({ "asset": first });
+    let (status, shown) = send(&app, "PUT", &uri, Some(&body.to_string())).await;
+    assert_eq!(
+        (status, &shown["variants"][0]["media_asset_id"]),
+        (StatusCode::OK, &json!(first))
+    );
+
+    let (status, used) = send(&app, "GET", &format!("/admin/assets/{first}/usages"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        used["items"],
+        json!([{ "owner": { "kind": "product", "id": product }, "role": "gallery" }])
+    );
+
+    let (status, body) = send(&app, "DELETE", &format!("/admin/assets/{first}"), None).await;
+    assert_eq!(
+        (status, code(&body), &body["details"]),
+        (
+            StatusCode::CONFLICT,
+            "asset_in_use",
+            &json!({
+                "usages": [{ "owner": { "kind": "product", "id": product }, "role": "gallery" }],
+                "has_more": false,
+            })
+        )
+    );
+
+    // Detaching clears the variant's image and frees the asset.
+    let body = json!({ "assets": [second] });
+    let (_, detached) = send(&app, "PUT", &media, Some(&body.to_string())).await;
+    assert_eq!(detached["variants"][0]["media_asset_id"], Value::Null);
+    let (status, _) = send(&app, "DELETE", &format!("/admin/assets/{first}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let body = json!({ "assets": [first] });
+    let (status, body) = send(&app, "PUT", &media, Some(&body.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "asset_not_found")
+    );
+    let pending = start_png_upload(&app, 100).await;
+    let body = json!({ "assets": [pending["asset"]["id"]] });
+    let (status, body) = send(&app, "PUT", &media, Some(&body.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "asset_not_ready")
     );
 }
 
