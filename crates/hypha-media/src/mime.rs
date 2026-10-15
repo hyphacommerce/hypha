@@ -132,8 +132,10 @@ fn iso_media(head: &[u8]) -> Option<MimeType> {
     let ftyp = head.get(8..size.min(head.len()))?;
     let major = ftyp.get(0..4)?;
     // After the major brand come the minor version (4 bytes) and the compatible brands.
-    let compatible = ftyp.get(8..).unwrap_or_default().chunks_exact(4);
-    let brands: Vec<&[u8]> = std::iter::once(major).chain(compatible).collect();
+    let (compatible, _) = ftyp.get(8..).unwrap_or_default().as_chunks::<4>();
+    let brands: Vec<&[u8]> = std::iter::once(major)
+        .chain(compatible.iter().map(|brand| brand.as_slice()))
+        .collect();
     let has = |brand: &[u8]| brands.contains(&brand);
     if has(b"avif") || has(b"avis") {
         return Some(MimeType::Avif);
