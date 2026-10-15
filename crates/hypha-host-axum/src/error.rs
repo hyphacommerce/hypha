@@ -526,9 +526,12 @@ impl From<hypha_inventory::CommandError> for ApiError {
             E::LocationNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::InventoryItemExists { .. }
             | E::OutOfStock { .. }
-            | E::Inventory(I::OnHandChanged { .. } | I::ReferenceInUse(_) | I::OutOfStock { .. }) => {
-                StatusCode::CONFLICT
-            }
+            | E::Inventory(
+                I::OnHandChanged { .. }
+                | I::ReferenceInUse(_)
+                | I::OutOfStock { .. }
+                | I::StillReserved,
+            ) => StatusCode::CONFLICT,
             E::Inventory(
                 I::Text(_)
                 | I::Address(_)

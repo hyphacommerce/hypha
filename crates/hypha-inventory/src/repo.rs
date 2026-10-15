@@ -33,6 +33,9 @@ pub trait InventoryItemRepo {
     /// Precondition: each item at most once. Two copies of one item fail (`Backend` or
     /// `StaleVersion`, depending on the adapter) and write nothing.
     async fn update_many(&self, items: &mut [InventoryItem]) -> Result<(), RepoError>;
+    /// Removes the item with its levels and reservations, writing the events it
+    /// recorded (`InventoryItem::delete`); one that doesn't exist any more is fine.
+    async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError>;
 }
 
 /// Stages inventory item writes in a `hypha_core::HasBatch` batch; the adapter's batch

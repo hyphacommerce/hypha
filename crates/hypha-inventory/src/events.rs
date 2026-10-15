@@ -30,3 +30,15 @@ impl Event for InventoryItemChanged {
     const TYPE: &'static str = "inventory_item.changed";
     const VERSION: u16 = 1;
 }
+
+/// `inventory_item.deleted`: its variant was removed, and nothing was reserved.
+#[derive(Debug, Serialize)]
+pub struct InventoryItemDeleted {
+    pub inventory_item: InventoryItemId,
+    pub variant: VariantId,
+}
+
+impl Event for InventoryItemDeleted {
+    const TYPE: &'static str = "inventory_item.deleted";
+    const VERSION: u16 = 1;
+}

@@ -489,6 +489,21 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         in_transaction!(self, |tx| remove_fixed_prices(tx, list, variants).await)
     }
 
+    async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.client()
+            .query_typed(
+                "SELECT DISTINCT price_list_id FROM price_list_prices WHERE variant_id = $1
+                 ORDER BY price_list_id",
+                &[(&variant.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(|row| Ok(PriceListId::from_uuid(col(row, "price_list_id")?)))
+            .collect()
+    }
+
     async fn fixed_prices(
         &self,
         list: PriceListId,

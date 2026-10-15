@@ -19,7 +19,7 @@ pub use commands::{
     update_inventory_item, update_location,
 };
 pub use error::{InventoryError, RestoreError};
-pub use events::{Available, InventoryItemChanged};
+pub use events::{Available, InventoryItemChanged, InventoryItemDeleted};
 pub use item::{InventoryItem, InventoryItemSnapshot, Level, MAX_STOCK, Reservation};
 pub use location::{Location, LocationSnapshot};
 pub use reference::ReservationRef;

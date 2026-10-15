@@ -15,8 +15,8 @@ use crate::FixedClock;
 /// `InMemoryPorts` gives one to every repo that writes events and to its batches, and
 /// tests read them all here. A repo made on its own has a private one.
 ///
-/// Event IDs are `Uuid::from_u128(seq)` and `occurred_at` is `seq` microseconds after
-/// the epoch: deterministic, and in order, like the database's.
+/// Event IDs are `Uuid::from_u128(seq)` and `occurred_at` is the shared clock's time
+/// (below): deterministic, like the database's transaction time.
 ///
 /// It also carries the clock the repos stamp what they write with (design note 0016,
 /// Q3), `FixedClock::DEFAULT` unless a test moves it (`clock()`): the in-memory store's
@@ -85,7 +85,7 @@ impl InMemoryOutbox {
                 subject_id: event.subject.id,
                 subject_version: version,
                 actor,
-                occurred_at: Timestamp::from_unix_micros(seq),
+                occurred_at: self.clock.now(),
                 data: event.data,
             });
         }

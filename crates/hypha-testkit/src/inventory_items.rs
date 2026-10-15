@@ -67,6 +67,13 @@ impl InventoryItemRepo for InMemoryInventoryItemRepo {
         Ok(())
     }
 
+    async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
+        let events = item.take_events();
+        self.items.remove(&item.id());
+        self.outbox.write(events, None);
+        Ok(())
+    }
+
     async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         stamp_update(item, self.outbox.now());
         let events = item.take_events();

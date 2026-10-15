@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    InventoryItemId, LocationId, PendingEvent, Quantity, Recorded, Stamped, Stamps, Subject,
-    VariantId, Version, Versioned,
+    InventoryItemId, LocationId, PendingEvent, Quantity, Recorded, Recorder, Stamped, Stamps,
+    Subject, VariantId, Version, Versioned,
 };
 
 use crate::{
     InventoryError, Location, ReservationRef, RestoreError,
-    events::{Available, INVENTORY_ITEM, InventoryItemChanged},
+    events::{Available, INVENTORY_ITEM, InventoryItemChanged, InventoryItemDeleted},
 };
 
 /// Largest stock count, either way: 2⁵³ − 1, like `Money::MAX_AMOUNT`, so JSON clients
@@ -49,6 +49,8 @@ pub struct InventoryItem {
     /// Whether anything changed since it was loaded: its event is built from the item
     /// as it is when written (design note 0016).
     changed: Changed,
+    /// Its deletion, once `delete` was called.
+    deleted: Recorder,
 }
 
 /// A flag that compares as always equal, so it never makes two items unequal.
@@ -65,6 +67,10 @@ impl Eq for Changed {}
 
 impl Recorded for InventoryItem {
     fn take_events(&mut self) -> Vec<PendingEvent> {
+        let deleted = self.deleted.take();
+        if !deleted.is_empty() {
+            return deleted;
+        }
         if !std::mem::take(&mut self.changed).0 {
             return Vec::new();
         }
@@ -133,6 +139,7 @@ impl InventoryItem {
             levels: Vec::new(),
             reservations: Vec::new(),
             changed: Changed(true),
+            deleted: Recorder::default(),
         }
     }
 
@@ -334,6 +341,24 @@ impl InventoryItem {
         Ok(true)
     }
 
+    /// Records that the item is being deleted (its variant was removed); the repository's
+    /// `delete` writes it. Refused while anything is reserved: open orders still count
+    /// on those units (design note 0016, Q5).
+    pub fn delete(&mut self) -> Result<(), InventoryError> {
+        if !self.reservations.is_empty() {
+            return Err(InventoryError::StillReserved);
+        }
+        // Whatever else changed is moot now.
+        self.changed = Changed(false);
+        let event = InventoryItemDeleted {
+            inventory_item: self.id,
+            variant: self.variant,
+        };
+        self.deleted
+            .record(Subject::new(INVENTORY_ITEM, self.id.as_uuid()), &event);
+        Ok(())
+    }
+
     /// Gives back everything reserved for `reference`. Returns whether anything was;
     /// releasing an unknown reference is not an error, so a retry is harmless.
     pub fn release(&mut self, reference: &ReservationRef) -> bool {
@@ -435,6 +460,7 @@ impl InventoryItem {
             levels: s.levels,
             reservations: s.reservations,
             changed: Changed(false),
+            deleted: Recorder::default(),
         })
     }
 }

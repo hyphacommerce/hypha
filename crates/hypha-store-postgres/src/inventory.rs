@@ -268,6 +268,22 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         Ok(())
     }
 
+    async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
+        let id = item.id().as_uuid();
+        let events = item.take_events();
+        let actor = self.actor();
+        in_transaction!(self, |tx| {
+            // Levels and reservations go with it (ON DELETE CASCADE).
+            tx.query_typed(
+                "DELETE FROM inventory_items WHERE id = $1",
+                &[(&id, Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?;
+            insert_events(tx, &events, None, actor).await
+        })
+    }
+
     async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         self.update_many(std::slice::from_mut(item)).await
     }

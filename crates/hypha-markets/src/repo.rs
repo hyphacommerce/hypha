@@ -105,6 +105,9 @@ pub trait PriceListRepo {
         list: PriceListId,
         variants: &[VariantId],
     ) -> Result<(), RepoError>;
+    /// The price lists with a fixed price for `variant`, by ID: what to clean up when
+    /// the variant is removed (design note 0014, section 4).
+    async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError>;
     /// The fixed prices of those of `variants` that have one.
     async fn fixed_prices(
         &self,

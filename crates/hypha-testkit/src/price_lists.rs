@@ -108,6 +108,17 @@ impl PriceListRepo for InMemoryPriceListRepo {
         Ok(())
     }
 
+    async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError> {
+        let all = self.fixed_prices.lock().unwrap();
+        let mut lists: Vec<PriceListId> = all
+            .iter()
+            .filter(|(_, prices)| prices.contains_key(&variant))
+            .map(|(list, _)| *list)
+            .collect();
+        lists.sort();
+        Ok(lists)
+    }
+
     async fn fixed_prices(
         &self,
         list: PriceListId,

@@ -30,6 +30,9 @@ pub enum InventoryError {
         reference: ReservationRef,
         variant: VariantId,
     },
+    /// Deleting an item open orders have units reserved on.
+    #[error("units are still reserved")]
+    StillReserved,
 }
 
 /// Why stored data can't be rebuilt into an inventory item. Only
@@ -61,6 +64,7 @@ impl ErrorCode for InventoryError {
             InventoryError::ReferenceInUse(_) => "reservation_reference_in_use",
             InventoryError::OutOfStock { .. } => "out_of_stock",
             InventoryError::DuplicateLine { .. } => "duplicate_reservation_line",
+            InventoryError::StillReserved => "inventory_still_reserved",
         }
     }
 }

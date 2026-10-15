@@ -76,6 +76,9 @@ impl InventoryItemRepo for Racing {
     async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         self.inner.update(item).await
     }
+    async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
+        self.inner.delete(item).await
+    }
     async fn update_many(&self, items: &mut [InventoryItem]) -> Result<(), RepoError> {
         self.writes.set(self.writes.get() + 1);
         if self.races.get() > 0 {

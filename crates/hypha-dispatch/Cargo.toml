@@ -1,0 +1,20 @@
+[package]
+name = "hypha-dispatch"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+hypha-inventory = { path = "../hypha-inventory" }
+hypha-markets = { path = "../hypha-markets" }
+hypha-products = { path = "../hypha-products" }
+uuid.workspace = true
+
+[dev-dependencies]
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "0.4"
+serde_json.workspace = true
+
+[lints]
+workspace = true

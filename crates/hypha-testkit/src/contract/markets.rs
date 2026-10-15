@@ -310,6 +310,25 @@ pub async fn price_list_repo<R: PriceListRepo>(make: impl AsyncFn() -> R) {
     price_list_fixed_prices(&make().await).await;
     scenario("price list: fixed prices need the list and each variant once");
     fixed_prices_preconditions(&make().await).await;
+    scenario("price list: lists_pricing names the lists with a variant's fixed price");
+    lists_pricing(&make().await).await;
+}
+
+async fn lists_pricing<R: PriceListRepo>(repo: &R) {
+    for n in [1, 2, 3] {
+        repo.insert(&mut price_list(n, Currency::Eur, 0))
+            .await
+            .unwrap();
+    }
+    repo.set_fixed_prices(plid(2), &[(vid(1), eur(100))])
+        .await
+        .unwrap();
+    repo.set_fixed_prices(plid(1), &[(vid(1), eur(90)), (vid(2), eur(80))])
+        .await
+        .unwrap();
+    assert_eq!(repo.lists_pricing(vid(1)).await, Ok(vec![plid(1), plid(2)]));
+    assert_eq!(repo.lists_pricing(vid(2)).await, Ok(vec![plid(1)]));
+    assert_eq!(repo.lists_pricing(vid(9)).await, Ok(vec![]));
 }
 
 async fn price_list_round_trips<R: PriceListRepo>(repo: &R) {

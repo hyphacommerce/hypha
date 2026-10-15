@@ -875,6 +875,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-dispatch"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-inventory",
+ "hypha-markets",
+ "hypha-products",
+ "hypha-testkit",
+ "pollster",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-host-axum"
 version = "0.1.0"
 dependencies = [

@@ -158,6 +158,24 @@ pub async fn inventory_item_repo<R: InventoryItemRepo>(make: impl AsyncFn() -> R
     item_update_many_twice(&make().await).await;
     scenario("inventory item: one item per variant on update too");
     item_variant_on_update(&make().await).await;
+    scenario("inventory item: delete removes it with its levels, and is repeatable");
+    item_delete(&make().await).await;
+}
+
+async fn item_delete<R: InventoryItemRepo>(repo: &R) {
+    let mut gone = item(1, 10);
+    gone.set_on_hand(location_id(1), 5, None).unwrap();
+    repo.insert(&mut gone).await.unwrap();
+    let mut kept = item(2, 20);
+    repo.insert(&mut kept).await.unwrap();
+    gone.delete().unwrap();
+    repo.delete(&mut gone).await.unwrap();
+    assert_eq!(repo.get(item_id(1)).await, Ok(None));
+    assert_eq!(repo.get_by_variant(vid(10)).await, Ok(None));
+    assert_eq!(repo.get(item_id(2)).await, Ok(Some(kept)));
+    // Gone already: fine. And its variant can have an item again.
+    assert_eq!(repo.delete(&mut gone).await, Ok(()));
+    repo.insert(&mut item(3, 10)).await.unwrap();
 }
 
 /// Levels at the stock limits and reservations split across locations.
