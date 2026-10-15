@@ -53,6 +53,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The library: ready assets, newest first, optionally of one kind. */
+        get: operations["admin.assets.list"];
+        put?: never;
+        /**
+         * Starts an upload: a pending asset, and the request that sends its file straight to
+         *     storage. Then `POST /admin/assets/{id}/complete`.
+         */
+        post: operations["admin.assets.create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/assets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An asset, in any status. */
+        get: operations["admin.assets.fetch"];
+        put?: never;
+        post?: never;
+        /** Deletes an asset and its file. */
+        delete: operations["admin.assets.remove"];
+        options?: never;
+        head?: never;
+        /** Changes an asset's alt text or title. */
+        patch: operations["admin.assets.update"];
+        trace?: never;
+    };
+    "/admin/assets/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checks the uploaded file and makes the asset ready, with its real type and image
+         *     dimensions read from the file. A file that isn't what was declared is deleted and
+         *     the asset fails (`422 upload_mismatch`). Completing a ready asset again is fine.
+         */
+        post: operations["admin.assets.complete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/auth/login": {
         parameters: {
             query?: never;
@@ -987,6 +1048,63 @@ export interface components {
             revoked_at?: string | null;
             scopes: components["schemas"]["Scope"][];
         };
+        /**
+         * @description A AssetId: `asset_` and 32 hex digits.
+         * @example asset_0190f1a2b3c47d8e9f00112233445566
+         */
+        AssetId: string;
+        /**
+         * @description `AssetKind` on the wire.
+         * @enum {string}
+         */
+        AssetKindDto: "image" | "video" | "file";
+        /** @description A page of a list, newest first (design note 0012). */
+        AssetPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["AssetResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        AssetResponse: {
+            alt?: string | null;
+            /** Format: int64 */
+            byte_size: number;
+            /** @description SHA-256 as hex, when the uploader declared it. */
+            checksum?: string | null;
+            /** @description RFC 3339, UTC. */
+            created_at: string;
+            /** @description As uploaded, for people. */
+            filename: string;
+            /** Format: int32 */
+            height?: number | null;
+            id: components["schemas"]["AssetId"];
+            kind: components["schemas"]["AssetKindDto"];
+            mime_type: string;
+            /** @description Only `ready` assets are listed and can be attached. */
+            status: components["schemas"]["AssetStatusDto"];
+            /**
+             * @description Images only: a version at most 400 pixels wide when the media URLs can resize,
+             *     else the original.
+             */
+            thumbnail_url?: string | null;
+            title?: string | null;
+            /** @description RFC 3339, UTC. */
+            updated_at: string;
+            /**
+             * @description The file, once ready. A public file's URL never changes content; a private
+             *     file's is signed and works for 15 minutes.
+             */
+            url?: string | null;
+            visibility: components["schemas"]["VisibilityDto"];
+            /** Format: int32 */
+            width?: number | null;
+        };
+        /**
+         * @description `AssetStatus` on the wire.
+         * @enum {string}
+         */
+        AssetStatusDto: "pending" | "ready" | "failed";
         AssignPriceListRequest: {
             price_list?: components["schemas"]["PriceListId"] | null;
         };
@@ -1066,6 +1184,28 @@ export interface components {
             name: string;
             /** @description Required for a secret key; a publishable key always has the storefront scopes. */
             scopes?: components["schemas"]["Scope"][] | null;
+        };
+        CreateAssetRequest: {
+            /**
+             * Format: int64
+             * @description Exactly the file's size: storage refuses another. Images up to 20 MB, videos up
+             *     to 1 GB, PDFs up to 100 MB.
+             */
+            byte_size: number;
+            /** @description SHA-256 as 64 hex characters: storage then refuses other contents. */
+            checksum?: string | null;
+            /** @description The file's name, kept for people; up to 255 characters. */
+            filename: string;
+            /**
+             * @description One of `image/jpeg`, `image/png`, `image/webp`, `image/avif`, `image/gif`,
+             *     `video/mp4`, `video/webm`, `video/quicktime`, `application/pdf` (no SVG yet).
+             */
+            mime_type: string;
+            visibility?: components["schemas"]["VisibilityDto"];
+        };
+        CreateAssetResponse: {
+            asset: components["schemas"]["AssetResponse"];
+            upload: components["schemas"]["UploadRequestResponse"];
         };
         CreateCatalogRequest: {
             market: components["schemas"]["MarketId"];
@@ -1187,6 +1327,10 @@ export interface components {
          * @enum {string}
          */
         FulfillmentStatusDto: "unfulfilled";
+        HeaderResponse: {
+            name: string;
+            value: string;
+        };
         /**
          * @description A InventoryItemId: `invi_` and 32 hex digits.
          * @example invi_0190f1a2b3c47d8e9f00112233445566
@@ -1521,7 +1665,7 @@ export interface components {
             scopes: components["schemas"]["Scope"][];
         };
         /** @enum {string} */
-        Scope: "products:read" | "products:write" | "markets:read" | "markets:write" | "pricing:read" | "pricing:write" | "carts:read" | "carts:write" | "taxes:read" | "taxes:write" | "inventory:read" | "inventory:write" | "customers:read" | "customers:write" | "stores:read" | "stores:write" | "orders:read" | "orders:write" | "checkout" | "users:read" | "users:write" | "api_keys:read" | "api_keys:write";
+        Scope: "products:read" | "products:write" | "markets:read" | "markets:write" | "pricing:read" | "pricing:write" | "carts:read" | "carts:write" | "taxes:read" | "taxes:write" | "inventory:read" | "inventory:write" | "customers:read" | "customers:write" | "stores:read" | "stores:write" | "orders:read" | "orders:write" | "checkout" | "users:read" | "users:write" | "api_keys:read" | "api_keys:write" | "media:read" | "media:write";
         SessionResponse: {
             expires_at: string;
             /** @description Send as `Authorization: Bearer <token>`. Shown only now. */
@@ -1605,6 +1749,13 @@ export interface components {
             /** @description `otpauth://…`, for a QR code. */
             uri: string;
         };
+        /** @description A JSON Merge Patch of an asset's metadata: absent fields stay, `null` clears. */
+        UpdateAssetRequest: {
+            /** @description Describes the image for screen readers and search engines; up to 255 characters. */
+            alt?: string | null;
+            /** @description The library's label; up to 255 characters. */
+            title?: string | null;
+        };
         /**
          * @description JSON Merge Patch (see `patch`): only the fields sent change, `null` clears a name or
          *     phone. The email can be changed but not cleared.
@@ -1650,6 +1801,16 @@ export interface components {
             role?: components["schemas"]["RoleId"];
             status?: components["schemas"]["StatusRequest"];
         };
+        /** @description A request for the client to send itself, with the file as its body. */
+        UploadRequestResponse: {
+            /** @description RFC 3339, UTC: the URL stops working then. */
+            expires_at: string;
+            /** @description Send exactly these, besides `Content-Length`. */
+            headers: components["schemas"]["HeaderResponse"][];
+            /** @description `PUT`. */
+            method: string;
+            url: string;
+        };
         /**
          * @description A UserId: `user_` and 32 hex digits.
          * @example user_0190f1a2b3c47d8e9f00112233445566
@@ -1678,6 +1839,11 @@ export interface components {
             /** @description Its option values ("M / Blue"); `null` for a product without options. */
             title?: string | null;
         };
+        /**
+         * @description `Visibility` on the wire.
+         * @enum {string}
+         */
+        VisibilityDto: "public" | "private";
     };
     responses: never;
     parameters: never;
@@ -1868,6 +2034,498 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiKeyResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.assets.list": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /** @description Only assets of this kind. */
+                kind?: components["schemas"]["AssetKindDto"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.assets.create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAssetRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateAssetResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.assets.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.assets.remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.assets.update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAssetRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over 2 MB (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.assets.complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). */

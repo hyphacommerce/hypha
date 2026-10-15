@@ -30,6 +30,7 @@ use axum::extract::connect_info::MockConnectInfo;
 
 use super::postgres_router;
 use crate::client_ip::TrustedProxies;
+use crate::media::Media;
 use crate::state::{AppState, HostEnv, PgStorage, Storage, SystemClock, UuidV7Ids};
 
 const OWNER_EMAIL: &str = "owner@example.com";
@@ -44,6 +45,10 @@ struct TestApp {
 
 async fn app() -> TestApp {
     app_with(TrustedProxies::default()).await
+}
+
+async fn app_with(trusted_proxies: TrustedProxies) -> TestApp {
+    app_from(trusted_proxies, Some(test_media().await)).await
 }
 
 /// Requests in these tests come from this peer (`MockConnectInfo`), as if over a socket.
@@ -91,7 +96,20 @@ async fn fresh_schema() -> String {
     format!("{url}{separator}options=-csearch_path%3D{schema}")
 }
 
-async fn app_with(trusted_proxies: TrustedProxies) -> TestApp {
+/// File storage from `HYPHA_S3_*` (the compose server by default), bucket created.
+async fn test_media() -> Media {
+    let media = Media::from_env()
+        .expect("HYPHA_S3_* (see .cargo/config.toml)")
+        .expect("HYPHA_S3_ENDPOINT (see .cargo/config.toml)");
+    media
+        .blobs
+        .ensure_bucket()
+        .await
+        .unwrap_or_else(|e| panic!("route tests need the S3 server (`docker compose up -d`): {e}"));
+    media
+}
+
+async fn app_from(trusted_proxies: TrustedProxies, media: Option<Media>) -> TestApp {
     let storage = PgStorage::connect(&fresh_schema().await).await.unwrap();
     let store = ensure_single_store(
         &Ctx::system(),
@@ -112,6 +130,7 @@ async fn app_with(trusted_proxies: TrustedProxies) -> TestApp {
         trusted_proxies,
         store: store.id(),
         store_name: store.name().to_string(),
+        media,
     });
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {
@@ -481,6 +500,179 @@ async fn lists_need_read_scopes() {
             "{uri}"
         );
     }
+}
+
+// ---------- media (design note 0013) ----------
+
+/// A 3 × 2 PNG's first bytes (signature and IHDR), padded to `len` bytes.
+fn png(len: usize) -> Vec<u8> {
+    let mut file = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    file.extend_from_slice(&3u32.to_be_bytes());
+    file.extend_from_slice(&2u32.to_be_bytes());
+    file.extend_from_slice(&[8, 6, 0, 0, 0]);
+    file.resize(len, 0);
+    file
+}
+
+/// Starts an upload of `len` bytes of PNG; returns the created asset and upload.
+async fn start_png_upload(app: &TestApp, len: usize) -> Value {
+    let body = json!({ "filename": "Shirt front.png", "mime_type": "image/png", "byte_size": len });
+    let (status, created) = send(app, "POST", "/admin/assets", Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    created
+}
+
+/// Sends `body` with the upload request, as a browser would; the status storage gave.
+async fn put_file(upload: &Value, body: Vec<u8>) -> u16 {
+    let mut request = reqwest::Client::new()
+        .put(upload["url"].as_str().unwrap())
+        .body(body);
+    for header in upload["headers"].as_array().unwrap() {
+        request = request.header(
+            header["name"].as_str().unwrap(),
+            header["value"].as_str().unwrap(),
+        );
+    }
+    request.send().await.unwrap().status().as_u16()
+}
+
+#[tokio::test]
+async fn an_upload_goes_straight_to_storage_and_completes_into_a_ready_asset() {
+    let app = app().await;
+    let created = start_png_upload(&app, 100).await;
+    let asset = &created["asset"];
+    let id = asset["id"].as_str().unwrap();
+    assert_eq!(
+        (&asset["status"], &asset["url"]),
+        (&json!("pending"), &Value::Null)
+    );
+    assert_eq!(created["upload"]["method"], "PUT");
+
+    assert_eq!(put_file(&created["upload"], png(100)).await, 200);
+    let (status, ready) = send(&app, "POST", &format!("/admin/assets/{id}/complete"), None).await;
+    assert_eq!(status, StatusCode::OK, "{ready}");
+    assert_eq!(
+        (
+            &ready["status"],
+            &ready["kind"],
+            &ready["width"],
+            &ready["height"]
+        ),
+        (&json!("ready"), &json!("image"), &json!(3), &json!(2))
+    );
+    // No public media URL in tests: the file comes signed.
+    let file = reqwest::get(ready["url"].as_str().unwrap()).await.unwrap();
+    assert_eq!(file.bytes().await.unwrap().to_vec(), png(100));
+
+    let (_, page) = send(&app, "GET", "/admin/assets?kind=image", None).await;
+    assert_eq!(ids(&page), [id]);
+    let (_, videos) = send(&app, "GET", "/admin/assets?kind=video", None).await;
+    assert_eq!(ids(&videos), Vec::<&str>::new());
+
+    let uri = format!("/admin/assets/{id}");
+    let (status, patched) = send(&app, "PATCH", &uri, Some(r#"{"alt":"A blue shirt"}"#)).await;
+    assert_eq!(
+        (status, &patched["alt"], &patched["title"]),
+        (StatusCode::OK, &json!("A blue shirt"), &Value::Null)
+    );
+    let (status, _) = send(&app, "DELETE", &uri, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = send(&app, "GET", &uri, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "asset_not_found")
+    );
+}
+
+#[tokio::test]
+async fn completing_checks_what_was_stored() {
+    let app = app().await;
+    let created = start_png_upload(&app, 100).await;
+    let id = created["asset"]["id"].as_str().unwrap();
+    let complete = format!("/admin/assets/{id}/complete");
+    let (status, body) = send(&app, "POST", &complete, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "upload_missing")
+    );
+
+    let mut pdf = b"%PDF-1.7".to_vec();
+    pdf.resize(100, 0);
+    assert_eq!(put_file(&created["upload"], pdf).await, 200);
+    let (status, body) = send(&app, "POST", &complete, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "upload_mismatch")
+    );
+    let (_, asset) = send(&app, "GET", &format!("/admin/assets/{id}"), None).await;
+    assert_eq!(asset["status"], "failed");
+    let (status, body) = send(&app, "POST", &complete, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "asset_not_pending")
+    );
+}
+
+#[tokio::test]
+async fn storage_refuses_an_upload_of_another_size() {
+    let app = app().await;
+    let created = start_png_upload(&app, 100).await;
+    assert_ne!(put_file(&created["upload"], png(99)).await, 200);
+}
+
+#[tokio::test]
+async fn bad_uploads_are_refused_with_codes() {
+    let app = app().await;
+    for (body, expected) in [
+        (
+            json!({ "filename": "logo.svg", "mime_type": "image/svg+xml", "byte_size": 10 }),
+            "unsupported_media_type",
+        ),
+        (
+            json!({ "filename": "huge.png", "mime_type": "image/png", "byte_size": 21 * 1024 * 1024 }),
+            "file_too_large",
+        ),
+        (
+            json!({ "filename": "a.png", "mime_type": "image/png", "byte_size": 0 }),
+            "empty_file",
+        ),
+        (
+            json!({ "filename": "a.png", "mime_type": "image/png", "byte_size": 1, "checksum": "abc" }),
+            "invalid_checksum",
+        ),
+    ] {
+        let (status, json) = send(&app, "POST", "/admin/assets", Some(&body.to_string())).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::UNPROCESSABLE_ENTITY, expected),
+            "{body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_library_needs_media_scopes() {
+    let app = app().await;
+    let products = key(
+        &app,
+        json!({ "kind": "secret", "name": "Products", "scopes": ["products:write"] }),
+    )
+    .await;
+    let (status, body) = send_as(&app, &products, "GET", "/admin/assets", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+}
+
+#[tokio::test]
+async fn without_file_storage_the_library_is_unavailable() {
+    let app = app_from(TrustedProxies::default(), None).await;
+    let (status, body) = send(&app, "GET", "/admin/assets", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::SERVICE_UNAVAILABLE, "media_not_configured")
+    );
 }
 
 // ---------- authentication (design note 0008) ----------

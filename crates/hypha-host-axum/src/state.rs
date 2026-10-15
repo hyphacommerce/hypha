@@ -216,6 +216,9 @@ pub struct AppState<S> {
     /// Its name at startup, for labels that shouldn't cost a query (the entry in an
     /// authenticator app). A rename shows there after a restart.
     pub store_name: String,
+    /// File storage and asset URLs (design note 0013); `None` without
+    /// `HYPHA_S3_ENDPOINT`, and the asset routes then answer 503.
+    pub media: Option<crate::media::Media>,
 }
 
 impl<S: Storage> AppState<S> {
@@ -242,7 +245,7 @@ pub type SharedState<S> = Arc<AppState<S>>;
 /// router is built per concrete type (see `routes::router!`).
 #[allow(async_fn_in_trait)]
 pub trait Storage: Send + Sync + 'static {
-    type Ports<'a>: CheckoutPorts + StaffPorts + HasApiKeys
+    type Ports<'a>: CheckoutPorts + StaffPorts + HasApiKeys + hypha_media::HasAssets
     where
         Self: 'a;
     type Directory<'a>: StoreRepo

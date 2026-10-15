@@ -2,6 +2,7 @@
 //! separate from domain types) and thin handlers that call one domain command.
 
 mod api_keys;
+mod assets;
 mod auth;
 
 pub(crate) use auth::password_reset_in_background;
@@ -84,6 +85,13 @@ macro_rules! route_table {
             [admin, POST, "/admin/products", products::create],
             [admin, GET, "/admin/products/{id}", products::fetch],
             [admin, PATCH, "/admin/products/{id}/status", products::set_status],
+            // media (0013)
+            [admin, POST, "/admin/assets", assets::create],
+            [admin, GET, "/admin/assets", assets::list],
+            [admin, GET, "/admin/assets/{id}", assets::fetch],
+            [admin, PATCH, "/admin/assets/{id}", assets::update],
+            [admin, DELETE, "/admin/assets/{id}", assets::remove],
+            [admin, POST, "/admin/assets/{id}/complete", assets::complete],
             // markets, price lists, catalogs
             [admin, POST, "/admin/markets", markets::create_market_handler],
             [admin, PATCH, "/admin/markets/{id}", markets::update_market_handler],

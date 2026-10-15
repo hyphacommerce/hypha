@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# End-to-end check against a running hypha-host-axum, on either storage (a fresh
-# database for Postgres; see CLAUDE.md).
+# End-to-end check against a running hypha-host-axum on a fresh database, with file
+# storage (`docker compose up -d`; see CLAUDE.md).
 #
 #   HYPHA_OWNER_EMAIL=owner@example.com HYPHA_OWNER_PASSWORD=e2e-owner-password \
 #       cargo run -p hypha-host-axum  # in one terminal (PORT=... if 3000 is taken)
@@ -10,7 +10,7 @@
 # others) and sends the session with every step; the "auth" section checks the rest.
 #
 # Every step asserts the HTTP status and, for errors, the stable error code.
-# Exits non-zero if any step fails. Uses only curl, grep and sed (no jq).
+# Exits non-zero if any step fails. Uses only curl, grep, sed and head (no jq).
 # Restart the server between runs: product handles must be unique.
 
 set -u
@@ -167,6 +167,33 @@ step "active products" 200 - "$BASE/admin/products?status=active"
 step "a page too large" 422 invalid_limit "$BASE/admin/products?limit=500"
 step "an unknown filter" 400 invalid_query "$BASE/admin/products?sort=title"
 step "a cursor from another list" 400 invalid_cursor "$BASE/admin/products?cursor=ord_00000000000000000000000000000000"
+
+# media (design note 0013): the file goes straight to storage with the signed request,
+# so that PUT is a plain curl (no admin credentials; S3 checks its own signature).
+PNG_FILE=$(mktemp)
+{ printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x03\x00\x00\x00\x02\x08\x06\x00\x00\x00'; head -c 71 /dev/zero; } > "$PNG_FILE"
+step "start an upload" 201 - -X POST "$BASE/admin/assets" -H "$JSON" \
+    -d '{"filename":"Shirt front.png","mime_type":"image/png","byte_size":100}'
+contains "the asset is pending" '"status":"pending"'
+contains "the upload is signed for its type" '"name":"content-type","value":"image/png"'
+ASSET=$(sed -E 's/.*"asset":\{"id":"([^"]+)".*/\1/' <<<"$BODY")
+UPLOAD_URL=$(sed -E 's/.*"upload":\{"method":"PUT","url":"([^"]+)".*/\1/' <<<"$BODY")
+step "complete before uploading" 409 upload_missing -X POST "$BASE/admin/assets/$ASSET/complete"
+STORED=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: image/png' \
+    -H 'cache-control: public, max-age=31536000, immutable' --data-binary "@$PNG_FILE" "$UPLOAD_URL")
+if [[ $STORED == 200 ]]; then echo "ok   upload the file to storage"; else
+    echo "FAIL upload the file to storage: HTTP $STORED"; FAILED=$((FAILED + 1)); fi
+rm -f "$PNG_FILE"
+step "complete the upload" 200 - -X POST "$BASE/admin/assets/$ASSET/complete"
+contains "it is ready, with its dimensions" '"width":3,"height":2'
+step "list images" 200 - "$BASE/admin/assets?kind=image"
+contains "the asset is listed" "\"items\":[{\"id\":\"$ASSET\""
+step "set its alt text" 200 - -X PATCH "$BASE/admin/assets/$ASSET" -H "$JSON" -d '{"alt":"A blue shirt"}'
+contains "the alt text is stored" '"alt":"A blue shirt"'
+step "an SVG is refused" 422 unsupported_media_type -X POST "$BASE/admin/assets" -H "$JSON" \
+    -d '{"filename":"logo.svg","mime_type":"image/svg+xml","byte_size":10}'
+step "delete the asset" 204 - -X DELETE "$BASE/admin/assets/$ASSET"
+step "it is gone" 404 asset_not_found "$BASE/admin/assets/$ASSET"
 
 step "create market" 201 - -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"Eurozone","countries":["HR","DE"],"currency":"EUR"}'

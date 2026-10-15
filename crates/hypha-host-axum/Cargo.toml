@@ -19,6 +19,8 @@ hypha-orders = { path = "../hypha-orders" }
 hypha-checkout = { path = "../hypha-checkout" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
+hypha-media = { path = "../hypha-media" }
+hypha-store-s3 = { path = "../hypha-store-s3" }
 getrandom = "0.4"
 governor = "0.10"
 utoipa = "6"
@@ -41,6 +43,7 @@ tower-http = { version = "0.6", features = ["trace"] }
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 
 [lints]
 workspace = true

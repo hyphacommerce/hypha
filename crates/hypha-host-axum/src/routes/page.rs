@@ -43,16 +43,34 @@ impl<T> PageResponse<T> {
         id: impl Fn(&U) -> Id,
         item: impl FnMut(U) -> Result<T, ApiError>,
     ) -> Result<Self, ApiError> {
-        let next_cursor = page
-            .has_more
-            .then(|| page.items.last().map(|last| id(last).to_string()))
-            .flatten();
+        let next_cursor = next_cursor(&page, id);
         Ok(Self {
             items: page.items.into_iter().map(item).collect::<Result<_, _>>()?,
             has_more: page.has_more,
             next_cursor,
         })
     }
+
+    /// The response for `page` with `items` already made, for DTOs whose making is
+    /// async (asset URLs): one per page item, in order.
+    pub(crate) fn with_items<U, Id: Display>(
+        page: &Page<U>,
+        id: impl Fn(&U) -> Id,
+        items: Vec<T>,
+    ) -> Self {
+        Self {
+            items,
+            has_more: page.has_more,
+            next_cursor: next_cursor(page, id),
+        }
+    }
+}
+
+/// The cursor of the page after `page`: its last item's ID, when there are more.
+fn next_cursor<U, Id: Display>(page: &Page<U>, id: impl Fn(&U) -> Id) -> Option<String> {
+    page.has_more
+        .then(|| page.items.last().map(|last| id(last).to_string()))
+        .flatten()
 }
 
 /// Written out rather than derived: utoipa's derive names a generic schema

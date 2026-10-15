@@ -1,6 +1,7 @@
 mod client_ip;
 mod error;
 mod extract;
+mod media;
 mod patch;
 mod rate_limit;
 mod routes;
@@ -182,6 +183,30 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
     };
     tracing::info!(store = %store.id(), name = store.name(), "serving store");
 
+    let media = match media::Media::from_env() {
+        Ok(media) => media,
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+    };
+    match &media {
+        None => tracing::info!("media: off (set HYPHA_S3_ENDPOINT for file storage)"),
+        Some(media) => {
+            // Development servers start empty; production buckets are made by their owner.
+            if std::env::var("HYPHA_S3_CREATE_BUCKET").as_deref() == Ok("true")
+                && let Err(e) = media.blobs.ensure_bucket().await
+            {
+                tracing::error!("HYPHA_S3_CREATE_BUCKET: {e}");
+                std::process::exit(1);
+            }
+            match &media.urls.public_base {
+                Some(base) => tracing::info!(%base, "media: public files served from"),
+                None => tracing::info!("media: signed URLs (set HYPHA_MEDIA_URL for a CDN)"),
+            }
+        }
+    }
+
     let state = Arc::new(AppState {
         storage,
         ids,
@@ -192,6 +217,7 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         trusted_proxies,
         store: store.id(),
         store_name: store.name().to_string(),
+        media,
     });
     if let Err(e) = ensure_owner(&state).await {
         tracing::error!("owner setup failed: {e}");

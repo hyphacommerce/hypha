@@ -414,7 +414,14 @@ mod tests {
                 }
             }
         }
-        assert_eq!(lists, ["get /admin/orders", "get /admin/products"]);
+        assert_eq!(
+            lists,
+            [
+                "get /admin/assets",
+                "get /admin/orders",
+                "get /admin/products"
+            ]
+        );
     }
 
     #[test]

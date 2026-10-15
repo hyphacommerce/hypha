@@ -184,6 +184,15 @@ impl ApiError {
         Self::new(StatusCode::NOT_FOUND, "route_not_found", "no such route")
     }
 
+    /// The asset routes on a host without file storage (`HYPHA_S3_ENDPOINT` unset).
+    pub fn media_not_configured() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "media_not_configured",
+            "this deployment has no file storage (HYPHA_S3_ENDPOINT)",
+        )
+    }
+
     pub fn method_not_allowed() -> Self {
         Self::new(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -451,6 +460,37 @@ impl From<hypha_orders::CommandError> for ApiError {
             // Every order route names the order in its URL.
             E::OrderNotFound(_) => StatusCode::NOT_FOUND,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
+impl From<hypha_media::BlobError> for ApiError {
+    /// File storage failing is ours to fix, like a database failure: logged, not shown.
+    fn from(e: hypha_media::BlobError) -> Self {
+        Self::internal(e)
+    }
+}
+
+impl From<hypha_media::CommandError> for ApiError {
+    fn from(e: hypha_media::CommandError) -> Self {
+        use hypha_media::{CommandError as E, MediaError as M};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Every asset route names the asset in its URL.
+            E::AssetNotFound(_) => StatusCode::NOT_FOUND,
+            // The asset's state: not uploaded yet, or not pending any more.
+            E::UploadMissing(_) | E::Media(M::NotPending { .. }) => StatusCode::CONFLICT,
+            E::Media(
+                M::Text(_)
+                | M::UnsupportedMediaType(_)
+                | M::EmptyFile
+                | M::FileTooLarge { .. }
+                | M::InvalidChecksum(_),
+            )
+            | E::UploadMismatch(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Blob(_) | E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(RepoError::StaleVersion | RepoError::Duplicate(_)) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)

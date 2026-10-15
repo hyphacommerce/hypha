@@ -322,6 +322,649 @@
         ]
       }
     },
+    "/admin/assets": {
+      "get": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "The library: ready assets, newest first, optionally of one kind.",
+        "operationId": "admin.assets.list",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, 1 to 100 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only assets of this kind.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/AssetKindDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "media:read"
+        ]
+      },
+      "post": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Starts an upload: a pending asset, and the request that sends its file straight to\nstorage. Then `POST /admin/assets/{id}/complete`.",
+        "operationId": "admin.assets.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAssetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAssetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "media:write"
+        ]
+      }
+    },
+    "/admin/assets/{id}": {
+      "get": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "An asset, in any status.",
+        "operationId": "admin.assets.fetch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "media:read"
+        ]
+      },
+      "delete": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Deletes an asset and its file.",
+        "operationId": "admin.assets.remove",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "media:write"
+        ]
+      },
+      "patch": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Changes an asset's alt text or title.",
+        "operationId": "admin.assets.update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAssetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A body over 2 MB (`body_too_large`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "No `Content-Type: application/json` (`missing_content_type`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "media:write"
+        ]
+      }
+    },
+    "/admin/assets/{id}/complete": {
+      "post": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Checks the uploaded file and makes the asset ready, with its real type and image\ndimensions read from the file. A file that isn't what was declared is deleted and\nthe asset fails (`422 upload_mismatch`). Completing a ready asset again is fine.",
+        "operationId": "admin.assets.complete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed ID in the path (`invalid_path`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A server failure (`internal_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-hypha-scopes": [
+          "media:write"
+        ]
+      }
+    },
     "/admin/auth/login": {
       "post": {
         "tags": [
@@ -7601,6 +8244,157 @@
           }
         }
       },
+      "AssetId": {
+        "type": "string",
+        "description": "A AssetId: `asset_` and 32 hex digits.",
+        "examples": [
+          "asset_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^asset_[0-9a-f]{32}$"
+      },
+      "AssetKindDto": {
+        "type": "string",
+        "description": "`AssetKind` on the wire.",
+        "enum": [
+          "image",
+          "video",
+          "file"
+        ]
+      },
+      "AssetPage": {
+        "type": "object",
+        "description": "A page of a list, newest first (design note 0012).",
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether there are more after these."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssetResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it."
+          }
+        }
+      },
+      "AssetResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "kind",
+          "filename",
+          "mime_type",
+          "byte_size",
+          "visibility",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "alt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "byte_size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "checksum": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SHA-256 as hex, when the uploader declared it."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339, UTC."
+          },
+          "filename": {
+            "type": "string",
+            "description": "As uploaded, for people."
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "$ref": "#/components/schemas/AssetId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AssetKindDto"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AssetStatusDto",
+            "description": "Only `ready` assets are listed and can be attached."
+          },
+          "thumbnail_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Images only: a version at most 400 pixels wide when the media URLs can resize,\nelse the original."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "RFC 3339, UTC."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The file, once ready. A public file's URL never changes content; a private\nfile's is signed and works for 15 minutes."
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/VisibilityDto"
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "AssetStatusDto": {
+        "type": "string",
+        "description": "`AssetStatus` on the wire.",
+        "enum": [
+          "pending",
+          "ready",
+          "failed"
+        ]
+      },
       "AssignPriceListRequest": {
         "type": "object",
         "properties": {
@@ -7905,6 +8699,56 @@
           }
         },
         "additionalProperties": false
+      },
+      "CreateAssetRequest": {
+        "type": "object",
+        "required": [
+          "filename",
+          "mime_type",
+          "byte_size"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Exactly the file's size: storage refuses another. Images up to 20 MB, videos up\nto 1 GB, PDFs up to 100 MB.",
+            "minimum": 0
+          },
+          "checksum": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SHA-256 as 64 hex characters: storage then refuses other contents."
+          },
+          "filename": {
+            "type": "string",
+            "description": "The file's name, kept for people; up to 255 characters."
+          },
+          "mime_type": {
+            "type": "string",
+            "description": "One of `image/jpeg`, `image/png`, `image/webp`, `image/avif`, `image/gif`,\n`video/mp4`, `video/webm`, `video/quicktime`, `application/pdf` (no SVG yet)."
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/VisibilityDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateAssetResponse": {
+        "type": "object",
+        "required": [
+          "asset",
+          "upload"
+        ],
+        "properties": {
+          "asset": {
+            "$ref": "#/components/schemas/AssetResponse"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/UploadRequestResponse"
+          }
+        }
       },
       "CreateCatalogRequest": {
         "type": "object",
@@ -8279,6 +9123,21 @@
         "enum": [
           "unfulfilled"
         ]
+      },
+      "HeaderResponse": {
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
       },
       "InventoryItemId": {
         "type": "string",
@@ -9302,7 +10161,9 @@
           "users:read",
           "users:write",
           "api_keys:read",
-          "api_keys:write"
+          "api_keys:write",
+          "media:read",
+          "media:write"
         ]
       },
       "SessionResponse": {
@@ -9551,6 +10412,27 @@
           }
         }
       },
+      "UpdateAssetRequest": {
+        "type": "object",
+        "description": "A JSON Merge Patch of an asset's metadata: absent fields stay, `null` clears.",
+        "properties": {
+          "alt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Describes the image for screen readers and search engines; up to 255 characters."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The library's label; up to 255 characters."
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateCustomerRequest": {
         "type": "object",
         "description": "JSON Merge Patch (see `patch`): only the fields sent change, `null` clears a name or\nphone. The email can be changed but not cleared.",
@@ -9676,6 +10558,36 @@
         },
         "additionalProperties": false
       },
+      "UploadRequestResponse": {
+        "type": "object",
+        "description": "A request for the client to send itself, with the file as its body.",
+        "required": [
+          "method",
+          "url",
+          "headers",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "description": "RFC 3339, UTC: the URL stops working then."
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeaderResponse"
+            },
+            "description": "Send exactly these, besides `Content-Length`."
+          },
+          "method": {
+            "type": "string",
+            "description": "`PUT`."
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "UserId": {
         "type": "string",
         "description": "A UserId: `user_` and 32 hex digits.",
@@ -9759,6 +10671,14 @@
             "description": "Its option values (\"M / Blue\"); `null` for a product without options."
           }
         }
+      },
+      "VisibilityDto": {
+        "type": "string",
+        "description": "`Visibility` on the wire.",
+        "enum": [
+          "public",
+          "private"
+        ]
       }
     },
     "securitySchemes": {
