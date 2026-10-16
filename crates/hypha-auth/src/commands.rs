@@ -495,8 +495,8 @@ where
 }
 
 /// A reset for the identity of `kind` that logs in with `email`, or `None` if there is
-/// none, or if its latest link is only minutes old and unused
-/// (`PasswordReset::RESEND_AFTER_SECS`). The caller answers the same either way, and
+/// none, or if its latest link still works and is younger than
+/// `AuthSettings::password_reset_resend_after` (`PasswordReset::blocks_another`). The caller answers the same either way, and
 /// emails the token when there is one.
 pub async fn start_password_reset<S>(
     ports: &S,
@@ -517,7 +517,8 @@ where
     else {
         return Ok(None);
     };
-    // Asked again within a few minutes: the link already sent stands (no email bomb).
+    // Asked again while the link already sent works and is recent: it stands (no email
+    // bomb).
     let latest = ports
         .password_resets()
         .latest_for_identity(identity.id())
@@ -550,7 +551,7 @@ where
 }
 
 /// Uses up `identity`'s open reset links, e.g. one whose email couldn't be sent, so it
-/// doesn't hold back the next request (`PasswordReset::RESEND_AFTER_SECS`).
+/// doesn't hold back the next request (`PasswordReset::blocks_another`).
 pub async fn withdraw_password_resets<S>(
     ports: &S,
     clock: &impl Clock,

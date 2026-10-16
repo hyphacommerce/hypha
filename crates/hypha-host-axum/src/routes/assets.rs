@@ -117,7 +117,7 @@ pub(super) struct AssetResponse {
     title: Option<String>,
     visibility: VisibilityDto,
     /// The file, once ready. A public file's URL never changes content; a private
-    /// file's is signed and works for 15 minutes.
+    /// file's is signed and works for `media.download_expires` (15 minutes by default).
     url: Option<String>,
     /// Images only: a version at most 400 pixels wide when the media URLs can resize,
     /// else the original.

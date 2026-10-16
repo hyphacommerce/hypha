@@ -956,7 +956,7 @@
             ]
           },
           "url": {
-            "description": "The file. Public, so it doesn't expire when served from the media URL; without\none (local development) it is signed and works for 15 minutes.",
+            "description": "The file. Public, so it doesn't expire when served from the media URL; without\none (local development) it is signed and works for `media.download_expires` (15\nminutes by default).",
             "type": "string"
           },
           "width": {

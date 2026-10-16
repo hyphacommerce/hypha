@@ -585,7 +585,7 @@ pub async fn authenticate_staff<S: HasUsers + HasRoles + HasSessions>(
 /// otherwise. Callers answer the same either way, so nobody can probe for accounts.
 ///
 /// The user is checked before a link is made, so a disabled account doesn't get a link
-/// that would hold back the next request (`PasswordReset::RESEND_AFTER_SECS`); and a link
+/// that would hold back the next request (`PasswordReset::blocks_another`); and a link
 /// whose email couldn't be sent is withdrawn for the same reason.
 pub async fn request_password_reset<S: StaffPorts>(
     ports: &S,

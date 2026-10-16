@@ -77,10 +77,12 @@ impl PasswordReset {
         self.used_at.is_none() && now < self.expires_at
     }
 
-    /// Whether a new reset for the same identity should wait: this one is unused and
-    /// younger than `resend_after` (`AuthSettings::password_reset_resend_after`).
+    /// Whether a new reset for the same identity should wait: this one still works
+    /// (unused, not expired) and is younger than `resend_after`
+    /// (`AuthSettings::password_reset_resend_after`). An expired link never holds one
+    /// back, whichever of the two settings is longer.
     pub fn blocks_another(&self, now: Timestamp, resend_after: Duration) -> bool {
-        self.used_at.is_none() && now < self.created_at.plus(resend_after)
+        self.is_usable(now) && now < self.created_at.plus(resend_after)
     }
 
     /// Uses the token up. Callers check `is_usable` first.
@@ -145,5 +147,42 @@ mod tests {
         assert!(!r.is_usable(now.plus_secs(3600)));
         r.mark_used(now);
         assert!(!r.is_usable(now));
+    }
+
+    fn reset(now: Timestamp, lifetime_secs: u64) -> PasswordReset {
+        PasswordReset::new(
+            PasswordResetId::from_uuid(Uuid::from_u128(1)),
+            IdentityId::from_uuid(Uuid::from_u128(2)),
+            TokenHash::from_bytes([0; 32]),
+            now,
+            Duration::from_secs(lifetime_secs),
+        )
+    }
+
+    #[test]
+    fn a_working_link_holds_another_back_until_resend_after() {
+        let now = Timestamp::UNIX_EPOCH;
+        let r = reset(now, 3600);
+        let resend_after = Duration::from_secs(300);
+        assert!(r.blocks_another(now.plus_secs(299), resend_after));
+        assert!(!r.blocks_another(now.plus_secs(300), resend_after));
+    }
+
+    #[test]
+    fn an_expired_link_never_holds_another_back() {
+        // Resending waits a day, but the link only worked for an hour.
+        let now = Timestamp::UNIX_EPOCH;
+        let r = reset(now, 3600);
+        let resend_after = Duration::from_secs(86_400);
+        assert!(r.blocks_another(now.plus_secs(3599), resend_after));
+        assert!(!r.blocks_another(now.plus_secs(3600), resend_after));
+    }
+
+    #[test]
+    fn a_used_link_never_holds_another_back() {
+        let now = Timestamp::UNIX_EPOCH;
+        let mut r = reset(now, 3600);
+        r.mark_used(now);
+        assert!(!r.blocks_another(now, Duration::from_secs(300)));
     }
 }

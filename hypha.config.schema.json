@@ -135,7 +135,7 @@
   "additionalProperties": false,
   "$defs": {
     "Auth": {
-      "description": "How long staff sessions and auth's emailed tokens last.",
+      "description": "How long staff sessions and auth's emailed tokens last. Each is at most 365 days.",
       "type": "object",
       "properties": {
         "invite_lifetime": {
@@ -149,7 +149,7 @@
           "default": "1h"
         },
         "password_reset_resend_after": {
-          "description": "While the latest reset link is younger than this and unused, asking again sends\nnothing.",
+          "description": "While the latest reset link is younger than this, unused and still working,\nasking again sends nothing.",
           "$ref": "#/$defs/Duration",
           "default": "5m"
         },
@@ -345,7 +345,7 @@
           "default": true
         },
         "events_after": {
-          "description": "How long events, and their deliveries, are kept.",
+          "description": "How long events, and their deliveries, are kept. At least a day longer than\n`webhooks.give_up_after`, so no delivery is deleted while it's still due.",
           "$ref": "#/$defs/Duration",
           "default": "30d"
         },
@@ -521,12 +521,12 @@
           "default": "127.0.0.1:3000"
         },
         "max_body": {
-          "description": "The largest request body accepted.",
+          "description": "The largest request body accepted: 1KiB to 64MiB. Files don't count: they're\nuploaded to storage directly.",
           "$ref": "#/$defs/Size",
           "default": "2MiB"
         },
         "shutdown_grace": {
-          "description": "How long stopping waits for jobs, and then for background work, to finish.",
+          "description": "How long stopping waits for jobs, and then for background work, to finish. At\nleast 1 second.",
           "$ref": "#/$defs/Duration",
           "default": "10s"
         },
@@ -570,12 +570,12 @@
       "type": "object",
       "properties": {
         "give_up_after": {
-          "description": "No attempt is planned more than this long after the first; then the delivery\nfails for good (and can be retried from the admin).",
+          "description": "No attempt is planned more than this long after the first; then the delivery\nfails for good (and can be retried from the admin). At least the first wait, at\nmost 365 days.",
           "$ref": "#/$defs/Duration",
           "default": "3d"
         },
         "retry": {
-          "description": "The waits after the first failures, in order (at most 20).",
+          "description": "The waits after the first failures, in order (at most 20, each at most 365 days).",
           "type": "array",
           "default": [
             "1m",
@@ -589,7 +589,7 @@
           }
         },
         "retry_then_every": {
-          "description": "The wait after each later failure.",
+          "description": "The wait after each later failure. At most 365 days.",
           "$ref": "#/$defs/Duration",
           "default": "12h"
         }

@@ -58,11 +58,12 @@ pub struct HostEnv {
 impl HostEnv {
     /// `secret_key` seals TOTP secrets (`HYPHA_SECRET_KEY`); losing it makes every
     /// authenticator unreadable, so it must stay the same across restarts.
+    /// `admin_url` is without a trailing `/`, as `hypha-config` gives it.
     pub fn new(secret_key: [u8; 32], admin_url: Option<String>, auth: AuthSettings) -> Self {
         Self {
             secret_box: XChaChaBox::new(secret_key),
             hasher: Argon2id::OWASP,
-            admin_url: admin_url.map(|url| url.trim_end_matches('/').to_string()),
+            admin_url,
             auth,
         }
     }
@@ -219,8 +220,6 @@ pub struct AppState<S> {
     pub background: Background,
     /// Limits on the public routes (design note 0009). In memory: one instance's counts.
     pub limiter: crate::rate_limit::MemoryRateLimiter,
-    /// Whose `X-Forwarded-For` to believe (`server.trusted_proxies`).
-    pub trusted_proxies: crate::client_ip::TrustedProxies,
     /// The one store this deployment serves (design note 0006, model A), set at startup.
     pub store: StoreId,
     /// Its name at startup, for labels that shouldn't cost a query (the entry in an
@@ -230,13 +229,21 @@ pub struct AppState<S> {
     /// `media.s3.endpoint`, and the asset routes then answer 503.
     pub media: Option<crate::media::Media>,
     /// For rate callbacks to external apps (design note 0015); each call sets its own
-    /// timeout, the provider's. Built by `outbound::client` under `outbound`.
+    /// timeout, the provider's. Built by `outbound::client` under `outbound()`.
     pub http: reqwest::Client,
-    /// Whether those calls may reach private addresses (`outbound.allow_private`).
-    pub outbound: crate::outbound::OutboundPolicy,
-    /// The settings in effect (design note 0017): the body limit, the jobs' timers and
-    /// the dispatcher's batch, lease, retries and retention are read from here.
+    /// The settings in effect (design note 0017), the one copy: the body limit, the
+    /// trusted proxies, the outbound policy, the jobs' timers and the dispatcher's
+    /// batch, lease, retries and retention are read from here.
     pub config: hypha_config::Config,
+}
+
+impl<S> AppState<S> {
+    /// Whether calls to apps may reach private addresses (`outbound.allow_private`).
+    pub fn outbound(&self) -> crate::outbound::OutboundPolicy {
+        crate::outbound::OutboundPolicy {
+            allow_private: self.config.allow_private_callbacks,
+        }
+    }
 }
 
 impl<S: Storage> AppState<S> {
@@ -261,7 +268,7 @@ impl<S> AppState<S> {
         crate::shipping::HostRates {
             ports,
             http: &self.http,
-            outbound: self.outbound,
+            outbound: self.outbound(),
             env: &self.env,
             clock: &self.clock,
         }
@@ -273,7 +280,7 @@ impl<S> AppState<S> {
     pub fn webhooks(&self) -> crate::webhooks::HostWebhooks<'_> {
         crate::webhooks::HostWebhooks {
             http: &self.http,
-            outbound: self.outbound,
+            outbound: self.outbound(),
             env: &self.env,
             clock: &self.clock,
         }

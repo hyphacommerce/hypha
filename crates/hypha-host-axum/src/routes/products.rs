@@ -101,7 +101,8 @@ pub(super) struct ProductMediaResponse {
     kind: AssetKindDto,
     mime_type: String,
     /// The file. Public, so it doesn't expire when served from the media URL; without
-    /// one (local development) it is signed and works for 15 minutes.
+    /// one (local development) it is signed and works for `media.download_expires` (15
+    /// minutes by default).
     url: String,
     /// Images: a version at most 400 pixels wide when the media URLs can resize, else
     /// the original. `null` for videos.

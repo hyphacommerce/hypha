@@ -30,7 +30,6 @@ use std::net::SocketAddr;
 use axum::extract::connect_info::MockConnectInfo;
 
 use super::postgres_router;
-use crate::client_ip::TrustedProxies;
 use crate::media::Media;
 use crate::state::{AppState, HostEnv, PgStorage, Storage, SystemClock, UuidV7Ids};
 
@@ -49,27 +48,26 @@ struct TestApp {
 /// The app without file storage: most routes don't need it, so their tests don't need
 /// the S3 server.
 async fn app() -> TestApp {
-    app_with(TrustedProxies::default()).await
-}
-
-async fn app_with(trusted_proxies: TrustedProxies) -> TestApp {
-    app_from(trusted_proxies, None, Config::defaults()).await
+    app_from(Config::defaults(), false).await
 }
 
 /// The app with file storage (the compose S3 server), for the media routes.
 async fn app_with_media() -> TestApp {
-    app_from(
-        TrustedProxies::default(),
-        Some(test_media().await),
-        Config::defaults(),
-    )
-    .await
+    // The compose S3 server, from `.cargo/config.toml`'s `HYPHA_S3_*`.
+    let config = Config::load(None, |name| std::env::var(name).ok())
+        .expect("HYPHA_S3_* (see .cargo/config.toml)");
+    app_from(config, true).await
 }
 
 /// The app under `hypha.config.toml` text (design note 0017), without the environment.
 async fn app_configured(toml: &str) -> TestApp {
     let config = Config::load(Some(toml), |_| None).unwrap();
-    app_from(TrustedProxies::default(), None, config).await
+    app_from(config, false).await
+}
+
+/// Behind a trusted proxy: the test peer.
+async fn app_behind_proxy() -> TestApp {
+    app_configured("[server]\ntrusted_proxies = [\"127.0.0.1\"]").await
 }
 
 /// Requests in these tests come from this peer (`MockConnectInfo`), as if over a socket.
@@ -117,11 +115,8 @@ async fn fresh_schema() -> String {
     format!("{url}{separator}options=-csearch_path%3D{schema}")
 }
 
-/// File storage from `HYPHA_S3_*` (the compose server by default), bucket created.
-async fn test_media() -> Media {
-    // The compose S3 server, from `.cargo/config.toml`'s `HYPHA_S3_*`.
-    let config = Config::load(None, |name| std::env::var(name).ok())
-        .expect("HYPHA_S3_* (see .cargo/config.toml)");
+/// File storage under `config` (the compose server), bucket created.
+async fn test_media(config: &Config) -> Media {
     let media = Media::from_config(&config.media)
         .expect("HYPHA_S3_* (see .cargo/config.toml)")
         .expect("HYPHA_S3_ENDPOINT (see .cargo/config.toml)");
@@ -133,11 +128,15 @@ async fn test_media() -> Media {
     media
 }
 
-async fn app_from(
-    trusted_proxies: TrustedProxies,
-    media: Option<Media>,
-    config: Config,
-) -> TestApp {
+/// Everything from `config`, the one source of settings, as in `serve`; file storage
+/// with `media`.
+async fn app_from(mut config: Config, media: bool) -> TestApp {
+    // The tests' rate apps and webhook receivers listen on localhost.
+    config.allow_private_callbacks = true;
+    let media = match media {
+        true => Some(test_media(&config).await),
+        false => None,
+    };
     let storage = PgStorage::connect(&fresh_schema().await, &config.database)
         .await
         .unwrap();
@@ -157,16 +156,11 @@ async fn app_from(
         env,
         background: Default::default(),
         limiter: crate::rate_limit::MemoryRateLimiter::new(&config.rate_limits),
-        trusted_proxies,
         store: store.id(),
         store_name: store.name().to_string(),
         media,
-        // The tests' rate apps listen on localhost.
-        outbound: crate::outbound::OutboundPolicy {
-            allow_private: true,
-        },
         http: crate::outbound::client(crate::outbound::OutboundPolicy {
-            allow_private: true,
+            allow_private: config.allow_private_callbacks,
         })
         .unwrap(),
         config,
@@ -1642,7 +1636,7 @@ async fn too_many_logins_from_one_address_get_429_with_retry_after() {
 #[tokio::test]
 async fn one_email_is_limited_however_many_addresses_try_it() {
     // Behind a trusted proxy (the test peer), each request names another client.
-    let app = app_with(TrustedProxies::new(vec!["127.0.0.1/32".parse().unwrap()])).await;
+    let app = app_behind_proxy().await;
     let (burst, _) = crate::rate_limit::Rule::LoginEmail.quota(&Default::default());
     let body = login_body(OWNER_EMAIL);
     for n in 0..burst {
@@ -1665,7 +1659,7 @@ async fn one_email_is_limited_however_many_addresses_try_it() {
 
 #[tokio::test]
 async fn hammering_an_email_from_one_address_does_not_lock_its_owner_out() {
-    let app = app_with(TrustedProxies::new(vec!["127.0.0.1/32".parse().unwrap()])).await;
+    let app = app_behind_proxy().await;
     let (burst, _) = crate::rate_limit::Rule::LoginEmailFromIp.quota(&Default::default());
     let attacker = [("x-forwarded-for", "203.0.113.66")];
     let wrong = login_body(OWNER_EMAIL);
@@ -1740,7 +1734,7 @@ async fn a_forged_forwarded_for_does_not_escape_the_limit() {
 
 #[tokio::test]
 async fn reset_requests_for_one_email_are_limited_per_address() {
-    let app = app_with(TrustedProxies::new(vec!["127.0.0.1/32".parse().unwrap()])).await;
+    let app = app_behind_proxy().await;
     let (burst, _) = crate::rate_limit::Rule::ResetEmailFromIp.quota(&Default::default());
     let body = json!({ "email": OWNER_EMAIL }).to_string();
     let here = [("x-forwarded-for", "203.0.113.1")];

@@ -22,7 +22,6 @@ use hypha_core::Ctx;
 use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
-use crate::client_ip::TrustedProxies;
 use crate::rate_limit::MemoryRateLimiter;
 use crate::state::{AppState, HostEnv, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids};
 
@@ -222,7 +221,7 @@ async fn serve<S: Storage>(
     config: Config,
 ) {
     let ids = UuidV7Ids;
-    let trusted_proxies = TrustedProxies::new(config.server.trusted_proxies.clone());
+    let trusted_proxies = &config.server.trusted_proxies;
     // The one setting that silently goes wrong behind a proxy (design note 0009, §8).
     if trusted_proxies.is_empty() {
         tracing::info!(
@@ -296,12 +295,9 @@ async fn serve<S: Storage>(
         env,
         background: Default::default(),
         limiter: MemoryRateLimiter::new(&config.rate_limits),
-        trusted_proxies,
         store: store.id(),
         store_name: store.name().to_string(),
         media,
-        outbound,
-        config,
         http: match outbound::client(outbound) {
             Ok(client) => client,
             Err(e) => {
@@ -309,6 +305,7 @@ async fn serve<S: Storage>(
                 std::process::exit(1);
             }
         },
+        config,
     });
     if let Err(e) = ensure_owner(&state).await {
         tracing::error!("owner setup failed: {e}");

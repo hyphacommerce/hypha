@@ -18,18 +18,14 @@ use crate::{
     state::{SharedState, Storage},
 };
 
-/// The proxies whose `X-Forwarded-For` is believed.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TrustedProxies(Vec<IpNet>);
+/// The proxies whose `X-Forwarded-For` is believed, borrowed from the configuration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TrustedProxies<'a>(&'a [IpNet]);
 
-impl TrustedProxies {
+impl<'a> TrustedProxies<'a> {
     /// These ranges (`server.trusted_proxies`, parsed and checked by `hypha-config`).
-    pub fn new(nets: Vec<IpNet>) -> Self {
+    pub fn new(nets: &'a [IpNet]) -> Self {
         Self(nets)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 
     fn contains(&self, ip: IpAddr) -> bool {
@@ -105,7 +101,8 @@ impl<S: Storage> FromRequestParts<SharedState<S>> for ClientIp {
         let ConnectInfo(peer) = ConnectInfo::<SocketAddr>::from_request_parts(parts, state)
             .await
             .map_err(|_| ApiError::internal("the server records no peer addresses"))?;
-        let ip = state.trusted_proxies.client(peer.ip(), &parts.headers);
+        let ip = TrustedProxies::new(&state.config.server.trusted_proxies)
+            .client(peer.ip(), &parts.headers);
         Ok(ClientIp(limit_key(ip)))
     }
 }
@@ -128,12 +125,10 @@ mod tests {
         headers
     }
 
-    fn proxies(list: &str) -> TrustedProxies {
-        TrustedProxies::new(
-            list.split(',')
-                .map(|s| s.trim().parse::<IpNet>().unwrap())
-                .collect(),
-        )
+    fn proxies(list: &str) -> Vec<IpNet> {
+        list.split(',')
+            .map(|s| s.trim().parse::<IpNet>().unwrap())
+            .collect()
     }
 
     #[test]
@@ -149,7 +144,7 @@ mod tests {
     fn a_request_not_from_a_trusted_proxy_keeps_its_peer() {
         let headers = forwarded(&["6.6.6.6"]);
         assert_eq!(
-            proxies("10.0.0.0/8").client(ip("1.2.3.4"), &headers),
+            TrustedProxies::new(&proxies("10.0.0.0/8")).client(ip("1.2.3.4"), &headers),
             ip("1.2.3.4")
         );
     }
@@ -160,7 +155,7 @@ mod tests {
         // the real client, and an inner proxy (10.0.0.2) appended the balancer.
         let headers = forwarded(&["6.6.6.6, 1.2.3.4", "10.0.0.1"]);
         assert_eq!(
-            proxies("10.0.0.0/8").client(ip("10.0.0.2"), &headers),
+            TrustedProxies::new(&proxies("10.0.0.0/8")).client(ip("10.0.0.2"), &headers),
             ip("1.2.3.4")
         );
     }
@@ -169,7 +164,7 @@ mod tests {
     fn a_junk_hop_stops_the_walk_at_the_last_trusted_proxy() {
         let headers = forwarded(&["1.2.3.4, nonsense"]);
         assert_eq!(
-            proxies("10.0.0.0/8").client(ip("10.0.0.1"), &headers),
+            TrustedProxies::new(&proxies("10.0.0.0/8")).client(ip("10.0.0.1"), &headers),
             ip("10.0.0.1")
         );
     }

@@ -219,14 +219,22 @@ read-only settings route), never from a copy in the admin.
 
 ## 8. Checks (CF9)
 
-- Every duration and interval is above zero; `burst` is at least 1.
+- Every duration and interval is above zero; `burst` is at least 1;
+  `server.shutdown_grace` is at least a second.
+- `server.max_body` is 1KiB to 64MiB: every route's JSON fits, and anonymous clients can't
+  make the server buffer more before their 401 (files go to storage directly).
 - `jobs.dispatch.batch` is 1 to 1,000.
 - `jobs.dispatch.lease` is at least the slowest webhook's run (its 30-second timeout plus
   15 seconds) plus 15 seconds, so at least one delivery fits in a lease: 1 minute.
 - `webhooks.retry` holds at most 20 waits; `give_up_after` is at least the first wait.
+- `jobs.prune.events_after` is at least `webhooks.give_up_after` plus a day: pruning an
+  event deletes its deliveries, so none may still be due.
 - `jobs.prune.idempotency_keys_after` is at least an hour, so a client retrying a slow
   request still gets its first answer.
-- `auth.session_lifetime` and `auth.invite_lifetime` are at least a minute.
+- `auth.session_lifetime` and `auth.invite_lifetime` are at least a minute. Every auth
+  lifetime and every retry wait is at most 365 days, so expiries stay dates clients can
+  read (RFC 3339 ends at the year 9999). An expired reset link never holds back a new
+  one, whatever `password_reset_resend_after` says.
 - `media.upload_expires` and `download_expires` are 1 minute to 7 days (S3's limit on
   signed URLs); `media.abandoned_after` is at least `upload_expires`, so an upload in
   progress isn't swept; `media.s3.bucket` is required with an endpoint.
@@ -236,7 +244,8 @@ read-only settings route), never from a copy in the admin.
   `true` or `false`. An empty environment variable counts as unset.
 
 A file that fails to parse names the line and column; one that parses but fails a check
-lists every failure, each with its key, sorted by key.
+lists every failure, each with its key (or the environment variable that set it), sorted
+by key. Failures are typed (`Broken`, `UnitError`), each with its `ErrorCode`.
 
 ## 9. Order of work
 

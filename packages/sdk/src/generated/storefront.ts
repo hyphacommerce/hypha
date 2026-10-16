@@ -531,7 +531,8 @@ export interface components {
             thumbnail_url?: string | null;
             /**
              * @description The file. Public, so it doesn't expire when served from the media URL; without
-             *     one (local development) it is signed and works for 15 minutes.
+             *     one (local development) it is signed and works for `media.download_expires` (15
+             *     minutes by default).
              */
             url: string;
             /** Format: int32 */

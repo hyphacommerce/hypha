@@ -46,9 +46,11 @@ pub struct Server {
     /// token. `HYPHA_ADMIN_URL` wins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_url: Option<String>,
-    /// The largest request body accepted.
+    /// The largest request body accepted: 1KiB to 64MiB. Files don't count: they're
+    /// uploaded to storage directly.
     pub max_body: Size,
-    /// How long stopping waits for jobs, and then for background work, to finish.
+    /// How long stopping waits for jobs, and then for background work, to finish. At
+    /// least 1 second.
     pub shutdown_grace: Dur,
 }
 
@@ -168,7 +170,7 @@ impl Default for S3 {
     }
 }
 
-/// How long staff sessions and auth's emailed tokens last.
+/// How long staff sessions and auth's emailed tokens last. Each is at most 365 days.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Auth {
@@ -180,8 +182,8 @@ pub struct Auth {
     pub second_factor_lock: Dur,
     /// How long an emailed password reset link works.
     pub password_reset_lifetime: Dur,
-    /// While the latest reset link is younger than this and unused, asking again sends
-    /// nothing.
+    /// While the latest reset link is younger than this, unused and still working,
+    /// asking again sends nothing.
     pub password_reset_resend_after: Dur,
     /// How long an invite works. At least 1 minute.
     pub invite_lifetime: Dur,
@@ -205,12 +207,13 @@ impl Default for Auth {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Webhooks {
-    /// The waits after the first failures, in order (at most 20).
+    /// The waits after the first failures, in order (at most 20, each at most 365 days).
     pub retry: Vec<Dur>,
-    /// The wait after each later failure.
+    /// The wait after each later failure. At most 365 days.
     pub retry_then_every: Dur,
     /// No attempt is planned more than this long after the first; then the delivery
-    /// fails for good (and can be retried from the admin).
+    /// fails for good (and can be retried from the admin). At least the first wait, at
+    /// most 365 days.
     pub give_up_after: Dur,
 }
 
@@ -301,7 +304,8 @@ impl Default for DispatchJob {
 pub struct PruneJob {
     pub enabled: bool,
     pub interval: Dur,
-    /// How long events, and their deliveries, are kept.
+    /// How long events, and their deliveries, are kept. At least a day longer than
+    /// `webhooks.give_up_after`, so no delivery is deleted while it's still due.
     pub events_after: Dur,
     /// How long an `Idempotency-Key` is honoured. At least 1 hour.
     pub idempotency_keys_after: Dur,

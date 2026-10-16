@@ -4,8 +4,34 @@
 use core::{fmt, str::FromStr, time::Duration};
 use std::borrow::Cow;
 
+use hypha_core::ErrorCode;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use thiserror::Error;
+
+/// Why a duration or size didn't read. Each holds the text as written.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum UnitError {
+    #[error("{0:?}: expected a whole number and a unit, like \"30s\"")]
+    NoNumber(String),
+    #[error("{0:?}: the unit is ms, s, m, h or d, like \"30s\"")]
+    DurationUnit(String),
+    #[error("{0:?}: the unit is B, KiB, MiB or GiB, like \"2MiB\"")]
+    SizeUnit(String),
+    #[error("{0:?} is too large")]
+    TooLarge(String),
+}
+
+impl ErrorCode for UnitError {
+    fn code(&self) -> &'static str {
+        match self {
+            UnitError::NoNumber(_) => "unit_no_number",
+            UnitError::DurationUnit(_) => "unit_duration_unit",
+            UnitError::SizeUnit(_) => "unit_size_unit",
+            UnitError::TooLarge(_) => "unit_too_large",
+        }
+    }
+}
 
 /// A duration: a whole number and `ms`, `s`, `m`, `h` or `d`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -20,18 +46,18 @@ const DURATION_UNITS: [(&str, u64); 5] = [
 ];
 
 impl FromStr for Dur {
-    type Err = String;
+    type Err = UnitError;
 
-    fn from_str(s: &str) -> Result<Self, String> {
+    fn from_str(s: &str) -> Result<Self, UnitError> {
         let (n, unit) = split(s)?;
         let millis = DURATION_UNITS
             .iter()
             .find(|(name, _)| *name == unit)
             .map(|(_, millis)| *millis)
-            .ok_or_else(|| format!("{s:?}: the unit is ms, s, m, h or d, like \"30s\""))?;
+            .ok_or_else(|| UnitError::DurationUnit(s.to_string()))?;
         n.checked_mul(millis)
             .map(|ms| Dur(Duration::from_millis(ms)))
-            .ok_or_else(|| format!("{s:?} is too long"))
+            .ok_or_else(|| UnitError::TooLarge(s.to_string()))
     }
 }
 
@@ -64,18 +90,18 @@ const SIZE_UNITS: [(&str, u64); 7] = [
 ];
 
 impl FromStr for Size {
-    type Err = String;
+    type Err = UnitError;
 
-    fn from_str(s: &str) -> Result<Self, String> {
+    fn from_str(s: &str) -> Result<Self, UnitError> {
         let (n, unit) = split(s)?;
         let bytes = SIZE_UNITS
             .iter()
             .find(|(name, _)| *name == unit)
             .map(|(_, bytes)| *bytes)
-            .ok_or_else(|| format!("{s:?}: the unit is B, KiB, MiB or GiB, like \"2MiB\""))?;
+            .ok_or_else(|| UnitError::SizeUnit(s.to_string()))?;
         n.checked_mul(bytes)
             .map(Size)
-            .ok_or_else(|| format!("{s:?} is too large"))
+            .ok_or_else(|| UnitError::TooLarge(s.to_string()))
     }
 }
 
@@ -91,17 +117,15 @@ impl fmt::Display for Size {
 }
 
 /// `"30s"` → (30, "s"). Spaces around are allowed, not inside.
-fn split(s: &str) -> Result<(u64, &str), String> {
+fn split(s: &str) -> Result<(u64, &str), UnitError> {
     let t = s.trim();
     let digits = t.bytes().take_while(u8::is_ascii_digit).count();
     if digits == 0 {
-        return Err(format!(
-            "{s:?}: expected a whole number and a unit, like \"30s\""
-        ));
+        return Err(UnitError::NoNumber(s.to_string()));
     }
     let n = t[..digits]
         .parse()
-        .map_err(|_| format!("{s:?} is too large"))?;
+        .map_err(|_| UnitError::TooLarge(s.to_string()))?;
     Ok((n, &t[digits..]))
 }
 
@@ -156,8 +180,28 @@ as_string!(
 mod tests {
     use super::*;
 
-    fn dur(s: &str) -> Result<Duration, String> {
+    fn dur(s: &str) -> Result<Duration, UnitError> {
         s.parse::<Dur>().map(|d| d.0)
+    }
+
+    #[test]
+    fn each_failure_says_why() {
+        let no_number = |s: &str| Err(UnitError::NoNumber(s.to_string()));
+        assert_eq!(dur("s"), no_number("s"));
+        assert_eq!(dur("-1s"), no_number("-1s"));
+        assert_eq!(dur("1w"), Err(UnitError::DurationUnit("1w".to_string())));
+        assert_eq!(
+            "2mb".parse::<Size>(),
+            Err(UnitError::SizeUnit("2mb".to_string()))
+        );
+        assert_eq!(
+            dur("18446744073709551615d"),
+            Err(UnitError::TooLarge("18446744073709551615d".to_string()))
+        );
+        assert_eq!(
+            dur("99999999999999999999d"),
+            Err(UnitError::TooLarge("99999999999999999999d".to_string()))
+        );
     }
 
     #[test]
