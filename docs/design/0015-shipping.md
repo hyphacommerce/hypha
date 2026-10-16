@@ -9,7 +9,7 @@
   option on a cart, shipping in cart totals and tax, and the shipping snapshot on an
   order.
 - **Not in scope:** fulfilment (shipments, labels, tracking, `fulfillment_status`,
-  deducting stock: note 0017), local pickup and local delivery (section 9), returns,
+  deducting stock: note 0018), local pickup and local delivery (section 9), returns,
   billing addresses (with payments), duties and import taxes, the outbox (0016).
 - **Related:** 0002 (spores, ports, external apps), 0003 (tax: shipping tax was left
   for this note), 0004 (locations), 0005 (`Address`), 0007 (orders, O4 snapshots;
@@ -143,7 +143,7 @@ pub struct Rate {
     pub name: String,
     pub amount: Money,                 // in the request's currency
     pub estimate: Option<DeliveryEstimate>,
-    pub reference: Option<String>,     // the provider's quote ID, for buying the label later (0017)
+    pub reference: Option<String>,     // the provider's quote ID, for buying the label later (0018)
 }
 ```
 
@@ -282,7 +282,7 @@ pub trait RateProvider {
   (`shipping_option_required`), both 409 on the cart.
 - **Order** snapshots `shipping_address` and `shipping_lines[]` (`{group, option,
   code, name, provider, service, amount, tax, estimate, reference}`) and
-  `shipping_total`; fulfilment (0017) reads them.
+  `shipping_total`; fulfilment (0018) reads them.
 
 ## 8. API and admin
 
@@ -314,7 +314,7 @@ weight and "requires shipping" in the product page's variant table.
 - **Split shipments by location** (multi-origin): more groups per cart.
 - **Provinces and postal codes** in zones; changing a cart's country.
 - **Fulfilment providers** (labels, tracking): the same providers gain a second port in
-  0017, and a quote's `reference` buys its label.
+  0018, and a quote's `reference` buys its label.
 - **Rate apps without a held connection.** Offers, selecting and checkout call rate apps
   (up to 10 s each) while the request holds its pooled Postgres connection, so slow apps
   under load can starve the pool for every route. For now a per-cart rate limit

@@ -9,7 +9,7 @@
   events are delivered (in-process handlers and webhooks to external apps), the `App`
   record webhooks belong to, the first event catalog and the first handler (cleaning up
   after a removed variant, 0014 §4).
-- **Not in scope:** fulfilment (0017), search (0018; it consumes these events), spores
+- **Not in scope:** fulfilment (0018), search (0019; it consumes these events), spores
   (their handlers plug into the dispatcher later, section 6), emails through the outbox
   (section 10), OAuth for apps and open scopes (0008 §9, section 10), a public event feed
   for polling (section 10).
@@ -35,7 +35,7 @@
 | EV10 | **A jobs seam, not `Storage` methods.** Background work is plain functions, `run_due(ports, clock, …) -> Progress`, that a host calls from a Tokio interval, a Workers Cron trigger or EventBridge. The host owns one runner that starts them and drains them on shutdown (section 7) |
 | EV11 | **One `App` record** (`app_<name>`) owns an external app's name, signing secret, webhook endpoint and event subscriptions. Shipping's app providers keep only their rate callback (URL, timeout, services) and use the app's secret. OAuth and app scopes join the same record later (section 8). *Hard to reverse* |
 | EV12 | **Webhooks are signed like the rate callback** (`Hypha-Signature: t=…,v1=…`, 0015 §5), sent only to public addresses (`outbound.rs`), and carry the event envelope as the body |
-| EV13 | **Public contract fixes before the first webhook consumer:** list cursors are encoded (not the last item's raw ID) and closed enums in the API documents are marked extensible, so new states (0017) don't break generated clients (section 9) |
+| EV13 | **Public contract fixes before the first webhook consumer:** list cursors are encoded (not the last item's raw ID) and closed enums in the API documents are marked extensible, so new states (0018) don't break generated clients (section 9) |
 
 ## 1. What others do
 
@@ -256,7 +256,7 @@ Each handler's write is its own command, run as `Actor::System`.
 - removes the variant's fixed prices from every price list
   (`PriceListRepo::remove_variant_everywhere`, one statement)
 - deletes the variant's inventory item if it has no reservations; with reservations it
-  stays, since open orders still point at them, and 0017's fulfilment decides when it
+  stays, since open orders still point at them, and 0018's fulfilment decides when it
   goes (Q5)
 
 Both records `price_list.prices_removed` / `inventory_item.changed` events of their
@@ -437,7 +437,7 @@ its transaction, to fold into the main INSERT/UPDATE later with the other double
   once merchants have apps.
 
 **Q5. Inventory items of removed variants that still have reservations.**
-- *(Decided)* Keep them until fulfilment (0017) consumes the reservations, then
+- *(Decided)* Keep them until fulfilment (0018) consumes the reservations, then
   delete them there.
 - The alternative, deleting them anyway, loses the reservations open orders rely on.
 
