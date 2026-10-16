@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
-use hypha_core::{Quantity, VariantId};
+use hypha_core::{MarketId, Quantity, RepoError, VariantId};
 
-use crate::{InventoryItem, Location};
+use crate::{
+    HasInventoryItems, HasLocations, InventoryItem, InventoryItemRepo, Location, LocationRepo,
+};
 
 /// Whether a quantity of a variant can be sold in a market right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +31,20 @@ pub struct StockContext {
 }
 
 impl StockContext {
+    /// The stock of `variants` in the locations serving `market`, in 2 queries (design
+    /// note 0019, section 8: carts and search documents load it the same way).
+    pub async fn load<S: HasInventoryItems + HasLocations>(
+        ports: &S,
+        market: MarketId,
+        variants: &[VariantId],
+    ) -> Result<Self, RepoError> {
+        let items = ports.inventory_items().for_variants(variants).await?;
+        Ok(Self {
+            items: items.into_iter().map(|i| (i.variant(), i)).collect(),
+            locations: ports.locations().serving(market).await?,
+        })
+    }
+
     pub fn availability(&self, variant: VariantId, quantity: Quantity) -> Availability {
         let Some(item) = self.items.get(&variant) else {
             return Availability::Untracked;

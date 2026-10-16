@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use hypha_core::{
     AddressError, AddressParts, AuthError, CartId, Clock, CountryCode, CountryError, Ctx,
     CustomerId, Email, EmailError, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
@@ -8,13 +6,8 @@ use hypha_core::{
     StageIdempotency, VariantId, earlier_id,
 };
 use hypha_customers::{CustomerRepo, HasCustomers};
-use hypha_inventory::{
-    HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo, StockContext,
-};
-use hypha_markets::{
-    CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo,
-    PriceListRepo,
-};
+use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
+use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo};
 use hypha_pricing::PricingContext;
 use hypha_products::{HasProducts, Product, ProductRepo};
 use hypha_shipping::{
@@ -604,57 +597,18 @@ pub async fn read_cart<S: PricingPorts>(
     })
 }
 
-/// Everything needed to price the cart's lines, with a fixed number of queries
-/// however many lines there are: membership and fixed prices are fetched in batches.
+/// Everything needed to price the cart's lines (`hypha_pricing::load_pricing`).
 /// With `load_tax`, `load_stock` and `load_products`, pricing a cart takes the same
 /// number of round trips for 1 line or 100 (on Postgres about 20, counting the
 /// BEGIN/COMMIT of each multi-query load); an empty cart skips the batch lookups.
-///
-/// A missing catalog or price list is left out rather than reported here:
-/// `resolve_price` turns it into a precise per-line reason.
 async fn load_pricing<S: HasMarkets + HasCatalogs + HasPriceLists>(
     ports: &S,
     cart: &Cart,
 ) -> Result<PricingContext, CommandError> {
-    let market_id = cart.market();
-    let market = ports
-        .markets()
-        .get(market_id)
-        .await?
-        .ok_or(CommandError::MarketNotFound(market_id))?;
-    let catalog = ports
-        .catalogs()
-        .get_by_context(CatalogContext::Market(market_id))
-        .await?;
-    let price_list = match catalog.as_ref().and_then(|c| c.price_list()) {
-        Some(id) => ports.price_lists().get(id).await?,
-        None => None,
-    };
-
-    let products = product_ids(cart);
     let variants: Vec<VariantId> = cart.lines().iter().map(|l| l.variant()).collect();
-
-    let included_products = match &catalog {
-        Some(c) => {
-            ports
-                .catalogs()
-                .included_products(c.id(), &products)
-                .await?
-        }
-        None => HashSet::new(),
-    };
-    let fixed_prices = match &price_list {
-        Some(l) => ports.price_lists().fixed_prices(l.id(), &variants).await?,
-        None => HashMap::new(),
-    };
-
-    Ok(PricingContext {
-        market,
-        catalog,
-        price_list,
-        included_products,
-        fixed_prices,
-    })
+    hypha_pricing::load_pricing(ports, cart.market(), &product_ids(cart), &variants)
+        .await?
+        .ok_or(CommandError::MarketNotFound(cart.market()))
 }
 
 /// The tax rates of the cart's country and its products' tax classes, in 2 queries.
@@ -671,17 +625,13 @@ async fn load_tax<S: HasTaxClasses + HasTaxRegions>(
     })
 }
 
-/// The stock of the cart's variants in the locations serving its market, in 2 queries.
+/// The stock of the cart's variants in the locations serving its market.
 async fn load_stock<S: HasInventoryItems + HasLocations>(
     ports: &S,
     cart: &Cart,
 ) -> Result<StockContext, CommandError> {
     let variants: Vec<VariantId> = cart.lines().iter().map(|l| l.variant()).collect();
-    let items = ports.inventory_items().for_variants(&variants).await?;
-    Ok(StockContext {
-        items: items.into_iter().map(|i| (i.variant(), i)).collect(),
-        locations: ports.locations().serving(cart.market()).await?,
-    })
+    Ok(StockContext::load(ports, cart.market(), &variants).await?)
 }
 
 /// The cart's products, in one query. Missing (deleted) products are left out;
