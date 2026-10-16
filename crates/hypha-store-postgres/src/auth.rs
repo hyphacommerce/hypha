@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        actor_from_db, actor_to_db, col, micros, scopes_from_db, scopes_to_db, token_hash_from_db,
-        ts, version_from_db, version_to_db,
+        actor_from_db, actor_to_db, col, micros, opt_micros, opt_ts, scopes_from_db, scopes_to_db,
+        token_hash_from_db, ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -34,14 +34,6 @@ fn principal_from_db(kind: &str, id: Uuid) -> Result<Principal, RepoError> {
         Some(PrincipalKind::Staff) => Ok(Principal::Staff(UserId::from_uuid(id))),
         None => Err(corrupt(format!("unknown principal kind {kind:?}"))),
     }
-}
-
-fn opt_micros(t: Option<Timestamp>) -> Option<i64> {
-    t.map(Timestamp::unix_micros)
-}
-
-fn opt_ts(micros: Option<i64>) -> Option<Timestamp> {
-    micros.map(Timestamp::from_unix_micros)
 }
 
 // ---------- identities ----------

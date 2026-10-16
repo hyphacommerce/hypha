@@ -1,9 +1,10 @@
-use hypha_core::{Currency, ErrorCode, MoneyError, OrderLineId, TextError};
+use hypha_core::{Currency, ErrorCode, MoneyError, OrderId, OrderLineId, TextError};
 use thiserror::Error;
 
-/// Why an order can't be built. Checkout builds orders from a priced cart, so these
-/// mean a bug or bad stored data rather than bad input, but they are typed like any
-/// other rule.
+/// Why an order can't be built or changed. Checkout builds orders from a priced cart, so
+/// the building ones mean a bug or bad stored data rather than bad input, but they are
+/// typed like any other rule. The changes (fulfilling, cancelling, paying) refuse what
+/// the order's state doesn't allow.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum OrderError {
     #[error(transparent)]
@@ -26,6 +27,29 @@ pub enum OrderError {
     ShippingWithoutAddress,
     #[error("a shipping line names order line {0}, which the order doesn't have")]
     UnknownShippedLine(OrderLineId),
+    #[error("line {0} is fulfilled past its quantity")]
+    FulfilledPastQuantity(OrderLineId),
+    #[error("the order's fulfillment status isn't its lines'")]
+    FulfillmentStatusMismatch,
+    #[error("order {0} is cancelled")]
+    Cancelled(OrderId),
+    #[error("the order has no line {0}")]
+    UnknownLine(OrderLineId),
+    #[error("line {line} has {unfulfilled} left to fulfil, not {requested}")]
+    OverFulfilled {
+        line: OrderLineId,
+        requested: u32,
+        unfulfilled: u32,
+    },
+    #[error("line {line} has {fulfilled} fulfilled, not {requested}")]
+    NotFulfilled {
+        line: OrderLineId,
+        requested: u32,
+        fulfilled: u32,
+    },
+    /// Cancelling an order with standing fulfilments (design note 0018, FU7).
+    #[error("order {0} has fulfilments; cancel them first")]
+    HasFulfillments(OrderId),
 }
 
 impl ErrorCode for OrderError {
@@ -41,6 +65,13 @@ impl ErrorCode for OrderError {
             OrderError::InvalidNumber(_) => "invalid_order_number",
             OrderError::ShippingWithoutAddress => "shipping_without_address",
             OrderError::UnknownShippedLine(_) => "unknown_shipped_line",
+            OrderError::FulfilledPastQuantity(_) => "fulfilled_past_quantity",
+            OrderError::FulfillmentStatusMismatch => "fulfillment_status_mismatch",
+            OrderError::Cancelled(_) => "order_cancelled",
+            OrderError::UnknownLine(_) => "unknown_order_line",
+            OrderError::OverFulfilled { .. } => "over_fulfilled",
+            OrderError::NotFulfilled { .. } => "line_not_fulfilled",
+            OrderError::HasFulfillments(_) => "order_has_fulfillments",
         }
     }
 }

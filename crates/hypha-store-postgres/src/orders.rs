@@ -7,8 +7,8 @@ use hypha_core::{
     stamp_insert, stamp_update,
 };
 use hypha_orders::{
-    Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSummary,
-    OrderTax, OrderTaxSource,
+    Cancellation, Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot,
+    OrderSummary, OrderTax, OrderTaxSource,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -16,8 +16,9 @@ use uuid::Uuid;
 use crate::{
     columns::{
         ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
-        currency_from_db, id_and_address, micros, stamp_columns, stamps_from_row, tax_rate_from_db,
-        tax_rate_to_db, ts, version_from_db, version_to_db, write_stamps,
+        currency_from_db, id_and_address, micros, opt_micros, opt_ts, stamp_columns,
+        stamps_from_row, tax_rate_from_db, tax_rate_to_db, ts, version_from_db, version_to_db,
+        write_stamps,
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
@@ -44,12 +45,13 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                 &format!(
                     "SELECT o.id, o.number, {},
                      o.customer_id, o.email, o.country, o.currency, o.total,
-                     o.financial_status, o.fulfillment_status,
+                     o.financial_status, o.fulfillment_status, {},
                      (SELECT coalesce(sum(quantity), 0) FROM order_lines
                       WHERE order_id = o.id)::bigint AS item_count
                  FROM orders o WHERE ($1::uuid IS NULL OR o.id < $1)
                  ORDER BY o.id DESC LIMIT $2",
                     micros("o.placed_at"),
+                    micros("o.cancelled_at"),
                 ),
                 &[(&after, Type::UUID), (&fetch, Type::INT8)],
             )
@@ -137,9 +139,10 @@ pub(crate) async fn update_order(
                  cart_id = $5, market_id = $6, currency = $7, country = $8,
                  taxes_included = $9, customer_id = $10, email = $11, subtotal = $12,
                  tax_total = $13, total = $14, financial_status = $15,
-                 fulfillment_status = $16
+                 fulfillment_status = $16, cancelled_at = {}, cancel_reason = $18
              WHERE id = $1 AND version = $2 RETURNING version",
                 ts(4),
+                ts(17),
             ),
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -158,6 +161,8 @@ pub(crate) async fn update_order(
                 (&s.total.amount(), Type::INT8),
                 (&s.financial_status.as_str(), Type::TEXT),
                 (&s.fulfillment_status.as_str(), Type::TEXT),
+                (&opt_micros(s.cancelled.map(|c| c.at)), Type::INT8),
+                (&s.cancelled.map(|c| c.reason.as_str()), Type::TEXT),
             ],
         )
         .await
@@ -192,9 +197,10 @@ pub(crate) async fn insert_order(
         &format!(
             "INSERT INTO orders (id, version, number, placed_at, cart_id, market_id, currency,
              country, taxes_included, customer_id, email, subtotal, tax_total, total,
-             financial_status, fulfillment_status)
-         VALUES ($1, 1, $2, {}, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+             financial_status, fulfillment_status, cancelled_at, cancel_reason)
+         VALUES ($1, 1, $2, {}, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, {}, $17)",
             ts(3),
+            ts(16),
         ),
         &[
             (&s.id.as_uuid(), Type::UUID),
@@ -212,6 +218,8 @@ pub(crate) async fn insert_order(
             (&s.total.amount(), Type::INT8),
             (&s.financial_status.as_str(), Type::TEXT),
             (&s.fulfillment_status.as_str(), Type::TEXT),
+            (&opt_micros(s.cancelled.map(|c| c.at)), Type::INT8),
+            (&s.cancelled.map(|c| c.reason.as_str()), Type::TEXT),
         ],
     )
     .await
@@ -312,6 +320,10 @@ async fn insert_lines(
         .map(|l| l.unit_price.money().amount())
         .collect();
     let totals: Vec<i64> = lines.iter().map(|l| l.total.amount()).collect();
+    let fulfilled: Vec<i64> = lines
+        .iter()
+        .map(|l| i64::from(l.fulfilled_quantity))
+        .collect();
     let tax_rates = lines
         .iter()
         .map(|l| l.tax.map(|t| tax_rate_to_db(t.rate)).transpose())
@@ -335,16 +347,16 @@ async fn insert_lines(
     tx.query_typed(
         "INSERT INTO order_lines (order_id, position, id, product_id, variant_id, quantity,
              product_title, variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
-             tax_amount, tax_region_id)
+             tax_amount, tax_region_id, fulfilled_quantity)
          SELECT $1, (n - 1)::integer, id, product_id, variant_id, quantity, product_title,
              variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id, tax_amount,
-             tax_region_id
+             tax_region_id, fulfilled_quantity
          FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::bigint[], $6::text[], $7::text[],
                      $8::text[], $9::bigint[], $10::bigint[], $11::integer[], $12::uuid[],
-                     $13::bigint[], $14::uuid[])
+                     $13::bigint[], $14::uuid[], $15::bigint[])
               WITH ORDINALITY AS t (id, product_id, variant_id, quantity, product_title,
                   variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
-                  tax_amount, tax_region_id, n)",
+                  tax_amount, tax_region_id, fulfilled_quantity, n)",
         &[
             (&order.as_uuid(), Type::UUID),
             (&ids, Type::UUID_ARRAY),
@@ -360,6 +372,7 @@ async fn insert_lines(
             (&tax_classes, Type::UUID_ARRAY),
             (&tax_amounts, Type::INT8_ARRAY),
             (&tax_regions, Type::UUID_ARRAY),
+            (&fulfilled, Type::INT8_ARRAY),
         ],
     )
     .await
@@ -384,9 +397,11 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, R
             &format!(
                 "SELECT id, version, number, {}, cart_id, market_id, currency, country,
                      taxes_included, customer_id, email, subtotal, tax_total, total,
-                     financial_status, fulfillment_status, {}, shipping_total, {}
+                     financial_status, fulfillment_status, {}, cancel_reason, {},
+                     shipping_total, {}
                  FROM orders WHERE id = ANY($1)",
                 micros("placed_at"),
+                micros("cancelled_at"),
                 address_columns("shipping_"),
                 stamp_columns(""),
             ),
@@ -403,7 +418,7 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, R
         .query_typed(
             "SELECT id, product_id, variant_id, quantity, product_title, variant_title, sku,
                  unit_price, total, tax_rate_ppm, tax_class_id, tax_amount, tax_region_id,
-                 order_id
+                 fulfilled_quantity, order_id
              FROM order_lines WHERE order_id = ANY($1) ORDER BY order_id, position",
             &param,
         )
@@ -470,6 +485,16 @@ fn order_from_db(
     let email: String = col(row, "email")?;
     let financial: String = col(row, "financial_status")?;
     let fulfillment: String = col(row, "fulfillment_status")?;
+    let cancelled_at: Option<i64> = col(row, "cancelled_at")?;
+    let cancel_reason: Option<String> = col(row, "cancel_reason")?;
+    let cancelled = match (opt_ts(cancelled_at), cancel_reason) {
+        (Some(at), Some(reason)) => Some(Cancellation {
+            at,
+            reason: reason.parse().map_err(corrupt)?,
+        }),
+        (None, None) => None,
+        _ => return Err(corrupt("order cancellation columns are partly set")),
+    };
     let snapshot = OrderSnapshot {
         id: OrderId::from_uuid(col(row, "id")?),
         version: version_from_db(col(row, "version")?)?,
@@ -492,6 +517,7 @@ fn order_from_db(
         total: money(col(row, "total")?)?,
         financial_status: financial.parse().map_err(corrupt)?,
         fulfillment_status: fulfillment.parse().map_err(corrupt)?,
+        cancelled,
     };
     Order::restore(snapshot).map_err(corrupt)
 }
@@ -514,6 +540,7 @@ fn summary_from_db(row: &Row) -> Result<OrderSummary, RepoError> {
         country: CountryCode::new(&country).map_err(corrupt)?,
         financial_status: financial.parse().map_err(corrupt)?,
         fulfillment_status: fulfillment.parse().map_err(corrupt)?,
+        cancelled_at: opt_ts(col(row, "cancelled_at")?),
         total: Money::new(col(row, "total")?, currency_from_db(&currency)?).map_err(corrupt)?,
         item_count: u64::try_from(items).map_err(|_| corrupt(format!("order {id} item count")))?,
     })
@@ -569,6 +596,9 @@ fn line_from_db(
         .ok()
         .and_then(|q| Quantity::new(q).ok())
         .ok_or_else(|| corrupt(format!("order line quantity {quantity}")))?;
+    let fulfilled: i64 = col(line, "fulfilled_quantity")?;
+    let fulfilled_quantity = u32::try_from(fulfilled)
+        .map_err(|_| corrupt(format!("order line fulfilled quantity {fulfilled}")))?;
     let rate: Option<i32> = col(line, "tax_rate_ppm")?;
     let class: Option<Uuid> = col(line, "tax_class_id")?;
     let amount: Option<i64> = col(line, "tax_amount")?;
@@ -596,5 +626,6 @@ fn line_from_db(
         unit_price: Price::new(money(col(line, "unit_price")?)?).map_err(corrupt)?,
         total: money(col(line, "total")?)?,
         tax,
+        fulfilled_quantity,
     })
 }

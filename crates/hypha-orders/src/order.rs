@@ -9,7 +9,7 @@ use hypha_core::{
 
 use crate::{
     OrderError,
-    events::{ORDER, OrderPaid, OrderPlaced},
+    events::{ORDER, OrderCancelled, OrderFulfillmentStatusChanged, OrderPaid, OrderPlaced},
 };
 
 /// An order's human number (`#1001`) from `OrderRepo::next_number`: unique and
@@ -74,11 +74,13 @@ impl FromStr for FinancialStatus {
     }
 }
 
-/// Where the goods are (design note 0007, O3). Fulfillment comes later; until then
-/// every order is `Unfulfilled`.
+/// Where the goods are (design note 0007, O3), derived from the lines' fulfilled
+/// quantities (design note 0018, FU3) and stored for lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FulfillmentStatus {
     Unfulfilled,
+    PartiallyFulfilled,
+    Fulfilled,
 }
 
 impl FulfillmentStatus {
@@ -86,6 +88,22 @@ impl FulfillmentStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             FulfillmentStatus::Unfulfilled => "unfulfilled",
+            FulfillmentStatus::PartiallyFulfilled => "partially_fulfilled",
+            FulfillmentStatus::Fulfilled => "fulfilled",
+        }
+    }
+
+    /// The status of `lines`: nothing fulfilled, all of every line, or anything between.
+    pub fn of(lines: &[OrderLine]) -> FulfillmentStatus {
+        if lines.iter().all(|l| l.fulfilled_quantity == 0) {
+            FulfillmentStatus::Unfulfilled
+        } else if lines
+            .iter()
+            .all(|l| l.fulfilled_quantity == l.quantity.value())
+        {
+            FulfillmentStatus::Fulfilled
+        } else {
+            FulfillmentStatus::PartiallyFulfilled
         }
     }
 }
@@ -103,9 +121,70 @@ impl FromStr for FulfillmentStatus {
     fn from_str(s: &str) -> Result<Self, String> {
         match s {
             "unfulfilled" => Ok(FulfillmentStatus::Unfulfilled),
+            "partially_fulfilled" => Ok(FulfillmentStatus::PartiallyFulfilled),
+            "fulfilled" => Ok(FulfillmentStatus::Fulfilled),
             other => Err(other.to_string()),
         }
     }
+}
+
+/// Why an order was cancelled (design note 0018, FU7; Shopify's reasons).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelReason {
+    /// The buyer asked.
+    Customer,
+    /// The goods ran out or can't be shipped.
+    Inventory,
+    Fraud,
+    /// Payment was declined.
+    Declined,
+    /// Staff cancelled it for a reason of their own.
+    Staff,
+    Other,
+}
+
+impl CancelReason {
+    /// The same string used in JSON and storage, e.g. "customer".
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CancelReason::Customer => "customer",
+            CancelReason::Inventory => "inventory",
+            CancelReason::Fraud => "fraud",
+            CancelReason::Declined => "declined",
+            CancelReason::Staff => "staff",
+            CancelReason::Other => "other",
+        }
+    }
+}
+
+impl fmt::Display for CancelReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for CancelReason {
+    /// The text that didn't match a reason.
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "customer" => Ok(CancelReason::Customer),
+            "inventory" => Ok(CancelReason::Inventory),
+            "fraud" => Ok(CancelReason::Fraud),
+            "declined" => Ok(CancelReason::Declined),
+            "staff" => Ok(CancelReason::Staff),
+            "other" => Ok(CancelReason::Other),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
+/// When and why an order was cancelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cancellation {
+    pub at: Timestamp,
+    pub reason: CancelReason,
 }
 
 /// Which rule produced a line's tax, copied from the cart's tax line so orders don't
@@ -144,6 +223,18 @@ pub struct OrderLine {
     pub total: Money,
     /// `None` when the cart's country had no tax rates.
     pub tax: Option<OrderTax>,
+    /// How many of `quantity` standing fulfilments shipped (design note 0018, FU3): 0
+    /// at checkout, never more than `quantity`.
+    pub fulfilled_quantity: u32,
+}
+
+impl OrderLine {
+    /// How many are still to ship.
+    pub fn unfulfilled_quantity(&self) -> u32 {
+        self.quantity
+            .value()
+            .saturating_sub(self.fulfilled_quantity)
+    }
 }
 
 /// How one group of the order ships, as it was charged (design note 0015, SH12): copies,
@@ -152,7 +243,7 @@ pub struct OrderLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderShippingLine {
     pub group: ShippingGroupId,
-    /// The order lines this ships: what fulfilment (0017) works through.
+    /// The order lines this ships: what fulfilment (0018) works through.
     pub lines: Vec<OrderLineId>,
     pub option: ShippingOptionId,
     pub code: String,
@@ -161,7 +252,7 @@ pub struct OrderShippingLine {
     /// built-in rate.
     pub provider: Option<String>,
     pub service: Option<String>,
-    /// The provider's quote ID: what fulfilment buys the label with (0017).
+    /// The provider's quote ID: what fulfilment buys the label with (0018, section 8).
     pub reference: Option<String>,
     pub amount: Price,
     /// Delivery in days, `min` to `max`, as estimated at checkout.
@@ -201,11 +292,12 @@ pub struct NewOrder {
 }
 
 /// An order (design note 0007): a snapshot of a priced cart, plus its payment and
-/// fulfillment status.
+/// fulfillment status, and its cancellation (design note 0018).
 ///
 /// Invariants, checked by `place` and `restore`: at least one line, line IDs unique,
 /// every amount in `currency`, each line's total is its unit price times its quantity,
-/// and the totals add up from the lines.
+/// the totals add up from the lines, no line fulfilled past its quantity, and the
+/// fulfillment status is the lines'.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Order {
     id: OrderId,
@@ -230,6 +322,7 @@ pub struct Order {
     total: Money,
     financial_status: FinancialStatus,
     fulfillment_status: FulfillmentStatus,
+    cancelled: Option<Cancellation>,
     events: Recorder,
 }
 
@@ -283,7 +376,9 @@ impl Order {
             tax_total: new.tax_total,
             total: new.total,
             financial_status: FinancialStatus::Pending,
+            // Lines that say otherwise fail `restore`'s status check.
             fulfillment_status: FulfillmentStatus::Unfulfilled,
+            cancelled: None,
         })?;
         let placed = OrderPlaced {
             order: order.id,
@@ -300,18 +395,105 @@ impl Order {
     }
 
     /// Records that the order is paid; returns whether that changed anything (an order
-    /// already paid stays as it is).
-    pub fn mark_paid(&mut self) -> bool {
-        let changed = self.financial_status != FinancialStatus::Paid;
-        self.financial_status = FinancialStatus::Paid;
-        if changed {
-            let paid = OrderPaid {
-                order: self.id,
-                amount: self.total,
-            };
-            self.events.record(self.subject(), &paid);
+    /// already paid stays as it is). A cancelled order can't be marked paid.
+    pub fn mark_paid(&mut self) -> Result<bool, OrderError> {
+        if self.financial_status == FinancialStatus::Paid {
+            return Ok(false);
         }
-        changed
+        self.refuse_cancelled()?;
+        self.financial_status = FinancialStatus::Paid;
+        let paid = OrderPaid {
+            order: self.id,
+            amount: self.total,
+        };
+        self.events.record(self.subject(), &paid);
+        Ok(true)
+    }
+
+    fn refuse_cancelled(&self) -> Result<(), OrderError> {
+        match self.cancelled {
+            Some(_) => Err(OrderError::Cancelled(self.id)),
+            None => Ok(()),
+        }
+    }
+
+    /// Counts `lines` (line, quantity) as shipped by a new fulfilment. All or nothing:
+    /// refused for a cancelled order, a line the order doesn't have, or more than a
+    /// line has left to ship (the same line twice counts twice).
+    pub fn fulfil(&mut self, lines: &[(OrderLineId, Quantity)]) -> Result<(), OrderError> {
+        self.refuse_cancelled()?;
+        let mut next = self.lines.clone();
+        for (id, quantity) in lines {
+            let line = line_in(&mut next, *id)?;
+            let requested = quantity.value();
+            if requested > line.unfulfilled_quantity() {
+                return Err(OrderError::OverFulfilled {
+                    line: *id,
+                    requested,
+                    unfulfilled: line.unfulfilled_quantity(),
+                });
+            }
+            line.fulfilled_quantity += requested;
+        }
+        self.set_lines(next);
+        Ok(())
+    }
+
+    /// Takes back `lines` (line, quantity) of a cancelled fulfilment. All or nothing:
+    /// refused for a cancelled order (its stock is gone back already), a line the order
+    /// doesn't have, or more than a line has fulfilled.
+    pub fn unfulfil(&mut self, lines: &[(OrderLineId, Quantity)]) -> Result<(), OrderError> {
+        self.refuse_cancelled()?;
+        let mut next = self.lines.clone();
+        for (id, quantity) in lines {
+            let line = line_in(&mut next, *id)?;
+            let requested = quantity.value();
+            if requested > line.fulfilled_quantity {
+                return Err(OrderError::NotFulfilled {
+                    line: *id,
+                    requested,
+                    fulfilled: line.fulfilled_quantity,
+                });
+            }
+            line.fulfilled_quantity -= requested;
+        }
+        self.set_lines(next);
+        Ok(())
+    }
+
+    /// Replaces the lines (only their fulfilled quantities differ) and records the
+    /// status change, if any.
+    fn set_lines(&mut self, lines: Vec<OrderLine>) {
+        let from = self.fulfillment_status;
+        self.lines = lines;
+        self.fulfillment_status = FulfillmentStatus::of(&self.lines);
+        if self.fulfillment_status != from {
+            let changed = OrderFulfillmentStatusChanged {
+                order: self.id,
+                from: from.as_str(),
+                to: self.fulfillment_status.as_str(),
+            };
+            self.events.record(self.subject(), &changed);
+        }
+    }
+
+    /// Cancels the order; returns whether that changed anything (a cancelled order
+    /// stays as it was, with its first reason). Refused while anything is fulfilled:
+    /// those fulfilments are cancelled first. Payment is untouched (FU7).
+    pub fn cancel(&mut self, at: Timestamp, reason: CancelReason) -> Result<bool, OrderError> {
+        if self.cancelled.is_some() {
+            return Ok(false);
+        }
+        if self.fulfillment_status != FulfillmentStatus::Unfulfilled {
+            return Err(OrderError::HasFulfillments(self.id));
+        }
+        self.cancelled = Some(Cancellation { at, reason });
+        let cancelled = OrderCancelled {
+            order: self.id,
+            reason: reason.as_str(),
+        };
+        self.events.record(self.subject(), &cancelled);
+        Ok(true)
     }
 
     pub fn id(&self) -> OrderId {
@@ -389,6 +571,10 @@ impl Order {
     pub fn fulfillment_status(&self) -> FulfillmentStatus {
         self.fulfillment_status
     }
+
+    pub fn cancelled(&self) -> Option<Cancellation> {
+        self.cancelled
+    }
 }
 
 /// Plain-data form of an `Order` for storage adapters (design note 0001, 3.4).
@@ -417,6 +603,7 @@ pub struct OrderSnapshot {
     pub total: Money,
     pub financial_status: FinancialStatus,
     pub fulfillment_status: FulfillmentStatus,
+    pub cancelled: Option<Cancellation>,
 }
 
 impl Order {
@@ -443,6 +630,7 @@ impl Order {
             total: self.total,
             financial_status: self.financial_status,
             fulfillment_status: self.fulfillment_status,
+            cancelled: self.cancelled,
         }
     }
 
@@ -475,6 +663,9 @@ impl Order {
             line.variant_title = copied_text(line.variant_title.take());
             line.sku = copied_text(line.sku.take());
 
+            if line.fulfilled_quantity > line.quantity.value() {
+                return Err(OrderError::FulfilledPastQuantity(line.id));
+            }
             in_currency(line.unit_price.money())?;
             in_currency(line.total)?;
             if line.unit_price.money().checked_mul(line.quantity.value())? != line.total {
@@ -519,6 +710,10 @@ impl Order {
             return Err(OrderError::TotalsMismatch);
         }
 
+        if FulfillmentStatus::of(&s.lines) != s.fulfillment_status {
+            return Err(OrderError::FulfillmentStatusMismatch);
+        }
+
         Ok(Order {
             id: s.id,
             version: s.version,
@@ -541,9 +736,17 @@ impl Order {
             total: s.total,
             financial_status: s.financial_status,
             fulfillment_status: s.fulfillment_status,
+            cancelled: s.cancelled,
             events: Recorder::default(),
         })
     }
+}
+
+fn line_in(lines: &mut [OrderLine], id: OrderLineId) -> Result<&mut OrderLine, OrderError> {
+    lines
+        .iter_mut()
+        .find(|l| l.id == id)
+        .ok_or(OrderError::UnknownLine(id))
 }
 
 /// Text copied from a product that the product doesn't cap (option labels joined into a
@@ -590,6 +793,7 @@ mod tests {
                     region: TaxRegionId::from_uuid(Uuid::from_u128(9)),
                 },
             }),
+            fulfilled_quantity: 0,
         }
     }
 
@@ -702,6 +906,240 @@ mod tests {
         assert_eq!(order.version(), Version::NEW);
     }
 
+    // ---- fulfilment and cancellation (design note 0018) ----
+
+    fn q(n: u32) -> Quantity {
+        Quantity::new(n).unwrap()
+    }
+
+    fn placed() -> Order {
+        let mut order = Order::place(new_order()).unwrap();
+        order.take_events();
+        order
+    }
+
+    fn event_types(order: &mut Order) -> Vec<&'static str> {
+        order.take_events().iter().map(|e| e.event_type).collect()
+    }
+
+    fn at() -> Timestamp {
+        Timestamp::from_unix_micros(1_767_312_000_000_000)
+    }
+
+    #[test]
+    fn fulfilling_part_of_an_order_makes_it_partially_fulfilled() {
+        let mut order = placed();
+        order.fulfil(&[(line_id(1), q(1))]).unwrap();
+        assert_eq!(order.lines()[0].fulfilled_quantity, 1);
+        assert_eq!(order.lines()[0].unfulfilled_quantity(), 1);
+        assert_eq!(
+            order.fulfillment_status(),
+            FulfillmentStatus::PartiallyFulfilled
+        );
+        assert_eq!(
+            event_types(&mut order),
+            ["order.fulfillment_status_changed"]
+        );
+    }
+
+    #[test]
+    fn fulfilling_every_line_makes_it_fulfilled() {
+        let mut order = placed();
+        order.fulfil(&[(line_id(1), q(1))]).unwrap();
+        order.take_events();
+        order
+            .fulfil(&[(line_id(1), q(1)), (line_id(2), q(1))])
+            .unwrap();
+        assert_eq!(order.fulfillment_status(), FulfillmentStatus::Fulfilled);
+        assert_eq!(
+            event_types(&mut order),
+            ["order.fulfillment_status_changed"]
+        );
+    }
+
+    #[test]
+    fn a_fulfilment_that_keeps_the_status_records_no_event() {
+        let mut order = Order::place(NewOrder {
+            lines: vec![line(1, 1000, 3, None)],
+            subtotal: eur(3000),
+            tax_total: eur(0),
+            total: eur(3000),
+            ..new_order()
+        })
+        .unwrap();
+        order.take_events();
+        order.fulfil(&[(line_id(1), q(1))]).unwrap();
+        order.take_events();
+        order.fulfil(&[(line_id(1), q(1))]).unwrap();
+        assert_eq!(event_types(&mut order), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_line_cant_be_fulfilled_past_its_quantity() {
+        let mut order = placed();
+        let before = order.clone();
+        assert_eq!(
+            order.fulfil(&[(line_id(2), q(1)), (line_id(1), q(3))]),
+            Err(OrderError::OverFulfilled {
+                line: line_id(1),
+                requested: 3,
+                unfulfilled: 2
+            })
+        );
+        assert_eq!(order, before);
+    }
+
+    #[test]
+    fn the_same_line_twice_counts_twice() {
+        let mut order = placed();
+        assert_eq!(
+            order.fulfil(&[(line_id(1), q(2)), (line_id(1), q(1))]),
+            Err(OrderError::OverFulfilled {
+                line: line_id(1),
+                requested: 1,
+                unfulfilled: 0
+            })
+        );
+    }
+
+    #[test]
+    fn fulfilling_a_line_the_order_doesnt_have_is_refused() {
+        let mut order = placed();
+        assert_eq!(
+            order.fulfil(&[(line_id(9), q(1))]),
+            Err(OrderError::UnknownLine(line_id(9)))
+        );
+    }
+
+    #[test]
+    fn unfulfilling_takes_the_count_back() {
+        let mut order = placed();
+        order.fulfil(&[(line_id(1), q(2))]).unwrap();
+        order.take_events();
+        order.unfulfil(&[(line_id(1), q(2))]).unwrap();
+        assert_eq!(order.fulfillment_status(), FulfillmentStatus::Unfulfilled);
+        assert_eq!(
+            event_types(&mut order),
+            ["order.fulfillment_status_changed"]
+        );
+    }
+
+    #[test]
+    fn unfulfilling_more_than_was_fulfilled_is_refused() {
+        let mut order = placed();
+        order.fulfil(&[(line_id(1), q(1))]).unwrap();
+        let before = order.clone();
+        assert_eq!(
+            order.unfulfil(&[(line_id(1), q(2))]),
+            Err(OrderError::NotFulfilled {
+                line: line_id(1),
+                requested: 2,
+                fulfilled: 1
+            })
+        );
+        assert_eq!(order, before);
+    }
+
+    #[test]
+    fn cancelling_records_when_and_why() {
+        let mut order = placed();
+        assert_eq!(order.cancel(at(), CancelReason::Customer), Ok(true));
+        assert_eq!(
+            order.cancelled(),
+            Some(Cancellation {
+                at: at(),
+                reason: CancelReason::Customer
+            })
+        );
+        assert_eq!(event_types(&mut order), ["order.cancelled"]);
+    }
+
+    #[test]
+    fn cancelling_again_keeps_the_first_reason() {
+        let mut order = placed();
+        order.cancel(at(), CancelReason::Customer).unwrap();
+        order.take_events();
+        assert_eq!(order.cancel(at(), CancelReason::Fraud), Ok(false));
+        assert_eq!(
+            order.cancelled().map(|c| c.reason),
+            Some(CancelReason::Customer)
+        );
+        assert_eq!(event_types(&mut order), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn an_order_with_fulfilments_cant_be_cancelled() {
+        let mut order = placed();
+        order.fulfil(&[(line_id(2), q(1))]).unwrap();
+        assert_eq!(
+            order.cancel(at(), CancelReason::Staff),
+            Err(OrderError::HasFulfillments(order.id()))
+        );
+        assert_eq!(order.cancelled(), None);
+    }
+
+    #[test]
+    fn a_cancelled_order_cant_be_fulfilled_unfulfilled_or_paid() {
+        let mut order = placed();
+        order.cancel(at(), CancelReason::Inventory).unwrap();
+        let cancelled = Err(OrderError::Cancelled(order.id()));
+        assert_eq!(order.fulfil(&[(line_id(1), q(1))]), cancelled);
+        assert_eq!(order.unfulfil(&[(line_id(1), q(1))]), cancelled);
+        assert_eq!(order.mark_paid(), Err(OrderError::Cancelled(order.id())));
+    }
+
+    #[test]
+    fn a_paid_order_can_be_cancelled_and_stays_paid() {
+        // Refunds come with payment spores (FU7, Q3).
+        let mut order = placed();
+        order.mark_paid().unwrap();
+        assert_eq!(order.cancel(at(), CancelReason::Customer), Ok(true));
+        assert_eq!(order.financial_status(), FinancialStatus::Paid);
+        assert_eq!(order.mark_paid(), Ok(false));
+    }
+
+    #[test]
+    fn restore_rejects_a_line_fulfilled_past_its_quantity() {
+        let mut s = placed().snapshot();
+        s.lines[1].fulfilled_quantity = 2;
+        s.fulfillment_status = FulfillmentStatus::PartiallyFulfilled;
+        assert_eq!(
+            Order::restore(s),
+            Err(OrderError::FulfilledPastQuantity(line_id(2)))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_a_status_the_lines_dont_have() {
+        let mut s = placed().snapshot();
+        s.fulfillment_status = FulfillmentStatus::Fulfilled;
+        assert_eq!(
+            Order::restore(s),
+            Err(OrderError::FulfillmentStatusMismatch)
+        );
+    }
+
+    #[test]
+    fn statuses_and_reasons_read_back_from_their_strings() {
+        for status in [
+            FulfillmentStatus::Unfulfilled,
+            FulfillmentStatus::PartiallyFulfilled,
+            FulfillmentStatus::Fulfilled,
+        ] {
+            assert_eq!(status.as_str().parse(), Ok(status));
+        }
+        for reason in [
+            CancelReason::Customer,
+            CancelReason::Inventory,
+            CancelReason::Fraud,
+            CancelReason::Declined,
+            CancelReason::Staff,
+            CancelReason::Other,
+        ] {
+            assert_eq!(reason.as_str().parse(), Ok(reason));
+        }
+    }
+
     #[test]
     fn an_order_needs_a_line() {
         let mut new = new_order();
@@ -787,15 +1225,16 @@ mod tests {
     #[test]
     fn mark_paid_changes_a_pending_order_once() {
         let mut order = Order::place(new_order()).unwrap();
-        assert!(order.mark_paid());
+        assert_eq!(order.mark_paid(), Ok(true));
         assert_eq!(order.financial_status(), FinancialStatus::Paid);
-        assert!(!order.mark_paid());
+        assert_eq!(order.mark_paid(), Ok(false));
     }
 
     #[test]
     fn restore_round_trips() {
         let mut order = Order::place(new_order()).unwrap();
-        order.mark_paid();
+        order.mark_paid().unwrap();
+        order.fulfil(&[(line_id(2), q(1))]).unwrap();
         assert_eq!(Order::restore(order.snapshot()), Ok(order));
     }
 

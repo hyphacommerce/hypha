@@ -37,6 +37,19 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "CancelReasonDto": {
+        "description": "`CancelReason` on the wire (design note 0018).\n\nKnown values: `customer`, `inventory`, `fraud`, `declined`, `staff`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "customer",
+          "inventory",
+          "fraud",
+          "declined",
+          "staff",
+          "other"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "CartId": {
         "description": "A CartId: `cart_` and 32 hex digits.",
         "examples": [
@@ -280,9 +293,11 @@
         "x-hypha-open-enum": true
       },
       "FulfillmentStatusDto": {
-        "description": "`FulfillmentStatus` on the wire.\n\nKnown values: `unfulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`FulfillmentStatus` on the wire.\n\nKnown values: `unfulfilled`, `partially_fulfilled`, `fulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
-          "unfulfilled"
+          "unfulfilled",
+          "partially_fulfilled",
+          "fulfilled"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -515,6 +530,12 @@
       },
       "OrderLineResponse": {
         "properties": {
+          "fulfilled_quantity": {
+            "description": "How many of `quantity` standing fulfilments shipped.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "id": {
             "$ref": "#/components/schemas/OrderLineId"
           },
@@ -570,12 +591,31 @@
           "quantity",
           "product_title",
           "unit_price",
-          "total"
+          "total",
+          "fulfilled_quantity"
         ],
         "type": "object"
       },
       "OrderResponse": {
         "properties": {
+          "cancel_reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CancelReasonDto",
+                "description": "Why it was cancelled; `null` if it wasn't."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cancelled_at": {
+            "description": "When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "cart": {
             "$ref": "#/components/schemas/CartId"
           },

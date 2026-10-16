@@ -12,10 +12,10 @@ pub mod summary;
 
 pub use commands::{CommandError, get_order, list_orders, mark_order_paid};
 pub use error::OrderError;
-pub use events::{OrderPaid, OrderPlaced};
+pub use events::{OrderCancelled, OrderFulfillmentStatusChanged, OrderPaid, OrderPlaced};
 pub use order::{
-    FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderLine, OrderNumber, OrderShippingLine,
-    OrderSnapshot, OrderTax, OrderTaxSource,
+    CancelReason, Cancellation, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderLine,
+    OrderNumber, OrderShippingLine, OrderSnapshot, OrderTax, OrderTaxSource,
 };
 pub use repo::{HasOrders, OrderRepo, StageOrders};
 pub use summary::OrderSummary;

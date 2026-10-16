@@ -578,6 +578,33 @@ impl From<hypha_customers::CommandError> for ApiError {
     }
 }
 
+/// The status of a rule an order refused, or `None` for the rules only a bug or bad
+/// stored data breaks (an order checkout built wrong), which are internal errors.
+fn order_error_status(e: &hypha_orders::OrderError) -> Option<StatusCode> {
+    use hypha_orders::OrderError as O;
+    match e {
+        // The state of the order in the URL.
+        O::Cancelled(_) | O::HasFulfillments(_) | O::OverFulfilled { .. } => {
+            Some(StatusCode::CONFLICT)
+        }
+        O::NotFulfilled { .. } => Some(StatusCode::CONFLICT),
+        // A line ID in the body.
+        O::UnknownLine(_) => Some(StatusCode::UNPROCESSABLE_ENTITY),
+        O::Text(_)
+        | O::Money(_)
+        | O::NoLines
+        | O::DuplicateLine(_)
+        | O::CurrencyMismatch { .. }
+        | O::LineTotalMismatch(_)
+        | O::TotalsMismatch
+        | O::InvalidNumber(_)
+        | O::ShippingWithoutAddress
+        | O::UnknownShippedLine(_)
+        | O::FulfilledPastQuantity(_)
+        | O::FulfillmentStatusMismatch => None,
+    }
+}
+
 impl From<hypha_orders::CommandError> for ApiError {
     fn from(e: hypha_orders::CommandError) -> Self {
         use hypha_orders::CommandError as E;
@@ -585,6 +612,10 @@ impl From<hypha_orders::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Every order route names the order in its URL.
             E::OrderNotFound(_) => StatusCode::NOT_FOUND,
+            E::Order(o) => match order_error_status(o) {
+                Some(status) => status,
+                None => return Self::internal(e),
+            },
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),

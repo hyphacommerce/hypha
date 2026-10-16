@@ -8,8 +8,8 @@ use hypha_core::{
     ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
 use hypha_orders::{
-    FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, OrderSummary, get_order,
-    list_orders, mark_order_paid,
+    CancelReason, FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, OrderSummary,
+    get_order, list_orders, mark_order_paid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,12 +58,57 @@ impl From<FinancialStatus> for FinancialStatusDto {
 #[serde(rename_all = "snake_case")]
 pub(super) enum FulfillmentStatusDto {
     Unfulfilled,
+    PartiallyFulfilled,
+    Fulfilled,
 }
 
 impl From<FulfillmentStatus> for FulfillmentStatusDto {
     fn from(s: FulfillmentStatus) -> Self {
         match s {
             FulfillmentStatus::Unfulfilled => FulfillmentStatusDto::Unfulfilled,
+            FulfillmentStatus::PartiallyFulfilled => FulfillmentStatusDto::PartiallyFulfilled,
+            FulfillmentStatus::Fulfilled => FulfillmentStatusDto::Fulfilled,
+        }
+    }
+}
+
+/// `CancelReason` on the wire (design note 0018).
+#[derive(Serialize, Deserialize, Clone, Copy, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum CancelReasonDto {
+    /// The buyer asked.
+    Customer,
+    /// The goods ran out or can't be shipped.
+    Inventory,
+    Fraud,
+    /// Payment was declined.
+    Declined,
+    Staff,
+    Other,
+}
+
+impl From<CancelReason> for CancelReasonDto {
+    fn from(r: CancelReason) -> Self {
+        match r {
+            CancelReason::Customer => CancelReasonDto::Customer,
+            CancelReason::Inventory => CancelReasonDto::Inventory,
+            CancelReason::Fraud => CancelReasonDto::Fraud,
+            CancelReason::Declined => CancelReasonDto::Declined,
+            CancelReason::Staff => CancelReasonDto::Staff,
+            CancelReason::Other => CancelReasonDto::Other,
+        }
+    }
+}
+
+impl From<CancelReasonDto> for CancelReason {
+    fn from(r: CancelReasonDto) -> Self {
+        match r {
+            CancelReasonDto::Customer => CancelReason::Customer,
+            CancelReasonDto::Inventory => CancelReason::Inventory,
+            CancelReasonDto::Fraud => CancelReason::Fraud,
+            CancelReasonDto::Declined => CancelReason::Declined,
+            CancelReasonDto::Staff => CancelReason::Staff,
+            CancelReasonDto::Other => CancelReason::Other,
         }
     }
 }
@@ -83,6 +128,10 @@ pub(super) struct OrderResponse {
     email: Email,
     financial_status: FinancialStatusDto,
     fulfillment_status: FulfillmentStatusDto,
+    /// When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.
+    cancelled_at: Option<String>,
+    /// Why it was cancelled; `null` if it wasn't.
+    cancel_reason: Option<CancelReasonDto>,
     /// Whether line prices include tax (the market decided, at checkout).
     taxes_included: bool,
     subtotal: Money,
@@ -137,6 +186,8 @@ pub(super) struct OrderLineResponse {
     total: Money,
     /// `null` when the country had no tax rates.
     tax: Option<OrderTaxResponse>,
+    /// How many of `quantity` standing fulfilments shipped.
+    fulfilled_quantity: u32,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -165,6 +216,8 @@ impl OrderResponse {
             email: order.email().clone(),
             financial_status: order.financial_status().into(),
             fulfillment_status: order.fulfillment_status().into(),
+            cancelled_at: order.cancelled().map(|c| rfc3339(c.at)).transpose()?,
+            cancel_reason: order.cancelled().map(|c| c.reason.into()),
             taxes_included: order.taxes_included(),
             subtotal: order.subtotal(),
             shipping_total: order.shipping_total(),
@@ -216,6 +269,7 @@ impl From<&OrderLine> for OrderLineResponse {
                 amount: t.amount,
                 tax_class: t.class,
             }),
+            fulfilled_quantity: l.fulfilled_quantity,
         }
     }
 }
@@ -267,6 +321,8 @@ pub(super) struct OrderSummaryResponse {
     country: CountryCode,
     financial_status: FinancialStatusDto,
     fulfillment_status: FulfillmentStatusDto,
+    /// When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.
+    cancelled_at: Option<String>,
     total: Money,
     /// How many items, adding up line quantities.
     item_count: u64,
@@ -283,6 +339,7 @@ impl OrderSummaryResponse {
             country: o.country,
             financial_status: o.financial_status.into(),
             fulfillment_status: o.fulfillment_status.into(),
+            cancelled_at: o.cancelled_at.map(rfc3339).transpose()?,
             total: o.total,
             item_count: o.item_count,
         })

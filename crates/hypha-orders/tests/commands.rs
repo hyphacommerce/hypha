@@ -4,8 +4,8 @@ use hypha_core::{
     VariantId, Version, Versioned,
 };
 use hypha_orders::{
-    CommandError, FinancialStatus, NewOrder, Order, OrderLine, OrderNumber, OrderRepo,
-    OrderSummary, get_order, list_orders, mark_order_paid,
+    CancelReason, CommandError, FinancialStatus, NewOrder, Order, OrderError, OrderLine,
+    OrderNumber, OrderRepo, OrderSummary, get_order, list_orders, mark_order_paid,
 };
 use hypha_testkit::InMemoryOrderRepo;
 use pollster::block_on;
@@ -44,6 +44,7 @@ fn repo_with_order() -> InMemoryOrderRepo {
             unit_price: Price::new(eur(500)).unwrap(),
             total: eur(1000),
             tax: None,
+            fulfilled_quantity: 0,
         }],
         shipping_address: None,
         shipping_lines: vec![],
@@ -199,5 +200,22 @@ fn list_orders_needs_orders_read() {
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::OrdersRead
         )))
+    );
+}
+
+#[test]
+fn a_cancelled_order_cant_be_marked_paid() {
+    let repo = repo_with_order();
+    let mut order = block_on(repo.get(order_id())).unwrap().unwrap();
+    order
+        .cancel(
+            Timestamp::from_unix_micros(1_767_312_000_000_000),
+            CancelReason::Fraud,
+        )
+        .unwrap();
+    block_on(repo.update(&mut order)).unwrap();
+    assert_eq!(
+        block_on(mark_order_paid(&Ctx::system(), &repo, order_id())),
+        Err(CommandError::Order(OrderError::Cancelled(order_id())))
     );
 }

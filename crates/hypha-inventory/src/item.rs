@@ -46,6 +46,9 @@ pub struct InventoryItem {
     continue_selling: bool,
     levels: Vec<Level>,
     reservations: Vec<Reservation>,
+    /// Its variant was removed while units were still reserved: it goes once the last
+    /// reservation is fulfilled or released (design note 0016, Q5; 0018).
+    retired: bool,
     /// Whether anything changed since it was loaded: its event is built from the item
     /// as it is when written (design note 0016).
     changed: Changed,
@@ -138,6 +141,7 @@ impl InventoryItem {
             continue_selling,
             levels: Vec::new(),
             reservations: Vec::new(),
+            retired: false,
             changed: Changed(true),
             deleted: Recorder::default(),
         }
@@ -359,6 +363,111 @@ impl InventoryItem {
         Ok(())
     }
 
+    /// Records that `quantity` for `reference` left `location` (design note 0018, FU5).
+    /// It comes out of what `reference` holds at `location` first; whatever else it
+    /// holds elsewhere is released for the rest, since the units shipped from here
+    /// instead. On hand at `location` drops by `quantity`, which may take it below zero
+    /// (the count was off, or stock was sold past zero). Untracked items change no
+    /// counts, but stale reservations are still given back.
+    ///
+    /// All or nothing; returns whether anything changed.
+    pub fn fulfil(
+        &mut self,
+        reference: &ReservationRef,
+        location: LocationId,
+        quantity: Quantity,
+    ) -> Result<bool, InventoryError> {
+        let on_hand = match self.tracked {
+            true => Some(check_range(
+                i128::from(self.on_hand(location)) - i128::from(quantity.value()),
+            )?),
+            false => None,
+        };
+        // Here first, then the other locations in the order they were reserved.
+        let mut held: Vec<usize> = (0..self.reservations.len())
+            .filter(|&i| self.reservations[i].reference == *reference)
+            .collect();
+        held.sort_by_key(|&i| self.reservations[i].location != location);
+        let mut left = quantity.value();
+        let mut remaining = vec![None; self.reservations.len()];
+        for i in held {
+            let r = &self.reservations[i];
+            let take = r.quantity.value().min(left);
+            left -= take;
+            remaining[i] = Some(r.quantity.value() - take);
+        }
+        let mut released = false;
+        let mut kept = Vec::with_capacity(self.reservations.len());
+        for (r, remaining) in std::mem::take(&mut self.reservations)
+            .into_iter()
+            .zip(remaining)
+        {
+            match remaining.map(Quantity::new) {
+                None => kept.push(r),
+                Some(Ok(quantity)) => {
+                    released |= quantity != r.quantity;
+                    kept.push(Reservation { quantity, ..r });
+                }
+                // Nothing left of it.
+                Some(Err(_)) => released = true,
+            }
+        }
+        self.reservations = kept;
+        if released {
+            self.changed = Changed(true);
+        }
+        // A tracked count always moves: `quantity` is at least 1.
+        if let Some(on_hand) = on_hand {
+            self.write_level(location, on_hand);
+        }
+        Ok(released || on_hand.is_some())
+    }
+
+    /// Reverses `fulfil` for a cancelled fulfilment: `quantity` is back on hand at
+    /// `location` and reserved there for `reference` again. Untracked items change
+    /// nothing. Returns whether anything changed.
+    pub fn restock(
+        &mut self,
+        reference: &ReservationRef,
+        location: LocationId,
+        quantity: Quantity,
+    ) -> Result<bool, InventoryError> {
+        if !self.tracked {
+            return Ok(false);
+        }
+        let on_hand =
+            check_range(i128::from(self.on_hand(location)) + i128::from(quantity.value()))?;
+        match self
+            .reservations
+            .iter_mut()
+            .find(|r| r.reference == *reference && r.location == location)
+        {
+            Some(r) => {
+                let total = r.quantity.value().checked_add(quantity.value());
+                r.quantity = Quantity::new(total.unwrap_or(u32::MAX))?;
+            }
+            None => self.reservations.push(Reservation {
+                reference: reference.clone(),
+                location,
+                quantity,
+            }),
+        }
+        self.write_level(location, on_hand);
+        self.changed = Changed(true);
+        Ok(true)
+    }
+
+    /// Marks the item to go once nothing is reserved on it any more: its variant was
+    /// removed while open orders still counted on these units (0016, Q5).
+    pub fn retire(&mut self) {
+        self.retired = true;
+    }
+
+    /// Retired, and nothing is reserved on it any more: the caller deletes it.
+    pub fn is_spent(&self) -> bool {
+        self.retired && self.reservations.is_empty()
+    }
+
     /// Gives back everything reserved for `reference`. Returns whether anything was;
     /// releasing an unknown reference is not an error, so a retry is harmless.
     pub fn release(&mut self, reference: &ReservationRef) -> bool {
@@ -394,6 +503,10 @@ impl InventoryItem {
     pub fn reservations(&self) -> &[Reservation] {
         &self.reservations
     }
+
+    pub fn retired(&self) -> bool {
+        self.retired
+    }
 }
 
 fn check_range(quantity: i128) -> Result<i64, InventoryError> {
@@ -415,6 +528,7 @@ pub struct InventoryItemSnapshot {
     pub continue_selling: bool,
     pub levels: Vec<Level>,
     pub reservations: Vec<Reservation>,
+    pub retired: bool,
 }
 
 impl InventoryItem {
@@ -428,6 +542,7 @@ impl InventoryItem {
             continue_selling: self.continue_selling,
             levels: self.levels.clone(),
             reservations: self.reservations.clone(),
+            retired: self.retired,
         }
     }
 
@@ -459,6 +574,7 @@ impl InventoryItem {
             continue_selling: s.continue_selling,
             levels: s.levels,
             reservations: s.reservations,
+            retired: s.retired,
             changed: Changed(false),
             deleted: Recorder::default(),
         })
@@ -778,6 +894,148 @@ mod tests {
         assert_eq!(i.available(loc_id(1)), 1);
         assert_eq!(i.available(loc_id(2)), 1);
         assert!(!i.release(&reference("a")), "second release is a no-op");
+    }
+
+    // ---- fulfilment (design note 0018) ----
+
+    fn held_by(item: &InventoryItem, r: &str) -> Vec<(LocationId, u32)> {
+        item.reservations()
+            .iter()
+            .filter(|h| h.reference.as_str() == r)
+            .map(|h| (h.location, h.quantity.value()))
+            .collect()
+    }
+
+    #[test]
+    fn fulfilling_takes_the_reservation_and_the_stock_at_the_location() {
+        let mut item = item(&[(1, 5)]);
+        item.reserve(&reference("a"), qty(3), &[location(1, 0)])
+            .unwrap();
+        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(2)), Ok(true));
+        assert_eq!(item.on_hand(loc_id(1)), 3);
+        assert_eq!(held_by(&item, "a"), [(loc_id(1), 1)]);
+        assert_eq!(item.available(loc_id(1)), 2);
+        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(1)), Ok(true));
+        assert_eq!(held_by(&item, "a"), []);
+        assert_eq!(item.on_hand(loc_id(1)), 2);
+    }
+
+    #[test]
+    fn fulfilling_from_another_location_releases_the_reservation_there() {
+        let mut item = item(&[(1, 5), (2, 5)]);
+        item.reserve(&reference("a"), qty(2), &[location(1, 0)])
+            .unwrap();
+        item.fulfil(&reference("a"), loc_id(2), qty(2)).unwrap();
+        assert_eq!(held_by(&item, "a"), []);
+        assert_eq!((item.on_hand(loc_id(1)), item.on_hand(loc_id(2))), (5, 3));
+    }
+
+    #[test]
+    fn fulfilling_a_split_line_takes_here_first_then_elsewhere() {
+        // 2 reserved at 1 and 2 at 2 (I9 split); 3 leave from location 2.
+        let mut item = item(&[(1, 2), (2, 2)]);
+        item.reserve(&reference("a"), qty(4), &[location(1, 0), location(2, 1)])
+            .unwrap();
+        item.fulfil(&reference("a"), loc_id(2), qty(3)).unwrap();
+        assert_eq!(held_by(&item, "a"), [(loc_id(1), 1)]);
+        assert_eq!(item.on_hand(loc_id(2)), -1);
+    }
+
+    #[test]
+    fn fulfilling_leaves_other_references_alone() {
+        let mut item = item(&[(1, 5)]);
+        item.reserve(&reference("a"), qty(1), &[location(1, 0)])
+            .unwrap();
+        item.reserve(&reference("b"), qty(2), &[location(1, 0)])
+            .unwrap();
+        item.fulfil(&reference("a"), loc_id(1), qty(1)).unwrap();
+        assert_eq!(held_by(&item, "b"), [(loc_id(1), 2)]);
+    }
+
+    #[test]
+    fn fulfilling_unreserved_units_still_counts_them_out() {
+        // Tracking was turned on after the order was placed: nothing was reserved.
+        let mut item = item(&[(1, 1)]);
+        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(3)), Ok(true));
+        assert_eq!(item.on_hand(loc_id(1)), -2);
+    }
+
+    #[test]
+    fn fulfilling_an_untracked_item_changes_no_count() {
+        let mut item = item(&[(1, 5)]);
+        item.reserve(&reference("a"), qty(1), &[location(1, 0)])
+            .unwrap();
+        item.set_tracked(false);
+        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(1)), Ok(true));
+        assert_eq!(item.on_hand(loc_id(1)), 5);
+        assert_eq!(held_by(&item, "a"), []);
+        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(1)), Ok(false));
+    }
+
+    #[test]
+    fn fulfilling_past_the_stock_range_changes_nothing() {
+        let mut item = item(&[(1, -MAX_STOCK)]);
+        let before = item.clone();
+        assert_eq!(
+            item.fulfil(&reference("a"), loc_id(1), qty(1)),
+            Err(InventoryError::StockOutOfRange(-i128::from(MAX_STOCK) - 1))
+        );
+        assert_eq!(item, before);
+    }
+
+    #[test]
+    fn restocking_puts_the_units_back_and_reserves_them_again() {
+        let mut item = item(&[(1, 5)]);
+        item.reserve(&reference("a"), qty(3), &[location(1, 0)])
+            .unwrap();
+        item.fulfil(&reference("a"), loc_id(1), qty(2)).unwrap();
+        assert_eq!(item.restock(&reference("a"), loc_id(1), qty(2)), Ok(true));
+        assert_eq!(item.on_hand(loc_id(1)), 5);
+        assert_eq!(held_by(&item, "a"), [(loc_id(1), 3)]);
+    }
+
+    #[test]
+    fn restocking_where_nothing_was_left_reserved_reserves_anew() {
+        let mut item = item(&[(1, 5), (2, 5)]);
+        item.reserve(&reference("a"), qty(1), &[location(1, 0)])
+            .unwrap();
+        item.fulfil(&reference("a"), loc_id(2), qty(1)).unwrap();
+        item.restock(&reference("a"), loc_id(2), qty(1)).unwrap();
+        assert_eq!(held_by(&item, "a"), [(loc_id(2), 1)]);
+        assert_eq!(item.on_hand(loc_id(2)), 5);
+    }
+
+    #[test]
+    fn restocking_an_untracked_item_changes_nothing() {
+        let mut item = item(&[(1, 5)]);
+        item.set_tracked(false);
+        assert_eq!(item.restock(&reference("a"), loc_id(1), qty(1)), Ok(false));
+        assert_eq!(item.on_hand(loc_id(1)), 5);
+        assert_eq!(held_by(&item, "a"), []);
+    }
+
+    #[test]
+    fn a_retired_item_is_spent_once_nothing_is_reserved() {
+        let mut item = item(&[(1, 5)]);
+        item.reserve(&reference("a"), qty(1), &[location(1, 0)])
+            .unwrap();
+        assert!(!item.is_spent());
+        item.retire();
+        assert!(!item.is_spent());
+        item.fulfil(&reference("a"), loc_id(1), qty(1)).unwrap();
+        assert!(item.is_spent());
+    }
+
+    #[test]
+    fn an_item_that_isnt_retired_is_never_spent() {
+        assert!(!item(&[(1, 5)]).is_spent());
+    }
+
+    #[test]
+    fn retired_survives_storage() {
+        let mut item = item(&[(1, 5)]);
+        item.retire();
+        assert!(InventoryItem::restore(item.snapshot()).unwrap().retired());
     }
 
     // ---- storage ----

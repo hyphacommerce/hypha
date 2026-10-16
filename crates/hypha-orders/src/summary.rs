@@ -17,6 +17,8 @@ pub struct OrderSummary {
     pub country: CountryCode,
     pub financial_status: FinancialStatus,
     pub fulfillment_status: FulfillmentStatus,
+    /// When it was cancelled, if it was (design note 0018).
+    pub cancelled_at: Option<Timestamp>,
     pub total: Money,
     /// How many items, adding up line quantities.
     pub item_count: u64,
@@ -33,6 +35,7 @@ impl Order {
             country: self.country(),
             financial_status: self.financial_status(),
             fulfillment_status: self.fulfillment_status(),
+            cancelled_at: self.cancelled().map(|c| c.at),
             total: self.total(),
             item_count: self
                 .lines()

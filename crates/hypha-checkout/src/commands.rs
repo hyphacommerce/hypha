@@ -530,6 +530,7 @@ fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandEr
         unit_price: *unit_price,
         total: *total,
         tax: tax.map(order_tax),
+        fulfilled_quantity: 0,
     })
 }
 

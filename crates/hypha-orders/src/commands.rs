@@ -1,7 +1,7 @@
 use hypha_core::{AuthError, Ctx, ErrorCode, OrderId, Page, PageRequest, RepoError, Scope};
 use thiserror::Error;
 
-use crate::{FinancialStatus, Order, OrderRepo, OrderSummary};
+use crate::{FinancialStatus, Order, OrderError, OrderRepo, OrderSummary};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -9,6 +9,8 @@ pub enum CommandError {
     Auth(#[from] AuthError),
     #[error(transparent)]
     Repo(#[from] RepoError),
+    #[error(transparent)]
+    Order(#[from] OrderError),
     #[error("order {0} not found")]
     OrderNotFound(OrderId),
 }
@@ -18,6 +20,7 @@ impl ErrorCode for CommandError {
         match self {
             CommandError::Auth(e) => e.code(),
             CommandError::Repo(e) => e.code(),
+            CommandError::Order(e) => e.code(),
             CommandError::OrderNotFound(_) => "order_not_found",
         }
     }
@@ -44,7 +47,7 @@ pub async fn get_order<R: OrderRepo>(
 
 /// Records that the order is paid, e.g. a bank transfer arrived (payment providers will
 /// do this through the same command). Marking a paid order again changes nothing, even
-/// when two requests mark it at once.
+/// when two requests mark it at once. A cancelled order is refused (`order_cancelled`).
 pub async fn mark_order_paid<R: OrderRepo>(
     ctx: &Ctx,
     orders: &R,
@@ -52,7 +55,7 @@ pub async fn mark_order_paid<R: OrderRepo>(
 ) -> Result<Order, CommandError> {
     ctx.require(Scope::OrdersWrite)?;
     let mut order = load(orders, id).await?;
-    if !order.mark_paid() {
+    if !order.mark_paid()? {
         return Ok(order);
     }
     match orders.update(&mut order).await {

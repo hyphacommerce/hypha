@@ -327,13 +327,15 @@ pub(crate) async fn insert_item(
     s: &InventoryItemSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
-        "INSERT INTO inventory_items (id, version, variant_id, tracked, continue_selling)
-         VALUES ($1, 1, $2, $3, $4)",
+        "INSERT INTO inventory_items (id, version, variant_id, tracked, continue_selling,
+             retired)
+         VALUES ($1, 1, $2, $3, $4, $5)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.variant.as_uuid(), Type::UUID),
             (&s.tracked, Type::BOOL),
             (&s.continue_selling, Type::BOOL),
+            (&s.retired, Type::BOOL),
         ],
     )
     .await
@@ -371,6 +373,7 @@ pub(crate) async fn update_items(
     let variants: Vec<Uuid> = snapshots.iter().map(|s| s.variant.as_uuid()).collect();
     let tracked: Vec<bool> = snapshots.iter().map(|s| s.tracked).collect();
     let continue_selling: Vec<bool> = snapshots.iter().map(|s| s.continue_selling).collect();
+    let retired: Vec<bool> = snapshots.iter().map(|s| s.retired).collect();
 
     // Lock the rows in ID order first. Two checkouts touching overlapping items then
     // queue instead of deadlocking, whatever order their callers listed the items in;
@@ -385,9 +388,10 @@ pub(crate) async fn update_items(
         .query_typed(
             "UPDATE inventory_items AS i
              SET version = i.version + 1, variant_id = t.variant_id, tracked = t.tracked,
-                 continue_selling = t.continue_selling
-             FROM unnest($1::uuid[], $2::bigint[], $3::uuid[], $4::boolean[], $5::boolean[])
-                 AS t (id, version, variant_id, tracked, continue_selling)
+                 continue_selling = t.continue_selling, retired = t.retired
+             FROM unnest($1::uuid[], $2::bigint[], $3::uuid[], $4::boolean[], $5::boolean[],
+                         $6::boolean[])
+                 AS t (id, version, variant_id, tracked, continue_selling, retired)
              WHERE i.id = t.id AND i.version = t.version
              RETURNING i.id, i.version",
             &[
@@ -396,6 +400,7 @@ pub(crate) async fn update_items(
                 (&variants, Type::UUID_ARRAY),
                 (&tracked, Type::BOOL_ARRAY),
                 (&continue_selling, Type::BOOL_ARRAY),
+                (&retired, Type::BOOL_ARRAY),
             ],
         )
         .await
@@ -520,7 +525,7 @@ async fn load_items(
     let rows = client
         .query_typed(
             &format!(
-                "SELECT id, version, variant_id, tracked, continue_selling, {}
+                "SELECT id, version, variant_id, tracked, continue_selling, retired, {}
                  FROM inventory_items WHERE {column} = ANY($1) ORDER BY id",
                 stamp_columns(""),
             ),
@@ -587,6 +592,7 @@ async fn load_items(
                 variant: VariantId::from_uuid(col(r, "variant_id")?),
                 tracked: col(r, "tracked")?,
                 continue_selling: col(r, "continue_selling")?,
+                retired: col(r, "retired")?,
                 levels: levels.remove(&id).unwrap_or_default(),
                 reservations: reservations.remove(&id).unwrap_or_default(),
             };

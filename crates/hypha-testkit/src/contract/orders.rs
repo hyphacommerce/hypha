@@ -4,8 +4,8 @@ use hypha_core::{
     TaxRegionId, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_orders::{
-    FinancialStatus, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, OrderTax, OrderTaxSource,
-    repo::keys,
+    CancelReason, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderLine, OrderNumber,
+    OrderRepo, OrderTax, OrderTaxSource, repo::keys,
 };
 use uuid::Uuid;
 
@@ -27,6 +27,8 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     list_pages(&make().await).await;
     scenario("order: shipping address and lines round trip, every field");
     shipping_round_trips(&make().await).await;
+    scenario("order: fulfilled quantities, the status and a cancellation round trip");
+    fulfilment_round_trips(&make().await).await;
 }
 
 fn eur(amount: i64) -> Money {
@@ -58,6 +60,7 @@ fn plain_line(id: u128) -> OrderLine {
         unit_price: Price::new(eur(500)).unwrap(),
         total: eur(500),
         tax: None,
+        fulfilled_quantity: 0,
     }
 }
 
@@ -82,6 +85,7 @@ fn full_line(id: u128) -> OrderLine {
                 region: TaxRegionId::from_uuid(Uuid::from_u128(id + 4)),
             },
         }),
+        fulfilled_quantity: 0,
     }
 }
 
@@ -148,7 +152,7 @@ async fn updates<R: OrderRepo>(repo: &R) {
     repo.insert(&mut o).await.unwrap();
     let stale = o.clone();
 
-    o.mark_paid();
+    o.mark_paid().unwrap();
     repo.update(&mut o).await.unwrap();
     assert_eq!(o.version(), Version::new(2));
     let stored = repo.get(o.id()).await.unwrap().unwrap();
@@ -228,13 +232,22 @@ async fn listed<R: OrderRepo>(repo: &R, after: Option<u128>, limit: u32) -> (Vec
 async fn list_pages<R: OrderRepo>(repo: &R) {
     assert_eq!(listed(repo, None, 10).await, (vec![], false));
 
-    // Orders 1 to 3, inserted out of order; 3 has two lines and is paid.
+    // Orders 1 to 3, inserted out of order; 3 has two lines, is paid and partly
+    // fulfilled; 2 is cancelled.
     let mut full = order_with(3, vec![full_line(31), plain_line(32)], true);
-    full.mark_paid();
+    full.mark_paid().unwrap();
+    full.fulfil(&[(full.lines()[1].id, Quantity::new(1).unwrap())])
+        .unwrap();
     repo.insert(&mut full).await.unwrap();
-    for n in [1, 2] {
-        repo.insert(&mut order(n)).await.unwrap();
-    }
+    repo.insert(&mut order(1)).await.unwrap();
+    let mut cancelled = order(2);
+    cancelled
+        .cancel(
+            Timestamp::from_unix_micros(1_767_312_000_000_001),
+            CancelReason::Fraud,
+        )
+        .unwrap();
+    repo.insert(&mut cancelled).await.unwrap();
 
     // Summaries of the stored orders: item counts add up line quantities (order 3's
     // first line has the largest quantity, so a 32-bit sum would overflow).
@@ -332,7 +345,47 @@ async fn shipping_round_trips<R: OrderRepo>(repo: &R) {
     assert_eq!(repo.get(order.id()).await, Ok(Some(order.clone())));
 
     // Updates keep it (the whole order is written).
-    order.mark_paid();
+    order.mark_paid().unwrap();
     repo.update(&mut order).await.unwrap();
     assert_eq!(repo.get(order.id()).await, Ok(Some(order)));
+}
+
+async fn fulfilment_round_trips<R: OrderRepo>(repo: &R) {
+    // The largest quantity, half of it fulfilled: counts must survive whole.
+    let mut order = order_with(1, vec![full_line(11), plain_line(12)], false);
+    let big = order.lines()[0].id;
+    order
+        .fulfil(&[(big, Quantity::new(u32::MAX / 2).unwrap())])
+        .unwrap();
+    repo.insert(&mut order).await.unwrap();
+    let stored = repo.get(order.id()).await.unwrap().unwrap();
+    assert_eq!(
+        stored.fulfillment_status(),
+        FulfillmentStatus::PartiallyFulfilled
+    );
+    assert_eq!(stored, order);
+
+    // Fulfilling the rest is written by an update.
+    let lines: Vec<_> = order
+        .lines()
+        .iter()
+        .map(|l| (l.id, Quantity::new(l.unfulfilled_quantity()).unwrap()))
+        .collect();
+    order.fulfil(&lines).unwrap();
+    repo.update(&mut order).await.unwrap();
+    let stored = repo.get(order.id()).await.unwrap().unwrap();
+    assert_eq!(stored.fulfillment_status(), FulfillmentStatus::Fulfilled);
+    assert_eq!(stored, order);
+
+    // A cancellation, to the microsecond, with its reason.
+    let mut other = order_with(2, vec![plain_line(21)], false);
+    repo.insert(&mut other).await.unwrap();
+    other
+        .cancel(
+            Timestamp::from_unix_micros(1_767_312_000_000_001),
+            CancelReason::Declined,
+        )
+        .unwrap();
+    repo.update(&mut other).await.unwrap();
+    assert_eq!(repo.get(other.id()).await, Ok(Some(other)));
 }

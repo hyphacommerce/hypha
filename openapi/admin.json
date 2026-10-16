@@ -710,6 +710,19 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "CancelReasonDto": {
+        "description": "`CancelReason` on the wire (design note 0018).\n\nKnown values: `customer`, `inventory`, `fraud`, `declined`, `staff`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "customer",
+          "inventory",
+          "fraud",
+          "declined",
+          "staff",
+          "other"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "CartId": {
         "description": "A CartId: `cart_` and 32 hex digits.",
         "examples": [
@@ -1731,9 +1744,11 @@
         "type": "object"
       },
       "FulfillmentStatusDto": {
-        "description": "`FulfillmentStatus` on the wire.\n\nKnown values: `unfulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`FulfillmentStatus` on the wire.\n\nKnown values: `unfulfilled`, `partially_fulfilled`, `fulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
-          "unfulfilled"
+          "unfulfilled",
+          "partially_fulfilled",
+          "fulfilled"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -2344,6 +2359,12 @@
       },
       "OrderLineResponse": {
         "properties": {
+          "fulfilled_quantity": {
+            "description": "How many of `quantity` standing fulfilments shipped.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "id": {
             "$ref": "#/components/schemas/OrderLineId"
           },
@@ -2399,12 +2420,31 @@
           "quantity",
           "product_title",
           "unit_price",
-          "total"
+          "total",
+          "fulfilled_quantity"
         ],
         "type": "object"
       },
       "OrderResponse": {
         "properties": {
+          "cancel_reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CancelReasonDto",
+                "description": "Why it was cancelled; `null` if it wasn't."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cancelled_at": {
+            "description": "When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "cart": {
             "$ref": "#/components/schemas/CartId"
           },
@@ -2623,6 +2663,13 @@
       "OrderSummaryResponse": {
         "description": "An order in a list: what a table of orders shows, without lines.",
         "properties": {
+          "cancelled_at": {
+            "description": "When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "country": {
             "$ref": "#/components/schemas/CountryCode"
           },
@@ -3250,7 +3297,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "products:read",
           "products:write",
@@ -3280,7 +3327,9 @@
           "shipping:read",
           "shipping:write",
           "apps:read",
-          "apps:write"
+          "apps:write",
+          "fulfillments:read",
+          "fulfillments:write"
         ],
         "type": "string",
         "x-hypha-open-enum": true

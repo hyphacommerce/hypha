@@ -70,6 +70,12 @@ pub enum Scope {
     AppsRead,
     #[serde(rename = "apps:write")]
     AppsWrite,
+    /// Recording shipments and their tracking, without changing or cancelling orders
+    /// (design note 0018, FU9).
+    #[serde(rename = "fulfillments:read")]
+    FulfillmentsRead,
+    #[serde(rename = "fulfillments:write")]
+    FulfillmentsWrite,
 }
 
 impl Scope {
@@ -105,6 +111,8 @@ impl Scope {
             Scope::ShippingWrite => "shipping:write",
             Scope::AppsRead => "apps:read",
             Scope::AppsWrite => "apps:write",
+            Scope::FulfillmentsRead => "fulfillments:read",
+            Scope::FulfillmentsWrite => "fulfillments:write",
         }
     }
 
@@ -127,6 +135,7 @@ impl Scope {
             Scope::MediaRead => Some(Scope::MediaWrite),
             Scope::ShippingRead => Some(Scope::ShippingWrite),
             Scope::AppsRead => Some(Scope::AppsWrite),
+            Scope::FulfillmentsRead => Some(Scope::FulfillmentsWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -141,7 +150,8 @@ impl Scope {
             | Scope::ApiKeysWrite
             | Scope::MediaWrite
             | Scope::ShippingWrite
-            | Scope::AppsWrite => None,
+            | Scope::AppsWrite
+            | Scope::FulfillmentsWrite => None,
         }
     }
 
@@ -157,7 +167,7 @@ impl Scope {
         Scope::Checkout,
     ];
 
-    pub const ALL: [Scope; 29] = [
+    pub const ALL: [Scope; 31] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -187,6 +197,8 @@ impl Scope {
         Scope::ShippingWrite,
         Scope::AppsRead,
         Scope::AppsWrite,
+        Scope::FulfillmentsRead,
+        Scope::FulfillmentsWrite,
     ];
 }
 

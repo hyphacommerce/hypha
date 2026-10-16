@@ -32,3 +32,31 @@ impl Event for OrderPaid {
     const TYPE: &'static str = "order.paid";
     const VERSION: u16 = 1;
 }
+
+/// `order.fulfillment_status_changed`: a fulfilment (or its cancellation) moved the
+/// order between `unfulfilled`, `partially_fulfilled` and `fulfilled` (design note
+/// 0018).
+#[derive(Debug, Serialize)]
+pub struct OrderFulfillmentStatusChanged {
+    pub order: OrderId,
+    pub from: &'static str,
+    pub to: &'static str,
+}
+
+impl Event for OrderFulfillmentStatusChanged {
+    const TYPE: &'static str = "order.fulfillment_status_changed";
+    const VERSION: u16 = 1;
+}
+
+/// `order.cancelled`: the order won't ship; its stock was given back. `reason` is one
+/// of `customer`, `inventory`, `fraud`, `declined`, `staff`, `other`.
+#[derive(Debug, Serialize)]
+pub struct OrderCancelled {
+    pub order: OrderId,
+    pub reason: &'static str,
+}
+
+impl Event for OrderCancelled {
+    const TYPE: &'static str = "order.cancelled";
+    const VERSION: u16 = 1;
+}

@@ -95,6 +95,16 @@ pub(crate) fn ts(n: usize) -> String {
     format!("('epoch'::timestamptz + ${n}::bigint * interval '1 microsecond')")
 }
 
+/// A nullable timestamp as the microseconds `ts` takes (`NULL` stays `NULL`).
+pub(crate) fn opt_micros(t: Option<Timestamp>) -> Option<i64> {
+    t.map(Timestamp::unix_micros)
+}
+
+/// A nullable `micros` column back as a timestamp.
+pub(crate) fn opt_ts(micros: Option<i64>) -> Option<Timestamp> {
+    micros.map(Timestamp::from_unix_micros)
+}
+
 /// SQL reading a `timestamptz` column back as microseconds since the epoch, for a SELECT
 /// list: named after the column (without any `table.` prefix), so `col` finds it.
 pub(crate) fn micros(column: &str) -> String {
