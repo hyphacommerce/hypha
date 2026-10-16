@@ -97,8 +97,9 @@ export function PriceListCard({
               Prices
             </Text>
             <Text type="supporting" color="secondary">
-              Without a price list, the market sells at each variant's base price (if it's in{" "}
-              {market.currency}).
+              {list
+                ? `Prices in ${market.currency}: each variant's fixed price, or its base price with the adjustment.`
+                : `Without a price list, the market sells at each variant's base price (if it's in ${market.currency}).`}
             </Text>
           </VStack>
           {list && (
