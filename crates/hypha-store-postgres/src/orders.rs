@@ -44,7 +44,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
             .query_typed(
                 &format!(
                     "SELECT o.id, o.number, {},
-                     o.customer_id, o.email, o.country, o.currency, o.total,
+                     o.channel_id, o.customer_id, o.email, o.country, o.currency, o.total,
                      o.financial_status, o.fulfillment_status, {},
                      (SELECT coalesce(sum(quantity), 0) FROM order_lines
                       WHERE order_id = o.id)::bigint AS item_count
@@ -538,6 +538,7 @@ fn summary_from_db(row: &Row) -> Result<OrderSummary, RepoError> {
         id: OrderId::from_uuid(id),
         number: OrderNumber::new(col(row, "number")?).map_err(corrupt)?,
         placed_at: Timestamp::from_unix_micros(col(row, "placed_at")?),
+        channel: ChannelId::from_uuid(col(row, "channel_id")?),
         customer: CustomerId::from_uuid(col(row, "customer_id")?),
         email: Email::new(&email).map_err(corrupt)?,
         country: CountryCode::new(&country).map_err(corrupt)?,

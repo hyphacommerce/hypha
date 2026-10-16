@@ -2,7 +2,10 @@ use hypha_core::Stamped;
 
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AssetId, Money, OptionId, OptionValueId, ProductId, VariantId, Weight};
+use hypha_channels::{channels_of_products, product_channels};
+use hypha_core::{
+    AssetId, ChannelId, Ctx, Money, OptionId, OptionValueId, ProductId, VariantId, Weight,
+};
 use hypha_media::{Asset, HasAssets};
 use hypha_merchandising::{
     ProductSummaryView, ProductView, get_product_view, list_product_views, set_product_media,
@@ -91,6 +94,9 @@ pub(super) struct ProductResponse {
     variants: Vec<VariantResponse>,
     /// In order; the first is the featured item. At most 250.
     media: Vec<ProductMediaResponse>,
+    /// The sales channels it is published to, sorted (design note 0020); a new product
+    /// is in none.
+    channels: Vec<ChannelId>,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -190,7 +196,11 @@ pub(super) struct VariantResponse {
 }
 
 impl ProductResponse {
-    async fn new(view: &ProductView, media: Option<&Media>) -> Result<Self, ApiError> {
+    async fn new(
+        view: &ProductView,
+        channels: Vec<ChannelId>,
+        media: Option<&Media>,
+    ) -> Result<Self, ApiError> {
         let p = &view.product;
         let (created_at, updated_at) = stamp_times(p.stamps())?;
         Ok(Self {
@@ -235,6 +245,7 @@ impl ProductResponse {
                 })
                 .collect(),
             media: media_items(&view.media, media).await?,
+            channels,
         })
     }
 }
@@ -243,11 +254,23 @@ impl ProductResponse {
 async fn respond<S: Storage>(
     state: &SharedState<S>,
     ports: &S::Ports<'_>,
+    ctx: &Ctx,
     product: Product,
 ) -> Result<Json<ProductResponse>, ApiError> {
     let view = ProductView::load(ports.assets(), product).await?;
+    respond_view(state, ports, ctx, &view).await
+}
+
+/// The response for `view`, with the channels its product is published to.
+async fn respond_view<S: Storage>(
+    state: &SharedState<S>,
+    ports: &S::Ports<'_>,
+    ctx: &Ctx,
+    view: &ProductView,
+) -> Result<Json<ProductResponse>, ApiError> {
+    let channels = product_channels(ctx, ports, view.product.id()).await?;
     Ok(Json(
-        ProductResponse::new(&view, state.media.as_ref()).await?,
+        ProductResponse::new(view, channels, state.media.as_ref()).await?,
     ))
 }
 
@@ -279,6 +302,8 @@ pub(super) struct ProductSummaryResponse {
     price_ranges: Vec<PriceRangeResponse>,
     /// The first item of the product's media, if it has any.
     featured_media: Option<ProductMediaResponse>,
+    /// The sales channels it is published to, sorted (design note 0020).
+    channels: Vec<ChannelId>,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -293,7 +318,11 @@ pub(super) struct PriceRangeResponse {
 }
 
 impl ProductSummaryResponse {
-    async fn new(view: &ProductSummaryView, media: Option<&Media>) -> Result<Self, ApiError> {
+    async fn new(
+        view: &ProductSummaryView,
+        channels: Vec<ChannelId>,
+        media: Option<&Media>,
+    ) -> Result<Self, ApiError> {
         let featured_media = match &view.featured_media {
             Some(asset) => media_items(std::slice::from_ref(asset), media).await?.pop(),
             None => None,
@@ -319,6 +348,7 @@ impl ProductSummaryResponse {
                 })
                 .collect(),
             featured_media,
+            channels,
         })
     }
 }
@@ -346,9 +376,12 @@ pub(super) async fn list<S: Storage>(
         q: filters.q,
     };
     let page = list_product_views(&ctx, &ports, input, page).await?;
+    let ids: Vec<ProductId> = page.items.iter().map(|v| v.summary.id).collect();
+    let mut channels = channels_of_products(&ctx, &ports, &ids).await?;
     let mut items = Vec::with_capacity(page.items.len());
     for view in &page.items {
-        items.push(ProductSummaryResponse::new(view, state.media.as_ref()).await?);
+        let of = channels.remove(&view.summary.id).unwrap_or_default();
+        items.push(ProductSummaryResponse::new(view, of, state.media.as_ref()).await?);
     }
     Ok(Json(PageResponse::with_items(
         &page,
@@ -379,7 +412,10 @@ pub(super) async fn create<S: Storage>(
         price: req.price,
     };
     let product = create_simple_product(&ctx, ports.products(), &state.ids, input).await?;
-    Ok((StatusCode::CREATED, respond(&state, &ports, product).await?))
+    Ok((
+        StatusCode::CREATED,
+        respond(&state, &ports, &ctx, product).await?,
+    ))
 }
 
 /// A product, in any status.
@@ -397,9 +433,7 @@ pub(super) async fn fetch<S: Storage>(
 ) -> Result<Json<ProductResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let view = get_product_view(&ctx, &ports, id).await?;
-    Ok(Json(
-        ProductResponse::new(&view, state.media.as_ref()).await?,
-    ))
+    respond_view(&state, &ports, &ctx, &view).await
 }
 
 /// A product as a storefront sees it (design note 0010, S5): active products only, without
@@ -503,7 +537,7 @@ pub(super) async fn set_status<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let product = set_product_status(&ctx, ports.products(), id, req.status.into()).await?;
-    respond(&state, &ports, product).await
+    respond(&state, &ports, &ctx, product).await
 }
 
 /// Title and handle (JSON Merge Patch; neither can be `null`).
@@ -563,7 +597,7 @@ pub(super) async fn update<S: Storage>(
         tags: req.tags,
     };
     let product = update_product(&ctx, ports.products(), id, input).await?;
-    respond(&state, &ports, product).await
+    respond(&state, &ports, &ctx, product).await
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -640,7 +674,7 @@ pub(super) async fn set_options<S: Storage>(
         remove_variants: req.remove_variants,
     };
     let product = set_product_options(&ctx, ports.products(), &state.ids, id, input).await?;
-    respond(&state, &ports, product).await
+    respond(&state, &ports, &ctx, product).await
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -691,7 +725,10 @@ pub(super) async fn add_variant<S: Storage>(
         requires_shipping: req.requires_shipping,
     };
     let product = add_product_variant(&ctx, ports.products(), &state.ids, id, input).await?;
-    Ok((StatusCode::CREATED, respond(&state, &ports, product).await?))
+    Ok((
+        StatusCode::CREATED,
+        respond(&state, &ports, &ctx, product).await?,
+    ))
 }
 
 /// A variant's SKU, price and option values (JSON Merge Patch).
@@ -743,7 +780,7 @@ pub(super) async fn update_variant<S: Storage>(
         requires_shipping: req.requires_shipping,
     };
     let product = update_product_variant(&ctx, ports.products(), id, variant, input).await?;
-    respond(&state, &ports, product).await
+    respond(&state, &ports, &ctx, product).await
 }
 
 /// Removes a variant; a product keeps at least one (`409 no_variants`). Price lists and
@@ -762,7 +799,7 @@ pub(super) async fn remove_variant<S: Storage>(
 ) -> Result<Json<ProductResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let product = remove_product_variant(&ctx, ports.products(), id, variant).await?;
-    respond(&state, &ports, product).await
+    respond(&state, &ports, &ctx, product).await
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -792,9 +829,7 @@ pub(super) async fn set_media<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let view = set_product_media(&ctx, &ports, id, req.assets).await?;
-    Ok(Json(
-        ProductResponse::new(&view, state.media.as_ref()).await?,
-    ))
+    respond_view(&state, &ports, &ctx, &view).await
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -822,9 +857,7 @@ pub(super) async fn set_variant_media_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let view = set_variant_media(&ctx, &ports, id, variant, req.asset).await?;
-    Ok(Json(
-        ProductResponse::new(&view, state.media.as_ref()).await?,
-    ))
+    respond_view(&state, &ports, &ctx, &view).await
 }
 
 #[cfg(test)]

@@ -3021,6 +3021,10 @@
               "null"
             ]
           },
+          "channel": {
+            "$ref": "#/components/schemas/ChannelId",
+            "description": "The sales channel it was placed through (design note 0020)."
+          },
           "country": {
             "$ref": "#/components/schemas/CountryCode"
           },
@@ -3062,6 +3066,7 @@
           "id",
           "number",
           "placed_at",
+          "channel",
           "customer",
           "email",
           "country",
@@ -3373,6 +3378,13 @@
       },
       "ProductResponse": {
         "properties": {
+          "channels": {
+            "description": "The sales channels it is published to, sorted (design note 0020); a new product\nis in none.",
+            "items": {
+              "$ref": "#/components/schemas/ChannelId"
+            },
+            "type": "array"
+          },
           "created_at": {
             "description": "When it was created, RFC 3339 in UTC.",
             "type": "string"
@@ -3449,6 +3461,7 @@
           "options",
           "variants",
           "media",
+          "channels",
           "created_at",
           "updated_at"
         ],
@@ -3494,6 +3507,13 @@
       "ProductSummaryResponse": {
         "description": "A product in a list: what a table of products shows, without options or variants\n(design note 0012, L7). `GET /admin/products/{id}` has the rest.",
         "properties": {
+          "channels": {
+            "description": "The sales channels it is published to, sorted (design note 0020).",
+            "items": {
+              "$ref": "#/components/schemas/ChannelId"
+            },
+            "type": "array"
+          },
           "created_at": {
             "description": "When it was created, RFC 3339 in UTC.",
             "type": "string"
@@ -3557,6 +3577,7 @@
           "status",
           "variant_count",
           "price_ranges",
+          "channels",
           "created_at",
           "updated_at"
         ],

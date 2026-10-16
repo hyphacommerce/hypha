@@ -13,9 +13,9 @@ pub mod repo;
 
 pub use channel::{Channel, ChannelKind, ChannelSnapshot};
 pub use commands::{
-    CommandError, CreateChannel, UpdateChannel, create_channel, get_channel, is_published,
-    list_channels, product_channels, publish_products, set_product_channels, unpublish_products,
-    update_channel,
+    CommandError, CreateChannel, UpdateChannel, channels_of_products, create_channel, get_channel,
+    is_published, list_channels, product_channels, publish_products, set_product_channels,
+    unpublish_products, update_channel,
 };
 pub use error::ChannelError;
 pub use events::{ChannelChanged, ProductsPublished, ProductsUnpublished};

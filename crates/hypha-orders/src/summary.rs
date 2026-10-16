@@ -3,7 +3,7 @@
 //! may compute it in storage, and the repository contract checks it equals
 //! `Order::summary`.
 
-use hypha_core::{CountryCode, CustomerId, Email, Money, OrderId, Timestamp};
+use hypha_core::{ChannelId, CountryCode, CustomerId, Email, Money, OrderId, Timestamp};
 
 use crate::{FinancialStatus, FulfillmentStatus, Order, OrderNumber};
 
@@ -12,6 +12,8 @@ pub struct OrderSummary {
     pub id: OrderId,
     pub number: OrderNumber,
     pub placed_at: Timestamp,
+    /// The sales channel it was placed through (design note 0020).
+    pub channel: ChannelId,
     pub customer: CustomerId,
     pub email: Email,
     pub country: CountryCode,
@@ -30,6 +32,7 @@ impl Order {
             id: self.id(),
             number: self.number(),
             placed_at: self.placed_at(),
+            channel: self.channel(),
             customer: self.customer(),
             email: self.email().clone(),
             country: self.country(),

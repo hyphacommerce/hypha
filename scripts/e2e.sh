@@ -320,6 +320,25 @@ step "a mug not published to the key's channel is refused" 422 product_not_publi
 step "and isn't there for the storefront" 404 product_not_found "$BASE/storefront/products/$MUG"
 step "publish mug and cup to the Online Store" 204 - -X POST "$BASE/admin/channels/$ONLINE_STORE/products" \
     -H "$JSON" -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
+step "create an Outlet channel" 201 - -X POST "$BASE/admin/channels" -H "$JSON" \
+    -d '{"name":"Outlet","kind":"custom"}'
+OUTLET=$(id)
+step "a channel's name is unique ignoring case" 409 channel_name_taken -X POST "$BASE/admin/channels" \
+    -H "$JSON" -d '{"name":" outlet ","kind":"custom"}'
+step "rename the outlet" 200 - -X PATCH "$BASE/admin/channels/$OUTLET" -H "$JSON" \
+    -d '{"name":"Outlet store"}'
+contains "renamed" '"name":"Outlet store","kind":"custom"'
+step "an unknown channel" 404 channel_not_found "$BASE/admin/channels/chan_00000000000000000000000000000063"
+step "sell the cup in both channels" 200 - -X PUT "$BASE/admin/products/$CUP/channels" -H "$JSON" \
+    -d "{\"channels\":[\"$OUTLET\",\"$ONLINE_STORE\"]}"
+step "the cup's channels" 200 - "$BASE/admin/products/$CUP"
+contains "include the outlet" "\"$OUTLET\""
+step "a product's channels must exist" 422 channel_not_found -X PUT "$BASE/admin/products/$CUP/channels" \
+    -H "$JSON" -d '{"channels":["chan_00000000000000000000000000000063"]}'
+step "take the cup out of the outlet" 204 - -X DELETE "$BASE/admin/channels/$OUTLET/products" \
+    -H "$JSON" -d "{\"products\":[\"$CUP\"]}"
+step "the cup's channels again" 200 - "$BASE/admin/products/$CUP"
+contains "only the Online Store" "\"channels\":[\"$ONLINE_STORE\"]"
 step "add 2 mugs" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "mug unit price is 900 (1000 - 10%)" '"unit_price":{"amount":900,"currency":"EUR"}'

@@ -2558,6 +2558,8 @@ export interface components {
         OrderSummaryResponse: {
             /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
             cancelled_at?: string | null;
+            /** @description The sales channel it was placed through (design note 0020). */
+            channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
             customer: components["schemas"]["CustomerId"];
             email: components["schemas"]["Email"];
@@ -2676,6 +2678,11 @@ export interface components {
             width?: number | null;
         };
         ProductResponse: {
+            /**
+             * @description The sales channels it is published to, sorted (design note 0020); a new product
+             *     is in none.
+             */
+            channels: components["schemas"]["ChannelId"][];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
             /** @description Sanitised HTML (scripts, styles and event attributes removed), safe to render. */
@@ -2720,6 +2727,8 @@ export interface components {
          *     (design note 0012, L7). `GET /admin/products/{id}` has the rest.
          */
         ProductSummaryResponse: {
+            /** @description The sales channels it is published to, sorted (design note 0020). */
+            channels: components["schemas"]["ChannelId"][];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
             featured_media?: components["schemas"]["ProductMediaResponse"] | null;

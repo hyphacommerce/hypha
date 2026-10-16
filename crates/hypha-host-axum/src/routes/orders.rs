@@ -315,6 +315,8 @@ pub(super) struct OrderSummaryResponse {
     number: i64,
     /// RFC 3339, UTC.
     placed_at: String,
+    /// The sales channel it was placed through (design note 0020).
+    channel: ChannelId,
     customer: CustomerId,
     email: Email,
     country: CountryCode,
@@ -333,6 +335,7 @@ impl OrderSummaryResponse {
             id: o.id,
             number: o.number.value(),
             placed_at: rfc3339(o.placed_at)?,
+            channel: o.channel,
             customer: o.customer,
             email: o.email,
             country: o.country,

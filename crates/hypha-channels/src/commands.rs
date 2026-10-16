@@ -1,7 +1,7 @@
 //! Managing channels and publishing products to them (design note 0020). Channels need
 //! `channels:*`; publishing is how a product is presented, so `products:write`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use hypha_core::{
     AuthError, ChannelId, Ctx, ErrorCode, HasBatch, IdGenerator, PendingEvent, ProductId,
@@ -228,6 +228,17 @@ pub async fn product_channels<S: HasChannels>(
         .await?
         .remove(&product)
         .unwrap_or_default())
+}
+
+/// Each of `products`' channels, sorted; a product in none is absent (a page of a
+/// product list, in one read).
+pub async fn channels_of_products<S: HasChannels>(
+    ctx: &Ctx,
+    ports: &S,
+    products: &[ProductId],
+) -> Result<HashMap<ProductId, Vec<ChannelId>>, CommandError> {
+    ctx.require(Scope::ProductsRead)?;
+    Ok(ports.channels().channels_of(products).await?)
 }
 
 /// Makes `channels` the product's channels (the product page's Publishing card):

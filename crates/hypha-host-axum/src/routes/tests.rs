@@ -662,6 +662,7 @@ async fn a_listed_product_is_a_summary() {
                 "max": { "amount": 1000, "currency": "EUR" },
             }],
             "featured_media": null,
+            "channels": [],
         })
     );
 }
@@ -3097,6 +3098,8 @@ async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) 
     .await;
     assert_eq!(status, StatusCode::CREATED, "{order}");
     assert_eq!(order["channel"], online_store(app).await.as_str());
+    let (_, orders) = send(app, "GET", "/admin/orders", None).await;
+    assert_eq!(orders["items"][0]["channel"], order["channel"]);
     (
         order["id"].as_str().unwrap().to_string(),
         order["lines"][0]["id"].as_str().unwrap().to_string(),
@@ -3455,6 +3458,15 @@ async fn a_storefront_searches_what_its_channel_publishes() {
     let (status, json) = send(&app, "PUT", &path, Some(&body)).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     settle_search(&app).await;
+    let (_, cup) = send(&app, "GET", &format!("/admin/products/{}", ids[1]), None).await;
+    assert_eq!(cup["channels"], json!([outlet]));
+    let (_, list) = send(&app, "GET", "/admin/products", None).await;
+    let online = online_store(&app).await;
+    assert_eq!(
+        (&list["items"][0]["channels"], &list["items"][1]["channels"]),
+        (&json!([outlet]), &json!([online])),
+        "newest first: the cup, then the mug"
+    );
     let (_, found) = send_as(&app, &pk, "GET", url, None).await;
     assert_eq!(titles(&found), ["mug"]);
     assert_eq!(
