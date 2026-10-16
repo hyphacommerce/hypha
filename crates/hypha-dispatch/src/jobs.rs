@@ -6,7 +6,7 @@ use hypha_apps::{App, AppKey, AppRepo, HasApps, Webhook};
 use hypha_auth::{HasSessions, SessionRepo};
 use hypha_core::{
     Clock, Delivery, DeliveryOutcome, EventHandlers, HasIdempotency, HasOutbox, IdempotencyRepo,
-    OutboxRepo, Outcome, RepoError,
+    OutboxRepo, Outcome, Progress, RepoError,
 };
 
 use core::time::Duration;
@@ -30,22 +30,6 @@ pub trait WebhookSender {
     /// the admin shows the merchant: say what happened (a status, a timeout), not how
     /// the network looked.
     async fn send(&self, app: &App, delivery: &Delivery) -> Result<(), String>;
-}
-
-/// How much a job did, and whether it stopped at its limit with more to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Progress {
-    pub done: u32,
-    pub more: bool,
-}
-
-impl Progress {
-    fn of(done: u32, limit: u32) -> Self {
-        Self {
-            done,
-            more: done >= limit,
-        }
-    }
 }
 
 /// The longest one delivery may take: the slowest webhook timeout allowed, with room for

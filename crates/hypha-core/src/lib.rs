@@ -47,7 +47,8 @@ pub use ids::{
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
 pub use page::{Page, PageError, PageLimit, PageRequest};
 pub use ports::{
-    Clock, HasBatch, IdGenerator, Notifier, NotifyError, Random, RepoError, report_duplicate,
+    Clock, HasBatch, IdGenerator, Notifier, NotifyError, Progress, Random, RepoError,
+    report_duplicate,
 };
 pub use quantity::{Quantity, QuantityError};
 pub use retry::{Attempts, MAX_ATTEMPTS, retry_on_conflict};

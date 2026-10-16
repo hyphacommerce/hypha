@@ -13,6 +13,26 @@ pub trait Clock {
     fn now(&self) -> Timestamp;
 }
 
+/// How much a job step did, and whether it stopped at its limit with more to do
+/// (design note 0016, EV10): a runner repeats the step while there's more and waits its
+/// interval when there isn't. Every crate's jobs (dispatching, pruning, search sync)
+/// answer with it, so a Workers Cron trigger can drive them all the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    pub done: u32,
+    pub more: bool,
+}
+
+impl Progress {
+    /// `done` items of a batch of at most `limit`: a full batch may have more behind it.
+    pub fn of(done: u32, limit: u32) -> Self {
+        Self {
+            done,
+            more: done >= limit,
+        }
+    }
+}
+
 /// Randomness for secrets: tokens, salts, nonces, recovery codes (design note 0008).
 /// Hosts use the operating system's generator; tests use a deterministic one. Never a
 /// seeded or predictable generator in production: these bytes are what keep a session
