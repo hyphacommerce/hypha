@@ -387,6 +387,7 @@ fn update_market_stores_prices_include_tax() {
         &markets,
         market.id(),
         UpdateMarket {
+            name: None,
             prices_include_tax: Some(false),
         },
     ))

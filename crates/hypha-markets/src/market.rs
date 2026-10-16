@@ -87,6 +87,16 @@ impl Market {
             .record_once(Subject::new(MARKET, self.id.as_uuid()), &event);
     }
 
+    /// The shared text rule: trimmed, 1 to 255 characters.
+    pub fn rename(&mut self, name: &str) -> Result<(), MarketError> {
+        let name = required_text("name", name)?;
+        if self.name != name {
+            self.name = name;
+            self.changed();
+        }
+        Ok(())
+    }
+
     pub fn set_prices_include_tax(&mut self, include: bool) {
         if self.prices_include_tax != include {
             self.prices_include_tax = include;

@@ -487,6 +487,31 @@ impl<C: PgConnection> ApiKeyRepo for PgStore<C> {
             .transpose()
     }
 
+    async fn list(
+        &self,
+        page: hypha_core::PageRequest<ApiKeyId>,
+    ) -> Result<hypha_core::Page<ApiKey>, RepoError> {
+        let after = page.after.map(|id| id.as_uuid());
+        let fetch = i64::from(page.limit.get()) + 1;
+        let mut conn = self.conn().await;
+        let keys = conn
+            .client()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM api_keys WHERE ($1::uuid IS NULL OR id < $1)
+                     ORDER BY id DESC LIMIT $2",
+                    key_columns()
+                ),
+                &[(&after, Type::UUID), (&fetch, Type::INT8)],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(key_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(hypha_core::Page::from_overfetch(keys, page.limit))
+    }
+
     async fn insert(&self, key: &mut ApiKey) -> Result<(), RepoError> {
         let s = key.snapshot();
         in_transaction!(self, |tx| insert_api_key(tx, &s).await)?;

@@ -12,9 +12,9 @@ use hypha_markets::{
     add_market_country, assign_price_list, create_catalog, create_market, create_price_list,
     get_catalog, get_market, get_price_list, list_catalog_products, list_fixed_prices,
     list_markets, list_price_lists, remove_catalog_products, remove_fixed_prices,
-    remove_market_country, set_fixed_prices, update_market,
+    remove_market_country, set_fixed_prices, update_market, update_price_list,
 };
-use hypha_products::{HasProducts, get_products};
+use hypha_products::{HasProducts, get_products, products_of_variants};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -43,6 +43,10 @@ pub(super) struct CreateMarketRequest {
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct UpdateMarketRequest {
+    /// 1 to 255 characters, trimmed.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = String, required = false)]
+    name: Option<String>,
     #[serde(default, deserialize_with = "patch::non_null")]
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = bool, required = false)]
@@ -181,6 +185,7 @@ pub(super) async fn update_market_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = UpdateMarket {
+        name: req.name,
         prices_include_tax: req.prices_include_tax,
     };
     let market = update_market(&ctx, ports.markets(), id, input)
@@ -548,6 +553,52 @@ pub(super) async fn fetch_price_list<S: Storage>(
 pub(super) struct FixedPriceResponse {
     variant: VariantId,
     price: Money,
+    /// The variant's product; `null` when the variant no longer exists (fixed prices
+    /// store variant IDs as given).
+    product: Option<FixedPriceProduct>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct FixedPriceProduct {
+    id: ProductId,
+    title: String,
+    /// The variant's option values ("M / Blue"); `null` for a product without options.
+    variant_title: Option<String>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct UpdatePriceListRequest {
+    /// Basis points: -1000 = 10% off.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = i32, required = false)]
+    adjustment_bps: Option<i32>,
+}
+
+/// Changes a price list's adjustment; its currency is fixed.
+#[utoipa::path(
+    patch,
+    path = "/admin/price-lists/{id}",
+    params(("id" = PriceListId, Path)),
+    request_body = UpdatePriceListRequest,
+    responses((status = 200, description = "OK", body = PriceListResponse)),
+    extensions(("x-hypha-scopes" = json!(["pricing:write"]))),
+)]
+pub(super) async fn update_price_list_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<PriceListId>,
+    body: JsonBody<UpdatePriceListRequest>,
+) -> Result<Json<PriceListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let input = hypha_markets::UpdatePriceList {
+        adjustment: req.adjustment_bps,
+    };
+    let list = update_price_list(&ctx, ports.price_lists(), id, input)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
+    Ok(Json(PriceListResponse::from(&list)))
 }
 
 type FixedPricePage = PageResponse<FixedPriceResponse>;
@@ -558,7 +609,7 @@ type FixedPricePage = PageResponse<FixedPriceResponse>;
     path = "/admin/price-lists/{id}/fixed-prices",
     params(("id" = PriceListId, Path), PageParams),
     responses((status = 200, description = "OK", body = FixedPricePage)),
-    extensions(("x-hypha-scopes" = json!(["pricing:read"]))),
+    extensions(("x-hypha-scopes" = json!(["pricing:read", "products:read"]))),
 )]
 pub(super) async fn list_fixed_prices_handler<S: Storage>(
     State(state): State<SharedState<S>>,
@@ -571,6 +622,18 @@ pub(super) async fn list_fixed_prices_handler<S: Storage>(
     let page = list_fixed_prices(&ctx, ports.price_lists(), id, page)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
+    let variants: Vec<VariantId> = page.items.iter().map(|(v, _)| *v).collect();
+    let products = products_of_variants(&ctx, ports.products(), &variants).await?;
+    let product_of = |variant: VariantId| {
+        products
+            .iter()
+            .find(|p| p.variants().iter().any(|v| v.id() == variant))
+            .map(|p| FixedPriceProduct {
+                id: p.id(),
+                title: p.title().to_string(),
+                variant_title: p.variant_title(variant),
+            })
+    };
     Ok(Json(PageResponse::new(
         page,
         &scope,
@@ -579,6 +642,7 @@ pub(super) async fn list_fixed_prices_handler<S: Storage>(
             Ok(FixedPriceResponse {
                 variant,
                 price: price.money(),
+                product: product_of(variant),
             })
         },
     )?))

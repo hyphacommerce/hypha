@@ -341,7 +341,17 @@ step "list price lists" 200 - "$BASE/admin/price-lists"
 contains "with its adjustment" '"adjustment_bps":-1000'
 step "fetch the price list" 200 - "$BASE/admin/price-lists/$LIST"
 step "its fixed prices" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
-contains "the cup at 200" "{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}}"
+contains "the cup at 200" "{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}"
+step "rename the market" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"name":"Euro area"}'
+contains "renamed" '"name":"Euro area"'
+step "and back" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"name":"Eurozone"}'
+step "deepen the discount" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" -d '{"adjustment_bps":-2000}'
+contains "-20%" '"adjustment_bps":-2000'
+step "back to -10%" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" -d '{"adjustment_bps":-1000}'
+step "fixed prices name their product" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
+contains "the cup" '"product":{"id":'
+step "list API keys" 200 - "$BASE/admin/api-keys"
+contains "the storefront's key among them" '"kind":"publishable"'
 step "countries for pickers" 200 - "$BASE/admin/countries"
 contains "Serbia among them" '{"code":"RS","name":"Serbia"}'
 

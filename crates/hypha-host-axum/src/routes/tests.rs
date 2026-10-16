@@ -4136,3 +4136,60 @@ async fn a_product_page_is_one_read_priced_in_the_shoppers_country() {
         json!([{"country": "HR", "name": "Croatia", "market": market, "currency": "EUR", "minor_units": 2, "prices_include_tax": false}])
     );
 }
+
+#[tokio::test]
+async fn markets_are_renamed_price_lists_adjusted_and_keys_listed() {
+    let app = app().await;
+    let (_, mug_variant) = market_selling_a_mug(&app).await;
+    let (_, markets) = send(&app, "GET", "/admin/markets", None).await;
+    let market = markets["items"][0]["id"].as_str().unwrap().to_string();
+    let url = format!("/admin/markets/{market}");
+    let (status, renamed) = send(&app, "PATCH", &url, Some(r#"{"name":" Hrvatska "}"#)).await;
+    assert_eq!(
+        (status, &renamed["name"]),
+        (StatusCode::OK, &json!("Hrvatska"))
+    );
+    let (status, body) = send(&app, "PATCH", &url, Some(r#"{"name":"  "}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "field_required")
+    );
+
+    let (_, list) = send(
+        &app,
+        "POST",
+        "/admin/price-lists",
+        Some(r#"{"currency":"EUR"}"#),
+    )
+    .await;
+    let url = format!("/admin/price-lists/{}", list["id"].as_str().unwrap());
+    let (status, list) = send(&app, "PATCH", &url, Some(r#"{"adjustment_bps":-1500}"#)).await;
+    assert_eq!(
+        (status, &list["adjustment_bps"]),
+        (StatusCode::OK, &json!(-1500))
+    );
+    let body = json!({"fixed_prices": [{"variant": mug_variant, "price": {"amount": 750, "currency": "EUR"}}]});
+    send(
+        &app,
+        "PUT",
+        &format!("{url}/fixed-prices"),
+        Some(&body.to_string()),
+    )
+    .await;
+    let (_, prices) = send(&app, "GET", &format!("{url}/fixed-prices"), None).await;
+    assert_eq!(prices["items"][0]["product"]["title"], json!("Mug"));
+    assert_eq!(prices["items"][0]["product"]["variant_title"], Value::Null);
+
+    publishable(&app).await;
+    let (status, keys) = send(&app, "GET", "/admin/api-keys?limit=1", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        keys["items"][0]["kind"],
+        json!("publishable"),
+        "newest first"
+    );
+    assert!(
+        keys["items"][0].get("token").is_none(),
+        "tokens are shown only once"
+    );
+}

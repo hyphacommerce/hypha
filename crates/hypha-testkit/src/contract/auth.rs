@@ -334,6 +334,50 @@ pub async fn api_key_repo<R: ApiKeyRepo>(make: impl AsyncFn() -> R) {
     key_update(&make().await).await;
     scenario("api key: unique ID and token");
     key_keys(&make().await).await;
+    scenario("api key: keys come in pages, newest first");
+    key_pages(&make().await).await;
+}
+
+async fn key_pages<R: ApiKeyRepo>(repo: &R) {
+    let first = |limit| hypha_core::PageRequest {
+        after: None,
+        limit: hypha_core::PageLimit::new(limit).unwrap(),
+    };
+    assert_eq!(repo.list(first(10)).await.unwrap().items, vec![]);
+    for n in [1, 3, 2] {
+        repo.insert(&mut key(n, n as u8, ApiKeyKind::Secret))
+            .await
+            .unwrap();
+    }
+    let page = repo.list(first(2)).await.unwrap();
+    let ids: Vec<ApiKeyId> = page.items.iter().map(|k| k.id()).collect();
+    assert_eq!(
+        (ids, page.has_more),
+        (
+            vec![
+                ApiKeyId::from_uuid(Uuid::from_u128(3)),
+                ApiKeyId::from_uuid(Uuid::from_u128(2))
+            ],
+            true
+        )
+    );
+    let rest = repo
+        .list(hypha_core::PageRequest {
+            after: Some(ApiKeyId::from_uuid(Uuid::from_u128(2))),
+            limit: hypha_core::PageLimit::new(2).unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        rest.items,
+        vec![
+            repo.get(ApiKeyId::from_uuid(Uuid::from_u128(1)))
+                .await
+                .unwrap()
+                .unwrap()
+        ]
+    );
+    assert!(!rest.has_more);
 }
 
 async fn key_round_trips<R: ApiKeyRepo>(repo: &R) {

@@ -131,6 +131,18 @@ pub async fn get_products<R: ProductRepo>(
     Ok(repo.get_many(ids).await?)
 }
 
+/// The products owning any of `variants`, in no particular order: for lists that hold
+/// variant IDs (a price list's fixed prices).
+pub async fn products_of_variants<R: ProductRepo>(
+    ctx: &Ctx,
+    repo: &R,
+    variants: &[VariantId],
+) -> Result<Vec<Product>, CommandError> {
+    ctx.require(Scope::ProductsRead)?;
+    let ids = repo.ids_of_variants(variants).await?;
+    Ok(repo.get_many(&ids).await?)
+}
+
 /// Moves a product to `status`, following the allowed transitions
 /// (draft ↔ active, active → archived, archived → draft).
 pub async fn set_product_status<R: ProductRepo>(

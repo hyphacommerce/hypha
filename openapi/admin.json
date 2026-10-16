@@ -335,6 +335,33 @@
         "pattern": "^key_[0-9a-f]{32}$",
         "type": "string"
       },
+      "ApiKeyPage": {
+        "description": "A page of a list, newest first (design note 0012).",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
       "ApiKeyResponse": {
         "properties": {
           "channel": {
@@ -2142,10 +2169,43 @@
         ],
         "type": "object"
       },
+      "FixedPriceProduct": {
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "title": {
+            "type": "string"
+          },
+          "variant_title": {
+            "description": "The variant's option values (\"M / Blue\"); `null` for a product without options.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "type": "object"
+      },
       "FixedPriceResponse": {
         "properties": {
           "price": {
             "$ref": "#/components/schemas/Money"
+          },
+          "product": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixedPriceProduct",
+                "description": "The variant's product; `null` when the variant no longer exists (fixed prices\nstore variant IDs as given)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "variant": {
             "$ref": "#/components/schemas/VariantId"
@@ -4937,6 +4997,10 @@
       "UpdateMarketRequest": {
         "additionalProperties": false,
         "properties": {
+          "name": {
+            "description": "1 to 255 characters, trimmed.",
+            "type": "string"
+          },
           "prices_include_tax": {
             "type": "boolean"
           }
@@ -4981,6 +5045,17 @@
                 "type": "null"
               }
             ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdatePriceListRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "adjustment_bps": {
+            "description": "Basis points: -1000 = 10% off.",
+            "format": "int32",
+            "type": "integer"
           }
         },
         "type": "object"
@@ -5407,6 +5482,106 @@
   "openapi": "3.1.0",
   "paths": {
     "/admin/api-keys": {
+      "get": {
+        "operationId": "admin.api_keys.list",
+        "parameters": [
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every API key, revoked ones too, newest first. Tokens are never shown again.",
+        "tags": [
+          "api_keys"
+        ],
+        "x-hypha-scopes": [
+          "api_keys:read"
+        ]
+      },
       "post": {
         "operationId": "admin.api_keys.create",
         "requestBody": {
@@ -14092,6 +14267,143 @@
         "x-hypha-scopes": [
           "pricing:read"
         ]
+      },
+      "patch": {
+        "operationId": "admin.markets.update_price_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PriceListId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePriceListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes a price list's adjustment; its currency is fixed.",
+        "tags": [
+          "markets"
+        ],
+        "x-hypha-scopes": [
+          "pricing:write"
+        ]
       }
     },
     "/admin/price-lists/{id}/fixed-prices": {
@@ -14340,7 +14652,8 @@
           "markets"
         ],
         "x-hypha-scopes": [
-          "pricing:read"
+          "pricing:read",
+          "products:read"
         ]
       },
       "put": {

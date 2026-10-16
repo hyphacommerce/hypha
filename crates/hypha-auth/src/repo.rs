@@ -1,4 +1,4 @@
-use hypha_core::{ApiKeyId, IdentityId, RepoError, SessionId, Timestamp};
+use hypha_core::{ApiKeyId, IdentityId, Page, PageRequest, RepoError, SessionId, Timestamp};
 
 use crate::{
     ApiKey, Identity, PasswordReset, Session,
@@ -57,6 +57,8 @@ pub trait SessionRepo {
 pub trait ApiKeyRepo {
     async fn get(&self, id: ApiKeyId) -> Result<Option<ApiKey>, RepoError>;
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<ApiKey>, RepoError>;
+    /// A page of keys, revoked ones too, newest first (design note 0012).
+    async fn list(&self, page: PageRequest<ApiKeyId>) -> Result<Page<ApiKey>, RepoError>;
     /// Enforces `API_KEY_ID` and `API_KEY_TOKEN`.
     async fn insert(&self, key: &mut ApiKey) -> Result<(), RepoError>;
     async fn update(&self, key: &mut ApiKey) -> Result<(), RepoError>;

@@ -9,7 +9,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Every API key, revoked ones too, newest first. Tokens are never shown again. */
+        get: operations["admin.api_keys.list"];
         put?: never;
         /** Creates an API key; its token is shown only in this response. */
         post: operations["admin.api_keys.create"];
@@ -1075,7 +1076,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Changes a price list's adjustment; its currency is fixed. */
+        patch: operations["admin.markets.update_price_list"];
         trace?: never;
     };
     "/admin/price-lists/{id}/fixed-prices": {
@@ -1751,6 +1753,14 @@ export interface components {
          * @example key_0190f1a2b3c47d8e9f00112233445566
          */
         ApiKeyId: string;
+        /** @description A page of a list, newest first (design note 0012). */
+        ApiKeyPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["ApiKeyResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
         ApiKeyResponse: {
             channel?: components["schemas"]["ChannelId"] | null;
             created_at: string;
@@ -2362,8 +2372,15 @@ export interface components {
             /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
             next_cursor?: string | null;
         };
+        FixedPriceProduct: {
+            id: components["schemas"]["ProductId"];
+            title: string;
+            /** @description The variant's option values ("M / Blue"); `null` for a product without options. */
+            variant_title?: string | null;
+        };
         FixedPriceResponse: {
             price: components["schemas"]["Money"];
+            product?: components["schemas"]["FixedPriceProduct"] | null;
             variant: components["schemas"]["VariantId"];
         };
         /**
@@ -3255,6 +3272,8 @@ export interface components {
             priority?: number;
         };
         UpdateMarketRequest: {
+            /** @description 1 to 255 characters, trimmed. */
+            name?: string;
             prices_include_tax?: boolean;
         };
         /** @description An option's fields (JSON Merge Patch; `estimate` and `tax_class` take `null`). */
@@ -3266,6 +3285,13 @@ export interface components {
             name?: string;
             rate?: components["schemas"]["RateDto"];
             tax_class?: components["schemas"]["TaxClassId"] | null;
+        };
+        UpdatePriceListRequest: {
+            /**
+             * Format: int32
+             * @description Basis points: -1000 = 10% off.
+             */
+            adjustment_bps?: number;
         };
         /** @description Title and handle (JSON Merge Patch; neither can be `null`). */
         UpdateProductRequest: {
@@ -3426,6 +3452,76 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "admin.api_keys.list": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.api_keys.create": {
         parameters: {
             query?: never;
@@ -10174,6 +10270,113 @@ export interface operations {
             };
             /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.markets.update_price_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePriceListRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceListResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

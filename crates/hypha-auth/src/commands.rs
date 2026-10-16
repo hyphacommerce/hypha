@@ -782,6 +782,16 @@ pub async fn get_api_key<R: ApiKeyRepo>(
     keys.get(id).await?.ok_or(CommandError::ApiKeyNotFound(id))
 }
 
+/// A page of the store's API keys, revoked ones too, newest first.
+pub async fn list_api_keys<R: ApiKeyRepo>(
+    ctx: &Ctx,
+    keys: &R,
+    page: hypha_core::PageRequest<ApiKeyId>,
+) -> Result<hypha_core::Page<ApiKey>, CommandError> {
+    ctx.require(Scope::ApiKeysRead)?;
+    Ok(keys.list(page).await?)
+}
+
 /// Stops a key working, from the next request on.
 pub async fn revoke_api_key<R: ApiKeyRepo>(
     ctx: &Ctx,

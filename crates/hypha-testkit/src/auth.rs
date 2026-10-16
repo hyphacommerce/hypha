@@ -136,6 +136,13 @@ impl ApiKeyRepo for InMemoryApiKeyRepo {
         Ok(self.keys.find(|k| k.token_hash() == hash))
     }
 
+    async fn list(
+        &self,
+        page: hypha_core::PageRequest<ApiKeyId>,
+    ) -> Result<hypha_core::Page<ApiKey>, RepoError> {
+        Ok(self.keys.page(|_| true, page, Clone::clone))
+    }
+
     async fn insert(&self, key: &mut ApiKey) -> Result<(), RepoError> {
         self.keys
             .insert(key.id(), key, keys::API_KEY_ID, &unique_key)

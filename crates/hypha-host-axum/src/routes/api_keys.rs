@@ -3,12 +3,16 @@
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_auth::{
-    ApiKey, ApiKeyKind, CreateApiKey, HasApiKeys, create_api_key, get_api_key, revoke_api_key,
+    ApiKey, ApiKeyKind, CreateApiKey, HasApiKeys, create_api_key, get_api_key, list_api_keys,
+    revoke_api_key,
 };
 use hypha_core::{ApiKeyId, ChannelId, Scope};
 use serde::{Deserialize, Serialize};
 
-use super::rfc3339;
+use super::{
+    page::{ListQuery, PageParams, PageResponse},
+    rfc3339,
+};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
@@ -137,4 +141,30 @@ pub(super) async fn revoke<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let key = revoke_api_key(&ctx, ports.api_keys(), &state.clock, id).await?;
     Ok(Json(ApiKeyResponse::new(&key)?))
+}
+
+type ApiKeyPage = PageResponse<ApiKeyResponse>;
+
+/// Every API key, revoked ones too, newest first. Tokens are never shown again.
+#[utoipa::path(
+    get,
+    path = "/admin/api-keys",
+    params(PageParams),
+    responses((status = 200, description = "OK", body = ApiKeyPage)),
+    extensions(("x-hypha-scopes" = json!(["api_keys:read"]))),
+)]
+pub(super) async fn list<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    query: ListQuery,
+) -> Result<Json<ApiKeyPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, _, scope) = query.parse()?;
+    let page = list_api_keys(&ctx, ports.api_keys(), page).await?;
+    Ok(Json(PageResponse::new(
+        page,
+        &scope,
+        |k| k.id(),
+        |k| ApiKeyResponse::new(&k),
+    )?))
 }

@@ -159,6 +159,7 @@ pub async fn create_market<M: MarketRepo, I: IdGenerator>(
 /// Changes the fields that are `Some`; the rest keep their values.
 #[derive(Debug, Default)]
 pub struct UpdateMarket {
+    pub name: Option<String>,
     pub prices_include_tax: Option<bool>,
 }
 
@@ -171,6 +172,9 @@ pub async fn update_market<M: MarketRepo>(
     ctx.require(Scope::MarketsWrite)?;
 
     let mut market = load_market(markets, id).await?;
+    if let Some(name) = &input.name {
+        market.rename(name)?;
+    }
     if let Some(include) = input.prices_include_tax {
         market.set_prices_include_tax(include);
     }
@@ -341,6 +345,33 @@ where
     };
     batch.record_events(vec![PendingEvent::new(price_list_subject(list_id), &event)]);
     Ok(ports.commit(batch).await?)
+}
+
+/// A price list's changes; `None` keeps a field.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpdatePriceList {
+    /// Basis points (-1000 = 10% off).
+    pub adjustment: Option<i32>,
+}
+
+/// Changes a price list's adjustment. Its currency is fixed: catalogs and fixed prices
+/// depend on it.
+pub async fn update_price_list<P: PriceListRepo>(
+    ctx: &Ctx,
+    lists: &P,
+    id: PriceListId,
+    input: UpdatePriceList,
+) -> Result<PriceList, CommandError> {
+    ctx.require(Scope::PricingWrite)?;
+    let mut list = lists
+        .get(id)
+        .await?
+        .ok_or(CommandError::PriceListNotFound(id))?;
+    if let Some(adjustment) = input.adjustment {
+        list.set_adjustment(BasisPoints::new(adjustment)?);
+    }
+    lists.update(&mut list).await?;
+    Ok(list)
 }
 
 pub struct CreateCatalog {
