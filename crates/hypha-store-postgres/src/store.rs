@@ -101,6 +101,7 @@ accessors! {
     hypha_customers::HasCustomers => Customers, customers;
     hypha_core::HasIdempotency => Idempotency, idempotency;
     hypha_orders::HasOrders => Orders, orders;
+    hypha_fulfillment::HasFulfillments => Fulfillments, fulfillments;
     hypha_auth::HasIdentities => Identities, identities;
     hypha_auth::HasSessions => Sessions, sessions;
     hypha_auth::HasApiKeys => ApiKeys, api_keys;

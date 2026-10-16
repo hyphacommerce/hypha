@@ -9,6 +9,7 @@ use hypha_core::{
     Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
+use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
 use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
@@ -41,6 +42,8 @@ pub struct InMemoryBatch {
 
 enum Staged {
     NewOrder(Order),
+    NewFulfillment(Fulfillment),
+    Fulfillment(Fulfillment),
     NewCart(Cart),
     Cart(Cart),
     Product(Product),
@@ -222,6 +225,24 @@ impl StageOrders for InMemoryBatch {
     }
 }
 
+impl StageFulfillments for InMemoryBatch {
+    fn insert_fulfillment(&mut self, fulfillment: &mut Fulfillment) {
+        stamp_insert(fulfillment, self.now);
+        let events = fulfillment.take_events();
+        self.stage(Staged::NewFulfillment(fulfillment.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        fulfillment.set_version(Version::NEW.next());
+    }
+
+    fn update_fulfillment(&mut self, fulfillment: &mut Fulfillment) {
+        stamp_update(fulfillment, self.now);
+        let version = fulfillment.version().next();
+        self.stage_events_of(fulfillment, version);
+        self.stage(Staged::Fulfillment(fulfillment.clone()));
+        fulfillment.set_version(version);
+    }
+}
+
 impl StageCustomers for InMemoryBatch {
     fn insert_customer(&mut self, customer: &mut Customer) {
         stamp_insert(customer, self.now);
@@ -255,6 +276,8 @@ impl HasBatch for InMemoryPorts {
     /// batch. Copying the tables for the rollback is fine at test sizes.
     async fn commit(&self, batch: InMemoryBatch) -> Result<(), RepoError> {
         let mut orders = self.orders.orders.lock();
+        let mut fulfillments = self.fulfillments.fulfillments.lock();
+        let fulfillments_before = fulfillments.clone();
         let mut carts = self.carts.carts.lock();
         let mut products = self.products.products.lock();
         let mut items = self.inventory_items.items.lock();
@@ -303,6 +326,19 @@ impl HasBatch for InMemoryPorts {
                         &mut order,
                         order_keys::ORDER_ID,
                         &unique_order,
+                    )?,
+                    Staged::NewFulfillment(mut fulfillment) => insert_row(
+                        &mut fulfillments,
+                        fulfillment.id(),
+                        &mut fulfillment,
+                        fulfillment_keys::FULFILLMENT_ID,
+                        &no_unique_keys,
+                    )?,
+                    Staged::Fulfillment(mut fulfillment) => update_row(
+                        &mut fulfillments,
+                        fulfillment.id(),
+                        &mut fulfillment,
+                        &no_unique_keys,
                     )?,
                     Staged::NewCart(mut cart) => insert_row(
                         &mut carts,
@@ -452,6 +488,7 @@ impl HasBatch for InMemoryPorts {
         if written.is_err() {
             (*orders, *carts, *products, *items, *customers, *records) = before;
             *usages = usages_before;
+            *fulfillments = fulfillments_before;
             *memberships = memberships_before;
             *fixed_prices = fixed_prices_before;
             *tax_classes = tax_classes_before;

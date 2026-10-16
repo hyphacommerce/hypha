@@ -11,6 +11,7 @@ use hypha_core::{
     Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
+use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
 use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
@@ -30,6 +31,7 @@ use crate::{
     carts::{insert_cart, update_cart},
     customers::insert_customer,
     error::repo_error,
+    fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
     inventory::update_items,
     markets::{
@@ -56,6 +58,8 @@ pub struct PgBatch {
 /// `rank` and `apply`, and its `Stage*` impl below.
 enum Staged {
     NewOrder(OrderSnapshot),
+    NewFulfillment(FulfillmentSnapshot),
+    Fulfillment(FulfillmentSnapshot),
     NewCart(CartSnapshot),
     Cart(CartSnapshot),
     Product(ProductSnapshot),
@@ -96,32 +100,34 @@ impl Staged {
     fn rank(&self) -> u8 {
         match self {
             Staged::NewOrder(_) => 0,
-            Staged::NewCart(_) => 1,
-            Staged::Cart(_) => 2,
-            Staged::Product(_) => 3,
-            Staged::AssetUsages(..) => 4,
-            Staged::NewCustomer(_) => 5,
-            Staged::NewRole(_) => 6,
-            Staged::Role(_) => 7,
-            Staged::NewUser(_) => 8,
-            Staged::User(_) => 9,
-            Staged::Invite(_) => 10,
-            Staged::NewIdentity(_) => 11,
-            Staged::Identity(_) => 12,
-            Staged::NewSession(_) => 13,
-            Staged::Session(_) => 14,
-            Staged::SessionRevocation(..) => 15,
-            Staged::NewPasswordReset(_) => 16,
-            Staged::PasswordReset(_) => 17,
-            Staged::UsedUpResets(..) => 18,
+            Staged::NewFulfillment(_) => 1,
+            Staged::Fulfillment(_) => 2,
+            Staged::NewCart(_) => 3,
+            Staged::Cart(_) => 4,
+            Staged::Product(_) => 5,
+            Staged::AssetUsages(..) => 6,
+            Staged::NewCustomer(_) => 7,
+            Staged::NewRole(_) => 8,
+            Staged::Role(_) => 9,
+            Staged::NewUser(_) => 10,
+            Staged::User(_) => 11,
+            Staged::Invite(_) => 12,
+            Staged::NewIdentity(_) => 13,
+            Staged::Identity(_) => 14,
+            Staged::NewSession(_) => 15,
+            Staged::Session(_) => 16,
+            Staged::SessionRevocation(..) => 17,
+            Staged::NewPasswordReset(_) => 18,
+            Staged::PasswordReset(_) => 19,
+            Staged::UsedUpResets(..) => 20,
             // These two are gathered and written in one statement each, last.
-            Staged::CatalogProducts(..) => 19,
-            Staged::FixedPrices(..) => 20,
-            Staged::TaxAssignment(..) => 21,
-            Staged::Idempotency(_) => 22,
-            Staged::InventoryItem(_) => 23,
+            Staged::CatalogProducts(..) => 21,
+            Staged::FixedPrices(..) => 22,
+            Staged::TaxAssignment(..) => 23,
+            Staged::Idempotency(_) => 24,
+            Staged::InventoryItem(_) => 25,
             // Inserts into a table nothing else locks: anywhere would do.
-            Staged::Events(..) => 24,
+            Staged::Events(..) => 26,
         }
     }
 
@@ -132,6 +138,8 @@ impl Staged {
             .cmp(&other.rank())
             .then_with(|| match (self, other) {
                 (Staged::NewOrder(a), Staged::NewOrder(b)) => a.id.cmp(&b.id),
+                (Staged::NewFulfillment(a), Staged::NewFulfillment(b))
+                | (Staged::Fulfillment(a), Staged::Fulfillment(b)) => a.id.cmp(&b.id),
                 (Staged::NewCart(a), Staged::NewCart(b)) | (Staged::Cart(a), Staged::Cart(b)) => {
                     a.id.cmp(&b.id)
                 }
@@ -310,6 +318,23 @@ impl StageOrders for PgBatch {
     }
 }
 
+impl StageFulfillments for PgBatch {
+    fn insert_fulfillment(&mut self, fulfillment: &mut Fulfillment) {
+        stamp_insert(fulfillment, self.now);
+        self.stage(Staged::NewFulfillment(fulfillment.snapshot()));
+        self.stage_events_of(fulfillment, Version::NEW.next());
+        fulfillment.set_version(Version::NEW.next());
+    }
+
+    fn update_fulfillment(&mut self, fulfillment: &mut Fulfillment) {
+        stamp_update(fulfillment, self.now);
+        self.stage(Staged::Fulfillment(fulfillment.snapshot()));
+        let version = fulfillment.version().next();
+        self.stage_events_of(fulfillment, version);
+        fulfillment.set_version(version);
+    }
+}
+
 impl StageCustomers for PgBatch {
     fn insert_customer(&mut self, customer: &mut Customer) {
         stamp_insert(customer, self.now);
@@ -351,6 +376,10 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         for write in batch.staged {
             match write {
                 Staged::NewOrder(s) => insert_order(&tx, &s).await?,
+                Staged::NewFulfillment(s) => insert_fulfillment(&tx, &s).await?,
+                Staged::Fulfillment(s) => {
+                    update_fulfillment(&tx, &s).await?;
+                }
                 Staged::NewCart(s) => insert_cart(&tx, &s).await?,
                 Staged::Cart(s) => {
                     update_cart(&tx, &s).await?;

@@ -5,6 +5,7 @@ use hypha_auth::keys as auth_keys;
 use hypha_cart::repo::keys as cart_keys;
 use hypha_core::{RepoError, idempotency::keys as idempotency_keys};
 use hypha_customers::repo::keys as customer_keys;
+use hypha_fulfillment::keys as fulfillment_keys;
 use hypha_inventory::repo::keys as inventory_keys;
 use hypha_markets::repo::keys as market_keys;
 use hypha_media::repo::keys as media_keys;
@@ -56,6 +57,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("order_number", order_keys::ORDER_NUMBER),
     ("order_cart", order_keys::ORDER_CART),
     ("order_lines_pkey", order_keys::ORDER_LINE_ID),
+    ("fulfillments_pkey", fulfillment_keys::FULFILLMENT_ID),
     ("identities_pkey", auth_keys::IDENTITY_ID),
     ("identity_principal", auth_keys::IDENTITY_PRINCIPAL),
     ("identity_login", auth_keys::IDENTITY_LOGIN),

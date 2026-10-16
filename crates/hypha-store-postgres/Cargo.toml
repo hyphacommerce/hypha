@@ -14,6 +14,7 @@ hypha-inventory = { path = "../hypha-inventory" }
 hypha-customers = { path = "../hypha-customers" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-orders = { path = "../hypha-orders" }
+hypha-fulfillment = { path = "../hypha-fulfillment" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
 hypha-apps = { path = "../hypha-apps" }

@@ -20,6 +20,7 @@ mod columns;
 mod config;
 mod customers;
 mod error;
+mod fulfillments;
 mod idempotency;
 mod inventory;
 mod markets;

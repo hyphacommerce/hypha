@@ -3,9 +3,9 @@
 use hypha_core::Timestamp;
 use hypha_testkit::{
     InMemoryAppRepo, InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCatalogRepo,
-    InMemoryCustomerRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo, InMemoryMarketRepo,
-    InMemoryOrderRepo, InMemoryPorts, InMemoryPriceListRepo, InMemoryProductRepo,
-    InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
+    InMemoryCustomerRepo, InMemoryFulfillmentRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo,
+    InMemoryMarketRepo, InMemoryOrderRepo, InMemoryPorts, InMemoryPriceListRepo,
+    InMemoryProductRepo, InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
 };
 use pollster::block_on;
 
@@ -96,6 +96,13 @@ fn batch() {
 fn idempotency_repo() {
     block_on(contract::idempotency_repo(async || {
         InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn fulfillment_repo() {
+    block_on(contract::fulfillment_repo(async || {
+        InMemoryFulfillmentRepo::default()
     }));
 }
 

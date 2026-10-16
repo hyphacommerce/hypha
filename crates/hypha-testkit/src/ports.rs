@@ -2,6 +2,7 @@ use hypha_auth::{HasApiKeys, HasIdentities, HasPasswordResets, HasSessions};
 use hypha_cart::HasCarts;
 use hypha_core::{ActingAs, Actor, HasIdempotency, HasOutbox};
 use hypha_customers::HasCustomers;
+use hypha_fulfillment::HasFulfillments;
 use hypha_inventory::{HasInventoryItems, HasLocations};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_media::{HasAssetUsages, HasAssets};
@@ -13,11 +14,12 @@ use hypha_users::{HasInvites, HasRoles, HasUsers};
 
 use crate::{
     InMemoryApiKeyRepo, InMemoryAppProviderRepo, InMemoryAppRepo, InMemoryAssetRepo,
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryIdempotencyRepo,
-    InMemoryIdentityRepo, InMemoryInventoryItemRepo, InMemoryInviteRepo, InMemoryLocationRepo,
-    InMemoryMarketRepo, InMemoryOrderRepo, InMemoryOutbox, InMemoryPasswordResetRepo,
-    InMemoryPriceListRepo, InMemoryProductRepo, InMemoryRoleRepo, InMemorySessionRepo,
-    InMemoryShippingZoneRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
+    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryFulfillmentRepo,
+    InMemoryIdempotencyRepo, InMemoryIdentityRepo, InMemoryInventoryItemRepo, InMemoryInviteRepo,
+    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryOrderRepo, InMemoryOutbox,
+    InMemoryPasswordResetRepo, InMemoryPriceListRepo, InMemoryProductRepo, InMemoryRoleRepo,
+    InMemorySessionRepo, InMemoryShippingZoneRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
+    InMemoryUserRepo,
 };
 
 /// Every repository of one store, in memory: the tests' world. It has every accessor, so it is `hypha_cart::CartPorts`; the fields are
@@ -37,6 +39,7 @@ pub struct InMemoryPorts {
     pub customers: InMemoryCustomerRepo,
     pub idempotency: InMemoryIdempotencyRepo,
     pub orders: InMemoryOrderRepo,
+    pub fulfillments: InMemoryFulfillmentRepo,
     pub assets: InMemoryAssetRepo,
     pub shipping_zones: InMemoryShippingZoneRepo,
     pub app_providers: InMemoryAppProviderRepo,
@@ -68,6 +71,7 @@ impl Default for InMemoryPorts {
             customers: InMemoryCustomerRepo::sharing(&outbox),
             idempotency: InMemoryIdempotencyRepo::default(),
             orders: InMemoryOrderRepo::sharing(&outbox),
+            fulfillments: InMemoryFulfillmentRepo::sharing(&outbox),
             assets: InMemoryAssetRepo::default(),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
             app_providers,
@@ -200,6 +204,13 @@ impl HasAppProviders for InMemoryPorts {
     type AppProviders = InMemoryAppProviderRepo;
     fn app_providers(&self) -> &InMemoryAppProviderRepo {
         &self.app_providers
+    }
+}
+
+impl HasFulfillments for InMemoryPorts {
+    type Fulfillments = InMemoryFulfillmentRepo;
+    fn fulfillments(&self) -> &InMemoryFulfillmentRepo {
+        &self.fulfillments
     }
 }
 

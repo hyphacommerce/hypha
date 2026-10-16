@@ -125,6 +125,12 @@ async fn order_repo() {
 }
 
 #[tokio::test]
+async fn fulfillment_repo() {
+    let Some(url) = database_url() else { return };
+    contract::fulfillment_repo(async || fresh_store(&url, "contract_fulfillments").await).await;
+}
+
+#[tokio::test]
 async fn identity_repo() {
     let Some(url) = database_url() else { return };
     contract::identity_repo(async || fresh_store(&url, "contract_identities").await).await;

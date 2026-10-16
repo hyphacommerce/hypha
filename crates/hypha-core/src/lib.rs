@@ -37,10 +37,10 @@ pub use idempotency::{
 };
 pub use ids::{
     AddressId, AgentId, ApiKeyId, AssetId, CartId, CatalogId, CustomerId, DeliveryId, EventId,
-    IdError, IdentityId, InventoryItemId, InviteId, LocationId, MarketId, OptionId, OptionValueId,
-    OrderId, OrderLineId, PasswordResetId, PriceListId, ProductId, RoleId, SessionId,
-    ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId,
-    VariantId,
+    FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId, LocationId, MarketId, OptionId,
+    OptionValueId, OrderId, OrderLineId, PasswordResetId, PriceListId, ProductId, RoleId,
+    SessionId, ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId,
+    UserId, VariantId,
 };
 pub use money::{BasisPoints, Currency, Money, MoneyError, Price, TaxRate, UnknownCurrency};
 pub use page::{Page, PageError, PageLimit, PageRequest};

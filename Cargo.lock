@@ -926,6 +926,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-fulfillment"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-host-axum"
 version = "0.1.0"
 dependencies = [
@@ -1088,6 +1100,7 @@ dependencies = [
  "hypha-checkout",
  "hypha-core",
  "hypha-customers",
+ "hypha-fulfillment",
  "hypha-inventory",
  "hypha-markets",
  "hypha-media",
@@ -1152,6 +1165,7 @@ dependencies = [
  "hypha-cart",
  "hypha-core",
  "hypha-customers",
+ "hypha-fulfillment",
  "hypha-inventory",
  "hypha-markets",
  "hypha-media",
