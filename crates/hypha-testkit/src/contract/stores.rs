@@ -1,4 +1,6 @@
-use hypha_core::{RepoError, StoreId, Version, Versioned};
+use hypha_core::{
+    Address, AddressParts, Email, Language, RepoError, StoreId, Timezone, Version, Versioned,
+};
 use hypha_stores::{Store, StoreRepo, repo::keys};
 use uuid::Uuid;
 
@@ -12,6 +14,42 @@ pub async fn store_repo<R: StoreRepo>(make: impl AsyncFn() -> R) {
     update_round_trips(&make().await).await;
     scenario("store: unique ID, stale and missing updates");
     keys_and_stale(&make().await).await;
+    scenario("store: every detail is set, stored and cleared");
+    details_round_trip(&make().await).await;
+}
+
+async fn details_round_trip<R: StoreRepo>(repo: &R) {
+    let mut s = store(1, "Acme");
+    repo.insert(&mut s).await.unwrap();
+    s.set_contact_email(Some(Email::new("hi@acme.example").unwrap()));
+    s.set_description(Some("Mugs, cups\nand plates.")).unwrap();
+    s.set_legal_name(Some("Acme d.o.o.")).unwrap();
+    let address = Address::new(AddressParts {
+        first_name: Some("Ana".to_string()),
+        last_name: "Horvat".to_string(),
+        company: Some("Acme d.o.o.".to_string()),
+        line1: "Ilica 1".to_string(),
+        line2: Some("2. kat".to_string()),
+        city: "Zagreb".to_string(),
+        province: Some("Grad Zagreb".to_string()),
+        postal_code: Some("10000".to_string()),
+        country: "HR".to_string(),
+        phone: Some("+385 1 000 000".to_string()),
+    })
+    .unwrap();
+    s.set_legal_address(Some(address));
+    s.set_timezone(Some(Timezone::new("Europe/Zagreb").unwrap()));
+    s.set_default_language(Language::new("sr-Latn-RS").unwrap());
+    repo.update(&mut s).await.unwrap();
+    assert_eq!(repo.get(s.id()).await, Ok(Some(s.clone())));
+
+    s.set_contact_email(None);
+    s.set_description(None).unwrap();
+    s.set_legal_name(None).unwrap();
+    s.set_legal_address(None);
+    s.set_timezone(None);
+    repo.update(&mut s).await.unwrap();
+    assert_eq!(repo.get(s.id()).await, Ok(Some(s)));
 }
 
 fn store(n: u128, name: &str) -> Store {

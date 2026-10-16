@@ -410,6 +410,79 @@ async fn the_store_can_be_renamed() {
 }
 
 #[tokio::test]
+async fn the_store_details_are_set_cleared_and_partly_public() {
+    let app = app().await;
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(
+        (&store["default_language"], &store["timezone"]),
+        (&json!("en"), &Value::Null)
+    );
+    let body = json!({
+        "contact_email": "Hi@Lumen.example",
+        "description": " Candles. ",
+        "legal_name": "Lumen d.o.o.",
+        "legal_address": {"last_name": "Lumen", "line1": "Ilica 1", "city": "Zagreb", "country": "HR"},
+        "timezone": "Europe/Zagreb",
+        "default_language": "hr"
+    })
+    .to_string();
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    assert_eq!(
+        (
+            &store["contact_email"],
+            &store["description"],
+            &store["legal_address"]["city"]
+        ),
+        (
+            &json!("hi@lumen.example"),
+            &json!("Candles."),
+            &json!("Zagreb")
+        )
+    );
+
+    let key = publishable(&app).await;
+    let (_, public) = send_with(
+        &app,
+        &[("x-publishable-key", &key)],
+        "GET",
+        "/storefront/store",
+        None,
+    )
+    .await;
+    assert_eq!(
+        public,
+        json!({"name": store["name"], "description": "Candles.", "contact_email": "hi@lumen.example", "default_language": "hr"})
+    );
+
+    for (body, want) in [
+        (r#"{"timezone":"Mars/Base"}"#, "unknown_timezone"),
+        (r#"{"default_language":"en_GB"}"#, "invalid_language"),
+        (r#"{"default_language":null}"#, "invalid_body"),
+        (r#"{"contact_email":"nope"}"#, "invalid_email"),
+    ] {
+        let (status, error) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+        assert_eq!(
+            (status, code(&error)),
+            (StatusCode::UNPROCESSABLE_ENTITY, want),
+            "{body}"
+        );
+    }
+    let body = r#"{"contact_email":null,"description":null,"legal_name":null,"legal_address":null,"timezone":null}"#;
+    let (_, cleared) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    for field in [
+        "contact_email",
+        "description",
+        "legal_name",
+        "legal_address",
+        "timezone",
+    ] {
+        assert_eq!(cleared[field], Value::Null, "{field}");
+    }
+    assert_eq!(cleared["default_language"], json!("hr"));
+}
+
+#[tokio::test]
 async fn changing_the_store_needs_stores_write_even_with_nothing_to_change() {
     let app = app().await;
     let (_, created) = send(
@@ -1496,7 +1569,10 @@ async fn a_publishable_key_works_on_the_storefront_only() {
     let (status, store) = send_with(&app, &header, "GET", "/storefront/store", None).await;
     assert_eq!(
         (status, &store),
-        (StatusCode::OK, &json!({ "name": "Test" }))
+        (
+            StatusCode::OK,
+            &json!({ "name": "Test", "description": null, "contact_email": null, "default_language": "en" })
+        )
     );
     // In the Authorization header too.
     let (status, _) = send_as(&app, token, "GET", "/storefront/store", None).await;

@@ -2400,6 +2400,15 @@
         ],
         "type": "string"
       },
+      "Language": {
+        "description": "A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.",
+        "examples": [
+          "en-GB"
+        ],
+        "maxLength": 35,
+        "pattern": "^[A-Za-z]{2,3}(-[A-Za-z]{4})?(-([A-Za-z]{2}|[0-9]{3}))?(-([A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*$",
+        "type": "string"
+      },
       "LevelResponse": {
         "properties": {
           "available": {
@@ -4465,16 +4474,67 @@
       },
       "StoreResponse": {
         "properties": {
+          "contact_email": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Email",
+                "description": "Where shoppers and agents can write to the store."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "default_language": {
+            "$ref": "#/components/schemas/Language",
+            "description": "The language the store's content (titles, descriptions, option labels) is written\nin (design note 0021, SU5)."
+          },
+          "description": {
+            "description": "Plain text, at most 500 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "$ref": "#/components/schemas/StoreId"
           },
+          "legal_address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legal_name": {
+            "description": "The registered business name, for invoices and legal pages.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string"
+          },
+          "timezone": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timezone",
+                "description": "Clients convert times with it; the API keeps every time in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "default_language"
         ],
         "type": "object"
       },
@@ -4621,6 +4681,13 @@
           "amount"
         ],
         "type": "object"
+      },
+      "Timezone": {
+        "description": "An IANA time zone name, as `Intl.supportedValuesOf(\"timeZone\")` lists them.",
+        "examples": [
+          "Europe/Belgrade"
+        ],
+        "type": "string"
       },
       "TotpSetupResponse": {
         "properties": {
@@ -5001,9 +5068,52 @@
         "additionalProperties": false,
         "description": "A JSON Merge Patch of the store: absent fields stay as they are.",
         "properties": {
+          "contact_email": {
+            "description": "`null` clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_language": {
+            "description": "A BCP 47 tag such as `en` or `sr-Latn`.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Plain text, at most 500 characters, trimmed; `null` or blank clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "legal_address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressRequest",
+                "description": "Replaced whole; `null` clears it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legal_name": {
+            "description": "At most 255 characters, trimmed; `null` or blank clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "description": "1 to 100 characters, trimmed.",
             "type": "string"
+          },
+          "timezone": {
+            "description": "An IANA name such as `Europe/Belgrade`; `null` clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"

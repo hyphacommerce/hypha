@@ -212,7 +212,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The store's name. */
+        /** The store's public details. */
         get: operations["storefront.stores.fetch"];
         put?: never;
         post?: never;
@@ -376,6 +376,11 @@ export interface components {
              */
             unavailable: components["schemas"]["UnavailableOptionResponse"][];
         };
+        /**
+         * @description A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.
+         * @example en-GB
+         */
+        Language: string;
         LineResponse: components["schemas"]["LineState"] & {
             product: components["schemas"]["ProductId"];
             /**
@@ -725,8 +730,16 @@ export interface components {
             variants: components["schemas"]["StorefrontVariantResponse"][];
             vendor?: string | null;
         };
-        /** @description What a storefront sees of the store: its name. */
+        /**
+         * @description What a storefront sees of the store (design note 0021, SU4): what a header, footer
+         *     or contact page shows. Legal details stay in the admin until a storefront needs them.
+         */
         StorefrontStoreResponse: {
+            contact_email?: components["schemas"]["Email"] | null;
+            /** @description The language the store's content is written in. */
+            default_language: components["schemas"]["Language"];
+            /** @description Plain text, at most 500 characters. */
+            description?: string | null;
             name: string;
         };
         StorefrontVariantResponse: {

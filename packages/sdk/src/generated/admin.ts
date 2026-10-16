@@ -2450,6 +2450,11 @@ export interface components {
         };
         /** @enum {string} */
         KindRequest: "secret" | "publishable";
+        /**
+         * @description A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.
+         * @example en-GB
+         */
+        Language: string;
         LevelResponse: {
             /**
              * Format: int64
@@ -3099,8 +3104,20 @@ export interface components {
          */
         StoreId: string;
         StoreResponse: {
+            contact_email?: components["schemas"]["Email"] | null;
+            /**
+             * @description The language the store's content (titles, descriptions, option labels) is written
+             *     in (design note 0021, SU5).
+             */
+            default_language: components["schemas"]["Language"];
+            /** @description Plain text, at most 500 characters. */
+            description?: string | null;
             id: components["schemas"]["StoreId"];
+            legal_address?: components["schemas"]["PostalAddressResponse"] | null;
+            /** @description The registered business name, for invoices and legal pages. */
+            legal_name?: string | null;
             name: string;
+            timezone?: components["schemas"]["Timezone"] | null;
         };
         /**
          * @description A TaxClassId: `txc_` and 32 hex digits.
@@ -3153,6 +3170,11 @@ export interface components {
              */
             up_to?: number | null;
         };
+        /**
+         * @description An IANA time zone name, as `Intl.supportedValuesOf("timeZone")` lists them.
+         * @example Europe/Belgrade
+         */
+        Timezone: string;
         TotpSetupResponse: {
             /** @description Base32, for typing into the app. */
             secret: string;
@@ -3282,8 +3304,19 @@ export interface components {
         };
         /** @description A JSON Merge Patch of the store: absent fields stay as they are. */
         UpdateStoreRequest: {
+            /** @description `null` clears it. */
+            contact_email?: string | null;
+            /** @description A BCP 47 tag such as `en` or `sr-Latn`. */
+            default_language?: string;
+            /** @description Plain text, at most 500 characters, trimmed; `null` or blank clears it. */
+            description?: string | null;
+            legal_address?: components["schemas"]["PostalAddressRequest"] | null;
+            /** @description At most 255 characters, trimmed; `null` or blank clears it. */
+            legal_name?: string | null;
             /** @description 1 to 100 characters, trimmed. */
             name?: string;
+            /** @description An IANA name such as `Europe/Belgrade`; `null` clears it. */
+            timezone?: string | null;
         };
         UpdateTaxRegionRequest: {
             /** Format: int32 */

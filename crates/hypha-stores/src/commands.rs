@@ -1,4 +1,7 @@
-use hypha_core::{AuthError, Ctx, ErrorCode, IdGenerator, RepoError, Scope, StoreId};
+use hypha_core::{
+    Address, AddressError, AddressParts, AuthError, Ctx, Email, EmailError, ErrorCode, IdGenerator,
+    Language, LanguageError, RepoError, Scope, StoreId, Timezone, TimezoneError,
+};
 use thiserror::Error;
 
 use crate::{Store, StoreError, StoreRepo};
@@ -11,6 +14,14 @@ pub enum CommandError {
     Repo(#[from] RepoError),
     #[error(transparent)]
     Store(#[from] StoreError),
+    #[error(transparent)]
+    Email(#[from] EmailError),
+    #[error(transparent)]
+    Address(#[from] AddressError),
+    #[error(transparent)]
+    Timezone(#[from] TimezoneError),
+    #[error(transparent)]
+    Language(#[from] LanguageError),
     #[error("store {0} not found")]
     StoreNotFound(StoreId),
     /// One store per deployment (design note 0006, model A) found more than one.
@@ -24,6 +35,10 @@ impl ErrorCode for CommandError {
             CommandError::Auth(e) => e.code(),
             CommandError::Repo(e) => e.code(),
             CommandError::Store(e) => e.code(),
+            CommandError::Email(e) => e.code(),
+            CommandError::Address(e) => e.code(),
+            CommandError::Timezone(e) => e.code(),
+            CommandError::Language(e) => e.code(),
             CommandError::StoreNotFound(_) => "store_not_found",
             CommandError::MultipleStores(_) => "multiple_stores",
         }
@@ -51,10 +66,25 @@ pub async fn get_store<R: StoreRepo>(
     repo.get(id).await?.ok_or(CommandError::StoreNotFound(id))
 }
 
-/// The store's details to change; `None` keeps a field as it is.
+/// The store's details to change, unvalidated: `None` keeps a field as it is, and
+/// `Some(None)` clears an optional one (JSON Merge Patch).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpdateStore {
     pub name: Option<String>,
+    pub contact_email: Option<Option<String>>,
+    pub description: Option<Option<String>>,
+    pub legal_name: Option<Option<String>>,
+    pub legal_address: Option<Option<AddressParts>>,
+    /// An IANA name (`Europe/Belgrade`).
+    pub timezone: Option<Option<String>>,
+    /// A BCP 47 tag (`en`, `sr-Latn`).
+    pub default_language: Option<String>,
+}
+
+impl UpdateStore {
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// Changes the store's details. Needs `stores:write` even when nothing changes, so the
@@ -68,10 +98,30 @@ pub async fn update_store<R: StoreRepo>(
 ) -> Result<Store, CommandError> {
     ctx.require(Scope::StoresWrite)?;
     let mut store = repo.get(id).await?.ok_or(CommandError::StoreNotFound(id))?;
-    let Some(name) = input.name else {
+    if input.is_empty() {
         return Ok(store);
-    };
-    store.rename(&name)?;
+    }
+    if let Some(name) = &input.name {
+        store.rename(name)?;
+    }
+    if let Some(email) = input.contact_email {
+        store.set_contact_email(email.as_deref().map(Email::new).transpose()?);
+    }
+    if let Some(description) = &input.description {
+        store.set_description(description.as_deref())?;
+    }
+    if let Some(legal_name) = &input.legal_name {
+        store.set_legal_name(legal_name.as_deref())?;
+    }
+    if let Some(address) = input.legal_address {
+        store.set_legal_address(address.map(Address::new).transpose()?);
+    }
+    if let Some(timezone) = input.timezone {
+        store.set_timezone(timezone.as_deref().map(Timezone::new).transpose()?);
+    }
+    if let Some(language) = &input.default_language {
+        store.set_default_language(Language::new(language)?);
+    }
     repo.update(&mut store).await?;
     Ok(store)
 }

@@ -1,4 +1,7 @@
-use hypha_core::{Actor, AuthError, Ctx, Scope, StoreId, UserId};
+use hypha_core::{
+    Actor, AddressParts, AuthError, CountryError, Ctx, EmailError, LanguageError, Scope, StoreId,
+    TimezoneError, UserId,
+};
 use hypha_stores::{
     CommandError, Store, StoreError, StoreRepo, UpdateStore, create_store, ensure_single_store,
     get_store, update_store,
@@ -76,6 +79,7 @@ fn update_store_stores_the_new_name() {
 
     let input = UpdateStore {
         name: Some("Acme EU".to_string()),
+        ..UpdateStore::default()
     };
     block_on(update_store(&Ctx::system(), &repo, store.id(), input)).unwrap();
 
@@ -125,7 +129,8 @@ fn scopes_are_required() {
             &repo,
             store.id(),
             UpdateStore {
-                name: Some("X".to_string())
+                name: Some("X".to_string()),
+                ..UpdateStore::default()
             }
         )),
         Err(CommandError::Auth(AuthError::MissingScope(
@@ -143,5 +148,125 @@ fn scopes_are_required() {
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::StoresWrite
         )))
+    );
+}
+
+fn address(country: &str) -> AddressParts {
+    AddressParts {
+        first_name: None,
+        last_name: "Acme".to_string(),
+        company: Some("Acme d.o.o.".to_string()),
+        line1: "Ilica 1".to_string(),
+        line2: None,
+        city: "Zagreb".to_string(),
+        province: None,
+        postal_code: Some("10000".to_string()),
+        country: country.to_string(),
+        phone: None,
+    }
+}
+
+#[test]
+fn update_store_sets_and_clears_the_details() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+    let input = UpdateStore {
+        contact_email: Some(Some(" Hi@Acme.example ".to_string())),
+        description: Some(Some("Mugs and cups.".to_string())),
+        legal_name: Some(Some("Acme d.o.o.".to_string())),
+        legal_address: Some(Some(address("HR"))),
+        timezone: Some(Some("Europe/Zagreb".to_string())),
+        default_language: Some("HR".to_string()),
+        ..UpdateStore::default()
+    };
+    block_on(update_store(&Ctx::system(), &repo, store.id(), input)).unwrap();
+    let loaded = block_on(get_store(&Ctx::system(), &repo, store.id())).unwrap();
+    assert_eq!(
+        loaded.contact_email().map(|e| e.as_str()),
+        Some("hi@acme.example")
+    );
+    assert_eq!(loaded.description(), Some("Mugs and cups."));
+    assert_eq!(
+        loaded.legal_address().map(|a| a.parts().city.as_str()),
+        Some("Zagreb")
+    );
+    assert_eq!(loaded.timezone().map(|t| t.as_str()), Some("Europe/Zagreb"));
+    assert_eq!(loaded.default_language().as_str(), "hr");
+
+    let clear = UpdateStore {
+        contact_email: Some(None),
+        description: Some(None),
+        legal_name: Some(None),
+        legal_address: Some(None),
+        timezone: Some(None),
+        ..UpdateStore::default()
+    };
+    let cleared = block_on(update_store(&Ctx::system(), &repo, store.id(), clear)).unwrap();
+    assert!(cleared.contact_email().is_none() && cleared.legal_address().is_none());
+    assert_eq!(
+        (
+            cleared.description(),
+            cleared.legal_name(),
+            cleared.timezone()
+        ),
+        (None, None, None)
+    );
+    assert_eq!(cleared.name(), "Acme", "absent fields stay");
+}
+
+#[test]
+fn update_store_rejects_bad_details_and_changes_nothing() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+    let update =
+        |input: UpdateStore| block_on(update_store(&Ctx::system(), &repo, store.id(), input));
+    assert_eq!(
+        update(UpdateStore {
+            contact_email: Some(Some("nope".to_string())),
+            ..UpdateStore::default()
+        }),
+        Err(CommandError::Email(EmailError::Invalid("nope".to_string())))
+    );
+    assert_eq!(
+        update(UpdateStore {
+            timezone: Some(Some("Mars/Base".to_string())),
+            ..UpdateStore::default()
+        }),
+        Err(CommandError::Timezone(TimezoneError::Unknown(
+            "Mars/Base".to_string()
+        )))
+    );
+    assert_eq!(
+        update(UpdateStore {
+            default_language: Some("en_GB".to_string()),
+            ..UpdateStore::default()
+        }),
+        Err(CommandError::Language(LanguageError::Invalid(
+            "en_GB".to_string()
+        )))
+    );
+    assert_eq!(
+        update(UpdateStore {
+            legal_address: Some(Some(address("XK"))),
+            ..UpdateStore::default()
+        }),
+        Err(CommandError::Address(hypha_core::AddressError::Country(
+            CountryError::Unknown("XK".to_string())
+        )))
+    );
+    assert_eq!(
+        update(UpdateStore {
+            description: Some(Some("x".repeat(501))),
+            ..UpdateStore::default()
+        }),
+        Err(CommandError::Store(StoreError::DescriptionTooLong {
+            max: 500
+        }))
+    );
+    assert_eq!(
+        block_on(get_store(&Ctx::system(), &repo, store.id())),
+        Ok(store)
     );
 }

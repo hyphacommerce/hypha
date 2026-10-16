@@ -1,22 +1,95 @@
-use hypha_core::{RepoError, StoreId, Version, Versioned, stamp_insert, stamp_update};
+use hypha_core::{
+    Email, Language, RepoError, StoreId, Timezone, Version, Versioned, stamp_insert, stamp_update,
+};
 use hypha_stores::{Store, StoreRepo, StoreSnapshot};
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{
+    GenericClient, Row,
+    types::{ToSql, Type},
+};
 
 use crate::{
-    columns::{col, stamp_columns, stamps_from_row, version_from_db, version_to_db, write_stamps},
+    columns::{
+        ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
+        id_and_address, stamp_columns, stamps_from_row, version_from_db, version_to_db,
+        write_stamps,
+    },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, in_transaction},
 };
 
+/// `stores`' columns, as `store_from_row` reads them.
+fn store_columns() -> String {
+    format!(
+        "id, version, name, contact_email, description, legal_name, timezone, \
+         default_language, {}, {}",
+        address_columns("legal_address_"),
+        stamp_columns(""),
+    )
+}
+
 fn store_from_row(row: &Row) -> Result<Store, RepoError> {
     let id = StoreId::from_uuid(col(row, "id")?);
+    let bad = |e: &dyn std::fmt::Display| corrupt(format!("store {id}: {e}"));
+    let email: Option<String> = col(row, "contact_email")?;
+    let timezone: Option<String> = col(row, "timezone")?;
+    let language: String = col(row, "default_language")?;
     Store::restore(StoreSnapshot {
         id,
         version: version_from_db(col(row, "version")?)?,
         stamps: stamps_from_row(row)?,
         name: col(row, "name")?,
+        contact_email: email
+            .as_deref()
+            .map(Email::new)
+            .transpose()
+            .map_err(|e| bad(&e))?,
+        description: col(row, "description")?,
+        legal_name: col(row, "legal_name")?,
+        legal_address: address_from_row(row, "legal_address_")?,
+        timezone: timezone
+            .as_deref()
+            .map(Timezone::new)
+            .transpose()
+            .map_err(|e| bad(&e))?,
+        default_language: Language::new(&language).map_err(|e| bad(&e))?,
     })
-    .map_err(|e| corrupt(format!("store {id}: {e}")))
+    .map_err(|e| bad(&e))
+}
+
+/// Sets every detail column to `s`'s (inside the caller's transaction).
+async fn write_details(tx: &impl GenericClient, s: &StoreSnapshot) -> Result<(), RepoError> {
+    let id = s.id.as_uuid();
+    let address = address_values(s.legal_address.as_ref());
+    let email = s.contact_email.as_ref().map(|e| e.as_str());
+    let timezone = s.timezone.map(|t| t.as_str());
+    let language = s.default_language.as_str();
+    let mut params = id_and_address(&id, &address);
+    let details: [(&(dyn ToSql + Sync), Type); 5] = [
+        (&email, Type::TEXT),
+        (&s.description, Type::TEXT),
+        (&s.legal_name, Type::TEXT),
+        (&timezone, Type::TEXT),
+        (&language, Type::TEXT),
+    ];
+    params.extend(details);
+    let first = 2 + ADDRESS_LEN;
+    tx.query_typed(
+        &format!(
+            "UPDATE stores SET {}, contact_email = ${}, description = ${}, legal_name = ${},
+                 timezone = ${}, default_language = ${}
+             WHERE id = $1",
+            address_assignments("legal_address_", 2),
+            first,
+            first + 1,
+            first + 2,
+            first + 3,
+            first + 4,
+        ),
+        &params,
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
 }
 
 impl<C: PgConnection> StoreRepo for PgStore<C> {
@@ -25,10 +98,7 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
         let row = conn
             .client()
             .query_typed_opt(
-                &format!(
-                    "SELECT id, version, name, {} FROM stores WHERE id = $1",
-                    stamp_columns(""),
-                ),
+                &format!("SELECT {} FROM stores WHERE id = $1", store_columns()),
                 &[(&id.as_uuid(), Type::UUID)],
             )
             .await
@@ -40,10 +110,7 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
         let mut conn = self.conn().await;
         conn.client()
             .query_typed(
-                &format!(
-                    "SELECT id, version, name, {} FROM stores",
-                    stamp_columns("")
-                ),
+                &format!("SELECT {} FROM stores ORDER BY id", store_columns()),
                 &[],
             )
             .await
@@ -81,9 +148,9 @@ pub(crate) async fn insert_store(
     )
     .await
     .map_err(repo_error)?;
-    let written = ();
+    write_details(tx, s).await?;
     write_stamps(tx, "stores", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
-    Ok(written)
+    Ok(())
 }
 
 /// `StoreRepo::update` inside the caller's transaction; the new version.
@@ -105,6 +172,7 @@ pub(crate) async fn update_store(
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
     let written = version_from_db(col(&row, "version")?)?;
+    write_details(tx, s).await?;
     write_stamps(tx, "stores", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
     Ok(written)
 }

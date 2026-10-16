@@ -224,6 +224,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "reference_codes",
             sql: include_str!("../migrations/0040_reference_codes.sql"),
         },
+        Migration {
+            version: 41,
+            name: "store_details",
+            sql: include_str!("../migrations/0041_store_details.sql"),
+        },
     ],
 };
 

@@ -171,6 +171,16 @@ contains "store has a store_ ID" '"id":"store_'
 step "rename the store" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"name":"E2E Shop"}'
 contains "store has its new name" '"name":"E2E Shop"'
 step "a blank store name" 422 store_name_empty -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"name":" "}'
+step "a new store writes in English" 200 - "$BASE/admin/store"
+contains "default language en" '"default_language":"en"'
+step "store details" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"contact_email":"Hello@E2E.example","description":"Mugs and cups.","timezone":"Europe/Zagreb","legal_address":{"last_name":"E2E","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+contains "the email is lowercased" '"contact_email":"hello@e2e.example"'
+contains "the address is kept" '"city":"Zagreb"'
+step "an unknown time zone" 422 unknown_timezone -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"timezone":"Mars/Base"}'
+step "a malformed language" 422 invalid_language -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"default_language":"en_GB"}'
+step "clear the legal address" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"legal_address":null}'
+contains "it is gone" '"legal_address":null'
 step "create mug" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}'
 if [[ $BODY == *'"code":"handle_taken"'* ]]; then
@@ -1035,7 +1045,7 @@ PUBLISHABLE=$(token)
 SAVED_SF_AUTH=("${SF_AUTH[@]}")
 SF_AUTH=(-H "x-publishable-key: $PUBLISHABLE")
 step "a storefront reads the store" 200 - "$BASE/storefront/store"
-contains "only its name" '{"name":'
+contains "its public details" '"description":"Mugs and cups.","contact_email":"hello@e2e.example","default_language":"en"'
 step "and makes a cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 SF_AUTH=("${SAVED_SF_AUTH[@]}")
 AUTH=(-H "x-publishable-key: $PUBLISHABLE")

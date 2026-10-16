@@ -367,6 +367,15 @@
         ],
         "type": "object"
       },
+      "Language": {
+        "description": "A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.",
+        "examples": [
+          "en-GB"
+        ],
+        "maxLength": 35,
+        "pattern": "^[A-Za-z]{2,3}(-[A-Za-z]{4})?(-([A-Za-z]{2}|[0-9]{3}))?(-([A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*$",
+        "type": "string"
+      },
       "LineResponse": {
         "allOf": [
           {
@@ -1456,14 +1465,36 @@
         "type": "object"
       },
       "StorefrontStoreResponse": {
-        "description": "What a storefront sees of the store: its name.",
+        "description": "What a storefront sees of the store (design note 0021, SU4): what a header, footer\nor contact page shows. Legal details stay in the admin until a storefront needs them.",
         "properties": {
+          "contact_email": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Email"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "default_language": {
+            "$ref": "#/components/schemas/Language",
+            "description": "The language the store's content is written in."
+          },
+          "description": {
+            "description": "Plain text, at most 500 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string"
           }
         },
         "required": [
-          "name"
+          "name",
+          "default_language"
         ],
         "type": "object"
       },
@@ -3266,7 +3297,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "The store's name.",
+        "summary": "The store's public details.",
         "tags": [
           "stores"
         ],

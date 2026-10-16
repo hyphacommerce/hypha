@@ -450,7 +450,9 @@ impl From<hypha_stores::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::StoreNotFound(_) => StatusCode::NOT_FOUND,
-            E::Store(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Store(_) | E::Email(_) | E::Address(_) | E::Timezone(_) | E::Language(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
