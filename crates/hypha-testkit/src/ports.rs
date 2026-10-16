@@ -53,8 +53,9 @@ pub struct InMemoryPorts {
     pub users: InMemoryUserRepo,
     pub roles: InMemoryRoleRepo,
     pub invites: InMemoryInviteRepo,
-    // Search's queue and settings (design note 0019); the engine is passed apart.
+    // Sales channels and their publications (design note 0020).
     pub channels: InMemoryChannelRepo,
+    // Search's queue and settings (design note 0019); the engine is passed apart.
     pub search_queue: InMemorySearchQueue,
     pub search_settings: InMemorySearchSettingsRepo,
 }

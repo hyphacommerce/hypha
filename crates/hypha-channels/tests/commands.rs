@@ -1,10 +1,11 @@
 //! Channels and publishing (design note 0020) over a store in memory.
 
+use hypha_channels::ChannelRepo;
 use hypha_channels::{
     ChannelKind, CommandError, CreateChannel, UpdateChannel, create_channel, list_channels,
     product_channels, publish_products, set_product_channels, unpublish_products, update_channel,
 };
-use hypha_core::{Actor, AuthError, ChannelId, Ctx, ProductId, Scope, UserId};
+use hypha_core::{Actor, AuthError, ChannelId, Ctx, ProductId, Scope, UserId, Versioned};
 use hypha_testkit::{InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
@@ -164,4 +165,23 @@ fn channels_need_channel_scopes_and_publishing_products_write() {
         block_on(publish_products(&manager, &w.ports, web, vec![pid(1)])),
         missing(Scope::ProductsWrite)
     );
+}
+
+#[test]
+fn an_update_that_changes_nothing_writes_nothing() {
+    let w = World::new();
+    let web = w.create("Web").unwrap();
+    let before = block_on(w.ports.channels.get(web)).unwrap().unwrap();
+    let events = w.ports.outbox.events().len();
+    for name in [None, Some(" Web ".to_string())] {
+        let same = block_on(update_channel(
+            &w.ctx,
+            &w.ports,
+            web,
+            UpdateChannel { name },
+        ));
+        assert_eq!(same.map(|c| c.version()), Ok(before.version()));
+    }
+    assert_eq!(block_on(w.ports.channels.get(web)), Ok(Some(before)));
+    assert_eq!(w.ports.outbox.events().len(), events);
 }

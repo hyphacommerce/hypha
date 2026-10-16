@@ -195,6 +195,8 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvider>(
         .carts()
         .get(input.cart)
         .await?
+        // Another channel's cart reads as missing (design note 0020).
+        .filter(|cart| cart.visible_in(ctx.channel()))
         .ok_or(CommandError::CartNotFound(input.cart))?;
     if let CartStatus::Completed { order } = cart.status() {
         return Err(CommandError::CartCompleted {

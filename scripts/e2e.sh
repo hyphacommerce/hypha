@@ -339,6 +339,13 @@ step "take the cup out of the outlet" 204 - -X DELETE "$BASE/admin/channels/$OUT
     -H "$JSON" -d "{\"products\":[\"$CUP\"]}"
 step "the cup's channels again" 200 - "$BASE/admin/products/$CUP"
 contains "only the Online Store" "\"channels\":[\"$ONLINE_STORE\"]"
+step "a storefront key for the outlet" 201 - -X POST "$BASE/admin/api-keys" -H "$JSON" \
+    -d "{\"kind\":\"publishable\",\"name\":\"Outlet\",\"channel\":\"$OUTLET\"}"
+ONLINE_SF_AUTH=("${SF_AUTH[@]}")
+SF_AUTH=(-H "x-publishable-key: $(token)")
+step "the outlet's storefront doesn't see the Online Store's cart" 404 cart_not_found \
+    "$BASE/storefront/carts/$CART"
+SF_AUTH=("${ONLINE_SF_AUTH[@]}")
 step "add 2 mugs" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "mug unit price is 900 (1000 - 10%)" '"unit_price":{"amount":900,"currency":"EUR"}'

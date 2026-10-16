@@ -318,8 +318,9 @@ impl hypha_search_index::SearchIndex for Refusing<'_> {
     async fn option_names(
         &self,
         market: MarketId,
+        channel: Option<hypha_core::ChannelId>,
     ) -> Result<Vec<String>, hypha_search_index::IndexError> {
-        self.inner.option_names(market).await
+        self.inner.option_names(market, channel).await
     }
 
     async fn count(&self) -> Result<u64, hypha_search_index::IndexError> {
@@ -738,6 +739,15 @@ fn a_storefront_searches_only_what_its_channel_publishes() {
     assert_eq!(found.results.total, 0);
     // Staff search every channel.
     assert_eq!(w.search(linen()).unwrap().results.total, 1);
+
+    // Default facets are the channel's own: the shirt's options went with it.
+    let options = |found: &hypha_search::Found| -> Vec<FacetKey> {
+        let keys = found.results.facets.iter().map(|f| f.key.clone());
+        keys.filter(|k| matches!(k, FacetKey::Option(_))).collect()
+    };
+    let everything = block_on(search(&storefront, &w.ports, &w.index, input("HR"))).unwrap();
+    assert_eq!(options(&everything), vec![]);
+    assert!(!options(&w.search(input("HR")).unwrap()).is_empty());
 }
 
 #[test]

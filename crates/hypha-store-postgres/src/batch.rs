@@ -127,7 +127,8 @@ impl Staged {
             Staged::NewPasswordReset(_) => 19,
             Staged::PasswordReset(_) => 20,
             Staged::UsedUpResets(..) => 21,
-            // These two are gathered and written in one statement each, last.
+            // Set-based writes (memberships, fixed prices, tax classes): one statement
+            // each, whatever the number of rows.
             Staged::CatalogProducts(..) => 22,
             Staged::Publications(..) => 23,
             Staged::FixedPrices(..) => 24,

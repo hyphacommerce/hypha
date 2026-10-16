@@ -16,7 +16,7 @@ pub use commands::{
 };
 pub use error::{CartError, LineError, RestoreError};
 pub use pricing::{
-    LineDetails, LineStatus, PricedCart, PricedLine, Publication, check_stock, price_cart,
+    LineDetails, LineStatus, PricedCart, PricedLine, Publication, check_stock,
     price_cart_with_shipping, price_line,
 };
 pub use repo::{CartRepo, HasCarts, StageCarts};

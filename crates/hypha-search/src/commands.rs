@@ -116,7 +116,7 @@ pub async fn search<S: HasMarkets + HasSearchSettings, I: SearchIndex>(
         let mut facets = vec![FacetKey::ProductType, FacetKey::Vendor];
         facets.extend(
             index
-                .option_names(market.id())
+                .option_names(market.id(), ctx.channel())
                 .await?
                 .into_iter()
                 .take(DEFAULT_OPTION_FACETS)

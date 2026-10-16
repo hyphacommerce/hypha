@@ -28,6 +28,8 @@ where
     round_trip(&make().await).await;
     scenario("channel: names are unique ignoring case, on insert and update");
     unique_names(&make().await).await;
+    scenario("channel: case is compared by name_key, beyond ASCII too; found by it");
+    name_keys(&make().await).await;
     scenario("channel: update from a stale copy fails");
     stale_update(&make().await).await;
     scenario("channel: publications are written, read and removed in batches");
@@ -69,6 +71,28 @@ async fn unique_names<S: HasChannels>(ports: &S) {
     assert_eq!(
         repo.update(&mut other).await,
         Err(RepoError::Duplicate(keys::CHANNEL_NAME))
+    );
+}
+
+async fn name_keys<S: HasChannels>(ports: &S) {
+    let repo = ports.channels();
+    let mut summer = channel(1, "Été");
+    repo.insert(&mut summer).await.unwrap();
+    // Postgres's lower() leaves "É" alone under the C collation; name_key doesn't.
+    assert_eq!(
+        repo.insert(&mut channel(2, "ÉTÉ")).await,
+        Err(RepoError::Duplicate(keys::CHANNEL_NAME))
+    );
+    assert_eq!(repo.find_by_name("été").await, Ok(Some(summer.clone())));
+    assert_eq!(repo.find_by_name("winter").await, Ok(None));
+
+    // A rename moves the key: the old one is free, the new one found.
+    summer.rename("Winter").unwrap();
+    repo.update(&mut summer).await.unwrap();
+    assert_eq!(repo.find_by_name("été").await, Ok(None));
+    assert_eq!(
+        repo.find_by_name("winter").await.unwrap().map(|c| c.id()),
+        Some(cid(1))
     );
 }
 

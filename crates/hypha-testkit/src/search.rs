@@ -3,7 +3,9 @@
 
 use std::{collections::BTreeMap, sync::Mutex};
 
-use hypha_core::{MarketId, ProductId, RepoError, Timestamp, stamp_insert, stamp_update};
+use hypha_core::{
+    ChannelId, MarketId, ProductId, RepoError, Timestamp, stamp_insert, stamp_update,
+};
 use hypha_search_index::{
     IndexError, Mark, SearchDocument, SearchIndex, SearchQuery, SearchQueue, SearchResults,
     SearchSettings, SearchSettingsRepo, Target, keys, reference,
@@ -48,16 +50,12 @@ impl SearchIndex for InMemorySearchIndex {
         Ok(reference::search(&self.lock(), query))
     }
 
-    async fn option_names(&self, market: MarketId) -> Result<Vec<String>, IndexError> {
-        let mut counts: BTreeMap<String, u64> = BTreeMap::new();
-        for doc in self.lock().iter().filter(|d| d.market == market) {
-            for (name, _) in &doc.options {
-                *counts.entry(name.to_lowercase()).or_default() += 1;
-            }
-        }
-        let mut names: Vec<(String, u64)> = counts.into_iter().collect();
-        names.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        Ok(names.into_iter().map(|(name, _)| name).collect())
+    async fn option_names(
+        &self,
+        market: MarketId,
+        channel: Option<ChannelId>,
+    ) -> Result<Vec<String>, IndexError> {
+        Ok(reference::option_names(&self.lock(), market, channel))
     }
 
     async fn count(&self) -> Result<u64, IndexError> {

@@ -28,11 +28,13 @@ export default async function OrdersPage({
   const cursor = typeof params.cursor === "string" ? params.cursor : undefined;
 
   const client = await sessionClient();
-  const result = await client.GET("/admin/orders", { params: { query: { cursor } } });
+  const [result, channelName] = await Promise.all([
+    client.GET("/admin/orders", { params: { query: { cursor } } }),
+    channelNames(client),
+  ]);
   // A hand-edited URL (an old or foreign cursor): start the list again.
   if (result.response.status === 400) redirect("/orders");
   const page = loaded(result);
-  const channelName = await channelNames(client);
 
   return (
     <Section padding={6}>

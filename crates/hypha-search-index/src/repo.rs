@@ -1,7 +1,7 @@
 //! Search's ports (design note 0019, sections 4 to 6): the engine, the queue of what
 //! to rebuild, and the merchant's settings.
 
-use hypha_core::{MarketId, ProductId, RepoError, Timestamp, VariantId};
+use hypha_core::{ChannelId, MarketId, ProductId, RepoError, Timestamp, VariantId};
 
 use crate::{IndexError, SearchDocument, SearchQuery, SearchResults, SearchSettings};
 
@@ -27,8 +27,14 @@ pub trait SearchIndex {
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError>;
 
     /// The option names (lowercased) documents in `market` have, most documents
-    /// first, then by name: the default facets.
-    async fn option_names(&self, market: MarketId) -> Result<Vec<String>, IndexError>;
+    /// first, then by name: the default facets. With a `channel`, only its documents
+    /// count (design note 0020), so a storefront's facets are its own products'.
+    /// `reference::option_names` says exactly what.
+    async fn option_names(
+        &self,
+        market: MarketId,
+        channel: Option<ChannelId>,
+    ) -> Result<Vec<String>, IndexError>;
 
     /// How many documents it holds, over every market: none means a new engine, which
     /// the host fills with a full rebuild.
@@ -50,8 +56,12 @@ impl<T: SearchIndex + ?Sized> SearchIndex for &T {
         (**self).search(query).await
     }
 
-    async fn option_names(&self, market: MarketId) -> Result<Vec<String>, IndexError> {
-        (**self).option_names(market).await
+    async fn option_names(
+        &self,
+        market: MarketId,
+        channel: Option<ChannelId>,
+    ) -> Result<Vec<String>, IndexError> {
+        (**self).option_names(market, channel).await
     }
 
     async fn count(&self) -> Result<u64, IndexError> {

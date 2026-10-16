@@ -385,6 +385,30 @@ fn a_retry_that_loses_the_race_to_its_own_key_replays_the_order() {
 }
 
 #[test]
+fn another_channels_cart_cant_be_checked_out() {
+    let world = World::new();
+    let cart = world.cart();
+    let elsewhere = Ctx::in_channel(
+        Actor::System,
+        Scope::ALL.to_vec(),
+        hypha_core::ChannelId::from_uuid(Uuid::from_u128(999)),
+    );
+    assert_eq!(
+        world.checkout_as(&elsewhere, cart, None, None).map(|_| ()),
+        Err(CommandError::CartNotFound(cart))
+    );
+    assert_eq!(
+        block_on(view_cart(&elsewhere, &world.ports, cart)).map(|_| ()),
+        Err(CommandError::CartNotFound(cart))
+    );
+    assert!(
+        world
+            .checkout_as(&world.ports.storefront(), cart, None, None)
+            .is_ok()
+    );
+}
+
+#[test]
 fn an_empty_cart_is_refused() {
     let world = World::new();
     let input = CreateCart {

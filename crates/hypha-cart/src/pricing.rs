@@ -33,22 +33,18 @@ pub enum LineStatus {
 }
 
 /// Which products a cart may sell (design note 0020, CH6): those its channel publishes.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum Publication {
-    /// Every product: for pricing that isn't about a channel (and the tests of
-    /// everything else).
-    #[default]
-    Unrestricted,
-    /// Only these (the cart's products that its channel sells).
-    Only(HashSet<ProductId>),
-}
+/// There's no "every product": pricing a cart always asks its channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Publication(HashSet<ProductId>);
 
 impl Publication {
+    /// The cart's products that its channel publishes (`ChannelRepo::published`).
+    pub fn new(published: HashSet<ProductId>) -> Self {
+        Self(published)
+    }
+
     pub fn allows(&self, product: ProductId) -> bool {
-        match self {
-            Publication::Unrestricted => true,
-            Publication::Only(published) => published.contains(&product),
-        }
+        self.0.contains(&product)
     }
 }
 
@@ -169,27 +165,10 @@ pub fn price_line(
 /// `products` should contain every product in the cart; a missing one makes its
 /// lines unavailable with `ProductNotFound`. `pricing`, `tax` and `stock` must have
 /// been built for all of the cart's products and variants.
-pub fn price_cart(
-    cart: &Cart,
-    products: &[Product],
-    pricing: &PricingContext,
-    tax: &TaxContext,
-    stock: &StockContext,
-) -> PricedCart {
-    price_cart_with_shipping(
-        cart,
-        products,
-        pricing,
-        tax,
-        stock,
-        &ShippingContext::default(),
-        &Publication::Unrestricted,
-    )
-}
-
-/// `price_cart`, with the buyer's shipping choice priced and taxed (design note 0015,
-/// section 7). Like lines, a choice that can't be priced now is reported on its group
-/// and left out of the totals.
+///
+/// The buyer's shipping choice is priced and taxed too (design note 0015, section 7).
+/// Like lines, a choice that can't be priced now is reported on its group and left out
+/// of the totals. Only products `published` allows are sold (design note 0020).
 pub fn price_cart_with_shipping(
     cart: &Cart,
     products: &[Product],
@@ -402,6 +381,26 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    /// Prices without shipping, every product in `products` published.
+    fn price_cart(
+        cart: &Cart,
+        products: &[Product],
+        pricing: &PricingContext,
+        tax: &TaxContext,
+        stock: &StockContext,
+    ) -> PricedCart {
+        let published = Publication::new(products.iter().map(|p| p.id()).collect());
+        price_cart_with_shipping(
+            cart,
+            products,
+            pricing,
+            tax,
+            stock,
+            &ShippingContext::default(),
+            &published,
+        )
+    }
 
     fn mid() -> MarketId {
         MarketId::from_uuid(Uuid::from_u128(100))

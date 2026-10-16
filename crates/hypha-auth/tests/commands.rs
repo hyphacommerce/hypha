@@ -1,14 +1,14 @@
 use hypha_auth::{
-    ApiKeyError, ApiKeyKind, ChannelDirectory, CommandError, CreateApiKey, Identity, IdentityError,
-    IdentityRepo, LoginStep, MfaMethod, Password, PasswordError, Principal, PrincipalKind,
-    SessionRepo, TokenHash, authenticate_api_key, authenticate_session, change_password,
-    check_password, confirm_totp, create_api_key, disable_mfa, finish_login, get_api_key,
-    hash_new_password, logout, open_session, regenerate_recovery_codes, reset_password,
-    revoke_api_key, start_password_reset, start_totp, totp,
+    ApiKeyError, ApiKeyKind, CommandError, CreateApiKey, Identity, IdentityError, IdentityRepo,
+    LoginStep, MfaMethod, Password, PasswordError, Principal, PrincipalKind, SessionRepo,
+    TokenHash, authenticate_api_key, authenticate_session, change_password, check_password,
+    confirm_totp, create_api_key, disable_mfa, finish_login, get_api_key, hash_new_password,
+    logout, open_session, regenerate_recovery_codes, reset_password, revoke_api_key,
+    start_password_reset, start_totp, totp,
 };
 use hypha_core::{
-    Actor, ApiKeyId, AuthError, ChannelId, Clock, Ctx, Email, IdentityId, RepoError, Scope,
-    Timestamp, UserId, Versioned,
+    Actor, ApiKeyId, AuthError, ChannelId, Clock, Ctx, Email, IdentityId, Scope, Timestamp, UserId,
+    Versioned,
 };
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use pollster::block_on;
@@ -27,6 +27,8 @@ fn identity_id() -> IdentityId {
 /// A staff identity for ana@example.com with `PASSWORD`.
 fn world() -> (InMemoryPorts, TestEnv) {
     let ports = InMemoryPorts::default();
+    // Makes the Online Store channel.
+    ports.storefront();
     let env = TestEnv::default();
     let hash = block_on(hash_new_password(&env, &Password::new(PASSWORD).unwrap())).unwrap();
     let mut identity = Identity::with_password(
@@ -878,20 +880,10 @@ fn a_reset_keeps_mfa() {
 
 // ---------- API keys ----------
 
+/// The channel `world()` has (the testkit's Online Store).
 fn online_store() -> ChannelId {
-    ChannelId::from_uuid(uuid::Uuid::from_u128(500))
+    ChannelId::from_uuid(uuid::Uuid::from_u128(InMemoryPorts::ONLINE_STORE))
 }
-
-/// A directory knowing one channel, the Online Store.
-struct Known;
-
-impl ChannelDirectory for Known {
-    async fn channel_exists(&self, channel: ChannelId) -> Result<bool, RepoError> {
-        Ok(channel == online_store())
-    }
-}
-
-const KNOWN: Known = Known;
 
 #[test]
 fn a_publishable_key_sells_through_a_known_channel() {
@@ -905,31 +897,16 @@ fn a_publishable_key_sells_through_a_known_channel() {
     };
     let unknown = ChannelId::from_uuid(uuid::Uuid::from_u128(9));
     assert_eq!(
-        block_on(create_api_key(
-            &ctx,
-            &ports.api_keys,
-            &KNOWN,
-            &env,
-            input(Some(unknown))
-        ))
-        .map(|(k, _)| k.id()),
+        block_on(create_api_key(&ctx, &ports, &env, input(Some(unknown)))).map(|(k, _)| k.id()),
         Err(CommandError::ChannelNotFound(unknown))
     );
     assert_eq!(
-        block_on(create_api_key(
-            &ctx,
-            &ports.api_keys,
-            &KNOWN,
-            &env,
-            input(None)
-        ))
-        .map(|(k, _)| k.id()),
+        block_on(create_api_key(&ctx, &ports, &env, input(None))).map(|(k, _)| k.id()),
         Err(CommandError::ApiKey(ApiKeyError::ChannelRequired))
     );
     let (_, token) = block_on(create_api_key(
         &ctx,
-        &ports.api_keys,
-        &KNOWN,
+        &ports,
         &env,
         input(Some(online_store())),
     ))
@@ -942,22 +919,15 @@ fn a_publishable_key_sells_through_a_known_channel() {
 fn a_secret_key_has_no_channel() {
     let (ports, env) = world();
     let mut input = secret_key(vec![Scope::ProductsWrite]);
-    input.channel = Some(online_store());
+    input.channel = Some(ChannelId::from_uuid(uuid::Uuid::from_u128(9)));
+    // Told it can't have a channel, not that this one is unknown.
     assert_eq!(
-        block_on(create_api_key(
-            &admin(),
-            &ports.api_keys,
-            &KNOWN,
-            &env,
-            input
-        ))
-        .map(|(k, _)| k.id()),
+        block_on(create_api_key(&admin(), &ports, &env, input)).map(|(k, _)| k.id()),
         Err(CommandError::ApiKey(ApiKeyError::ChannelNotAllowed))
     );
     let (_, token) = block_on(create_api_key(
         &admin(),
-        &ports.api_keys,
-        &KNOWN,
+        &ports,
         &env,
         secret_key(vec![Scope::ProductsWrite]),
     ))
@@ -987,8 +957,7 @@ fn a_secret_key_authenticates_with_its_own_scopes() {
     let (ports, env) = world();
     let (key, token) = block_on(create_api_key(
         &admin(),
-        &ports.api_keys,
-        &KNOWN,
+        &ports,
         &env,
         secret_key(vec![Scope::ProductsWrite]),
     ))
@@ -1013,8 +982,7 @@ fn a_publishable_key_gets_the_storefront_scopes() {
         scopes: None,
         channel: Some(online_store()),
     };
-    let (key, token) =
-        block_on(create_api_key(&ctx, &ports.api_keys, &KNOWN, &env, input)).unwrap();
+    let (key, token) = block_on(create_api_key(&ctx, &ports, &env, input)).unwrap();
     assert!(token.expose().starts_with("hypha_pk_"));
     assert_eq!(key.scopes(), Scope::STOREFRONT);
 }
@@ -1025,8 +993,7 @@ fn nobody_grants_a_scope_they_lack() {
     assert_eq!(
         block_on(create_api_key(
             &admin(),
-            &ports.api_keys,
-            &KNOWN,
+            &ports,
             &env,
             secret_key(vec![Scope::ProductsRead, Scope::CustomersRead]),
         ))
@@ -1041,14 +1008,7 @@ fn nobody_grants_a_scope_they_lack() {
         channel: Some(online_store()),
     };
     assert_eq!(
-        block_on(create_api_key(
-            &admin(),
-            &ports.api_keys,
-            &KNOWN,
-            &env,
-            input
-        ))
-        .map(|(k, _)| k.id()),
+        block_on(create_api_key(&admin(), &ports, &env, input)).map(|(k, _)| k.id()),
         Err(CommandError::CannotGrant(Scope::MarketsRead))
     );
 }
@@ -1060,8 +1020,7 @@ fn creating_a_key_needs_api_keys_write() {
     assert_eq!(
         block_on(create_api_key(
             &ctx,
-            &ports.api_keys,
-            &KNOWN,
+            &ports,
             &env,
             secret_key(vec![Scope::ProductsWrite])
         ))
@@ -1077,8 +1036,7 @@ fn a_revoked_key_stops_working_and_cannot_be_revoked_again() {
     let (ports, env) = world();
     let (key, token) = block_on(create_api_key(
         &admin(),
-        &ports.api_keys,
-        &KNOWN,
+        &ports,
         &env,
         secret_key(vec![Scope::OrdersRead]),
     ))
@@ -1126,8 +1084,7 @@ fn only_hashes_are_stored() {
     let (ports, env) = world();
     let (key, token) = block_on(create_api_key(
         &admin(),
-        &ports.api_keys,
-        &KNOWN,
+        &ports,
         &env,
         secret_key(vec![Scope::OrdersRead]),
     ))

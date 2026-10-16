@@ -219,6 +219,16 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "search_channels",
             sql: include_str!("../migrations/0039_search_channels.sql"),
         },
+        Migration {
+            version: 40,
+            name: "channel_name_keys",
+            sql: include_str!("../migrations/0040_channel_name_keys.sql"),
+        },
+        Migration {
+            version: 41,
+            name: "search_channel_option_counts",
+            sql: include_str!("../migrations/0041_search_channel_option_counts.sql"),
+        },
     ],
 };
 

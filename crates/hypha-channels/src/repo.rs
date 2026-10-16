@@ -7,7 +7,8 @@ use crate::Channel;
 /// Uniqueness rules a `ChannelRepo` enforces, reported as `RepoError::Duplicate(key)`.
 pub mod keys {
     pub const CHANNEL_ID: &str = "channel_id";
-    /// Names are unique ignoring case: "Online Store" and "online store" are one.
+    /// Names are unique ignoring case (`Channel::name_key`): "Online Store" and
+    /// "online store" are one.
     pub const CHANNEL_NAME: &str = "channel_name";
 }
 
@@ -18,6 +19,8 @@ pub mod keys {
 #[allow(async_fn_in_trait)]
 pub trait ChannelRepo {
     async fn get(&self, id: ChannelId) -> Result<Option<Channel>, RepoError>;
+    /// The channel whose `Channel::name_key` is `name_key`, if any.
+    async fn find_by_name(&self, name_key: &str) -> Result<Option<Channel>, RepoError>;
     /// Every channel, oldest first. A store has a handful.
     async fn list(&self) -> Result<Vec<Channel>, RepoError>;
     /// Stores a new channel (version 1). Enforces `keys`.

@@ -49,17 +49,13 @@ fn name_taken(e: RepoError, name: &str) -> CommandError {
     }
 }
 
-async fn name_in_use<R: ChannelRepo>(
-    repo: &R,
-    name: &str,
-    except: Option<ChannelId>,
-) -> Result<bool, RepoError> {
-    let wanted = name.trim().to_lowercase();
+/// Whether another channel already has `channel`'s name, ignoring case: one indexed
+/// lookup by `Channel::name_key`.
+async fn name_in_use<R: ChannelRepo>(repo: &R, channel: &Channel) -> Result<bool, RepoError> {
     Ok(repo
-        .list()
+        .find_by_name(&channel.name_key())
         .await?
-        .iter()
-        .any(|c| Some(c.id()) != except && c.name().to_lowercase() == wanted))
+        .is_some_and(|other| other.id() != channel.id()))
 }
 
 async fn load<R: ChannelRepo>(repo: &R, id: ChannelId) -> Result<Channel, CommandError> {
@@ -83,7 +79,7 @@ pub async fn create_channel<S: HasChannels>(
         &input.name,
         input.kind,
     )?;
-    if name_in_use(ports.channels(), channel.name(), None).await? {
+    if name_in_use(ports.channels(), &channel).await? {
         return Err(CommandError::NameTaken(channel.name().to_string()));
     }
     let name = channel.name().to_string();
@@ -109,11 +105,17 @@ pub async fn update_channel<S: HasChannels>(
 ) -> Result<Channel, CommandError> {
     ctx.require(Scope::ChannelsWrite)?;
     let mut channel = load(ports.channels(), id).await?;
-    if let Some(name) = input.name {
-        channel.rename(&name)?;
-        if name_in_use(ports.channels(), channel.name(), Some(id)).await? {
-            return Err(CommandError::NameTaken(channel.name().to_string()));
-        }
+    // Nothing to change writes nothing: no new version for a concurrent rename to lose to.
+    let Some(name) = input.name else {
+        return Ok(channel);
+    };
+    let before = channel.name().to_string();
+    channel.rename(&name)?;
+    if channel.name() == before {
+        return Ok(channel);
+    }
+    if name_in_use(ports.channels(), &channel).await? {
+        return Err(CommandError::NameTaken(channel.name().to_string()));
     }
     let name = channel.name().to_string();
     ports

@@ -528,6 +528,29 @@ fn a_cart_belongs_to_the_callers_channel() {
 }
 
 #[test]
+fn another_channels_cart_reads_as_missing() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let elsewhere = Ctx::in_channel(
+        Actor::System,
+        Scope::ALL.to_vec(),
+        hypha_core::ChannelId::from_uuid(Uuid::from_u128(999)),
+    );
+    assert_eq!(
+        block_on(get_cart(&elsewhere, &world.ports, cart)).map(|_| ()),
+        Err(CommandError::CartNotFound(cart))
+    );
+    assert_eq!(
+        world.add(&elsewhere, cart, "mug", 1).map(|_| ()),
+        Err(CommandError::CartNotFound(cart))
+    );
+    assert_eq!(world.stored_line_count(cart), 0);
+    // Its own storefront and staff (in no channel) still see it.
+    assert!(block_on(get_cart(&world.storefront(), &world.ports, cart)).is_ok());
+    assert!(world.get(cart).is_ok());
+}
+
+#[test]
 fn a_product_not_published_to_the_carts_channel_is_refused() {
     let world = World::new();
     let cart = world.create_cart();
@@ -541,6 +564,21 @@ fn a_product_not_published_to_the_carts_channel_is_refused() {
         ))))
     );
     assert_eq!(world.stored_line_count(cart), 0);
+}
+
+#[test]
+fn an_unpublished_product_says_nothing_about_its_stock() {
+    let world = World::new();
+    world.stock("mug", 0);
+    let cart = world.create_cart();
+    let channel = world.storefront().channel().unwrap();
+    block_on(world.channels.unpublish(channel, &[pid("mug")])).unwrap();
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "mug", 1).map(|_| ()),
+        Err(CommandError::Line(LineError::ProductNotPublished(pid(
+            "mug"
+        ))))
+    );
 }
 
 #[test]

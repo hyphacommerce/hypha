@@ -17,7 +17,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE, WWW_AUTHENTICATE},
     },
 };
-use hypha_auth::{ApiKeyKind, Argon2id, CreateApiKey, HasApiKeys, create_api_key, totp};
+use hypha_auth::{ApiKeyKind, Argon2id, CreateApiKey, create_api_key, totp};
 use hypha_config::Config;
 use hypha_core::{Ctx, Scope, Timestamp};
 use hypha_stores::ensure_single_store;
@@ -194,7 +194,7 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
         scopes: Some(Scope::ALL.to_vec()),
         channel: None,
     };
-    let (_, token) = create_api_key(&Ctx::system(), ports.api_keys(), &ports, &state.env, input)
+    let (_, token) = create_api_key(&Ctx::system(), &ports, &state.env, input)
         .await
         .unwrap();
     TestApp {
@@ -1619,6 +1619,28 @@ async fn a_cart_sells_only_what_its_channel_publishes() {
         (status, code(&json)),
         (StatusCode::UNPROCESSABLE_ENTITY, "product_not_published")
     );
+
+    // Another channel's storefront doesn't see the cart at all.
+    let (_, outlet) = send(
+        &app,
+        "POST",
+        "/admin/channels",
+        Some(r#"{"name":"Outlet","kind":"custom"}"#),
+    )
+    .await;
+    let body = json!({"kind": "publishable", "name": "Outlet", "channel": outlet["id"]});
+    let outlet_key = key(&app, body).await;
+    for (method, path, body) in [
+        ("GET", cart_path, None),
+        ("POST", lines.as_str(), Some(line.as_str())),
+    ] {
+        let (status, json) = send_as(&app, &outlet_key, method, path, body).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::NOT_FOUND, "cart_not_found"),
+            "{method} {path}"
+        );
+    }
 }
 
 #[tokio::test]

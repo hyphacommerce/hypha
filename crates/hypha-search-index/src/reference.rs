@@ -19,6 +19,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
+use hypha_core::{ChannelId, MarketId};
+
 use crate::{
     FacetCounts, FacetKey, FacetValue, Group, Hit, MAX_FACET_VALUES, SearchDocument, SearchQuery,
     SearchResults, Sort, terms,
@@ -51,6 +53,29 @@ pub fn group_key(document: &SearchDocument, group: Group) -> String {
         Group::Product => document.product.to_string(),
         Group::Variant => document.variant.to_string(),
     }
+}
+
+/// The option names (lowercased) of `market`'s documents, those published to `channel`
+/// if there is one: most documents first, then by name. What `SearchIndex::option_names`
+/// returns, and so the default facets.
+pub fn option_names(
+    documents: &[SearchDocument],
+    market: MarketId,
+    channel: Option<ChannelId>,
+) -> Vec<String> {
+    let mut counts: BTreeMap<String, u64> = BTreeMap::new();
+    for doc in documents
+        .iter()
+        .filter(|d| d.market == market)
+        .filter(|d| channel.is_none_or(|c| d.channels.contains(&c)))
+    {
+        for (name, _) in &doc.options {
+            *counts.entry(name.to_lowercase()).or_default() += 1;
+        }
+    }
+    let mut names: Vec<(String, u64)> = counts.into_iter().collect();
+    names.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    names.into_iter().map(|(name, _)| name).collect()
 }
 
 /// Runs `query` over `documents` (every market's; the query's is picked out).

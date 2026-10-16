@@ -93,16 +93,16 @@ export default async function ProductsPage({
   };
 
   const client = await sessionClient();
-  const result = await client.GET("/admin/products", {
-    params: { query: { status, q, cursor } },
-  });
+  const [result, channelName] = await Promise.all([
+    client.GET("/admin/products", { params: { query: { status, q, cursor } } }),
+    channelNames(client),
+  ]);
   // A hand-edited URL (an old or foreign cursor, text over 255 characters): start the
   // list again, same status.
   if (result.response.status === 400 || result.response.status === 422) {
     redirect(status ? `/products?status=${status}` : "/products");
   }
   const page = loaded(result);
-  const channelName = await channelNames(client);
 
   return (
     <Section padding={6}>

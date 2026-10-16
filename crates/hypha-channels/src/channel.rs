@@ -104,6 +104,13 @@ impl Channel {
         &self.name
     }
 
+    /// The name as uniqueness compares it: lowercased by Rust's Unicode rules. Adapters
+    /// store and index this value rather than lowercasing in storage, so every adapter
+    /// agrees on which names clash ("Été" and "ÉTÉ" do, whatever the database's collation).
+    pub fn name_key(&self) -> String {
+        name_key(&self.name)
+    }
+
     pub fn kind(&self) -> ChannelKind {
         self.kind
     }
@@ -126,6 +133,12 @@ impl Channel {
         channel.events = Recorder::default();
         Ok(channel)
     }
+}
+
+/// `name`'s uniqueness key (`Channel::name_key`), for looking a name up
+/// (`ChannelRepo::find_by_name`). Trims like the name itself is trimmed.
+fn name_key(name: &str) -> String {
+    name.trim().to_lowercase()
 }
 
 /// Plain-data form of a `Channel` for storage adapters.

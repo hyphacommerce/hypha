@@ -234,10 +234,22 @@ picks.
 Built in the section 10 order on `feat/channels` (2026-10-16). Where it differs from the
 sections above:
 
-- **Migrations:** four, not one: `0036_channels` (tables, the Online Store, every product
-  published to it), `0037_api_key_channels`, `0038_cart_order_channels` and
+- **Migrations:** six, not one: `0036_channels` (tables, the Online Store, every product
+  published to it), `0037_api_key_channels`, `0038_cart_order_channels`,
   `0039_search_channels` (the GIN-indexed `channels uuid[]`; it empties the index, which
-  the host rebuilds at start).
+  the host rebuilds at start), and two from the review: `0040_channel_name_keys` and
+  `0041_search_channel_option_counts` (below).
+- **A cart belongs to its channel** (from the review): cart commands, checkout and
+  `view_cart` treat a cart from another channel as missing (`cart_not_found`), through
+  `Cart::visible_in(ctx.channel())`; staff, in no channel, see every cart. Without it a
+  key for one channel could fill and check out another's cart, buying what only that
+  channel sells and booking the sale to it.
+- **Names compare by `Channel::name_key`** (lowercased in Rust), stored in `name_key` with
+  the unique index on it, instead of Postgres's collation-dependent `lower(name)`; a
+  duplicate check is one lookup (`ChannelRepo::find_by_name`).
+- **Default facets per channel:** `SearchIndex::option_names` takes the caller's channel
+  (`reference::option_names` defines it); Postgres keeps `search_channel_option_counts`
+  beside the market's counts, so a storefront's facets are its own products' options.
 - **Unpublished lines** are `LineError::ProductNotPublished` (`product_not_published`),
   checked before pricing, so a cart line reads `unavailable` with that `reason_code`;
   adding one is a 422 with the same code. Not a new `LineStatus`.

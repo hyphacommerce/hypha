@@ -18,8 +18,8 @@ use crate::{
     password::{HashError, Password, PasswordError, PasswordHasher},
     recovery,
     repo::{
-        ApiKeyRepo, HasIdentities, HasPasswordResets, HasSessions, IdentityRepo, PasswordResetRepo,
-        SessionRepo, StageIdentities, StagePasswordResets, StageSessions,
+        ApiKeyRepo, HasApiKeys, HasIdentities, HasPasswordResets, HasSessions, IdentityRepo,
+        PasswordResetRepo, SessionRepo, StageIdentities, StagePasswordResets, StageSessions,
     },
     secret_box::{SealError, SecretBox},
     settings::HasAuthSettings,
@@ -736,20 +736,16 @@ pub trait ChannelDirectory {
 }
 
 /// Creates a key and returns it with its token, which is never shown again. The caller
-/// must hold every scope the key gets.
-pub async fn create_api_key<R: ApiKeyRepo>(
+/// must hold every scope the key gets. The key's own rules (scopes and channel by kind)
+/// are checked before its channel is looked up, so a secret key sent with a channel is
+/// told it can't have one, whatever that channel is.
+pub async fn create_api_key<S: HasApiKeys + ChannelDirectory>(
     ctx: &Ctx,
-    keys: &R,
-    channels: &impl ChannelDirectory,
+    ports: &S,
     env: &(impl IdGenerator + Clock + Random),
     input: CreateApiKey,
 ) -> Result<(ApiKey, NewToken), CommandError> {
     ctx.require(Scope::ApiKeysWrite)?;
-    if let Some(channel) = input.channel
-        && !channels.channel_exists(channel).await?
-    {
-        return Err(CommandError::ChannelNotFound(channel));
-    }
     let token = NewToken::generate(
         match input.kind {
             ApiKeyKind::Secret => TokenKind::SecretKey,
@@ -768,7 +764,12 @@ pub async fn create_api_key<R: ApiKeyRepo>(
     };
     let mut key = ApiKey::new(parts, token.hash(), token.last_four())?;
     require_grantable(ctx, key.scopes())?;
-    keys.insert(&mut key).await?;
+    if let Some(channel) = key.channel()
+        && !ports.channel_exists(channel).await?
+    {
+        return Err(CommandError::ChannelNotFound(channel));
+    }
+    ports.api_keys().insert(&mut key).await?;
     Ok((key, token))
 }
 

@@ -75,11 +75,18 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
             return Ok(());
         }
         let product_ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
-        // The option facets each document adds, to keep `search_option_counts`.
+        // The option facets each document adds, to keep `search_option_counts` (the
+        // market's) and `search_channel_option_counts` (each channel's in it).
         let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+        let mut channel_counts: BTreeMap<(Uuid, String), i64> = BTreeMap::new();
         for document in documents {
             for (key, _) in document.facet_values() {
                 if key.starts_with("option.") {
+                    for channel in &document.channels {
+                        *channel_counts
+                            .entry((channel.as_uuid(), key.clone()))
+                            .or_default() += 1;
+                    }
                     *counts.entry(key).or_default() += 1;
                 }
             }
@@ -89,11 +96,17 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
                 .query_typed(
                     "WITH gone AS (
                          DELETE FROM search_documents
-                         WHERE market_id = $1 AND product_id = ANY($2) RETURNING facets
+                         WHERE market_id = $1 AND product_id = ANY($2)
+                         RETURNING facets, channels
+                     ),
+                     options AS (
+                         SELECT split_part(fv, chr(31), 1) AS key, gone.channels
+                         FROM gone, unnest(gone.facets) fv WHERE starts_with(fv, 'option.')
                      )
-                     SELECT split_part(fv, chr(31), 1) AS key, count(*) AS n
-                     FROM gone, unnest(gone.facets) fv
-                     WHERE starts_with(fv, 'option.') GROUP BY 1",
+                     SELECT NULL::uuid AS channel, key, count(*) AS n FROM options GROUP BY key
+                     UNION ALL
+                     SELECT c, key, count(*) FROM options, unnest(options.channels) c
+                     GROUP BY c, key",
                     &[
                         (&market.as_uuid(), Type::UUID),
                         (&product_ids, Type::UUID_ARRAY),
@@ -102,7 +115,15 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             for row in &gone {
-                *counts.entry(col(row, "key")?).or_default() -= col::<i64>(row, "n")?;
+                let n = col::<i64>(row, "n")?;
+                match col::<Option<Uuid>>(row, "channel")? {
+                    None => *counts.entry(col(row, "key")?).or_default() -= n,
+                    Some(channel) => {
+                        *channel_counts
+                            .entry((channel, col(row, "key")?))
+                            .or_default() -= n
+                    }
+                }
             }
             for chunk in documents.chunks(INSERT_ROWS) {
                 insert_documents(tx, chunk).await?;
@@ -133,6 +154,46 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
                 .await
                 .map_err(repo_error)?;
             }
+            // The same per channel; the map's order is (channel, key), as the locks want.
+            let mut channels = Vec::new();
+            let mut keys = Vec::new();
+            let mut deltas = Vec::new();
+            for ((channel, key), n) in channel_counts.into_iter().filter(|(_, n)| *n != 0) {
+                channels.push(channel);
+                keys.push(key);
+                deltas.push(n);
+            }
+            if !keys.is_empty() {
+                tx.query_typed(
+                    "INSERT INTO search_channel_option_counts (market_id, channel_id, key, documents)
+                     SELECT $1, c, k, n FROM unnest($2::uuid[], $3::text[], $4::bigint[])
+                         AS t (c, k, n)
+                     ORDER BY c, k COLLATE \"C\"
+                     ON CONFLICT (market_id, channel_id, key)
+                     DO UPDATE SET documents =
+                         search_channel_option_counts.documents + EXCLUDED.documents",
+                    &[
+                        (&market.as_uuid(), Type::UUID),
+                        (&channels, Type::UUID_ARRAY),
+                        (&keys, Type::TEXT_ARRAY),
+                        (&deltas, Type::INT8_ARRAY),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
+                tx.query_typed(
+                    "DELETE FROM search_channel_option_counts
+                     WHERE market_id = $1 AND documents <= 0
+                       AND (channel_id, key) IN (SELECT * FROM unnest($2::uuid[], $3::text[]))",
+                    &[
+                        (&market.as_uuid(), Type::UUID),
+                        (&channels, Type::UUID_ARRAY),
+                        (&keys, Type::TEXT_ARRAY),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
+            }
             Ok(())
         })?;
         Ok(())
@@ -149,17 +210,37 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
         Ok(results)
     }
 
-    async fn option_names(&self, market: MarketId) -> Result<Vec<String>, IndexError> {
+    async fn option_names(
+        &self,
+        market: MarketId,
+        channel: Option<ChannelId>,
+    ) -> Result<Vec<String>, IndexError> {
         let mut conn = self.conn().await;
-        let rows = conn
-            .client()
-            .query_typed(
-                "SELECT key FROM search_option_counts WHERE market_id = $1
-                 ORDER BY documents DESC, key COLLATE \"C\"",
-                &[(&market.as_uuid(), Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?;
+        let rows = match channel {
+            None => {
+                conn.client()
+                    .query_typed(
+                        "SELECT key FROM search_option_counts WHERE market_id = $1
+                         ORDER BY documents DESC, key COLLATE \"C\"",
+                        &[(&market.as_uuid(), Type::UUID)],
+                    )
+                    .await
+            }
+            Some(channel) => {
+                conn.client()
+                    .query_typed(
+                        "SELECT key FROM search_channel_option_counts
+                         WHERE market_id = $1 AND channel_id = $2
+                         ORDER BY documents DESC, key COLLATE \"C\"",
+                        &[
+                            (&market.as_uuid(), Type::UUID),
+                            (&channel.as_uuid(), Type::UUID),
+                        ],
+                    )
+                    .await
+            }
+        }
+        .map_err(repo_error)?;
         Ok(rows
             .iter()
             .map(|row| {

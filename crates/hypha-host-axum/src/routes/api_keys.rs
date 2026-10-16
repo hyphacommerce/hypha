@@ -95,7 +95,7 @@ pub(super) async fn create<S: Storage>(
         scopes: req.scopes,
         channel: req.channel,
     };
-    let (key, token) = create_api_key(&ctx, ports.api_keys(), &ports, &state.env, input).await?;
+    let (key, token) = create_api_key(&ctx, &ports, &state.env, input).await?;
     let response = CreatedApiKeyResponse {
         key: ApiKeyResponse::new(&key)?,
         token: token.expose().to_string(),

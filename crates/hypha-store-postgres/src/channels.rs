@@ -52,6 +52,22 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
         row.as_ref().map(channel_from_row).transpose()
     }
 
+    async fn find_by_name(&self, name_key: &str) -> Result<Option<Channel>, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .client()
+            .query_typed_opt(
+                &format!(
+                    "SELECT id, version, name, kind, {} FROM channels WHERE name_key = $1",
+                    stamp_columns("")
+                ),
+                &[(&name_key, Type::TEXT)],
+            )
+            .await
+            .map_err(repo_error)?;
+        row.as_ref().map(channel_from_row).transpose()
+    }
+
     async fn list(&self) -> Result<Vec<Channel>, RepoError> {
         let mut conn = self.conn().await;
         conn.client()
@@ -72,15 +88,18 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
     async fn insert(&self, channel: &mut Channel) -> Result<(), RepoError> {
         stamp_insert(channel, self.now());
         let s = channel.snapshot();
+        let name_key = channel.name_key();
         let events = channel.take_events();
         let actor = self.actor();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             tx.query_typed(
-                "INSERT INTO channels (id, version, name, kind) VALUES ($1, 1, $2, $3)",
+                "INSERT INTO channels (id, version, name, name_key, kind)
+                 VALUES ($1, 1, $2, $3, $4)",
                 &[
                     (&s.id.as_uuid(), Type::UUID),
                     (&s.name, Type::TEXT),
+                    (&name_key, Type::TEXT),
                     (&s.kind.as_str(), Type::TEXT),
                 ],
             )
@@ -96,17 +115,19 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
     async fn update(&self, channel: &mut Channel) -> Result<(), RepoError> {
         stamp_update(channel, self.now());
         let s = channel.snapshot();
+        let name_key = channel.name_key();
         let events = channel.take_events();
         let actor = self.actor();
         let version = in_transaction!(self, |tx| {
             let row = tx
                 .query_typed_opt(
-                    "UPDATE channels SET version = version + 1, name = $3
+                    "UPDATE channels SET version = version + 1, name = $3, name_key = $4
                      WHERE id = $1 AND version = $2 RETURNING version",
                     &[
                         (&s.id.as_uuid(), Type::UUID),
                         (&version_to_db(s.version)?, Type::INT8),
                         (&s.name, Type::TEXT),
+                        (&name_key, Type::TEXT),
                     ],
                 )
                 .await

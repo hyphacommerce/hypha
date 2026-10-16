@@ -22,7 +22,7 @@ use crate::{
     SelectedShipping, ShippingContext, StageCarts, StoredQuote, check_stock,
     price_cart_with_shipping, price_line,
 };
-use hypha_channels::{ChannelRepo, HasChannels, is_published};
+use hypha_channels::{ChannelRepo, HasChannels};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -217,7 +217,7 @@ pub async fn create_cart<S: IdempotentCartPorts, I: IdGenerator, C: Clock>(
     ctx.require(Scope::CartsWrite)?;
     let key = input.idempotency.as_ref();
     if let Some(cart) = replay_of(ctx, ports, CREATE_CART, key).await? {
-        return replay(ports, cart).await;
+        return replay(ctx, ports, cart).await;
     }
 
     let channel = ctx.channel().ok_or(CommandError::ChannelRequired)?;
@@ -246,7 +246,7 @@ pub async fn create_cart<S: IdempotentCartPorts, I: IdGenerator, C: Clock>(
     )
     .await?
     {
-        Some(winner) => replay(ports, winner).await,
+        Some(winner) => replay(ctx, ports, winner).await,
         None => Ok(Idempotent::fresh(priced)),
     }
 }
@@ -274,21 +274,17 @@ pub async fn add_line<S: IdempotentCartPorts, C: Clock>(
     ctx.require(Scope::CartsWrite)?;
     let key = input.idempotency.as_ref();
     if let Some(cart) = replay_of(ctx, ports, ADD_LINE, key).await? {
-        return replay(ports, cart).await;
+        return replay(ctx, ports, cart).await;
     }
 
     let quantity = Quantity::new(input.quantity)?;
-    let mut cart = load_open_cart(ports, input.cart).await?;
+    let mut cart = load_open_cart(ctx, ports, input.cart).await?;
     let product = ports
         .products()
         .get_by_variant(input.variant)
         .await?
         .ok_or(CommandError::VariantNotFound(input.variant))?;
 
-    // Sold through the cart's channel (design note 0020, CH6).
-    if !is_published(ports, cart.channel(), product.id()).await? {
-        return Err(LineError::ProductNotPublished(product.id()).into());
-    }
     // Only changes the copy in memory; nothing is saved unless every check below passes.
     cart.add_line(product.id(), input.variant, quantity)?;
     let priced = reprice_grown_line(ports, &cart, product, input.variant).await?;
@@ -296,7 +292,7 @@ pub async fn add_line<S: IdempotentCartPorts, C: Clock>(
     // Fails with StaleVersion (409) if another request changed the cart meanwhile,
     // instead of silently dropping that request's line.
     match write_cart(ctx, ports, clock, ADD_LINE, key, &mut cart, Write::Update).await? {
-        Some(winner) => replay(ports, winner).await,
+        Some(winner) => replay(ctx, ports, winner).await,
         None => Ok(Idempotent::fresh(priced)),
     }
 }
@@ -322,10 +318,11 @@ async fn replay_of<S: HasIdempotency>(
 /// What a replay returns: the cart as it is now (not as the first response showed it;
 /// design note 0007, section 5).
 async fn replay<S: HasCarts + PricingPorts>(
+    ctx: &Ctx,
     ports: &S,
     cart: CartId,
 ) -> Result<Idempotent<PricedCart>, CommandError> {
-    let cart = load_cart(ports, cart).await?;
+    let cart = load_cart(ctx, ports, cart).await?;
     Ok(Idempotent::replayed(reprice(ports, &cart).await?))
 }
 
@@ -389,7 +386,7 @@ pub async fn set_cart_email<S: HasCarts + PricingPorts>(
     ctx.require(Scope::CartsWrite)?;
 
     let email = email.as_deref().map(Email::new).transpose()?;
-    let mut cart = load_open_cart(ports, id).await?;
+    let mut cart = load_open_cart(ctx, ports, id).await?;
     cart.set_email(email)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
@@ -412,7 +409,7 @@ pub async fn set_cart_customer<S: HasCarts + HasCustomers + PricingPorts>(
         ctx.require(Scope::CustomersRead)?;
     }
 
-    let mut cart = load_open_cart(ports, id).await?;
+    let mut cart = load_open_cart(ctx, ports, id).await?;
     let buyer = match customer {
         Some(customer) => {
             let found = ports
@@ -450,7 +447,7 @@ pub async fn set_line_quantity<S: HasCarts + PricingPorts>(
     ctx.require(Scope::CartsWrite)?;
 
     let quantity = Quantity::new(input.quantity)?;
-    let mut cart = load_open_cart(ports, input.cart).await?;
+    let mut cart = load_open_cart(ctx, ports, input.cart).await?;
     let raised = quantity > cart.line(input.variant)?.quantity();
     cart.set_quantity(input.variant, quantity)?;
 
@@ -479,7 +476,7 @@ pub async fn remove_cart_line<S: HasCarts + PricingPorts>(
 ) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
 
-    let mut cart = load_open_cart(ports, cart).await?;
+    let mut cart = load_open_cart(ctx, ports, cart).await?;
     cart.remove_line(variant)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
@@ -496,6 +493,12 @@ async fn reprice_grown_line<S: PricingPorts>(
     product: Product,
     variant: VariantId,
 ) -> Result<PricedCart, CommandError> {
+    // Sold through the cart's channel (design note 0020, CH6): checked first, so a
+    // product the channel doesn't sell says nothing about its price or stock.
+    let published = load_publication(ports, cart).await?;
+    if !published.allows(product.id()) {
+        return Err(LineError::ProductNotPublished(product.id()).into());
+    }
     let pricing = load_pricing(ports, cart).await?;
     price_line(&product, variant, &pricing)?;
 
@@ -517,7 +520,6 @@ async fn reprice_grown_line<S: PricingPorts>(
             .get_by_country(cart.country())
             .await?,
     };
-    let published = load_publication(ports, cart).await?;
     let priced = price_cart_with_shipping(
         cart,
         &cart_products,
@@ -546,18 +548,24 @@ fn refuse_unavailable(priced: &PricedCart, variant: VariantId) -> Result<(), Com
     }
 }
 
-async fn load_cart<S: HasCarts>(ports: &S, id: CartId) -> Result<Cart, CommandError> {
+/// The cart, if the caller may use it: another channel's cart reads as missing.
+async fn load_cart<S: HasCarts>(ctx: &Ctx, ports: &S, id: CartId) -> Result<Cart, CommandError> {
     ports
         .carts()
         .get(id)
         .await?
+        .filter(|cart| cart.visible_in(ctx.channel()))
         .ok_or(CommandError::CartNotFound(id))
 }
 
 /// `load_cart` for a command that changes the cart: a checked-out cart is refused here,
 /// before lookups that would report a less useful error.
-async fn load_open_cart<S: HasCarts>(ports: &S, id: CartId) -> Result<Cart, CommandError> {
-    let cart = load_cart(ports, id).await?;
+async fn load_open_cart<S: HasCarts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+) -> Result<Cart, CommandError> {
+    let cart = load_cart(ctx, ports, id).await?;
     cart.ensure_open()?;
     Ok(cart)
 }
@@ -571,7 +579,7 @@ pub async fn get_cart<S: HasCarts + PricingPorts>(
 ) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsRead)?;
 
-    let cart = load_cart(ports, id).await?;
+    let cart = load_cart(ctx, ports, id).await?;
     reprice(ports, &cart).await
 }
 
@@ -635,9 +643,9 @@ async fn load_publication<S: HasChannels>(
 ) -> Result<Publication, CommandError> {
     let products = product_ids(cart);
     if products.is_empty() {
-        return Ok(Publication::Only(Default::default()));
+        return Ok(Publication::new(Default::default()));
     }
-    Ok(Publication::Only(
+    Ok(Publication::new(
         ports
             .channels()
             .published(cart.channel(), &products)
@@ -711,7 +719,7 @@ pub async fn set_shipping_address<S: HasCarts + PricingPorts>(
 ) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
     let address = address.map(hypha_core::Address::new).transpose()?;
-    let mut cart = load_open_cart(ports, id).await?;
+    let mut cart = load_open_cart(ctx, ports, id).await?;
     cart.set_shipping_address(address)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
@@ -735,7 +743,7 @@ pub async fn shipping_offers<S: HasCarts + PricingPorts, P: RateProvider>(
     id: CartId,
 ) -> Result<Vec<GroupOffers>, CommandError> {
     ctx.require(Scope::CartsRead)?;
-    let cart = load_cart(ports, id).await?;
+    let cart = load_cart(ctx, ports, id).await?;
     let reading = read_cart(ports, &cart).await?;
     group_offers(&cart, &reading, rates).await
 }
@@ -752,7 +760,7 @@ pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
     option: ShippingOptionId,
 ) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
-    let mut cart = load_open_cart(ports, id).await?;
+    let mut cart = load_open_cart(ctx, ports, id).await?;
     if group != cart.shipping_group() {
         return Err(CommandError::ShippingGroupNotFound(group));
     }

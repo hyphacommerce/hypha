@@ -226,13 +226,43 @@ async fn battery<I: SearchIndex>(index: &I) {
 }
 
 async fn option_names<I: SearchIndex>(index: &I) {
-    load(index, &search_fixture()).await;
+    let fixture = search_fixture();
+    load(index, &fixture).await;
     // Five documents have a colour and a size each; names are lowercased.
     assert_eq!(
-        index.option_names(market(1)).await,
+        index.option_names(market(1), None).await,
         Ok(vec!["color".to_string(), "size".to_string()])
     );
-    assert_eq!(index.option_names(market(2)).await, Ok(vec![]));
+    assert_eq!(index.option_names(market(2), None).await, Ok(vec![]));
+    // Per channel, only its documents count; a channel selling nothing has none.
+    let channel = |n: u128| Some(ChannelId::from_uuid(Uuid::from_u128(n)));
+    for m in [market(1), market(2)] {
+        for c in [None, channel(1), channel(2), channel(9)] {
+            assert_eq!(
+                index.option_names(m, c).await,
+                Ok(reference::option_names(&fixture, m, c)),
+                "{m} {c:?}"
+            );
+        }
+    }
+    assert_eq!(index.option_names(market(1), channel(9)).await, Ok(vec![]));
+
+    // Replacing a product moves its counts: channel 2's shirt leaves, and with it
+    // the options only it had there.
+    let shirt = fixture[0].product;
+    index.replace(market(1), &[shirt], &[]).await.unwrap();
+    let rest: Vec<SearchDocument> = fixture
+        .iter()
+        .filter(|d| d.product != shirt)
+        .cloned()
+        .collect();
+    for c in [None, channel(1), channel(2)] {
+        assert_eq!(
+            index.option_names(market(1), c).await,
+            Ok(reference::option_names(&rest, market(1), c)),
+            "after the shirt left, {c:?}"
+        );
+    }
 }
 
 // ---------- the queue ----------

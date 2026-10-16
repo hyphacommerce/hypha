@@ -43,14 +43,18 @@ impl InMemoryChannelRepo {
     }
 }
 
-/// Names are unique ignoring case.
+/// Names are unique by `Channel::name_key`.
 fn unique(new: &Channel, other: &Channel) -> Option<&'static str> {
-    (new.name().to_lowercase() == other.name().to_lowercase()).then_some(keys::CHANNEL_NAME)
+    (new.name_key() == other.name_key()).then_some(keys::CHANNEL_NAME)
 }
 
 impl ChannelRepo for InMemoryChannelRepo {
     async fn get(&self, id: ChannelId) -> Result<Option<Channel>, RepoError> {
         Ok(self.channels.get(&id))
+    }
+
+    async fn find_by_name(&self, name_key: &str) -> Result<Option<Channel>, RepoError> {
+        Ok(self.channels.find(|c| c.name_key() == name_key))
     }
 
     async fn list(&self) -> Result<Vec<Channel>, RepoError> {

@@ -279,6 +279,12 @@ impl Cart {
         self.channel
     }
 
+    /// Whether a caller in `channel` may use the cart: a storefront only its own channel's
+    /// carts (design note 0020); staff and secret keys, in no channel, every cart.
+    pub fn visible_in(&self, channel: Option<ChannelId>) -> bool {
+        channel.is_none_or(|c| c == self.channel)
+    }
+
     pub fn country(&self) -> CountryCode {
         self.country
     }
