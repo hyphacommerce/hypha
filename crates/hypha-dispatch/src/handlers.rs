@@ -50,9 +50,11 @@ pub(crate) async fn run_handler<S: DispatchPorts>(
 }
 
 /// `product.variant_removed`: removes the variant's fixed prices from every price list,
-/// and deletes its inventory item unless units are still reserved on it (open orders
-/// count on them; fulfilment, 0017, decides when it goes, Q5). Each write records its
-/// own events. Running again finds nothing left to do.
+/// and deletes its inventory item. While units are still reserved on it (open orders
+/// count on them) the item is retired instead, and goes with its last reservation when
+/// the orders are fulfilled or cancelled (design note 0016, Q5; 0018). Each write
+/// records its own events. Running again finds nothing left to do; a write that lost a
+/// race fails the run, and the retry sees the item as it is then.
 async fn variant_cleanup<S: DispatchPorts>(ports: &S, event: &StoredEvent) -> Result<(), String> {
     let variant: VariantId = event.data["variant"]
         .as_str()
@@ -77,8 +79,12 @@ async fn variant_cleanup<S: DispatchPorts>(ports: &S, event: &StoredEvent) -> Re
     {
         match item.delete() {
             Ok(()) => items.delete(&mut item).await.map_err(|e| e.to_string())?,
-            // Stays until fulfilment consumes the reservations.
-            Err(InventoryError::StillReserved) => {}
+            // Stays until the order actions use up or release the reservations.
+            Err(InventoryError::StillReserved) if item.retired() => {}
+            Err(InventoryError::StillReserved) => {
+                item.retire();
+                items.update(&mut item).await.map_err(|e| e.to_string())?;
+            }
             Err(e) => return Err(e.to_string()),
         }
     }

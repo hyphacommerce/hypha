@@ -176,7 +176,7 @@ fn a_removed_variant_loses_its_prices_and_stock_record() {
 }
 
 #[test]
-fn an_item_with_reservations_stays_until_fulfilment() {
+fn an_item_with_reservations_is_retired_until_its_orders_are_done() {
     let ports = world();
     let clock = FixedClock::default();
     let mut item = block_on(ports.inventory_items.get_by_variant(small()))
@@ -197,11 +197,12 @@ fn an_item_with_reservations_stays_until_fulfilment() {
 
     remove(&ports, small());
     dispatch(&ports, &clock);
-    assert!(
-        block_on(ports.inventory_items.get_by_variant(small()))
-            .unwrap()
-            .is_some()
-    );
+    let kept = block_on(ports.inventory_items.get_by_variant(small()))
+        .unwrap()
+        .unwrap();
+    // Kept with its reservation, and marked to go with it (design note 0018).
+    assert!(kept.retired());
+    assert_eq!(kept.reservations().len(), 1);
     // Not a failure: there's nothing more to do now.
     assert_eq!(cleanup_deliveries(&ports)[0].1, "succeeded");
 }
