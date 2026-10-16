@@ -15,7 +15,10 @@ use hypha_dispatch::{
 };
 use tokio::{sync::watch, task::JoinHandle};
 
-use crate::state::{AppState, PgStorage, SharedState};
+use crate::{
+    handlers::HANDLERS,
+    state::{AppState, PgStorage, SharedState},
+};
 
 /// The running jobs. Dropping it without `stop` leaves them running until the process
 /// exits.
@@ -149,7 +152,7 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
     let no_connection = |_| "no connection".to_string();
     let (fanned, leased) = {
         let ports = state.public_ports().await.map_err(no_connection)?;
-        let fanned = fan_out(&ports, &state.clock, &state.config.dispatch)
+        let fanned = fan_out(&ports, &state.clock, &state.config.dispatch, &HANDLERS)
             .await
             .map_err(|e| e.to_string())?;
         let leased = lease_due(&ports, &state.clock, &state.config.dispatch)
@@ -163,7 +166,14 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
             let ports = state.public_ports().await.map_err(no_connection)?;
             match prepare(&ports, &state.clock, &state.config.dispatch, delivery).await {
                 Prepared::Handler => Prepared::Done(
-                    handle(&ports, &state.clock, &state.config.dispatch, delivery).await,
+                    handle(
+                        &ports,
+                        &state.clock,
+                        &state.config.dispatch,
+                        &HANDLERS,
+                        delivery,
+                    )
+                    .await,
                 ),
                 other => other,
             }

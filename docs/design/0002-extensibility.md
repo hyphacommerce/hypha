@@ -107,7 +107,7 @@ pub trait Spore {
     fn name(&self) -> &'static str;
     fn migrations(&self) -> MigrationSet;
     fn routes(&self) -> Vec<SporeRoute>;            // e.g. POST /webhooks/stripe
-    fn event_handlers(&self) -> Vec<EventHandler>;
+    fn event_handlers(&self) -> Vec<EventHandler>; // as built: hypha_core::EventHandler, listed by the host (0019 §5.1)
     fn custom_fields(&self) -> Vec<FieldDefinition>;
     fn policies(&self) -> Vec<Box<dyn AnyPolicy>>;
     // plus the ports it provides, e.g. a PaymentProvider

@@ -5,6 +5,7 @@ pub mod ctx;
 pub mod email;
 pub mod error_code;
 pub mod events;
+pub mod handlers;
 pub mod idempotency;
 pub mod ids;
 pub mod money;
@@ -31,6 +32,7 @@ pub use events::{
     ActingAs, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, Event, HasOutbox,
     OutboxRepo, Outcome, PendingEvent, Recorded, Recorder, StageEvents, StoredEvent, Subject,
 };
+pub use handlers::{EventHandler, EventHandlers};
 pub use idempotency::{
     HasIdempotency, IdempotencyError, IdempotencyKey, IdempotencyRecord, IdempotencyRepo,
     IdempotencyRequest, Idempotent, StageIdempotency, earlier_id, earlier_result,

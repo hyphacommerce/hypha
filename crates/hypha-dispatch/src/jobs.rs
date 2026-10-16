@@ -5,36 +5,22 @@
 use hypha_apps::{App, AppKey, AppRepo, HasApps, Webhook};
 use hypha_auth::{HasSessions, SessionRepo};
 use hypha_core::{
-    Clock, Delivery, DeliveryOutcome, HasBatch, HasIdempotency, HasOutbox, IdempotencyRepo,
-    OutboxRepo, Outcome, RepoError, StageEvents,
+    Clock, Delivery, DeliveryOutcome, EventHandlers, HasIdempotency, HasOutbox, IdempotencyRepo,
+    OutboxRepo, Outcome, RepoError,
 };
-use hypha_inventory::HasInventoryItems;
-use hypha_markets::{HasPriceLists, StageFixedPrices};
 
 use core::time::Duration;
 
-use crate::{handlers::run_handler, settings::DispatchSettings};
+use crate::settings::DispatchSettings;
 
-/// Everything the dispatcher and its handlers read and write. Anything with all of them
-/// is `DispatchPorts` (the blanket impl below).
-pub trait DispatchPorts:
-    HasOutbox
-    + HasApps
-    + HasPriceLists
-    + HasInventoryItems
-    + HasBatch<Batch: StageFixedPrices + StageEvents>
-{
-}
+/// What the dispatcher itself reads and writes: the outbox and the apps. Handlers bring
+/// their own needs (each `EventHandler<P>` bounds `P`), so this doesn't grow with them.
+pub trait DispatchPorts: HasOutbox + HasApps {}
 
-impl<T> DispatchPorts for T where
-    T: HasOutbox
-        + HasApps
-        + HasPriceLists
-        + HasInventoryItems
-        + HasBatch<Batch: StageFixedPrices + StageEvents>
-        + ?Sized
-{
-}
+impl<T> DispatchPorts for T where T: HasOutbox + HasApps + ?Sized {}
+
+/// A handler's destination name in deliveries.
+const HANDLER: &str = "handler:";
 
 /// Sends webhooks (design note 0016, section 8): the host's HTTP client, signing with
 /// the app's secret. A port, so the dispatcher stays free of HTTP and runtimes.
@@ -68,16 +54,22 @@ impl Progress {
 pub const LONGEST_RUN: Duration = Duration::from_secs(Webhook::MAX_TIMEOUT_MS as u64 / 1000 + 15);
 
 /// Fans out events not fanned out yet: a pending delivery for each destination that
-/// wants them, the handlers (`handlers::destinations`) and every app subscribed to the
-/// event's type (`app:<key>`, `App::wants`) as the apps are now.
+/// wants them, the `handlers` (`handler:<name>`) and every app subscribed to the event's
+/// type (`app:<key>`, `App::wants`) as the apps are now. `handlers` are `Sync` because
+/// the outbox may hold their routing across an await (a host's futures must be `Send`).
 pub async fn fan_out<S: HasOutbox + HasApps>(
     ports: &S,
     clock: &impl Clock,
     settings: &DispatchSettings,
+    handlers: &(impl EventHandlers<S> + Sync),
 ) -> Result<Progress, RepoError> {
     let apps = ports.apps().list().await?;
     let destinations = |event_type: &str| {
-        let mut to = crate::destinations(event_type);
+        let mut to: Vec<String> = handlers
+            .wanting(event_type)
+            .into_iter()
+            .map(|name| format!("{HANDLER}{name}"))
+            .collect();
         to.extend(
             apps.iter()
                 .filter(|app| app.wants(event_type))
@@ -140,7 +132,7 @@ pub async fn prepare<S: HasApps>(
     delivery: &Delivery,
 ) -> Prepared {
     match delivery.destination.split_once(':') {
-        Some(("handler", _)) => Prepared::Handler,
+        Some((kind, _)) if format!("{kind}:") == HANDLER => Prepared::Handler,
         Some(("app", key)) => match load_app(ports, key).await {
             Ok(app) => Prepared::Webhook(app),
             Err(failure) => Prepared::Done(outcome(Err(failure), clock, settings, delivery)),
@@ -157,20 +149,24 @@ pub async fn prepare<S: HasApps>(
     }
 }
 
-/// Runs a handler delivery (`Prepared::Handler`).
-pub async fn handle<S: DispatchPorts>(
+/// Runs a handler delivery (`Prepared::Handler`) with the one of `handlers` it names.
+/// One the set doesn't have (removed from the build) is retried on the schedule, so
+/// putting it back in time still delivers.
+pub async fn handle<S: ?Sized>(
     ports: &S,
     clock: &impl Clock,
     settings: &DispatchSettings,
+    handlers: &impl EventHandlers<S>,
     delivery: &Delivery,
 ) -> DeliveryOutcome {
     let name = delivery
         .destination
-        .strip_prefix("handler:")
+        .strip_prefix(HANDLER)
         .unwrap_or_default();
-    let result = run_handler(ports, name, &delivery.event)
-        .await
-        .map_err(Failure::Retry);
+    let result = match handlers.run(name, ports, &delivery.event).await {
+        Some(result) => result.map_err(Failure::Retry),
+        None => Err(Failure::Retry(format!("no handler {name:?} in this build"))),
+    };
     outcome(result, clock, settings, delivery)
 }
 
@@ -195,11 +191,12 @@ pub async fn run<S: DispatchPorts>(
     ports: &S,
     clock: &impl Clock,
     settings: &DispatchSettings,
+    handlers: &impl EventHandlers<S>,
     webhooks: &impl WebhookSender,
     delivery: &Delivery,
 ) -> DeliveryOutcome {
     match prepare(ports, clock, settings, delivery).await {
-        Prepared::Handler => handle(ports, clock, settings, delivery).await,
+        Prepared::Handler => handle(ports, clock, settings, handlers, delivery).await,
         Prepared::Webhook(app) => send(webhooks, clock, settings, &app, delivery).await,
         Prepared::Done(outcome) => outcome,
     }
@@ -256,12 +253,13 @@ pub async fn deliver_due<S: DispatchPorts>(
     ports: &S,
     clock: &impl Clock,
     settings: &DispatchSettings,
+    handlers: &impl EventHandlers<S>,
     webhooks: &impl WebhookSender,
 ) -> Result<Progress, RepoError> {
     let leased = lease_due(ports, clock, settings).await?;
     let mut outcomes = Vec::with_capacity(leased.len());
     for delivery in leased.iter().take_while(|d| has_time(d, clock)) {
-        let outcome = run(ports, clock, settings, webhooks, delivery).await;
+        let outcome = run(ports, clock, settings, handlers, webhooks, delivery).await;
         outcomes.push(Outcome::of(delivery, outcome));
     }
     record(ports, &outcomes).await?;

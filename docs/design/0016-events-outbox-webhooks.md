@@ -235,6 +235,11 @@ job does it (section 7).
 
 ## 6. In-process handlers, and the first one
 
+*Changed by 0019 (SE10):* handlers are `hypha_core::EventHandler`s and the host passes
+the set the dispatcher runs (`hypha-host-axum/src/handlers.rs`); the `Handler` struct,
+the `HANDLERS` list and the `match` below are gone, and `DispatchPorts` is the outbox
+and apps only. See 0019 §5.1.
+
 A handler is a destination in code:
 
 ```rust

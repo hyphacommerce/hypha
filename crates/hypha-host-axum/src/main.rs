@@ -1,6 +1,7 @@
 mod client_ip;
 mod error;
 mod extract;
+mod handlers;
 mod jobs;
 mod media;
 mod outbound;

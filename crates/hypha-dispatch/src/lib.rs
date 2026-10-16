@@ -18,7 +18,7 @@ pub mod jobs;
 pub mod schedule;
 pub mod settings;
 
-pub use handlers::{HANDLERS, Handler, destinations};
+pub use handlers::VariantCleanup;
 pub use jobs::{
     DispatchPorts, LONGEST_RUN, Prepared, Progress, WebhookSender, deliver_due, fan_out, handle,
     has_time, lease_due, prepare, prune_events, prune_idempotency_keys, prune_sessions, record,

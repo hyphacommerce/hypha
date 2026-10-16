@@ -1,51 +1,33 @@
-//! In-process handlers (design note 0016, section 6): destinations in code, named
-//! `handler:<name>` in deliveries. Spores will add theirs to the same list.
+//! The dispatcher's own handler (design note 0016, section 6). Handlers are
+//! `hypha_core::EventHandler`s; the host lists the set it runs (design note 0019,
+//! section 5), so other crates and spores add theirs without this crate knowing.
 //!
 //! Handlers must be idempotent: a lease can run out mid-run and the delivery runs again
 //! (EV7). Each one's writes are commands of their own, run as `Actor::System`.
 
-use hypha_core::{Ctx, Event, StoredEvent, VariantId};
-use hypha_inventory::{InventoryError, InventoryItemRepo};
-use hypha_markets::{PriceListRepo, remove_fixed_prices};
+use hypha_core::{Ctx, Event, EventHandler, HasBatch, StageEvents, StoredEvent, VariantId};
+use hypha_inventory::{HasInventoryItems, InventoryError, InventoryItemRepo};
+use hypha_markets::{HasPriceLists, PriceListRepo, StageFixedPrices, remove_fixed_prices};
 use hypha_products::VariantRemoved;
 
-use crate::DispatchPorts;
-
-/// A destination in code: its name, and the event types it wants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Handler {
-    pub name: &'static str,
-    pub events: &'static [&'static str],
-}
-
 /// Cleans up what other domains keep for a removed variant (design note 0014, §4).
-pub const VARIANT_CLEANUP: Handler = Handler {
-    name: "variant_cleanup",
-    events: &[VariantRemoved::TYPE],
-};
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VariantCleanup;
 
-/// Every handler this build has.
-pub const HANDLERS: &[Handler] = &[VARIANT_CLEANUP];
+impl<P> EventHandler<P> for VariantCleanup
+where
+    P: HasPriceLists + HasInventoryItems + HasBatch<Batch: StageFixedPrices + StageEvents>,
+{
+    fn name(&self) -> &'static str {
+        "variant_cleanup"
+    }
 
-/// The handlers an event of `event_type` goes to; `fan_out` adds the apps subscribed
-/// to it.
-pub fn destinations(event_type: &str) -> Vec<String> {
-    HANDLERS
-        .iter()
-        .filter(|h| h.events.contains(&event_type))
-        .map(|h| format!("handler:{}", h.name))
-        .collect()
-}
+    fn wants(&self, event_type: &str) -> bool {
+        event_type == VariantRemoved::TYPE
+    }
 
-/// Runs handler `name` on `event`. `Err` with why, for the delivery's retry.
-pub(crate) async fn run_handler<S: DispatchPorts>(
-    ports: &S,
-    name: &str,
-    event: &StoredEvent,
-) -> Result<(), String> {
-    match name {
-        "variant_cleanup" => variant_cleanup(ports, event).await,
-        unknown => Err(format!("no handler {unknown:?} in this build")),
+    async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
+        variant_cleanup(ports, event).await
     }
 }
 
@@ -55,7 +37,10 @@ pub(crate) async fn run_handler<S: DispatchPorts>(
 /// the orders are fulfilled or cancelled (design note 0016, Q5; 0018). Each write
 /// records its own events. Running again finds nothing left to do; a write that lost a
 /// race fails the run, and the retry sees the item as it is then.
-async fn variant_cleanup<S: DispatchPorts>(ports: &S, event: &StoredEvent) -> Result<(), String> {
+async fn variant_cleanup<P>(ports: &P, event: &StoredEvent) -> Result<(), String>
+where
+    P: HasPriceLists + HasInventoryItems + HasBatch<Batch: StageFixedPrices + StageEvents>,
+{
     let variant: VariantId = event.data["variant"]
         .as_str()
         .and_then(|v| v.parse().ok())

@@ -8,7 +8,7 @@ use hypha_core::{
     Quantity, Sealed, VariantId,
 };
 use hypha_dispatch::{
-    DispatchSettings, Progress, WebhookSender, deliver_due, fan_out, prune_events,
+    DispatchSettings, Progress, VariantCleanup, WebhookSender, deliver_due, fan_out, prune_events,
 };
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, ReservationRef};
 use hypha_markets::{PriceList, PriceListRepo};
@@ -18,6 +18,9 @@ use hypha_products::{
 use hypha_testkit::{FixedClock, InMemoryPorts};
 use pollster::block_on;
 use uuid::Uuid;
+
+/// The handlers these tests run: the dispatcher's own.
+const HANDLERS: (VariantCleanup,) = (VariantCleanup,);
 
 fn settings() -> DispatchSettings {
     DispatchSettings::default()
@@ -121,8 +124,8 @@ fn dispatch(ports: &InMemoryPorts, clock: &FixedClock) -> Progress {
 }
 
 fn dispatch_with(ports: &InMemoryPorts, clock: &FixedClock, webhooks: &Webhooks) -> Progress {
-    block_on(fan_out(ports, clock, &settings())).unwrap();
-    block_on(deliver_due(ports, clock, &settings(), webhooks)).unwrap()
+    block_on(fan_out(ports, clock, &settings(), &HANDLERS)).unwrap();
+    block_on(deliver_due(ports, clock, &settings(), &HANDLERS, webhooks)).unwrap()
 }
 
 fn cleanup_deliveries(ports: &InMemoryPorts) -> Vec<(String, &'static str, u32, Option<String>)> {
@@ -212,7 +215,7 @@ fn running_a_cleanup_again_is_harmless() {
     let ports = world();
     let clock = FixedClock::default();
     remove(&ports, small());
-    block_on(fan_out(&ports, &clock, &settings())).unwrap();
+    block_on(fan_out(&ports, &clock, &settings(), &HANDLERS)).unwrap();
     // A runner leases it and dies; the lease runs out and another runs it, then a
     // third time, as at-least-once allows.
     let leased = block_on(hypha_dispatch::lease_due(&ports, &clock, &settings())).unwrap();
@@ -221,6 +224,7 @@ fn running_a_cleanup_again_is_harmless() {
         &ports,
         &clock,
         &settings(),
+        &HANDLERS,
         &Webhooks::default(),
         &leased[0],
     ));
@@ -230,6 +234,7 @@ fn running_a_cleanup_again_is_harmless() {
             &ports,
             &clock,
             &settings(),
+            &HANDLERS,
             &Webhooks::default()
         ))
         .unwrap()
@@ -259,6 +264,7 @@ fn a_failing_delivery_is_retried_on_the_schedule_then_fails() {
             &ports,
             &clock,
             &settings(),
+            &HANDLERS,
             &Webhooks::default()
         ))
         .unwrap()
@@ -279,6 +285,7 @@ fn a_failing_delivery_is_retried_on_the_schedule_then_fails() {
             &ports,
             &clock,
             &settings(),
+            &HANDLERS,
             &Webhooks::default()
         ))
         .unwrap()
@@ -294,6 +301,7 @@ fn a_failing_delivery_is_retried_on_the_schedule_then_fails() {
             &ports,
             &clock,
             &settings(),
+            &HANDLERS,
             &Webhooks::default(),
         ))
         .unwrap();
@@ -334,7 +342,7 @@ fn old_events_are_pruned_after_thirty_days() {
         .unwrap()
         .done as usize;
     assert!(pruned > 0 && pruned < written, "{pruned} of {written}");
-    block_on(fan_out(&ports, &clock, &settings())).unwrap();
+    block_on(fan_out(&ports, &clock, &settings(), &HANDLERS)).unwrap();
     block_on(prune_events(&ports, &clock, &settings())).unwrap();
     assert!(ports.outbox.events().is_empty());
 }
@@ -429,7 +437,7 @@ fn a_webhook_with_nowhere_to_go_fails_at_once_and_a_paused_app_waits() {
         block_on(ports.apps.insert(&mut app)).unwrap();
     }
     remove(&ports, small());
-    block_on(fan_out(&ports, &clock, &settings())).unwrap();
+    block_on(fan_out(&ports, &clock, &settings(), &HANDLERS)).unwrap();
     // Between fanning out and sending, the apps change.
     block_on(ports.apps.delete(&AppKey::new("app_gone").unwrap())).unwrap();
     let mut off = block_on(ports.apps.get(&AppKey::new("app_off").unwrap()))
@@ -444,7 +452,14 @@ fn a_webhook_with_nowhere_to_go_fails_at_once_and_a_paused_app_waits() {
     block_on(ports.apps.update(&mut bare)).unwrap();
 
     let webhooks = Webhooks::default();
-    block_on(deliver_due(&ports, &clock, &settings(), &webhooks)).unwrap();
+    block_on(deliver_due(
+        &ports,
+        &clock,
+        &settings(),
+        &HANDLERS,
+        &webhooks,
+    ))
+    .unwrap();
     assert!(webhooks.sent.borrow().is_empty());
     let mut failed = app_deliveries(&ports);
     failed.sort();
@@ -474,11 +489,72 @@ fn a_delivery_starts_only_with_time_left_on_its_lease() {
     let ports = world();
     let clock = FixedClock::default();
     remove(&ports, small());
-    block_on(fan_out(&ports, &clock, &settings())).unwrap();
+    block_on(fan_out(&ports, &clock, &settings(), &HANDLERS)).unwrap();
     let leased = block_on(hypha_dispatch::lease_due(&ports, &clock, &settings())).unwrap();
     // Leased for 120 s; the longest run is 45 s (a 30 s webhook and room).
     clock.set(FixedClock::DEFAULT.plus_secs(75));
     assert!(hypha_dispatch::has_time(&leased[0], &clock));
     clock.set(FixedClock::DEFAULT.plus_secs(76));
     assert!(!hypha_dispatch::has_time(&leased[0], &clock));
+}
+
+// ---------- handlers from other crates ----------
+
+/// A handler the dispatcher doesn't know, as a spore or another domain crate would
+/// write it (design note 0019, section 5): it needs no ports, and records what it saw.
+#[derive(Default)]
+struct Audit {
+    seen: std::sync::Mutex<Vec<String>>,
+}
+
+impl<P> hypha_core::EventHandler<P> for Audit {
+    fn name(&self) -> &'static str {
+        "audit"
+    }
+
+    fn wants(&self, event_type: &str) -> bool {
+        event_type.starts_with("product.")
+    }
+
+    async fn handle(&self, _: &P, event: &hypha_core::StoredEvent) -> Result<(), String> {
+        self.seen.lock().unwrap().push(event.event_type.clone());
+        Ok(())
+    }
+}
+
+#[test]
+fn a_handler_from_another_crate_gets_the_events_it_wants() {
+    let ports = world();
+    let clock = FixedClock::default();
+    remove(&ports, small());
+    let handlers = (VariantCleanup, Audit::default());
+    block_on(fan_out(&ports, &clock, &settings(), &handlers)).unwrap();
+    block_on(deliver_due(
+        &ports,
+        &clock,
+        &settings(),
+        &handlers,
+        &Webhooks::default(),
+    ))
+    .unwrap();
+
+    assert_eq!(
+        *handlers.1.seen.lock().unwrap(),
+        ["product.created", "product.variant_removed"]
+    );
+    let mut destinations: Vec<(String, &str)> = ports
+        .outbox
+        .deliveries()
+        .into_iter()
+        .map(|d| (d.0, d.1))
+        .collect();
+    destinations.sort();
+    assert_eq!(
+        destinations,
+        [
+            ("handler:audit".to_string(), "succeeded"),
+            ("handler:audit".to_string(), "succeeded"),
+            ("handler:variant_cleanup".to_string(), "succeeded"),
+        ]
+    );
 }

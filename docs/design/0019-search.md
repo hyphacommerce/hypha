@@ -6,7 +6,8 @@
   search reads the database. On the document shape he asked for flexibility (some
   clients want products, others variants), which became SE3 and SE4. He then said to
   build it; section 11's questions are answered with their recommendations, marked
-  *Proceeding with*, until he says otherwise.
+  *Proceeding with*, until he says otherwise. On Q2 he asked for the cleanest
+  architecture rather than either option, which became SE10 (*Decided*, 2026-10-16).
 - **Scope:** product content fields (description, vendor, product type, tags), the
   admin product list's text filter, search documents and how they stay in sync, the
   `SearchIndex` port and its engines, storefront search and listing with facets and
@@ -32,6 +33,7 @@
 | SE6 | **The storefront asks Hypha, not the engine.** `GET /storefront/search` takes a country (as carts do) to pick the market, `q`, filters, sort, group and a page; it returns hits with prices and facet counts. With no `q` it's the product listing 0010 S5 waited for. *Hard to reverse* |
 | SE7 | **Default facets** are each option name (`Color`, `Size`), `vendor`, `product_type`, `tag`, price and availability. The merchant picks which are shown and in what order, and which options split listings (`SearchSettings`, one per store) |
 | SE8 | **The admin searches the database**: `GET /admin/products?q=` matches title, handle and SKU (case-insensitive substring), so staff see drafts and their own edits at once. The index is for shoppers |
+| SE10 | **Event handlers are a trait, and the host composes them.** `hypha_core::EventHandler<P>` (name, the event types it wants, `handle`); the dispatcher runs whatever tuple of handlers the host passes, and each handler bounds `P` on just the repositories it uses. Search's handler lives in `hypha-search`; `hypha-dispatch` doesn't know it. Spores add handlers the same way (0002 §6). *Decided* |
 | SE9 | **The Postgres engine needs no extension**: full-text search with the `simple` configuration and prefix matching. Typo tolerance and ranking finesse are what Meilisearch is for |
 
 ## 1. What others do
@@ -197,8 +199,8 @@ CREATE TABLE search_queue (
 );
 ```
 
-**The handler, `search_index`** (in `hypha-dispatch`, which gains a dependency on
-`hypha-search`, section 11 Q2), marks:
+**The handler, `SearchIndexer`** (`search_index`, in `hypha-search`, an
+`EventHandler` the host lists; section 5.1), marks:
 
 | Event | Marks |
 | --- | --- |
@@ -224,6 +226,47 @@ coalescing: 500 checkouts of one shirt are one rebuild.
 then deletes the marks it finished. A mark re-queued while it ran (the product changed
 again) is kept: the delete matches `queued_at`. Failures leave the mark for the next run;
 `Progress` like the dispatcher's.
+
+### 5.1 Handlers as a trait (SE10)
+
+Until 0019 the dispatcher knew every handler: a constant list of names, a `match` that
+ran them, and `DispatchPorts` bounded on every repository any of them used. Each new
+handler meant editing the dispatcher and widening its bounds, and a spore couldn't add
+one without editing core, the opposite of 0002 §6.
+
+```rust
+// hypha-core (handlers.rs): a port shape like `Clock`, no domain knowledge.
+pub trait EventHandler<P: ?Sized> {
+    fn name(&self) -> &'static str;            // deliveries go to "handler:<name>"
+    fn wants(&self, event_type: &str) -> bool;
+    async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String>;
+}
+pub trait EventHandlers<P: ?Sized> {           // (), and tuples of 1 to 12 handlers
+    fn names(&self) -> Vec<&'static str>;
+    fn wanting(&self, event_type: &str) -> Vec<&'static str>;
+    async fn run(&self, name: &str, ports: &P, event: &StoredEvent) -> Option<Result<(), String>>;
+}
+```
+
+- `fan_out`, `handle`, `run` and `deliver_due` take `handlers: &impl EventHandlers<S>`;
+  `DispatchPorts` is back to the outbox and apps.
+- Each handler states its own needs: `impl<P: HasPriceLists + HasInventoryItems + …>
+  EventHandler<P> for VariantCleanup`. A host whose ports lack them doesn't compile with
+  that handler in its set.
+- **The host is the composition root:** `hypha-host-axum/src/handlers.rs` holds
+  `const HANDLERS: (VariantCleanup, SearchIndexer)`, with a test that names are unique.
+  A Workers host lists its own.
+- **Why a tuple, not `Vec<Box<dyn EventHandler>>`:** a trait with a generic parameter
+  and an `async fn` isn't object safe, and a `dyn` future couldn't be proven `Send` by
+  the host. Tuples are static dispatch (the pattern axum uses for handler arguments and
+  Bevy for systems): the compiler generates the code for the exact set.
+- **Names are a contract:** deliveries store `handler:<name>`. A handler removed from
+  the set leaves its pending deliveries retrying ("no handler in this build") until
+  they fail, so putting it back in time still delivers.
+- **Not a cursor over the outbox:** a projection like search could read events after
+  a position of its own, but sequence numbers are taken before commit, so a reader can
+  see 11 before 10 commits and skip 10 for good (`events_after` is documented as not a
+  feed). Claiming through `fan_out` doesn't have that gap.
 
 **Reindex:** `POST /admin/search/reindex` queues `all`. The host queues `all` at start
 when the engine reports it's empty (a new engine, or a switch from another).
@@ -284,8 +327,11 @@ Developers adjust beyond this through the search spore seam (section 9).
 - `hypha-cart`: `load_pricing` / `load_stock` become reusable functions over a product
   set (moved where `hypha-search` can call them without depending on carts: into
   `hypha-pricing` and `hypha-inventory`, or a shared module, decided while building).
-- `hypha-dispatch`: the `search_index` handler; the host runs `hypha_search::sync` as a
-  job (`jobs.search_sync`, every 2 s, in `hypha.config.toml` like the others).
+- `hypha-core`: `EventHandler` and `EventHandlers` (section 5.1).
+- `hypha-dispatch`: runs the host's handlers; `variant_cleanup` becomes the
+  `VariantCleanup` handler; `DispatchPorts` shrinks to the outbox and apps.
+- `hypha-host-axum`: `handlers.rs` lists the set; the host runs `hypha_search::sync` as
+  a job (`jobs.search_sync`, every 2 s, in `hypha.config.toml` like the others).
 
 ## 9. Extending it (developers)
 
@@ -302,12 +348,15 @@ Each step ends green (fmt, clippy, tests, wasm, Postgres contract, e2e).
 
 1. Content fields: products (with sanitising), migration, host DTOs, OpenAPI, SDK,
    admin product form, e2e.
+1b. Handlers as a trait (SE10): core's traits, the dispatcher and `VariantCleanup` on
+   them, the host's set (a refactor commit of its own).
 2. Admin `q`: `ProductFilter`, both repos, contract, route, admin search box.
 3. `hypha-search`: documents and `build_documents`, settings, queue and sync, the port,
    `InMemorySearchIndex` and the contract, with the shared pricing/stock loaders.
 4. Postgres: the engine (`search_documents`), the queue and settings tables, the
    contract.
-5. `location.changed`, the dispatch handler, the host job, routes, OpenAPI, SDK, e2e.
+5. `location.changed`, `SearchIndexer` in the host's set, the host job, routes,
+   OpenAPI, SDK, e2e.
 6. Admin: Settings → Search.
 7. Meilisearch: `hypha-search-meilisearch` (HTTP through a port, like `hypha-store-s3`),
    the contract against a Meilisearch in `docker-compose.yml`, chosen in
@@ -324,12 +373,12 @@ Each step ends green (fmt, clippy, tests, wasm, Postgres contract, e2e).
 - **C. Plain text** now, rich text later: changing a field's meaning later breaks
   clients.
 
-**Q2. `hypha-dispatch` → `hypha-search`, a new edge between workflows.** *Proceeding
-with A.*
-- **A.** The handler lives in `hypha-dispatch` (where every handler is) and depends on
-  `hypha-search` for the queue port. Dispatch is the top of the workflows already.
-- **B.** The queue port goes into `hypha-core` and the handler needs no search
-  dependency: core gains a search-specific port.
+**Q2. How the search handler reaches the dispatcher.** *Decided: neither A nor B,*
+SE10. A (`hypha-dispatch` depends on `hypha-search`) kept the dispatcher's handler list
+closed and its port bounds growing with every handler; B (the queue port in
+`hypha-core`) put a search-only concept into core and still left the dispatcher naming
+the handler. Making handlers a trait the host composes removes the edge and the
+special case, and gives spores their `event_handlers()` (0002 §6).
 
 **Q3. Facet counts on engines that count documents.** *Proceeding with A.* A. Accept
 the difference and say so (`COUNTS_GROUPS`); B. count groups with a second query per
