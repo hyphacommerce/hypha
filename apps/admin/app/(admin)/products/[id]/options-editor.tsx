@@ -9,112 +9,66 @@ import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Token } from "@astryxdesign/core/Token";
-import type { AdminSchemas } from "@hypha/sdk/admin";
 import { ArrowDownIcon, ArrowUpIcon, TrashIcon } from "@heroicons/react/24/outline";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
-import { type OptionDraft, setOptions } from "../actions";
-
-type Option = AdminSchemas["OptionResponse"];
-
-/** An option being edited; `key` is stable for React, `id` is the saved option's. */
-type Draft = {
-  key: string;
-  id?: string;
-  name: string;
-  values: { key: string; id?: string; label: string }[];
-  /** The "Add a value" input. */
-  adding: string;
-};
-
-let nextKey = 0;
-const newKey = () => `new-${nextKey++}`;
-
-function drafts(options: Option[]): Draft[] {
-  return options.map((o) => ({
-    key: o.id,
-    id: o.id,
-    name: o.name,
-    values: o.values.map((v) => ({ key: v.id, id: v.id, label: v.label })),
-    adding: "",
-  }));
-}
-
-/** What saving sends. A value typed but not yet added with Enter counts too: it shows
- * in its option, so saving shouldn't drop it. */
-function request(list: Draft[]): OptionDraft[] {
-  return list.map((d) => {
-    const typed = d.adding.trim();
-    return {
-      id: d.id,
-      name: d.name,
-      values: [
-        ...d.values.map((v) => ({ id: v.id, label: v.label })),
-        ...(typed === "" ? [] : [{ label: typed }]),
-      ],
-    };
-  });
-}
+import {
+  type Draft,
+  type OptionDraft,
+  newKey,
+  orphaned,
+  variantTitle,
+  withAllCombinations,
+} from "./draft";
 
 /**
- * Options and their values (design note 0014, section 3), saved as one list. Removing a
- * value that variants use asks first, naming them, then removes them in the same save.
+ * Options and their values (design note 0014, section 3), part of the editor's draft.
+ * A variant using a removed value is named here and removed with the save; "Create all
+ * variants" fills the draft with the combinations it lacks (design note 0021, Q1).
  */
 export function OptionsEditor({
-  id,
-  options,
-  variantTitles,
+  draft,
+  savedTitles,
+  onChange,
 }: {
-  id: string;
-  options: Option[];
-  /** Variant ID → its title ("M / Blue"), to name the ones a save would remove. */
-  variantTitles: Record<string, string>;
+  draft: Draft;
+  /** Variant ID → its saved title ("M / Blue"), to name the ones a save would remove. */
+  savedTitles: Record<string, string>;
+  onChange: (change: Partial<Draft>) => void;
 }) {
-  const [list, setList] = useState(() => drafts(options));
-  const [error, setError] = useState<string>();
-  const [toRemove, setToRemove] = useState<string[]>();
-  const [isPending, startTransition] = useTransition();
+  const [message, setMessage] = useState<{ status: "error" | "success"; text: string }>();
+  const list = draft.options;
+  const removed = orphaned(draft);
 
-  const saved = JSON.stringify(request(drafts(options)));
-  const isDirty = JSON.stringify(request(list)) !== saved;
-
-  const update = (key: string, change: (d: Draft) => Draft) =>
-    setList((before) => before.map((d) => (d.key === key ? change(d) : d)));
-  const move = (from: number, to: number) =>
-    setList((before) => {
-      const next = [...before];
-      const [d] = next.splice(from, 1);
-      next.splice(to, 0, d);
-      return next;
-    });
-  const addValue = (d: Draft) => {
+  const setList = (options: OptionDraft[]) => onChange({ options });
+  const update = (key: string, change: (d: OptionDraft) => OptionDraft) =>
+    setList(list.map((d) => (d.key === key ? change(d) : d)));
+  const move = (from: number, to: number) => {
+    const next = [...list];
+    const [d] = next.splice(from, 1);
+    next.splice(to, 0, d);
+    setList(next);
+  };
+  const addValue = (d: OptionDraft) => {
     const label = d.adding.trim();
     if (label === "") return;
     update(d.key, (x) => ({ ...x, values: [...x.values, { key: newKey(), label }], adding: "" }));
   };
-
-  const save = (removeVariants: string[] = []) =>
-    startTransition(async () => {
-      const result = await setOptions(id, request(list), removeVariants);
-      const variants = (result.details as { variants?: string[] } | null)?.variants ?? [];
-      if (result.code === "option_value_in_use") {
-        setError(undefined);
-        setToRemove(variants);
-        return;
-      }
-      setToRemove(undefined);
-      if (result.code === "duplicate_option_combination" && variants.length === 2) {
-        const [a, b] = variants.map((v) => variantTitles[v] ?? v);
-        setError(`Variants ${a} and ${b} would become the same. Remove one of them first.`);
-        return;
-      }
-      setError(result.error);
+  const createAll = () => {
+    const result = withAllCombinations(draft);
+    if ("error" in result) {
+      setMessage({ status: "error", text: result.error });
+      return;
+    }
+    const added = result.draft.variants.length - draft.variants.length;
+    onChange({ options: result.draft.options, variants: result.draft.variants });
+    setMessage({
+      status: "success",
+      text:
+        added === 0
+          ? "Every combination already has a variant."
+          : `Added ${added === 1 ? "a variant" : `${added} variants`} below: price them, then save.`,
     });
-
-  const reset = () => {
-    setList(drafts(options));
-    setError(undefined);
-    setToRemove(undefined);
   };
 
   return (
@@ -130,25 +84,14 @@ export function OptionsEditor({
           </Text>
         </VStack>
 
-        {error && <Banner status="error" title={error} />}
-        {toRemove && (
+        {message && <Banner status={message.status} title={message.text} />}
+        {removed.length > 0 && (
           <Banner
             status="warning"
-            title={`Saving removes ${toRemove.length === 1 ? "a variant" : `${toRemove.length} variants`}: ${toRemove
-              .map((v) => variantTitles[v] ?? v)
+            title={`Saving removes ${removed.length === 1 ? "a variant" : `${removed.length} variants`}: ${removed
+              .map((v) => (v.id ? savedTitles[v.id] : undefined) ?? variantTitle(draft, v) ?? "new")
               .join(", ")}.`}
             description="They use values you removed. Their prices in price lists and their stock records stay behind until they're cleaned up."
-            endContent={
-              <HStack gap={2}>
-                <Button label="Cancel" variant="ghost" onClick={() => setToRemove(undefined)} />
-                <Button
-                  label="Remove and save"
-                  variant="destructive"
-                  isLoading={isPending}
-                  onClick={() => save(toRemove)}
-                />
-              </HStack>
-            }
           />
         )}
 
@@ -188,7 +131,7 @@ export function OptionsEditor({
                 tooltip="Remove option"
                 variant="ghost"
                 icon={<TrashIcon width={16} />}
-                onClick={() => setList((before) => before.filter((x) => x.key !== d.key))}
+                onClick={() => setList(list.filter((x) => x.key !== d.key))}
               />
             </HStack>
             <HStack gap={2} wrap="wrap" vAlign="center">
@@ -218,24 +161,19 @@ export function OptionsEditor({
           </VStack>
         ))}
 
-        <HStack gap={2} hAlign="between">
+        <HStack gap={2}>
           <Button
             label="Add option"
             variant="secondary"
-            onClick={() =>
-              setList((before) => [...before, { key: newKey(), name: "", values: [], adding: "" }])
-            }
+            onClick={() => setList([...list, { key: newKey(), name: "", values: [], adding: "" }])}
           />
-          <HStack gap={2}>
-            {isDirty && <Button label="Discard" variant="ghost" onClick={reset} />}
-            <Button
-              label="Save options"
-              variant="primary"
-              isDisabled={!isDirty}
-              isLoading={isPending && !toRemove}
-              onClick={() => save()}
-            />
-          </HStack>
+          <Button
+            label="Create all variants"
+            variant="ghost"
+            isDisabled={list.length === 0}
+            tooltip="Adds a variant for every combination of values that doesn't have one."
+            onClick={createAll}
+          />
         </HStack>
       </VStack>
     </Card>

@@ -24,24 +24,47 @@ import { Thumbnail } from "@astryxdesign/core/Thumbnail";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useState, useTransition } from "react";
 
-import { useCurrencies } from "@/components/currencies";
-import { moneyInput, parseMoney } from "@/lib/format";
-
-import { addVariant, removeVariant, setVariantMedia, updateVariant } from "../actions";
+import { setVariantMedia } from "../actions";
+import {
+  type Draft,
+  type VariantDraft,
+  kept,
+  newKey,
+  valuesOf,
+  variantTitle,
+  withTypedValues,
+} from "./draft";
 
 type Product = AdminSchemas["ProductResponse"];
-type Variant = AdminSchemas["VariantResponse"];
 type Item = AdminSchemas["ProductMediaResponse"];
 
 /**
  * The variants (design note 0014, section 8): SKU, price, weight and whether it ships
- * (design note 0015) edited in place and saved per row, an image per variant from the product's media, and Add variant for one
- * combination at a time. Nothing generates every combination of the options.
+ * (design note 0015), part of the editor's draft and saved as one list (design note
+ * 0021, Q1). A variant's image is a separate decision and saves at once, for saved
+ * variants. Add variant adds one combination; "Create all variants", in Options, the
+ * rest.
  */
-export function VariantsSection({ product }: { product: Product }) {
+export function VariantsSection({
+  product,
+  draft,
+  currency,
+  onChange,
+}: {
+  /** As saved: the variants' images and the product's media. */
+  product: Product;
+  draft: Draft;
+  /** The base prices' currency. */
+  currency: string;
+  onChange: (change: Partial<Draft>) => void;
+}) {
   const [isAdding, setIsAdding] = useState(false);
-  const hasOptions = product.options.length > 0;
+  const hasOptions = draft.options.length > 0;
   const images = product.media.filter((item) => item.kind === "image");
+  const rows = kept(draft);
+
+  const update = (key: string, change: Partial<VariantDraft>) =>
+    onChange({ variants: draft.variants.map((v) => (v.key === key ? { ...v, ...change } : v)) });
 
   return (
     <Card>
@@ -52,7 +75,7 @@ export function VariantsSection({ product }: { product: Product }) {
               Variants
             </Text>
             <Text type="supporting" color="secondary">
-              Base prices, before markets and price lists adjust them.
+              Base prices in {currency}, before markets and price lists adjust them.
             </Text>
           </VStack>
           <Button
@@ -80,20 +103,36 @@ export function VariantsSection({ product }: { product: Product }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {product.variants.map((variant) => (
+            {rows.map((variant) => (
               <VariantRow
-                key={`${variant.id}:${variant.sku}:${variant.price.amount}:${variant.media_asset_id}:${variant.weight_grams}:${variant.requires_shipping}`}
+                key={variant.key}
                 productId={product.id}
                 variant={variant}
-                title={variant.title ?? (hasOptions ? "—" : "Default")}
+                saved={product.variants.find((v) => v.id === variant.id)}
+                title={variantTitle(draft, variant) ?? "Default"}
+                currency={currency}
                 images={images}
-                isOnly={product.variants.length === 1}
+                isOnly={rows.length === 1}
+                onChange={(change) => update(variant.key, change)}
+                onRemove={() =>
+                  onChange({ variants: draft.variants.filter((v) => v.key !== variant.key) })
+                }
               />
             ))}
           </TableBody>
         </Table>
       </VStack>
-      {isAdding && <AddVariantDialog product={product} onClose={() => setIsAdding(false)} />}
+      {isAdding && (
+        <AddVariantDialog
+          draft={draft}
+          currency={currency}
+          onAdd={(change) => {
+            onChange(change);
+            setIsAdding(false);
+          }}
+          onClose={() => setIsAdding(false)}
+        />
+      )}
     </Card>
   );
 }
@@ -101,54 +140,27 @@ export function VariantsSection({ product }: { product: Product }) {
 function VariantRow({
   productId,
   variant,
+  saved,
   title,
+  currency,
   images,
   isOnly,
+  onChange,
+  onRemove,
 }: {
   productId: string;
-  variant: Variant;
+  variant: VariantDraft;
+  /** The variant as saved; `undefined` for one added in this draft. */
+  saved?: AdminSchemas["VariantResponse"];
   title: string;
+  currency: string;
   images: Item[];
   isOnly: boolean;
+  onChange: (change: Partial<VariantDraft>) => void;
+  onRemove: () => void;
 }) {
-  const currencies = useCurrencies();
-  const savedSku = variant.sku ?? "";
-  const savedPrice = moneyInput(variant.price, currencies);
-  const savedWeight = variant.weight_grams == null ? "" : String(variant.weight_grams);
-  const [sku, setSku] = useState(savedSku);
-  const [price, setPrice] = useState(savedPrice);
-  const [weight, setWeight] = useState(savedWeight);
-  const [ships, setShips] = useState(variant.requires_shipping);
-  const [error, setError] = useState<string>();
-  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isPickingImage, setIsPickingImage] = useState(false);
-  const [isPending, startTransition] = useTransition();
-
-  // Compared as the API stores them (trimmed, in minor units): "A " or "45" saved as
-  // "A" and "45.00" would otherwise look unsaved forever.
-  const isDirty =
-    sku.trim() !== savedSku ||
-    parseMoney(price, variant.price.currency, currencies) !== variant.price.amount ||
-    weight.trim() !== savedWeight ||
-    ships !== variant.requires_shipping;
-  const image = images.find((item) => item.asset_id === variant.media_asset_id);
-  const save = () => {
-    if (!isDirty) return;
-    startTransition(async () => {
-      const result = await updateVariant(productId, variant.id, {
-        sku,
-        price,
-        currency: variant.price.currency,
-        weight,
-        requiresShipping: ships,
-      });
-      setError(result.error);
-      if (!result.error) {
-        setSku(sku.trim());
-        setWeight(weight.trim());
-      }
-    });
-  };
+  const image = images.find((item) => item.asset_id === saved?.media_asset_id);
 
   return (
     <TableRow>
@@ -156,13 +168,19 @@ function VariantRow({
         <Thumbnail
           src={image?.thumbnail_url ?? image?.url}
           alt={image?.alt ?? ""}
-          label={image ? `Change the image of ${title}` : `Choose an image for ${title}`}
-          onClick={() => setIsPickingImage(true)}
+          label={
+            saved
+              ? image
+                ? `Change the image of ${title}`
+                : `Choose an image for ${title}`
+              : `Save ${title} before choosing its image`
+          }
+          onClick={saved ? () => setIsPickingImage(true) : undefined}
         />
-        {isPickingImage && (
+        {isPickingImage && saved && (
           <VariantImageDialog
             productId={productId}
-            variant={variant}
+            variant={saved}
             title={title}
             images={images}
             onClose={() => setIsPickingImage(false)}
@@ -177,24 +195,20 @@ function VariantRow({
           label={`SKU of ${title}`}
           isLabelHidden
           size="sm"
-          value={sku}
-          onChange={setSku}
-          onEnter={save}
+          value={variant.sku}
+          onChange={(sku) => onChange({ sku })}
           placeholder="—"
           width={130}
         />
       </TableCell>
       <TableCell>
         <TextInput
-          label={`Price of ${title} in ${variant.price.currency}`}
+          label={`Price of ${title} in ${currency}`}
           isLabelHidden
           size="sm"
-          value={price}
-          onChange={setPrice}
-          onEnter={save}
+          value={variant.price}
+          onChange={(price) => onChange({ price })}
           width={110}
-          status={error ? { type: "error", message: error } : undefined}
-          statusVariant="tooltip"
         />
       </TableCell>
       <TableCell>
@@ -202,9 +216,8 @@ function VariantRow({
           label={`Weight of ${title} in grams`}
           isLabelHidden
           size="sm"
-          value={weight}
-          onChange={setWeight}
-          onEnter={save}
+          value={variant.weight}
+          onChange={(weight) => onChange({ weight })}
           placeholder="—"
           width={80}
         />
@@ -214,56 +227,27 @@ function VariantRow({
           label={`${title} is shipped`}
           isLabelHidden
           size="sm"
-          value={ships}
-          onChange={setShips}
+          value={variant.ships}
+          onChange={(ships) => onChange({ ships })}
         />
       </TableCell>
       <TableCell>
         <HStack gap={1} hAlign="end" vAlign="center">
-          {isConfirmingDelete ? (
-            <>
-              <Button
-                label="Cancel"
-                size="sm"
-                variant="ghost"
-                onClick={() => setIsConfirmingDelete(false)}
-              />
-              <Button
-                label="Delete variant"
-                size="sm"
-                variant="destructive"
-                isLoading={isPending}
-                onClick={() =>
-                  startTransition(async () => {
-                    const result = await removeVariant(productId, variant.id);
-                    setError(result.error);
-                    setIsConfirmingDelete(false);
-                  })
-                }
-              />
-            </>
-          ) : (
-            <>
-              {isDirty && (
-                <Button label="Save" size="sm" variant="primary" isLoading={isPending} onClick={save} />
-              )}
-              <Button
-                label="Delete"
-                size="sm"
-                variant="ghost"
-                isDisabled={isOnly}
-                tooltip={isOnly ? "A product keeps at least one variant." : undefined}
-                onClick={() => setIsConfirmingDelete(true)}
-              />
-            </>
-          )}
+          <Button
+            label="Remove"
+            size="sm"
+            variant="ghost"
+            isDisabled={isOnly}
+            tooltip={isOnly ? "A product keeps at least one variant." : undefined}
+            onClick={onRemove}
+          />
         </HStack>
       </TableCell>
     </TableRow>
   );
 }
 
-/** One of the product's images for a variant, or none. */
+/** One of the product's images for a saved variant, or none; saves at once. */
 function VariantImageDialog({
   productId,
   variant,
@@ -272,7 +256,7 @@ function VariantImageDialog({
   onClose,
 }: {
   productId: string;
-  variant: Variant;
+  variant: AdminSchemas["VariantResponse"];
   title: string;
   images: Item[];
   onClose: () => void;
@@ -330,44 +314,54 @@ function VariantImageDialog({
   );
 }
 
-/** One combination: a value per option, a SKU and a price. */
-function AddVariantDialog({ product, onClose }: { product: Product; onClose: () => void }) {
+/** One combination: a value per option (values added in the draft included), a SKU and
+ * a price, added to the draft. */
+function AddVariantDialog({
+  draft: current,
+  currency,
+  onAdd,
+  onClose,
+}: {
+  draft: Draft;
+  currency: string;
+  onAdd: (change: Partial<Draft>) => void;
+  onClose: () => void;
+}) {
+  // A value typed but not yet entered can be chosen too.
+  const [draft] = useState(() => withTypedValues(current));
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [sku, setSku] = useState("");
   const [price, setPrice] = useState("");
-  const [error, setError] = useState<string>();
-  const [isPending, startTransition] = useTransition();
-  const currency = product.variants[0]?.price.currency ?? "EUR";
 
   const isComplete =
-    product.options.every((option) => selections[option.id]) && price.trim() !== "";
+    draft.options.every((option) => selections[option.key]) && price.trim() !== "";
   const submit = () => {
     if (!isComplete) return;
-    startTransition(async () => {
-      const result = await addVariant(product.id, {
-        sku,
-        price,
-        currency,
-        selections: product.options.map((option) => selections[option.id]),
-      });
-      if (result.error) setError(result.error);
-      else onClose();
+    onAdd({
+      options: draft.options,
+      variants: [
+        ...draft.variants,
+        { key: newKey(), sku, price, weight: "", ships: true, selections },
+      ],
     });
   };
 
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={480} purpose="form">
-      <DialogHeader title="Add variant" onOpenChange={(isOpen) => !isOpen && onClose()} />
+      <DialogHeader
+        title="Add variant"
+        subtitle="It's saved with the rest of your changes."
+        onOpenChange={(isOpen) => !isOpen && onClose()}
+      />
       <VStack gap={4} padding={4}>
-        {error && <Banner status="error" title={error} />}
-        {product.options.map((option) => (
+        {draft.options.map((option) => (
           <Selector
-            key={option.id}
-            label={option.name}
-            placeholder={`Choose a ${option.name.toLowerCase()}`}
-            options={option.values.map((value) => ({ value: value.id, label: value.label }))}
-            value={selections[option.id]}
-            onChange={(value) => setSelections((before) => ({ ...before, [option.id]: value }))}
+            key={option.key}
+            label={option.name || "Option"}
+            placeholder={`Choose a ${(option.name || "value").toLowerCase()}`}
+            options={valuesOf(option).map((value) => ({ value: value.key, label: value.label }))}
+            value={selections[option.key]}
+            onChange={(value) => setSelections((before) => ({ ...before, [option.key]: value }))}
           />
         ))}
         <TextInput label="SKU" isOptional value={sku} onChange={setSku} onEnter={submit} />
@@ -380,13 +374,7 @@ function AddVariantDialog({ product, onClose }: { product: Product; onClose: () 
         />
         <HStack gap={2} hAlign="end">
           <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button
-            label="Add variant"
-            variant="primary"
-            isDisabled={!isComplete}
-            isLoading={isPending}
-            onClick={submit}
-          />
+          <Button label="Add variant" variant="primary" isDisabled={!isComplete} onClick={submit} />
         </HStack>
       </VStack>
     </Dialog>

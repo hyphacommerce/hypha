@@ -8,19 +8,15 @@ import { PageHeader } from "@/components/page-header";
 import { ProductStatusBadge } from "@/components/status";
 import { loaded, sessionClient } from "@/lib/hypha";
 
-import { ContentForm } from "./content-form";
-import { DetailsForm } from "./details-form";
 import { MediaSection } from "./media-section";
-import { OptionsEditor } from "./options-editor";
+import { ProductEditor } from "./product-editor";
 import { PublishingCard } from "./publishing-card";
 import { StatusActions } from "./status-actions";
-import { VariantsSection } from "./variants-section";
 
 /**
- * A product, edited in sections that each save on their own (design note 0014, section
- * 8). After a save, each section takes in what the API stored: the forms are keyed by
- * the data they edit (a remount resets them), and the media section, which has uploads
- * running, takes the new list while staying mounted.
+ * A product. Details, content, options and variants are one draft saved with a bar
+ * (design note 0021, section 8); status, publishing and media act at once. The media
+ * section, which has uploads running, takes each new list while staying mounted.
  */
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -30,10 +26,6 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
     // Without `channels:read` the page shows no Publishing card.
     client.GET("/admin/channels"),
   ]);
-  const hasOptions = product.options.length > 0;
-  const variantTitles = Object.fromEntries(
-    product.variants.map((v) => [v.id, v.title ?? (hasOptions ? v.id : "Default")]),
-  );
 
   return (
     <Section padding={6}>
@@ -45,51 +37,21 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           actions={<StatusActions id={product.id} status={product.status} />}
         />
 
-        <DetailsForm
-          key={`${product.title}/${product.handle}`}
-          id={product.id}
-          title={product.title}
-          handle={product.handle}
-          isActive={product.status === "active"}
+        <ProductEditor
+          product={product}
+          publishing={
+            channels.data && (
+              <PublishingCard
+                key={product.channels.join()}
+                id={product.id}
+                published={product.channels}
+                channels={channels.data.items}
+                isActive={product.status === "active"}
+              />
+            )
+          }
+          media={<MediaSection id={product.id} media={product.media} />}
         />
-
-        {channels.data && (
-          <PublishingCard
-            key={product.channels.join()}
-            id={product.id}
-            published={product.channels}
-            channels={channels.data.items}
-            isActive={product.status === "active"}
-          />
-        )}
-
-        <ContentForm
-          key={JSON.stringify([
-            product.description,
-            product.vendor,
-            product.product_type,
-            product.tags,
-          ])}
-          id={product.id}
-          description={product.description ?? ""}
-          vendor={product.vendor ?? ""}
-          productType={product.product_type ?? ""}
-          tags={product.tags}
-        />
-
-        <MediaSection
-          id={product.id}
-          media={product.media}
-        />
-
-        <OptionsEditor
-          key={JSON.stringify(product.options)}
-          id={product.id}
-          options={product.options}
-          variantTitles={variantTitles}
-        />
-
-        <VariantsSection product={product} />
 
         <Card>
           <MetadataList title="Identifiers">

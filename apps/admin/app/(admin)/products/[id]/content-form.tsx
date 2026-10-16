@@ -1,7 +1,5 @@
 "use client";
 
-import { Banner } from "@astryxdesign/core/Banner";
-import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
@@ -9,9 +7,8 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Tokenizer } from "@astryxdesign/core/Tokenizer";
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
-import { useState, useTransition } from "react";
 
-import { updateProduct } from "../actions";
+import type { Draft } from "./draft";
 
 /** Tags are typed in, not picked from a list: the source offers nothing, `hasCreate` adds. */
 const noSuggestions: SearchSource = { search: () => [], bootstrap: () => [] };
@@ -23,80 +20,42 @@ const firstWithLabel = (items: SearchableItem[], label: string) =>
 
 /**
  * What the product says about itself (design note 0019, section 2): description,
- * vendor, product type and tags, saved together (one PATCH). The description is HTML;
- * the API sanitises it, and the form then shows what was kept.
+ * vendor, product type and tags, part of the editor's draft. The description is HTML;
+ * the API sanitises it, and after saving the form shows what was kept.
  */
 export function ContentForm({
-  id,
-  description: savedDescription,
-  vendor: savedVendor,
-  productType: savedProductType,
-  tags: savedTags,
+  draft,
+  onChange,
 }: {
-  id: string;
-  description: string;
-  vendor: string;
-  productType: string;
-  tags: string[];
+  draft: Draft;
+  onChange: (change: Partial<Draft>) => void;
 }) {
-  const [description, setDescription] = useState(savedDescription);
-  const [vendor, setVendor] = useState(savedVendor);
-  const [productType, setProductType] = useState(savedProductType);
-  const [tags, setTags] = useState(asItems(savedTags));
-  const [error, setError] = useState<string>();
-  const [isPending, startTransition] = useTransition();
-
-  const tagLabels = tags.map((t) => t.label);
-  const isDirty =
-    description.trim() !== savedDescription ||
-    vendor.trim() !== savedVendor ||
-    productType.trim() !== savedProductType ||
-    tagLabels.join("\n") !== savedTags.join("\n");
-
-  const reset = () => {
-    setDescription(savedDescription);
-    setVendor(savedVendor);
-    setProductType(savedProductType);
-    setTags(asItems(savedTags));
-    setError(undefined);
-  };
-  const save = () => {
-    if (!isDirty) return;
-    startTransition(async () => {
-      const blankIsNull = (s: string) => (s.trim() === "" ? null : s);
-      const result = await updateProduct(id, {
-        description: blankIsNull(description),
-        vendor: blankIsNull(vendor),
-        product_type: blankIsNull(productType),
-        tags: tagLabels,
-      });
-      setError(result.error);
-    });
-  };
-
   return (
     <Card>
       <VStack gap={4}>
         <Text type="display-3" as="h2">
           Content
         </Text>
-        {error && <Banner status="error" title={error} />}
         <TextArea
           label="Description"
           description="HTML: paragraphs, headings, lists, links and images. Scripts and styles are removed when it's saved."
           isOptional
           rows={8}
-          value={description}
-          onChange={setDescription}
+          value={draft.description}
+          onChange={(description) => onChange({ description })}
         />
         <HStack gap={4}>
-          <TextInput label="Vendor" isOptional value={vendor} onChange={setVendor} onEnter={save} />
+          <TextInput
+            label="Vendor"
+            isOptional
+            value={draft.vendor}
+            onChange={(vendor) => onChange({ vendor })}
+          />
           <TextInput
             label="Product type"
             isOptional
-            value={productType}
-            onChange={setProductType}
-            onEnter={save}
+            value={draft.productType}
+            onChange={(productType) => onChange({ productType })}
           />
         </HStack>
         <Tokenizer
@@ -108,22 +67,16 @@ export function ContentForm({
           hasCreate
           debounceMs={0}
           maxEntries={250}
-          value={tags}
+          value={asItems(draft.tags)}
           onChange={(items) =>
             // The API keeps the first spelling of a tag; so does the form.
-            setTags(items.filter((item, i) => firstWithLabel(items, item.label) === i))
+            onChange({
+              tags: items
+                .filter((item, i) => firstWithLabel(items, item.label) === i)
+                .map((item) => item.label),
+            })
           }
         />
-        <HStack gap={2} hAlign="end">
-          {isDirty && <Button label="Discard" variant="ghost" onClick={reset} />}
-          <Button
-            label="Save"
-            variant="primary"
-            isDisabled={!isDirty}
-            isLoading={isPending}
-            onClick={save}
-          />
-        </HStack>
       </VStack>
     </Card>
   );

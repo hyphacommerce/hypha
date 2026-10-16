@@ -7,6 +7,8 @@ import { redirect } from "next/navigation";
 import { parseMoney } from "@/lib/format";
 import { describe, loadCurrencies, sessionClient } from "@/lib/hypha";
 
+import type { SavePlan, SelectionRef } from "./[id]/draft";
+
 export type FormState = { error?: string };
 
 export async function createProduct(
@@ -57,105 +59,72 @@ function refresh(id: string) {
   revalidatePath("/products");
 }
 
-export async function updateProduct(
-  id: string,
-  input: AdminSchemas["UpdateProductRequest"],
-): Promise<EditResult> {
+/** A save's outcome: the first failure's message, and the options as stored when the
+ * save got that far, so the editor can point its draft at them. */
+export type SaveResult = {
+  error?: string;
+  options?: AdminSchemas["OptionResponse"][];
+  /** The product as the last step stored it, after a save that succeeded. */
+  product?: AdminSchemas["ProductResponse"];
+};
+
+/**
+ * Saves the product editor's draft (design note 0021, section 8): the product's PATCH,
+ * then its options, then its whole variant list (`PUT …/variants`), each only when its
+ * part changed. Values created by the options step are found by option name and label
+ * for the variants that select them. Stops at the first failure: what came before it
+ * stays saved.
+ */
+export async function saveProduct(id: string, plan: SavePlan): Promise<SaveResult> {
   const client = await sessionClient();
-  const { error } = await client.PATCH("/admin/products/{id}", {
-    params: { path: { id } },
-    body: input,
-  });
-  if (error) return failed(error);
-  refresh(id);
-  return {};
+  let product: AdminSchemas["ProductResponse"] | undefined;
+  try {
+    if (plan.product) {
+      const { data, error } = await client.PATCH("/admin/products/{id}", {
+        params: { path: { id } },
+        body: plan.product,
+      });
+      if (error) return { error: describe(error) };
+      product = data;
+    }
+    let options: AdminSchemas["OptionResponse"][] | undefined;
+    if (plan.options) {
+      const { data, error } = await client.PUT("/admin/products/{id}/options", {
+        params: { path: { id } },
+        body: { options: plan.options.options, remove_variants: plan.options.removeVariants },
+      });
+      if (error) return { error: describe(error) };
+      product = data;
+      options = data.options;
+    }
+    if (plan.variants) {
+      const variants = plan.variants.map((v) => ({
+        ...v,
+        selections: v.selections.map((s) => valueId(s, options)),
+      }));
+      const { data, error } = await client.PUT("/admin/products/{id}/variants", {
+        params: { path: { id } },
+        body: { variants },
+      });
+      if (error) return { error: describe(error), options };
+      product = data;
+    }
+    return { product };
+  } finally {
+    refresh(id);
+  }
 }
 
-export type OptionDraft = AdminSchemas["OptionRequest"];
-
-export async function setOptions(
-  id: string,
-  options: OptionDraft[],
-  removeVariants: string[] = [],
-): Promise<EditResult> {
-  const client = await sessionClient();
-  const { error } = await client.PUT("/admin/products/{id}/options", {
-    params: { path: { id } },
-    body: { options, remove_variants: removeVariants },
-  });
-  if (error) return failed(error);
-  refresh(id);
-  return {};
-}
-
-export async function addVariant(
-  id: string,
-  input: { sku: string; price: string; currency: AdminSchemas["Currency"]; selections: string[] },
-): Promise<EditResult> {
-  const amount = parseMoney(input.price, input.currency, await loadCurrencies());
-  if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
-  const client = await sessionClient();
-  const { error } = await client.POST("/admin/products/{id}/variants", {
-    params: { path: { id } },
-    body: {
-      sku: input.sku.trim() === "" ? null : input.sku,
-      price: { amount, currency: input.currency },
-      selections: input.selections,
-    },
-  });
-  if (error) return failed(error);
-  refresh(id);
-  return {};
-}
-
-/** Grams from what someone typed: a whole number, or null for a blank (not entered). */
-function parseGrams(input: string): number | null | undefined {
-  const text = input.trim();
-  if (text === "") return null;
-  if (!/^\d+$/.test(text)) return undefined;
-  const grams = Number(text);
-  return grams <= 4_294_967_295 ? grams : undefined;
-}
-
-export async function updateVariant(
-  id: string,
-  variant: string,
-  input: {
-    sku: string;
-    price: string;
-    currency: AdminSchemas["Currency"];
-    weight: string;
-    requiresShipping: boolean;
-  },
-): Promise<EditResult> {
-  const amount = parseMoney(input.price, input.currency, await loadCurrencies());
-  if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
-  const grams = parseGrams(input.weight);
-  if (grams === undefined) return { error: "Enter the weight in whole grams, like 350." };
-  const client = await sessionClient();
-  const { error } = await client.PATCH("/admin/products/{id}/variants/{variant_id}", {
-    params: { path: { id, variant_id: variant } },
-    // A blank SKU or weight clears it (`null` in a Merge Patch).
-    body: {
-      sku: input.sku.trim() === "" ? null : input.sku,
-      price: { amount, currency: input.currency },
-      weight_grams: grams,
-      requires_shipping: input.requiresShipping,
-    },
-  });
-  if (error) return failed(error);
-  refresh(id);
-  return {};
-}
-
-export async function removeVariant(id: string, variant: string): Promise<EditResult> {
-  const client = await sessionClient();
-  const { error } = await client.DELETE("/admin/products/{id}/variants/{variant_id}", {
-    params: { path: { id, variant_id: variant } },
-  });
-  if (error) return failed(error);
-  refresh(id);
-  return {};
+/** The value a selection names: its ID, or (created by this save) the value with its
+ * label in the stored option with its name. */
+function valueId(selection: SelectionRef, options?: AdminSchemas["OptionResponse"][]): string {
+  if (selection.value.id) return selection.value.id;
+  const option = options?.find((o) =>
+    selection.option.id ? o.id === selection.option.id : o.name === selection.option.name.trim(),
+  );
+  const value = option?.values.find((v) => v.label === selection.value.label.trim());
+  // Not found only if the options step stored something else; the API then names it.
+  return value?.id ?? selection.value.label;
 }
 
 /** Attaches, reorders and detaches in one: `assets` becomes the whole list. */
