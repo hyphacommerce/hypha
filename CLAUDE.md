@@ -22,7 +22,7 @@ Run all four before considering work done; CI (`.github/workflows/ci.yml`) runs 
 cargo fmt --all
 cargo clippy --workspace --all-targets
 cargo test --workspace
-cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-tax -p hypha-inventory -p hypha-customers -p hypha-stores -p hypha-orders -p hypha-fulfillment -p hypha-checkout -p hypha-dispatch -p hypha-auth -p hypha-users -p hypha-media -p hypha-merchandising -p hypha-shipping -p hypha-apps -p hypha-config -p hypha-store-postgres -p hypha-store-s3 --target wasm32-unknown-unknown
+cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p hypha-cart -p hypha-tax -p hypha-inventory -p hypha-customers -p hypha-stores -p hypha-orders -p hypha-fulfillment -p hypha-checkout -p hypha-order-actions -p hypha-dispatch -p hypha-auth -p hypha-users -p hypha-media -p hypha-merchandising -p hypha-shipping -p hypha-apps -p hypha-config -p hypha-store-postgres -p hypha-store-s3 --target wasm32-unknown-unknown
 ```
 
 Extend the wasm build list when a domain crate or storage adapter is added.
@@ -57,7 +57,7 @@ Domain crates are layered; a crate may only depend on layers below it (Cargo rej
 | Hosts | `hypha-host-axum` | anything |
 | Storage adapters | `hypha-store-postgres` (tokio-postgres; native and Workers via Hyperdrive), `hypha-store-s3` (files over the S3 API: R2, S3; HTTP through its `HttpClient` port) | domain crates, core; never hosts |
 | Configuration | `hypha-config` (design note 0017: `hypha.config.toml` into each crate's settings; parses a string, so it builds for wasm) | workflows, domain crates, core; only hosts depend on it |
-| Workflows | `hypha-checkout` (cart → order), `hypha-dispatch` (delivering domain events: fan-out, retries, in-process handlers like `variant_cleanup`, webhooks to apps through the host's `WebhookSender` port; design note 0016) | composing and leaf domains, core |
+| Workflows | `hypha-checkout` (cart → order), `hypha-order-actions` (fulfil, cancel a fulfilment, cancel an order: orders, fulfilments and stock in one batch; design note 0018), `hypha-dispatch` (delivering domain events: fan-out, retries, in-process handlers like `variant_cleanup`, webhooks to apps through the host's `WebhookSender` port; design note 0016) | composing and leaf domains, core |
 | Composing domains | `hypha-cart`, `hypha-users`, `hypha-merchandising` | leaf domains, core (`hypha-users` → `hypha-auth` only; `hypha-merchandising` → `hypha-products`, `hypha-media` only) |
 | Leaf domains | `hypha-products`, `hypha-markets`, `hypha-pricing`, `hypha-tax`, `hypha-inventory`, `hypha-customers`, `hypha-stores`, `hypha-orders`, `hypha-fulfillment`, `hypha-auth`, `hypha-media`, `hypha-shipping`, `hypha-apps` | core; `hypha-pricing` → `hypha-markets` only |
 | Core | `hypha-core` | nothing internal |

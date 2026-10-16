@@ -1,0 +1,20 @@
+[package]
+name = "hypha-order-actions"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+hypha-fulfillment = { path = "../hypha-fulfillment" }
+hypha-inventory = { path = "../hypha-inventory" }
+hypha-orders = { path = "../hypha-orders" }
+thiserror.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "0.4"
+
+[lints]
+workspace = true

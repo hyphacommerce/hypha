@@ -1041,6 +1041,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-order-actions"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-fulfillment",
+ "hypha-inventory",
+ "hypha-orders",
+ "hypha-testkit",
+ "pollster",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-orders"
 version = "0.1.0"
 dependencies = [
@@ -1104,6 +1118,7 @@ dependencies = [
  "hypha-inventory",
  "hypha-markets",
  "hypha-media",
+ "hypha-order-actions",
  "hypha-orders",
  "hypha-products",
  "hypha-shipping",

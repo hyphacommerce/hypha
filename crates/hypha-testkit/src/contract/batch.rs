@@ -1,12 +1,16 @@
 use hypha_cart::{Cart, CartRepo, HasCarts, StageCarts, repo::keys as cart_keys};
 use hypha_core::{
-    Actor, CartId, CountryCode, CustomerId, Email, HasBatch, HasIdempotency, IdempotencyKey,
-    IdempotencyRecord, IdempotencyRepo, InventoryItemId, MarketId, ProductId, Quantity, RepoError,
-    StageIdempotency, Timestamp, VariantId, Version, Versioned,
+    Actor, CartId, CountryCode, CustomerId, Email, FulfillmentId, HasBatch, HasIdempotency,
+    IdempotencyKey, IdempotencyRecord, IdempotencyRepo, InventoryItemId, LocationId, MarketId,
+    ProductId, Quantity, RepoError, StageIdempotency, Timestamp, VariantId, Version, Versioned,
     idempotency::keys as idempotency_keys,
 };
 use hypha_customers::{
     Customer, CustomerRepo, HasCustomers, StageCustomers, repo::keys as customer_keys,
+};
+use hypha_fulfillment::{
+    Fulfillment, FulfillmentLine, FulfillmentRepo, HasFulfillments, NewFulfillment,
+    StageFulfillments, Tracking,
 };
 use hypha_inventory::{HasInventoryItems, InventoryItem, InventoryItemRepo, StageInventoryItems};
 use hypha_orders::{HasOrders, Order, OrderRepo, StageOrders, repo::keys as order_keys};
@@ -18,8 +22,19 @@ use super::{orders::order, scenario};
 /// aggregates commit together, with the versions checked as single writes check them.
 pub async fn batch<S>(make: impl AsyncFn() -> S)
 where
-    S: HasBatch + HasCarts + HasInventoryItems + HasOrders + HasCustomers + HasIdempotency,
-    S::Batch: StageCarts + StageInventoryItems + StageOrders + StageCustomers + StageIdempotency,
+    S: HasBatch
+        + HasCarts
+        + HasInventoryItems
+        + HasOrders
+        + HasCustomers
+        + HasIdempotency
+        + HasFulfillments,
+    S::Batch: StageCarts
+        + StageInventoryItems
+        + StageOrders
+        + StageCustomers
+        + StageIdempotency
+        + StageFulfillments,
 {
     scenario("batch: commits every staged write, at the versions staging promised");
     commits_everything(&make().await).await;
@@ -45,6 +60,16 @@ where
     taken_key_writes_nothing(&make().await).await;
     scenario("batch: an empty batch commits");
     empty_batch(&make().await).await;
+    scenario("batch: a fulfilment with its order and stock (design note 0018)");
+    fulfils_an_order(&make().await).await;
+    scenario("batch: a stale order writes nothing, not even the new fulfilment");
+    stale_order_writes_nothing(&make().await).await;
+    scenario("batch: a stale fulfilment writes nothing");
+    stale_fulfillment_writes_nothing(&make().await).await;
+    scenario("batch: deletes an inventory item at its version");
+    deletes_an_item(&make().await).await;
+    scenario("batch: deleting a stale or missing inventory item writes nothing");
+    stale_deleted_item_writes_nothing(&make().await).await;
 }
 
 fn cart(n: u128) -> Cart {
@@ -376,4 +401,165 @@ where
 
 async fn empty_batch<S: HasBatch>(ports: &S) {
     assert_eq!(ports.commit(ports.batch()).await, Ok(()));
+}
+
+/// Fulfilment `n` of `order`'s first line, one unit, with tracking.
+fn fulfillment(n: u128, order: &Order) -> Fulfillment {
+    Fulfillment::new(NewFulfillment {
+        id: FulfillmentId::from_uuid(Uuid::from_u128(n)),
+        order: order.id(),
+        location: LocationId::from_uuid(Uuid::from_u128(500)),
+        lines: vec![FulfillmentLine {
+            line: order.lines()[0].id,
+            quantity: Quantity::new(1).unwrap(),
+        }],
+        tracking: vec![Tracking::new(Some("DHL"), "1", None).unwrap()],
+    })
+    .unwrap()
+}
+
+/// A stored order (one line of 1), and stored items 1 and 2.
+async fn stored_order<S: HasOrders + HasCarts + HasInventoryItems>(
+    ports: &S,
+) -> (Order, InventoryItem, InventoryItem) {
+    let (_, a, b) = stored(ports).await;
+    let mut o = order(1);
+    ports.orders().insert(&mut o).await.unwrap();
+    (o, a, b)
+}
+
+fn first_line(o: &Order) -> [(hypha_core::OrderLineId, Quantity); 1] {
+    [(o.lines()[0].id, Quantity::new(1).unwrap())]
+}
+
+async fn fulfils_an_order<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems + HasOrders + HasFulfillments,
+    S::Batch: StageOrders + StageInventoryItems + StageFulfillments,
+{
+    let (mut o, mut a, _) = stored_order(ports).await;
+    let mut f = fulfillment(1, &o);
+    o.fulfil(&first_line(&o)).unwrap();
+    a.set_tracked(false);
+    let mut batch = ports.batch();
+    batch.insert_fulfillment(&mut f);
+    batch.update_order(&mut o);
+    batch.update_inventory_item(&mut a);
+    assert_eq!(
+        (f.version(), o.version()),
+        (Version::new(1), Version::new(2))
+    );
+    assert_eq!(ports.commit(batch).await, Ok(()));
+    assert_eq!(ports.fulfillments().get(f.id()).await, Ok(Some(f.clone())));
+    assert_eq!(ports.orders().get(o.id()).await, Ok(Some(o.clone())));
+    assert_eq!(ports.inventory_items().get(a.id()).await, Ok(Some(a)));
+
+    // Then cancelled: the fulfilment and the order updated together.
+    f.cancel(Timestamp::from_unix_micros(1_767_225_600_000_001));
+    o.unfulfil(&first_line(&o)).unwrap();
+    let mut batch = ports.batch();
+    batch.update_order(&mut o);
+    batch.update_fulfillment(&mut f);
+    assert_eq!(ports.commit(batch).await, Ok(()));
+    assert_eq!(ports.fulfillments().get(f.id()).await, Ok(Some(f)));
+    assert_eq!(ports.orders().get(o.id()).await, Ok(Some(o)));
+}
+
+async fn stale_order_writes_nothing<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems + HasOrders + HasFulfillments,
+    S::Batch: StageOrders + StageInventoryItems + StageFulfillments,
+{
+    let (o, a, _) = stored_order(ports).await;
+    // Another request fulfils it first.
+    let mut rival = o.clone();
+    rival.fulfil(&first_line(&o)).unwrap();
+    ports.orders().update(&mut rival).await.unwrap();
+
+    let (mut stale, mut changed) = (o, a.clone());
+    let mut f = fulfillment(1, &stale);
+    stale.fulfil(&first_line(&rival)).unwrap();
+    changed.set_tracked(false);
+    let mut batch = ports.batch();
+    batch.insert_fulfillment(&mut f);
+    batch.update_inventory_item(&mut changed);
+    batch.update_order(&mut stale);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(ports.fulfillments().get(f.id()).await, Ok(None));
+    assert_eq!(ports.orders().get(rival.id()).await, Ok(Some(rival)));
+    assert_eq!(ports.inventory_items().get(a.id()).await, Ok(Some(a)));
+}
+
+async fn stale_fulfillment_writes_nothing<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems + HasOrders + HasFulfillments,
+    S::Batch: StageOrders + StageFulfillments,
+{
+    let (mut o, _, _) = stored_order(ports).await;
+    let mut f = fulfillment(1, &o);
+    ports.fulfillments().insert(&mut f).await.unwrap();
+    o.fulfil(&first_line(&o)).unwrap();
+    ports.orders().update(&mut o).await.unwrap();
+    let mut rival = f.clone();
+    rival.cancel(Timestamp::UNIX_EPOCH);
+    ports.fulfillments().update(&mut rival).await.unwrap();
+
+    let (mut stale, mut changed) = (f, o.clone());
+    stale.set_tracking(vec![]).unwrap();
+    changed.mark_paid().unwrap();
+    let mut batch = ports.batch();
+    batch.update_order(&mut changed);
+    batch.update_fulfillment(&mut stale);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(ports.orders().get(o.id()).await, Ok(Some(o)));
+    assert_eq!(ports.fulfillments().get(rival.id()).await, Ok(Some(rival)));
+}
+
+async fn deletes_an_item<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems,
+    S::Batch: StageInventoryItems,
+{
+    let (_, mut a, mut b) = stored(ports).await;
+    a.delete().unwrap();
+    b.set_tracked(false);
+    let mut batch = ports.batch();
+    batch.delete_inventory_item(&mut a);
+    batch.update_inventory_item(&mut b);
+    assert_eq!(ports.commit(batch).await, Ok(()));
+    assert_eq!(ports.inventory_items().get(a.id()).await, Ok(None));
+    assert_eq!(ports.inventory_items().get(b.id()).await, Ok(Some(b)));
+}
+
+async fn stale_deleted_item_writes_nothing<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems,
+    S::Batch: StageInventoryItems,
+{
+    let (_, a, b) = stored(ports).await;
+    // Changed since it was loaded (say, a new reservation).
+    let mut rival = a.clone();
+    rival.set_tracked(false);
+    ports.inventory_items().update(&mut rival).await.unwrap();
+
+    let (mut stale, mut changed) = (a, b.clone());
+    stale.delete().unwrap();
+    changed.set_tracked(false);
+    let mut batch = ports.batch();
+    batch.update_inventory_item(&mut changed);
+    batch.delete_inventory_item(&mut stale);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(
+        ports.inventory_items().get(rival.id()).await,
+        Ok(Some(rival.clone()))
+    );
+    assert_eq!(ports.inventory_items().get(b.id()).await, Ok(Some(b)));
+
+    // Already gone.
+    let mut gone = rival.clone();
+    ports.inventory_items().delete(&mut rival).await.unwrap();
+    gone.delete().unwrap();
+    let mut batch = ports.batch();
+    batch.delete_inventory_item(&mut gone);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
 }

@@ -33,12 +33,13 @@ use crate::{
     error::repo_error,
     fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
+    inventory::delete_items,
     inventory::update_items,
     markets::{
         add_catalog_products, remove_catalog_products, remove_fixed_prices, set_fixed_prices,
     },
     media::replace_usages,
-    orders::insert_order,
+    orders::{insert_order, update_order},
     outbox::insert_events,
     products::update_product,
     store::{PgConnection, PgStore},
@@ -58,6 +59,7 @@ pub struct PgBatch {
 /// `rank` and `apply`, and its `Stage*` impl below.
 enum Staged {
     NewOrder(OrderSnapshot),
+    Order(OrderSnapshot),
     NewFulfillment(FulfillmentSnapshot),
     Fulfillment(FulfillmentSnapshot),
     NewCart(CartSnapshot),
@@ -80,6 +82,8 @@ enum Staged {
     PasswordReset(PasswordResetSnapshot),
     UsedUpResets(IdentityId, Timestamp),
     InventoryItem(InventoryItemSnapshot),
+    /// An item removed at the version it was loaded at.
+    DeletedInventoryItem(InventoryItemSnapshot),
     /// Products' tax class (`None`: the default rate).
     TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
     /// Catalog membership: added (`true`) or removed.
@@ -100,34 +104,36 @@ impl Staged {
     fn rank(&self) -> u8 {
         match self {
             Staged::NewOrder(_) => 0,
-            Staged::NewFulfillment(_) => 1,
-            Staged::Fulfillment(_) => 2,
-            Staged::NewCart(_) => 3,
-            Staged::Cart(_) => 4,
-            Staged::Product(_) => 5,
-            Staged::AssetUsages(..) => 6,
-            Staged::NewCustomer(_) => 7,
-            Staged::NewRole(_) => 8,
-            Staged::Role(_) => 9,
-            Staged::NewUser(_) => 10,
-            Staged::User(_) => 11,
-            Staged::Invite(_) => 12,
-            Staged::NewIdentity(_) => 13,
-            Staged::Identity(_) => 14,
-            Staged::NewSession(_) => 15,
-            Staged::Session(_) => 16,
-            Staged::SessionRevocation(..) => 17,
-            Staged::NewPasswordReset(_) => 18,
-            Staged::PasswordReset(_) => 19,
-            Staged::UsedUpResets(..) => 20,
+            Staged::Order(_) => 1,
+            Staged::NewFulfillment(_) => 2,
+            Staged::Fulfillment(_) => 3,
+            Staged::NewCart(_) => 4,
+            Staged::Cart(_) => 5,
+            Staged::Product(_) => 6,
+            Staged::AssetUsages(..) => 7,
+            Staged::NewCustomer(_) => 8,
+            Staged::NewRole(_) => 9,
+            Staged::Role(_) => 10,
+            Staged::NewUser(_) => 11,
+            Staged::User(_) => 12,
+            Staged::Invite(_) => 13,
+            Staged::NewIdentity(_) => 14,
+            Staged::Identity(_) => 15,
+            Staged::NewSession(_) => 16,
+            Staged::Session(_) => 17,
+            Staged::SessionRevocation(..) => 18,
+            Staged::NewPasswordReset(_) => 19,
+            Staged::PasswordReset(_) => 20,
+            Staged::UsedUpResets(..) => 21,
             // These two are gathered and written in one statement each, last.
-            Staged::CatalogProducts(..) => 21,
-            Staged::FixedPrices(..) => 22,
-            Staged::TaxAssignment(..) => 23,
-            Staged::Idempotency(_) => 24,
-            Staged::InventoryItem(_) => 25,
+            Staged::CatalogProducts(..) => 22,
+            Staged::FixedPrices(..) => 23,
+            Staged::TaxAssignment(..) => 24,
+            Staged::Idempotency(_) => 25,
+            Staged::InventoryItem(_) => 26,
+            Staged::DeletedInventoryItem(_) => 27,
             // Inserts into a table nothing else locks: anywhere would do.
-            Staged::Events(..) => 26,
+            Staged::Events(..) => 28,
         }
     }
 
@@ -137,7 +143,8 @@ impl Staged {
         self.rank()
             .cmp(&other.rank())
             .then_with(|| match (self, other) {
-                (Staged::NewOrder(a), Staged::NewOrder(b)) => a.id.cmp(&b.id),
+                (Staged::NewOrder(a), Staged::NewOrder(b))
+                | (Staged::Order(a), Staged::Order(b)) => a.id.cmp(&b.id),
                 (Staged::NewFulfillment(a), Staged::NewFulfillment(b))
                 | (Staged::Fulfillment(a), Staged::Fulfillment(b)) => a.id.cmp(&b.id),
                 (Staged::NewCart(a), Staged::NewCart(b)) | (Staged::Cart(a), Staged::Cart(b)) => {
@@ -159,7 +166,10 @@ impl Staged {
                 | (Staged::Session(a), Staged::Session(b)) => a.id.cmp(&b.id),
                 (Staged::NewPasswordReset(a), Staged::NewPasswordReset(b))
                 | (Staged::PasswordReset(a), Staged::PasswordReset(b)) => a.id.cmp(&b.id),
-                (Staged::InventoryItem(a), Staged::InventoryItem(b)) => a.id.cmp(&b.id),
+                (Staged::InventoryItem(a), Staged::InventoryItem(b))
+                | (Staged::DeletedInventoryItem(a), Staged::DeletedInventoryItem(b)) => {
+                    a.id.cmp(&b.id)
+                }
                 (Staged::CatalogProducts(a, ..), Staged::CatalogProducts(b, ..)) => a.cmp(b),
                 (Staged::FixedPrices(a, _), Staged::FixedPrices(b, _)) => a.cmp(b),
                 _ => Ordering::Equal,
@@ -307,6 +317,14 @@ impl StageInventoryItems for PgBatch {
         self.stage_events_of(item, version);
         item.set_version(version);
     }
+
+    fn delete_inventory_item(&mut self, item: &mut InventoryItem) {
+        self.stage(Staged::DeletedInventoryItem(item.snapshot()));
+        let events = item.take_events();
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, None));
+        }
+    }
 }
 
 impl StageOrders for PgBatch {
@@ -315,6 +333,14 @@ impl StageOrders for PgBatch {
         self.stage(Staged::NewOrder(order.snapshot()));
         self.stage_events_of(order, Version::NEW.next());
         order.set_version(Version::NEW.next());
+    }
+
+    fn update_order(&mut self, order: &mut Order) {
+        stamp_update(order, self.now);
+        self.stage(Staged::Order(order.snapshot()));
+        let version = order.version().next();
+        self.stage_events_of(order, version);
+        order.set_version(version);
     }
 }
 
@@ -369,6 +395,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         }
         batch.staged.sort_by(Staged::cmp);
         let mut items = Vec::new();
+        let mut deleted = Vec::new();
         let mut records = Vec::new();
 
         let mut conn = self.conn().await;
@@ -376,6 +403,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         for write in batch.staged {
             match write {
                 Staged::NewOrder(s) => insert_order(&tx, &s).await?,
+                Staged::Order(s) => {
+                    update_order(&tx, &s).await?;
+                }
                 Staged::NewFulfillment(s) => insert_fulfillment(&tx, &s).await?,
                 Staged::Fulfillment(s) => {
                     update_fulfillment(&tx, &s).await?;
@@ -418,6 +448,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     use_up_password_resets(&tx, identity, at).await?
                 }
                 Staged::InventoryItem(s) => items.push(s),
+                Staged::DeletedInventoryItem(s) => deleted.push(s),
                 Staged::TaxAssignment(products, class) => {
                     assign_tax_class(&tx, &products, class).await?
                 }
@@ -451,6 +482,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         }
         insert_records(&tx, &records).await?;
         update_items(&tx, items).await?;
+        delete_items(&tx, &deleted).await?;
         tx.commit().await.map_err(repo_error)
     }
 }

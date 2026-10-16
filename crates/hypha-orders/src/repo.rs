@@ -36,6 +36,9 @@ pub trait StageOrders {
     /// Stages what `OrderRepo::insert` would write; `order` is at version 1 once the
     /// batch commits.
     fn insert_order(&mut self, order: &mut Order);
+    /// Stages what `OrderRepo::update` would write, and moves `order` to the version it
+    /// has once the batch commits (stale then: `StaleVersion`, nothing written).
+    fn update_order(&mut self, order: &mut Order);
 }
 
 /// Whatever holds the `OrderRepo`: a host's per-request ports, a test world.

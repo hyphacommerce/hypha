@@ -1,0 +1,696 @@
+use std::ops::Deref;
+
+use hypha_core::{
+    Actor, AuthError, CartId, CountryCode, Ctx, Currency, CustomerId, Email, FulfillmentId,
+    IdempotencyError, IdempotencyRequest, InventoryItemId, LocationId, MarketId, Money, OrderId,
+    OrderLineId, Price, ProductId, Quantity, QuantityError, Scope, UserId, VariantId, Versioned,
+};
+use hypha_fulfillment::{FulfillmentError, FulfillmentRepo, FulfillmentState, TrackingInput};
+use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
+use hypha_order_actions::{
+    CancelOrder, CommandError, Fulfil, FulfilLine, Fulfilled, OrderView, Unfulfilled,
+    cancel_fulfillment, cancel_order, fulfill, order_view,
+};
+use hypha_orders::{
+    CancelReason, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderError, OrderLine,
+    OrderNumber, OrderRepo,
+};
+use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
+use pollster::block_on;
+use uuid::Uuid;
+
+fn order_id() -> OrderId {
+    OrderId::from_uuid(Uuid::from_u128(1000))
+}
+
+/// 3 mugs, tracked, reserved at the warehouse.
+fn mugs() -> OrderLineId {
+    OrderLineId::from_uuid(Uuid::from_u128(1001))
+}
+
+/// 1 e-book, which has no inventory item (untracked).
+fn ebook() -> OrderLineId {
+    OrderLineId::from_uuid(Uuid::from_u128(1002))
+}
+
+fn mug_variant() -> VariantId {
+    VariantId::from_uuid(Uuid::from_u128(2001))
+}
+
+fn warehouse() -> LocationId {
+    LocationId::from_uuid(Uuid::from_u128(3001))
+}
+
+fn shop() -> LocationId {
+    LocationId::from_uuid(Uuid::from_u128(3002))
+}
+
+fn mug_item() -> InventoryItemId {
+    InventoryItemId::from_uuid(Uuid::from_u128(4001))
+}
+
+fn eur(amount: i64) -> Money {
+    Money::new(amount, Currency::Eur).unwrap()
+}
+
+fn line(id: OrderLineId, variant: u128, quantity: u32) -> OrderLine {
+    OrderLine {
+        id,
+        product: ProductId::from_uuid(Uuid::from_u128(variant + 100)),
+        variant: VariantId::from_uuid(Uuid::from_u128(variant)),
+        quantity: Quantity::new(quantity).unwrap(),
+        product_title: "Thing".to_string(),
+        variant_title: None,
+        sku: None,
+        unit_price: Price::new(eur(500)).unwrap(),
+        total: eur(500 * i64::from(quantity)),
+        tax: None,
+        fulfilled_quantity: 0,
+    }
+}
+
+/// A store with two locations (warehouse: 10 mugs, shop: 5) and order 1000: 3 mugs,
+/// reserved at the warehouse, and an untracked e-book.
+struct World {
+    ports: InMemoryPorts,
+    ids: SequentialIds,
+    clock: FixedClock,
+}
+
+impl Deref for World {
+    type Target = InMemoryPorts;
+    fn deref(&self) -> &InMemoryPorts {
+        &self.ports
+    }
+}
+
+impl World {
+    fn new() -> Self {
+        let world = World {
+            ports: InMemoryPorts::default(),
+            ids: SequentialIds::default(),
+            clock: FixedClock::default(),
+        };
+        let market = MarketId::from_uuid(Uuid::from_u128(5001));
+        for (id, priority) in [(warehouse(), 0), (shop(), 1)] {
+            let mut location =
+                Location::new(id, "Place".to_string(), vec![market], priority).unwrap();
+            block_on(world.locations.insert(&mut location)).unwrap();
+        }
+        let mut order = Order::place(NewOrder {
+            id: order_id(),
+            number: OrderNumber::new(1001).unwrap(),
+            placed_at: FixedClock::DEFAULT,
+            cart: CartId::from_uuid(Uuid::from_u128(6001)),
+            market,
+            currency: Currency::Eur,
+            country: CountryCode::new("HR").unwrap(),
+            taxes_included: true,
+            customer: CustomerId::from_uuid(Uuid::from_u128(7001)),
+            email: Email::new("ana@example.hr").unwrap(),
+            lines: vec![line(mugs(), 2001, 3), line(ebook(), 2002, 1)],
+            shipping_address: None,
+            shipping_lines: vec![],
+            subtotal: eur(2000),
+            shipping_total: eur(0),
+            tax_total: eur(0),
+            total: eur(2000),
+        })
+        .unwrap();
+        block_on(world.orders.insert(&mut order)).unwrap();
+
+        let mut item = InventoryItem::new(mug_item(), mug_variant(), true, false);
+        item.set_on_hand(warehouse(), 10, None).unwrap();
+        item.set_on_hand(shop(), 5, None).unwrap();
+        let locations = block_on(world.locations.serving(market)).unwrap();
+        item.reserve(&reference(mugs()), Quantity::new(3).unwrap(), &locations)
+            .unwrap();
+        block_on(world.inventory_items.insert(&mut item)).unwrap();
+        world
+    }
+
+    fn fulfil(
+        &self,
+        location: LocationId,
+        lines: &[(OrderLineId, u32)],
+    ) -> Result<Fulfilled, CommandError> {
+        self.fulfil_as(&Ctx::system(), location, lines, None)
+            .map(|done| done.value)
+    }
+
+    fn fulfil_as(
+        &self,
+        ctx: &Ctx,
+        location: LocationId,
+        lines: &[(OrderLineId, u32)],
+        idempotency: Option<IdempotencyRequest>,
+    ) -> Result<hypha_core::Idempotent<Fulfilled>, CommandError> {
+        let input = Fulfil {
+            order: order_id(),
+            location,
+            lines: lines
+                .iter()
+                .map(|&(line, quantity)| FulfilLine { line, quantity })
+                .collect(),
+            tracking: vec![TrackingInput {
+                carrier: Some("DHL".to_string()),
+                number: "JD0001".to_string(),
+                url: Some("https://dhl.example/JD0001".to_string()),
+            }],
+            idempotency,
+        };
+        block_on(fulfill(ctx, &self.ports, &self.ids, &self.clock, input))
+    }
+
+    fn cancel(&self, reason: CancelReason) -> Result<Order, CommandError> {
+        let input = CancelOrder {
+            order: order_id(),
+            reason,
+        };
+        block_on(cancel_order(
+            &Ctx::system(),
+            &self.ports,
+            &self.clock,
+            input,
+        ))
+    }
+
+    fn order(&self) -> Order {
+        block_on(self.orders.get(order_id())).unwrap().unwrap()
+    }
+
+    fn item(&self) -> Option<InventoryItem> {
+        block_on(self.inventory_items.get(mug_item())).unwrap()
+    }
+
+    /// (on hand at the warehouse, at the shop, reserved for the mugs line by location).
+    fn stock(&self) -> (i64, i64, Vec<(LocationId, u32)>) {
+        let item = self.item().unwrap();
+        let held = item
+            .reservations()
+            .iter()
+            .filter(|r| r.reference == reference(mugs()))
+            .map(|r| (r.location, r.quantity.value()))
+            .collect();
+        (item.on_hand(warehouse()), item.on_hand(shop()), held)
+    }
+
+    fn view(&self) -> OrderView {
+        block_on(order_view(&Ctx::system(), &self.ports, order_id())).unwrap()
+    }
+}
+
+fn reference(line: OrderLineId) -> ReservationRef {
+    ReservationRef::new(&line.to_string()).unwrap()
+}
+
+fn user_with(scopes: Vec<Scope>) -> Ctx {
+    Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(9))), scopes)
+}
+
+fn key(key: &str, fingerprint: u8) -> Option<IdempotencyRequest> {
+    Some(IdempotencyRequest {
+        key: key.to_string(),
+        fingerprint: [fingerprint; 32],
+    })
+}
+
+// ---- fulfil ----
+
+#[test]
+fn fulfilling_everything_ships_the_order_and_takes_the_stock() {
+    let world = World::new();
+    let done = world
+        .fulfil(warehouse(), &[(mugs(), 3), (ebook(), 1)])
+        .unwrap();
+    assert_eq!(
+        done.order.fulfillment_status(),
+        FulfillmentStatus::Fulfilled
+    );
+    assert_eq!(done.order, world.order());
+    assert_eq!(
+        block_on(world.fulfillments.get(done.fulfillment.id())),
+        Ok(Some(done.fulfillment.clone()))
+    );
+    assert_eq!(done.fulfillment.location(), warehouse());
+    assert_eq!(done.fulfillment.tracking()[0].number(), "JD0001");
+    // The reservation is used up, and the units are gone from the warehouse.
+    assert_eq!(world.stock(), (7, 5, vec![]));
+}
+
+#[test]
+fn fulfilling_writes_its_events_with_the_stock_change() {
+    let world = World::new();
+    world.fulfil(warehouse(), &[(mugs(), 1)]).unwrap();
+    let types = world.outbox.types();
+    assert_eq!(
+        types[types.len() - 3..],
+        [
+            "fulfillment.created",
+            "order.fulfillment_status_changed",
+            "inventory_item.changed"
+        ]
+    );
+}
+
+#[test]
+fn fulfilling_part_leaves_the_rest_reserved() {
+    let world = World::new();
+    let done = world.fulfil(warehouse(), &[(mugs(), 2)]).unwrap();
+    assert_eq!(
+        done.order.fulfillment_status(),
+        FulfillmentStatus::PartiallyFulfilled
+    );
+    assert_eq!(world.stock(), (8, 5, vec![(warehouse(), 1)]));
+}
+
+#[test]
+fn fulfilling_from_another_location_releases_the_reservation() {
+    let world = World::new();
+    world.fulfil(shop(), &[(mugs(), 3)]).unwrap();
+    assert_eq!(world.stock(), (10, 2, vec![]));
+}
+
+#[test]
+fn an_untracked_line_ships_without_touching_stock() {
+    let world = World::new();
+    let done = world.fulfil(warehouse(), &[(ebook(), 1)]).unwrap();
+    assert_eq!(done.order.lines()[1].fulfilled_quantity, 1);
+    assert_eq!(world.stock(), (10, 5, vec![(warehouse(), 3)]));
+}
+
+#[test]
+fn more_than_is_left_is_refused_and_nothing_is_written() {
+    let world = World::new();
+    world.fulfil(warehouse(), &[(mugs(), 2)]).unwrap();
+    let before = world.outbox.types().len();
+    assert_eq!(
+        world.fulfil(warehouse(), &[(ebook(), 1), (mugs(), 2)]),
+        Err(CommandError::Order(OrderError::OverFulfilled {
+            line: mugs(),
+            requested: 2,
+            unfulfilled: 1
+        }))
+    );
+    assert_eq!(world.outbox.types().len(), before);
+    assert_eq!(world.order().lines()[1].fulfilled_quantity, 0);
+    assert_eq!(world.stock(), (8, 5, vec![(warehouse(), 1)]));
+}
+
+#[test]
+fn a_line_listed_twice_is_refused() {
+    let world = World::new();
+    assert_eq!(
+        world.fulfil(warehouse(), &[(mugs(), 1), (mugs(), 1)]),
+        Err(CommandError::Fulfillment(FulfillmentError::DuplicateLine(
+            mugs()
+        )))
+    );
+}
+
+#[test]
+fn bad_input_is_refused() {
+    let world = World::new();
+    let other = OrderLineId::from_uuid(Uuid::from_u128(9999));
+    assert_eq!(
+        world.fulfil(warehouse(), &[(other, 1)]),
+        Err(CommandError::Order(OrderError::UnknownLine(other)))
+    );
+    assert_eq!(
+        world.fulfil(warehouse(), &[(mugs(), 0)]),
+        Err(CommandError::Quantity(QuantityError::Zero))
+    );
+    let nowhere = LocationId::from_uuid(Uuid::from_u128(9999));
+    assert_eq!(
+        world.fulfil(nowhere, &[(mugs(), 1)]),
+        Err(CommandError::LocationNotFound(nowhere))
+    );
+    assert_eq!(
+        world.fulfil(warehouse(), &[]),
+        Err(CommandError::Fulfillment(FulfillmentError::NoLines))
+    );
+}
+
+#[test]
+fn an_unknown_order_is_reported() {
+    let world = World::new();
+    let input = Fulfil {
+        order: OrderId::from_uuid(Uuid::from_u128(9999)),
+        location: warehouse(),
+        lines: vec![FulfilLine {
+            line: mugs(),
+            quantity: 1,
+        }],
+        tracking: vec![],
+        idempotency: None,
+    };
+    assert_eq!(
+        block_on(fulfill(
+            &Ctx::system(),
+            &world.ports,
+            &world.ids,
+            &world.clock,
+            input
+        )),
+        Err(CommandError::OrderNotFound(OrderId::from_uuid(
+            Uuid::from_u128(9999)
+        )))
+    );
+}
+
+#[test]
+fn a_cancelled_order_cant_be_fulfilled() {
+    let world = World::new();
+    world.cancel(CancelReason::Customer).unwrap();
+    assert_eq!(
+        world.fulfil(warehouse(), &[(mugs(), 1)]),
+        Err(CommandError::Order(OrderError::Cancelled(order_id())))
+    );
+}
+
+#[test]
+fn fulfilling_needs_fulfillments_write() {
+    let world = World::new();
+    // Changing orders isn't shipping them (FU9).
+    let ctx = user_with(vec![Scope::OrdersWrite]);
+    assert_eq!(
+        world
+            .fulfil_as(&ctx, warehouse(), &[(mugs(), 1)], None)
+            .map(|d| d.value),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::FulfillmentsWrite
+        )))
+    );
+}
+
+#[test]
+fn retried_with_its_key_fulfilling_replays_the_first_fulfilment() {
+    let world = World::new();
+    let first = world
+        .fulfil_as(&Ctx::system(), warehouse(), &[(mugs(), 1)], key("k", 1))
+        .unwrap();
+    let again = world
+        .fulfil_as(&Ctx::system(), warehouse(), &[(mugs(), 1)], key("k", 1))
+        .unwrap();
+    assert!(!first.replayed && again.replayed);
+    assert_eq!(again.value, first.value);
+    assert_eq!(world.order().lines()[0].fulfilled_quantity, 1);
+    // The key with another body is a client bug.
+    assert_eq!(
+        world
+            .fulfil_as(&Ctx::system(), warehouse(), &[(mugs(), 2)], key("k", 2))
+            .map(|d| d.value),
+        Err(CommandError::Idempotency(IdempotencyError::KeyReused))
+    );
+}
+
+#[test]
+fn a_retry_that_loses_the_race_to_its_own_key_replays() {
+    let world = World::new();
+    let first = world
+        .fulfil_as(&Ctx::system(), warehouse(), &[(mugs(), 3)], key("k", 1))
+        .unwrap();
+    // The retry's first look misses the record, so it runs, finds nothing left to
+    // fulfil, and then finds the record.
+    world.idempotency.hide_next_lookups(1);
+    let again = world
+        .fulfil_as(&Ctx::system(), warehouse(), &[(mugs(), 3)], key("k", 1))
+        .unwrap();
+    assert!(again.replayed);
+    assert_eq!(again.value.fulfillment.id(), first.value.fulfillment.id());
+}
+
+#[test]
+fn the_last_reservation_of_a_retired_item_takes_the_item_with_it() {
+    let world = World::new();
+    let mut item = world.item().unwrap();
+    item.retire();
+    block_on(world.inventory_items.update(&mut item)).unwrap();
+    world.fulfil(warehouse(), &[(mugs(), 2)]).unwrap();
+    assert!(world.item().is_some());
+    world.fulfil(warehouse(), &[(mugs(), 1)]).unwrap();
+    assert_eq!(world.item(), None);
+    assert_eq!(
+        world.outbox.types().last().unwrap(),
+        "inventory_item.deleted"
+    );
+}
+
+// ---- cancel a fulfilment ----
+
+fn shipped_two(world: &World) -> FulfillmentId {
+    world
+        .fulfil(warehouse(), &[(mugs(), 2), (ebook(), 1)])
+        .unwrap()
+        .fulfillment
+        .id()
+}
+
+#[test]
+fn cancelling_a_fulfilment_puts_its_units_back() {
+    let world = World::new();
+    let id = shipped_two(&world);
+    let done = block_on(cancel_fulfillment(
+        &Ctx::system(),
+        &world.ports,
+        &world.clock,
+        id,
+    ))
+    .unwrap();
+    assert_eq!(
+        done.fulfillment.state(),
+        FulfillmentState::Cancelled {
+            at: FixedClock::DEFAULT
+        }
+    );
+    assert_eq!(
+        done.order.fulfillment_status(),
+        FulfillmentStatus::Unfulfilled
+    );
+    assert_eq!(done.order, world.order());
+    // Back on hand and reserved again at the warehouse.
+    assert_eq!(world.stock(), (10, 5, vec![(warehouse(), 3)]));
+    assert!(
+        world
+            .outbox
+            .types()
+            .contains(&"fulfillment.cancelled".to_string())
+    );
+}
+
+#[test]
+fn cancelling_a_fulfilment_again_changes_nothing() {
+    let world = World::new();
+    let id = shipped_two(&world);
+    block_on(cancel_fulfillment(
+        &Ctx::system(),
+        &world.ports,
+        &world.clock,
+        id,
+    ))
+    .unwrap();
+    let events = world.outbox.types().len();
+    let again = block_on(cancel_fulfillment(
+        &Ctx::system(),
+        &world.ports,
+        &world.clock,
+        id,
+    ))
+    .unwrap();
+    assert_eq!(again.fulfillment.version().value(), 2);
+    assert_eq!(world.outbox.types().len(), events);
+    assert_eq!(world.stock(), (10, 5, vec![(warehouse(), 3)]));
+}
+
+#[test]
+fn cancelling_an_unknown_fulfilment_is_reported() {
+    let world = World::new();
+    let id = FulfillmentId::from_uuid(Uuid::from_u128(9999));
+    assert_eq!(
+        block_on(cancel_fulfillment(
+            &Ctx::system(),
+            &world.ports,
+            &world.clock,
+            id
+        )),
+        Err(CommandError::FulfillmentNotFound(id))
+    );
+}
+
+#[test]
+fn cancelling_a_fulfilment_needs_fulfillments_write() {
+    let world = World::new();
+    let id = shipped_two(&world);
+    let ctx = user_with(vec![Scope::OrdersWrite]);
+    assert_eq!(
+        block_on(cancel_fulfillment(&ctx, &world.ports, &world.clock, id)),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::FulfillmentsWrite
+        )))
+    );
+}
+
+// ---- cancel an order ----
+
+#[test]
+fn cancelling_an_order_releases_its_stock() {
+    let world = World::new();
+    let order = world.cancel(CancelReason::Inventory).unwrap();
+    assert_eq!(
+        order.cancelled().map(|c| c.reason),
+        Some(CancelReason::Inventory)
+    );
+    assert_eq!(order, world.order());
+    assert_eq!(world.stock(), (10, 5, vec![]));
+    let types = world.outbox.types();
+    assert_eq!(
+        types[types.len() - 2..],
+        ["order.cancelled", "inventory_item.changed"]
+    );
+}
+
+#[test]
+fn an_order_with_standing_fulfilments_cant_be_cancelled() {
+    let world = World::new();
+    let id = shipped_two(&world);
+    assert_eq!(
+        world.cancel(CancelReason::Customer),
+        Err(CommandError::HasFulfillments {
+            order: order_id(),
+            fulfillments: vec![id]
+        })
+    );
+    block_on(cancel_fulfillment(
+        &Ctx::system(),
+        &world.ports,
+        &world.clock,
+        id,
+    ))
+    .unwrap();
+    assert!(world.cancel(CancelReason::Customer).is_ok());
+    assert_eq!(world.stock(), (10, 5, vec![]));
+}
+
+#[test]
+fn cancelling_again_keeps_the_first_cancellation() {
+    let world = World::new();
+    world.cancel(CancelReason::Customer).unwrap();
+    let events = world.outbox.types().len();
+    let again = world.cancel(CancelReason::Fraud).unwrap();
+    assert_eq!(
+        again.cancelled().map(|c| c.reason),
+        Some(CancelReason::Customer)
+    );
+    assert_eq!(world.outbox.types().len(), events);
+}
+
+#[test]
+fn a_paid_order_cancelled_stays_paid() {
+    let world = World::new();
+    let mut order = world.order();
+    order.mark_paid().unwrap();
+    block_on(world.orders.update(&mut order)).unwrap();
+    let cancelled = world.cancel(CancelReason::Customer).unwrap();
+    assert_eq!(cancelled.financial_status(), FinancialStatus::Paid);
+}
+
+#[test]
+fn cancelling_releases_a_retired_item_and_deletes_it() {
+    let world = World::new();
+    let mut item = world.item().unwrap();
+    item.retire();
+    block_on(world.inventory_items.update(&mut item)).unwrap();
+    world.cancel(CancelReason::Other).unwrap();
+    assert_eq!(world.item(), None);
+}
+
+#[test]
+fn cancelling_an_order_needs_orders_write() {
+    let world = World::new();
+    let ctx = user_with(vec![Scope::FulfillmentsWrite]);
+    let input = CancelOrder {
+        order: order_id(),
+        reason: CancelReason::Staff,
+    };
+    assert_eq!(
+        block_on(cancel_order(&ctx, &world.ports, &world.clock, input)),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::OrdersWrite
+        )))
+    );
+}
+
+// ---- what's left to ship ----
+
+#[test]
+fn whats_left_is_where_it_was_reserved() {
+    let world = World::new();
+    assert_eq!(
+        world.view().unfulfilled,
+        [
+            Unfulfilled {
+                line: mugs(),
+                location: Some(warehouse()),
+                quantity: 3
+            },
+            Unfulfilled {
+                line: ebook(),
+                location: None,
+                quantity: 1
+            },
+        ]
+    );
+    world
+        .fulfil(warehouse(), &[(mugs(), 2), (ebook(), 1)])
+        .unwrap();
+    assert_eq!(
+        world.view().unfulfilled,
+        [Unfulfilled {
+            line: mugs(),
+            location: Some(warehouse()),
+            quantity: 1
+        }]
+    );
+}
+
+#[test]
+fn a_split_reservation_shows_at_each_location() {
+    let world = World::new();
+    // Re-reserve the mugs with 1 at the warehouse and 2 at the shop: neither covers
+    // all 3, so the line is split (design note 0004, I9).
+    let mut item = world.item().unwrap();
+    item.release(&reference(mugs()));
+    item.set_on_hand(warehouse(), 1, None).unwrap();
+    item.set_on_hand(shop(), 2, None).unwrap();
+    let locations = block_on(world.locations.serving(world.order().market())).unwrap();
+    item.reserve(&reference(mugs()), Quantity::new(3).unwrap(), &locations)
+        .unwrap();
+    block_on(world.inventory_items.update(&mut item)).unwrap();
+    let mugs_left: Vec<(Option<LocationId>, u32)> = world
+        .view()
+        .unfulfilled
+        .iter()
+        .filter(|u| u.line == mugs())
+        .map(|u| (u.location, u.quantity))
+        .collect();
+    assert_eq!(mugs_left, [(Some(warehouse()), 1), (Some(shop()), 2)]);
+}
+
+#[test]
+fn a_cancelled_order_has_nothing_left() {
+    let world = World::new();
+    world.cancel(CancelReason::Customer).unwrap();
+    assert_eq!(world.view().unfulfilled, []);
+}
+
+#[test]
+fn the_view_needs_orders_read() {
+    let world = World::new();
+    let ctx = user_with(vec![Scope::FulfillmentsRead]);
+    assert_eq!(
+        block_on(order_view(&ctx, &world.ports, order_id())).map(|v| v.order.id()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::OrdersRead
+        )))
+    );
+}

@@ -42,6 +42,7 @@ pub struct InMemoryBatch {
 
 enum Staged {
     NewOrder(Order),
+    Order(Order),
     NewFulfillment(Fulfillment),
     Fulfillment(Fulfillment),
     NewCart(Cart),
@@ -49,6 +50,7 @@ enum Staged {
     Product(Product),
     AssetUsages(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>),
     InventoryItem(InventoryItem),
+    DeletedInventoryItem(InventoryItem),
     NewCustomer(Customer),
     Idempotency(IdempotencyRecord),
     NewRole(Role),
@@ -212,6 +214,12 @@ impl StageInventoryItems for InMemoryBatch {
         self.stage(Staged::InventoryItem(item.clone()));
         item.set_version(version);
     }
+
+    fn delete_inventory_item(&mut self, item: &mut InventoryItem) {
+        let events = item.take_events();
+        self.stage(Staged::DeletedInventoryItem(item.clone()));
+        self.stage(Staged::Events(events, None));
+    }
 }
 
 impl StageOrders for InMemoryBatch {
@@ -222,6 +230,14 @@ impl StageOrders for InMemoryBatch {
         self.stage(Staged::NewOrder(order.clone()));
         self.stage(Staged::Events(events, Some(Version::NEW.next())));
         order.set_version(Version::NEW.next());
+    }
+
+    fn update_order(&mut self, order: &mut Order) {
+        stamp_update(order, self.now);
+        let version = order.version().next();
+        self.stage_events_of(order, version);
+        self.stage(Staged::Order(order.clone()));
+        order.set_version(version);
     }
 }
 
@@ -327,6 +343,9 @@ impl HasBatch for InMemoryPorts {
                         order_keys::ORDER_ID,
                         &unique_order,
                     )?,
+                    Staged::Order(mut order) => {
+                        update_row(&mut orders, order.id(), &mut order, &unique_order)?
+                    }
                     Staged::NewFulfillment(mut fulfillment) => insert_row(
                         &mut fulfillments,
                         fulfillment.id(),
@@ -358,6 +377,13 @@ impl HasBatch for InMemoryPorts {
                     }
                     Staged::InventoryItem(mut item) => {
                         update_row(&mut items, item.id(), &mut item, &inventory_items::unique)?
+                    }
+                    Staged::DeletedInventoryItem(item) => {
+                        match items.get(&item.id()) {
+                            Some(stored) if stored.version() == item.version() => {}
+                            _ => return Err(RepoError::StaleVersion),
+                        }
+                        items.remove(&item.id());
                     }
                     Staged::NewCustomer(mut customer) => insert_row(
                         &mut customers,

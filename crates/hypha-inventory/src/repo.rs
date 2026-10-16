@@ -45,6 +45,11 @@ pub trait StageInventoryItems {
     /// version it has once the batch commits. If the commit fails, `item` is stale: load
     /// it again.
     fn update_inventory_item(&mut self, item: &mut InventoryItem);
+    /// Stages removing the item (after `InventoryItem::delete`) with its levels and
+    /// reservations. Unlike `InventoryItemRepo::delete`, it checks the version: a change
+    /// since the item was loaded (a new reservation) fails the batch with
+    /// `StaleVersion`, and so does an item already gone.
+    fn delete_inventory_item(&mut self, item: &mut InventoryItem);
 }
 
 /// Whatever holds the `LocationRepo`: a host's per-request ports, a test world. Commands

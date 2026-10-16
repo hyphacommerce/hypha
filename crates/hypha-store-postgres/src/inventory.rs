@@ -353,6 +353,37 @@ pub(crate) async fn insert_item(
     Ok(())
 }
 
+/// `StageInventoryItems::delete_inventory_item`'s writes inside the caller's
+/// transaction (`PgBatch`): every item at the version it was loaded at, or
+/// `StaleVersion` and the caller drops the transaction. Levels and reservations go with
+/// them (ON DELETE CASCADE).
+pub(crate) async fn delete_items(
+    tx: &impl GenericClient,
+    snapshots: &[InventoryItemSnapshot],
+) -> Result<(), RepoError> {
+    if snapshots.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<Uuid> = snapshots.iter().map(|s| s.id.as_uuid()).collect();
+    let versions = snapshots
+        .iter()
+        .map(|s| version_to_db(s.version))
+        .collect::<Result<Vec<i64>, _>>()?;
+    let removed = tx
+        .query_typed(
+            "DELETE FROM inventory_items AS i USING unnest($1::uuid[], $2::bigint[])
+                 AS t (id, version)
+             WHERE i.id = t.id AND i.version = t.version RETURNING i.id",
+            &[(&ids, Type::UUID_ARRAY), (&versions, Type::INT8_ARRAY)],
+        )
+        .await
+        .map_err(repo_error)?;
+    if removed.len() != snapshots.len() {
+        return Err(RepoError::StaleVersion);
+    }
+    Ok(())
+}
+
 /// `InventoryItemRepo::update_many` inside the caller's transaction (also used by
 /// `PgBatch`): every item or none. Returns each item's new version; on `StaleVersion`
 /// the caller drops the transaction, rolling it back.
