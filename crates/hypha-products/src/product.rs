@@ -1,15 +1,14 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
-    AssetId, Money, OptionId, OptionValueId, PendingEvent, Price, ProductId, Recorded, Stamped,
-    Stamps, VariantId, Version, Versioned, optional_text, required_text,
+    AssetId, Description, Handle, Money, OptionId, OptionValueId, PendingEvent, Price, ProductId,
+    Recorded, Stamped, Stamps, VariantId, Version, Versioned, optional_text, required_text,
 };
 
 use crate::{
-    content::{self, Description},
+    content,
     error::ProductError,
     events::Changes,
-    handle::Handle,
     option::{OptionValue, ProductOption},
     variant::{NewVariant, Variant, VariantPatch},
 };
@@ -547,7 +546,7 @@ impl Product {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::HandleError;
+    use hypha_core::HandleError;
     use hypha_core::{Currency, Money, MoneyError, OptionId, OptionValueId};
     use uuid::Uuid;
 

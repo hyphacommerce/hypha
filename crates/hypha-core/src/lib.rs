@@ -2,9 +2,11 @@ pub mod address;
 pub mod callback_url;
 pub mod country;
 pub mod ctx;
+pub mod description;
 pub mod email;
 pub mod error_code;
 pub mod events;
+pub mod handle;
 pub mod handlers;
 pub mod idempotency;
 pub mod ids;
@@ -29,12 +31,14 @@ pub use address::{Address, AddressError, AddressParts};
 pub use callback_url::{CallbackUrl, CallbackUrlError};
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
+pub use description::{Description, DescriptionError};
 pub use email::{Email, EmailError};
 pub use error_code::ErrorCode;
 pub use events::{
     ActingAs, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, Event, HasOutbox,
     OutboxRepo, Outcome, PendingEvent, Recorded, Recorder, StageEvents, StoredEvent, Subject,
 };
+pub use handle::{Handle, HandleError};
 pub use handlers::{EventHandler, EventHandlers};
 pub use idempotency::{
     HasIdempotency, IdempotencyError, IdempotencyKey, IdempotencyRecord, IdempotencyRepo,

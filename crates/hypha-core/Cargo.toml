@@ -9,6 +9,8 @@ uuid.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 url = "2.5"
+# Sanitising rich descriptions (products, categories); builds for wasm.
+ammonia = "4.2.3"
 # Only for hosts that publish OpenAPI documents (design note 0010, S8): domain crates
 # and wasm builds never turn it on.
 utoipa = { version = "6", optional = true }

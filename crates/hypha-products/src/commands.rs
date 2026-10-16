@@ -55,7 +55,7 @@ pub async fn create_simple_product<R: ProductRepo, I: IdGenerator>(
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsWrite)?;
 
-    let handle = Handle::new(&input.handle)?;
+    let handle = Handle::new(&input.handle).map_err(ProductError::from)?;
     let price = Price::new(input.price)?;
 
     // All input is checked before anything is read.
@@ -180,7 +180,12 @@ pub async fn update_product<R: ProductRepo>(
     input: UpdateProduct,
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsWrite)?;
-    let handle = input.handle.as_deref().map(Handle::new).transpose()?;
+    let handle = input
+        .handle
+        .as_deref()
+        .map(Handle::new)
+        .transpose()
+        .map_err(ProductError::from)?;
 
     let mut product = load(repo, id).await?;
     if let Some(title) = &input.title {

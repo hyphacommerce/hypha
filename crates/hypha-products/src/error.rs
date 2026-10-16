@@ -1,18 +1,9 @@
-use hypha_core::{AssetId, ErrorCode, MoneyError, OptionId, OptionValueId, TextError, VariantId};
+use hypha_core::{
+    AssetId, DescriptionError, ErrorCode, HandleError, MoneyError, OptionId, OptionValueId,
+    TextError, VariantId,
+};
 
 use crate::ProductStatus;
-
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum HandleError {
-    #[error("handle is empty")]
-    Empty,
-    #[error("invalid character {0:?}")]
-    InvalidChar(char),
-    #[error("handle can't start or end with '-'")]
-    EdgeDash,
-    #[error("handle can't contain '--'")]
-    DoubleDash,
-}
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum ProductError {
@@ -87,17 +78,6 @@ fn join(ids: &[VariantId]) -> String {
         .join(", ")
 }
 
-impl ErrorCode for HandleError {
-    fn code(&self) -> &'static str {
-        match self {
-            HandleError::Empty
-            | HandleError::InvalidChar(_)
-            | HandleError::EdgeDash
-            | HandleError::DoubleDash => "invalid_handle",
-        }
-    }
-}
-
 impl ErrorCode for ProductError {
     fn code(&self) -> &'static str {
         match self {
@@ -128,6 +108,21 @@ impl ErrorCode for ProductError {
             ProductError::MediaNotInProduct(_) => "media_not_in_product",
             ProductError::DescriptionTooLong { .. } => "description_too_long",
             ProductError::TooManyTags { .. } => "too_many_tags",
+        }
+    }
+}
+
+/// Handles are core's rule (`hypha_core::Handle`); a product reports a bad one as its own.
+impl From<HandleError> for ProductError {
+    fn from(e: HandleError) -> Self {
+        ProductError::InvalidHandle(e)
+    }
+}
+
+impl From<DescriptionError> for ProductError {
+    fn from(e: DescriptionError) -> Self {
+        match e {
+            DescriptionError::TooLong { max } => ProductError::DescriptionTooLong { max },
         }
     }
 }
