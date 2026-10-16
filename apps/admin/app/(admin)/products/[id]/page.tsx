@@ -12,6 +12,7 @@ import { ContentForm } from "./content-form";
 import { DetailsForm } from "./details-form";
 import { MediaSection } from "./media-section";
 import { OptionsEditor } from "./options-editor";
+import { PublishingCard } from "./publishing-card";
 import { StatusActions } from "./status-actions";
 import { VariantsSection } from "./variants-section";
 
@@ -24,9 +25,11 @@ import { VariantsSection } from "./variants-section";
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const product = loaded(
-    await client.GET("/admin/products/{id}", { params: { path: { id } } }),
-  );
+  const [product, channels] = await Promise.all([
+    client.GET("/admin/products/{id}", { params: { path: { id } } }).then(loaded),
+    // Without `channels:read` the page shows no Publishing card.
+    client.GET("/admin/channels"),
+  ]);
   const hasOptions = product.options.length > 0;
   const variantTitles = Object.fromEntries(
     product.variants.map((v) => [v.id, v.title ?? (hasOptions ? v.id : "Default")]),
@@ -49,6 +52,16 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           handle={product.handle}
           isActive={product.status === "active"}
         />
+
+        {channels.data && (
+          <PublishingCard
+            key={product.channels.join()}
+            id={product.id}
+            published={product.channels}
+            channels={channels.data.items}
+            isActive={product.status === "active"}
+          />
+        )}
 
         <ContentForm
           key={JSON.stringify([

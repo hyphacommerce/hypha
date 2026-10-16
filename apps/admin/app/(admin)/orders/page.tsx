@@ -17,7 +17,7 @@ import { PageHeader } from "@/components/page-header";
 import { Pager } from "@/components/pager";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { formatDateTime, formatMoney } from "@/lib/format";
-import { loaded, sessionClient } from "@/lib/hypha";
+import { channelNames, loaded, sessionClient } from "@/lib/hypha";
 
 export default async function OrdersPage({
   searchParams,
@@ -32,6 +32,7 @@ export default async function OrdersPage({
   // A hand-edited URL (an old or foreign cursor): start the list again.
   if (result.response.status === 400) redirect("/orders");
   const page = loaded(result);
+  const channelName = await channelNames(client);
 
   return (
     <Section padding={6}>
@@ -51,6 +52,7 @@ export default async function OrdersPage({
                 <TableHeaderCell>Order</TableHeaderCell>
                 <TableHeaderCell>Placed</TableHeaderCell>
                 <TableHeaderCell>Customer</TableHeaderCell>
+                <TableHeaderCell>Channel</TableHeaderCell>
                 <TableHeaderCell>Status</TableHeaderCell>
                 <TableHeaderCell>Items</TableHeaderCell>
                 <TableHeaderCell>Total</TableHeaderCell>
@@ -66,6 +68,7 @@ export default async function OrdersPage({
                   </TableCell>
                   <TableCell>{formatDateTime(order.placed_at)}</TableCell>
                   <TableCell>{order.email}</TableCell>
+                  <TableCell>{channelName.get(order.channel) ?? order.channel}</TableCell>
                   <TableCell>
                     <HStack gap={1} wrap="wrap">
                       {order.cancelled_at && <CancelledBadge />}

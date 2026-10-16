@@ -207,3 +207,15 @@ export async function libraryPage(
   }
   return { items: [], next };
 }
+
+/** The channels the product is sold in (design note 0020): `channels` becomes the whole set. */
+export async function setProductChannels(id: string, channels: string[]): Promise<EditResult> {
+  const client = await sessionClient();
+  const { error } = await client.PUT("/admin/products/{id}/channels", {
+    params: { path: { id } },
+    body: { channels },
+  });
+  if (error) return failed(error);
+  refresh(id);
+  return {};
+}

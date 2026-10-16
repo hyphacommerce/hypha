@@ -18,7 +18,7 @@ import type { ReactNode } from "react";
 import { PageHeader } from "@/components/page-header";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { CANCEL_REASONS, formatDateTime, formatMoney } from "@/lib/format";
-import { loaded, sessionClient } from "@/lib/hypha";
+import { channelNames, loaded, sessionClient } from "@/lib/hypha";
 
 import { CancelOrderButton, FulfilButton, type Place, ShipmentsCard } from "./fulfilment";
 import { MarkPaid } from "./mark-paid";
@@ -48,9 +48,10 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const order = loaded(await client.GET("/admin/orders/{id}", { params: { path: { id } } }));
   // Shipments and locations need their own scopes; without them the page shows the
   // order alone.
-  const [shipments, locations] = await Promise.all([
+  const [shipments, locations, channelName] = await Promise.all([
     client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
     client.GET("/admin/locations"),
+    channelNames(client),
   ]);
   const fulfillments = shipments.data?.items ?? [];
   const places: Place[] = (locations.data?.items ?? []).map(({ id, name }) => ({ id, name }));
@@ -220,6 +221,9 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
             <MetadataListItem label="Email">{order.email}</MetadataListItem>
             <MetadataListItem label="Country">{order.country}</MetadataListItem>
             <MetadataListItem label="Currency">{order.currency}</MetadataListItem>
+            <MetadataListItem label="Channel">
+              {channelName.get(order.channel) ?? order.channel}
+            </MetadataListItem>
           </MetadataList>
         </Card>
       </VStack>

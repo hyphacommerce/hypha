@@ -1,6 +1,7 @@
 # 0020: Sales channels
 
-- **Status:** Accepted (2026-10-16). Danilo raised sales channels after search (0019):
+- **Status:** Built (2026-10-16; section 13). Accepted 2026-10-16. Danilo raised sales
+  channels after search (0019):
   per-product publishing as in Shopify, an Online Store channel now and an agentic
   channel later, built before the admin's store setup and the storefront. He agreed to
   the shape in section 2 before the note was written, then answered section 11: a leaf
@@ -227,3 +228,33 @@ picks.
 - Collections published per channel, once collections exist.
 - Channel-specific content (titles, descriptions per channel) if marketplaces need it.
 - Reporting by channel (orders, revenue).
+
+## 13. As built
+
+Built in the section 10 order on `feat/channels` (2026-10-16). Where it differs from the
+sections above:
+
+- **Migrations:** four, not one: `0036_channels` (tables, the Online Store, every product
+  published to it), `0037_api_key_channels`, `0038_cart_order_channels` and
+  `0039_search_channels` (the GIN-indexed `channels uuid[]`; it empties the index, which
+  the host rebuilds at start).
+- **Unpublished lines** are `LineError::ProductNotPublished` (`product_not_published`),
+  checked before pricing, so a cart line reads `unavailable` with that `reason_code`;
+  adding one is a 422 with the same code. Not a new `LineStatus`.
+- **The admin product response's `channels`** are loaded by the host
+  (`product_channels`, and `channels_of_products` once per list page), not through
+  merchandising's `ProductView`: that would have been a new merchandising → channels
+  edge for a field only the admin shows.
+- **Order summaries** carry `channel` too (the admin's order list shows it).
+- **Deferred: the product list's `channel` filter.** The products repo would have to join
+  `channel_products`, a table another domain owns, and `ProductFilter::matches` (what
+  the in-memory repo and the contract use) can't see publications. It comes with a way
+  to filter across domains in storage, or as a search over the admin's own index.
+- **Settings → Channels** lists, adds and renames channels and creates a channel's
+  storefront key (shown once). It can't list a channel's keys yet: listing API keys is
+  still a follow-up of 0008 §9. The API keys screen, and its channel picker, come with
+  that.
+- **Tests:** `hypha_testkit::InMemoryPorts::storefront()` is a caller in an "Online
+  Store" channel with every product that exists then published, for tests of what
+  storefronts do; the host tests publish with a `publish(app, ids)` helper (CH9: new
+  products are sold nowhere).

@@ -179,6 +179,8 @@ export function describe(error: ApiError): string {
       return "That sign-in expired. Start again.";
     case "handle_taken":
       return "Another product already uses that handle. Pick a different one.";
+    case "channel_name_taken":
+      return "Another channel already has that name.";
     case "sku_taken":
       return "Another variant already uses that SKU. SKUs are unique across the store.";
     case "duplicate_option_combination":
@@ -284,4 +286,13 @@ export function describe(error: ApiError): string {
     default:
       return error.error;
   }
+}
+
+/** Sales channels' names by ID (design note 0020). Empty without `channels:read`, so a
+ * page that only labels channels still shows, with their IDs. */
+export async function channelNames(
+  client: Awaited<ReturnType<typeof sessionClient>>,
+): Promise<Map<string, string>> {
+  const { data } = await client.GET("/admin/channels");
+  return new Map((data?.items ?? []).map((c) => [c.id, c.name]));
 }

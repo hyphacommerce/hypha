@@ -17,6 +17,7 @@ import {
   MagnifyingGlassIcon,
   PhotoIcon,
   ShoppingBagIcon,
+  Squares2X2Icon,
   PuzzlePieceIcon,
   TruckIcon,
   UsersIcon,
@@ -48,6 +49,7 @@ const NAV: {
     title: "Settings",
     items: [
       { label: "Store", href: "/settings/store", icon: BuildingStorefrontIcon, isReady: true },
+      { label: "Channels", href: "/settings/channels", icon: Squares2X2Icon, isReady: true },
       { label: "Shipping", href: "/settings/shipping", icon: TruckIcon, isReady: true },
       { label: "Search", href: "/settings/search", icon: MagnifyingGlassIcon, isReady: true },
       { label: "Apps", href: "/settings/apps", icon: PuzzlePieceIcon, isReady: true },

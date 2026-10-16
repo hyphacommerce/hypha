@@ -20,7 +20,7 @@ import { PageHeader } from "@/components/page-header";
 import { Pager } from "@/components/pager";
 import { ProductStatusBadge } from "@/components/status";
 import { formatMoney } from "@/lib/format";
-import { loaded, sessionClient } from "@/lib/hypha";
+import { channelNames, loaded, sessionClient } from "@/lib/hypha";
 
 import { SearchBox } from "./search-box";
 
@@ -102,6 +102,7 @@ export default async function ProductsPage({
     redirect(status ? `/products?status=${status}` : "/products");
   }
   const page = loaded(result);
+  const channelName = await channelNames(client);
 
   return (
     <Section padding={6}>
@@ -157,6 +158,7 @@ export default async function ProductsPage({
               <TableRow>
                 <TableHeaderCell>Product</TableHeaderCell>
                 <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>Channels</TableHeaderCell>
                 <TableHeaderCell>Variants</TableHeaderCell>
                 <TableHeaderCell>Price</TableHeaderCell>
               </TableRow>
@@ -179,6 +181,13 @@ export default async function ProductsPage({
                   </TableCell>
                   <TableCell>
                     <ProductStatusBadge status={product.status} />
+                  </TableCell>
+                  <TableCell>
+                    {product.channels.length === 0 ? (
+                      <Text color="secondary">None</Text>
+                    ) : (
+                      product.channels.map((id) => channelName.get(id) ?? id).join(", ")
+                    )}
                   </TableCell>
                   <TableCell>{product.variant_count}</TableCell>
                   <TableCell>{priceRanges(product)}</TableCell>
