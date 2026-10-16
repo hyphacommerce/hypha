@@ -8,6 +8,7 @@ import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 
 import type { Currencies } from "./format";
+import type { Country } from "./regions";
 
 const SESSION_COOKIE = "hypha_admin_session";
 /** A pending login's second-factor challenge, for the few minutes it lives. */
@@ -284,6 +285,36 @@ export function describe(error: ApiError): string {
       return "That location doesn't exist any more. Reload and pick another.";
     case "concurrent_modification":
       return "Someone else changed this at the same time. Reload and try again.";
+    case "country_in_other_market":
+      return "A country you chose is already in another market. A country belongs to one market.";
+    case "no_countries":
+      return "A market needs at least one country.";
+    case "last_country":
+      return "A market keeps at least one country. Add another before removing this one.";
+    case "catalog_exists":
+      return "This market already has a catalog.";
+    case "price_list_currency_mismatch":
+      return "A market's price list must be in the market's currency.";
+    case "fixed_price_currency_mismatch":
+      return "A fixed price must be in the price list's currency.";
+    case "duplicate_fixed_price":
+      return "A variant is listed twice.";
+    case "invalid_basis_points":
+      return "A discount can't be more than 100%.";
+    case "store_name_empty":
+      return "The store needs a name.";
+    case "store_name_too_long":
+      return "The store name can be at most 100 characters.";
+    case "store_description_too_long":
+      return "The description can be at most 500 characters.";
+    case "unknown_timezone":
+      return "Choose a time zone from the list.";
+    case "invalid_language":
+      return "Write the language as a BCP 47 tag, like en, en-GB or sr-Latn.";
+    case "invalid_email":
+      return "That isn't a valid email address.";
+    case "invalid_address":
+      return "An address needs a last name, a first line and a city, each up to 255 characters.";
     case "rate_limited": {
       const secs = (error.details as { retry_after_secs?: number } | null)?.retry_after_secs;
       return secs ? `Too many attempts. Try again in ${secs} seconds.` : "Too many attempts.";
@@ -311,4 +342,13 @@ export const loadCurrencies = cache(async (): Promise<Currencies> => {
   const client = await sessionClient();
   const { items } = loaded(await client.GET("/admin/currencies"));
   return Object.fromEntries(items.map((c) => [c.code, c.minor_units]));
+});
+
+/**
+ * Every country an address or market can name (`GET /admin/countries`), once per
+ * request, for pickers.
+ */
+export const loadCountries = cache(async (): Promise<Country[]> => {
+  const client = await sessionClient();
+  return loaded(await client.GET("/admin/countries")).items;
 });

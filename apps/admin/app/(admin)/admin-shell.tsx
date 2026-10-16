@@ -42,7 +42,7 @@ const NAV: {
       { label: "Products", href: "/products", icon: CubeIcon, isReady: true },
       { label: "Media", href: "/media", icon: PhotoIcon, isReady: true },
       { label: "Customers", href: "/customers", icon: UsersIcon, isReady: false },
-      { label: "Markets", href: "/markets", icon: GlobeEuropeAfricaIcon, isReady: false },
+      { label: "Markets", href: "/markets", icon: GlobeEuropeAfricaIcon, isReady: true },
     ],
   },
   {

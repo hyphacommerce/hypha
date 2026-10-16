@@ -5,21 +5,23 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 
 import { PageHeader } from "@/components/page-header";
-import { loaded, sessionClient } from "@/lib/hypha";
+import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
 
 import { StoreForm } from "./store-form";
 
+/** Settings → Store (design note 0021, SU4): the store's name and details. */
 export default async function StoreSettingsPage() {
   const client = await sessionClient();
-  const store = loaded(await client.GET("/admin/store"));
+  const [store, countries] = await Promise.all([
+    client.GET("/admin/store").then(loaded),
+    loadCountries(),
+  ]);
 
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={640}>
         <PageHeader title="Store" description="The store this deployment serves." />
-        <Card>
-          <StoreForm name={store.name} />
-        </Card>
+        <StoreForm store={store} countries={countries} />
         <Card>
           <MetadataList title="Details">
             <MetadataListItem label="ID">
