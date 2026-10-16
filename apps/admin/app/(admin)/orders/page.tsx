@@ -17,7 +17,7 @@ import { PageHeader } from "@/components/page-header";
 import { Pager } from "@/components/pager";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { formatDateTime, formatMoney } from "@/lib/format";
-import { channelNames, loaded, sessionClient } from "@/lib/hypha";
+import { channelNames, loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
 
 export default async function OrdersPage({
   searchParams,
@@ -28,9 +28,10 @@ export default async function OrdersPage({
   const cursor = typeof params.cursor === "string" ? params.cursor : undefined;
 
   const client = await sessionClient();
-  const [result, channelName] = await Promise.all([
+  const [result, channelName, currencies] = await Promise.all([
     client.GET("/admin/orders", { params: { query: { cursor } } }),
     channelNames(client),
+    loadCurrencies(),
   ]);
   // A hand-edited URL (an old or foreign cursor): start the list again.
   if (result.response.status === 400) redirect("/orders");
@@ -79,7 +80,7 @@ export default async function OrdersPage({
                     </HStack>
                   </TableCell>
                   <TableCell>{order.item_count}</TableCell>
-                  <TableCell>{formatMoney(order.total)}</TableCell>
+                  <TableCell>{formatMoney(order.total, currencies)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

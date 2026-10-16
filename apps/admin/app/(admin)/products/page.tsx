@@ -19,8 +19,8 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { Pager } from "@/components/pager";
 import { ProductStatusBadge } from "@/components/status";
-import { formatMoney } from "@/lib/format";
-import { channelNames, loaded, sessionClient } from "@/lib/hypha";
+import { type Currencies, formatMoney } from "@/lib/format";
+import { channelNames, loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
 
 import { SearchBox } from "./search-box";
 
@@ -37,11 +37,16 @@ function asStatus(value: string | string[] | undefined): Status | undefined {
 }
 
 /** "€9.50", "€9.50 – €14.00" for several prices, one range per currency. */
-function priceRanges(product: AdminSchemas["ProductSummaryResponse"]): string {
+function priceRanges(
+  product: AdminSchemas["ProductSummaryResponse"],
+  currencies: Currencies,
+): string {
   if (product.price_ranges.length === 0) return "—";
   return product.price_ranges
     .map(({ min, max }) =>
-      min.amount === max.amount ? formatMoney(min) : `${formatMoney(min)} – ${formatMoney(max)}`,
+      min.amount === max.amount
+        ? formatMoney(min, currencies)
+        : `${formatMoney(min, currencies)} – ${formatMoney(max, currencies)}`,
     )
     .join(", ");
 }
@@ -93,9 +98,10 @@ export default async function ProductsPage({
   };
 
   const client = await sessionClient();
-  const [result, channelName] = await Promise.all([
+  const [result, channelName, currencies] = await Promise.all([
     client.GET("/admin/products", { params: { query: { status, q, cursor } } }),
     channelNames(client),
+    loadCurrencies(),
   ]);
   // A hand-edited URL (an old or foreign cursor, text over 255 characters): start the
   // list again, same status.
@@ -190,7 +196,7 @@ export default async function ProductsPage({
                     )}
                   </TableCell>
                   <TableCell>{product.variant_count}</TableCell>
-                  <TableCell>{priceRanges(product)}</TableCell>
+                  <TableCell>{priceRanges(product, currencies)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

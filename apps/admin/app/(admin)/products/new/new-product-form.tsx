@@ -9,10 +9,12 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { startTransition, useActionState, useState } from "react";
 
+import { useCurrencies } from "@/components/currencies";
+import { currencyCodes } from "@/lib/format";
+
 import { createProduct } from "../actions";
 
 type Currency = AdminSchemas["Currency"];
-const CURRENCIES: Currency[] = ["EUR", "USD", "RSD"];
 
 /** A handle from a title, by the API's rule: lowercase letters, digits, single dashes. */
 function toHandle(title: string): string {
@@ -25,6 +27,7 @@ function toHandle(title: string): string {
 }
 
 export function NewProductForm() {
+  const currencies = useCurrencies();
   const [title, setTitle] = useState("");
   // Follows the title until edited by hand; clearing it follows the title again.
   const [handle, setHandle] = useState<string>();
@@ -68,7 +71,8 @@ export function NewProductForm() {
           />
           <Selector
             label="Currency"
-            options={CURRENCIES}
+            options={currencyCodes(currencies)}
+            hasSearch
             value={currency}
             onChange={(value) => setCurrency(value as Currency)}
           />

@@ -25,7 +25,8 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { ArrowDownIcon, ArrowUpIcon, PencilIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import { CURRENCIES } from "@/lib/format";
+import { useCurrencies } from "@/components/currencies";
+import { currencyCodes } from "@/lib/format";
 import {
   RATE_KINDS,
   type RateDraft,
@@ -239,6 +240,7 @@ function OptionRow({
   onMove: (by: -1 | 1) => void;
   onError: (error?: string) => void;
 }) {
+  const currencies = useCurrencies();
   const [isEditing, setIsEditing] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -257,7 +259,7 @@ function OptionRow({
         </VStack>
       </TableCell>
       <TableCell>
-        <Text>{describeRate(option.rate)}</Text>
+        <Text>{describeRate(option.rate, currencies)}</Text>
       </TableCell>
       <TableCell>
         <Text color="secondary">
@@ -362,10 +364,11 @@ function OptionDialog({
   providers: Provider[];
   onClose: () => void;
 }) {
+  const currencies = useCurrencies();
   const [name, setName] = useState(option?.name ?? "");
   const [code, setCode] = useState(option?.code);
   const [draft, setDraft] = useState<RateDraft>(
-    option ? toDraft(option.rate) : emptyDraft("flat", "EUR"),
+    option ? toDraft(option.rate, currencies) : emptyDraft("flat", "EUR"),
   );
   const [minDays, setMinDays] = useState(option?.estimate ? String(option.estimate.min_days) : "");
   const [maxDays, setMaxDays] = useState(option?.estimate ? String(option.estimate.max_days) : "");
@@ -375,7 +378,7 @@ function OptionDialog({
   const shownCode = code ?? codeFrom(name);
 
   const submit = () => {
-    const built = fromDraft(draft);
+    const built = fromDraft(draft, currencies);
     if ("error" in built) return setError(built.error);
     let estimate = null;
     if (minDays.trim() || maxDays.trim()) {
@@ -458,8 +461,6 @@ function OptionDialog({
   );
 }
 
-const CURRENCY_OPTIONS = CURRENCIES.map((currency) => ({ value: currency, label: currency }));
-
 /** The fields of one rate preset, a row (or a tier list) per currency. */
 function RateEditor({
   draft,
@@ -470,6 +471,7 @@ function RateEditor({
   providers: Provider[];
   onChange: (draft: RateDraft) => void;
 }) {
+  const currencies = useCurrencies();
   if (draft.kind === "provider") {
     return (
       <HStack gap={3}>
@@ -493,7 +495,7 @@ function RateEditor({
 
   // Each currency's table; the currencies not used yet can be added.
   const used = draft.kind === "flat" ? draft.prices.map((p) => p.currency) : draft.tables.map((t) => t.currency);
-  const unused = CURRENCIES.filter((c) => !used.includes(c));
+  const unused = currencyCodes(currencies).filter((c) => !used.includes(c));
   const addCurrency = () => {
     const currency = unused[0];
     const extra = emptyDraft(draft.kind, currency);
@@ -510,7 +512,10 @@ function RateEditor({
       label="Currency"
       isLabelHidden
       size="sm"
-      options={CURRENCY_OPTIONS.filter((o) => o.value === currency || !used.includes(o.value))}
+      options={currencyCodes(currencies)
+        .filter((c) => c === currency || !used.includes(c))
+        .map((c) => ({ value: c, label: c }))}
+      hasSearch
       value={currency}
       onChange={(value) => set(value as Currency)}
     />

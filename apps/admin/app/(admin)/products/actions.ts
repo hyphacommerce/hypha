@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { parseMoney } from "@/lib/format";
-import { describe, sessionClient } from "@/lib/hypha";
+import { describe, loadCurrencies, sessionClient } from "@/lib/hypha";
 
 export type FormState = { error?: string };
 
@@ -13,7 +13,7 @@ export async function createProduct(
   _previous: FormState,
   input: { title: string; handle: string; price: string; currency: AdminSchemas["Currency"] },
 ): Promise<FormState> {
-  const amount = parseMoney(input.price, input.currency);
+  const amount = parseMoney(input.price, input.currency, await loadCurrencies());
   if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/products", {
@@ -92,7 +92,7 @@ export async function addVariant(
   id: string,
   input: { sku: string; price: string; currency: AdminSchemas["Currency"]; selections: string[] },
 ): Promise<EditResult> {
-  const amount = parseMoney(input.price, input.currency);
+  const amount = parseMoney(input.price, input.currency, await loadCurrencies());
   if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
   const client = await sessionClient();
   const { error } = await client.POST("/admin/products/{id}/variants", {
@@ -128,7 +128,7 @@ export async function updateVariant(
     requiresShipping: boolean;
   },
 ): Promise<EditResult> {
-  const amount = parseMoney(input.price, input.currency);
+  const amount = parseMoney(input.price, input.currency, await loadCurrencies());
   if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
   const grams = parseGrams(input.weight);
   if (grams === undefined) return { error: "Enter the weight in whole grams, like 350." };

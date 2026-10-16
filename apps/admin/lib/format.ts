@@ -6,21 +6,32 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 type Money = AdminSchemas["Money"];
 
 /**
- * Minor-unit digits per currency (1050 is 10.50 EUR). Typed by the API's currency list,
- * so a currency added there fails to compile here until it has an entry.
+ * Minor-unit digits by currency code, as `GET /admin/currencies` lists them (design note
+ * 0021, SU1): 1050 is 10.50 EUR but 1050 JPY. Server code gets it from `loadCurrencies`,
+ * client components from `useCurrencies`. A plain object, so a server page can pass it
+ * to a client component.
  */
-const MINOR_DIGITS: Record<Money["currency"], number> = {
-  EUR: 2,
-  USD: 2,
-  RSD: 2,
-};
+export type Currencies = Readonly<Record<string, number>>;
 
-/** Every currency the API takes, for pickers. */
-export const CURRENCIES = Object.keys(MINOR_DIGITS) as Money["currency"][];
+/** Every currency code, sorted, for pickers. */
+export function currencyCodes(currencies: Currencies): string[] {
+  return Object.keys(currencies).sort();
+}
+
+/**
+ * The digits of `currency`. ISO's, not `Intl`'s: they differ for a few (HUF, IDR, IQD…),
+ * and only ISO's say what a stored amount means. An unknown one throws rather than guess,
+ * since a wrong guess misstates the amount by a power of ten.
+ */
+function minorUnits(currencies: Currencies, currency: string): number {
+  const digits = currencies[currency];
+  if (digits === undefined) throw new Error(`unknown currency ${JSON.stringify(currency)}`);
+  return digits;
+}
 
 /** "€18.00". Amounts are integers in minor units, never floats (CLAUDE.md, Money). */
-export function formatMoney({ amount, currency }: Money): string {
-  const digits = MINOR_DIGITS[currency];
+export function formatMoney({ amount, currency }: Money, currencies: Currencies): string {
+  const digits = minorUnits(currencies, currency);
   return new Intl.NumberFormat("en-IE", {
     style: "currency",
     currency,
@@ -30,8 +41,9 @@ export function formatMoney({ amount, currency }: Money): string {
 }
 
 /** The decimal form of a money amount for an input ("18.00"). */
-export function moneyInput({ amount, currency }: Money): string {
-  return (amount / 10 ** MINOR_DIGITS[currency]).toFixed(MINOR_DIGITS[currency]);
+export function moneyInput({ amount, currency }: Money, currencies: Currencies): string {
+  const digits = minorUnits(currencies, currency);
+  return (amount / 10 ** digits).toFixed(digits);
 }
 
 /**
@@ -39,8 +51,8 @@ export function moneyInput({ amount, currency }: Money): string {
  * non-negative amount with at most the currency's digits. Parsed as text, so 0.1 + 0.2
  * style float errors can't creep in.
  */
-export function parseMoney(input: string, currency: Money["currency"]): number | null {
-  const digits = MINOR_DIGITS[currency];
+export function parseMoney(input: string, currency: string, currencies: Currencies): number | null {
+  const digits = minorUnits(currencies, currency);
   const match = /^(\d+)(?:[.,](\d*))?$/.exec(input.trim());
   if (!match) return null;
   const [, whole, fraction = ""] = match;

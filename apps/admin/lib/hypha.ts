@@ -5,6 +5,9 @@
 import { type AdminSchemas, type ApiError, createAdminClient } from "@hypha/sdk/admin";
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import { cache } from "react";
+
+import type { Currencies } from "./format";
 
 const SESSION_COOKIE = "hypha_admin_session";
 /** A pending login's second-factor challenge, for the few minutes it lives. */
@@ -209,6 +212,8 @@ export function describe(error: ApiError): string {
       return "A country you listed is already in another zone. A country ships from one zone.";
     case "invalid_country_code":
       return "Countries are two-letter codes, like HR or DE.";
+    case "unknown_country_code":
+      return "That isn't an ISO country code. Use the two letters ISO assigned, like HR or DE.";
     case "duplicate_country":
       return "A country is listed twice.";
     case "shipping_option_code_taken":
@@ -296,3 +301,14 @@ export async function channelNames(
   const { data } = await client.GET("/admin/channels");
   return new Map((data?.items ?? []).map((c) => [c.id, c.name]));
 }
+
+/**
+ * Minor units by currency (`GET /admin/currencies`, design note 0021), fetched once per
+ * request: React's `cache` shares one result between the layout, which provides it to
+ * client components (`useCurrencies`), and the page's own server code.
+ */
+export const loadCurrencies = cache(async (): Promise<Currencies> => {
+  const client = await sessionClient();
+  const { items } = loaded(await client.GET("/admin/currencies"));
+  return Object.fromEntries(items.map((c) => [c.code, c.minor_units]));
+});

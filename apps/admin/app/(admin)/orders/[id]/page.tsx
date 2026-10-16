@@ -18,7 +18,7 @@ import type { ReactNode } from "react";
 import { PageHeader } from "@/components/page-header";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { CANCEL_REASONS, formatDateTime, formatMoney } from "@/lib/format";
-import { channelNames, loaded, sessionClient } from "@/lib/hypha";
+import { channelNames, loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
 
 import { CancelOrderButton, FulfilButton, type Place, ShipmentsCard } from "./fulfilment";
 import { MarkPaid } from "./mark-paid";
@@ -48,10 +48,11 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const order = loaded(await client.GET("/admin/orders/{id}", { params: { path: { id } } }));
   // Shipments and locations need their own scopes; without them the page shows the
   // order alone.
-  const [shipments, locations, channelName] = await Promise.all([
+  const [shipments, locations, channelName, currencies] = await Promise.all([
     client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
     client.GET("/admin/locations"),
     channelNames(client),
+    loadCurrencies(),
   ]);
   const fulfillments = shipments.data?.items ?? [];
   const places: Place[] = (locations.data?.items ?? []).map(({ id, name }) => ({ id, name }));
@@ -123,22 +124,22 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                         )}
                       </VStack>
                     </TableCell>
-                    <TableCell>{formatMoney(line.unit_price)}</TableCell>
+                    <TableCell>{formatMoney(line.unit_price, currencies)}</TableCell>
                     <TableCell>{line.quantity}</TableCell>
                     <TableCell>
                       {line.fulfilled_quantity} of {line.quantity}
                     </TableCell>
                     <TableCell>
                       {line.tax
-                        ? `${formatMoney(line.tax.amount)} (${percent(line.tax.rate_ppm)})`
+                        ? `${formatMoney(line.tax.amount, currencies)} (${percent(line.tax.rate_ppm)})`
                         : "—"}
                     </TableCell>
-                    <TableCell>{formatMoney(line.total)}</TableCell>
+                    <TableCell>{formatMoney(line.total, currencies)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
               <TableFooter>
-                <TotalRow label="Subtotal">{formatMoney(order.subtotal)}</TotalRow>
+                <TotalRow label="Subtotal">{formatMoney(order.subtotal, currencies)}</TotalRow>
                 {order.shipping_lines.map((shipping) => (
                   <TableRow key={shipping.group}>
                     <TableCell>
@@ -158,14 +159,14 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                     <TableCell />
                     <TableCell>
                       {shipping.tax
-                        ? `${formatMoney(shipping.tax.amount)} (${percent(shipping.tax.rate_ppm)})`
+                        ? `${formatMoney(shipping.tax.amount, currencies)} (${percent(shipping.tax.rate_ppm)})`
                         : "—"}
                     </TableCell>
-                    <TableCell>{formatMoney(shipping.amount)}</TableCell>
+                    <TableCell>{formatMoney(shipping.amount, currencies)}</TableCell>
                   </TableRow>
                 ))}
                 <TotalRow label={order.taxes_included ? "Tax (included)" : "Tax"}>
-                  {formatMoney(order.tax_total)}
+                  {formatMoney(order.tax_total, currencies)}
                 </TotalRow>
                 <TotalRow
                   label={
@@ -175,7 +176,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                   }
                 >
                   <Text type="body" weight="bold">
-                    {formatMoney(order.total)}
+                    {formatMoney(order.total, currencies)}
                   </Text>
                 </TotalRow>
               </TableFooter>

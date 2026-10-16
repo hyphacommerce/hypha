@@ -24,6 +24,7 @@ import { Thumbnail } from "@astryxdesign/core/Thumbnail";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useState, useTransition } from "react";
 
+import { useCurrencies } from "@/components/currencies";
 import { moneyInput, parseMoney } from "@/lib/format";
 
 import { addVariant, removeVariant, setVariantMedia, updateVariant } from "../actions";
@@ -110,8 +111,9 @@ function VariantRow({
   images: Item[];
   isOnly: boolean;
 }) {
+  const currencies = useCurrencies();
   const savedSku = variant.sku ?? "";
-  const savedPrice = moneyInput(variant.price);
+  const savedPrice = moneyInput(variant.price, currencies);
   const savedWeight = variant.weight_grams == null ? "" : String(variant.weight_grams);
   const [sku, setSku] = useState(savedSku);
   const [price, setPrice] = useState(savedPrice);
@@ -126,7 +128,7 @@ function VariantRow({
   // "A" and "45.00" would otherwise look unsaved forever.
   const isDirty =
     sku.trim() !== savedSku ||
-    parseMoney(price, variant.price.currency) !== variant.price.amount ||
+    parseMoney(price, variant.price.currency, currencies) !== variant.price.amount ||
     weight.trim() !== savedWeight ||
     ships !== variant.requires_shipping;
   const image = images.find((item) => item.asset_id === variant.media_asset_id);
