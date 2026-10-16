@@ -1148,6 +1148,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-search"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-inventory",
+ "hypha-markets",
+ "hypha-pricing",
+ "hypha-products",
+ "hypha-testkit",
+ "pollster",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-shipping"
 version = "0.1.0"
 dependencies = [
@@ -1244,6 +1261,7 @@ dependencies = [
  "hypha-media",
  "hypha-orders",
  "hypha-products",
+ "hypha-search",
  "hypha-shipping",
  "hypha-stores",
  "hypha-tax",

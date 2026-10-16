@@ -26,7 +26,8 @@ impl Event for ProductCreated {
 }
 
 /// `product.updated`: which of the product's own fields changed, among `title`,
-/// `handle`, `status`, `options` and `media`.
+/// `handle`, `status`, `description`, `vendor`, `product_type`, `tags`, `options` and
+/// `media`.
 #[derive(Debug, Serialize)]
 pub struct ProductUpdated {
     pub product: ProductId,

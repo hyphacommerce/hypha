@@ -5,7 +5,8 @@ use hypha_testkit::{
     InMemoryAppRepo, InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCatalogRepo,
     InMemoryCustomerRepo, InMemoryFulfillmentRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo,
     InMemoryMarketRepo, InMemoryOrderRepo, InMemoryPorts, InMemoryPriceListRepo,
-    InMemoryProductRepo, InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
+    InMemoryProductRepo, InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo,
+    InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
 };
 use pollster::block_on;
 
@@ -209,4 +210,25 @@ fn app_repo() {
 #[test]
 fn app_deliveries() {
     block_on(contract::app_deliveries(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn search_index() {
+    block_on(contract::search_index(async || {
+        InMemorySearchIndex::default()
+    }));
+}
+
+#[test]
+fn search_queue() {
+    block_on(contract::search_queue(async || {
+        InMemorySearchQueue::default()
+    }));
+}
+
+#[test]
+fn search_settings_repo() {
+    block_on(contract::search_settings_repo(async || {
+        InMemorySearchSettingsRepo::default()
+    }));
 }

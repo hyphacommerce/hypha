@@ -24,6 +24,9 @@ impl crate::ErrorCode for QuantityError {
 }
 
 impl Quantity {
+    /// A single unit: "can one be sold?" (search's availability, design note 0019).
+    pub const ONE: Quantity = Quantity(1);
+
     pub fn new(n: u32) -> Result<Self, QuantityError> {
         if n == 0 {
             Err(QuantityError::Zero)

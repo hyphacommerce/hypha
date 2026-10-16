@@ -21,6 +21,7 @@ mod outbox;
 mod ports;
 mod price_lists;
 mod products;
+mod search;
 mod shipping;
 mod stores;
 mod table;
@@ -50,6 +51,9 @@ pub use outbox::InMemoryOutbox;
 pub use ports::InMemoryPorts;
 pub use price_lists::InMemoryPriceListRepo;
 pub use products::InMemoryProductRepo;
+pub use search::{
+    InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo, search_fixture,
+};
 pub use shipping::{InMemoryAppProviderRepo, InMemoryShippingZoneRepo, NoRateProviders};
 pub use stores::InMemoryStoreRepo;
 pub use tax_classes::InMemoryTaxClassRepo;

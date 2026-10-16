@@ -1,0 +1,674 @@
+//! Search over a store in memory (design note 0019): events become marks, the sync job
+//! turns marks into documents priced and stocked per market, and the commands search
+//! them and keep the merchant's settings.
+
+use std::cell::Cell;
+
+use hypha_core::{
+    Actor, AuthError, BasisPoints, CatalogId, CountryCode, Ctx, Currency, EventHandler,
+    InventoryItemId, LocationId, MarketId, Money, OptionId, OptionValueId, Price, PriceListId,
+    ProductId, Scope, UserId, VariantId,
+};
+use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo};
+use hypha_markets::{
+    Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo,
+};
+use hypha_products::{
+    Handle, NewVariant, OptionValue, Product, ProductOption, ProductRepo, ProductStatus,
+};
+use hypha_search::{
+    CommandError, FacetKey, Group, SearchDocument, SearchError, SearchIndexer, SearchInput,
+    SearchStatus, SyncSettings, Target, UpdateSearchSettings, get_search_settings, reindex, search,
+    search_status, sync, update_search_settings,
+};
+use hypha_testkit::{FixedClock, InMemoryPorts, InMemorySearchIndex};
+use pollster::block_on;
+use uuid::Uuid;
+
+fn id(n: u128) -> Uuid {
+    Uuid::from_u128(n)
+}
+fn hr_market() -> MarketId {
+    MarketId::from_uuid(id(1000))
+}
+fn us_market() -> MarketId {
+    MarketId::from_uuid(id(1001))
+}
+fn shirt() -> ProductId {
+    ProductId::from_uuid(id(1100))
+}
+fn mug() -> ProductId {
+    ProductId::from_uuid(id(1101))
+}
+fn draft() -> ProductId {
+    ProductId::from_uuid(id(1102))
+}
+/// Shirt: Red/S, Red/M, Blue/S. Mug: its only variant.
+fn red_s() -> VariantId {
+    VariantId::from_uuid(id(1200))
+}
+fn red_m() -> VariantId {
+    VariantId::from_uuid(id(1201))
+}
+fn blue_s() -> VariantId {
+    VariantId::from_uuid(id(1202))
+}
+fn mug_v() -> VariantId {
+    VariantId::from_uuid(id(1203))
+}
+fn warehouse() -> LocationId {
+    LocationId::from_uuid(id(1300))
+}
+fn eur(amount: i64) -> Money {
+    Money::new(amount, Currency::Eur).unwrap()
+}
+fn price(amount: i64) -> Price {
+    Price::new(eur(amount)).unwrap()
+}
+
+struct World {
+    ports: InMemoryPorts,
+    index: InMemorySearchIndex,
+    clock: FixedClock,
+    /// How many outbox events `deliver` has handled.
+    delivered: Cell<usize>,
+}
+
+impl World {
+    /// Croatia (EUR, a −10% price list with a fixed 1000 for Blue/S) sells the shirt,
+    /// the mug (none in stock) and a draft; the US (USD) lists the shirt, whose EUR
+    /// prices don't resolve there.
+    fn new() -> Self {
+        let w = Self {
+            ports: InMemoryPorts::default(),
+            index: InMemorySearchIndex::default(),
+            clock: FixedClock::default(),
+            delivered: Cell::new(0),
+        };
+        let p = &w.ports;
+        for (market, country, currency) in [
+            (hr_market(), "HR", Currency::Eur),
+            (us_market(), "US", Currency::Usd),
+        ] {
+            let mut m = Market::new(
+                market,
+                country.to_string(),
+                vec![CountryCode::new(country).unwrap()],
+                currency,
+            )
+            .unwrap();
+            block_on(p.markets.insert(&mut m)).unwrap();
+        }
+
+        let value =
+            |n, label: &str| OptionValue::new(OptionValueId::from_uuid(id(n)), label.to_string());
+        let color = ProductOption::new(
+            OptionId::from_uuid(id(1400)),
+            "Color".to_string(),
+            vec![value(1401, "Red"), value(1402, "Blue")],
+        );
+        let size = ProductOption::new(
+            OptionId::from_uuid(id(1410)),
+            "Size".to_string(),
+            vec![value(1411, "S"), value(1412, "M")],
+        );
+        let variant = |v, c, s, amount| NewVariant {
+            id: v,
+            sku: None,
+            price: price(amount),
+            selections: vec![
+                OptionValueId::from_uuid(id(c)),
+                OptionValueId::from_uuid(id(s)),
+            ],
+        };
+        let mut shirt_p = Product::new_configurable(
+            shirt(),
+            Handle::new("linen-shirt").unwrap(),
+            "Linen Shirt".to_string(),
+            vec![color, size],
+            variant(red_s(), 1401, 1411, 3000),
+        )
+        .unwrap();
+        shirt_p
+            .add_variant(variant(red_m(), 1401, 1412, 3200))
+            .unwrap();
+        shirt_p
+            .add_variant(variant(blue_s(), 1402, 1411, 2800))
+            .unwrap();
+        shirt_p
+            .set_description(Some("<p>Breathable <em>linen</em></p>"))
+            .unwrap();
+        shirt_p.set_vendor(Some("Acme".to_string())).unwrap();
+        shirt_p.set_tags(vec!["Summer".to_string()]).unwrap();
+        shirt_p.set_status(ProductStatus::Active).unwrap();
+        block_on(p.products.insert(&mut shirt_p)).unwrap();
+
+        for (product, variant, handle, active) in [
+            (mug(), mug_v(), "mug", true),
+            (draft(), VariantId::from_uuid(id(1204)), "draft", false),
+        ] {
+            let mut simple = Product::new_simple(
+                product,
+                Handle::new(handle).unwrap(),
+                handle.to_string(),
+                variant,
+                price(1000),
+            )
+            .unwrap();
+            if active {
+                simple.set_status(ProductStatus::Active).unwrap();
+            }
+            block_on(p.products.insert(&mut simple)).unwrap();
+        }
+
+        let list = PriceListId::from_uuid(id(1500));
+        let mut prices = PriceList::new(list, Currency::Eur, BasisPoints::new(-1000).unwrap());
+        block_on(p.price_lists.insert(&mut prices)).unwrap();
+        block_on(
+            p.price_lists
+                .set_fixed_prices(list, &[(blue_s(), price(1000))]),
+        )
+        .unwrap();
+        for (n, market, price_list, products) in [
+            (1600, hr_market(), Some(list), vec![shirt(), mug(), draft()]),
+            (1601, us_market(), None, vec![shirt()]),
+        ] {
+            let catalog_id = CatalogId::from_uuid(id(n));
+            let mut catalog = Catalog::new(catalog_id, CatalogContext::Market(market), price_list);
+            block_on(p.catalogs.insert(&mut catalog)).unwrap();
+            block_on(p.catalogs.add_products(catalog_id, &products)).unwrap();
+        }
+
+        let mut location =
+            Location::new(warehouse(), "Zagreb".to_string(), vec![hr_market()], 0).unwrap();
+        block_on(p.locations.insert(&mut location)).unwrap();
+        let mut item =
+            InventoryItem::new(InventoryItemId::from_uuid(id(1700)), mug_v(), true, false);
+        item.set_on_hand(warehouse(), 0, None).unwrap();
+        block_on(p.inventory_items.insert(&mut item)).unwrap();
+        w
+    }
+
+    /// Hands the outbox's new events to the handler, as the dispatcher would.
+    fn deliver(&self) {
+        let events = self.ports.outbox.events();
+        for event in &events[self.delivered.get()..] {
+            block_on(EventHandler::handle(&SearchIndexer, &self.ports, event)).unwrap();
+        }
+        self.delivered.set(events.len());
+    }
+
+    /// Delivers, then syncs until the queue is empty.
+    fn settle(&self) {
+        self.deliver();
+        while block_on(sync(
+            &self.ports,
+            &self.index,
+            &self.clock,
+            &SyncSettings::default(),
+        ))
+        .unwrap()
+        .more
+            || !self.ports.search_queue.targets().is_empty()
+        {}
+    }
+
+    fn documents(&self, market: MarketId) -> Vec<SearchDocument> {
+        let mut docs: Vec<SearchDocument> = self
+            .index
+            .documents()
+            .into_iter()
+            .filter(|d| d.market == market)
+            .collect();
+        docs.sort_by_key(|d| d.variant);
+        docs
+    }
+
+    fn search(&self, input: SearchInput) -> Result<hypha_search::Found, CommandError> {
+        block_on(search(&Ctx::system(), &self.ports, &self.index, input))
+    }
+}
+
+fn input(country: &str) -> SearchInput {
+    SearchInput {
+        country: country.to_string(),
+        limit: 10,
+        ..SearchInput::default()
+    }
+}
+
+// ---------- documents and sync ----------
+
+#[test]
+fn a_store_syncs_into_documents_priced_and_stocked_per_market() {
+    let w = World::new();
+    w.settle();
+
+    let hr = w.documents(hr_market());
+    let variants: Vec<VariantId> = hr.iter().map(|d| d.variant).collect();
+    // The draft has none; the shirt and the mug do.
+    assert_eq!(variants, [red_s(), red_m(), blue_s(), mug_v()]);
+    let prices: Vec<i64> = hr.iter().map(|d| d.price.amount()).collect();
+    // −10% on the shirt's base prices, Blue/S fixed at 1000, the mug −10%.
+    assert_eq!(prices, [2700, 2880, 1000, 900]);
+    let shirt_doc = &hr[0];
+    assert_eq!(
+        (
+            shirt_doc.title.as_str(),
+            shirt_doc.variant_title.as_deref(),
+            shirt_doc.description.as_str(),
+            shirt_doc.vendor.as_deref(),
+            &shirt_doc.tags[..],
+            &shirt_doc.options[..],
+        ),
+        (
+            "Linen Shirt",
+            Some("Red / S"),
+            "Breathable linen",
+            Some("Acme"),
+            &["Summer".to_string()][..],
+            &[
+                ("Color".to_string(), "Red".to_string()),
+                ("Size".to_string(), "S".to_string())
+            ][..],
+        )
+    );
+    assert_eq!(shirt_doc.listing, shirt().to_string(), "no splits yet");
+    assert_eq!(
+        (
+            shirt_doc.product_price.min.amount(),
+            shirt_doc.product_price.max.amount()
+        ),
+        (1000, 2880)
+    );
+    // Untracked shirts sell; the mug has none in stock.
+    let available: Vec<bool> = hr.iter().map(|d| d.available).collect();
+    assert_eq!(available, [true, true, true, false]);
+    // EUR prices don't resolve in a USD market until exchange rates exist.
+    assert!(w.documents(us_market()).is_empty());
+}
+
+#[test]
+fn a_product_leaving_active_leaves_the_index() {
+    let w = World::new();
+    w.settle();
+    let mut p = block_on(w.ports.products.get(shirt())).unwrap().unwrap();
+    p.set_status(ProductStatus::Archived).unwrap();
+    block_on(w.ports.products.update(&mut p)).unwrap();
+    w.settle();
+    let variants: Vec<VariantId> = w.documents(hr_market()).iter().map(|d| d.variant).collect();
+    assert_eq!(variants, [mug_v()]);
+}
+
+#[test]
+fn stock_arriving_makes_a_variant_available() {
+    let w = World::new();
+    w.settle();
+    let mut item = block_on(w.ports.inventory_items.get_by_variant(mug_v()))
+        .unwrap()
+        .unwrap();
+    item.set_on_hand(warehouse(), 5, None).unwrap();
+    block_on(w.ports.inventory_items.update(&mut item)).unwrap();
+    w.deliver();
+    assert_eq!(w.ports.search_queue.targets(), [Target::Variant(mug_v())]);
+    w.settle();
+    let mug_doc = w.documents(hr_market()).pop().unwrap();
+    assert!(mug_doc.available);
+}
+
+#[test]
+fn many_changes_to_one_product_are_one_rebuild() {
+    let w = World::new();
+    w.settle();
+    let mut p = block_on(w.ports.products.get(shirt())).unwrap().unwrap();
+    for title in ["Shirt A", "Shirt B", "Shirt C"] {
+        p.rename(title).unwrap();
+        block_on(w.ports.products.update(&mut p)).unwrap();
+    }
+    w.deliver();
+    assert_eq!(w.ports.search_queue.targets(), [Target::Product(shirt())]);
+    w.settle();
+    assert_eq!(w.documents(hr_market())[0].title, "Shirt C");
+}
+
+#[test]
+fn splitting_by_an_option_rebuilds_every_listing() {
+    let w = World::new();
+    w.settle();
+    block_on(update_search_settings(
+        &Ctx::system(),
+        &w.ports,
+        UpdateSearchSettings {
+            split_by: Some(vec!["color".to_string()]),
+            ..UpdateSearchSettings::default()
+        },
+    ))
+    .unwrap();
+    w.deliver();
+    assert_eq!(w.ports.search_queue.targets(), [Target::All]);
+    w.settle();
+    let listings: Vec<String> = w
+        .documents(hr_market())
+        .iter()
+        .map(|d| d.listing.clone())
+        .collect();
+    assert_eq!(
+        listings,
+        [
+            format!("{}|color=Red", shirt()),
+            format!("{}|color=Red", shirt()),
+            format!("{}|color=Blue", shirt()),
+            mug().to_string(),
+        ]
+    );
+    // Red's price range is its own two variants'.
+    let red = &w.documents(hr_market())[0];
+    assert_eq!(
+        (
+            red.listing_price.min.amount(),
+            red.listing_price.max.amount()
+        ),
+        (2700, 2880)
+    );
+}
+
+#[test]
+fn changing_only_the_facets_rebuilds_nothing() {
+    let w = World::new();
+    w.settle();
+    block_on(update_search_settings(
+        &Ctx::system(),
+        &w.ports,
+        UpdateSearchSettings {
+            facets: Some(vec![("vendor".to_string(), Some("Brand".to_string()))]),
+            ..UpdateSearchSettings::default()
+        },
+    ))
+    .unwrap();
+    w.deliver();
+    assert!(w.ports.search_queue.targets().is_empty());
+}
+
+#[test]
+fn reindex_queues_everything_and_status_counts() {
+    let w = World::new();
+    w.settle();
+    let ctx = Ctx::system();
+    block_on(reindex(&ctx, &w.ports)).unwrap();
+    assert_eq!(
+        block_on(search_status(&ctx, &w.ports, &w.index)),
+        Ok(SearchStatus {
+            queued: 1,
+            documents: 4
+        })
+    );
+    w.settle();
+    assert_eq!(
+        block_on(search_status(&ctx, &w.ports, &w.index)).map(|s| s.queued),
+        Ok(0)
+    );
+}
+
+// ---------- the search command ----------
+
+#[test]
+fn search_finds_listings_in_the_shoppers_market() {
+    let w = World::new();
+    w.settle();
+    let found = w
+        .search(SearchInput {
+            q: Some("linen".to_string()),
+            ..input("HR")
+        })
+        .unwrap();
+    assert_eq!(found.market.id(), hr_market());
+    assert_eq!(found.results.total, 1);
+    assert_eq!(found.results.hits[0].matched, 3);
+
+    let by_variant = w
+        .search(SearchInput {
+            filters: vec!["option.Color:Red".to_string()],
+            group: Group::Variant,
+            ..input("HR")
+        })
+        .unwrap();
+    assert_eq!(by_variant.results.total, 2);
+}
+
+#[test]
+fn default_facets_are_type_vendor_the_markets_options_and_tags() {
+    let w = World::new();
+    w.settle();
+    let found = w.search(input("HR")).unwrap();
+    let keys: Vec<FacetKey> = found.results.facets.iter().map(|f| f.key.clone()).collect();
+    assert_eq!(
+        keys,
+        [
+            FacetKey::ProductType,
+            FacetKey::Vendor,
+            FacetKey::Option("color".to_string()),
+            FacetKey::Option("size".to_string()),
+            FacetKey::Tag,
+        ]
+    );
+    assert!(found.labels.is_empty());
+}
+
+#[test]
+fn the_merchants_facets_and_labels_replace_the_defaults() {
+    let w = World::new();
+    w.settle();
+    block_on(update_search_settings(
+        &Ctx::system(),
+        &w.ports,
+        UpdateSearchSettings {
+            facets: Some(vec![
+                ("option.Size".to_string(), Some("Size".to_string())),
+                ("tag".to_string(), None),
+            ]),
+            ..UpdateSearchSettings::default()
+        },
+    ))
+    .unwrap();
+    let found = w.search(input("HR")).unwrap();
+    let keys: Vec<FacetKey> = found.results.facets.iter().map(|f| f.key.clone()).collect();
+    assert_eq!(keys, [FacetKey::Option("size".to_string()), FacetKey::Tag]);
+    assert_eq!(
+        found.labels.get(&FacetKey::Option("size".to_string())),
+        Some(&"Size".to_string())
+    );
+}
+
+#[test]
+fn a_country_no_market_sells_to_is_refused() {
+    let w = World::new();
+    let de = CountryCode::new("DE").unwrap();
+    assert_eq!(
+        w.search(input("DE")).map(|_| ()),
+        Err(CommandError::NoMarketForCountry(de))
+    );
+}
+
+#[test]
+fn bad_searches_say_what_is_wrong() {
+    let w = World::new();
+    let with = |f: &dyn Fn(&mut SearchInput)| {
+        let mut i = input("HR");
+        f(&mut i);
+        w.search(i).map(|_| ())
+    };
+    let err = |e: SearchError| Err(CommandError::Search(e));
+    assert_eq!(
+        with(&|i| i.filters = vec!["Red".to_string()]),
+        err(SearchError::InvalidFilter("Red".to_string()))
+    );
+    assert_eq!(
+        with(&|i| i.filters = vec!["color:Red".to_string()]),
+        err(SearchError::UnknownFacet("color".to_string()))
+    );
+    assert_eq!(
+        with(&|i| {
+            i.price_min = Some(10);
+            i.price_max = Some(9);
+        }),
+        err(SearchError::InvalidPriceRange)
+    );
+    assert_eq!(
+        with(&|i| i.limit = 0),
+        err(SearchError::InvalidLimit { max: 100 })
+    );
+    assert_eq!(
+        with(&|i| {
+            i.offset = 991;
+            i.limit = 10;
+        }),
+        err(SearchError::TooDeep { max: 1000 })
+    );
+    assert_eq!(
+        with(&|i| {
+            i.offset = 990;
+            i.limit = 10;
+        }),
+        Ok(())
+    );
+}
+
+#[test]
+fn searching_needs_products_read_and_settings_need_write() {
+    let w = World::new();
+    let ctx = Ctx::new(
+        Actor::User(UserId::from_uuid(id(9))),
+        vec![Scope::OrdersRead],
+    );
+    let missing = |scope| Err(CommandError::Auth(AuthError::MissingScope(scope)));
+    assert_eq!(
+        block_on(search(&ctx, &w.ports, &w.index, input("HR"))).map(|_| ()),
+        missing(Scope::ProductsRead)
+    );
+    assert_eq!(
+        block_on(get_search_settings(&ctx, &w.ports)).map(|_| ()),
+        missing(Scope::ProductsRead)
+    );
+    let reader = Ctx::new(
+        Actor::User(UserId::from_uuid(id(9))),
+        vec![Scope::ProductsRead],
+    );
+    assert_eq!(
+        block_on(update_search_settings(
+            &reader,
+            &w.ports,
+            UpdateSearchSettings::default()
+        ))
+        .map(|_| ()),
+        missing(Scope::ProductsWrite)
+    );
+    assert_eq!(
+        block_on(reindex(&reader, &w.ports)),
+        missing(Scope::ProductsWrite)
+    );
+}
+
+#[test]
+fn settings_are_stored_on_first_save_and_updated_after() {
+    let w = World::new();
+    let ctx = Ctx::system();
+    assert_eq!(
+        block_on(get_search_settings(&ctx, &w.ports)).map(|s| s.split_by().to_vec()),
+        Ok(vec![])
+    );
+    let save = |names: &[&str]| {
+        block_on(update_search_settings(
+            &ctx,
+            &w.ports,
+            UpdateSearchSettings {
+                split_by: Some(names.iter().map(|n| n.to_string()).collect()),
+                ..UpdateSearchSettings::default()
+            },
+        ))
+    };
+    assert!(save(&["Color"]).is_ok());
+    assert!(save(&["Color", "Size"]).is_ok());
+    let stored = block_on(get_search_settings(&ctx, &w.ports)).unwrap();
+    assert_eq!(stored.split_by(), ["Color", "Size"]);
+    let changes = w
+        .ports
+        .outbox
+        .events()
+        .iter()
+        .filter(|e| e.event_type == "search_settings.changed")
+        .count();
+    assert_eq!(changes, 2);
+    assert_eq!(
+        save(&["a", "b", "c", "d"]).map(|_| ()),
+        Err(CommandError::Search(SearchError::TooManySplits { max: 3 }))
+    );
+}
+
+// ---------- the handler ----------
+
+fn event(event_type: &str, data: serde_json::Value) -> hypha_core::StoredEvent {
+    hypha_core::StoredEvent {
+        seq: 1,
+        id: id(1),
+        event_type: event_type.to_string(),
+        version: 1,
+        subject_kind: "any".to_string(),
+        subject_id: id(2),
+        subject_version: None,
+        actor: Actor::System,
+        occurred_at: hypha_core::Timestamp::from_unix_micros(0),
+        data,
+    }
+}
+
+#[test]
+fn each_event_marks_what_it_changes() {
+    use hypha_search::handler::targets;
+    let product = serde_json::json!({ "product": shirt() });
+    assert_eq!(
+        targets(&event("product.updated", product)),
+        Ok(vec![Target::Product(shirt())])
+    );
+    let products = serde_json::json!({ "catalog": "cat_x", "products": [shirt(), mug()] });
+    assert_eq!(
+        targets(&event("catalog.products_removed", products)),
+        Ok(vec![Target::Product(shirt()), Target::Product(mug())])
+    );
+    let variants = serde_json::json!({ "price_list": "pl_x", "variants": [red_s()] });
+    assert_eq!(
+        targets(&event("price_list.prices_set", variants)),
+        Ok(vec![Target::Variant(red_s())])
+    );
+    assert_eq!(
+        targets(&event("market.changed", serde_json::json!({}))),
+        Ok(vec![Target::All])
+    );
+    let facets_only = serde_json::json!({ "fields": ["facets"] });
+    assert_eq!(
+        targets(&event("search_settings.changed", facets_only)),
+        Ok(vec![])
+    );
+}
+
+#[test]
+fn events_search_ignores_mark_nothing() {
+    let w = World::new();
+    let placed = event("order.placed", serde_json::json!({}));
+    assert!(!EventHandler::<InMemoryPorts>::wants(
+        &SearchIndexer,
+        &placed.event_type
+    ));
+    block_on(EventHandler::handle(&SearchIndexer, &w.ports, &placed)).unwrap();
+    assert!(w.ports.search_queue.targets().is_empty());
+}
+
+#[test]
+fn a_malformed_payload_fails_the_delivery() {
+    let w = World::new();
+    let bad = event(
+        "inventory_item.changed",
+        serde_json::json!({ "variant": 7 }),
+    );
+    assert!(block_on(EventHandler::handle(&SearchIndexer, &w.ports, &bad)).is_err());
+    assert!(w.ports.search_queue.targets().is_empty());
+}

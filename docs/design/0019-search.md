@@ -151,81 +151,92 @@ pub struct SearchDocument {
 
 **Group keys and the representative:** with `group=product` or `listing`, the hit is
 the best-ranked document of the group; ties (a listing page with no `q`) go to the lowest
-`position`. A hit says how many of its group's documents matched (`matched_variants`)
-where the engine can tell.
+`position`. A hit says how many of its group's documents matched (`matched`).
 
 ## 4. The port (SE2)
 
 ```rust
-#[allow(async_fn_in_trait)]
+// hypha-search/src/repo.rs (as built)
 pub trait SearchIndex {
-    /// Makes `docs` the documents of `product` in `market`: inserts, replaces, and
-    /// removes the ones not in `docs`. Empty removes the product from the market.
-    async fn replace(&self, market: MarketId, product: ProductId, docs: &[SearchDocument]) -> Result<(), SearchError>;
-    /// Removes every document of `market` (deleted, or rebuilt from scratch).
-    async fn clear_market(&self, market: MarketId) -> Result<(), SearchError>;
-    /// The products with documents in `market`, a page at a time (for full rebuilds,
-    /// to remove what's no longer there).
-    async fn products(&self, market: MarketId, after: Option<ProductId>, limit: u32) -> Result<Vec<ProductId>, SearchError>;
-    async fn search(&self, query: &SearchQuery) -> Result<SearchResults, SearchError>;
+    /// Makes `documents` the documents of `product` in `market`: adds, replaces, and
+    /// removes the ones not in `documents` (all of them when it's empty).
+    async fn replace(&self, market: MarketId, product: ProductId, documents: &[SearchDocument]) -> Result<(), IndexError>;
+    async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError>;
+    /// Option names (lowercased) in the market, most documents first: default facets.
+    async fn option_names(&self, market: MarketId) -> Result<Vec<String>, IndexError>;
+    /// Documents over every market: none means a new engine (the host rebuilds).
+    async fn count(&self) -> Result<u64, IndexError>;
 }
 ```
 
-`SearchQuery { market, q, filters: Vec<Filter>, price: Option<(Money, Money)>, available: Option<bool>, sort, group, facets: Vec<FacetKey>, offset, limit }`
-and `SearchResults { hits: Vec<SearchDocument + matched_variants>, total, facets: Vec<FacetCounts> }`.
+The engine isn't a request port (`HasXxx`): a host picks one for its life and passes
+it to the commands and the sync job, like the `WebhookSender`. The Postgres engine can
+be the request's ports themselves (`PgStore` implements it).
 
-- `Filter { key: FacetKey, values: Vec<String> }`: values within a key are OR, keys are
-  AND (Shopify's rule). `FacetKey` is `Option(name)`, `Vendor`, `ProductType`, `Tag`.
-- Facet counts count **groups** (what the shopper sees), and each facet's counts ignore
-  that facet's own filter, so picking "Red" still shows "Blue" with its count
-  (disjunctive facets). An engine that can only count documents says so
-  (`SearchIndex::COUNTS_GROUPS`); Postgres counts groups.
-- `sort`: `relevance` (default with `q`), `newest` (default without), `price_asc`,
-  `price_desc`, `title`.
-- Pages are offsets (engines page that way) capped at 1 000 results deep; the API wraps
-  them in the usual opaque `cursor` (0012), so a page shape change stays internal.
-- `SearchError`: `Engine(String)` (unreachable, refused) and `InvalidQuery`; no
-  engine's types leak.
-- The testkit gets `InMemorySearchIndex` and a `search_index` contract scenario set that
-  both engines run.
+`SearchQuery { market, terms, filters, price: PriceBounds, available, sort, group, facets, offset, limit }`
+and `SearchResults { hits: Vec<Hit { document, matched }>, total, facets: Vec<FacetCounts>, price: Option<(Money, Money)> }`.
+
+**What a search means is a plain function, `hypha_search::reference::search`** over a
+slice of documents. The in-memory engine runs it; the `search_index` contract loads a
+fixture into an engine and requires every query of a battery (terms, filters, price,
+availability, every group and sort, pages, facets) to answer exactly as the reference
+does. So engines agree on everything, ranking included:
+
+- **Terms** (`terms.rs`, one tokenizer for documents and queries): runs of letters and
+  digits, lowercased ("LS-RED" is `ls`, `red`). A document matches when every query
+  term is a prefix of one of its terms.
+- **Score** (relevance): per query term, 10 if it's in the title or variant title, 4 in
+  vendor, type, tags, SKU or option values, 1 in the description; summed.
+- **Filters** (`FacetKey`: `option.<name>` with the name lowercased, `vendor`,
+  `product_type`, `tag`; exact values): values of a key OR, keys AND (Shopify's rule).
+- **Groups:** a group's representative is its first document by the sort (cheapest
+  for `price_asc`, dearest for `price_desc`, best score for relevance), then by
+  `position`; `matched` counts the group's matching documents.
+- **Order** of groups: the sort's key, then newest product (created, then product ID,
+  descending), then listing key and position. Titles compare lowercased by code point
+  (`COLLATE "C"` in Postgres), so the order doesn't depend on a database's locale.
+- **Facets** count **groups** (what the shopper sees), each ignoring its own filter, so
+  picking "Red" still shows "Blue" with its count (disjunctive facets). The price range
+  ignores the price bounds.
+- `sort`: `relevance` (without terms: `newest`), `newest`, `price_asc`, `price_desc`,
+  `title`. Pages are offsets, at most 100 hits and 1 000 deep (`MAX_LIMIT`,
+  `MAX_DEPTH`); the API wraps them in an opaque `cursor` (0012).
+- `IndexError(String)`: the engine failed (clients see `search_unavailable`); bad
+  queries are `SearchError`s, caught before the engine.
 
 ## 5. Sync (SE5)
 
-```sql
-CREATE TABLE search_queue (
-    target     text        PRIMARY KEY,  -- 'product:<uuid>', 'market:<uuid>', 'all'
-    queued_at  timestamptz NOT NULL,
-    leased_until timestamptz
-);
-```
+**The queue** (`SearchQueue`): one row per target (`Target::Product`,
+`Target::Variant`, `Target::All`) with a `generation`. Marking a queued target bumps its
+generation instead of adding a row, which is the coalescing: 500 checkouts of one shirt
+are one rebuild. Marks are leased like deliveries (oldest marked first); finishing
+removes a mark only at the generation leased, so one marked again meanwhile stays, with
+its lease freed. The queue needs no clock to mark, so the handler needs none.
 
 **The handler, `SearchIndexer`** (`search_index`, in `hypha-search`, an
 `EventHandler` the host lists; section 5.1), marks:
 
 | Event | Marks |
 | --- | --- |
-| `product.created`, `.updated`, `.variant_added`, `.variant_updated`, `.variant_removed`, `.deleted` | the product |
+| `product.created`, `.updated`, `.variant_added`, `.variant_updated`, `.variant_removed` | the product |
 | `catalog.products_added` / `_removed` | those products |
-| `catalog.changed`, `market.changed` | the market |
-| `price_list.changed` | everything (rare; markets using it aren't in the event) |
-| `price_list.prices_set` / `_removed`, `inventory_item.changed` / `.deleted` | the variants' products (looked up when the job runs) |
-| `location.changed` (new, section 8) | everything |
-| `search_settings.changed` (new) | everything |
+| `price_list.prices_set` / `_removed`, `inventory_item.changed` / `.deleted` | the variants (their products are looked up when the job runs) |
+| `market.changed`, `catalog.changed`, `price_list.changed`, `location.changed` (new, section 8) | everything (rare and wide) |
+| `search_settings.changed` naming `split_by` | everything; facets alone change no document |
 
-A mark that's already queued stays one row (`ON CONFLICT DO NOTHING`), which is the
-coalescing: 500 checkouts of one shirt are one rebuild.
+A payload that isn't what its type promises fails the delivery (retried, then shown in
+the admin) rather than being skipped.
 
-**The job, `hypha_search::sync`**, leases a batch of marks (like deliveries), then:
-- **product:** loads it once, and per market builds and `replace`s its documents (empty
-  where it's no longer listed, or deleted);
-- **market:** walks the market's catalog's products in pages, re-marking each as a
-  product (so the work stays bounded per run), then removes documents of products
-  no longer in it (`SearchIndex::products`);
-- **all:** re-marks every market, and clears markets that no longer exist;
+**The job, `hypha_search::sync`**, leases a batch of marks, then:
+- **all:** marks every product, a page at a time (products aren't deleted and markets
+  aren't removed, so every product rebuilt covers every market);
+- **variant:** its product (a removed variant's product has its own event);
+- **products:** loads them once; per market, loads prices and stock once for all of
+  them (`load_pricing`, `StockContext::load`) and `replace`s each product's documents
+  (none when it's inactive, unlisted or gone);
 
-then deletes the marks it finished. A mark re-queued while it ran (the product changed
-again) is kept: the delete matches `queued_at`. Failures leave the mark for the next run;
-`Progress` like the dispatcher's.
+and finishes the marks only if everything worked; otherwise their lease runs out and a
+later run tries again. It answers `Progress` like the dispatcher's jobs.
 
 ### 5.1 Handlers as a trait (SE10)
 
@@ -295,14 +306,15 @@ Developers adjust beyond this through the search spore seam (section 9).
 ## 7. API and admin
 
 **Storefront** (publishable key, `products:read`):
-- `GET /storefront/search?country=DE&q=shirt&filter=Color:Red&filter=Color:Blue&filter=vendor:Acme&price_min=1000&price_max=5000&available=true&sort=price_asc&group=listing&limit=24&cursor=…`
+- `GET /storefront/search?country=DE&q=shirt&filter=option.color:Red&filter=option.color:Blue&filter=vendor:Acme&price_min=1000&price_max=5000&available=true&sort=price_asc&group=listing&limit=24&cursor=…`
   - `country` is required: the market is the one serving it (`422 country_not_served`
     otherwise).
-  - `filter` repeats; `key:value`, where key is an option name or `vendor`, `type`,
-    `tag`. Values within a key OR, keys AND.
+  - `filter` repeats; `key:value`, key a `FacetKey`: `option.<name>` (any case),
+    `vendor`, `product_type`, `tag`. Values within a key OR, keys AND. Options carry a
+    prefix so an option called "Vendor" or "Tag" can't be mistaken for a field.
   - Response: `{ items: [{ product, variant, listing, handle, title, variant_title,
     price, product_price: {min, max}, listing_price, available, image: {url, alt}?,
-    options, matched_variants? }], total, facets: [{ key, label, values: [{ value,
+    options, matched }], total, facets: [{ key, label, values: [{ value,
     count }] }] | price: {min, max}, next_cursor }`.
 - `GET /storefront/products` stays absent: the listing is `search` without `q` (one
   route, one response shape). `GET /storefront/products/{id}` gains the content
@@ -380,9 +392,11 @@ closed and its port bounds growing with every handler; B (the queue port in
 the handler. Making handlers a trait the host composes removes the edge and the
 special case, and gives spores their `event_handlers()` (0002 §6).
 
-**Q3. Facet counts on engines that count documents.** *Proceeding with A.* A. Accept
-the difference and say so (`COUNTS_GROUPS`); B. count groups with a second query per
-facet (slow).
+**Q3. Facet counts on engines that count documents.** *Open until Meilisearch (step
+7).* The contract holds engines to group counts, which Postgres and the reference give.
+If Meilisearch's facet distribution counts documents even with `distinct`, either the
+adapter counts groups itself (B: slower) or the contract gains a documented allowance
+for that engine (A).
 
 **Q4. `country` vs `market` on the storefront.** *Proceeding with country*, as carts
 do: a storefront knows where the shopper is, not our market IDs.
