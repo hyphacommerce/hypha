@@ -38,9 +38,9 @@ pub use idempotency::{
     IdempotencyRequest, Idempotent, StageIdempotency, earlier_id, earlier_result,
 };
 pub use ids::{
-    AddressId, AgentId, ApiKeyId, AssetId, CartId, CatalogId, CustomerId, DeliveryId, EventId,
-    FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId, LocationId, MarketId, OptionId,
-    OptionValueId, OrderId, OrderLineId, PasswordResetId, PriceListId, ProductId, RoleId,
+    AddressId, AgentId, ApiKeyId, AssetId, CartId, CatalogId, ChannelId, CustomerId, DeliveryId,
+    EventId, FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId, LocationId, MarketId,
+    OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId, PriceListId, ProductId, RoleId,
     SessionId, ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId,
     UserId, VariantId,
 };

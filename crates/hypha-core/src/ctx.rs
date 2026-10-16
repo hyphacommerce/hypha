@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{AgentId, ApiKeyId, ErrorCode, UserId, scope::Scope};
+use crate::{AgentId, ApiKeyId, ChannelId, ErrorCode, UserId, scope::Scope};
 
 /// Who a command runs for, for audit and idempotency (keys are per actor).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,6 +19,10 @@ pub enum Actor {
 pub struct Ctx {
     actor: Actor,
     scopes: Vec<Scope>,
+    /// The sales channel the caller sells through (design note 0020, CH5): a
+    /// storefront's, from its publishable key. `None` for staff, secret keys and the
+    /// system, who see every channel.
+    channel: Option<ChannelId>,
 }
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -37,8 +41,22 @@ impl ErrorCode for AuthError {
 }
 
 impl Ctx {
+    /// A caller in no channel: staff, a secret key, the system.
     pub fn new(actor: Actor, scopes: Vec<Scope>) -> Self {
-        Self { actor, scopes }
+        Self {
+            actor,
+            scopes,
+            channel: None,
+        }
+    }
+
+    /// A storefront caller, selling through `channel` (its key's).
+    pub fn in_channel(actor: Actor, scopes: Vec<Scope>, channel: ChannelId) -> Self {
+        Self {
+            actor,
+            scopes,
+            channel: Some(channel),
+        }
     }
 
     pub fn system() -> Self {
@@ -47,6 +65,11 @@ impl Ctx {
 
     pub fn actor(&self) -> Actor {
         self.actor
+    }
+
+    /// The channel the caller sells through; `None` sees every channel.
+    pub fn channel(&self) -> Option<ChannelId> {
+        self.channel
     }
 
     /// Whether the caller holds `scope`, directly or through the write scope that

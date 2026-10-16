@@ -76,6 +76,12 @@ pub enum Scope {
     FulfillmentsRead,
     #[serde(rename = "fulfillments:write")]
     FulfillmentsWrite,
+    /// Managing sales channels (design note 0020, CH10). Publishing products to them is
+    /// `products:write`.
+    #[serde(rename = "channels:read")]
+    ChannelsRead,
+    #[serde(rename = "channels:write")]
+    ChannelsWrite,
 }
 
 impl Scope {
@@ -113,6 +119,8 @@ impl Scope {
             Scope::AppsWrite => "apps:write",
             Scope::FulfillmentsRead => "fulfillments:read",
             Scope::FulfillmentsWrite => "fulfillments:write",
+            Scope::ChannelsRead => "channels:read",
+            Scope::ChannelsWrite => "channels:write",
         }
     }
 
@@ -136,6 +144,7 @@ impl Scope {
             Scope::ShippingRead => Some(Scope::ShippingWrite),
             Scope::AppsRead => Some(Scope::AppsWrite),
             Scope::FulfillmentsRead => Some(Scope::FulfillmentsWrite),
+            Scope::ChannelsRead => Some(Scope::ChannelsWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -151,7 +160,8 @@ impl Scope {
             | Scope::MediaWrite
             | Scope::ShippingWrite
             | Scope::AppsWrite
-            | Scope::FulfillmentsWrite => None,
+            | Scope::FulfillmentsWrite
+            | Scope::ChannelsWrite => None,
         }
     }
 
@@ -167,7 +177,7 @@ impl Scope {
         Scope::Checkout,
     ];
 
-    pub const ALL: [Scope; 31] = [
+    pub const ALL: [Scope; 33] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -199,6 +209,8 @@ impl Scope {
         Scope::AppsWrite,
         Scope::FulfillmentsRead,
         Scope::FulfillmentsWrite,
+        Scope::ChannelsRead,
+        Scope::ChannelsWrite,
     ];
 }
 
