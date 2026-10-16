@@ -3,8 +3,8 @@ use hypha_core::{
     RepoError, VariantId, Version, Versioned,
 };
 use hypha_products::{
-    Handle, NewVariant, OptionValue, Product, ProductOption, ProductRepo, ProductStatus,
-    VariantPatch, repo::keys,
+    Handle, NewVariant, OptionValue, Product, ProductFilter, ProductOption, ProductRepo,
+    ProductStatus, VariantPatch, repo::keys,
 };
 use uuid::Uuid;
 
@@ -32,6 +32,8 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     missing_update(&make().await).await;
     scenario("product: list pages newest first, after a cursor, by status");
     list_pages(&make().await).await;
+    scenario("product: list by text in the title, handle or a SKU, ignoring case");
+    list_by_text(&make().await).await;
     scenario("product: media and variant media round trip, in order");
     media_round_trips(&make().await).await;
     scenario("product: variant weight and requires_shipping round trip");
@@ -345,8 +347,69 @@ async fn listed<R: ProductRepo>(
     after: Option<u128>,
     limit: u32,
 ) -> (Vec<ProductId>, bool) {
-    let page = repo.list(status, page(after, limit)).await.unwrap();
+    let filter = ProductFilter::new(status, None).unwrap();
+    let page = repo.list(&filter, page(after, limit)).await.unwrap();
     (page.items.iter().map(|p| p.id).collect(), page.has_more)
+}
+
+async fn list_by_text<R: ProductRepo>(repo: &R) {
+    // 1: "Linen Shirt" (shirt), SKU LS-RED; 2: "Mug" (stoneware-mug); 3: "Čaša", SKU
+    // 100%_OFF (characters LIKE would treat as wildcards); 4 is active.
+    let mut shirt = simple(1, "shirt");
+    shirt.rename("Linen Shirt").unwrap();
+    shirt
+        .update_variant(
+            vid(101),
+            VariantPatch {
+                sku: Some(Some("LS-RED".to_string())),
+                ..VariantPatch::default()
+            },
+        )
+        .unwrap();
+    let mut mug = simple(2, "stoneware-mug");
+    mug.rename("Mug").unwrap();
+    let mut glass = simple(3, "glass");
+    glass.rename("Čaša").unwrap();
+    glass
+        .update_variant(
+            vid(301),
+            VariantPatch {
+                sku: Some(Some("100%_OFF".to_string())),
+                ..VariantPatch::default()
+            },
+        )
+        .unwrap();
+    let mut linen_mug = simple(4, "linen-mug");
+    linen_mug.set_status(ProductStatus::Active).unwrap();
+    for p in [&mut shirt, &mut mug, &mut glass, &mut linen_mug] {
+        repo.insert(p).await.unwrap();
+    }
+
+    let found = async |status, q: &str| {
+        let filter = ProductFilter::new(status, Some(q.to_string())).unwrap();
+        let page = repo.list(&filter, page(None, 10)).await.unwrap();
+        page.items.iter().map(|p| p.id).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        found(None, "LINEN").await,
+        [pid(4), pid(1)],
+        "title and handle"
+    );
+    assert_eq!(found(None, "ware-m").await, [pid(2)], "inside the handle");
+    assert_eq!(found(None, "ls-red").await, [pid(1)], "a SKU");
+    assert_eq!(found(None, "čAŠ").await, [pid(3)], "beyond ASCII");
+    assert_eq!(found(None, "0%_").await, [pid(3)], "% and _ are plain text");
+    assert_eq!(
+        found(None, "_").await,
+        [pid(3)],
+        "only the SKU with an underscore"
+    );
+    assert_eq!(found(None, "cup").await, Vec::<ProductId>::new());
+    assert_eq!(
+        found(Some(ProductStatus::Active), "linen").await,
+        [pid(4)],
+        "with a status too"
+    );
 }
 
 async fn list_pages<R: ProductRepo>(repo: &R) {
@@ -370,7 +433,10 @@ async fn list_pages<R: ProductRepo>(repo: &R) {
     }
 
     // Summaries of the stored products.
-    let first = repo.list(None, page(None, 2)).await.unwrap();
+    let first = repo
+        .list(&ProductFilter::default(), page(None, 2))
+        .await
+        .unwrap();
     assert_eq!(
         first.items,
         vec![
@@ -505,7 +571,10 @@ async fn content_round_trips<R: ProductRepo>(repo: &R) {
         .unwrap();
     repo.insert(&mut p).await.unwrap();
     assert_eq!(repo.get(p.id()).await, Ok(Some(p.clone())));
-    let listed = repo.list(None, page(None, 10)).await.unwrap();
+    let listed = repo
+        .list(&ProductFilter::default(), page(None, 10))
+        .await
+        .unwrap();
     assert_eq!(listed.items, vec![p.summary()]);
 
     p.set_description(None).unwrap();
@@ -513,7 +582,10 @@ async fn content_round_trips<R: ProductRepo>(repo: &R) {
     p.set_tags(vec![]).unwrap();
     repo.update(&mut p).await.unwrap();
     assert_eq!(repo.get(p.id()).await, Ok(Some(p.clone())));
-    let listed = repo.list(None, page(None, 10)).await.unwrap();
+    let listed = repo
+        .list(&ProductFilter::default(), page(None, 10))
+        .await
+        .unwrap();
     assert_eq!(listed.items, vec![p.summary()]);
 }
 

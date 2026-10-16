@@ -22,6 +22,8 @@ import { ProductStatusBadge } from "@/components/status";
 import { formatMoney } from "@/lib/format";
 import { loaded, sessionClient } from "@/lib/hypha";
 
+import { SearchBox } from "./search-box";
+
 type Status = AdminSchemas["ProductStatus"];
 const FILTERS: { label: string; status?: Status }[] = [
   { label: "All" },
@@ -80,13 +82,23 @@ export default async function ProductsPage({
   const params = await searchParams;
   const status = asStatus(params.status);
   const cursor = typeof params.cursor === "string" ? params.cursor : undefined;
+  const q = typeof params.q === "string" && params.q.trim() !== "" ? params.q : undefined;
+  const filters = (extra: Record<string, string | undefined> = {}) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries({ status, q, ...extra })) {
+      if (value) search.set(key, value);
+    }
+    const query = search.toString();
+    return query ? `/products?${query}` : "/products";
+  };
 
   const client = await sessionClient();
   const result = await client.GET("/admin/products", {
-    params: { query: { status, cursor } },
+    params: { query: { status, q, cursor } },
   });
-  // A hand-edited URL (an old or foreign cursor): start the list again, same filter.
-  if (result.response.status === 400) {
+  // A hand-edited URL (an old or foreign cursor, text over 255 characters): start the
+  // list again, same status.
+  if (result.response.status === 400 || result.response.status === 422) {
     redirect(status ? `/products?status=${status}` : "/products");
   }
   const page = loaded(result);
@@ -99,26 +111,45 @@ export default async function ProductsPage({
           actions={<Button label="Add product" variant="primary" href="/products/new" />}
         />
 
-        <HStack gap={1}>
-          {FILTERS.map((filter) => (
-            <Button
-              key={filter.label}
-              label={filter.label}
-              size="sm"
-              variant={filter.status === status ? "secondary" : "ghost"}
-              href={filter.status ? `/products?status=${filter.status}` : "/products"}
-            />
-          ))}
+        <HStack gap={3} vAlign="center">
+          <SearchBox key={q ?? ""} q={q ?? ""} status={status} />
+          <HStack gap={1}>
+            {FILTERS.map((filter) => (
+              <Button
+                key={filter.label}
+                label={filter.label}
+                size="sm"
+                variant={filter.status === status ? "secondary" : "ghost"}
+                href={filters({ status: filter.status })}
+              />
+            ))}
+          </HStack>
         </HStack>
 
         {page.items.length === 0 ? (
           <EmptyState
             icon={<CubeIcon width={32} />}
             title={
-              cursor ? "No more products" : status ? `No ${status} products` : "No products yet"
+              cursor
+                ? "No more products"
+                : q
+                  ? `No products match “${q}”`
+                  : status
+                    ? `No ${status} products`
+                    : "No products yet"
             }
-            description="Products you add show up here, newest first."
-            actions={<Button label="Add product" href="/products/new" />}
+            description={
+              q
+                ? "Search looks at titles, handles and SKUs."
+                : "Products you add show up here, newest first."
+            }
+            actions={
+              q ? (
+                <Button label="Clear search" href={filters({ q: undefined })} />
+              ) : (
+                <Button label="Add product" href="/products/new" />
+              )
+            }
           />
         ) : (
           <Table hasHover>
@@ -159,7 +190,7 @@ export default async function ProductsPage({
 
         <Pager
           path="/products"
-          query={{ status }}
+          query={{ status, q }}
           isFirstPage={!cursor}
           nextCursor={page.next_cursor}
         />

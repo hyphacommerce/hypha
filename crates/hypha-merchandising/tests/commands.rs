@@ -398,7 +398,7 @@ fn a_list_carries_each_products_featured_asset() {
     let page = block_on(list_product_views(
         &Ctx::system(),
         &ports,
-        None,
+        hypha_products::ListProducts::default(),
         PageRequest::default(),
     ))
     .unwrap();

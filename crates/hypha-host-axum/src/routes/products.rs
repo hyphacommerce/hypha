@@ -9,8 +9,8 @@ use hypha_merchandising::{
     set_variant_media,
 };
 use hypha_products::{
-    AddVariant, CreateSimpleProduct, HasProducts, OptionDraft, OptionValueDraft, Product,
-    ProductStatus, SetProductOptions, UpdateProduct, UpdateVariant, add_product_variant,
+    AddVariant, CreateSimpleProduct, HasProducts, ListProducts, OptionDraft, OptionValueDraft,
+    Product, ProductStatus, SetProductOptions, UpdateProduct, UpdateVariant, add_product_variant,
     create_simple_product, remove_product_variant, set_product_options, set_product_status,
     update_product, update_product_variant,
 };
@@ -253,6 +253,10 @@ async fn respond<S: Storage>(
 pub(super) struct ProductFilters {
     /// Only products in this status.
     status: Option<StatusDto>,
+    /// Only products whose title, handle or a variant's SKU contains this text, ignoring
+    /// case. Up to 255 characters; blank filters nothing. Reads the products as they are
+    /// now (drafts too); storefronts search with `/storefront/search`.
+    q: Option<String>,
 }
 
 /// A product in a list: what a table of products shows, without options or variants
@@ -333,8 +337,11 @@ pub(super) async fn list<S: Storage>(
 ) -> Result<Json<ProductSummaryPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, filters, scope) = query.parse()?;
-    let status = filters.status.map(Into::into);
-    let page = list_product_views(&ctx, &ports, status, page).await?;
+    let input = ListProducts {
+        status: filters.status.map(Into::into),
+        q: filters.q,
+    };
+    let page = list_product_views(&ctx, &ports, input, page).await?;
     let mut items = Vec::with_capacity(page.items.len());
     for view in &page.items {
         items.push(ProductSummaryResponse::new(view, state.media.as_ref()).await?);

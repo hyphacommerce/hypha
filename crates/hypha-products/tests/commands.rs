@@ -1,9 +1,11 @@
 use hypha_core::{
-    Actor, AuthError, Ctx, Currency, Money, MoneyError, PageRequest, ProductId, Scope, UserId,
+    Actor, AuthError, Ctx, Currency, Money, MoneyError, PageRequest, ProductId, Scope, TextError,
+    UserId,
 };
 use hypha_products::{
-    CommandError, CreateSimpleProduct, Handle, HandleError, ProductError, ProductStatus,
-    create_simple_product, get_product, list_products, repo::ProductRepo, set_product_status,
+    CommandError, CreateSimpleProduct, Handle, HandleError, ListProducts, ProductError,
+    ProductStatus, create_simple_product, get_product, list_products, repo::ProductRepo,
+    set_product_status,
 };
 use hypha_testkit::{InMemoryProductRepo, SequentialIds};
 use pollster::block_on;
@@ -215,16 +217,55 @@ fn list_products_filters_by_status() {
     ))
     .unwrap();
 
-    let all = block_on(list_products(&ctx, &repo, None, PageRequest::default())).unwrap();
-    assert_eq!(all.items, vec![cup.summary(), mug.summary()]);
-    let active = block_on(list_products(
+    let all = block_on(list_products(
         &ctx,
         &repo,
-        Some(ProductStatus::Active),
+        ListProducts::default(),
         PageRequest::default(),
     ))
     .unwrap();
+    assert_eq!(all.items, vec![cup.summary(), mug.summary()]);
+    let active = ListProducts {
+        status: Some(ProductStatus::Active),
+        ..ListProducts::default()
+    };
+    let active = block_on(list_products(&ctx, &repo, active, PageRequest::default())).unwrap();
     assert_eq!(active.items, vec![cup.summary()]);
+}
+
+#[test]
+fn list_products_filters_by_text() {
+    let repo = InMemoryProductRepo::default();
+    let ids = SequentialIds::default();
+    let ctx = Ctx::system();
+    block_on(create_simple_product(&ctx, &repo, &ids, mug())).unwrap();
+    let mut cup_input = self::mug();
+    cup_input.handle = "cup".to_string();
+    let cup = block_on(create_simple_product(&ctx, &repo, &ids, cup_input)).unwrap();
+
+    let q = |text: &str| ListProducts {
+        q: Some(text.to_string()),
+        ..ListProducts::default()
+    };
+    let found = block_on(list_products(
+        &ctx,
+        &repo,
+        q(" CU "),
+        PageRequest::default(),
+    ))
+    .unwrap();
+    assert_eq!(found.items, vec![cup.summary()]);
+    assert_eq!(
+        block_on(list_products(
+            &ctx,
+            &repo,
+            q(&"x".repeat(256)),
+            PageRequest::default()
+        )),
+        Err(CommandError::Product(ProductError::Text(
+            TextError::TooLong("q")
+        )))
+    );
 }
 
 #[test]
@@ -235,7 +276,12 @@ fn list_products_needs_products_read() {
         vec![Scope::OrdersRead],
     );
     assert_eq!(
-        block_on(list_products(&ctx, &repo, None, PageRequest::default())),
+        block_on(list_products(
+            &ctx,
+            &repo,
+            ListProducts::default(),
+            PageRequest::default()
+        )),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::ProductsRead
         )))

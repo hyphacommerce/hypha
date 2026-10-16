@@ -3,7 +3,7 @@ use hypha_core::{
     stamp_update,
 };
 use hypha_products::{
-    Handle, Product, ProductStatus, ProductSummary,
+    Handle, Product, ProductFilter, ProductSummary,
     repo::{ProductRepo, keys},
 };
 
@@ -70,14 +70,12 @@ impl ProductRepo for InMemoryProductRepo {
 
     async fn list(
         &self,
-        status: Option<ProductStatus>,
+        filter: &ProductFilter,
         page: PageRequest<ProductId>,
     ) -> Result<Page<ProductSummary>, RepoError> {
-        Ok(self.products.page(
-            |p| status.is_none_or(|s| p.status() == s),
-            page,
-            Product::summary,
-        ))
+        Ok(self
+            .products
+            .page(|p| filter.matches(p), page, Product::summary))
     }
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {

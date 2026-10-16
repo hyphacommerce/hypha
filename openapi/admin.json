@@ -12475,6 +12475,15 @@
             "schema": {
               "$ref": "#/components/schemas/ProductStatus"
             }
+          },
+          {
+            "description": "Only products whose title, handle or a variant's SKU contains this text, ignoring\ncase. Up to 255 characters; blank filters nothing. Reads the products as they are\nnow (drafts too); storefronts search with `/storefront/search`.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {

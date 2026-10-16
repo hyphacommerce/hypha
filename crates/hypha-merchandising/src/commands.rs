@@ -9,7 +9,9 @@ use hypha_media::{
     Asset, AssetKind, AssetRepo, AssetStatus, HasAssets, StageAssetUsages, UsageOwner, UsageRole,
     Visibility, repo::keys as media_keys,
 };
-use hypha_products::{HasProducts, ProductError, ProductRepo, ProductStatus, StageProducts};
+use hypha_products::{
+    HasProducts, ListProducts, ProductError, ProductFilter, ProductRepo, StageProducts,
+};
 use thiserror::Error;
 
 use crate::view::{ProductSummaryView, ProductView, in_order};
@@ -179,11 +181,12 @@ pub async fn get_product_view<S: HasProducts + HasAssets>(
 pub async fn list_product_views<S: HasProducts + HasAssets>(
     ctx: &Ctx,
     ports: &S,
-    status: Option<ProductStatus>,
+    input: ListProducts,
     page: PageRequest<ProductId>,
 ) -> Result<Page<ProductSummaryView>, CommandError> {
     ctx.require(Scope::ProductsRead)?;
-    let page = ports.products().list(status, page).await?;
+    let filter = ProductFilter::new(input.status, input.q)?;
+    let page = ports.products().list(&filter, page).await?;
     let featured: Vec<AssetId> = page.items.iter().filter_map(|s| s.featured_media).collect();
     let assets = ports.assets().get_many(&featured).await?;
     let items = page

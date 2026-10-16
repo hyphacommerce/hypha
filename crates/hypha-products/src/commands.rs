@@ -5,8 +5,8 @@ use hypha_core::{
 use thiserror::Error;
 
 use crate::{
-    Handle, NewVariant, OptionDraft, Product, ProductError, ProductRepo, ProductStatus,
-    ProductSummary, VariantPatch, repo::keys,
+    Handle, NewVariant, OptionDraft, Product, ProductError, ProductFilter, ProductRepo,
+    ProductStatus, ProductSummary, VariantPatch, repo::keys,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -90,16 +90,25 @@ async fn handle_taken<R: ProductRepo>(
         }))
 }
 
-/// A page of product summaries, newest first, only those with `status` when given
-/// (design note 0012).
+/// A list's filters as a request gives them; `list_products` checks them.
+#[derive(Debug, Default)]
+pub struct ListProducts {
+    pub status: Option<ProductStatus>,
+    /// Text the title, handle or a SKU contains, ignoring case (design note 0019, SE8).
+    pub q: Option<String>,
+}
+
+/// A page of product summaries, newest first, narrowed by `input` (design notes 0012,
+/// 0019).
 pub async fn list_products<R: ProductRepo>(
     ctx: &Ctx,
     repo: &R,
-    status: Option<ProductStatus>,
+    input: ListProducts,
     page: PageRequest<ProductId>,
 ) -> Result<Page<ProductSummary>, CommandError> {
     ctx.require(Scope::ProductsRead)?;
-    Ok(repo.list(status, page).await?)
+    let filter = ProductFilter::new(input.status, input.q)?;
+    Ok(repo.list(&filter, page).await?)
 }
 
 pub async fn get_product<R: ProductRepo>(

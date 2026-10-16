@@ -5,8 +5,8 @@ use hypha_core::{
     RepoError, VariantId, Version, Versioned, Weight, stamp_insert, stamp_update,
 };
 use hypha_products::{
-    Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductRepo, ProductSnapshot,
-    ProductStatus, ProductSummary, VariantSnapshot,
+    Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductFilter, ProductRepo,
+    ProductSnapshot, ProductSummary, VariantSnapshot,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -41,12 +41,17 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     /// One query whatever the page holds: each product's variant count and price ranges
     /// are aggregated in SQL (per product, only for the rows the limit keeps), so no
     /// variant rows leave the database.
+    ///
+    /// The text filter is `strpos` on `lower(…)`, not `ILIKE`: the merchant's `%` and `_`
+    /// are plain characters, with nothing to escape. It scans (no trigram index: design
+    /// note 0019, SE9), which suits an admin list; shoppers search the index.
     async fn list(
         &self,
-        status: Option<ProductStatus>,
+        filter: &ProductFilter,
         page: PageRequest<ProductId>,
     ) -> Result<Page<ProductSummary>, RepoError> {
-        let status = status.map(|s| s.as_str());
+        let status = filter.status().map(|s| s.as_str());
+        let q = filter.q().map(|q| q.as_str());
         let after = page.after.map(|id| id.as_uuid());
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
@@ -73,6 +78,11 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                      ) by_currency
                  ) r
                  WHERE ($1::text IS NULL OR p.status = $1) AND ($2::uuid IS NULL OR p.id < $2)
+                   AND ($4::text IS NULL
+                        OR strpos(lower(p.title), lower($4)) > 0
+                        OR strpos(lower(p.handle), lower($4)) > 0
+                        OR EXISTS (SELECT 1 FROM variants v WHERE v.product_id = p.id
+                                   AND strpos(lower(v.sku), lower($4)) > 0))
                  ORDER BY p.id DESC LIMIT $3",
                     stamp_columns("p."),
                 ),
@@ -80,6 +90,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                     (&status, Type::TEXT),
                     (&after, Type::UUID),
                     (&fetch, Type::INT8),
+                    (&q, Type::TEXT),
                 ],
             )
             .await

@@ -8999,6 +8999,12 @@ export interface operations {
                 limit?: number;
                 /** @description Only products in this status. */
                 status?: components["schemas"]["ProductStatus"];
+                /**
+                 * @description Only products whose title, handle or a variant's SKU contains this text, ignoring
+                 *     case. Up to 255 characters; blank filters nothing. Reads the products as they are
+                 *     now (drafts too); storefronts search with `/storefront/search`.
+                 */
+                q?: string;
             };
             header?: never;
             path?: never;

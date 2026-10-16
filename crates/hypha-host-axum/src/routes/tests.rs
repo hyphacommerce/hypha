@@ -604,6 +604,35 @@ async fn products_list_newest_first_in_pages() {
 }
 
 #[tokio::test]
+async fn products_are_listed_by_text() {
+    let app = app().await;
+    let mug = create_product(&app, "stoneware-mug").await;
+    create_product(&app, "cup").await;
+
+    let (status, page) = send(&app, "GET", "/admin/products?q=WARE", None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let ids: Vec<&Value> = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| &p["id"])
+        .collect();
+    assert_eq!(ids, [&json!(mug)]);
+    let (status, page) = send(&app, "GET", "/admin/products?q=%20%20", None).await;
+    assert_eq!(
+        (status, page["items"].as_array().unwrap().len()),
+        (StatusCode::OK, 2)
+    );
+
+    let long = "x".repeat(256);
+    let (status, body) = send(&app, "GET", &format!("/admin/products?q={long}"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "field_too_long")
+    );
+}
+
+#[tokio::test]
 async fn a_listed_product_is_a_summary() {
     let app = app().await;
     let id = create_product(&app, "mug").await;
