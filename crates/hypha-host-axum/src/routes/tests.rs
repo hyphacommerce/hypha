@@ -131,6 +131,12 @@ async fn test_media(config: &Config) -> Media {
 /// Everything from `config`, the one source of settings, as in `serve`; file storage
 /// with `media`.
 async fn app_from(mut config: Config, media: bool) -> TestApp {
+    // Warnings and errors (a 500's cause is only logged) go to the test's output, which
+    // a failing test prints: in CI, that's the only place to see them.
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_env_filter(tracing_subscriber::EnvFilter::new("warn"))
+        .try_init();
     // The tests' rate apps and webhook receivers listen on localhost.
     config.allow_private_callbacks = true;
     let media = match media {
