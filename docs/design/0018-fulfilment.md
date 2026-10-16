@@ -266,3 +266,33 @@ order, not a shipment. The alternative is a scope of its own (`orders:cancel`).
 
 **Q5. Over-fulfilling an untracked or `continue_selling` line.** *Decided:* never;
 `fulfilled_quantity` is capped at the ordered quantity whatever the stock does.
+
+## 11. As built (2026-10-16)
+
+Built on `feat/fulfilment` in section 7's order, one commit per step, plus FU10.
+
+- **Orders** count `fulfilled_quantity` per line; `fulfil`, `unfulfil` and `cancel` are
+  all or nothing and record `order.fulfillment_status_changed` and `order.cancelled`.
+  `restore` rejects a line fulfilled past its quantity and a status the lines don't
+  have. `mark_paid` refuses a cancelled order. The list's summary gains `cancelled_at`.
+- **Inventory**: `fulfil` takes from the reservation at the location first, then from the
+  line's reservations elsewhere, and lowers on hand (below zero if the count was off);
+  `restock` reverses it; `retire` and `is_spent`. Batches stage `update_order` and a
+  version-checked `delete_inventory_item`, with batch contract scenarios.
+- **`hypha-fulfillment`**: the aggregate, `get_fulfillment`, `list_order_fulfillments`,
+  `update_tracking` (returns whether it changed, for the email), the
+  `fulfillment_repo` contract, migrations 0030 and 0031.
+- **`hypha-order-actions`**: `fulfill` (idempotency key, one fulfilment ID across
+  retries), `cancel_fulfillment`, `cancel_order` (`order_has_fulfillments` lists the
+  standing ones), `order_view` for what's left by location, and `BuyerEmail`, which the
+  host sends from a background slot (logged for now). Race tests on Postgres
+  (`tests/fulfilment_race.rs`).
+- **Host**: the routes of section 6 plus `GET /admin/fulfillments/{id}` and
+  `GET /admin/locations`; `over_fulfilled` and `order_has_fulfillments` carry
+  `details`. The e2e script has a fulfilment section.
+- **Admin**: the order page's "Fulfil items" dialog (location, quantities prefilled
+  with what waits there, one tracking number, email toggle, an idempotency key per
+  dialog), a shipments card (edit tracking, take back), "Cancel order" with a reason,
+  and the cancelled and fulfilment badges in the list.
+- **Not done:** several tracking numbers in the admin's dialog (the API takes 10), a
+  locations screen in the admin, notify-by-default as a merchant setting.

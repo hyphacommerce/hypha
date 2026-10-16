@@ -253,6 +253,28 @@ export function describe(error: ApiError): string {
       return "The file's contents don't match its type. Export it again and retry.";
     case "media_not_configured":
       return "File storage isn't set up for this store yet.";
+    case "over_fulfilled": {
+      const left = (error.details as { unfulfilled?: number } | null)?.unfulfilled;
+      return left === undefined
+        ? "That's more than is left to ship."
+        : `That's more than is left to ship: ${left} of that item.`;
+    }
+    case "order_has_fulfillments":
+      return "Take back the order's shipments first, then cancel it.";
+    case "order_cancelled":
+      return "This order is cancelled.";
+    case "fulfillment_cancelled":
+      return "This shipment was taken back.";
+    case "fulfillment_has_no_lines":
+      return "Choose at least one item to ship.";
+    case "duplicate_fulfillment_line":
+      return "An item is listed twice.";
+    case "invalid_tracking_url":
+      return "The tracking link must start with https:// or http://.";
+    case "too_much_tracking":
+      return "A shipment has at most 10 tracking numbers.";
+    case "location_not_found":
+      return "That location doesn't exist any more. Reload and pick another.";
     case "concurrent_modification":
       return "Someone else changed this at the same time. Reload and try again.";
     case "rate_limited": {

@@ -30,8 +30,12 @@ export function PaymentBadge({ status }: { status: AdminSchemas["FinancialStatus
   return <Badge label={label} variant={variant} />;
 }
 
-const FULFILLMENT: Record<AdminSchemas["FulfillmentStatusDto"], string> = {
-  unfulfilled: "Unfulfilled",
+// The SDK types open enums as strings (a new status mustn't break old admins), so an
+// unknown one shows as it is.
+const FULFILLMENT: Record<string, { label: string; variant: "success" | "neutral" | "info" }> = {
+  unfulfilled: { label: "Unfulfilled", variant: "neutral" },
+  partially_fulfilled: { label: "Partly fulfilled", variant: "info" },
+  fulfilled: { label: "Fulfilled", variant: "success" },
 };
 
 export function FulfillmentBadge({
@@ -39,5 +43,19 @@ export function FulfillmentBadge({
 }: {
   status: AdminSchemas["FulfillmentStatusDto"];
 }) {
-  return <Badge label={FULFILLMENT[status]} variant="neutral" />;
+  const { label, variant } = FULFILLMENT[status] ?? { label: status, variant: "neutral" };
+  return <Badge label={label} variant={variant} />;
+}
+
+export function CancelledBadge() {
+  return <Badge label="Cancelled" variant="error" />;
+}
+
+/** A shipment: shipped, or taken back. */
+export function ShipmentBadge({ status }: { status: AdminSchemas["FulfillmentStateDto"] }) {
+  return status === "cancelled" ? (
+    <Badge label="Taken back" variant="warning" />
+  ) : (
+    <Badge label="Shipped" variant="success" />
+  );
 }

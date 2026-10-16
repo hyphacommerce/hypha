@@ -69,3 +69,13 @@ export function formatBytes(bytes: number): string {
   }
   return unit === 0 ? `${value} B` : `${value.toFixed(1)} ${units[unit]}`;
 }
+
+/** Why an order was cancelled, as the admin says it (an unknown reason as it is). */
+export const CANCEL_REASONS: Record<string, string> = {
+  customer: "The customer asked",
+  inventory: "Out of stock or can't ship",
+  declined: "Payment declined",
+  fraud: "Fraud",
+  staff: "Staff error",
+  other: "Other",
+};

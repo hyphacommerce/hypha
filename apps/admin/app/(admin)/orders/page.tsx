@@ -15,7 +15,7 @@ import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
 import { Pager } from "@/components/pager";
-import { FulfillmentBadge, PaymentBadge } from "@/components/status";
+import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { loaded, sessionClient } from "@/lib/hypha";
 
@@ -68,6 +68,7 @@ export default async function OrdersPage({
                   <TableCell>{order.email}</TableCell>
                   <TableCell>
                     <HStack gap={1} wrap="wrap">
+                      {order.cancelled_at && <CancelledBadge />}
                       <PaymentBadge status={order.financial_status} />
                       <FulfillmentBadge status={order.fulfillment_status} />
                     </HStack>

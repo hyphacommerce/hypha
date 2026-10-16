@@ -1,3 +1,4 @@
+import { Banner } from "@astryxdesign/core/Banner";
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
@@ -12,12 +13,14 @@ import {
   TableRow,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
+import type { ReactNode } from "react";
 
 import { PageHeader } from "@/components/page-header";
-import { FulfillmentBadge, PaymentBadge } from "@/components/status";
-import { formatDateTime, formatMoney } from "@/lib/format";
+import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
+import { CANCEL_REASONS, formatDateTime, formatMoney } from "@/lib/format";
 import { loaded, sessionClient } from "@/lib/hypha";
 
+import { CancelOrderButton, FulfilButton, type Place, ShipmentsCard } from "./fulfilment";
 import { MarkPaid } from "./mark-paid";
 
 /** "25%" from parts per million (250000). */
@@ -25,10 +28,35 @@ function percent(ppm: number): string {
   return `${new Intl.NumberFormat("en-IE", { maximumFractionDigits: 4 }).format(ppm / 10_000)}%`;
 }
 
+/** A footer row of the items table: its label, and the amount in the last column. */
+function TotalRow({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <TableRow>
+      <TableCell>{label}</TableCell>
+      <TableCell />
+      <TableCell />
+      <TableCell />
+      <TableCell />
+      <TableCell>{children}</TableCell>
+    </TableRow>
+  );
+}
+
 export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
   const order = loaded(await client.GET("/admin/orders/{id}", { params: { path: { id } } }));
+  // Shipments and locations need their own scopes; without them the page shows the
+  // order alone.
+  const [shipments, locations] = await Promise.all([
+    client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
+    client.GET("/admin/locations"),
+  ]);
+  const fulfillments = shipments.data?.items ?? [];
+  const places: Place[] = (locations.data?.items ?? []).map(({ id, name }) => ({ id, name }));
+  const cancelled = order.cancelled_at !== null && order.cancelled_at !== undefined;
+  const canFulfil =
+    !cancelled && order.unfulfilled.length > 0 && places.length > 0 && shipments.data;
 
   return (
     <Section padding={6}>
@@ -39,12 +67,27 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           back={{ label: "Orders", href: "/orders" }}
           badges={
             <HStack gap={1}>
+              {cancelled && <CancelledBadge />}
               <PaymentBadge status={order.financial_status} />
               <FulfillmentBadge status={order.fulfillment_status} />
             </HStack>
           }
-          actions={order.financial_status === "pending" && <MarkPaid id={order.id} />}
+          actions={
+            <>
+              {!cancelled && <CancelOrderButton order={order} />}
+              {!cancelled && order.financial_status === "pending" && <MarkPaid id={order.id} />}
+              {canFulfil && <FulfilButton order={order} places={places} />}
+            </>
+          }
         />
+
+        {cancelled && (
+          <Banner
+            status="warning"
+            title={`Cancelled ${formatDateTime(order.cancelled_at ?? "")}`}
+            description={`${CANCEL_REASONS[order.cancel_reason ?? ""] ?? order.cancel_reason ?? "No reason given"}. Its stock was released.`}
+          />
+        )}
 
         <Card>
           <VStack gap={3}>
@@ -57,6 +100,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                   <TableHeaderCell>Product</TableHeaderCell>
                   <TableHeaderCell>Price</TableHeaderCell>
                   <TableHeaderCell>Quantity</TableHeaderCell>
+                  <TableHeaderCell>Shipped</TableHeaderCell>
                   <TableHeaderCell>Tax</TableHeaderCell>
                   <TableHeaderCell>Total</TableHeaderCell>
                 </TableRow>
@@ -81,6 +125,9 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                     <TableCell>{formatMoney(line.unit_price)}</TableCell>
                     <TableCell>{line.quantity}</TableCell>
                     <TableCell>
+                      {line.fulfilled_quantity} of {line.quantity}
+                    </TableCell>
+                    <TableCell>
                       {line.tax
                         ? `${formatMoney(line.tax.amount)} (${percent(line.tax.rate_ppm)})`
                         : "—"}
@@ -90,13 +137,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                 ))}
               </TableBody>
               <TableFooter>
-                <TableRow>
-                  <TableCell>Subtotal</TableCell>
-                  <TableCell />
-                  <TableCell />
-                  <TableCell />
-                  <TableCell>{formatMoney(order.subtotal)}</TableCell>
-                </TableRow>
+                <TotalRow label="Subtotal">{formatMoney(order.subtotal)}</TotalRow>
                 {order.shipping_lines.map((shipping) => (
                   <TableRow key={shipping.group}>
                     <TableCell>
@@ -113,6 +154,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                     </TableCell>
                     <TableCell />
                     <TableCell />
+                    <TableCell />
                     <TableCell>
                       {shipping.tax
                         ? `${formatMoney(shipping.tax.amount)} (${percent(shipping.tax.rate_ppm)})`
@@ -121,32 +163,28 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                     <TableCell>{formatMoney(shipping.amount)}</TableCell>
                   </TableRow>
                 ))}
-                <TableRow>
-                  <TableCell>{order.taxes_included ? "Tax (included)" : "Tax"}</TableCell>
-                  <TableCell />
-                  <TableCell />
-                  <TableCell />
-                  <TableCell>{formatMoney(order.tax_total)}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>
+                <TotalRow label={order.taxes_included ? "Tax (included)" : "Tax"}>
+                  {formatMoney(order.tax_total)}
+                </TotalRow>
+                <TotalRow
+                  label={
                     <Text type="body" weight="bold">
                       Total
                     </Text>
-                  </TableCell>
-                  <TableCell />
-                  <TableCell />
-                  <TableCell />
-                  <TableCell>
-                    <Text type="body" weight="bold">
-                      {formatMoney(order.total)}
-                    </Text>
-                  </TableCell>
-                </TableRow>
+                  }
+                >
+                  <Text type="body" weight="bold">
+                    {formatMoney(order.total)}
+                  </Text>
+                </TotalRow>
               </TableFooter>
             </Table>
           </VStack>
         </Card>
+
+        {fulfillments.length > 0 && (
+          <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
+        )}
 
         {order.shipping_address && (
           <Card>
