@@ -371,9 +371,9 @@ Each step ends green (fmt, clippy, tests, wasm, Postgres contract, e2e).
 5. `location.changed`, `SearchIndexer` in the host's set, the host job, routes,
    OpenAPI, SDK, e2e.
 6. Admin: Settings → Search.
-7. Meilisearch: `hypha-search-meilisearch` (HTTP through a port, like `hypha-store-s3`),
-   the contract against a Meilisearch in `docker-compose.yml`, chosen in
-   `hypha.config.toml` (`search.engine`).
+7. Meilisearch, as a spore (deferred, see section 13): an engine implementing
+   `SearchIndex` (HTTP through a port, like `hypha-store-s3`), the contract against a
+   Meilisearch in `docker-compose.yml`, chosen in `hypha.config.toml`.
 
 ## 11. Open decisions
 
@@ -413,7 +413,11 @@ do: a storefront knows where the shopper is, not our market IDs.
 
 Built on `feat/search` in section 10's order, with three refactors first (handlers as a
 trait, SE10; shared pricing and stock loaders; `Progress` in core) and the crate split
-(SE11). Steps 6 (admin settings screen) and 7 (Meilisearch) are still to do.
+(SE11). Step 6 built the admin's Settings → Search page (listings split by options,
+the storefront's filters in order with labels, the index's status with a rebuild
+button that follows its progress). *Decided (2026-10-16):* step 7, Meilisearch, will be
+a spore, built when a store needs it: Postgres is the engine out of the box, and Q3 is
+decided with the spore.
 
 - **Products** gained `description` (sanitised HTML, `ammonia`), `vendor`,
   `product_type` and `tags` (migration 0033). Below a 256 KiB `server.max_body`, the
