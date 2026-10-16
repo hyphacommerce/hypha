@@ -3041,3 +3041,65 @@ async fn a_store_starts_with_a_default_location() {
     assert_eq!(items[0]["name"], "Default");
     assert_eq!(items[0]["markets"], json!([]));
 }
+
+#[tokio::test]
+async fn a_storefront_never_sees_why_an_order_was_cancelled() {
+    let app = app().await;
+    let mug = shop_selling_a_mug(&app).await;
+    let (_, product) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let product = product["items"][0]["id"].as_str().unwrap().to_string();
+    send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{product}/variants/{mug}"),
+        Some(r#"{"requires_shipping":false}"#),
+    )
+    .await;
+    let pk = publishable(&app).await;
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let cart_path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let line = json!({"variant": mug, "quantity": 1}).to_string();
+    send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/lines"),
+        Some(&line),
+    )
+    .await;
+    send_as(
+        &app,
+        &pk,
+        "PUT",
+        &format!("{cart_path}/email"),
+        Some(r#"{"email":"a@example.hr"}"#),
+    )
+    .await;
+    let checkout = format!("{cart_path}/checkout");
+    let auth = format!("Bearer {pk}");
+    let headers = [
+        (AUTHORIZATION.as_str(), auth.as_str()),
+        ("idempotency-key", "buy-1"),
+    ];
+    let (status, order) = send_with(&app, &headers, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{order}");
+
+    let cancel = format!("/admin/orders/{}/cancel", order["id"].as_str().unwrap());
+    let (status, cancelled) = send(&app, "POST", &cancel, Some(r#"{"reason":"fraud"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    assert_eq!(cancelled["cancel_reason"], "fraud");
+
+    // The shopper's retry replays the order as it is now, without the admin's fields.
+    let (status, replayed) = send_with(&app, &headers, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{replayed}");
+    assert_eq!(replayed["id"], order["id"]);
+    assert!(replayed.get("cancel_reason").is_none(), "{replayed}");
+    assert!(replayed.get("cancelled_at").is_none(), "{replayed}");
+}

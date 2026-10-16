@@ -33,6 +33,15 @@ fn line(n: u128, quantity: u32) -> FulfillmentLine {
     FulfillmentLine {
         line: OrderLineId::from_uuid(Uuid::from_u128(n)),
         quantity: Quantity::new(quantity).unwrap(),
+        stock_taken: true,
+    }
+}
+
+/// A line whose units didn't come off any stock (an untracked item).
+fn untracked_line(n: u128, quantity: u32) -> FulfillmentLine {
+    FulfillmentLine {
+        stock_taken: false,
+        ..line(n, quantity)
     }
 }
 
@@ -72,7 +81,7 @@ async fn round_trips<R: FulfillmentRepo>(repo: &R) {
     let mut many = with(
         2,
         1,
-        vec![line(23, u32::MAX), line(21, 1), line(22, 7)],
+        vec![line(23, u32::MAX), untracked_line(21, 1), line(22, 7)],
         vec![
             Tracking::new(None, "B-2", None).unwrap(),
             full_tracking("A-1"),

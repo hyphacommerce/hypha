@@ -2,7 +2,7 @@
 //! the lines' reservations, not stored.
 
 use hypha_core::{Ctx, LocationId, OrderId, OrderLineId, Scope};
-use hypha_inventory::{HasInventoryItems, InventoryItemRepo, ReservationRef};
+use hypha_inventory::{HasInventoryItems, ReservationRef};
 use hypha_orders::{HasOrders, Order, OrderRepo};
 
 use crate::CommandError;
@@ -44,10 +44,7 @@ pub async fn order_view<S: HasOrders + HasInventoryItems>(
             unfulfilled: Vec::new(),
         });
     }
-    let mut variants: Vec<_> = order.lines().iter().map(|l| l.variant).collect();
-    variants.sort_by_key(|v| v.as_uuid());
-    variants.dedup();
-    let items = ports.inventory_items().for_variants(&variants).await?;
+    let items = crate::commands::order_items(ports, &order).await?;
 
     let mut unfulfilled = Vec::new();
     for line in order.lines() {

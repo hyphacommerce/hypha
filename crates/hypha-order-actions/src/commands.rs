@@ -191,7 +191,9 @@ impl Attempt<'_> {
         if ports.locations().get(location).await?.is_none() {
             return Err(CommandError::LocationNotFound(location));
         }
-        // The fulfilment's own rules first (each line once), then the order's.
+        let mut stock = Stock::load(ports, &order).await?;
+        // The fulfilment's own rules first (each line once), then the order's. Each line
+        // notes whether its units come off stock, for taking it back later.
         let mut fulfillment = Fulfillment::new(NewFulfillment {
             id: self.id,
             order: order.id(),
@@ -199,13 +201,16 @@ impl Attempt<'_> {
             lines: self
                 .lines
                 .iter()
-                .map(|&(line, quantity)| FulfillmentLine { line, quantity })
+                .map(|&(line, quantity)| FulfillmentLine {
+                    line,
+                    quantity,
+                    stock_taken: stock.tracks(&order, line),
+                })
                 .collect(),
             tracking: self.tracking.to_vec(),
         })?;
         order.fulfil(self.lines)?;
 
-        let mut stock = Stock::load(ports, &order).await?;
         for &(line, quantity) in self.lines {
             stock.change(&order, line, |item, reference| {
                 item.fulfil(reference, location, quantity)
@@ -232,9 +237,10 @@ impl Attempt<'_> {
 }
 
 /// Takes back a fulfilment recorded by mistake (design note 0018, section 3): its lines
-/// count as unfulfilled again, and its units are back on hand at its location and
-/// reserved there for their lines. One batch, retried like `fulfill`. Cancelling it
-/// again changes nothing.
+/// count as unfulfilled again, and the units that came off stock when it shipped are
+/// back on hand at its location (and reserved there for their lines while tracked);
+/// lines that took no stock put none back. One batch, retried like `fulfill`.
+/// Cancelling it again changes nothing.
 pub async fn cancel_fulfillment<S: OrderActionPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -273,9 +279,10 @@ async fn cancel_fulfillment_once<S: OrderActionPorts>(
     order.unfulfil(&lines)?;
     let location = fulfillment.location();
     let mut stock = Stock::load(ports, &order).await?;
-    for &(line, quantity) in &lines {
-        stock.change(&order, line, |item, reference| {
-            item.restock(reference, location, quantity)
+    for shipped in fulfillment.lines().iter().filter(|l| l.stock_taken) {
+        stock.change(&order, shipped.line, |item, reference| {
+            item.restock(reference, location, shipped.quantity)?;
+            Ok(true)
         })?;
     }
     fulfillment.cancel(clock.now());
@@ -296,13 +303,14 @@ pub struct CancelOrder {
 /// Cancels an order (design note 0018, FU7): every line's reservation is released, in
 /// the same batch as the order. Refused while fulfilments stand
 /// (`order_has_fulfillments`, listing them). Payment is untouched: a paid order stays
-/// paid until refunds exist. Cancelling it again changes nothing.
+/// paid until refunds exist. Cancelling it again changes nothing, and says so (`false`),
+/// so only the request that cancelled it tells the buyer.
 pub async fn cancel_order<S: OrderActionPorts>(
     ctx: &Ctx,
     ports: &S,
     clock: &impl Clock,
     input: CancelOrder,
-) -> Result<Order, CommandError> {
+) -> Result<(Order, bool), CommandError> {
     ctx.require(Scope::OrdersWrite)?;
     let mut attempts = Attempts::first();
     loop {
@@ -317,11 +325,11 @@ async fn cancel_order_once<S: OrderActionPorts>(
     ports: &S,
     clock: &impl Clock,
     input: &CancelOrder,
-) -> Result<Order, CommandError> {
+) -> Result<(Order, bool), CommandError> {
     let mut order = load_order(ports, input.order).await?;
     match order.cancel(clock.now(), input.reason) {
         Ok(true) => {}
-        Ok(false) => return Ok(order),
+        Ok(false) => return Ok((order, false)),
         Err(OrderError::HasFulfillments(id)) => {
             let fulfillments = ports
                 .fulfillments()
@@ -348,7 +356,7 @@ async fn cancel_order_once<S: OrderActionPorts>(
     batch.update_order(&mut order);
     stock.stage(&mut batch)?;
     ports.commit(batch).await?;
-    Ok(order)
+    Ok((order, true))
 }
 
 /// Another request committed first (the order, the fulfilment or an item changed), so
@@ -377,14 +385,21 @@ struct Stock {
     changed: HashSet<VariantId>,
 }
 
+/// The inventory items of `order`'s variants that have one: what every order action
+/// reads and changes, and what `order_view` reads.
+pub(crate) async fn order_items<S: HasInventoryItems>(
+    ports: &S,
+    order: &Order,
+) -> Result<Vec<InventoryItem>, RepoError> {
+    let mut variants: Vec<VariantId> = order.lines().iter().map(|l| l.variant).collect();
+    variants.sort_by_key(|v| v.as_uuid());
+    variants.dedup();
+    ports.inventory_items().for_variants(&variants).await
+}
+
 impl Stock {
     async fn load<S: HasInventoryItems>(ports: &S, order: &Order) -> Result<Self, RepoError> {
-        let mut variants: Vec<VariantId> = order.lines().iter().map(|l| l.variant).collect();
-        variants.sort_by_key(|v| v.as_uuid());
-        variants.dedup();
-        let items = ports
-            .inventory_items()
-            .for_variants(&variants)
+        let items = order_items(ports, order)
             .await?
             .into_iter()
             .map(|item| (item.variant(), item))
@@ -393,6 +408,16 @@ impl Stock {
             items,
             changed: HashSet::new(),
         })
+    }
+
+    /// Whether `line`'s units come off stock: its variant has an item, and it's tracked.
+    fn tracks(&self, order: &Order, line: OrderLineId) -> bool {
+        order
+            .lines()
+            .iter()
+            .find(|l| l.id == line)
+            .and_then(|l| self.items.get(&l.variant))
+            .is_some_and(InventoryItem::tracked)
     }
 
     /// Runs `change` on the item of `line`'s variant with the line's reservation

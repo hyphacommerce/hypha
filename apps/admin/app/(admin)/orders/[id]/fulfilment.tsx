@@ -20,13 +20,9 @@ import { useState, useTransition } from "react";
 import { ShipmentBadge } from "@/components/status";
 import { CANCEL_REASONS, formatDateTime } from "@/lib/format";
 
-import {
-  type TrackingInput,
-  cancelOrder,
-  fulfilOrder,
-  takeBack,
-  updateTracking,
-} from "../actions";
+import { MAX_TRACKING, NO_TRACKING, type TrackingInput, trackingProblem } from "@/lib/tracking";
+
+import { cancelOrder, fulfilOrder, takeBack, updateTracking } from "../actions";
 
 type Order = AdminSchemas["AdminOrderResponse"];
 type Line = AdminSchemas["OrderLineResponse"];
@@ -49,39 +45,62 @@ function waitingAt(order: Order, location: string | undefined): Record<string, n
   return quantities;
 }
 
-const NO_TRACKING: TrackingInput = { carrier: "", number: "", url: "" };
-
-function TrackingFields({
-  value,
+/** Every tracking number of a shipment: edit, remove, add up to `MAX_TRACKING`. */
+function TrackingList({
+  rows,
   onChange,
 }: {
-  value: TrackingInput;
-  onChange: (value: TrackingInput) => void;
+  rows: TrackingInput[];
+  onChange: (rows: TrackingInput[]) => void;
 }) {
+  const set = (index: number, row: TrackingInput) =>
+    onChange(rows.map((old, i) => (i === index ? row : old)));
   return (
     <VStack gap={3}>
-      <HStack gap={3} wrap="wrap">
-        <TextInput
-          label="Carrier"
-          isOptional
-          placeholder="DHL"
-          value={value.carrier}
-          onChange={(carrier) => onChange({ ...value, carrier })}
-        />
-        <TextInput
-          label="Tracking number"
-          isOptional
-          value={value.number}
-          onChange={(number) => onChange({ ...value, number })}
-        />
-      </HStack>
-      <TextInput
-        label="Tracking link"
-        isOptional
-        placeholder="https://"
-        value={value.url}
-        onChange={(url) => onChange({ ...value, url })}
-      />
+      {rows.map((row, index) => (
+        // Rows have no ID of their own; their place in the list is what they are.
+        <VStack key={index} gap={2}>
+          <HStack gap={3} wrap="wrap" vAlign="end">
+            <TextInput
+              label="Carrier"
+              isOptional
+              placeholder="DHL"
+              value={row.carrier}
+              onChange={(carrier) => set(index, { ...row, carrier })}
+            />
+            <TextInput
+              label="Tracking number"
+              value={row.number}
+              onChange={(number) => set(index, { ...row, number })}
+            />
+            {rows.length > 1 && (
+              <Button
+                label="Remove"
+                size="sm"
+                variant="ghost"
+                onClick={() => onChange(rows.filter((_, i) => i !== index))}
+              />
+            )}
+          </HStack>
+          <TextInput
+            label="Tracking link"
+            isOptional
+            placeholder="https://"
+            value={row.url}
+            onChange={(url) => set(index, { ...row, url })}
+          />
+        </VStack>
+      ))}
+      {rows.length < MAX_TRACKING && (
+        <HStack>
+          <Button
+            label="Add another tracking number"
+            size="sm"
+            variant="ghost"
+            onClick={() => onChange([...rows, NO_TRACKING])}
+          />
+        </HStack>
+      )}
     </VStack>
   );
 }
@@ -112,7 +131,7 @@ function FulfilDialog({
   const first = order.unfulfilled.find((left) => left.location)?.location ?? places[0]?.id;
   const [location, setLocation] = useState(first);
   const [quantities, setQuantities] = useState(() => waitingAt(order, first));
-  const [tracking, setTracking] = useState(NO_TRACKING);
+  const [tracking, setTracking] = useState<TrackingInput[]>([NO_TRACKING]);
   const [notify, setNotify] = useState(true);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -126,6 +145,8 @@ function FulfilDialog({
 
   const submit = () => {
     if (!location || lines.length === 0) return;
+    const problem = trackingProblem(tracking);
+    if (problem) return setError(problem);
     startTransition(async () => {
       const result = await fulfilOrder(order.id, { key, location, lines, tracking, notify });
       if (result.error) setError(result.error);
@@ -174,7 +195,7 @@ function FulfilDialog({
             );
           })}
         </VStack>
-        <TrackingFields value={tracking} onChange={setTracking} />
+        <TrackingList rows={tracking} onChange={setTracking} />
         <CheckboxInput
           label="Email the customer"
           description="A shipping confirmation with the tracking."
@@ -316,32 +337,39 @@ function TrackingDialog({
   fulfillment: Fulfillment;
   onClose: () => void;
 }) {
-  const current = fulfillment.tracking[0];
-  const [tracking, setTracking] = useState<TrackingInput>({
-    carrier: current?.carrier ?? "",
-    number: current?.number ?? "",
-    url: current?.url ?? "",
-  });
+  // Every number it has: saving replaces them all, so none may be left out.
+  const [tracking, setTracking] = useState<TrackingInput[]>(() =>
+    fulfillment.tracking.length === 0
+      ? [NO_TRACKING]
+      : fulfillment.tracking.map((t) => ({
+          carrier: t.carrier ?? "",
+          number: t.number,
+          url: t.url ?? "",
+        })),
+  );
   const [notify, setNotify] = useState(true);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
-  const submit = () =>
+  const submit = () => {
+    const problem = trackingProblem(tracking);
+    if (problem) return setError(problem);
     startTransition(async () => {
       const result = await updateTracking(orderId, fulfillment.id, tracking, notify);
       if (result.error) setError(result.error);
       else onClose();
     });
+  };
 
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
       <DialogHeader
         title="Edit tracking"
-        subtitle="Leave the number empty to remove it."
+        subtitle="Clear a row, or remove it, to drop that number."
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <TrackingFields value={tracking} onChange={setTracking} />
+        <TrackingList rows={tracking} onChange={setTracking} />
         <CheckboxInput
           label="Email the customer"
           description="Only if the tracking changed."

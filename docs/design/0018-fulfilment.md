@@ -294,5 +294,16 @@ Built on `feat/fulfilment` in section 7's order, one commit per step, plus FU10.
   with what waits there, one tracking number, email toggle, an idempotency key per
   dialog), a shipments card (edit tracking, take back), "Cancel order" with a reason,
   and the cancelled and fulfilment badges in the list.
-- **Not done:** several tracking numbers in the admin's dialog (the API takes 10), a
-  locations screen in the admin, notify-by-default as a merchant setting.
+- **Review fixes (2026-10-16):** a fulfilment line records `stock_taken` (migration
+  0032), and taking it back restocks only those lines, whatever tracking says by then;
+  `restock` refuses a reservation past its range instead of capping it. The storefront's
+  order response has no cancellation fields (they're on `AdminOrderResponse`).
+  `cancel_order` says whether it changed the order, so only that request emails the
+  buyer. `release_stock` deletes a retired item left with nothing reserved, like the
+  order actions. `PgBatch` locks the items it updates and deletes together, in ID order
+  (a deadlock was retried, but cost `deadlock_timeout` each time). The admin edits every
+  tracking number of a shipment and refuses a carrier or link without a number.
+- **Not done:** a locations screen in the admin, notify-by-default as a merchant
+  setting. **Known gap:** a buyer email dropped because every background slot was busy
+  isn't sent on a replay (a replay never emails, or the normal retry would email
+  twice); the outbox (0007 §10) is the fix.

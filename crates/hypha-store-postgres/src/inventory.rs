@@ -367,6 +367,24 @@ pub(crate) async fn insert_item(
     Ok(())
 }
 
+/// Locks the rows of `ids` in ID order (`FOR UPDATE`), so every writer of several items
+/// takes their locks in one order and queues instead of deadlocking. A batch that
+/// updates some items and deletes others locks them all at once, before either.
+pub(crate) async fn lock_items(tx: &impl GenericClient, ids: &[Uuid]) -> Result<(), RepoError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let mut sorted = ids.to_vec();
+    sorted.sort();
+    tx.query_typed(
+        "SELECT id FROM inventory_items WHERE id = ANY($1) ORDER BY id FOR UPDATE",
+        &[(&sorted, Type::UUID_ARRAY)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
+}
+
 /// `StageInventoryItems::delete_inventory_item`'s writes inside the caller's
 /// transaction (`PgBatch`): every item at the version it was loaded at, or
 /// `StaleVersion` and the caller drops the transaction. Levels and reservations go with
@@ -423,12 +441,7 @@ pub(crate) async fn update_items(
     // Lock the rows in ID order first. Two checkouts touching overlapping items then
     // queue instead of deadlocking, whatever order their callers listed the items in;
     // the UPDATE below joins through `unnest`, whose lock order the planner picks.
-    tx.query_typed(
-        "SELECT id FROM inventory_items WHERE id = ANY($1) ORDER BY id FOR UPDATE",
-        &[(&ids, Type::UUID_ARRAY)],
-    )
-    .await
-    .map_err(repo_error)?;
+    lock_items(tx, &ids).await?;
     let bumped = tx
         .query_typed(
             "UPDATE inventory_items AS i

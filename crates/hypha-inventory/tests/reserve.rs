@@ -468,3 +468,28 @@ fn one_reference_for_two_variants_is_fine() {
         Ok(())
     );
 }
+
+#[test]
+fn releasing_the_last_reservation_of_a_retired_item_deletes_it() {
+    let world = World::new();
+    world.stock(1, &[(1, 5)]);
+    world.stock(2, &[(1, 5)]);
+    world
+        .reserve(vec![
+            line("ol-1", 1, 1),
+            line("ol-2", 1, 1),
+            line("ol-3", 2, 1),
+        ])
+        .unwrap();
+    // Item 1's variant was removed while two orders held units.
+    let mut item = world.stored(1);
+    item.retire();
+    block_on(world.items.inner.update(&mut item)).unwrap();
+
+    world.release(&[("ol-1", 1), ("ol-3", 2)]).unwrap();
+    assert_eq!(world.held(1).len(), 1, "one order still holds a unit");
+    world.release(&[("ol-2", 1)]).unwrap();
+    assert_eq!(block_on(world.items.inner.get(item_id(1))), Ok(None));
+    // An item that isn't retired stays, with nothing reserved.
+    assert!(world.held(2).is_empty());
+}

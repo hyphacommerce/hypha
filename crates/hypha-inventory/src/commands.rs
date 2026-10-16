@@ -402,7 +402,7 @@ pub async fn reserve_stock<R: InventoryItemRepo, L: LocationRepo>(
             let serving = locations.serving(market).await?;
             let mut stock = by_variant(items.for_variants(variants).await?);
             let changed = reserve_lines(&mut stock, &serving, lines)?;
-            write_changed(items, stock, &changed).await
+            write_changed(items, &mut stock, &changed).await
         },
         lost_a_race,
     )
@@ -461,7 +461,8 @@ pub struct ReleaseLine {
 
 /// Gives back what `reserve_stock` reserved for each line, all or nothing, retried
 /// like `reserve_stock`. Releasing something that isn't reserved is not an error, so a
-/// retried or duplicate release is harmless.
+/// retried or duplicate release is harmless. A retired item left with nothing reserved
+/// is deleted (design note 0016, Q5), as every path that releases stock does.
 pub async fn release_stock<R: InventoryItemRepo>(
     ctx: &Ctx,
     items: &R,
@@ -493,7 +494,24 @@ pub async fn release_stock<R: InventoryItemRepo>(
                     changed.insert(*variant);
                 }
             }
-            write_changed(items, stock, &changed).await
+            // The removed variants' items go once spent; their variants are gone, so
+            // nothing reserves them again meanwhile.
+            let spent: Vec<VariantId> = changed
+                .iter()
+                .filter(|v| stock.get(v).is_some_and(InventoryItem::is_spent))
+                .copied()
+                .collect();
+            for variant in &spent {
+                changed.remove(variant);
+            }
+            write_changed(items, &mut stock, &changed).await?;
+            for variant in &spent {
+                if let Some(mut item) = stock.remove(variant) {
+                    item.delete()?;
+                    items.delete(&mut item).await?;
+                }
+            }
+            Ok(())
         },
         lost_a_race,
     )
@@ -529,12 +547,12 @@ fn by_variant(items: Vec<InventoryItem>) -> HashMap<VariantId, InventoryItem> {
 /// One atomic write of the items that changed (none: no write at all).
 async fn write_changed<R: InventoryItemRepo>(
     items: &R,
-    stock: HashMap<VariantId, InventoryItem>,
+    stock: &mut HashMap<VariantId, InventoryItem>,
     changed: &HashSet<VariantId>,
 ) -> Result<(), CommandError> {
-    let mut write: Vec<InventoryItem> = stock
-        .into_values()
-        .filter(|i| changed.contains(&i.variant()))
+    let mut write: Vec<InventoryItem> = changed
+        .iter()
+        .filter_map(|variant| stock.remove(variant))
         .collect();
     if write.is_empty() {
         return Ok(());

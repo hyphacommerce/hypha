@@ -423,38 +423,38 @@ impl InventoryItem {
         Ok(released || on_hand.is_some())
     }
 
-    /// Reverses `fulfil` for a cancelled fulfilment: `quantity` is back on hand at
-    /// `location` and reserved there for `reference` again. Untracked items change
-    /// nothing. Returns whether anything changed.
+    /// Reverses `fulfil` for a cancelled fulfilment whose units came off this item's
+    /// stock (the caller knows: `FulfillmentLine::stock_taken`): `quantity` is back on
+    /// hand at `location`, even if tracking was turned off since, so the count is right
+    /// when it's turned on again. While tracked, the units are reserved there for
+    /// `reference` again; untracked items reserve nothing.
+    ///
+    /// All or nothing: a count or reservation past its range changes nothing.
     pub fn restock(
         &mut self,
         reference: &ReservationRef,
         location: LocationId,
         quantity: Quantity,
-    ) -> Result<bool, InventoryError> {
-        if !self.tracked {
-            return Ok(false);
-        }
+    ) -> Result<(), InventoryError> {
         let on_hand =
             check_range(i128::from(self.on_hand(location)) + i128::from(quantity.value()))?;
-        match self
-            .reservations
-            .iter_mut()
-            .find(|r| r.reference == *reference && r.location == location)
-        {
-            Some(r) => {
-                let total = r.quantity.value().checked_add(quantity.value());
-                r.quantity = Quantity::new(total.unwrap_or(u32::MAX))?;
+        if self.tracked {
+            match self
+                .reservations
+                .iter_mut()
+                .find(|r| r.reference == *reference && r.location == location)
+            {
+                Some(r) => r.quantity = r.quantity.checked_add(quantity)?,
+                None => self.reservations.push(Reservation {
+                    reference: reference.clone(),
+                    location,
+                    quantity,
+                }),
             }
-            None => self.reservations.push(Reservation {
-                reference: reference.clone(),
-                location,
-                quantity,
-            }),
+            self.changed = Changed(true);
         }
         self.write_level(location, on_hand);
-        self.changed = Changed(true);
-        Ok(true)
+        Ok(())
     }
 
     /// Marks the item to go once nothing is reserved on it any more: its variant was
@@ -583,7 +583,7 @@ impl InventoryItem {
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::MarketId;
+    use hypha_core::{MarketId, QuantityError};
     use uuid::Uuid;
 
     use super::*;
@@ -989,7 +989,7 @@ mod tests {
         item.reserve(&reference("a"), qty(3), &[location(1, 0)])
             .unwrap();
         item.fulfil(&reference("a"), loc_id(1), qty(2)).unwrap();
-        assert_eq!(item.restock(&reference("a"), loc_id(1), qty(2)), Ok(true));
+        assert_eq!(item.restock(&reference("a"), loc_id(1), qty(2)), Ok(()));
         assert_eq!(item.on_hand(loc_id(1)), 5);
         assert_eq!(held_by(&item, "a"), [(loc_id(1), 3)]);
     }
@@ -1006,12 +1006,27 @@ mod tests {
     }
 
     #[test]
-    fn restocking_an_untracked_item_changes_nothing() {
-        let mut item = item(&[(1, 5)]);
+    fn restocking_an_item_untracked_since_puts_the_count_back_and_reserves_nothing() {
+        // Shipped while tracked (4 left), then tracking was turned off.
+        let mut item = item(&[(1, 4)]);
         item.set_tracked(false);
-        assert_eq!(item.restock(&reference("a"), loc_id(1), qty(1)), Ok(false));
+        assert_eq!(item.restock(&reference("a"), loc_id(1), qty(1)), Ok(()));
         assert_eq!(item.on_hand(loc_id(1)), 5);
         assert_eq!(held_by(&item, "a"), []);
+    }
+
+    #[test]
+    fn a_reservation_past_its_range_is_refused_and_changes_nothing() {
+        let mut item = item(&[(1, 5)]);
+        let at = [location(1, 0)];
+        item.set_continue_selling(true);
+        item.reserve(&reference("a"), qty(u32::MAX), &at).unwrap();
+        let before = item.clone();
+        assert_eq!(
+            item.restock(&reference("a"), loc_id(1), qty(1)),
+            Err(InventoryError::Quantity(QuantityError::Overflow))
+        );
+        assert_eq!(item, before);
     }
 
     #[test]

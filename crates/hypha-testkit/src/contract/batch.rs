@@ -412,6 +412,7 @@ fn fulfillment(n: u128, order: &Order) -> Fulfillment {
         lines: vec![FulfillmentLine {
             line: order.lines()[0].id,
             quantity: Quantity::new(1).unwrap(),
+            stock_taken: true,
         }],
         tracking: vec![Tracking::new(Some("DHL"), "1", None).unwrap()],
     })

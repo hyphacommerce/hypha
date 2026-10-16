@@ -33,8 +33,8 @@ use crate::{
     error::repo_error,
     fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
-    inventory::delete_items,
     inventory::update_items,
+    inventory::{delete_items, lock_items},
     markets::{
         add_catalog_products, remove_catalog_products, remove_fixed_prices, set_fixed_prices,
     },
@@ -481,6 +481,13 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
             }
         }
         insert_records(&tx, &records).await?;
+        // Updated and deleted items locked together, in ID order (see `lock_items`).
+        let ids: Vec<uuid::Uuid> = items
+            .iter()
+            .chain(&deleted)
+            .map(|s| s.id.as_uuid())
+            .collect();
+        lock_items(&tx, &ids).await?;
         update_items(&tx, items).await?;
         delete_items(&tx, &deleted).await?;
         tx.commit().await.map_err(repo_error)

@@ -98,14 +98,18 @@ pub(crate) async fn insert_fulfillment(
         .iter()
         .map(|l| i64::from(l.quantity.value()))
         .collect();
+    let taken: Vec<bool> = s.lines.iter().map(|l| l.stock_taken).collect();
     tx.query_typed(
-        "INSERT INTO fulfillment_lines (fulfillment_id, position, order_line_id, quantity)
-         SELECT $1, (n - 1)::integer, line, quantity
-         FROM unnest($2::uuid[], $3::bigint[]) WITH ORDINALITY AS t (line, quantity, n)",
+        "INSERT INTO fulfillment_lines (fulfillment_id, position, order_line_id, quantity,
+             stock_taken)
+         SELECT $1, (n - 1)::integer, line, quantity, stock_taken
+         FROM unnest($2::uuid[], $3::bigint[], $4::boolean[])
+              WITH ORDINALITY AS t (line, quantity, stock_taken, n)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&lines, Type::UUID_ARRAY),
             (&quantities, Type::INT8_ARRAY),
+            (&taken, Type::BOOL_ARRAY),
         ],
     )
     .await
@@ -224,7 +228,7 @@ async fn load(
     let mut lines: HashMap<Uuid, Vec<FulfillmentLine>> = HashMap::new();
     for row in client
         .query_typed(
-            "SELECT fulfillment_id, order_line_id, quantity FROM fulfillment_lines
+            "SELECT fulfillment_id, order_line_id, quantity, stock_taken FROM fulfillment_lines
              WHERE fulfillment_id = ANY($1) ORDER BY fulfillment_id, position",
             &[(&ids, Type::UUID_ARRAY)],
         )
@@ -242,6 +246,7 @@ async fn load(
             .push(FulfillmentLine {
                 line: OrderLineId::from_uuid(col(&row, "order_line_id")?),
                 quantity,
+                stock_taken: col(&row, "stock_taken")?,
             });
     }
 

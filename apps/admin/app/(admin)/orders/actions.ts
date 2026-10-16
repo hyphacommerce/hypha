@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";
+import { type TrackingInput, trackingBody, trackingProblem } from "@/lib/tracking";
 
 export type ActionResult = { error?: string };
 
@@ -23,19 +24,6 @@ function refresh(orderId: string) {
   revalidatePath("/orders");
 }
 
-export type TrackingInput = { carrier: string; number: string; url: string };
-
-/** One tracking number, or none when no number was entered. */
-function tracking(input: TrackingInput) {
-  if (!input.number.trim()) return [];
-  return [
-    {
-      number: input.number,
-      carrier: input.carrier.trim() || null,
-      url: input.url.trim() || null,
-    },
-  ];
-}
 
 /**
  * Records a shipment. `key` is made once per dialog, so a double submit records it
@@ -47,17 +35,19 @@ export async function fulfilOrder(
     key: string;
     location: string;
     lines: { line: string; quantity: number }[];
-    tracking: TrackingInput;
+    tracking: TrackingInput[];
     notify: boolean;
   },
 ): Promise<ActionResult> {
+  const problem = trackingProblem(input.tracking);
+  if (problem) return { error: problem };
   const client = await sessionClient();
   const { error } = await client.POST("/admin/orders/{id}/fulfillments", {
     params: { path: { id: orderId }, header: { "Idempotency-Key": input.key } },
     body: {
       location: input.location,
       lines: input.lines,
-      tracking: tracking(input.tracking),
+      tracking: trackingBody(input.tracking),
       notify: input.notify,
     },
   });
@@ -69,13 +59,15 @@ export async function fulfilOrder(
 export async function updateTracking(
   orderId: string,
   fulfillmentId: string,
-  input: TrackingInput,
+  input: TrackingInput[],
   notify: boolean,
 ): Promise<ActionResult> {
+  const problem = trackingProblem(input);
+  if (problem) return { error: problem };
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/fulfillments/{id}", {
     params: { path: { id: fulfillmentId } },
-    body: { tracking: tracking(input), notify },
+    body: { tracking: trackingBody(input), notify },
   });
   if (error) return { error: describe(error) };
   refresh(orderId);

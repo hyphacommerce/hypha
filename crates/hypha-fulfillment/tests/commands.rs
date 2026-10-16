@@ -29,6 +29,7 @@ fn repo() -> InMemoryFulfillmentRepo {
             lines: vec![FulfillmentLine {
                 line: OrderLineId::from_uuid(Uuid::from_u128(300 + n)),
                 quantity: Quantity::new(1).unwrap(),
+                stock_taken: true,
             }],
             tracking: vec![Tracking::new(None, "1", None).unwrap()],
         })

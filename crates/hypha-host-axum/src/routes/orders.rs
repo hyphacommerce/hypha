@@ -129,10 +129,6 @@ pub(super) struct OrderResponse {
     email: Email,
     financial_status: FinancialStatusDto,
     fulfillment_status: FulfillmentStatusDto,
-    /// When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.
-    cancelled_at: Option<String>,
-    /// Why it was cancelled; `null` if it wasn't.
-    cancel_reason: Option<CancelReasonDto>,
     /// Whether line prices include tax (the market decided, at checkout).
     taxes_included: bool,
     subtotal: Money,
@@ -217,8 +213,6 @@ impl OrderResponse {
             email: order.email().clone(),
             financial_status: order.financial_status().into(),
             fulfillment_status: order.fulfillment_status().into(),
-            cancelled_at: order.cancelled().map(|c| rfc3339(c.at)).transpose()?,
-            cancel_reason: order.cancelled().map(|c| c.reason.into()),
             taxes_included: order.taxes_included(),
             subtotal: order.subtotal(),
             shipping_total: order.shipping_total(),
@@ -384,11 +378,17 @@ pub(super) struct UnfulfilledDto {
     quantity: u32,
 }
 
-/// An order as the admin sees it: with what's left to ship, by location.
+/// An order as the admin sees it: with its cancellation and what's left to ship, by
+/// location. A storefront's `OrderResponse` has neither: why staff cancelled an order
+/// (`fraud`) is theirs to know.
 #[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct AdminOrderResponse {
     #[serde(flatten)]
     order: OrderResponse,
+    /// When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.
+    cancelled_at: Option<String>,
+    /// Why it was cancelled; `null` if it wasn't.
+    cancel_reason: Option<CancelReasonDto>,
     /// Per line with anything left, in line order; empty once everything shipped or the
     /// order was cancelled.
     unfulfilled: Vec<UnfulfilledDto>,
@@ -396,8 +396,11 @@ pub(super) struct AdminOrderResponse {
 
 impl AdminOrderResponse {
     fn new(view: &OrderView) -> Result<Self, ApiError> {
+        let cancelled = view.order.cancelled();
         Ok(Self {
             order: OrderResponse::new(&view.order)?,
+            cancelled_at: cancelled.map(|c| rfc3339(c.at)).transpose()?,
+            cancel_reason: cancelled.map(|c| c.reason.into()),
             unfulfilled: view
                 .unfulfilled
                 .iter()
@@ -458,15 +461,14 @@ pub(super) async fn cancel<S: Storage>(
 ) -> Result<Json<AdminOrderResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    let before = hypha_orders::get_order(&ctx, ports.orders(), id).await?;
     let input = CancelOrder {
         order: id,
         reason: req.reason.into(),
     };
-    let order = cancel_order(&ctx, &ports, &state.clock, input).await?;
+    let (order, cancelled_now) = cancel_order(&ctx, &ports, &state.clock, input).await?;
     // Only the request that cancelled it tells the buyer.
     if req.notify
-        && before.cancelled().is_none()
+        && cancelled_now
         && let Some(email) = BuyerEmail::cancelled(&order)
     {
         super::fulfillments::notify_buyer(&state, email);

@@ -18,6 +18,10 @@ use crate::{
 pub struct FulfillmentLine {
     pub line: OrderLineId,
     pub quantity: Quantity,
+    /// Whether these units came off the location's stock (the item was tracked when it
+    /// shipped). Taking the fulfilment back puts back only what was taken, whatever
+    /// tracking says by then.
+    pub stock_taken: bool,
 }
 
 /// A tracking number, with the carrier and a URL to follow it when known (design note
@@ -320,6 +324,7 @@ mod tests {
         FulfillmentLine {
             line: OrderLineId::from_uuid(Uuid::from_u128(n)),
             quantity: Quantity::new(quantity).unwrap(),
+            stock_taken: true,
         }
     }
 

@@ -1530,8 +1530,15 @@ export interface components {
              */
             delta: number;
         };
-        /** @description An order as the admin sees it: with what's left to ship, by location. */
+        /**
+         * @description An order as the admin sees it: with its cancellation and what's left to ship, by
+         *     location. A storefront's `OrderResponse` has neither: why staff cancelled an order
+         *     (`fraud`) is theirs to know.
+         */
         AdminOrderResponse: components["schemas"]["OrderResponse"] & {
+            cancel_reason?: components["schemas"]["CancelReasonDto"] | null;
+            /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
+            cancelled_at?: string | null;
             /**
              * @description Per line with anything left, in line order; empty once everything shipped or the
              *     order was cancelled.
@@ -2312,9 +2319,6 @@ export interface components {
             variant_title?: string | null;
         };
         OrderResponse: {
-            cancel_reason?: components["schemas"]["CancelReasonDto"] | null;
-            /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
-            cancelled_at?: string | null;
             cart: components["schemas"]["CartId"];
             country: components["schemas"]["CountryCode"];
             /** @description When it was created, RFC 3339 in UTC. */

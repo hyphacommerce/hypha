@@ -163,6 +163,10 @@ impl World {
     }
 
     fn cancel(&self, reason: CancelReason) -> Result<Order, CommandError> {
+        self.cancel_and_changed(reason).map(|(order, _)| order)
+    }
+
+    fn cancel_and_changed(&self, reason: CancelReason) -> Result<(Order, bool), CommandError> {
         let input = CancelOrder {
             order: order_id(),
             reason,
@@ -693,4 +697,77 @@ fn the_view_needs_orders_read() {
             Scope::OrdersRead
         )))
     );
+}
+
+// ---- review fixes ----
+
+fn set_tracked(world: &World, tracked: bool) {
+    let mut item = world.item().unwrap();
+    item.set_tracked(tracked);
+    block_on(world.inventory_items.update(&mut item)).unwrap();
+}
+
+fn take_back(world: &World, id: FulfillmentId) -> Fulfilled {
+    block_on(cancel_fulfillment(
+        &Ctx::system(),
+        &world.ports,
+        &world.clock,
+        id,
+    ))
+    .unwrap()
+}
+
+#[test]
+fn a_fulfilment_notes_which_lines_took_stock() {
+    let world = World::new();
+    let done = world
+        .fulfil(warehouse(), &[(mugs(), 1), (ebook(), 1)])
+        .unwrap();
+    let taken: Vec<bool> = done
+        .fulfillment
+        .lines()
+        .iter()
+        .map(|l| l.stock_taken)
+        .collect();
+    // The mugs are tracked; the e-book has no item.
+    assert_eq!(taken, [true, false]);
+}
+
+#[test]
+fn taking_back_what_shipped_untracked_puts_no_stock_back() {
+    let world = World::new();
+    set_tracked(&world, false);
+    let id = world
+        .fulfil(warehouse(), &[(mugs(), 2)])
+        .unwrap()
+        .fulfillment
+        .id();
+    assert_eq!(world.item().unwrap().on_hand(warehouse()), 10);
+    // Tracking is turned on before the shipment is taken back: no units appear.
+    set_tracked(&world, true);
+    take_back(&world, id);
+    let item = world.item().unwrap();
+    assert_eq!(item.on_hand(warehouse()), 10);
+}
+
+#[test]
+fn taking_back_what_shipped_tracked_restores_the_count_even_if_untracked_since() {
+    let world = World::new();
+    let id = world
+        .fulfil(warehouse(), &[(mugs(), 2)])
+        .unwrap()
+        .fulfillment
+        .id();
+    assert_eq!(world.item().unwrap().on_hand(warehouse()), 8);
+    set_tracked(&world, false);
+    take_back(&world, id);
+    // The count is right for when tracking comes back; untracked items reserve nothing.
+    assert_eq!(world.stock(), (10, 5, vec![(warehouse(), 1)]));
+}
+
+#[test]
+fn only_the_request_that_cancels_says_it_changed_the_order() {
+    let world = World::new();
+    assert!(world.cancel_and_changed(CancelReason::Customer).unwrap().1);
+    assert!(!world.cancel_and_changed(CancelReason::Customer).unwrap().1);
 }

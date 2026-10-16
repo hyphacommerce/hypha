@@ -293,6 +293,24 @@
           },
           {
             "properties": {
+              "cancel_reason": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CancelReasonDto",
+                    "description": "Why it was cancelled; `null` if it wasn't."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cancelled_at": {
+                "description": "When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "unfulfilled": {
                 "description": "Per line with anything left, in line order; empty once everything shipped or the\norder was cancelled.",
                 "items": {
@@ -307,7 +325,7 @@
             "type": "object"
           }
         ],
-        "description": "An order as the admin sees it: with what's left to ship, by location."
+        "description": "An order as the admin sees it: with its cancellation and what's left to ship, by\nlocation. A storefront's `OrderResponse` has neither: why staff cancelled an order\n(`fraud`) is theirs to know."
       },
       "ApiKeyId": {
         "description": "A ApiKeyId: `key_` and 32 hex digits.",
@@ -2618,24 +2636,6 @@
       },
       "OrderResponse": {
         "properties": {
-          "cancel_reason": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/CancelReasonDto",
-                "description": "Why it was cancelled; `null` if it wasn't."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "cancelled_at": {
-            "description": "When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "cart": {
             "$ref": "#/components/schemas/CartId"
           },
