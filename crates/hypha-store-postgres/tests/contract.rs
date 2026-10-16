@@ -225,3 +225,22 @@ async fn outbox() {
 fn clock() -> std::sync::Arc<hypha_testkit::FixedClock> {
     std::sync::Arc::new(hypha_testkit::FixedClock::default())
 }
+
+#[tokio::test]
+async fn search_index() {
+    let Some(url) = database_url() else { return };
+    contract::search_index(async || fresh_store(&url, "contract_search_index").await).await;
+}
+
+#[tokio::test]
+async fn search_queue() {
+    let Some(url) = database_url() else { return };
+    contract::search_queue(async || fresh_store(&url, "contract_search_queue").await).await;
+}
+
+#[tokio::test]
+async fn search_settings_repo() {
+    let Some(url) = database_url() else { return };
+    contract::search_settings_repo(async || fresh_store(&url, "contract_search_settings").await)
+        .await;
+}

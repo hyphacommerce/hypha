@@ -1209,6 +1209,7 @@ dependencies = [
  "hypha-order-actions",
  "hypha-orders",
  "hypha-products",
+ "hypha-search-index",
  "hypha-shipping",
  "hypha-stores",
  "hypha-tax",

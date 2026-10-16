@@ -11,6 +11,7 @@ use hypha_markets::repo::keys as market_keys;
 use hypha_media::repo::keys as media_keys;
 use hypha_orders::repo::keys as order_keys;
 use hypha_products::repo::keys as product_keys;
+use hypha_search_index::keys as search_keys;
 use hypha_shipping::keys as shipping_keys;
 use hypha_stores::repo::keys as store_keys;
 use hypha_tax::repo::keys as tax_keys;
@@ -52,6 +53,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("customers_pkey", customer_keys::CUSTOMER_ID),
     ("customer_email", customer_keys::CUSTOMER_EMAIL),
     ("stores_pkey", store_keys::STORE_ID),
+    ("search_settings_pkey", search_keys::SETTINGS),
     ("idempotency_key", idempotency_keys::IDEMPOTENCY_KEY),
     ("orders_pkey", order_keys::ORDER_ID),
     ("order_number", order_keys::ORDER_NUMBER),

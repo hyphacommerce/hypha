@@ -115,6 +115,8 @@ accessors! {
     hypha_shipping::HasAppProviders => AppProviders, app_providers;
     hypha_core::HasOutbox => Outbox, outbox;
     hypha_apps::HasApps => Apps, apps;
+    hypha_search_index::HasSearchQueue => SearchQueue, search_queue;
+    hypha_search_index::HasSearchSettings => SearchSettings, search_settings;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one
