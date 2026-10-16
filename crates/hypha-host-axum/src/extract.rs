@@ -28,11 +28,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     error::ApiError,
-    state::{AppState, Storage},
+    state::{AppState, SharedState, Storage},
 };
-
-/// The largest body read: axum's default limit for `Json`.
-const MAX_BODY: usize = 2 * 1024 * 1024;
 
 /// A JSON body, read but not yet parsed: call `parse` after authenticating (see the
 /// module docs). Checks the content type and parses with axum's rules, mapping its
@@ -43,14 +40,16 @@ pub struct JsonBody<T> {
     _body: PhantomData<fn() -> T>,
 }
 
-impl<S: Send + Sync, T> FromRequest<S> for JsonBody<T> {
+/// Reads at most `server.max_body` bytes (2 MiB by default, axum's limit for `Json`).
+impl<S: Storage, T> FromRequest<SharedState<S>> for JsonBody<T> {
     type Rejection = ApiError;
 
-    async fn from_request(req: Request, _state: &S) -> Result<Self, ApiError> {
+    async fn from_request(req: Request, state: &SharedState<S>) -> Result<Self, ApiError> {
+        let limit = state.config.server.max_body;
         let (parts, body) = req.into_parts();
-        let bytes = axum::body::to_bytes(body, MAX_BODY)
+        let bytes = axum::body::to_bytes(body, limit)
             .await
-            .map_err(|_| ApiError::body_too_large(MAX_BODY))?;
+            .map_err(|_| ApiError::body_too_large(limit))?;
         Ok(Self {
             content_type: parts.headers.get(CONTENT_TYPE).cloned(),
             bytes,
@@ -284,10 +283,10 @@ pub struct Keyed<T> {
     pub idempotency: Option<IdempotencyRequest>,
 }
 
-impl<S: Send + Sync, T> FromRequest<S> for KeyedJson<T> {
+impl<S: Storage, T> FromRequest<SharedState<S>> for KeyedJson<T> {
     type Rejection = ApiError;
 
-    async fn from_request(req: Request, state: &S) -> Result<Self, ApiError> {
+    async fn from_request(req: Request, state: &SharedState<S>) -> Result<Self, ApiError> {
         // Not checked here: a key that isn't visible ASCII reaches the command, which
         // refuses it with `invalid_idempotency_key` like any other bad key.
         let key = req

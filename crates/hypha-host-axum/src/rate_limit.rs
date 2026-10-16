@@ -8,6 +8,8 @@
 
 use std::{num::NonZeroU32, time::Duration};
 
+use hypha_config::RateLimits;
+
 use governor::{
     Quota, RateLimiter as Governor,
     clock::{Clock, DefaultClock},
@@ -72,28 +74,28 @@ impl Rule {
         Rule::CartCreateIp,
     ];
 
-    /// `(burst, one more every)`: the starting numbers from 0009, section 3.
-    pub fn quota(self) -> (u32, Duration) {
-        match self {
-            Rule::LoginIp | Rule::MfaIp | Rule::ResetConfirmIp | Rule::InviteIp => {
-                (10, Duration::from_secs(30))
-            }
-            Rule::LoginEmailFromIp => (5, Duration::from_secs(60)),
-            // About 50 an hour.
-            Rule::LoginEmail => (50, Duration::from_secs(72)),
-            Rule::ResetIp => (5, Duration::from_secs(60)),
-            Rule::ResetEmailFromIp => (3, Duration::from_secs(5 * 60)),
-            // A checkout asks a few times; a page polling every second doesn't need to.
-            Rule::ShippingQuotesCart => (10, Duration::from_secs(2)),
-            // A shopper makes a cart or two; a page reloading makes a few more.
-            Rule::CartCreateIp => (20, Duration::from_secs(3)),
-        }
+    /// `(burst, one more every)` under `limits` (`[rate_limits]`, design note 0017; the
+    /// defaults are 0009's, section 3).
+    pub fn quota(self, limits: &RateLimits) -> (u32, Duration) {
+        let quota = match self {
+            Rule::LoginIp => limits.login_ip,
+            Rule::LoginEmailFromIp => limits.login_email_from_ip,
+            Rule::LoginEmail => limits.login_email,
+            Rule::MfaIp => limits.mfa_ip,
+            Rule::ResetIp => limits.reset_ip,
+            Rule::ResetEmailFromIp => limits.reset_email_from_ip,
+            Rule::ResetConfirmIp => limits.reset_confirm_ip,
+            Rule::InviteIp => limits.invite_ip,
+            Rule::ShippingQuotesCart => limits.shipping_quotes_cart,
+            Rule::CartCreateIp => limits.cart_create_ip,
+        };
+        (quota.burst, quota.per.0)
     }
 
-    fn governor_quota(self) -> Quota {
-        let (burst, every) = self.quota();
-        // Every quota above has a non-zero period and burst; a zero would be a typo in
-        // this file, caught by the tests.
+    fn governor_quota(self, limits: &RateLimits) -> Quota {
+        let (burst, every) = self.quota(limits);
+        // The configuration's checks keep every period and burst above zero
+        // (`hypha_config::Config::load`).
         Quota::with_period(every)
             .and_then(|q| NonZeroU32::new(burst).map(|b| q.allow_burst(b)))
             .unwrap_or_else(|| panic!("invalid quota for {self:?}"))
@@ -148,17 +150,18 @@ pub struct MemoryRateLimiter<C: Clock = DefaultClock> {
     limiters: [Keyed<C>; Rule::ALL.len()],
 }
 
-impl Default for MemoryRateLimiter {
-    fn default() -> Self {
-        Self::with_clock(DefaultClock::default())
+impl MemoryRateLimiter {
+    /// With `limits`' quotas, on the real clock.
+    pub fn new(limits: &RateLimits) -> Self {
+        Self::with_clock(limits, DefaultClock::default())
     }
 }
 
 impl<C: Clock + Clone> MemoryRateLimiter<C> {
     /// With another clock: tests use `governor::clock::FakeRelativeClock` and step it.
-    pub fn with_clock(clock: C) -> Self {
+    pub fn with_clock(limits: &RateLimits, clock: C) -> Self {
         let limiters = Rule::ALL
-            .map(|rule| Governor::dashmap_with_clock(rule.governor_quota(), clock.clone()));
+            .map(|rule| Governor::dashmap_with_clock(rule.governor_quota(limits), clock.clone()));
         Self { clock, limiters }
     }
 
@@ -200,7 +203,10 @@ mod tests {
 
     fn limiter() -> (MemoryRateLimiter<FakeRelativeClock>, FakeRelativeClock) {
         let clock = FakeRelativeClock::default();
-        (MemoryRateLimiter::with_clock(clock.clone()), clock)
+        (
+            MemoryRateLimiter::with_clock(&RateLimits::default(), clock.clone()),
+            clock,
+        )
     }
 
     /// The in-memory limiter never awaits anything, so one poll finishes a check.
@@ -221,16 +227,16 @@ mod tests {
     }
 
     #[test]
-    fn every_rule_has_a_valid_quota() {
+    fn every_rule_has_a_valid_default_quota() {
         for rule in Rule::ALL {
-            let _ = rule.governor_quota();
+            let _ = rule.governor_quota(&RateLimits::default());
         }
     }
 
     #[test]
     fn the_burst_passes_then_one_more_per_period() {
         let (l, clock) = limiter();
-        let (burst, every) = Rule::ResetIp.quota();
+        let (burst, every) = Rule::ResetIp.quota(&RateLimits::default());
         for _ in 0..burst {
             assert_eq!(check(&l, Rule::ResetIp, "1.2.3.4"), Decision::Allowed);
         }
@@ -249,7 +255,7 @@ mod tests {
     #[test]
     fn keys_and_rules_count_separately() {
         let (l, _) = limiter();
-        let (burst, _) = Rule::ResetEmailFromIp.quota();
+        let (burst, _) = Rule::ResetEmailFromIp.quota(&RateLimits::default());
         for _ in 0..burst {
             check(&l, Rule::ResetEmailFromIp, "ana@example.com");
         }
@@ -275,7 +281,7 @@ mod tests {
         }
         assert_eq!(l.tracked(Rule::LoginIp), 100);
         // Long enough for every key's state to be back to fresh.
-        let (burst, every) = Rule::LoginIp.quota();
+        let (burst, every) = Rule::LoginIp.quota(&RateLimits::default());
         clock.advance(every * burst);
         l.forget_idle();
         assert_eq!(l.tracked(Rule::LoginIp), 0);

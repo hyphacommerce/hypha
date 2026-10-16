@@ -1,0 +1,600 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hypha.config.toml",
+  "description": "Hypha's settings for one deployment. Secrets (`DATABASE_URL`, `HYPHA_SECRET_KEY`, the\nS3 keys) stay in environment variables and have no key here.",
+  "type": "object",
+  "properties": {
+    "auth": {
+      "$ref": "#/$defs/Auth",
+      "default": {
+        "invite_lifetime": "7d",
+        "password_reset_lifetime": "1h",
+        "password_reset_resend_after": "5m",
+        "second_factor_lock": "15m",
+        "second_factor_window": "5m",
+        "session_lifetime": "7d"
+      }
+    },
+    "database": {
+      "$ref": "#/$defs/Database",
+      "default": {
+        "pool_timeout": "5s"
+      }
+    },
+    "jobs": {
+      "$ref": "#/$defs/Jobs",
+      "default": {
+        "dispatch": {
+          "batch": 100,
+          "enabled": true,
+          "interval": "2s",
+          "lease": "2m"
+        },
+        "enabled": true,
+        "media_sweep": {
+          "enabled": true,
+          "interval": "1h"
+        },
+        "prune": {
+          "enabled": true,
+          "events_after": "30d",
+          "idempotency_keys_after": "1d",
+          "interval": "1h",
+          "sessions_after": "30d"
+        }
+      }
+    },
+    "media": {
+      "$ref": "#/$defs/Media",
+      "default": {
+        "abandoned_after": "1d",
+        "download_expires": "15m",
+        "s3": {
+          "create_bucket": false,
+          "region": "auto"
+        },
+        "transforms": "none",
+        "upload_expires": "15m"
+      }
+    },
+    "outbound": {
+      "$ref": "#/$defs/Outbound",
+      "default": {
+        "allow_private": false
+      }
+    },
+    "rate_limits": {
+      "$ref": "#/$defs/RateLimits",
+      "default": {
+        "cart_create_ip": {
+          "burst": 20,
+          "per": "3s"
+        },
+        "invite_ip": {
+          "burst": 10,
+          "per": "30s"
+        },
+        "login_email": {
+          "burst": 50,
+          "per": "72s"
+        },
+        "login_email_from_ip": {
+          "burst": 5,
+          "per": "1m"
+        },
+        "login_ip": {
+          "burst": 10,
+          "per": "30s"
+        },
+        "mfa_ip": {
+          "burst": 10,
+          "per": "30s"
+        },
+        "reset_confirm_ip": {
+          "burst": 10,
+          "per": "30s"
+        },
+        "reset_email_from_ip": {
+          "burst": 3,
+          "per": "5m"
+        },
+        "reset_ip": {
+          "burst": 5,
+          "per": "1m"
+        },
+        "shipping_quotes_cart": {
+          "burst": 10,
+          "per": "2s"
+        }
+      }
+    },
+    "server": {
+      "$ref": "#/$defs/Server",
+      "default": {
+        "bind": "127.0.0.1:3000",
+        "max_body": "2MiB",
+        "shutdown_grace": "10s",
+        "trusted_proxies": []
+      }
+    },
+    "webhooks": {
+      "$ref": "#/$defs/Webhooks",
+      "default": {
+        "give_up_after": "3d",
+        "retry": [
+          "1m",
+          "5m",
+          "30m",
+          "2h",
+          "6h"
+        ],
+        "retry_then_every": "12h"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Auth": {
+      "description": "How long staff sessions and auth's emailed tokens last.",
+      "type": "object",
+      "properties": {
+        "invite_lifetime": {
+          "description": "How long an invite works. At least 1 minute.",
+          "$ref": "#/$defs/Duration",
+          "default": "7d"
+        },
+        "password_reset_lifetime": {
+          "description": "How long an emailed password reset link works.",
+          "$ref": "#/$defs/Duration",
+          "default": "1h"
+        },
+        "password_reset_resend_after": {
+          "description": "While the latest reset link is younger than this and unused, asking again sends\nnothing.",
+          "$ref": "#/$defs/Duration",
+          "default": "5m"
+        },
+        "second_factor_lock": {
+          "description": "How long second-factor checks stop after 5 wrong codes in a row.",
+          "$ref": "#/$defs/Duration",
+          "default": "15m"
+        },
+        "second_factor_window": {
+          "description": "How long, after the password, the second factor may be entered.",
+          "$ref": "#/$defs/Duration",
+          "default": "5m"
+        },
+        "session_lifetime": {
+          "description": "How long a session lasts from login. At least 1 minute.",
+          "$ref": "#/$defs/Duration",
+          "default": "7d"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Database": {
+      "description": "The Postgres connection pool. The URL is `DATABASE_URL`, never here.",
+      "type": "object",
+      "properties": {
+        "max_connections": {
+          "description": "The most connections open at once. Unset: the pool's default, 4 per CPU.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "pool_timeout": {
+          "description": "How long a request waits for a pooled connection (or for a new one to open, or an\nold one to be checked) before it fails.",
+          "$ref": "#/$defs/Duration",
+          "default": "5s"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DispatchJob": {
+      "description": "Delivering events: fanning them out to apps and handlers, and running what's due.",
+      "type": "object",
+      "properties": {
+        "batch": {
+          "description": "Events fanned out, deliveries run, or old rows pruned per step (1 to 1,000).",
+          "type": "integer",
+          "format": "uint32",
+          "default": 100,
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "default": "2s"
+        },
+        "lease": {
+          "description": "How long a runner holds the deliveries it took; past it, another may take them.\nAt least 1 minute: the slowest webhook may take 45 seconds.",
+          "$ref": "#/$defs/Duration",
+          "default": "2m"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Duration": {
+      "description": "A whole number and a unit: ms, s, m, h or d.",
+      "type": "string",
+      "examples": [
+        "30s",
+        "5m",
+        "1h",
+        "7d"
+      ],
+      "pattern": "^\\s*[0-9]+(ms|s|m|h|d)\\s*$"
+    },
+    "Job": {
+      "description": "A job that runs every `interval`, and again at once while it has more to do.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "default": "1h"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Jobs": {
+      "description": "Background jobs. Set `enabled = false` on instances that only serve requests, and\nkeep them on in one. A Workers host runs them from Cron triggers and ignores the\nintervals.",
+      "type": "object",
+      "properties": {
+        "dispatch": {
+          "$ref": "#/$defs/DispatchJob",
+          "default": {
+            "batch": 100,
+            "enabled": true,
+            "interval": "2s",
+            "lease": "2m"
+          }
+        },
+        "enabled": {
+          "description": "`false`: this instance runs no jobs, whatever the jobs below say.",
+          "type": "boolean",
+          "default": true
+        },
+        "media_sweep": {
+          "$ref": "#/$defs/Job",
+          "default": {
+            "enabled": true,
+            "interval": "1h"
+          }
+        },
+        "prune": {
+          "$ref": "#/$defs/PruneJob",
+          "default": {
+            "enabled": true,
+            "events_after": "30d",
+            "idempotency_keys_after": "1d",
+            "interval": "1h",
+            "sessions_after": "30d"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Media": {
+      "description": "File storage and asset URLs. Media is off without `s3.endpoint`.",
+      "type": "object",
+      "properties": {
+        "abandoned_after": {
+          "description": "How long an unfinished upload is kept before the sweep deletes it. At least\n`upload_expires`.",
+          "$ref": "#/$defs/Duration",
+          "default": "1d"
+        },
+        "download_expires": {
+          "description": "How long a private file's download URL works (1 minute to 7 days).",
+          "$ref": "#/$defs/Duration",
+          "default": "15m"
+        },
+        "public_url": {
+          "description": "Where public files are served from, e.g. a CDN. Unset: every file gets a signed\nURL. `HYPHA_MEDIA_URL` wins.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "s3": {
+          "$ref": "#/$defs/S3",
+          "default": {
+            "create_bucket": false,
+            "region": "auto"
+          }
+        },
+        "transforms": {
+          "description": "How thumbnails are made from public image URLs. `HYPHA_MEDIA_TRANSFORMS` wins.",
+          "$ref": "#/$defs/Transforms",
+          "default": "none"
+        },
+        "upload_expires": {
+          "description": "How long an upload URL works (1 minute to 7 days).",
+          "$ref": "#/$defs/Duration",
+          "default": "15m"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Outbound": {
+      "description": "Calls to URLs merchants configure (rate apps, webhooks).",
+      "type": "object",
+      "properties": {
+        "allow_private": {
+          "description": "Lets those calls reach private and loopback addresses, for apps on localhost.\nDevelopment only. `HYPHA_ALLOW_PRIVATE_CALLBACKS` wins.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "PruneJob": {
+      "description": "Deleting what's past keeping.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "events_after": {
+          "description": "How long events, and their deliveries, are kept.",
+          "$ref": "#/$defs/Duration",
+          "default": "30d"
+        },
+        "idempotency_keys_after": {
+          "description": "How long an `Idempotency-Key` is honoured. At least 1 hour.",
+          "$ref": "#/$defs/Duration",
+          "default": "1d"
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "default": "1h"
+        },
+        "sessions_after": {
+          "description": "How long a session is kept after it ended (expired or revoked).",
+          "$ref": "#/$defs/Duration",
+          "default": "30d"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Quota": {
+      "description": "Up to `burst` requests at once, then one more each `per`.",
+      "type": "object",
+      "properties": {
+        "burst": {
+          "description": "At least 1.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "per": {
+          "$ref": "#/$defs/Duration"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "burst",
+        "per"
+      ]
+    },
+    "RateLimits": {
+      "description": "Limits on the routes that need no credentials, and on the storefront routes that\ncall rate apps (design notes 0009 and 0015). Counted per instance.",
+      "type": "object",
+      "properties": {
+        "cart_create_ip": {
+          "description": "Creating carts, per client address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 20,
+            "per": "3s"
+          }
+        },
+        "invite_ip": {
+          "description": "Accepting an invite, per client address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 10,
+            "per": "30s"
+          }
+        },
+        "login_email": {
+          "description": "Logging in, per email from anywhere: guessing spread over many addresses.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 50,
+            "per": "72s"
+          }
+        },
+        "login_email_from_ip": {
+          "description": "Logging in, per email and address: guesses at one account from one place.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 5,
+            "per": "1m"
+          }
+        },
+        "login_ip": {
+          "description": "Logging in, per client address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 10,
+            "per": "30s"
+          }
+        },
+        "mfa_ip": {
+          "description": "The second factor, per client address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 10,
+            "per": "30s"
+          }
+        },
+        "reset_confirm_ip": {
+          "description": "Setting a new password with a reset token, per client address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 10,
+            "per": "30s"
+          }
+        },
+        "reset_email_from_ip": {
+          "description": "Asking for a password reset, per email and address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 3,
+            "per": "5m"
+          }
+        },
+        "reset_ip": {
+          "description": "Asking for a password reset, per client address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 5,
+            "per": "1m"
+          }
+        },
+        "shipping_quotes_cart": {
+          "description": "Shipping quotes, per cart: each may call rate apps.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 10,
+            "per": "2s"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "S3": {
+      "description": "An S3-compatible bucket (R2, S3, MinIO). The keys are `HYPHA_S3_ACCESS_KEY_ID` and\n`HYPHA_S3_SECRET_ACCESS_KEY`, never here.",
+      "type": "object",
+      "properties": {
+        "bucket": {
+          "description": "Required with an endpoint. `HYPHA_S3_BUCKET` wins.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "create_bucket": {
+          "description": "Creates the bucket on startup if it's missing. Development only.\n`HYPHA_S3_CREATE_BUCKET` wins.",
+          "type": "boolean",
+          "default": false
+        },
+        "endpoint": {
+          "description": "The S3 API's URL. Unset: media is off. `HYPHA_S3_ENDPOINT` wins.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "region": {
+          "description": "`HYPHA_S3_REGION` wins.",
+          "type": "string",
+          "default": "auto"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Server": {
+      "description": "The HTTP server.",
+      "type": "object",
+      "properties": {
+        "admin_url": {
+          "description": "Where the admin panel lives, for links in emails; unset, emails show the bare\ntoken. `HYPHA_ADMIN_URL` wins.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bind": {
+          "description": "The address to listen on, `host:port`. `HYPHA_BIND` wins, then `PORT` (as\n`0.0.0.0:$PORT`, as platforms like Fly.io and Render expect).",
+          "type": "string",
+          "default": "127.0.0.1:3000"
+        },
+        "max_body": {
+          "description": "The largest request body accepted.",
+          "$ref": "#/$defs/Size",
+          "default": "2MiB"
+        },
+        "shutdown_grace": {
+          "description": "How long stopping waits for jobs, and then for background work, to finish.",
+          "$ref": "#/$defs/Duration",
+          "default": "10s"
+        },
+        "trusted_proxies": {
+          "description": "The proxies and load balancers whose `X-Forwarded-For` is believed: CIDR ranges\nor addresses. Behind one, set it, or every client shares one rate limit.\n`HYPHA_TRUSTED_PROXIES` (comma-separated) wins.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Size": {
+      "description": "A whole number and a unit: B, KiB, MiB or GiB (KB, MB and GB are powers of 1,000).",
+      "type": "string",
+      "examples": [
+        "512KiB",
+        "2MiB"
+      ],
+      "pattern": "^\\s*[0-9]+(B|KiB|MiB|GiB|KB|MB|GB)\\s*$"
+    },
+    "Transforms": {
+      "description": "How thumbnails are made.",
+      "oneOf": [
+        {
+          "description": "No resizing: the thumbnail is the original.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "Cloudflare Image Transformations on the media domain's zone.",
+          "type": "string",
+          "const": "cloudflare"
+        }
+      ]
+    },
+    "Webhooks": {
+      "description": "When failed deliveries (webhooks and in-process handlers) are tried again.",
+      "type": "object",
+      "properties": {
+        "give_up_after": {
+          "description": "No attempt is planned more than this long after the first; then the delivery\nfails for good (and can be retried from the admin).",
+          "$ref": "#/$defs/Duration",
+          "default": "3d"
+        },
+        "retry": {
+          "description": "The waits after the first failures, in order (at most 20).",
+          "type": "array",
+          "default": [
+            "1m",
+            "5m",
+            "30m",
+            "2h",
+            "6h"
+          ],
+          "items": {
+            "$ref": "#/$defs/Duration"
+          }
+        },
+        "retry_then_every": {
+          "description": "The wait after each later failure.",
+          "$ref": "#/$defs/Duration",
+          "default": "12h"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -219,7 +219,7 @@ pub struct AppState<S> {
     pub background: Background,
     /// Limits on the public routes (design note 0009). In memory: one instance's counts.
     pub limiter: crate::rate_limit::MemoryRateLimiter,
-    /// Whose `X-Forwarded-For` to believe (`HYPHA_TRUSTED_PROXIES`).
+    /// Whose `X-Forwarded-For` to believe (`server.trusted_proxies`).
     pub trusted_proxies: crate::client_ip::TrustedProxies,
     /// The one store this deployment serves (design note 0006, model A), set at startup.
     pub store: StoreId,
@@ -227,15 +227,16 @@ pub struct AppState<S> {
     /// authenticator app). A rename shows there after a restart.
     pub store_name: String,
     /// File storage and asset URLs (design note 0013); `None` without
-    /// `HYPHA_S3_ENDPOINT`, and the asset routes then answer 503.
+    /// `media.s3.endpoint`, and the asset routes then answer 503.
     pub media: Option<crate::media::Media>,
     /// For rate callbacks to external apps (design note 0015); each call sets its own
     /// timeout, the provider's. Built by `outbound::client` under `outbound`.
     pub http: reqwest::Client,
-    /// Whether those calls may reach private addresses (`HYPHA_ALLOW_PRIVATE_CALLBACKS`).
+    /// Whether those calls may reach private addresses (`outbound.allow_private`).
     pub outbound: crate::outbound::OutboundPolicy,
-    /// The event jobs' batch, lease, retries and retention (design note 0017).
-    pub dispatch: hypha_dispatch::DispatchSettings,
+    /// The settings in effect (design note 0017): the body limit, the jobs' timers and
+    /// the dispatcher's batch, lease, retries and retention are read from here.
+    pub config: hypha_config::Config,
 }
 
 impl<S: Storage> AppState<S> {
@@ -350,9 +351,6 @@ impl PgConnection for PooledClient {
     }
 }
 
-/// How long a request waits for a pooled connection (or for a new one to open).
-const POOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
 /// TLS for Postgres, verified against the operating system's trust store (as reqwest's
 /// is). The URL's `sslmode` decides whether it's used: `prefer` (the default) tries TLS
 /// and falls back to plain, which the compose database needs; `require` refuses to
@@ -376,8 +374,11 @@ pub struct PgStorage {
 }
 
 impl PgStorage {
-    /// Opens a connection pool and applies pending migrations.
-    pub async fn connect(url: &str) -> Result<Self, String> {
+    /// Opens a connection pool (`[database]`) and applies pending migrations.
+    pub async fn connect(
+        url: &str,
+        settings: &hypha_config::DatabaseConfig,
+    ) -> Result<Self, String> {
         use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Runtime};
 
         let config = database_config(url).map_err(|e| format!("invalid DATABASE_URL: {e}"))?;
@@ -388,14 +389,19 @@ impl PgStorage {
                 recycling_method: RecyclingMethod::Fast,
             },
         );
-        // A request waits at most this long for a free connection or a new one, then
-        // fails with a 500 instead of hanging while the pool is exhausted or Postgres
-        // is down.
-        let pool = Pool::builder(manager)
+        // A request waits at most `pool_timeout` for a free connection or a new one,
+        // then fails with a 500 instead of hanging while the pool is exhausted or
+        // Postgres is down.
+        let timeout = Some(settings.pool_timeout);
+        let mut builder = Pool::builder(manager)
             .runtime(Runtime::Tokio1)
-            .wait_timeout(Some(POOL_TIMEOUT))
-            .create_timeout(Some(POOL_TIMEOUT))
-            .recycle_timeout(Some(POOL_TIMEOUT))
+            .wait_timeout(timeout)
+            .create_timeout(timeout)
+            .recycle_timeout(timeout);
+        if let Some(max) = settings.max_connections {
+            builder = builder.max_size(max);
+        }
+        let pool = builder
             .build()
             .map_err(|e| format!("cannot build the connection pool: {e}"))?;
         let mut conn = pool

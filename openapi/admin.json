@@ -4459,7 +4459,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -4823,7 +4823,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -5145,7 +5145,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -5714,7 +5714,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -6031,7 +6031,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -6359,7 +6359,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -6473,7 +6473,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -6630,7 +6630,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -6737,7 +6737,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -6881,7 +6881,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -7001,7 +7001,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -7140,7 +7140,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -7272,7 +7272,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -7402,7 +7402,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -7521,7 +7521,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -7747,7 +7747,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -7886,7 +7886,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -8138,7 +8138,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -8346,7 +8346,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -8572,7 +8572,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -8719,7 +8719,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -8866,7 +8866,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -8985,7 +8985,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -9094,7 +9094,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -9218,7 +9218,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -9444,7 +9444,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -9563,7 +9563,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -9702,7 +9702,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -9841,7 +9841,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -10124,7 +10124,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -10241,7 +10241,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -10358,7 +10358,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -10468,7 +10468,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -10578,7 +10578,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -10985,7 +10985,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -11117,7 +11117,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -11247,7 +11247,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -11475,7 +11475,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -11701,7 +11701,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -11840,7 +11840,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -11980,7 +11980,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -12119,7 +12119,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -12258,7 +12258,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -12510,7 +12510,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -12657,7 +12657,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -12776,7 +12776,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -13002,7 +13002,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -13178,7 +13178,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -13503,7 +13503,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -13771,7 +13771,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -14087,7 +14087,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -14226,7 +14226,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -14365,7 +14365,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -14617,7 +14617,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -14793,7 +14793,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -14905,7 +14905,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -15024,7 +15024,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -15143,7 +15143,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -15369,7 +15369,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -15621,7 +15621,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {
@@ -15847,7 +15847,7 @@
                 }
               }
             },
-            "description": "A body over 2 MB (`body_too_large`)."
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
           },
           "415": {
             "content": {

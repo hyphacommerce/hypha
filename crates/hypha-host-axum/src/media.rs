@@ -1,5 +1,6 @@
-//! Media in the host (design note 0013): the file store (`HYPHA_S3_*`) and how asset URLs
-//! are built (`HYPHA_MEDIA_URL`, `HYPHA_MEDIA_TRANSFORMS`).
+//! Media in the host (design note 0013): the file store (`[media.s3]`, with the keys in
+//! `HYPHA_S3_ACCESS_KEY_ID` and `HYPHA_S3_SECRET_ACCESS_KEY`) and how asset URLs are
+//! built (`media.public_url`, `media.transforms`).
 
 use hypha_core::{Clock, Timestamp};
 use hypha_media::{Asset, AssetKind, AssetStatus, BlobStore, MediaSettings, Visibility};
@@ -9,8 +10,8 @@ use crate::{error::ApiError, state::SystemClock};
 
 pub type HostBlobs = S3BlobStore<ReqwestClient, SystemClock>;
 
-/// The file store and the URL rules; `None` in `AppState` when `HYPHA_S3_ENDPOINT`
-/// isn't set, and then the asset routes answer `503 media_not_configured`.
+/// The file store and the URL rules; `None` in `AppState` without `media.s3.endpoint`,
+/// and then the asset routes answer `503 media_not_configured`.
 pub struct Media {
     pub blobs: HostBlobs,
     pub urls: MediaUrls,
@@ -18,19 +19,13 @@ pub struct Media {
     pub settings: MediaSettings,
 }
 
-/// How a thumbnail is made from a public image URL.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Transforms {
-    /// No resizing: the thumbnail is the original.
-    None,
-    /// Cloudflare Image Transformations on the media domain's zone.
-    Cloudflare,
-}
+/// How a thumbnail is made from a public image URL (`media.transforms`).
+pub use hypha_config::Transforms;
 
 /// Where clients fetch files from (design note 0013, section 4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MediaUrls {
-    /// `HYPHA_MEDIA_URL`, e.g. `https://cdn.mystore.com`: public files are served from
+    /// `media.public_url`, e.g. `https://cdn.mystore.com`: public files are served from
     /// here. Without it every file gets a signed URL (development, no CDN).
     pub public_base: Option<String>,
     pub transforms: Transforms,
@@ -65,40 +60,29 @@ fn split_origin(url: &str) -> (&str, &str) {
 }
 
 impl Media {
-    /// From `HYPHA_S3_*`, `HYPHA_MEDIA_URL` and `HYPHA_MEDIA_TRANSFORMS` (`cloudflare` or
-    /// unset). `Ok(None)` without `HYPHA_S3_ENDPOINT`.
-    pub fn from_env() -> Result<Option<Media>, String> {
-        let Ok(endpoint) = std::env::var("HYPHA_S3_ENDPOINT") else {
+    /// From `[media]`, with the S3 keys from the environment (secrets have no key in
+    /// the file). `Ok(None)` without an S3 endpoint.
+    pub fn from_config(config: &hypha_config::MediaConfig) -> Result<Option<Media>, String> {
+        let Some(s3) = &config.s3 else {
             return Ok(None);
         };
-        let var = |name: &str| {
-            std::env::var(name).map_err(|_| format!("{name} is required with HYPHA_S3_ENDPOINT"))
+        let key = |name: &str| {
+            std::env::var(name).map_err(|_| format!("{name} is required with an S3 endpoint"))
         };
-        let config = S3Config {
-            endpoint,
-            region: std::env::var("HYPHA_S3_REGION").unwrap_or_else(|_| "auto".to_string()),
-            bucket: var("HYPHA_S3_BUCKET")?,
-            access_key_id: var("HYPHA_S3_ACCESS_KEY_ID")?,
-            secret_access_key: var("HYPHA_S3_SECRET_ACCESS_KEY")?,
-        };
-        let transforms = match std::env::var("HYPHA_MEDIA_TRANSFORMS").as_deref() {
-            Err(_) | Ok("") | Ok("none") => Transforms::None,
-            Ok("cloudflare") => Transforms::Cloudflare,
-            Ok(other) => {
-                return Err(format!(
-                    "HYPHA_MEDIA_TRANSFORMS is `cloudflare` or `none`, not {other:?}"
-                ));
-            }
+        let s3 = S3Config {
+            endpoint: s3.endpoint.clone(),
+            region: s3.region.clone(),
+            bucket: s3.bucket.clone(),
+            access_key_id: key("HYPHA_S3_ACCESS_KEY_ID")?,
+            secret_access_key: key("HYPHA_S3_SECRET_ACCESS_KEY")?,
         };
         Ok(Some(Media {
-            blobs: S3BlobStore::new(config, ReqwestClient::new()?, SystemClock),
+            blobs: S3BlobStore::new(s3, ReqwestClient::new()?, SystemClock),
             urls: MediaUrls {
-                public_base: std::env::var("HYPHA_MEDIA_URL")
-                    .ok()
-                    .filter(|u| !u.is_empty()),
-                transforms,
+                public_base: config.public_url.clone(),
+                transforms: config.transforms,
             },
-            settings: MediaSettings::default(),
+            settings: config.settings,
         }))
     }
 

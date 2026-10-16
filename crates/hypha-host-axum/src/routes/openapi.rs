@@ -228,7 +228,7 @@ fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
         errors
             .entry("413")
             .or_default()
-            .push("A body over 2 MB (`body_too_large`).");
+            .push("A body over the size limit, 2 MiB unless configured (`body_too_large`).");
         errors
             .entry("415")
             .or_default()

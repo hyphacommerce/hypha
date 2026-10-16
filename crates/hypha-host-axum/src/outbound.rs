@@ -4,8 +4,8 @@
 //! the addresses a name resolves to, at connection time, so a name that resolves to a
 //! private address (or is re-pointed at one later) is refused too.
 //!
-//! `HYPHA_ALLOW_PRIVATE_CALLBACKS=true` lifts it, for development and tests that run an
-//! app on localhost.
+//! `outbound.allow_private` (`HYPHA_ALLOW_PRIVATE_CALLBACKS=true`) lifts it, for
+//! development and tests that run an app on localhost.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -19,13 +19,6 @@ pub struct OutboundPolicy {
 }
 
 impl OutboundPolicy {
-    /// From `HYPHA_ALLOW_PRIVATE_CALLBACKS` (`true` allows; anything else doesn't).
-    pub fn from_env() -> Self {
-        Self {
-            allow_private: std::env::var("HYPHA_ALLOW_PRIVATE_CALLBACKS").as_deref() == Ok("true"),
-        }
-    }
-
     /// Whether a URL whose host is the IP literal `ip` may be called. Names are checked
     /// by the client's resolver instead; literals never reach it.
     pub fn allows(self, ip: IpAddr) -> bool {

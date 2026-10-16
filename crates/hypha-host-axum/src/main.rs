@@ -17,11 +17,13 @@ use axum::Router;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+use hypha_config::Config;
 use hypha_core::Ctx;
 use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
 use crate::client_ip::TrustedProxies;
+use crate::rate_limit::MemoryRateLimiter;
 use crate::state::{AppState, HostEnv, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids};
 
 /// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
@@ -38,16 +40,71 @@ fn write_openapi(dir: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Reads the configuration (design note 0017): the file `HYPHA_CONFIG` names, else
+/// `hypha.config.toml` if it's there, under the environment. `Ok` with the file read,
+/// if any.
+fn load_config() -> Result<(Config, Option<String>), String> {
+    let named = std::env::var("HYPHA_CONFIG").ok().filter(|p| !p.is_empty());
+    let path = named
+        .clone()
+        .unwrap_or_else(|| hypha_config::DEFAULT_PATH.to_string());
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => Some(text),
+        // Only the default file is optional; one named on purpose must be there.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && named.is_none() => None,
+        Err(e) => return Err(format!("cannot read {path}: {e}")),
+    };
+    let source = match &text {
+        Some(_) => format!("{path} and the environment"),
+        None => "the environment (no hypha.config.toml)".to_string(),
+    };
+    let config = Config::load(text.as_deref(), |name| std::env::var(name).ok())
+        .map_err(|e| format!("invalid configuration, from {source}:\n{e}"))?;
+    Ok((config, text.map(|_| path)))
+}
+
+/// `hypha-host-axum config` prints the settings in effect; `config schema [PATH]` writes
+/// the file's JSON Schema to `PATH` (default `hypha.config.schema.json`; a test fails
+/// while the committed one is stale).
+fn config_command(args: &[String]) -> Result<(), String> {
+    if args.first().map(String::as_str) == Some("schema") {
+        let path = args
+            .get(1)
+            .map_or("hypha.config.schema.json", String::as_str);
+        std::fs::write(path, hypha_config::schema_json())
+            .map_err(|e| format!("cannot write {path}: {e}"))?;
+        println!("wrote {path}");
+        return Ok(());
+    }
+    let (config, path) = load_config()?;
+    let from = path.as_deref().unwrap_or("defaults");
+    print!(
+        "# The settings in effect: {from}, then the environment.\n\n{}",
+        config.to_toml()
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("openapi") {
-        let dir = args.get(2).map_or("openapi", String::as_str);
-        if let Err(e) = write_openapi(dir) {
-            eprintln!("cannot write the OpenAPI documents: {e}");
-            std::process::exit(1);
+    match args.get(1).map(String::as_str) {
+        Some("openapi") => {
+            let dir = args.get(2).map_or("openapi", String::as_str);
+            if let Err(e) = write_openapi(dir) {
+                eprintln!("cannot write the OpenAPI documents: {e}");
+                std::process::exit(1);
+            }
+            return;
         }
-        return;
+        Some("config") => {
+            if let Err(e) = config_command(&args[2..]) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        _ => {}
     }
 
     tracing_subscriber::fmt()
@@ -56,7 +113,19 @@ async fn main() {
         )
         .init();
 
-    let admin_url = std::env::var("HYPHA_ADMIN_URL").ok();
+    let config = match load_config() {
+        Ok((config, path)) => {
+            match path {
+                Some(path) => tracing::info!("configuration: {path}"),
+                None => tracing::info!("configuration: defaults (no hypha.config.toml)"),
+            }
+            config
+        }
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+    };
     let secret_key = match std::env::var("HYPHA_SECRET_KEY")
         .ok()
         .map(|k| parse_key(&k))
@@ -86,7 +155,7 @@ async fn main() {
         );
         std::process::exit(1);
     };
-    let storage = match PgStorage::connect(&url).await {
+    let storage = match PgStorage::connect(&url, &config.database).await {
         Ok(storage) => storage,
         Err(e) => {
             tracing::error!("{e}");
@@ -94,8 +163,8 @@ async fn main() {
         }
     };
     tracing::info!("storage: Postgres (migrations applied)");
-    let env = HostEnv::new(secret_key, admin_url, Default::default());
-    serve(routes::postgres_router(), storage, env).await;
+    let env = HostEnv::new(secret_key, config.server.admin_url.clone(), config.auth);
+    serve(routes::postgres_router(), storage, env, config).await;
 }
 
 /// A 32-byte key written as 64 hex characters.
@@ -146,23 +215,19 @@ async fn ensure_owner<S: Storage>(state: &AppState<S>) -> Result<(), String> {
     Ok(())
 }
 
-async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: HostEnv) {
+async fn serve<S: Storage>(
+    router: Router<SharedState<S>>,
+    storage: S,
+    env: HostEnv,
+    config: Config,
+) {
     let ids = UuidV7Ids;
-    let trusted_proxies = match std::env::var("HYPHA_TRUSTED_PROXIES") {
-        Ok(list) => match TrustedProxies::parse(&list) {
-            Ok(proxies) => proxies,
-            Err(e) => {
-                tracing::error!("HYPHA_TRUSTED_PROXIES: {e}");
-                std::process::exit(1);
-            }
-        },
-        Err(_) => TrustedProxies::default(),
-    };
+    let trusted_proxies = TrustedProxies::new(config.server.trusted_proxies.clone());
     // The one setting that silently goes wrong behind a proxy (design note 0009, §8).
     if trusted_proxies.is_empty() {
         tracing::info!(
             "rate limits key clients by their socket address; behind a proxy or load \
-             balancer, set HYPHA_TRUSTED_PROXIES or every client shares one limit"
+             balancer, set server.trusted_proxies or every client shares one limit"
         );
     } else {
         tracing::info!(
@@ -187,7 +252,7 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
     };
     tracing::info!(store = %store.id(), name = store.name(), "serving store");
 
-    let media = match media::Media::from_env() {
+    let media = match media::Media::from_config(&config.media) {
         Ok(media) => media,
         Err(e) => {
             tracing::error!("{e}");
@@ -195,42 +260,48 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         }
     };
     match &media {
-        None => tracing::info!("media: off (set HYPHA_S3_ENDPOINT for file storage)"),
+        None => tracing::info!("media: off (set media.s3.endpoint for file storage)"),
         Some(media) => {
             // Development servers start empty; production buckets are made by their owner.
-            if std::env::var("HYPHA_S3_CREATE_BUCKET").as_deref() == Ok("true")
+            if config.media.s3.as_ref().is_some_and(|s3| s3.create_bucket)
                 && let Err(e) = media.blobs.ensure_bucket().await
             {
-                tracing::error!("HYPHA_S3_CREATE_BUCKET: {e}");
+                tracing::error!("media.s3.create_bucket: {e}");
                 std::process::exit(1);
             }
             match &media.urls.public_base {
                 Some(base) => tracing::info!(%base, "media: public files served from"),
-                None => tracing::info!("media: signed URLs (set HYPHA_MEDIA_URL for a CDN)"),
+                None => tracing::info!("media: signed URLs (set media.public_url for a CDN)"),
             }
         }
     }
 
-    let outbound = outbound::OutboundPolicy::from_env();
+    let outbound = outbound::OutboundPolicy {
+        allow_private: config.allow_private_callbacks,
+    };
     if outbound.allow_private {
         tracing::warn!(
-            "HYPHA_ALLOW_PRIVATE_CALLBACKS: rate apps may call private addresses; \
-             development only"
+            "outbound.allow_private: apps may be called at private addresses; development only"
         );
     }
+    if !config.jobs.dispatch.enabled {
+        tracing::info!("jobs: events aren't delivered from this instance (jobs.dispatch)");
+    }
+    let grace = config.server.shutdown_grace;
+    let addr = config.server.bind.clone();
     let state = Arc::new(AppState {
         storage,
         ids,
         clock: SystemClock,
         env,
         background: Default::default(),
-        limiter: Default::default(),
+        limiter: MemoryRateLimiter::new(&config.rate_limits),
         trusted_proxies,
         store: store.id(),
         store_name: store.name().to_string(),
         media,
         outbound,
-        dispatch: Default::default(),
+        config,
         http: match outbound::client(outbound) {
             Ok(client) => client,
             Err(e) => {
@@ -248,7 +319,6 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         .layer(TraceLayer::new_for_http())
         .with_state(Arc::clone(&state));
 
-    let addr = bind_address();
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,
         Err(e) => {
@@ -269,31 +339,13 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
     }
     // Requests are done; stop the jobs after the step each is in, and let work the
     // requests started (password reset emails) finish too.
-    if !jobs.stop(std::time::Duration::from_secs(10)).await {
+    if !jobs.stop(grace).await {
         tracing::warn!("stopping with background jobs unfinished");
     }
-    if !state
-        .background
-        .drain(std::time::Duration::from_secs(10))
-        .await
-    {
+    if !state.background.drain(grace).await {
         tracing::warn!("stopping with background work unfinished");
     }
     tracing::info!("stopped");
-}
-
-/// `HYPHA_BIND` (`host:port`) if set. Otherwise `PORT` on every interface, as platforms
-/// like Fly.io and Render expect. Otherwise `127.0.0.1:3000` for local development.
-fn bind_address() -> String {
-    bind_address_from(std::env::var("HYPHA_BIND").ok(), std::env::var("PORT").ok())
-}
-
-fn bind_address_from(bind: Option<String>, port: Option<String>) -> String {
-    match (bind, port) {
-        (Some(bind), _) => bind,
-        (None, Some(port)) => format!("0.0.0.0:{port}"),
-        (None, None) => "127.0.0.1:3000".to_string(),
-    }
 }
 
 /// Resolves on Ctrl+C or (on Unix) SIGTERM, which is how orchestrators stop a
@@ -338,13 +390,5 @@ mod tests {
         assert_eq!(key, [0x0f; 32]);
         assert!(parse_key(&"0f".repeat(31)).is_err());
         assert!(parse_key(&format!("{}zz", "0f".repeat(31))).is_err());
-    }
-
-    #[test]
-    fn bind_address_prefers_hypha_bind_then_port_then_localhost() {
-        let s = |v: &str| Some(v.to_string());
-        assert_eq!(bind_address_from(s("[::]:8080"), s("9000")), "[::]:8080");
-        assert_eq!(bind_address_from(None, s("9000")), "0.0.0.0:9000");
-        assert_eq!(bind_address_from(None, None), "127.0.0.1:3000");
     }
 }

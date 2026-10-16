@@ -1,7 +1,7 @@
 //! Which client a request comes from, for rate limits (design note 0009, R4 and R5).
 //!
 //! The socket's peer address, unless that peer is a proxy listed in
-//! `HYPHA_TRUSTED_PROXIES`: then `X-Forwarded-For`, read right to left up to the first
+//! `server.trusted_proxies` (`HYPHA_TRUSTED_PROXIES`): then `X-Forwarded-For`, read right to left up to the first
 //! address that isn't a trusted proxy. Without trusted proxies the header is ignored:
 //! anyone can send one, and a limit keyed by it would be a limit the attacker picks.
 
@@ -18,29 +18,14 @@ use crate::{
     state::{SharedState, Storage},
 };
 
-/// An entry of `HYPHA_TRUSTED_PROXIES` that isn't an address or a range.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{0:?} is not an IP address or CIDR range")]
-pub struct ProxyListError(pub String);
-
 /// The proxies whose `X-Forwarded-For` is believed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrustedProxies(Vec<IpNet>);
 
 impl TrustedProxies {
-    /// A comma-separated list of CIDR ranges (`10.0.0.0/8,fd00::/8`); a bare address
-    /// means just that address.
-    pub fn parse(list: &str) -> Result<Self, ProxyListError> {
-        list.split(',')
-            .map(str::trim)
-            .filter(|part| !part.is_empty())
-            .map(|part| {
-                part.parse::<IpNet>()
-                    .or_else(|_| part.parse::<IpAddr>().map(IpNet::from))
-                    .map_err(|_| ProxyListError(part.to_string()))
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map(Self)
+    /// These ranges (`server.trusted_proxies`, parsed and checked by `hypha-config`).
+    pub fn new(nets: Vec<IpNet>) -> Self {
+        Self(nets)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -144,7 +129,11 @@ mod tests {
     }
 
     fn proxies(list: &str) -> TrustedProxies {
-        TrustedProxies::parse(list).unwrap()
+        TrustedProxies::new(
+            list.split(',')
+                .map(|s| s.trim().parse::<IpNet>().unwrap())
+                .collect(),
+        )
     }
 
     #[test]
@@ -182,32 +171,6 @@ mod tests {
         assert_eq!(
             proxies("10.0.0.0/8").client(ip("10.0.0.1"), &headers),
             ip("10.0.0.1")
-        );
-    }
-
-    #[test]
-    fn parse_takes_ranges_and_bare_addresses() {
-        let net = |s: &str| s.parse::<IpNet>().unwrap();
-        assert_eq!(
-            TrustedProxies::parse(" 10.0.0.0/8 , fd00::/8,127.0.0.1 "),
-            Ok(TrustedProxies(vec![
-                net("10.0.0.0/8"),
-                net("fd00::/8"),
-                net("127.0.0.1/32"),
-            ]))
-        );
-    }
-
-    #[test]
-    fn parse_of_nothing_trusts_nobody() {
-        assert_eq!(TrustedProxies::parse(" , "), Ok(TrustedProxies::default()));
-    }
-
-    #[test]
-    fn parse_refuses_junk_naming_it() {
-        assert_eq!(
-            TrustedProxies::parse("10.0.0.0/8,nope"),
-            Err(ProxyListError("nope".to_string()))
         );
     }
 

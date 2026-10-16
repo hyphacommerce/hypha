@@ -83,6 +83,7 @@ allow_private = false       # HYPHA_ALLOW_PRIVATE_CALLBACKS wins; development on
 # public_url = "https://cdn.example.com"  # HYPHA_MEDIA_URL wins; unset: signed URLs
 transforms = "none"         # or "cloudflare"; HYPHA_MEDIA_TRANSFORMS wins
 upload_expires = "15m"
+download_expires = "15m"   # a private file's signed URL
 abandoned_after = "1d"
 
 [media.s3]                  # no endpoint: media is off. The keys stay in the environment.
@@ -211,9 +212,10 @@ intervals; the schema says so.
 ## 7. The admin
 
 The admin is its own deployment and doesn't read `hypha.config.toml`. Its few settings
-(`HYPHA_API_URL`, `ADMIN_TRUST_X_FORWARDED_FOR`) stay Worker variables. What it shows that
-depends on the API's settings comes from the API: errors already carry their limits in
-`details`, and a read-only settings route can follow when a page needs one.
+(`HYPHA_API_URL`, `ADMIN_TRUST_X_FORWARDED_FOR`) stay Worker variables. Nothing it shows
+depends on a setting yet: the limits its messages quote are the constants of section 2.
+When one does, it comes from the API (in the error's message or `details`, or a
+read-only settings route), never from a copy in the admin.
 
 ## 8. Checks (CF9)
 
@@ -225,14 +227,20 @@ depends on the API's settings comes from the API: errors already carry their lim
 - `jobs.prune.idempotency_keys_after` is at least an hour, so a client retrying a slow
   request still gets its first answer.
 - `auth.session_lifetime` and `auth.invite_lifetime` are at least a minute.
-- `server.bind` is an address, `trusted_proxies` are CIDR ranges, `admin_url` and
-  `media.public_url` are `http(s)://` URLs, `media.transforms` is `none` or
-  `cloudflare`.
+- `media.upload_expires` and `download_expires` are 1 minute to 7 days (S3's limit on
+  signed URLs); `media.abandoned_after` is at least `upload_expires`, so an upload in
+  progress isn't swept; `media.s3.bucket` is required with an endpoint.
+- `server.bind` is `host:port`, `trusted_proxies` are CIDR ranges or addresses,
+  `admin_url`, `media.public_url` and `media.s3.endpoint` are `http(s)://` URLs,
+  `media.transforms` is `none` or `cloudflare`, and the flags in the environment are
+  `true` or `false`. An empty environment variable counts as unset.
 
 A file that fails to parse names the line and column; one that parses but fails a check
-lists every failure, each with its key.
+lists every failure, each with its key, sorted by key.
 
 ## 9. Order of work
+
+Built in the other order (section 10): the domain settings first, then these.
 
 1. **`hypha-config` and the host.** The crate: file types, defaults, the environment, the
    checks, the schema (with its staleness test) and the `config` command. The host loads
@@ -244,3 +252,29 @@ lists every failure, each with its key.
    factor, reset, invite lifetimes); their constants become the defaults.
 3. **Docs.** CLAUDE.md (the layer, the commands, the file), the wasm build list, and this
    note's as-built section.
+
+## 10. As built (2026-10-16)
+
+Built on `feat/config` in two commits, the domain settings first (a refactor: every
+default is the old constant) and then `hypha-config` with the host.
+
+- **Domain settings.** `AuthSettings` (`hypha-auth`, read through `AuthEnv`'s new
+  `HasAuthSettings`; testkit's `TestEnv` has a public `auth` field), `DispatchSettings`
+  with a `RetrySchedule` (`hypha-dispatch`; `MAX_ATTEMPTS` became
+  `RetrySchedule::max_attempts`, `BATCH` a field, `LONGEST_RUN` a public `Duration` the
+  checks use), `MediaSettings` (`hypha-media`, with `download_expires` too). The
+  aggregates take the one lifetime they need, and `Timestamp` gained `plus` and `minus`
+  for `Duration`s.
+- **`hypha-config`.** `file.rs` holds the TOML types, whose `Default`s come from the
+  domain settings; `units.rs` the `"30s"` and `"2MiB"` types (one number and one unit;
+  durations print in the largest exact unit). `Config::load(text, env)` applies the
+  environment, checks and converts; `Config::to_toml` prints what's in effect;
+  `schema_json` is the schema (`schemars`), committed as `hypha.config.schema.json` and
+  checked by a test.
+- **The host** reads the file (`load_config` in `main.rs`) and keeps the `Config` in
+  `AppState`; the body limit (`JsonBody`), the pool, the rate limiter, the trusted
+  proxies, media, the outbound policy, the job runner and the shutdown grace read it.
+  The rate limiter's housekeeping (forgetting idle keys) runs even with jobs off.
+  `hypha-host-axum config` and `config schema` are new commands.
+- **Not done:** a read-only settings route for the admin (section 7), an example file
+  beyond section 3, and environment overrides for every key (CF5).

@@ -721,7 +721,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A body over 2 MB (`body_too_large`). */
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -909,7 +909,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A body over 2 MB (`body_too_large`). */
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1025,7 +1025,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A body over 2 MB (`body_too_large`). */
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1137,7 +1137,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A body over 2 MB (`body_too_large`). */
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1245,7 +1245,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A body over 2 MB (`body_too_large`). */
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1429,7 +1429,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A body over 2 MB (`body_too_large`). */
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1613,7 +1613,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A body over 2 MB (`body_too_large`). */
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
             413: {
                 headers: {
                     [name: string]: unknown;

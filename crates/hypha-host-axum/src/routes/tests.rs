@@ -18,6 +18,7 @@ use axum::{
     },
 };
 use hypha_auth::{ApiKeyKind, Argon2id, CreateApiKey, HasApiKeys, create_api_key, totp};
+use hypha_config::Config;
 use hypha_core::{Ctx, Scope, Timestamp};
 use hypha_stores::ensure_single_store;
 use hypha_users::{NewOwner, bootstrap_owner};
@@ -52,12 +53,23 @@ async fn app() -> TestApp {
 }
 
 async fn app_with(trusted_proxies: TrustedProxies) -> TestApp {
-    app_from(trusted_proxies, None).await
+    app_from(trusted_proxies, None, Config::defaults()).await
 }
 
 /// The app with file storage (the compose S3 server), for the media routes.
 async fn app_with_media() -> TestApp {
-    app_from(TrustedProxies::default(), Some(test_media().await)).await
+    app_from(
+        TrustedProxies::default(),
+        Some(test_media().await),
+        Config::defaults(),
+    )
+    .await
+}
+
+/// The app under `hypha.config.toml` text (design note 0017), without the environment.
+async fn app_configured(toml: &str) -> TestApp {
+    let config = Config::load(Some(toml), |_| None).unwrap();
+    app_from(TrustedProxies::default(), None, config).await
 }
 
 /// Requests in these tests come from this peer (`MockConnectInfo`), as if over a socket.
@@ -107,7 +119,10 @@ async fn fresh_schema() -> String {
 
 /// File storage from `HYPHA_S3_*` (the compose server by default), bucket created.
 async fn test_media() -> Media {
-    let media = Media::from_env()
+    // The compose S3 server, from `.cargo/config.toml`'s `HYPHA_S3_*`.
+    let config = Config::load(None, |name| std::env::var(name).ok())
+        .expect("HYPHA_S3_* (see .cargo/config.toml)");
+    let media = Media::from_config(&config.media)
         .expect("HYPHA_S3_* (see .cargo/config.toml)")
         .expect("HYPHA_S3_ENDPOINT (see .cargo/config.toml)");
     media
@@ -118,8 +133,14 @@ async fn test_media() -> Media {
     media
 }
 
-async fn app_from(trusted_proxies: TrustedProxies, media: Option<Media>) -> TestApp {
-    let storage = PgStorage::connect(&fresh_schema().await).await.unwrap();
+async fn app_from(
+    trusted_proxies: TrustedProxies,
+    media: Option<Media>,
+    config: Config,
+) -> TestApp {
+    let storage = PgStorage::connect(&fresh_schema().await, &config.database)
+        .await
+        .unwrap();
     let store = ensure_single_store(
         &Ctx::system(),
         &storage.directory().await.unwrap(),
@@ -128,14 +149,14 @@ async fn app_from(trusted_proxies: TrustedProxies, media: Option<Media>) -> Test
     )
     .await
     .unwrap();
-    let env = HostEnv::new([7; 32], None, Default::default()).with_hasher(Argon2id::new(8, 1, 1));
+    let env = HostEnv::new([7; 32], None, config.auth).with_hasher(Argon2id::new(8, 1, 1));
     let state = Arc::new(AppState {
         storage,
         ids: UuidV7Ids,
         clock: SystemClock,
         env,
         background: Default::default(),
-        limiter: Default::default(),
+        limiter: crate::rate_limit::MemoryRateLimiter::new(&config.rate_limits),
         trusted_proxies,
         store: store.id(),
         store_name: store.name().to_string(),
@@ -148,7 +169,7 @@ async fn app_from(trusted_proxies: TrustedProxies, media: Option<Media>) -> Test
             allow_private: true,
         })
         .unwrap(),
-        dispatch: Default::default(),
+        config,
     });
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {
@@ -245,6 +266,35 @@ async fn unknown_routes_and_methods_get_json_errors() {
     assert_eq!(
         (status, code(&body)),
         (StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed")
+    );
+}
+
+#[tokio::test]
+async fn the_body_limit_and_rate_limits_are_configurable() {
+    let app = app_configured(
+        r#"
+        [server]
+        max_body = "1KiB"
+
+        [rate_limits]
+        login_ip = { burst = 1, per = "1h" }
+        "#,
+    )
+    .await;
+    let big = format!("{{\"title\": \"{}\"}}", "x".repeat(1024));
+    let (status, body) = send(&app, "POST", "/admin/products", Some(&big)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::PAYLOAD_TOO_LARGE, "body_too_large")
+    );
+
+    let login = r#"{"email": "nobody@example.com", "password": "wrong-password"}"#;
+    let (status, _) = send(&app, "POST", "/admin/auth/login", Some(login)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, body) = send(&app, "POST", "/admin/auth/login", Some(login)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
     );
 }
 
@@ -1564,7 +1614,7 @@ fn login_body(email: &str) -> String {
 #[tokio::test]
 async fn too_many_logins_from_one_address_get_429_with_retry_after() {
     let app = app().await;
-    let (burst, every) = crate::rate_limit::Rule::LoginIp.quota();
+    let (burst, every) = crate::rate_limit::Rule::LoginIp.quota(&Default::default());
     for n in 0..burst {
         // Different emails, so only the per-address limit can trip.
         let body = login_body(&format!("user{n}@example.com"));
@@ -1592,8 +1642,8 @@ async fn too_many_logins_from_one_address_get_429_with_retry_after() {
 #[tokio::test]
 async fn one_email_is_limited_however_many_addresses_try_it() {
     // Behind a trusted proxy (the test peer), each request names another client.
-    let app = app_with(TrustedProxies::parse("127.0.0.1").unwrap()).await;
-    let (burst, _) = crate::rate_limit::Rule::LoginEmail.quota();
+    let app = app_with(TrustedProxies::new(vec!["127.0.0.1/32".parse().unwrap()])).await;
+    let (burst, _) = crate::rate_limit::Rule::LoginEmail.quota(&Default::default());
     let body = login_body(OWNER_EMAIL);
     for n in 0..burst {
         let client = format!("203.0.{}.{}", n / 250, n % 250);
@@ -1615,8 +1665,8 @@ async fn one_email_is_limited_however_many_addresses_try_it() {
 
 #[tokio::test]
 async fn hammering_an_email_from_one_address_does_not_lock_its_owner_out() {
-    let app = app_with(TrustedProxies::parse("127.0.0.1").unwrap()).await;
-    let (burst, _) = crate::rate_limit::Rule::LoginEmailFromIp.quota();
+    let app = app_with(TrustedProxies::new(vec!["127.0.0.1/32".parse().unwrap()])).await;
+    let (burst, _) = crate::rate_limit::Rule::LoginEmailFromIp.quota(&Default::default());
     let attacker = [("x-forwarded-for", "203.0.113.66")];
     let wrong = login_body(OWNER_EMAIL);
     for _ in 0..burst {
@@ -1651,7 +1701,7 @@ async fn something_that_is_not_an_email_still_gets_its_answer() {
 #[tokio::test]
 async fn asking_for_reset_links_does_not_block_using_one() {
     let app = app().await;
-    let (burst, _) = crate::rate_limit::Rule::ResetIp.quota();
+    let (burst, _) = crate::rate_limit::Rule::ResetIp.quota(&Default::default());
     for n in 0..burst {
         let body = json!({ "email": format!("user{n}@example.com") }).to_string();
         send_with(&app, &[], "POST", "/admin/auth/password-reset", Some(&body)).await;
@@ -1675,7 +1725,7 @@ async fn asking_for_reset_links_does_not_block_using_one() {
 async fn a_forged_forwarded_for_does_not_escape_the_limit() {
     // No trusted proxies: the header is ignored, so all of these are the same client.
     let app = app().await;
-    let (burst, _) = crate::rate_limit::Rule::LoginIp.quota();
+    let (burst, _) = crate::rate_limit::Rule::LoginIp.quota(&Default::default());
     let mut last = StatusCode::OK;
     for n in 0..=burst {
         let client = format!("203.0.113.{n}");
@@ -1690,8 +1740,8 @@ async fn a_forged_forwarded_for_does_not_escape_the_limit() {
 
 #[tokio::test]
 async fn reset_requests_for_one_email_are_limited_per_address() {
-    let app = app_with(TrustedProxies::parse("127.0.0.1").unwrap()).await;
-    let (burst, _) = crate::rate_limit::Rule::ResetEmailFromIp.quota();
+    let app = app_with(TrustedProxies::new(vec!["127.0.0.1/32".parse().unwrap()])).await;
+    let (burst, _) = crate::rate_limit::Rule::ResetEmailFromIp.quota(&Default::default());
     let body = json!({ "email": OWNER_EMAIL }).to_string();
     let here = [("x-forwarded-for", "203.0.113.1")];
     for _ in 0..burst {
@@ -1733,7 +1783,7 @@ async fn reset_requests_for_one_email_are_limited_per_address() {
 #[tokio::test]
 async fn the_address_limit_comes_before_the_body_is_parsed() {
     let app = app().await;
-    let (burst, _) = crate::rate_limit::Rule::InviteIp.quota();
+    let (burst, _) = crate::rate_limit::Rule::InviteIp.quota(&Default::default());
     for _ in 0..burst {
         send_with(&app, &[], "POST", "/admin/invites/accept", Some("{")).await;
     }
