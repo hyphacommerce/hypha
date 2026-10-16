@@ -77,6 +77,7 @@ fn cart(n: u128) -> Cart {
         CartId::from_uuid(Uuid::from_u128(n)),
         MarketId::from_uuid(Uuid::from_u128(1000 + n)),
         CountryCode::new("HR").unwrap(),
+        hypha_core::ChannelId::from_uuid(Uuid::from_u128(500)),
     )
 }
 

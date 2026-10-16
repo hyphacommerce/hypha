@@ -27,6 +27,7 @@ fn repo_with_order() -> InMemoryOrderRepo {
         number: OrderNumber::new(1001).unwrap(),
         placed_at: Timestamp::from_unix_micros(1_767_225_600_000_000),
         cart: CartId::from_uuid(Uuid::from_u128(2)),
+        channel: hypha_core::ChannelId::from_uuid(Uuid::from_u128(500)),
         market: MarketId::from_uuid(Uuid::from_u128(3)),
         currency: Currency::Eur,
         country: CountryCode::new("HR").unwrap(),

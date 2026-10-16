@@ -1,7 +1,7 @@
 use hypha_core::{
-    Address, AddressParts, CartId, CountryCode, CustomerId, Email, MarketId, OrderId, Price,
-    ProductId, Quantity, ShippingGroupId, ShippingOptionId, Stamped, Stamps, Timestamp, VariantId,
-    Version, Versioned,
+    Address, AddressParts, CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, OrderId,
+    Price, ProductId, Quantity, ShippingGroupId, ShippingOptionId, Stamped, Stamps, Timestamp,
+    VariantId, Version, Versioned,
 };
 use hypha_shipping::ProviderKey;
 
@@ -81,6 +81,9 @@ pub struct Cart {
     stamps: Option<Stamps>,
     market: MarketId,
     country: CountryCode,
+    /// The sales channel it was made in (design note 0020): its storefront's. It sells
+    /// only what that channel publishes, and its order records it.
+    channel: ChannelId,
     lines: Vec<CartLine>,
     email: Option<Email>,
     customer: Option<CustomerId>,
@@ -112,13 +115,14 @@ impl Stamped for Cart {
 }
 
 impl Cart {
-    pub fn new(id: CartId, market: MarketId, country: CountryCode) -> Self {
+    pub fn new(id: CartId, market: MarketId, country: CountryCode, channel: ChannelId) -> Self {
         Self {
             id,
             version: Version::NEW,
             stamps: None,
             market,
             country,
+            channel,
             lines: Vec::new(),
             email: None,
             customer: None,
@@ -270,6 +274,11 @@ impl Cart {
         self.market
     }
 
+    /// The sales channel it sells through.
+    pub fn channel(&self) -> ChannelId {
+        self.channel
+    }
+
     pub fn country(&self) -> CountryCode {
         self.country
     }
@@ -316,6 +325,7 @@ pub struct CartSnapshot {
     pub stamps: Option<Stamps>,
     pub market: MarketId,
     pub country: CountryCode,
+    pub channel: ChannelId,
     pub lines: Vec<CartLineSnapshot>,
     pub email: Option<Email>,
     pub customer: Option<CustomerId>,
@@ -341,6 +351,7 @@ impl Cart {
             stamps: self.stamps,
             market: self.market,
             country: self.country,
+            channel: self.channel,
             lines: self
                 .lines
                 .iter()
@@ -398,6 +409,7 @@ impl Cart {
             stamps: s.stamps,
             market: s.market,
             country: s.country,
+            channel: s.channel,
             lines,
             email: s.email,
             customer: s.customer,
@@ -424,6 +436,7 @@ mod tests {
             CartId::from_uuid(Uuid::from_u128(1)),
             MarketId::from_uuid(Uuid::from_u128(2)),
             CountryCode::new("HR").unwrap(),
+            ChannelId::from_uuid(Uuid::from_u128(500)),
         )
     }
 

@@ -7,10 +7,11 @@
 
 use futures_util::future::join_all;
 use hypha_cart::{AddLine, CreateCart, add_line, create_cart, set_cart_email};
+use hypha_channels::{Channel, ChannelKind, ChannelRepo};
 use hypha_checkout::{Checkout, CommandError, checkout};
 use hypha_core::{
-    CatalogId, Ctx, Currency, IdempotencyRequest, InventoryItemId, LocationId, MarketId, Money,
-    Price, ProductId, RepoError, VariantId,
+    Actor, CatalogId, ChannelId, Ctx, Currency, IdempotencyRequest, InventoryItemId, LocationId,
+    MarketId, Money, Price, ProductId, RepoError, Scope, VariantId,
 };
 use hypha_customers::repo::keys as customer_keys;
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo};
@@ -36,6 +37,10 @@ fn mug() -> VariantId {
 
 fn mug_item() -> InventoryItemId {
     InventoryItemId::from_uuid(Uuid::from_u128(1003))
+}
+
+fn online_store() -> ChannelId {
+    ChannelId::from_uuid(Uuid::from_u128(1006))
 }
 
 async fn connect(url: &str, schema: &str) -> Client {
@@ -99,6 +104,12 @@ async fn shop(url: &str, schema: &str, on_hand: i64) -> (PgStore<Client>, Client
         .await
         .unwrap();
 
+    let mut channel = Channel::new(online_store(), "Web", ChannelKind::OnlineStore).unwrap();
+    ChannelRepo::insert(&store, &mut channel).await.unwrap();
+    ChannelRepo::publish(&store, online_store(), &[product_id])
+        .await
+        .unwrap();
+
     let mut location = Location::new(warehouse(), "Zagreb".to_string(), vec![market()], 0).unwrap();
     LocationRepo::insert(&store, &mut location).await.unwrap();
     let mut item = InventoryItem::new(mug_item(), mug(), true, false);
@@ -115,7 +126,7 @@ async fn cart(
     clock: &FixedClock,
     email: &str,
 ) -> hypha_core::CartId {
-    let ctx = Ctx::system();
+    let ctx = Ctx::in_channel(Actor::System, Scope::ALL.to_vec(), online_store());
     let input = CreateCart {
         country: "HR".to_string(),
         idempotency: None,

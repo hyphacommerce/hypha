@@ -110,6 +110,7 @@ fn order_with(n: u128, lines: Vec<OrderLine>, taxes_included: bool) -> Order {
         // A microsecond past a whole second, so precision is checked too.
         placed_at: Timestamp::from_unix_micros(1_767_225_600_000_001),
         cart: CartId::from_uuid(Uuid::from_u128(1000 + n)),
+        channel: hypha_core::ChannelId::from_uuid(Uuid::from_u128(500 + n)),
         market: MarketId::from_uuid(Uuid::from_u128(2000 + n)),
         currency: Currency::Eur,
         country: CountryCode::new("HR").unwrap(),

@@ -3,6 +3,7 @@ use hypha_cart::{
     SetLineQuantity, add_line, create_cart, get_cart, remove_cart_line, set_cart_customer,
     set_cart_email, set_line_quantity,
 };
+use hypha_channels::ChannelRepo;
 use hypha_core::{
     Actor, AuthError, BasisPoints, CartId, CatalogId, CountryCode, CountryError, Ctx, Currency,
     InventoryItemId, LocationId, MarketId, Money, Price, PriceListId, ProductId, Scope, TaxClassId,
@@ -225,7 +226,7 @@ impl World {
             idempotency: None,
         };
         block_on(create_cart(
-            &Ctx::system(),
+            &self.ports.storefront(),
             &self.ports,
             &self.ids,
             &self.clock,
@@ -497,6 +498,66 @@ fn line_becomes_unavailable_when_product_leaves_catalog() {
         }))
     );
     assert_eq!(priced.total, eur(0));
+}
+
+// ---- channels (design note 0020) ----
+
+#[test]
+fn a_cart_needs_a_channel() {
+    let world = World::new();
+    let input = CreateCart {
+        country: "HR".to_string(),
+        idempotency: None,
+    };
+    let result = block_on(create_cart(
+        &Ctx::system(),
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        input,
+    ));
+    assert_eq!(result.map(|_| ()), Err(CommandError::ChannelRequired));
+}
+
+#[test]
+fn a_cart_belongs_to_the_callers_channel() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let stored = block_on(world.carts.get(cart)).unwrap().unwrap();
+    assert_eq!(Some(stored.channel()), world.storefront().channel());
+}
+
+#[test]
+fn a_product_not_published_to_the_carts_channel_is_refused() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let channel = world.storefront().channel().unwrap();
+    block_on(world.channels.unpublish(channel, &[pid("mug")])).unwrap();
+
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "mug", 1).map(|_| ()),
+        Err(CommandError::Line(LineError::ProductNotPublished(pid(
+            "mug"
+        ))))
+    );
+    assert_eq!(world.stored_line_count(cart), 0);
+}
+
+#[test]
+fn a_line_becomes_unavailable_when_its_product_is_unpublished() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 1).unwrap();
+    world.add(&Ctx::system(), cart, "cup", 1).unwrap();
+    let channel = world.storefront().channel().unwrap();
+    block_on(world.channels.unpublish(channel, &[pid("mug")])).unwrap();
+
+    let priced = world.get(cart).unwrap();
+    assert_eq!(
+        priced.lines[0].status,
+        LineStatus::Unavailable(LineError::ProductNotPublished(pid("mug")))
+    );
+    assert_eq!(priced.total, eur(1000), "only the cup");
 }
 
 // ---- tax ----
@@ -1023,8 +1084,12 @@ impl World {
 #[test]
 fn create_cart_retried_with_its_key_returns_the_first_cart() {
     let world = World::new();
-    let first = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
-    let retry = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
+    let first = world
+        .create_keyed(&world.storefront(), keyed("k-1", 1))
+        .unwrap();
+    let retry = world
+        .create_keyed(&world.storefront(), keyed("k-1", 1))
+        .unwrap();
     assert!(!first.replayed);
     assert!(retry.replayed);
     assert_eq!(retry.value, first.value);
@@ -1052,7 +1117,7 @@ fn a_key_reused_for_a_different_request_is_refused() {
     );
     // The same fingerprint for another operation is a different request too.
     assert_eq!(
-        world.create_keyed(&Ctx::system(), keyed("k-1", 1)),
+        world.create_keyed(&world.storefront(), keyed("k-1", 1)),
         Err(CommandError::Idempotency(IdempotencyError::KeyReused))
     );
     assert_eq!(world.stored_quantity(cart, "mug"), 2);
@@ -1072,11 +1137,14 @@ fn an_invalid_key_is_refused_before_anything_is_written() {
 #[test]
 fn keys_belong_to_the_actor_that_sent_them() {
     let world = World::new();
-    let user = Ctx::new(
+    let user = Ctx::in_channel(
         Actor::User(UserId::from_uuid(Uuid::from_u128(7))),
         vec![Scope::CartsWrite],
+        world.storefront().channel().unwrap(),
     );
-    let system_cart = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
+    let system_cart = world
+        .create_keyed(&world.storefront(), keyed("k-1", 1))
+        .unwrap();
     let user_cart = world.create_keyed(&user, keyed("k-1", 1)).unwrap();
     assert!(!user_cart.replayed);
     assert_ne!(user_cart.value.id, system_cart.value.id);
@@ -1104,11 +1172,15 @@ fn a_command_that_fails_records_no_key() {
 #[test]
 fn losing_the_race_for_a_key_replays_the_winner() {
     let world = World::new();
-    let winner = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
+    let winner = world
+        .create_keyed(&world.storefront(), keyed("k-1", 1))
+        .unwrap();
     // The retry's check runs before the winner's record is visible; its own write then
     // fails on the key, and nothing of it is stored.
     world.idempotency.hide_next_lookups(1);
-    let loser = world.create_keyed(&Ctx::system(), keyed("k-1", 1)).unwrap();
+    let loser = world
+        .create_keyed(&world.storefront(), keyed("k-1", 1))
+        .unwrap();
     assert!(loser.replayed);
     assert_eq!(loser.value.id, winner.value.id);
     let loser_cart = CartId::from_uuid(Uuid::from_u128(2));

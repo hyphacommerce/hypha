@@ -163,6 +163,14 @@
         ],
         "type": "object"
       },
+      "ChannelId": {
+        "description": "A ChannelId: `chan_` and 32 hex digits.",
+        "examples": [
+          "chan_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^chan_[0-9a-f]{32}$",
+        "type": "string"
+      },
       "CheckoutRequest": {
         "additionalProperties": false,
         "properties": {
@@ -633,6 +641,10 @@
           "cart": {
             "$ref": "#/components/schemas/CartId"
           },
+          "channel": {
+            "$ref": "#/components/schemas/ChannelId",
+            "description": "The sales channel it was placed through (design note 0020)."
+          },
           "country": {
             "$ref": "#/components/schemas/CountryCode"
           },
@@ -723,6 +735,7 @@
           "placed_at",
           "cart",
           "market",
+          "channel",
           "currency",
           "country",
           "customer",
@@ -3005,7 +3018,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "An active product; drafts and archived products read as missing.",
+        "summary": "An active product sold through the caller's channel; drafts, archived products and\nproducts the channel doesn't sell read as missing.",
         "tags": [
           "products"
         ],

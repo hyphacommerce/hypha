@@ -30,6 +30,8 @@ fn cart_to(n: u128, country: &str) -> Cart {
         CartId::from_uuid(Uuid::from_u128(n)),
         MarketId::from_uuid(Uuid::from_u128(1000 + n)),
         CountryCode::new(country).unwrap(),
+        // A channel per cart, so a mapping bug can't hide behind equal values.
+        hypha_core::ChannelId::from_uuid(Uuid::from_u128(500 + n)),
     )
 }
 

@@ -102,6 +102,7 @@ impl World {
             number: OrderNumber::new(1001).unwrap(),
             placed_at: FixedClock::DEFAULT,
             cart: CartId::from_uuid(Uuid::from_u128(6001)),
+            channel: hypha_core::ChannelId::from_uuid(Uuid::from_u128(500)),
             market,
             currency: Currency::Eur,
             country: CountryCode::new("HR").unwrap(),

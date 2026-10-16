@@ -1394,6 +1394,14 @@ async fn publishable(app: &TestApp) -> String {
     key(app, body).await
 }
 
+/// Publishes the products to the Online Store (new products aren't sold anywhere, CH9).
+async fn publish(app: &TestApp, products: &[&str]) {
+    let path = format!("/admin/channels/{}/products", online_store(app).await);
+    let body = json!({ "products": products }).to_string();
+    let (status, json) = send(app, "POST", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{json}");
+}
+
 /// The channel every store starts with (migration 0036).
 async fn online_store(app: &TestApp) -> String {
     let (_, channels) = send(app, "GET", "/admin/channels", None).await;
@@ -1552,6 +1560,14 @@ async fn a_storefront_sees_active_products_only_without_admin_fields() {
         Some(activate),
     )
     .await;
+    // So does an active product the key's channel doesn't sell.
+    let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "product_not_found")
+    );
+
+    publish(&app, &[id]).await;
     let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["handle"], "mug");
@@ -1563,6 +1579,45 @@ async fn a_storefront_sees_active_products_only_without_admin_fields() {
     // No prices: the base price isn't what a shopper in a market pays.
     assert!(json["variants"][0]["id"].is_string());
     assert!(json["variants"][0].get("price").is_none());
+}
+
+#[tokio::test]
+async fn a_cart_sells_only_what_its_channel_publishes() {
+    let app = app().await;
+    let mug = shop_selling_a_mug(&app).await;
+    let (_, mugs) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let product = mugs["items"][0]["id"].as_str().unwrap().to_string();
+    let pk = publishable(&app).await;
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let lines = format!("/storefront/carts/{}/lines", cart["id"].as_str().unwrap());
+    let line = json!({"variant": mug, "quantity": 1}).to_string();
+    let (status, json) = send_as(&app, &pk, "POST", &lines, Some(&line)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+
+    let path = format!("/admin/channels/{}/products", online_store(&app).await);
+    let body = json!({ "products": [product] }).to_string();
+    send(&app, "DELETE", &path, Some(&body)).await;
+    // The line already in the cart is unavailable; adding it again is refused.
+    assert_eq!(json["lines"][0]["status"], "priced", "{json}");
+    let cart_path = lines.trim_end_matches("/lines");
+    let (_, json) = send_as(&app, &pk, "GET", cart_path, None).await;
+    let line_now = &json["lines"][0];
+    assert_eq!(
+        (&line_now["status"], &line_now["reason_code"]),
+        (&json!("unavailable"), &json!("product_not_published"))
+    );
+    let (status, json) = send_as(&app, &pk, "POST", &lines, Some(&line)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "product_not_published")
+    );
 }
 
 #[tokio::test]
@@ -2281,6 +2336,7 @@ async fn market_selling_a_mug(app: &TestApp) -> (String, String) {
     let body = json!({ "products": [mug_id] }).to_string();
     let (status, _) = send(app, "POST", &path, Some(&body)).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+    publish(app, &[mug_id]).await;
     (
         market["id"].as_str().unwrap().to_string(),
         mug["variants"][0]["id"].as_str().unwrap().to_string(),
@@ -3040,6 +3096,7 @@ async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) 
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{order}");
+    assert_eq!(order["channel"], online_store(app).await.as_str());
     (
         order["id"].as_str().unwrap().to_string(),
         order["lines"][0]["id"].as_str().unwrap().to_string(),
@@ -3423,6 +3480,7 @@ async fn shop_selling(app: &TestApp, handles: &[&str]) -> Vec<String> {
     let body = json!({ "products": ids }).to_string();
     let (status, _) = send(app, "POST", &path, Some(&body)).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+    publish(app, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await;
     ids
 }
 

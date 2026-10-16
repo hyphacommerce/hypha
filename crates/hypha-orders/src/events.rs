@@ -1,7 +1,7 @@
 //! What happens to orders, as events (design note 0016, section 4). Contract types: a
 //! reshaped field is a new `VERSION`, never an edit.
 
-use hypha_core::{CustomerId, Event, Money, OrderId};
+use hypha_core::{ChannelId, CustomerId, Event, Money, OrderId};
 use serde::Serialize;
 
 pub const ORDER: &str = "order";
@@ -12,6 +12,8 @@ pub struct OrderPlaced {
     pub order: OrderId,
     pub number: i64,
     pub customer: CustomerId,
+    /// Where it was placed (design note 0020): an added field, so still version 1.
+    pub channel: ChannelId,
     pub total: Money,
 }
 

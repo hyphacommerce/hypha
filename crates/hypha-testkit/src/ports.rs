@@ -316,3 +316,45 @@ impl hypha_auth::ChannelDirectory for InMemoryPorts {
             .is_some())
     }
 }
+
+impl InMemoryPorts {
+    /// The channel `storefront` sells through.
+    pub const ONLINE_STORE: u128 = 0x0c4a_77e1;
+
+    /// A storefront's caller (design note 0020): in an "Online Store" channel, made on
+    /// first use, with every product that exists now published there and every scope.
+    /// For tests of what storefronts do; unpublish through `channels` to test that.
+    pub fn storefront(&self) -> hypha_core::Ctx {
+        use hypha_channels::{Channel, ChannelKind, ChannelRepo};
+        let id = hypha_core::ChannelId::from_uuid(uuid::Uuid::from_u128(Self::ONLINE_STORE));
+        if !self.channels.exists(id) {
+            let mut channel = Channel::new(id, "Online Store", ChannelKind::OnlineStore)
+                .unwrap_or_else(|e| panic!("{e}"));
+            now_or_never(self.channels.insert(&mut channel)).unwrap_or_else(|e| panic!("{e}"));
+        }
+        let products: Vec<hypha_core::ProductId> = self
+            .products
+            .products
+            .all()
+            .iter()
+            .map(|p| p.id())
+            .collect();
+        now_or_never(self.channels.publish(id, &products)).unwrap_or_else(|e| panic!("{e}"));
+        hypha_core::Ctx::in_channel(
+            hypha_core::Actor::System,
+            hypha_core::Scope::ALL.to_vec(),
+            id,
+        )
+    }
+}
+
+/// Runs an in-memory repo's future, which never waits on anything, to completion.
+fn now_or_never<F: std::future::Future>(future: F) -> F::Output {
+    use std::task::{Context, Poll, Waker};
+    let mut future = std::pin::pin!(future);
+    let mut cx = Context::from_waker(Waker::noop());
+    match future.as_mut().poll(&mut cx) {
+        Poll::Ready(output) => output,
+        Poll::Pending => unreachable!("in-memory repos are ready at once"),
+    }
+}

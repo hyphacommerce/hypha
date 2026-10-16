@@ -516,7 +516,9 @@ impl From<hypha_cart::CommandError> for ApiError {
     fn from(e: hypha_cart::CommandError) -> Self {
         use hypha_cart::{CartError, CommandError as E, LineError};
         let status = match &e {
-            E::Auth(_) => StatusCode::FORBIDDEN,
+            // A caller in no channel; storefront routes only take publishable keys, so
+            // only commands called otherwise get here.
+            E::Auth(_) | E::ChannelRequired => StatusCode::FORBIDDEN,
             E::CartNotFound(_) => StatusCode::NOT_FOUND,
             // Depends on the stock right now, not on the request: 409 like inventory's.
             E::Line(LineError::OutOfStock { .. }) => StatusCode::CONFLICT,

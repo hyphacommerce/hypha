@@ -2493,6 +2493,8 @@ export interface components {
         };
         OrderResponse: {
             cart: components["schemas"]["CartId"];
+            /** @description The sales channel it was placed through (design note 0020). */
+            channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;

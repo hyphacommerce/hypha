@@ -172,7 +172,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** An active product; drafts and archived products read as missing. */
+        /**
+         * An active product sold through the caller's channel; drafts, archived products and
+         *     products the channel doesn't sell read as missing.
+         */
         get: operations["storefront.products.fetch"];
         put?: never;
         post?: never;
@@ -280,6 +283,11 @@ export interface components {
             /** @description What the buyer pays. */
             total: components["schemas"]["Money"];
         };
+        /**
+         * @description A ChannelId: `chan_` and 32 hex digits.
+         * @example chan_0190f1a2b3c47d8e9f00112233445566
+         */
+        ChannelId: string;
         CheckoutRequest: {
             expected_total?: components["schemas"]["Money"] | null;
         };
@@ -458,6 +466,8 @@ export interface components {
         };
         OrderResponse: {
             cart: components["schemas"]["CartId"];
+            /** @description The sales channel it was placed through (design note 0020). */
+            channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;

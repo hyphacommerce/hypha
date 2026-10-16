@@ -1,7 +1,8 @@
 use hypha_cart::{Cart, CartLineSnapshot, CartRepo, CartSnapshot, SelectedShipping, StoredQuote};
 use hypha_core::{
-    CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, Price, ProductId, RepoError,
-    ShippingOptionId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
+    CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, Price, ProductId,
+    RepoError, ShippingOptionId, Timestamp, VariantId, Version, Versioned, stamp_insert,
+    stamp_update,
 };
 use hypha_shipping::ProviderKey;
 use tokio_postgres::{
@@ -49,8 +50,9 @@ pub(crate) async fn insert_cart(
     s: &CartSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
-        "INSERT INTO carts (id, version, market_id, country, email, customer_id, order_id)
-         VALUES ($1, 1, $2, $3, $4, $5, $6)",
+        "INSERT INTO carts (id, version, market_id, country, email, customer_id, order_id,
+             channel_id)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.market.as_uuid(), Type::UUID),
@@ -58,6 +60,7 @@ pub(crate) async fn insert_cart(
             (&s.email.as_ref().map(Email::as_str), Type::TEXT),
             (&s.customer.map(|c| c.as_uuid()), Type::UUID),
             (&s.order.map(|o| o.as_uuid()), Type::UUID),
+            (&s.channel.as_uuid(), Type::UUID),
         ],
     )
     .await
@@ -185,7 +188,7 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
     let Some(row) = client
         .query_typed_opt(
             &format!(
-                "SELECT version, market_id, country, email, customer_id, order_id, {},
+                "SELECT version, market_id, country, email, customer_id, order_id, channel_id, {},
                         shipping_option_id, quote_amount, quote_currency, quote_provider,
                         quote_service, quote_reference, {}, {}
                  FROM carts WHERE id = $1",
@@ -227,6 +230,7 @@ async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Car
         stamps: stamps_from_row(&row)?,
         market: MarketId::from_uuid(col(&row, "market_id")?),
         country: CountryCode::new(&country).map_err(corrupt)?,
+        channel: ChannelId::from_uuid(col(&row, "channel_id")?),
         lines,
         email: email
             .as_deref()

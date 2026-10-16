@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    Address, CartId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, OrderLineId, Page,
-    PageRequest, Price, ProductId, Quantity, Recorded, RepoError, ShippingGroupId,
-    ShippingOptionId, TaxClassId, TaxRegionId, Timestamp, VariantId, Version, Versioned,
-    stamp_insert, stamp_update,
+    Address, CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, Money, OrderId,
+    OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Recorded, RepoError,
+    ShippingGroupId, ShippingOptionId, TaxClassId, TaxRegionId, Timestamp, VariantId, Version,
+    Versioned, stamp_insert, stamp_update,
 };
 use hypha_orders::{
     Cancellation, Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot,
@@ -197,8 +197,9 @@ pub(crate) async fn insert_order(
         &format!(
             "INSERT INTO orders (id, version, number, placed_at, cart_id, market_id, currency,
              country, taxes_included, customer_id, email, subtotal, tax_total, total,
-             financial_status, fulfillment_status, cancelled_at, cancel_reason)
-         VALUES ($1, 1, $2, {}, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, {}, $17)",
+             financial_status, fulfillment_status, cancelled_at, cancel_reason, channel_id)
+         VALUES ($1, 1, $2, {}, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, {}, $17,
+                 $18)",
             ts(3),
             ts(16),
         ),
@@ -220,6 +221,7 @@ pub(crate) async fn insert_order(
             (&s.fulfillment_status.as_str(), Type::TEXT),
             (&opt_micros(s.cancelled.map(|c| c.at)), Type::INT8),
             (&s.cancelled.map(|c| c.reason.as_str()), Type::TEXT),
+            (&s.channel.as_uuid(), Type::UUID),
         ],
     )
     .await
@@ -395,7 +397,7 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, R
     let orders = client
         .query_typed(
             &format!(
-                "SELECT id, version, number, {}, cart_id, market_id, currency, country,
+                "SELECT id, version, number, {}, cart_id, channel_id, market_id, currency, country,
                      taxes_included, customer_id, email, subtotal, tax_total, total,
                      financial_status, fulfillment_status, {}, cancel_reason, {},
                      shipping_total, {}
@@ -502,6 +504,7 @@ fn order_from_db(
         number: OrderNumber::new(col(row, "number")?).map_err(corrupt)?,
         placed_at: Timestamp::from_unix_micros(col(row, "placed_at")?),
         cart: CartId::from_uuid(col(row, "cart_id")?),
+        channel: ChannelId::from_uuid(col(row, "channel_id")?),
         market: MarketId::from_uuid(col(row, "market_id")?),
         currency,
         country: CountryCode::new(&country).map_err(corrupt)?,

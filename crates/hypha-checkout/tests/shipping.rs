@@ -168,7 +168,7 @@ impl World {
             idempotency: None,
         };
         let cart = block_on(create_cart(
-            &Ctx::system(),
+            &self.ports.storefront(),
             &self.ports,
             &self.ids,
             &self.clock,

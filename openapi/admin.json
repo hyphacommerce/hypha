@@ -2794,6 +2794,10 @@
           "cart": {
             "$ref": "#/components/schemas/CartId"
           },
+          "channel": {
+            "$ref": "#/components/schemas/ChannelId",
+            "description": "The sales channel it was placed through (design note 0020)."
+          },
           "country": {
             "$ref": "#/components/schemas/CountryCode"
           },
@@ -2884,6 +2888,7 @@
           "placed_at",
           "cart",
           "market",
+          "channel",
           "currency",
           "country",
           "customer",

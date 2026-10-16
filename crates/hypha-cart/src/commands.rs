@@ -18,9 +18,11 @@ use hypha_tax::{HasTaxClasses, HasTaxRegions, TaxClassRepo, TaxContext, TaxRegio
 use thiserror::Error;
 
 use crate::{
-    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, SelectedShipping,
-    ShippingContext, StageCarts, StoredQuote, check_stock, price_cart_with_shipping, price_line,
+    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, Publication,
+    SelectedShipping, ShippingContext, StageCarts, StoredQuote, check_stock,
+    price_cart_with_shipping, price_line,
 };
+use hypha_channels::{ChannelRepo, HasChannels, is_published};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -48,6 +50,10 @@ pub enum CommandError {
     MarketNotFound(MarketId),
     #[error("no market sells to {0}")]
     NoMarketForCountry(CountryCode),
+    /// Carts are made by storefronts, which sell through a channel (design note 0020):
+    /// a caller in no channel (staff, a secret key) can't make one.
+    #[error("a cart is made in a sales channel: use a publishable key")]
+    ChannelRequired,
     #[error("variant {0} not found")]
     VariantNotFound(VariantId),
     #[error(transparent)]
@@ -87,6 +93,7 @@ impl ErrorCode for CommandError {
             CommandError::Email(e) => e.code(),
             CommandError::Country(e) => e.code(),
             CommandError::Idempotency(e) => e.code(),
+            CommandError::ChannelRequired => "channel_required",
             CommandError::CustomerNotFound(_) => "customer_not_found",
             CommandError::CartNotFound(_) => "cart_not_found",
             CommandError::MarketNotFound(_) => "market_not_found",
@@ -158,7 +165,8 @@ impl<T> IdempotentCartPorts for T where
 
 /// What pricing a cart reads: everything but the carts and customers themselves.
 pub trait PricingPorts:
-    HasProducts
+    HasChannels
+    + HasProducts
     + HasMarkets
     + HasCatalogs
     + HasPriceLists
@@ -171,7 +179,8 @@ pub trait PricingPorts:
 }
 
 impl<T> PricingPorts for T where
-    T: HasProducts
+    T: HasChannels
+        + HasProducts
         + HasMarkets
         + HasCatalogs
         + HasPriceLists
@@ -211,6 +220,7 @@ pub async fn create_cart<S: IdempotentCartPorts, I: IdGenerator, C: Clock>(
         return replay(ports, cart).await;
     }
 
+    let channel = ctx.channel().ok_or(CommandError::ChannelRequired)?;
     let country = CountryCode::new(&input.country)?;
     let market = ports
         .markets()
@@ -218,7 +228,12 @@ pub async fn create_cart<S: IdempotentCartPorts, I: IdGenerator, C: Clock>(
         .await?
         .ok_or(CommandError::NoMarketForCountry(country))?;
 
-    let mut cart = Cart::new(CartId::from_uuid(ids.new_uuid()), market.id(), country);
+    let mut cart = Cart::new(
+        CartId::from_uuid(ids.new_uuid()),
+        market.id(),
+        country,
+        channel,
+    );
     let priced = reprice(ports, &cart).await?;
     match write_cart(
         ctx,
@@ -270,6 +285,10 @@ pub async fn add_line<S: IdempotentCartPorts, C: Clock>(
         .await?
         .ok_or(CommandError::VariantNotFound(input.variant))?;
 
+    // Sold through the cart's channel (design note 0020, CH6).
+    if !is_published(ports, cart.channel(), product.id()).await? {
+        return Err(LineError::ProductNotPublished(product.id()).into());
+    }
     // Only changes the copy in memory; nothing is saved unless every check below passes.
     cart.add_line(product.id(), input.variant, quantity)?;
     let priced = reprice_grown_line(ports, &cart, product, input.variant).await?;
@@ -498,7 +517,16 @@ async fn reprice_grown_line<S: PricingPorts>(
             .get_by_country(cart.country())
             .await?,
     };
-    let priced = price_cart_with_shipping(cart, &cart_products, &pricing, &tax, &stock, &shipping);
+    let published = load_publication(ports, cart).await?;
+    let priced = price_cart_with_shipping(
+        cart,
+        &cart_products,
+        &pricing,
+        &tax,
+        &stock,
+        &shipping,
+        &published,
+    );
 
     refuse_unavailable(&priced, variant)?;
     Ok(priced)
@@ -588,13 +616,33 @@ pub async fn read_cart<S: PricingPorts>(
             .get_by_country(cart.country())
             .await?,
     };
-    let priced = price_cart_with_shipping(cart, &products, &pricing, &tax, &stock, &shipping);
+    let published = load_publication(ports, cart).await?;
+    let priced = price_cart_with_shipping(
+        cart, &products, &pricing, &tax, &stock, &shipping, &published,
+    );
     Ok(CartReading {
         priced,
         stock,
         products,
         shipping,
     })
+}
+
+/// Which of the cart's products its channel sells, in one query (design note 0020).
+async fn load_publication<S: HasChannels>(
+    ports: &S,
+    cart: &Cart,
+) -> Result<Publication, CommandError> {
+    let products = product_ids(cart);
+    if products.is_empty() {
+        return Ok(Publication::Only(Default::default()));
+    }
+    Ok(Publication::Only(
+        ports
+            .channels()
+            .published(cart.channel(), &products)
+            .await?,
+    ))
 }
 
 /// Everything needed to price the cart's lines (`hypha_pricing::load_pricing`).

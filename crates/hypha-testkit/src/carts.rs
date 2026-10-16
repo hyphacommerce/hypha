@@ -54,6 +54,7 @@ mod tests {
             CartId::from_uuid(Uuid::from_u128(1)),
             MarketId::from_uuid(Uuid::from_u128(2)),
             CountryCode::new("HR").unwrap(),
+            hypha_core::ChannelId::from_uuid(Uuid::from_u128(500)),
         )
     }
 

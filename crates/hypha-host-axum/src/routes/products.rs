@@ -456,7 +456,8 @@ impl StorefrontProductResponse {
     }
 }
 
-/// An active product; drafts and archived products read as missing.
+/// An active product sold through the caller's channel; drafts, archived products and
+/// products the channel doesn't sell read as missing.
 #[utoipa::path(
     get,
     path = "/storefront/products/{id}",
@@ -471,7 +472,12 @@ pub(super) async fn fetch_storefront<S: Storage>(
 ) -> Result<Json<StorefrontProductResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let view = get_product_view(&ctx, &ports, id).await?;
-    if view.product.status() != ProductStatus::Active {
+    // Like a draft, a product the caller's channel doesn't sell isn't there (0020, CH6).
+    let published = match ctx.channel() {
+        Some(channel) => hypha_channels::is_published(&ports, channel, id).await?,
+        None => false,
+    };
+    if view.product.status() != ProductStatus::Active || !published {
         return Err(hypha_products::CommandError::ProductNotFound(id).into());
     }
     Ok(Json(

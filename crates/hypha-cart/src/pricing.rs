@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use hypha_core::{
     Address, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, MoneyError,
     OrderId, Price, ProductId, Quantity, VariantId,
@@ -28,6 +30,26 @@ pub enum LineStatus {
         tax: Option<TaxLine>,
     },
     Unavailable(LineError),
+}
+
+/// Which products a cart may sell (design note 0020, CH6): those its channel publishes.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Publication {
+    /// Every product: for pricing that isn't about a channel (and the tests of
+    /// everything else).
+    #[default]
+    Unrestricted,
+    /// Only these (the cart's products that its channel sells).
+    Only(HashSet<ProductId>),
+}
+
+impl Publication {
+    pub fn allows(&self, product: ProductId) -> bool {
+        match self {
+            Publication::Unrestricted => true,
+            Publication::Only(published) => published.contains(&product),
+        }
+    }
 }
 
 /// What a line is called, read from its product as it is now. An order copies it, so
@@ -161,6 +183,7 @@ pub fn price_cart(
         tax,
         stock,
         &ShippingContext::default(),
+        &Publication::Unrestricted,
     )
 }
 
@@ -174,6 +197,7 @@ pub fn price_cart_with_shipping(
     tax: &TaxContext,
     stock: &StockContext,
     shipping: &ShippingContext,
+    published: &Publication,
 ) -> PricedCart {
     let currency = pricing.market.currency();
     let mut totals = Totals::zero(currency);
@@ -181,7 +205,7 @@ pub fn price_cart_with_shipping(
 
     for line in cart.lines() {
         let product = products.iter().find(|p| p.id() == line.product());
-        let status = match line_total(line, product, pricing, tax, stock) {
+        let status = match line_total(line, product, pricing, tax, stock, published) {
             Ok((unit_price, total, line_tax)) => {
                 let line_tax_amount = line_tax.map(|t| t.amount);
                 match totals.add(total, line_tax_amount, tax.prices_include_tax) {
@@ -326,8 +350,12 @@ fn line_total(
     pricing: &PricingContext,
     tax: &TaxContext,
     stock: &StockContext,
+    published: &Publication,
 ) -> Result<(Price, Money, Option<TaxLine>), LineError> {
     let product = product.ok_or(LineError::ProductNotFound(line.product()))?;
+    if !published.allows(product.id()) {
+        return Err(LineError::ProductNotPublished(product.id()));
+    }
     let unit_price = price_line(product, line.variant(), pricing)?;
     check_stock(stock, line.variant(), line.quantity())?;
     let total = unit_price.money().checked_mul(line.quantity().value())?;
@@ -459,7 +487,12 @@ mod tests {
     }
 
     fn cart(lines: &[(u128, u32)]) -> Cart {
-        let mut c = Cart::new(CartId::from_uuid(Uuid::from_u128(300)), mid(), hr());
+        let mut c = Cart::new(
+            CartId::from_uuid(Uuid::from_u128(300)),
+            mid(),
+            hr(),
+            hypha_core::ChannelId::from_uuid(Uuid::from_u128(500)),
+        );
         for (n, q) in lines {
             c.add_line(pid(*n), vid(n + 10), qty(*q)).unwrap();
         }

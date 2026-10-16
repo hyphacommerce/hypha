@@ -315,6 +315,11 @@ step "create cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"count
 contains "cart ships to Croatia" '"country":"HR"'
 contains "cart names its market and currency" "\"market\":\"$MARKET\",\"currency\":\"EUR\""
 CART=$(id)
+step "a mug not published to the key's channel is refused" 422 product_not_published \
+    -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
+step "and isn't there for the storefront" 404 product_not_found "$BASE/storefront/products/$MUG"
+step "publish mug and cup to the Online Store" 204 - -X POST "$BASE/admin/channels/$ONLINE_STORE/products" \
+    -H "$JSON" -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
 step "add 2 mugs" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "mug unit price is 900 (1000 - 10%)" '"unit_price":{"amount":900,"currency":"EUR"}'
@@ -494,6 +499,8 @@ BOOK_VAR=$(variant)
 step "activate book" 200 - -X PATCH "$BASE/admin/products/$BOOK/status" -H "$JSON" -d '{"status":"active"}'
 step "add book to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
     -d "{\"products\":[\"$BOOK\"]}"
+step "publish book" 204 - -X POST "$BASE/admin/channels/$ONLINE_STORE/products" -H "$JSON" \
+    -d "{\"products\":[\"$BOOK\"]}"
 step "create tax class" 201 - -X POST "$BASE/admin/tax-classes" -H "$JSON" -d '{"name":"Books"}'
 BOOKS=$(id)
 step "put book in it" 204 - -X PUT "$BASE/admin/tax-assignments" -H "$JSON" \
@@ -530,6 +537,8 @@ LAMP=$(id)
 LAMP_VAR=$(variant)
 step "activate lamp" 200 - -X PATCH "$BASE/admin/products/$LAMP/status" -H "$JSON" -d '{"status":"active"}'
 step "add lamp to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
+    -d "{\"products\":[\"$LAMP\"]}"
+step "publish lamp" 204 - -X POST "$BASE/admin/channels/$ONLINE_STORE/products" -H "$JSON" \
     -d "{\"products\":[\"$LAMP\"]}"
 step "lamp has no stock set up" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
 contains "so it is untracked" '"id":null,'

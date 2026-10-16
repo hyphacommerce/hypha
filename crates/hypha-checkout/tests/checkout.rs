@@ -125,7 +125,7 @@ impl World {
 
     /// A cart for `ana@example.hr` holding 2 mugs and 1 cup: 24.00 + 6.00 VAT.
     fn cart(&self) -> CartId {
-        let ctx = Ctx::system();
+        let ctx = self.ports.storefront();
         let input = CreateCart {
             country: "HR".to_string(),
             idempotency: None,
@@ -208,6 +208,7 @@ fn checkout_places_an_order_from_the_priced_cart() {
     assert_eq!(order.placed_at(), world.clock.now());
     assert_eq!(order.financial_status(), FinancialStatus::Pending);
     assert_eq!((order.cart(), order.market()), (cart, market_id()));
+    assert_eq!(Some(order.channel()), world.ports.storefront().channel());
     assert_eq!(order.email(), &ana());
     assert_eq!(
         (order.subtotal(), order.tax_total(), order.total()),
@@ -273,6 +274,7 @@ fn checkout_records_the_order_and_the_new_customer_with_them() {
     assert_eq!(placed.data["order"], order.id().to_string());
     assert_eq!(placed.data["number"], order.number().value());
     assert_eq!(placed.data["customer"], order.customer().to_string());
+    assert_eq!(placed.data["channel"], order.channel().to_string());
 }
 
 #[test]
@@ -390,7 +392,7 @@ fn an_empty_cart_is_refused() {
         idempotency: None,
     };
     let cart = block_on(create_cart(
-        &Ctx::system(),
+        &world.ports.storefront(),
         &world.ports,
         &world.ids,
         &world.clock,

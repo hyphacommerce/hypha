@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
-    Address, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId,
+    Address, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId,
     OrderLineId, PendingEvent, Price, ProductId, Quantity, Recorded, Recorder, ShippingGroupId,
     ShippingOptionId, Stamped, Stamps, Subject, TaxClassId, TaxRate, TaxRegionId, Timestamp,
     VariantId, Version, Versioned, required_text,
@@ -268,6 +268,8 @@ pub struct NewOrder {
     pub number: OrderNumber,
     pub placed_at: Timestamp,
     pub cart: CartId,
+    /// The sales channel it was placed in (design note 0020, CH7).
+    pub channel: ChannelId,
     pub market: MarketId,
     pub currency: Currency,
     pub country: CountryCode,
@@ -307,6 +309,8 @@ pub struct Order {
     number: OrderNumber,
     placed_at: Timestamp,
     cart: CartId,
+    /// The sales channel it was placed in (design note 0020, CH7).
+    channel: ChannelId,
     market: MarketId,
     currency: Currency,
     country: CountryCode,
@@ -362,6 +366,7 @@ impl Order {
             number: new.number,
             placed_at: new.placed_at,
             cart: new.cart,
+            channel: new.channel,
             market: new.market,
             currency: new.currency,
             country: new.country,
@@ -384,6 +389,7 @@ impl Order {
             order: order.id,
             number: order.number.value(),
             customer: order.customer,
+            channel: order.channel,
             total: order.total,
         };
         order.events.record(order.subject(), &placed);
@@ -512,6 +518,11 @@ impl Order {
         self.cart
     }
 
+    /// The sales channel it was placed in.
+    pub fn channel(&self) -> ChannelId {
+        self.channel
+    }
+
     pub fn market(&self) -> MarketId {
         self.market
     }
@@ -587,6 +598,8 @@ pub struct OrderSnapshot {
     pub number: OrderNumber,
     pub placed_at: Timestamp,
     pub cart: CartId,
+    /// The sales channel it was placed in (design note 0020, CH7).
+    pub channel: ChannelId,
     pub market: MarketId,
     pub currency: Currency,
     pub country: CountryCode,
@@ -615,6 +628,7 @@ impl Order {
             number: self.number,
             placed_at: self.placed_at,
             cart: self.cart,
+            channel: self.channel,
             market: self.market,
             currency: self.currency,
             country: self.country,
@@ -721,6 +735,7 @@ impl Order {
             number: s.number,
             placed_at: s.placed_at,
             cart: s.cart,
+            channel: s.channel,
             market: s.market,
             currency: s.currency,
             country: s.country,
@@ -882,6 +897,7 @@ mod tests {
             number: OrderNumber::new(1001).unwrap(),
             placed_at: Timestamp::from_unix_micros(1_767_225_600_000_000),
             cart: CartId::from_uuid(Uuid::from_u128(2)),
+            channel: ChannelId::from_uuid(Uuid::from_u128(500)),
             market: MarketId::from_uuid(Uuid::from_u128(3)),
             currency: Currency::Eur,
             country: CountryCode::new("HR").unwrap(),

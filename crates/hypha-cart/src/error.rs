@@ -33,6 +33,9 @@ pub enum LineError {
     ProductNotFound(ProductId),
     #[error("product {0} is not active")]
     ProductNotActive(ProductId),
+    /// Not sold through the cart's channel (design note 0020, CH6).
+    #[error("product {0} isn't sold in this channel")]
+    ProductNotPublished(ProductId),
     #[error("variant {variant} does not belong to product {product}")]
     VariantNotFound {
         product: ProductId,
@@ -81,6 +84,7 @@ impl ErrorCode for LineError {
         match self {
             LineError::ProductNotFound(_) => "product_not_found",
             LineError::ProductNotActive(_) => "product_not_active",
+            LineError::ProductNotPublished(_) => "product_not_published",
             LineError::VariantNotFound { .. } => "variant_not_in_product",
             LineError::OutOfStock { .. } => "out_of_stock",
             LineError::Pricing(e) => e.code(),

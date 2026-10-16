@@ -284,6 +284,7 @@ async fn attempt<S: CheckoutPorts, I: IdGenerator, C: Clock, P: RateProvider>(
         number: ports.orders().next_number().await?,
         placed_at: clock.now(),
         cart: cart.id(),
+        channel: cart.channel(),
         market: priced.market,
         currency: priced.currency,
         country: priced.country,

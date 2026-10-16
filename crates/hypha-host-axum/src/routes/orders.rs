@@ -4,8 +4,9 @@ use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_checkout::{Checkout, checkout};
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, LocationId, MarketId, Money, OrderId,
-    OrderLineId, ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
+    CartId, ChannelId, CountryCode, Currency, CustomerId, Email, LocationId, MarketId, Money,
+    OrderId, OrderLineId, ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate,
+    VariantId,
 };
 use hypha_order_actions::{BuyerEmail, CancelOrder, OrderView, cancel_order, order_view};
 use hypha_orders::{
@@ -123,6 +124,8 @@ pub(super) struct OrderResponse {
     placed_at: String,
     cart: CartId,
     market: MarketId,
+    /// The sales channel it was placed through (design note 0020).
+    channel: ChannelId,
     currency: Currency,
     country: CountryCode,
     customer: CustomerId,
@@ -207,6 +210,7 @@ impl OrderResponse {
             placed_at: rfc3339(order.placed_at())?,
             cart: order.cart(),
             market: order.market(),
+            channel: order.channel(),
             currency: order.currency(),
             country: order.country(),
             customer: order.customer(),
