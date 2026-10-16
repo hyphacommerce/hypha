@@ -207,6 +207,17 @@ impl ApiError {
         )
     }
 
+    /// The search engine failed: logged, and the client is told only that search is down
+    /// (design note 0019), since the engine's message can name its internals.
+    pub(crate) fn search_unavailable(error: impl std::fmt::Display) -> Self {
+        tracing::error!(%error, "search engine failed");
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "search_unavailable",
+            "search is unavailable; try again shortly",
+        )
+    }
+
     pub fn method_not_allowed() -> Self {
         Self::new(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -445,6 +456,40 @@ impl From<hypha_stores::CommandError> for ApiError {
             ) => StatusCode::CONFLICT,
             // Only possible at startup, and a deployment problem rather than a request one.
             E::Repo(RepoError::Backend(_)) | E::MultipleStores(_) => return Self::internal(e),
+        };
+        Self::domain(status, e)
+    }
+}
+
+impl From<hypha_search_index::CommandError> for ApiError {
+    fn from(e: hypha_search_index::CommandError) -> Self {
+        use hypha_search_index::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            E::Search(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Index(error) => return Self::search_unavailable(error),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
+impl From<hypha_search::CommandError> for ApiError {
+    fn from(e: hypha_search::CommandError) -> Self {
+        use hypha_search::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            E::Search(_) | E::Country(_) | E::NoMarketForCountry(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            E::Index(error) => return Self::search_unavailable(error),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
     }

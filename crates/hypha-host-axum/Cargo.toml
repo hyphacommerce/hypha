@@ -22,6 +22,8 @@ hypha-order-actions = { path = "../hypha-order-actions" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
 hypha-dispatch = { path = "../hypha-dispatch" }
+hypha-search = { path = "../hypha-search" }
+hypha-search-index = { path = "../hypha-search-index" }
 hypha-media = { path = "../hypha-media" }
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-shipping = { path = "../hypha-shipping" }
@@ -54,6 +56,7 @@ tokio-postgres-rustls = "0.14"
 rustls-platform-verifier = "0.7"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 base64 = "0.22"
+serde_html_form = "0.4.1"
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }

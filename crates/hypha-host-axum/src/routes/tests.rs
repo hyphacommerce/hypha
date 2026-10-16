@@ -3207,3 +3207,322 @@ async fn a_storefront_never_sees_why_an_order_was_cancelled() {
     assert!(replayed.get("cancel_reason").is_none(), "{replayed}");
     assert!(replayed.get("cancelled_at").is_none(), "{replayed}");
 }
+
+// ---------- search (design note 0019) ----------
+
+/// Delivers events and rebuilds search until both are done, as the jobs would.
+async fn settle_search(app: &TestApp) {
+    for _ in 0..20 {
+        let dispatched = crate::jobs::dispatch(&app.state).await.unwrap();
+        let synced = crate::jobs::search_sync(&app.state).await.unwrap();
+        let (_, status) = send(app, "GET", "/admin/search/status", None).await;
+        if !dispatched && !synced && status["queued"] == 0 {
+            return;
+        }
+    }
+    panic!("search never settled");
+}
+
+#[tokio::test]
+async fn the_storefront_searches_its_market() {
+    let app = app().await;
+    let mug = shop_selling_a_mug(&app).await;
+    settle_search(&app).await;
+    let pk = publishable(&app).await;
+
+    let (status, found) =
+        send_as(&app, &pk, "GET", "/storefront/search?country=HR&q=MU", None).await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["total"], 1);
+    let hit = &found["items"][0];
+    assert_eq!(
+        (
+            &hit["variant"],
+            &hit["title"],
+            &hit["price"],
+            &hit["available"]
+        ),
+        (
+            &json!(mug),
+            &json!("Mug"),
+            &json!({ "amount": 1000, "currency": "EUR" }),
+            &json!(true)
+        )
+    );
+    assert_eq!(found["price"]["min"]["amount"], 1000);
+    assert_eq!(
+        (&found["has_more"], &found["next_cursor"]),
+        (&json!(false), &json!(null))
+    );
+
+    let (_, none) = send_as(
+        &app,
+        &pk,
+        "GET",
+        "/storefront/search?country=HR&q=cup",
+        None,
+    )
+    .await;
+    assert_eq!((&none["total"], &none["price"]), (&json!(0), &json!(null)));
+}
+
+/// A market for HR in EUR whose catalog sells active products with these handles (10
+/// EUR each, from `create_product`); their IDs.
+async fn shop_selling(app: &TestApp, handles: &[&str]) -> Vec<String> {
+    let mut ids = Vec::new();
+    for handle in handles {
+        let id = create_product(app, handle).await;
+        let path = format!("/admin/products/{id}/status");
+        send(app, "PATCH", &path, Some(r#"{"status":"active"}"#)).await;
+        ids.push(id);
+    }
+    let body = r#"{"name":"Croatia","countries":["HR"],"currency":"EUR"}"#;
+    let (_, market) = send(app, "POST", "/admin/markets", Some(body)).await;
+    let body = json!({ "market": market["id"] }).to_string();
+    let (_, catalog) = send(app, "POST", "/admin/catalogs", Some(&body)).await;
+    let path = format!(
+        "/admin/catalogs/{}/products",
+        catalog["id"].as_str().unwrap()
+    );
+    let body = json!({ "products": ids }).to_string();
+    let (status, _) = send(app, "POST", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    ids
+}
+
+#[tokio::test]
+async fn storefront_search_pages_with_a_cursor_bound_to_its_query() {
+    let app = app().await;
+    shop_selling(&app, &["mug", "cup"]).await;
+    settle_search(&app).await;
+    let pk = publishable(&app).await;
+
+    let first_url = "/storefront/search?country=HR&sort=title&limit=1";
+    let (_, first) = send_as(&app, &pk, "GET", first_url, None).await;
+    assert_eq!(
+        (&first["total"], &first["has_more"]),
+        (&json!(2), &json!(true))
+    );
+    assert_eq!(first["items"][0]["handle"], "cup");
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let (_, second) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("{first_url}&cursor={cursor}"),
+        None,
+    )
+    .await;
+    assert_eq!(second["items"][0]["handle"], "mug");
+    assert_eq!(second["next_cursor"], json!(null));
+
+    // The cursor belongs to that query.
+    let (status, body) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("/storefront/search?country=HR&sort=newest&limit=1&cursor={cursor}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_cursor")
+    );
+}
+
+#[tokio::test]
+async fn storefront_search_refuses_bad_queries_with_codes() {
+    let app = app().await;
+    shop_selling_a_mug(&app).await;
+    let pk = publishable(&app).await;
+    for (query, status, expected) in [
+        (
+            "country=DE",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "no_market_for_country",
+        ),
+        (
+            "country=HR&filter=Red",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_filter",
+        ),
+        (
+            "country=HR&filter=color:Red",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_facet",
+        ),
+        (
+            "country=HR&price_min=9&price_max=1",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_price_range",
+        ),
+        (
+            "country=HR&sort=cheapest",
+            StatusCode::BAD_REQUEST,
+            "invalid_query",
+        ),
+        (
+            "country=HR&country=DE",
+            StatusCode::BAD_REQUEST,
+            "invalid_query",
+        ),
+        ("q=mug", StatusCode::BAD_REQUEST, "invalid_query"),
+    ] {
+        let (got, body) = send_as(
+            &app,
+            &pk,
+            "GET",
+            &format!("/storefront/search?{query}"),
+            None,
+        )
+        .await;
+        assert_eq!((got, code(&body)), (status, expected), "{query}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn search_filters_repeat_and_facets_count_listings() {
+    let app = app().await;
+    let mug = create_product(&app, "shirt").await;
+    // Colour (Red, Blue): the first variant is Red; add Blue.
+    let options = format!("/admin/products/{mug}/options");
+    let body = r#"{"options":[{"name":"Color","values":[{"label":"Red"},{"label":"Blue"}]}]}"#;
+    let (_, sized) = send(&app, "PUT", &options, Some(body)).await;
+    let blue = sized["options"][0]["values"][1]["id"].clone();
+    let body = json!({ "price": { "amount": 1200, "currency": "EUR" }, "selections": [blue] });
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/admin/products/{mug}/variants"),
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{mug}/status"),
+        Some(r#"{"status":"active"}"#),
+    )
+    .await;
+    let (_, market) = send(
+        &app,
+        "POST",
+        "/admin/markets",
+        Some(r#"{"name":"Croatia","countries":["HR"],"currency":"EUR"}"#),
+    )
+    .await;
+    let body = json!({ "market": market["id"] }).to_string();
+    let (_, catalog) = send(&app, "POST", "/admin/catalogs", Some(&body)).await;
+    let body = json!({ "products": [mug] }).to_string();
+    send(
+        &app,
+        "POST",
+        &format!(
+            "/admin/catalogs/{}/products",
+            catalog["id"].as_str().unwrap()
+        ),
+        Some(&body),
+    )
+    .await;
+    settle_search(&app).await;
+    let pk = publishable(&app).await;
+
+    let url = "/storefront/search?country=HR&group=variant&filter=option.color:Red&filter=option.Color:Blue";
+    let (status, both) = send_as(&app, &pk, "GET", url, None).await;
+    assert_eq!(
+        (status, &both["total"]),
+        (StatusCode::OK, &json!(2)),
+        "{both}"
+    );
+    let (_, one) = send_as(
+        &app,
+        &pk,
+        "GET",
+        "/storefront/search?country=HR&filter=option.color:Blue",
+        None,
+    )
+    .await;
+    assert_eq!(one["items"][0]["price"]["amount"], 1200);
+    // One listing; the colour facet still shows Red and Blue.
+    let colour = one["facets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["key"] == "option.color")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        colour["values"],
+        json!([{"value": "Blue", "count": 1}, {"value": "Red", "count": 1}])
+    );
+
+    // Splitting by colour makes two listings, after a rebuild.
+    let (status, settings) = send(
+        &app,
+        "PATCH",
+        "/admin/search/settings",
+        Some(r#"{"split_by":["Color"],"facets":[{"key":"option.color","label":"Colour"}]}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    settle_search(&app).await;
+    let (_, split) = send_as(&app, &pk, "GET", "/storefront/search?country=HR", None).await;
+    assert_eq!(split["total"], 2);
+    assert_eq!(
+        split["facets"],
+        json!([{
+            "key": "option.color",
+            "label": "Colour",
+            "values": [{"value": "Blue", "count": 1}, {"value": "Red", "count": 1}],
+        }])
+    );
+}
+
+#[tokio::test]
+async fn search_settings_reindex_and_status_over_http() {
+    let app = app().await;
+    let (status, settings) = send(&app, "GET", "/admin/search/settings", None).await;
+    assert_eq!(
+        (status, &settings),
+        (StatusCode::OK, &json!({"split_by": [], "facets": []}))
+    );
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        "/admin/search/settings",
+        Some(r#"{"split_by":["a","b","c","d"]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "too_many_splits")
+    );
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        "/admin/search/settings",
+        Some(r#"{"facets":[{"key":"colour"}]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unknown_facet")
+    );
+
+    let (status, queued) = send(&app, "POST", "/admin/search/reindex", None).await;
+    assert_eq!(
+        (status, &queued["queued"]),
+        (StatusCode::ACCEPTED, &json!(1))
+    );
+    settle_search(&app).await;
+
+    // A publishable key reads the storefront only.
+    let pk = publishable(&app).await;
+    let (status, body) = send_as(&app, &pk, "GET", "/admin/search/settings", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "admin_credentials_required")
+    );
+}

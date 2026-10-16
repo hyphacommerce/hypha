@@ -18,6 +18,7 @@ use hypha_auth::AuthSettings;
 use hypha_core::ErrorCode;
 use hypha_dispatch::{DispatchSettings, LONGEST_RUN, RetrySchedule};
 use hypha_media::MediaSettings;
+use hypha_search::SyncSettings;
 use ipnet::IpNet;
 use thiserror::Error;
 
@@ -37,6 +38,8 @@ pub struct Config {
     pub media: MediaConfig,
     pub auth: AuthSettings,
     pub dispatch: DispatchSettings,
+    /// The search sync job's batch and lease (design note 0019).
+    pub search_sync: SyncSettings,
     pub jobs: JobsConfig,
     pub rate_limits: RateLimits,
     /// The file with the environment applied, for `Config::to_toml`.
@@ -83,6 +86,7 @@ pub struct JobsConfig {
     pub dispatch: JobConfig,
     pub prune: JobConfig,
     pub media_sweep: JobConfig,
+    pub search_sync: JobConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -518,21 +522,33 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         ("jobs.dispatch.interval", jobs.dispatch.interval),
         ("jobs.prune.interval", jobs.prune.interval),
         ("jobs.media_sweep.interval", jobs.media_sweep.interval),
+        ("jobs.search_sync.interval", jobs.search_sync.interval),
         ("jobs.prune.sessions_after", jobs.prune.sessions_after),
     ] {
         p.at_least(key, value, Duration::from_millis(1));
     }
-    if !(1..=1_000).contains(&jobs.dispatch.batch) {
-        let value = u64::from(jobs.dispatch.batch);
-        p.add(
-            "jobs.dispatch.batch",
-            Broken::NumberOutOfRange {
-                value,
-                min: 1,
-                max: 1_000,
-            },
-        );
+    for (key, batch) in [
+        ("jobs.dispatch.batch", jobs.dispatch.batch),
+        ("jobs.search_sync.batch", jobs.search_sync.batch),
+    ] {
+        if !(1..=1_000).contains(&batch) {
+            let value = u64::from(batch);
+            p.add(
+                key,
+                Broken::NumberOutOfRange {
+                    value,
+                    min: 1,
+                    max: 1_000,
+                },
+            );
+        }
     }
+    // Long enough to rebuild a batch, so a lease doesn't end while its runner works.
+    p.at_least(
+        "jobs.search_sync.lease",
+        jobs.search_sync.lease,
+        Duration::from_secs(10),
+    );
     // Pruning an event deletes its deliveries, so none may still be due: events outlive
     // the last retry.
     p.longer_than(
@@ -623,10 +639,15 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             keep_idempotency_keys: jobs.prune.idempotency_keys_after.0,
             keep_ended_sessions: jobs.prune.sessions_after.0,
         },
+        search_sync: SyncSettings {
+            batch: jobs.search_sync.batch,
+            lease: jobs.search_sync.lease.0,
+        },
         jobs: JobsConfig {
             dispatch: job(jobs.dispatch.enabled, jobs.dispatch.interval),
             prune: job(jobs.prune.enabled, jobs.prune.interval),
             media_sweep: job(jobs.media_sweep.enabled, jobs.media_sweep.interval),
+            search_sync: job(jobs.search_sync.enabled, jobs.search_sync.interval),
         },
         rate_limits: file.rate_limits.clone(),
         effective: file.clone(),
@@ -836,6 +857,20 @@ mod tests {
             ]
         );
         assert!(load("[auth]\nsession_lifetime = \"365d\"").is_ok());
+    }
+
+    #[test]
+    fn search_sync_has_a_batch_and_a_lease() {
+        let config = load("").unwrap();
+        assert_eq!(config.search_sync, SyncSettings::default());
+        assert!(config.jobs.search_sync.enabled);
+        assert_eq!(
+            problems(load("[jobs.search_sync]\nbatch = 0\nlease = \"5s\"")),
+            [
+                "jobs.search_sync.batch: is 0, 1 to 1000",
+                "jobs.search_sync.lease: is 5s, at least 10s is needed",
+            ]
+        );
     }
 
     #[test]

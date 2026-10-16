@@ -67,15 +67,27 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError> {
         stamp_insert(location, self.now());
         let s = location.snapshot();
-        in_transaction!(self, |tx| insert_location(tx, &s).await)?;
-        location.set_version(Version::NEW.next());
+        let events = location.take_events();
+        let actor = self.actor();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_location(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await
+        })?;
+        location.set_version(version);
         Ok(())
     }
 
     async fn update(&self, location: &mut Location) -> Result<(), RepoError> {
         stamp_update(location, self.now());
         let s = location.snapshot();
-        let version = in_transaction!(self, |tx| update_location(tx, &s).await)?;
+        let events = location.take_events();
+        let actor = self.actor();
+        let version = in_transaction!(self, |tx| {
+            let version = update_location(tx, &s).await?;
+            insert_events(tx, &events, Some(version), actor).await?;
+            Ok(version)
+        })?;
         location.set_version(version);
         Ok(())
     }

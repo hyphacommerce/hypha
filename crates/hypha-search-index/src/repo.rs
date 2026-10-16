@@ -34,6 +34,30 @@ pub trait SearchIndex {
     async fn count(&self) -> Result<u64, IndexError>;
 }
 
+/// A borrowed engine is an engine, so a host can lend the request's ports out as one.
+impl<T: SearchIndex + ?Sized> SearchIndex for &T {
+    async fn replace(
+        &self,
+        market: MarketId,
+        product: ProductId,
+        documents: &[SearchDocument],
+    ) -> Result<(), IndexError> {
+        (**self).replace(market, product, documents).await
+    }
+
+    async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError> {
+        (**self).search(query).await
+    }
+
+    async fn option_names(&self, market: MarketId) -> Result<Vec<String>, IndexError> {
+        (**self).option_names(market).await
+    }
+
+    async fn count(&self) -> Result<u64, IndexError> {
+        (**self).count().await
+    }
+}
+
 /// What a mark asks to rebuild.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Target {

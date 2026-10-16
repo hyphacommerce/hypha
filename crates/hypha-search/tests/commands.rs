@@ -645,6 +645,13 @@ fn each_event_marks_what_it_changes() {
         targets(&event("market.changed", serde_json::json!({}))),
         Ok(vec![Target::All])
     );
+    let renamed = serde_json::json!({ "location": "loc_x", "fields": ["name"] });
+    assert_eq!(targets(&event("location.changed", renamed)), Ok(vec![]));
+    let moved = serde_json::json!({ "location": "loc_x", "fields": ["markets", "name"] });
+    assert_eq!(
+        targets(&event("location.changed", moved)),
+        Ok(vec![Target::All])
+    );
     let facets_only = serde_json::json!({ "fields": ["facets"] });
     assert_eq!(
         targets(&event("search_settings.changed", facets_only)),

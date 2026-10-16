@@ -75,6 +75,20 @@ pub fn start(state: SharedState<PgStorage>) -> Jobs {
         }));
     }
 
+    // Rebuilding the search documents events marked (every 2 seconds by default).
+    if jobs.search_sync.enabled {
+        let s = Arc::clone(&state);
+        tasks.push(every(
+            &stopped,
+            "search_sync",
+            jobs.search_sync.interval,
+            move || {
+                let s = Arc::clone(&s);
+                async move { search_sync(&s).await }
+            },
+        ));
+    }
+
     if jobs.media_sweep.enabled && state.media.is_some() {
         let s = Arc::clone(&state);
         tasks.push(every(
@@ -205,6 +219,25 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
     let ports = state.public_ports().await.map_err(no_connection)?;
     record(&ports, &outcomes).await.map_err(|e| e.to_string())?;
     Ok(fanned.more || leased.len() >= state.config.dispatch.batch as usize)
+}
+
+/// Rebuilds a batch of the search documents events marked (design note 0019, section
+/// 5). One connection for the step: the built-in engine is the database.
+pub(crate) async fn search_sync(state: &AppState<PgStorage>) -> Step {
+    use crate::state::Storage;
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "no connection".to_string())?;
+    let progress = hypha_search::sync(
+        &ports,
+        &state.storage.search(&ports),
+        &state.clock,
+        &state.config.search_sync,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(progress.more)
 }
 
 /// Deletes uploads abandoned for over `media.abandoned_after` (design note 0013,

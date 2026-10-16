@@ -233,6 +233,29 @@ async fn ensure_location<S: Storage>(state: &AppState<S>) -> Result<(), String> 
     Ok(())
 }
 
+/// An empty engine (a new database, or a new engine) is filled by a full rebuild: the
+/// sync job works it like any other mark (design note 0019, section 5).
+async fn ensure_search_index<S: Storage>(state: &AppState<S>) -> Result<(), String> {
+    use hypha_search_index::SearchIndex;
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "cannot reach storage")?;
+    let documents = state
+        .storage
+        .search(&ports)
+        .count()
+        .await
+        .map_err(|e| e.to_string())?;
+    if documents == 0 {
+        hypha_search_index::queue_all(&ports)
+            .await
+            .map_err(|e| e.to_string())?;
+        tracing::info!("search: the index is empty, rebuilding it");
+    }
+    Ok(())
+}
+
 async fn serve<S: Storage>(
     router: Router<SharedState<S>>,
     storage: S,
@@ -332,6 +355,10 @@ async fn serve<S: Storage>(
     }
     if let Err(e) = ensure_location(&state).await {
         tracing::error!("location setup failed: {e}");
+        std::process::exit(1);
+    }
+    if let Err(e) = ensure_search_index(&state).await {
+        tracing::error!("search setup failed: {e}");
         std::process::exit(1);
     }
     tracing::warn!("emails (invites, password resets) are logged, not sent: development only");

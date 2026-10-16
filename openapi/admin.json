@@ -1789,6 +1789,44 @@
         ],
         "type": "object"
       },
+      "FacetSettingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "description": "`option.<name>`, `vendor`, `product_type` or `tag`.",
+            "type": "string"
+          },
+          "label": {
+            "description": "Up to 255 characters; absent or `null` lets the storefront label it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
+      "FacetSettingResponse": {
+        "properties": {
+          "key": {
+            "description": "`option.<name>`, `vendor`, `product_type` or `tag`.",
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
       "FinancialStatusDto": {
         "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.\n\nKnown values: `pending`, `paid`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -3564,6 +3602,50 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "SearchSettingsResponse": {
+        "properties": {
+          "facets": {
+            "description": "The facets storefronts show, in order. Empty: the defaults (product type,\nvendor, the market's most used options, tags).",
+            "items": {
+              "$ref": "#/components/schemas/FacetSettingResponse"
+            },
+            "type": "array"
+          },
+          "split_by": {
+            "description": "Option names whose values split listings, in order (\"show each Color\nseparately\"). Empty: one listing per product.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "split_by",
+          "facets"
+        ],
+        "type": "object"
+      },
+      "SearchStatusResponse": {
+        "properties": {
+          "documents": {
+            "description": "Documents in the index: one per variant per market it's sold in.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queued": {
+            "description": "Products (or everything) waiting to be rebuilt. 0 when the index is up to date.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued",
+          "documents"
+        ],
+        "type": "object"
+      },
       "SelectedShippingResponse": {
         "properties": {
           "amount": {
@@ -4463,6 +4545,27 @@
           "scopes": {
             "items": {
               "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateSearchSettingsRequest": {
+        "additionalProperties": false,
+        "description": "A JSON Merge Patch of the settings.",
+        "properties": {
+          "facets": {
+            "description": "At most 20, unique; empty for the defaults.",
+            "items": {
+              "$ref": "#/components/schemas/FacetSettingRequest"
+            },
+            "type": "array"
+          },
+          "split_by": {
+            "description": "At most 3 option names, unique ignoring case. Changing them rebuilds every\nsearch document in the background.",
+            "items": {
+              "type": "string"
             },
             "type": "array"
           }
@@ -14203,6 +14306,310 @@
         ],
         "x-hypha-scopes": [
           "users:write"
+        ]
+      }
+    },
+    "/admin/search/reindex": {
+      "post": {
+        "operationId": "admin.search.start_reindex",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchStatusResponse"
+                }
+              }
+            },
+            "description": "Queued"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rebuilds every search document in the background (after restoring a database, say);\n`status` shows the progress.",
+        "tags": [
+          "search"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/search/settings": {
+      "get": {
+        "operationId": "admin.search.fetch_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchSettingsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The store's search settings (the defaults until first saved).",
+        "tags": [
+          "search"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.search.update_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSearchSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchSettingsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes which options split listings and which facets storefronts show.",
+        "tags": [
+          "search"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/search/status": {
+      "get": {
+        "operationId": "admin.search.status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "How far behind the index is.",
+        "tags": [
+          "search"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
         ]
       }
     },

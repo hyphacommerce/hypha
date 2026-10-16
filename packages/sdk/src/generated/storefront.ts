@@ -182,6 +182,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Searches the products the shopper's market sells, priced and stocked there; without
+         *     `q`, the market's product listing. Pages go at most 1,000 results deep.
+         */
+        get: operations["storefront.search.storefront_search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/store": {
         parameters: {
             query?: never;
@@ -306,6 +326,22 @@ export interface components {
             details?: unknown;
             /** @description For humans; may change. */
             error: string;
+        };
+        FacetResponse: {
+            /** @description As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`. */
+            key: string;
+            /** @description The merchant's label, if they set one. */
+            label?: string | null;
+            /** @description Most results first, then by value; at most 100. */
+            values: components["schemas"]["FacetValueResponse"][];
+        };
+        FacetValueResponse: {
+            /**
+             * Format: int64
+             * @description Results (as grouped) with this value, ignoring this facet's own filter.
+             */
+            count: number;
+            value: string;
         };
         /**
          * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
@@ -542,6 +578,62 @@ export interface components {
             url: string;
             /** Format: int32 */
             width?: number | null;
+        };
+        /**
+         * @description One result: a listing, a product or a variant (the request's `group`), shown by
+         *     its best match.
+         */
+        SearchHitResponse: {
+            /** @description Whether the variant shown can be sold now. */
+            available: boolean;
+            handle: string;
+            image?: components["schemas"]["ProductMediaResponse"] | null;
+            /** @description The listing it belongs to: the product, split by the merchant's options. */
+            listing: string;
+            /** @description Over its listing's variants. */
+            listing_price: components["schemas"]["SearchPriceRange"];
+            /**
+             * Format: int32
+             * @description How many of the group's variants matched.
+             */
+            matched_variants: number;
+            /** @description The variant's options, in order. */
+            options: components["schemas"]["SearchOption"][];
+            /** @description In the market's currency. */
+            price: components["schemas"]["Money"];
+            product: components["schemas"]["ProductId"];
+            /** @description Over the product's variants in this market. */
+            product_price: components["schemas"]["SearchPriceRange"];
+            product_type?: string | null;
+            title: string;
+            /** @description The variant shown: the best match of its group. */
+            variant: components["schemas"]["VariantId"];
+            /** @description "M / Blue"; `null` for a product without options. */
+            variant_title?: string | null;
+            vendor?: string | null;
+        };
+        SearchOption: {
+            name: string;
+            value: string;
+        };
+        SearchPriceRange: {
+            /** @description Equal to `min` when every price is the same. */
+            max: components["schemas"]["Money"];
+            min: components["schemas"]["Money"];
+        };
+        SearchResponse: {
+            /** @description The facets the merchant shows (or the defaults), counted over these results. */
+            facets: components["schemas"]["FacetResponse"][];
+            has_more: boolean;
+            items: components["schemas"]["SearchHitResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last. Opaque. */
+            next_cursor?: string | null;
+            price?: components["schemas"]["SearchPriceRange"] | null;
+            /**
+             * Format: int64
+             * @description Results over every page.
+             */
+            total: number;
         };
         SelectShippingRequest: {
             /** @description One of the group's offers. */
@@ -1721,6 +1813,99 @@ export interface operations {
             };
             /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.search.storefront_search": {
+        parameters: {
+            query: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): the market selling there prices and
+                 *     stocks the results.
+                 */
+                country: string;
+                /**
+                 * @description Words to find in titles, vendors, types, tags, SKUs, option values and
+                 *     descriptions; each must start a word. Absent lists every product.
+                 */
+                q?: string;
+                /**
+                 * @description Repeatable `key:value`, key `option.<name>` (any case), `vendor`,
+                 *     `product_type` or `tag`: values of one key match any, different keys all.
+                 */
+                filter?: string[];
+                /** @description Inclusive, in the market currency's minor units. */
+                price_min?: number;
+                price_max?: number;
+                /** @description Only what can (`true`) or can't (`false`) be sold now. */
+                available?: boolean;
+                sort?: "relevance" | "newest" | "price_asc" | "price_desc" | "title";
+                /** @description What one result stands for. Default `listing`. */
+                group?: "listing" | "product" | "variant";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

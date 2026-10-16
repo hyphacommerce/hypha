@@ -5,6 +5,21 @@ use hypha_core::{Event, InventoryItemId, LocationId, VariantId};
 use serde::Serialize;
 
 pub const INVENTORY_ITEM: &str = "inventory_item";
+pub const LOCATION: &str = "location";
+
+/// `location.changed`: created, or which of `name`, `markets`, `priority` and `address`
+/// changed (all four when created). Its markets decide where its stock counts, so
+/// search rebuilds when they change (design note 0019, section 8).
+#[derive(Debug, Serialize)]
+pub struct LocationChanged {
+    pub location: LocationId,
+    pub fields: Vec<&'static str>,
+}
+
+impl Event for LocationChanged {
+    const TYPE: &'static str = "location.changed";
+    const VERSION: u16 = 1;
+}
 
 /// `inventory_item.changed`: stock counted or adjusted, reserved or released, or the
 /// item's settings changed. Carries availability after the change, so a consumer

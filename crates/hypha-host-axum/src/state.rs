@@ -353,6 +353,8 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_core::HasOutbox
         + hypha_core::ActingAs
         + hypha_apps::HasApps
+        + hypha_search_index::HasSearchQueue
+        + hypha_search_index::HasSearchSettings
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts
@@ -364,6 +366,10 @@ pub trait Storage: Send + Sync + 'static {
     type Directory<'a>: StoreRepo
     where
         Self: 'a;
+    /// The search engine a request's ports search with (design note 0019).
+    type Search<'p>: hypha_search_index::SearchIndex
+    where
+        Self: 'p;
 
     /// Repositories that only see `store`'s data (design note 0006). With one store per
     /// deployment (model A) the database *is* the store, so implementations ignore it;
@@ -372,6 +378,11 @@ pub trait Storage: Send + Sync + 'static {
 
     /// The stores this deployment knows (in model C, a control plane).
     async fn directory(&self) -> Result<Self::Directory<'_>, ApiError>;
+
+    /// The search engine, borrowing `ports` when the engine is the database (the
+    /// built-in Postgres one). An external engine (Meilisearch, design note 0019 step 7)
+    /// will be held by the storage and picked by configuration here.
+    fn search<'p>(&'p self, ports: &'p Self::Ports<'_>) -> Self::Search<'p>;
 
     /// Runs a password reset request in a `Background` slot, so the response doesn't
     /// wait for it (design note 0008, section 5); dropped and logged when every slot is
@@ -479,6 +490,7 @@ impl PgStorage {
 impl Storage for PgStorage {
     type Ports<'a> = PgStore<PooledClient>;
     type Directory<'a> = PgStore<PooledClient>;
+    type Search<'p> = &'p PgStore<PooledClient>;
 
     async fn ports(&self, _store: StoreId) -> Result<PgStore<PooledClient>, ApiError> {
         self.store().await
@@ -486,6 +498,10 @@ impl Storage for PgStorage {
 
     async fn directory(&self) -> Result<PgStore<PooledClient>, ApiError> {
         self.store().await
+    }
+
+    fn search<'p>(&'p self, ports: &'p PgStore<PooledClient>) -> &'p PgStore<PooledClient> {
+        ports
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {

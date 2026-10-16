@@ -98,11 +98,13 @@ fresh() {
 }
 
 # wait_for NAME URL TEXT: asks URL once a second, up to 20 times, until its body
-# contains TEXT (for what the dispatcher does every 2 seconds). Leaves the body in $BODY.
+# contains TEXT (for what the dispatcher and search sync do every 2 seconds). Leaves the
+# body in $BODY.
 wait_for() {
     local name=$1 url=$2 text=$3 n
+    pick_creds "$url"
     for n in $(seq 1 20); do
-        BODY=$(curl -s ${AUTH[@]+"${AUTH[@]}"} "$url")
+        BODY=$(curl -s ${CREDS[@]+"${CREDS[@]}"} "$url")
         if [[ $BODY == *"$text"* ]]; then
             echo "ok   $name"
             return
@@ -650,6 +652,28 @@ contains "the same guest customer" "\"customer\":\"$GUEST\""
 step "every lamp is reserved" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
 contains "4 of 4" '"on_hand":4,"reserved":4,"available":0'
 step "the first order is unchanged" 200 - "$BASE/admin/orders/$SHOP_ORDER"
+
+echo "## search (design note 0019)"
+# Events mark what changed; the search sync job rebuilds it every 2 seconds.
+wait_for "search sees every lamp reserved" "$BASE/storefront/search?country=HR&q=LAMP" '"available":false'
+contains "priced in the market (the list takes 10%)" '"price":{"amount":900,"currency":"EUR"}'
+contains "with facets" '"facets":['
+step "the shop's listing (no q)" 200 - "$BASE/storefront/search?country=HR&sort=price_asc&limit=1"
+contains "pages with a cursor" '"has_more":true,"next_cursor":"'
+step "a filter is key:value" 422 invalid_filter "$BASE/storefront/search?country=HR&filter=Red"
+step "an unknown facet" 422 unknown_facet "$BASE/storefront/search?country=HR&filter=colour:Red"
+step "no market sells to Japan" 422 no_market_for_country "$BASE/storefront/search?country=JP"
+step "too deep" 422 search_too_deep "$BASE/storefront/search?country=HR&limit=100&cursor=$(printf '{"v":1,"after":"950","filters":[["country","HR"]]}' | base64 | tr '+/' '-_' | tr -d '=\n')"
+step "search settings" 200 - "$BASE/admin/search/settings"
+contains "the defaults" '{"split_by":[],"facets":[]}'
+step "split listings by colour" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" \
+    -d '{"split_by":["Color"],"facets":[{"key":"vendor","label":"Brand"},{"key":"option.color"}]}'
+step "at most 3 splits" 422 too_many_splits -X PATCH "$BASE/admin/search/settings" -H "$JSON" \
+    -d '{"split_by":["a","b","c","d"]}'
+step "back to one listing per product" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" \
+    -d '{"split_by":[],"facets":[]}'
+step "rebuild everything" 202 - -X POST "$BASE/admin/search/reindex"
+wait_for "the rebuild finishes" "$BASE/admin/search/status" '"queued":0'
 
 echo "## fulfilment (design note 0018)"
 # The shop order: 2 lamps, reserved at the warehouse (4 on hand, 4 reserved with the

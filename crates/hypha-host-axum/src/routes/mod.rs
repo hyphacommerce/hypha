@@ -18,6 +18,7 @@ mod me;
 mod orders;
 mod page;
 mod products;
+mod search;
 mod shipping;
 mod staff;
 mod stores;
@@ -190,9 +191,15 @@ macro_rules! route_table {
             [admin, POST, "/admin/inventory-items/{id}/levels/{location_id}/adjustments", inventory::adjust_level],
             [admin, GET, "/admin/variants/{id}/inventory", inventory::fetch_variant_inventory],
 
+            [admin, GET, "/admin/search/settings", search::fetch_settings],
+            [admin, PATCH, "/admin/search/settings", search::update_settings],
+            [admin, GET, "/admin/search/status", search::status],
+            [admin, POST, "/admin/search/reindex", search::start_reindex],
+
             // ---------- storefront ----------
             [storefront, GET, "/storefront/store", stores::fetch_storefront],
             [storefront, GET, "/storefront/products/{id}", products::fetch_storefront],
+            [storefront, GET, "/storefront/search", search::storefront_search],
             [storefront, POST, "/storefront/carts", carts::create],
             [storefront, GET, "/storefront/carts/{id}", carts::fetch],
             [storefront, POST, "/storefront/carts/{id}/lines", carts::add],

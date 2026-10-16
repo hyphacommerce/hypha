@@ -270,6 +270,51 @@
         ],
         "type": "object"
       },
+      "FacetResponse": {
+        "properties": {
+          "key": {
+            "description": "As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`.",
+            "type": "string"
+          },
+          "label": {
+            "description": "The merchant's label, if they set one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "values": {
+            "description": "Most results first, then by value; at most 100.",
+            "items": {
+              "$ref": "#/components/schemas/FacetValueResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "values"
+        ],
+        "type": "object"
+      },
+      "FacetValueResponse": {
+        "properties": {
+          "count": {
+            "description": "Results (as grouped) with this value, ignoring this facet's own filter.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "count"
+        ],
+        "type": "object"
+      },
       "FinancialStatusDto": {
         "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.\n\nKnown values: `pending`, `paid`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -982,6 +1027,183 @@
           "kind",
           "mime_type",
           "url"
+        ],
+        "type": "object"
+      },
+      "SearchHitResponse": {
+        "description": "One result: a listing, a product or a variant (the request's `group`), shown by\nits best match.",
+        "properties": {
+          "available": {
+            "description": "Whether the variant shown can be sold now.",
+            "type": "boolean"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "image": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductMediaResponse",
+                "description": "The variant's image, else the product's featured one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "listing": {
+            "description": "The listing it belongs to: the product, split by the merchant's options.",
+            "type": "string"
+          },
+          "listing_price": {
+            "$ref": "#/components/schemas/SearchPriceRange",
+            "description": "Over its listing's variants."
+          },
+          "matched_variants": {
+            "description": "How many of the group's variants matched.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "options": {
+            "description": "The variant's options, in order.",
+            "items": {
+              "$ref": "#/components/schemas/SearchOption"
+            },
+            "type": "array"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money",
+            "description": "In the market's currency."
+          },
+          "product": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "product_price": {
+            "$ref": "#/components/schemas/SearchPriceRange",
+            "description": "Over the product's variants in this market."
+          },
+          "product_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId",
+            "description": "The variant shown: the best match of its group."
+          },
+          "variant_title": {
+            "description": "\"M / Blue\"; `null` for a product without options.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "vendor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "product",
+          "variant",
+          "listing",
+          "handle",
+          "title",
+          "options",
+          "price",
+          "product_price",
+          "listing_price",
+          "available",
+          "matched_variants"
+        ],
+        "type": "object"
+      },
+      "SearchOption": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
+      "SearchPriceRange": {
+        "properties": {
+          "max": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Equal to `min` when every price is the same."
+          },
+          "min": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ],
+        "type": "object"
+      },
+      "SearchResponse": {
+        "properties": {
+          "facets": {
+            "description": "The facets the merchant shows (or the defaults), counted over these results.",
+            "items": {
+              "$ref": "#/components/schemas/FacetResponse"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHitResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last. Opaque.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SearchPriceRange",
+                "description": "The lowest and highest price among the results, ignoring `price_min` and\n`price_max` (for a price slider); `null` when nothing matches."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "description": "Results over every page.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "facets",
+          "has_more"
         ],
         "type": "object"
       },
@@ -2786,6 +3008,199 @@
         "summary": "An active product; drafts and archived products read as missing.",
         "tags": [
           "products"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      }
+    },
+    "/storefront/search": {
+      "get": {
+        "operationId": "storefront.search.storefront_search",
+        "parameters": [
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Where the shopper is (ISO 3166-1 alpha-2): the market selling there prices and\nstocks the results.",
+            "in": "query",
+            "name": "country",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Words to find in titles, vendors, types, tags, SKUs, option values and\ndescriptions; each must start a word. Absent lists every product.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Repeatable `key:value`, key `option.<name>` (any case), `vendor`,\n`product_type` or `tag`: values of one key match any, different keys all.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Inclusive, in the market currency's minor units.",
+            "in": "query",
+            "name": "price_min",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "price_max",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only what can (`true`) or can't (`false`) be sold now.",
+            "in": "query",
+            "name": "available",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "description": "Known values: `relevance`, `newest`, `price_asc`, `price_desc`, `title`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "relevance",
+                "newest",
+                "price_asc",
+                "price_desc",
+                "title"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "description": "What one result stands for. Default `listing`.",
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "description": "Known values: `listing`, `product`, `variant`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "listing",
+                "product",
+                "variant"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Searches the products the shopper's market sells, priced and stocked there; without\n`q`, the market's product listing. Pages go at most 1,000 results deep.",
+        "tags": [
+          "search"
         ],
         "x-hypha-scopes": [
           "products:read"

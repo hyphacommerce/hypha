@@ -21,13 +21,13 @@ const CATALOG_PRODUCTS: &[&str] = &["catalog.products_added", "catalog.products_
 const VARIANT_PRICES: &[&str] = &["price_list.prices_set", "price_list.prices_removed"];
 const STOCK: &[&str] = &["inventory_item.changed", "inventory_item.deleted"];
 /// Rare and wide: which products a market sells, at what price, from where.
-const EVERYTHING: &[&str] = &[
-    "market.changed",
-    "catalog.changed",
-    "price_list.changed",
-    "location.changed",
+const EVERYTHING: &[&str] = &["market.changed", "catalog.changed", "price_list.changed"];
+/// Everything too, but only when the field named changed: a location's `markets` decide
+/// where its stock counts; the settings' `split_by` changes every listing key.
+const WHEN_FIELD: &[(&str, &str)] = &[
+    ("location.changed", "markets"),
+    ("search_settings.changed", "split_by"),
 ];
-const SETTINGS: &str = "search_settings.changed";
 
 impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
     fn name(&self) -> &'static str {
@@ -44,7 +44,7 @@ impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
         ]
         .iter()
         .any(|types| types.contains(&event_type))
-            || event_type == SETTINGS
+            || WHEN_FIELD.iter().any(|(t, _)| *t == event_type)
     }
 
     async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
@@ -91,12 +91,15 @@ pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
         parse("variant", |id| id.parse().ok().map(Target::Variant))
     } else if EVERYTHING.contains(&t) {
         Ok(vec![Target::All])
-    } else if t == SETTINGS {
-        // Facets are read when searching; only splits change documents.
-        let splits = event.data["fields"]
+    } else if let Some((_, field)) = WHEN_FIELD.iter().find(|(w, _)| *w == t) {
+        let fields = event.data["fields"]
             .as_array()
-            .is_some_and(|f| f.iter().any(|f| f == "split_by"));
-        Ok(if splits { vec![Target::All] } else { vec![] })
+            .ok_or_else(|| bad("fields"))?;
+        Ok(if fields.iter().any(|f| f == field) {
+            vec![Target::All]
+        } else {
+            vec![]
+        })
     } else {
         Ok(vec![])
     }

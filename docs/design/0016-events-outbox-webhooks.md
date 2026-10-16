@@ -173,6 +173,7 @@ Every payload names its subject (`product`, `catalog`, …) as a prefixed ID. As
 | `tax_class.changed`, `tax_region.changed` | (subject) | created; a region's rates changed |
 | `product.tax_class_set` | `tax_class` (`null`: the default rate) | tax-class assignment (staged), one per product |
 | `shipping_zone.changed` / `shipping_zone.deleted` | (subject) | any zone edit; deleting it |
+| `location.changed` (0019) | `location`, `fields` (`name`, `markets`, `priority`, `address`; all four when created) | any location edit |
 | `inventory_item.changed` | `variant`, `tracked`, `continue_selling`, `available` per location | counts, adjustments, reservations, settings; built from the item as written |
 | `order.placed` | `number`, `customer`, `total` | checkout |
 | `order.paid` | `amount` | `mark_order_paid` (a payment `reference` comes with payment spores, as a version 2) |

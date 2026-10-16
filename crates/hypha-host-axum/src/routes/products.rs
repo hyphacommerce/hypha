@@ -99,7 +99,7 @@ pub(super) struct ProductResponse {
 
 /// One item of a product's media list (design note 0014, section 7): what a page needs
 /// to render it. The asset's own route has the rest.
-#[derive(Serialize, utoipa::ToSchema)]
+#[derive(Clone, Serialize, utoipa::ToSchema)]
 pub(super) struct ProductMediaResponse {
     asset_id: AssetId,
     /// `image` or `video` today. More kinds (3D models) will come: show the ones you
@@ -120,6 +120,10 @@ pub(super) struct ProductMediaResponse {
 }
 
 impl ProductMediaResponse {
+    pub(super) fn asset_id(&self) -> AssetId {
+        self.asset_id
+    }
+
     async fn new(asset: &Asset, media: &Media) -> Result<Self, ApiError> {
         Ok(Self {
             asset_id: asset.id(),
@@ -139,7 +143,7 @@ impl ProductMediaResponse {
 
 /// The items for `assets`, in order. A deployment without file storage can still serve
 /// products without media; one with media needs it (`503 media_not_configured`).
-async fn media_items(
+pub(super) async fn media_items(
     assets: &[Asset],
     media: Option<&Media>,
 ) -> Result<Vec<ProductMediaResponse>, ApiError> {

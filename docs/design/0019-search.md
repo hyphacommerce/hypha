@@ -408,3 +408,30 @@ do: a storefront knows where the shopper is, not our market IDs.
 - Collections (manual and rule-based) as a filter and a listing source; a taxonomy.
 - Synonyms, stop words, pinning and boosting per query; search analytics.
 - Documents per language when translations exist; UCP catalog search over this index.
+
+## 13. As built (2026-10-16)
+
+Built on `feat/search` in section 10's order, with three refactors first (handlers as a
+trait, SE10; shared pricing and stock loaders; `Progress` in core) and the crate split
+(SE11). Steps 6 (admin settings screen) and 7 (Meilisearch) are still to do.
+
+- **Products** gained `description` (sanitised HTML, `ammonia`), `vendor`,
+  `product_type` and `tags` (migration 0033); `server.max_body` is at least 256 KiB so
+  a full description fits. The admin list filters by `q` (title, handle, SKU; `strpos`
+  on `lower()`, so `%` and `_` are plain text).
+- **Locations** record `location.changed` naming the fields that changed; search
+  rebuilds everything only when `markets` changed.
+- **The engine seam** is `Storage::search(&ports)`: the Postgres storage lends its
+  ports; Meilisearch will be held by the storage and chosen by configuration.
+- **Jobs:** `[jobs.search_sync]` (`enabled`, `interval` 2 s, `batch` 50, `lease` 2 min,
+  at least 10 s). An empty index at startup queues a full rebuild.
+- **Routes:** `GET /storefront/search` (`country`, `q`, repeatable `filter`,
+  `price_min`/`price_max`, `available`, `sort`, `group`, `limit`, `cursor`; the cursor
+  carries the offset and only continues the same query), `GET`/`PATCH
+  /admin/search/settings`, `GET /admin/search/status`, `POST /admin/search/reindex`
+  (202). Engine failures are `503 search_unavailable` with the cause only in the log.
+  List filters now parse with `serde_html_form`, so a repeated key fills a `Vec`.
+- **Tests:** the reference by hand (13), the engine contract (330 queries against the
+  reference) on memory and Postgres, the queue and settings contracts, command and
+  handler tests, route tests, and an e2e section.
+

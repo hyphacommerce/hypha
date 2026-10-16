@@ -10,6 +10,7 @@ use std::time::Duration;
 use hypha_auth::AuthSettings;
 use hypha_dispatch::DispatchSettings;
 use hypha_media::MediaSettings;
+use hypha_search::SyncSettings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -239,6 +240,7 @@ pub struct Jobs {
     pub dispatch: DispatchJob,
     pub prune: PruneJob,
     pub media_sweep: Job,
+    pub search_sync: SearchSyncJob,
 }
 
 impl Default for Jobs {
@@ -248,6 +250,7 @@ impl Default for Jobs {
             enabled: true,
             dispatch: DispatchJob::default(),
             prune: PruneJob::default(),
+            search_sync: SearchSyncJob::default(),
             media_sweep: Job {
                 enabled: true,
                 interval: hour,
@@ -294,6 +297,31 @@ impl Default for DispatchJob {
             interval: Dur(Duration::from_secs(2)),
             batch: d.batch,
             lease: Dur(d.lease),
+        }
+    }
+}
+
+/// Keeping search up to date (design note 0019): rebuilding the products events marked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct SearchSyncJob {
+    pub enabled: bool,
+    pub interval: Dur,
+    /// Products rebuilt per step, each in every market (1 to 1,000).
+    pub batch: u32,
+    /// How long a runner holds the products it took; past it, another may take them.
+    /// At least 10 seconds.
+    pub lease: Dur,
+}
+
+impl Default for SearchSyncJob {
+    fn default() -> Self {
+        let s = SyncSettings::default();
+        Self {
+            enabled: true,
+            interval: Dur(Duration::from_secs(2)),
+            batch: s.batch,
+            lease: Dur(s.lease),
         }
     }
 }

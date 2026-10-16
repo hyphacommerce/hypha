@@ -109,6 +109,17 @@ impl Cursor {
     }
 }
 
+/// A cursor that continues `scope`'s list after `after`, for lists that page by
+/// something other than their items' IDs (search pages by offset, design note 0019).
+pub(crate) fn cursor_at(scope: &ListScope, after: impl Display) -> Result<String, ApiError> {
+    Cursor {
+        v: Cursor::VERSION,
+        after: after.to_string(),
+        filters: scope.filters.clone(),
+    }
+    .encode()
+}
+
 /// The cursor of the page after `page`, when there are more.
 fn next_cursor<U, Id: Display>(
     page: &Page<U>,
@@ -238,8 +249,10 @@ impl<F: DeserializeOwned> ListQuery<F> {
             }
         };
         // Back into a query string, so the filters parse with the same rules as any query.
+        // `serde_html_form` collects a repeated key into a `Vec` field (search's `filter`)
+        // and refuses one repeated for a single value.
         let rest = serde_urlencoded::to_string(&filters).map_err(ApiError::internal)?;
-        let filters = serde_urlencoded::from_str(&rest).map_err(ApiError::invalid_query)?;
+        let filters = serde_html_form::from_str(&rest).map_err(ApiError::invalid_query)?;
         Ok((PageRequest { after, limit }, filters, scope))
     }
 }

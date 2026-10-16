@@ -1,4 +1,6 @@
-use hypha_core::{LocationId, MarketId, RepoError, stamp_insert, stamp_update};
+use hypha_core::{
+    LocationId, MarketId, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
+};
 use hypha_inventory::{Location, LocationRepo, repo::keys};
 
 use crate::{
@@ -47,13 +49,19 @@ impl LocationRepo for InMemoryLocationRepo {
 
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError> {
         stamp_insert(location, self.outbox.now());
+        let events = location.take_events();
         self.locations
-            .insert(location.id(), location, keys::LOCATION_ID, &no_unique_keys)
+            .insert(location.id(), location, keys::LOCATION_ID, &no_unique_keys)?;
+        self.outbox.write(events, Some(location.version()));
+        Ok(())
     }
 
     async fn update(&self, location: &mut Location) -> Result<(), RepoError> {
         stamp_update(location, self.outbox.now());
+        let events = location.take_events();
         self.locations
-            .update(location.id(), location, &no_unique_keys)
+            .update(location.id(), location, &no_unique_keys)?;
+        self.outbox.write(events, Some(location.version()));
+        Ok(())
     }
 }

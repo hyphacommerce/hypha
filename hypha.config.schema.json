@@ -41,6 +41,12 @@
           "idempotency_keys_after": "1d",
           "interval": "1h",
           "sessions_after": "30d"
+        },
+        "search_sync": {
+          "batch": 50,
+          "enabled": true,
+          "interval": "2s",
+          "lease": "2m"
         }
       }
     },
@@ -279,6 +285,15 @@
             "interval": "1h",
             "sessions_after": "30d"
           }
+        },
+        "search_sync": {
+          "$ref": "#/$defs/SearchSyncJob",
+          "default": {
+            "batch": 50,
+            "enabled": true,
+            "interval": "2s",
+            "lease": "2m"
+          }
         }
       },
       "additionalProperties": false
@@ -500,6 +515,33 @@
           "description": "`HYPHA_S3_REGION` wins.",
           "type": "string",
           "default": "auto"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SearchSyncJob": {
+      "description": "Keeping search up to date (design note 0019): rebuilding the products events marked.",
+      "type": "object",
+      "properties": {
+        "batch": {
+          "description": "Products rebuilt per step, each in every market (1 to 1,000).",
+          "type": "integer",
+          "format": "uint32",
+          "default": 50,
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "default": "2s"
+        },
+        "lease": {
+          "description": "How long a runner holds the products it took; past it, another may take them.\nAt least 10 seconds.",
+          "$ref": "#/$defs/Duration",
+          "default": "2m"
         }
       },
       "additionalProperties": false
