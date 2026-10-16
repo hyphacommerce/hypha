@@ -1,10 +1,11 @@
 # 0020: Sales channels
 
-- **Status:** Proposed (2026-10-16). Danilo raised sales channels after search (0019):
+- **Status:** Accepted (2026-10-16). Danilo raised sales channels after search (0019):
   per-product publishing as in Shopify, an Online Store channel now and an agentic
   channel later, built before the admin's store setup and the storefront. He agreed to
-  the shape in section 2 before the note was written (marked *Decided*); section 10
-  lists what's left.
+  the shape in section 2 before the note was written, then answered section 11: a leaf
+  crate, no deleting ("an empty channel is basically the same as deleted"), and the new
+  scopes (all marked *Decided*).
 - **Scope:** channels (where products are sold), publishing products to them,
   publishable keys belonging to a channel, storefront reads, carts and checkout honouring
   publication, orders recording their channel, channel-aware search, events, routes and
@@ -30,7 +31,7 @@
 | CH7 | **Orders record their channel** (copied from the cart), for reporting, for webhooks (`order.placed` gains it) and so agent-placed orders are told apart. *Hard to reverse* |
 | CH8 | **Search documents carry their product's channels**; storefront search filters by the caller's channel. One document per variant per market, as before, not per channel too. *Decided* |
 | CH9 | **"Online Store" exists from the start**: the migration creates it, gives it every existing publishable key and publishes every existing product to it, so nothing a storefront sees today disappears. New products are published deliberately (no automatic publishing), like Shopify. *Decided* |
-| CH10 | **New scopes `channels:read` and `channels:write`** for managing channels; publishing a product to a channel needs `products:write` (it's how a product is presented, like search settings). |
+| CH10 | **New scopes `channels:read` and `channels:write`** for managing channels; publishing a product to a channel needs `products:write` (it's how a product is presented, like search settings). *Decided* |
 
 ## 1. What others do
 
@@ -198,17 +199,18 @@ Each step ends green (fmt, clippy, tests, wasm, Postgres contract, e2e).
 
 ## 11. Open decisions
 
-**Q1. Where channels live.** *Recommended: A.*
+**Q1. Where channels live.** *Decided: A.*
 - **A. A new leaf crate, `hypha-channels`** (section 2): its own aggregate and
   membership; products, carts, search and auth reach it without depending on each other.
 - **B. Inside `hypha-stores`**, as store configuration: one crate less, but publications
   are product data that grows with the catalog, unlike the store's own record.
 
-**Q2. Deleting channels.** *Recommended: not in this note.* Renaming only; a channel
+**Q2. Deleting channels.** *Decided: not in this note.* Danilo: an empty channel is as
+good as deleted. Renaming only; a channel
 with keys, carts or orders can't simply vanish. Archiving (keys stop working, products
 stay published for history) comes when someone needs it.
 
-**Q3. The scopes.** *Recommended: `channels:read` / `channels:write` (CH10).* The
+**Q3. The scopes.** *Decided: `channels:read` / `channels:write` (CH10).* The
 alternative folds channel management into `stores:write`; separate scopes let an app
 (an agentic adapter, a marketplace connector) manage its channel without editing the
 store.
