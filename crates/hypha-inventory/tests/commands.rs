@@ -2,10 +2,11 @@ use hypha_core::{
     Actor, AuthError, Ctx, InventoryItemId, LocationId, MarketId, Scope, UserId, VariantId,
 };
 use hypha_inventory::{
-    AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, InventoryError, InventoryItem,
-    InventoryItemRepo, Location, LocationRepo, SetOnHand, UpdateInventoryItem, UpdateLocation,
-    adjust_on_hand, create_inventory_item, create_location, get_inventory_item,
-    get_variant_inventory, set_on_hand, update_inventory_item, update_location,
+    AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, DEFAULT_LOCATION_NAME,
+    InventoryError, InventoryItem, InventoryItemRepo, Location, LocationRepo, SetOnHand,
+    UpdateInventoryItem, UpdateLocation, adjust_on_hand, create_inventory_item, create_location,
+    ensure_default_location, get_inventory_item, get_variant_inventory, list_locations,
+    set_on_hand, update_inventory_item, update_location,
 };
 use hypha_testkit::{InMemoryInventoryItemRepo, InMemoryLocationRepo, SequentialIds};
 use pollster::block_on;
@@ -408,6 +409,54 @@ fn stock_writes_require_write_scope() {
         )),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::InventoryWrite
+        )))
+    );
+}
+
+#[test]
+fn a_store_without_locations_gets_a_default_one() {
+    let world = World::new();
+    let created = block_on(ensure_default_location(
+        &Ctx::system(),
+        &world.locations,
+        &world.ids,
+    ))
+    .unwrap()
+    .unwrap();
+    assert_eq!(created.name(), DEFAULT_LOCATION_NAME);
+    assert!(created.markets().is_empty());
+    assert_eq!(
+        block_on(list_locations(&reader(), &world.locations)),
+        Ok(vec![created])
+    );
+}
+
+#[test]
+fn a_store_with_a_location_gets_no_default() {
+    let world = World::new();
+    world.create_location("Zagreb", vec![market(1)]).unwrap();
+    assert_eq!(
+        block_on(ensure_default_location(
+            &Ctx::system(),
+            &world.locations,
+            &world.ids
+        )),
+        Ok(None)
+    );
+    assert_eq!(block_on(world.locations.list()).unwrap().len(), 1);
+}
+
+#[test]
+fn listing_locations_needs_inventory_read() {
+    let world = World::new();
+    let ctx = Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
+        vec![Scope::OrdersRead],
+    );
+    assert_eq!(
+        block_on(list_locations(&ctx, &world.locations)),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::InventoryRead
         )))
     );
 }

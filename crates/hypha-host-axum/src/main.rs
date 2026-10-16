@@ -19,6 +19,7 @@ use tracing_subscriber::EnvFilter;
 
 use hypha_config::Config;
 use hypha_core::Ctx;
+use hypha_inventory::{HasLocations, ensure_default_location};
 use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
@@ -214,6 +215,23 @@ async fn ensure_owner<S: Storage>(state: &AppState<S>) -> Result<(), String> {
     Ok(())
 }
 
+/// A store with no location gets "Default", so it can fulfil orders before it sets up
+/// stock (design note 0018).
+async fn ensure_location<S: Storage>(state: &AppState<S>) -> Result<(), String> {
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "cannot reach storage")?;
+    match ensure_default_location(&Ctx::system(), ports.locations(), &state.ids).await {
+        Ok(Some(location)) => {
+            tracing::info!(location = %location.id(), "created the default location")
+        }
+        Ok(None) => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    Ok(())
+}
+
 async fn serve<S: Storage>(
     router: Router<SharedState<S>>,
     storage: S,
@@ -309,6 +327,10 @@ async fn serve<S: Storage>(
     });
     if let Err(e) = ensure_owner(&state).await {
         tracing::error!("owner setup failed: {e}");
+        std::process::exit(1);
+    }
+    if let Err(e) = ensure_location(&state).await {
+        tracing::error!("location setup failed: {e}");
         std::process::exit(1);
     }
     tracing::warn!("emails (invites, password resets) are logged, not sent: development only");

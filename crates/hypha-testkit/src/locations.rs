@@ -39,6 +39,12 @@ impl LocationRepo for InMemoryLocationRepo {
         Ok(serving)
     }
 
+    async fn list(&self) -> Result<Vec<Location>, RepoError> {
+        let mut all = self.locations.all();
+        all.sort_by_key(|l| (l.priority(), l.id().as_uuid()));
+        Ok(all)
+    }
+
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError> {
         stamp_insert(location, self.outbox.now());
         self.locations

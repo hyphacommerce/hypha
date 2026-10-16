@@ -50,6 +50,20 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
         })
     }
 
+    async fn list(&self) -> Result<Vec<Location>, RepoError> {
+        let mut conn = self.conn().await;
+        consistent_read!(conn.client(), |tx| {
+            let ids: Vec<Uuid> = tx
+                .query_typed("SELECT id FROM locations", &[])
+                .await
+                .map_err(repo_error)?
+                .iter()
+                .map(|r| col(r, "id"))
+                .collect::<Result<_, RepoError>>()?;
+            load_locations(tx, &ids).await
+        })
+    }
+
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError> {
         stamp_insert(location, self.now());
         let s = location.snapshot();

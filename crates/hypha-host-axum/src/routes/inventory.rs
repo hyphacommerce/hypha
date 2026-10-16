@@ -9,7 +9,7 @@ use hypha_inventory::{
     AdjustOnHand, CreateInventoryItem, CreateLocation, HasInventoryItems, HasLocations,
     InventoryItem, Location, SetOnHand, UpdateInventoryItem, UpdateLocation, adjust_on_hand,
     create_inventory_item, create_location, get_inventory_item, get_location,
-    get_variant_inventory, set_on_hand, update_inventory_item, update_location,
+    get_variant_inventory, list_locations, set_on_hand, update_inventory_item, update_location,
 };
 use serde::{Deserialize, Serialize};
 
@@ -101,6 +101,30 @@ pub(super) async fn create_location_handler<S: Storage>(
     };
     let location = create_location(&ctx, ports.locations(), &state.ids, input).await?;
     Ok((StatusCode::CREATED, Json(LocationResponse::from(&location))))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct LocationList {
+    /// By priority, then ID.
+    items: Vec<LocationResponse>,
+}
+
+/// Every stock location. A store starts with one, "Default", serving no market.
+#[utoipa::path(
+    get,
+    path = "/admin/locations",
+    responses((status = 200, description = "OK", body = LocationList)),
+    extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
+)]
+pub(super) async fn list_locations_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<LocationList>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let locations = list_locations(&ctx, ports.locations()).await?;
+    Ok(Json(LocationList {
+        items: locations.iter().map(LocationResponse::from).collect(),
+    }))
 }
 
 /// A stock location.

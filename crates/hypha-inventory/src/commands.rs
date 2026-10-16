@@ -86,6 +86,40 @@ pub async fn create_location<L: LocationRepo, I: IdGenerator>(
     Ok(location)
 }
 
+/// Every location, by priority (then ID).
+pub async fn list_locations<L: LocationRepo>(
+    ctx: &Ctx,
+    locations: &L,
+) -> Result<Vec<Location>, CommandError> {
+    ctx.require(Scope::InventoryRead)?;
+    Ok(locations.list().await?)
+}
+
+/// The name a store's first location gets.
+pub const DEFAULT_LOCATION_NAME: &str = "Default";
+
+/// Creates a location named `DEFAULT_LOCATION_NAME`, serving no market yet, if the store
+/// has none (design note 0018): a fulfilment leaves from a location, so a store that
+/// never set up stock can ship too. Hosts call it at startup, as the system; returns the
+/// new location, or `None` when there was one already. Two instances starting at once
+/// may each create one; the merchant renames or keeps both.
+pub async fn ensure_default_location<L: LocationRepo, I: IdGenerator>(
+    ctx: &Ctx,
+    locations: &L,
+    ids: &I,
+) -> Result<Option<Location>, CommandError> {
+    ctx.require(Scope::InventoryWrite)?;
+    if !locations.list().await?.is_empty() {
+        return Ok(None);
+    }
+    let input = CreateLocation {
+        name: DEFAULT_LOCATION_NAME.to_string(),
+        markets: Vec::new(),
+        priority: 0,
+    };
+    create_location(ctx, locations, ids, input).await.map(Some)
+}
+
 pub async fn get_location<L: LocationRepo>(
     ctx: &Ctx,
     locations: &L,

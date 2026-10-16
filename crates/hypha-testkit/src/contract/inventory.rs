@@ -62,6 +62,8 @@ pub async fn location_repo<R: LocationRepo>(make: impl AsyncFn() -> R) {
     location_stale(&make().await).await;
     scenario("location: serving lists a market's locations by priority, then ID");
     location_serving(&make().await).await;
+    scenario("location: list has every location by priority, then ID");
+    location_list(&make().await).await;
     scenario("location: an address round trips, every field, and can be removed");
     location_address(&make().await).await;
 }
@@ -136,6 +138,18 @@ async fn location_serving<R: LocationRepo>(repo: &R) {
     );
     assert_eq!(repo.serving(market(2)).await, Ok(vec![near, elsewhere]));
     assert_eq!(repo.serving(market(9)).await, Ok(vec![]));
+}
+
+async fn location_list<R: LocationRepo>(repo: &R) {
+    assert_eq!(repo.list().await, Ok(vec![]));
+    // One serving no market, and a tie on priority.
+    let mut nowhere = location(1, &[], 9);
+    let mut tie_b = location(3, &[1], 0);
+    let mut tie_a = location(2, &[2], 0);
+    for l in [&mut nowhere, &mut tie_b, &mut tie_a] {
+        repo.insert(l).await.unwrap();
+    }
+    assert_eq!(repo.list().await, Ok(vec![tie_a, tie_b, nowhere]));
 }
 
 // ---------- items ----------

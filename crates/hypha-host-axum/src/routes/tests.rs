@@ -174,6 +174,14 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
     bootstrap_owner(&Ctx::system(), &ports, &state.env, owner)
         .await
         .unwrap();
+    // As `serve` does at startup.
+    hypha_inventory::ensure_default_location(
+        &Ctx::system(),
+        hypha_inventory::HasLocations::locations(&ports),
+        &UuidV7Ids,
+    )
+    .await
+    .unwrap();
     let input = CreateApiKey {
         kind: ApiKeyKind::Secret,
         name: "Tests".to_string(),
@@ -3021,4 +3029,15 @@ async fn a_retried_fulfilment_replays_the_first() {
     assert_eq!(again["id"], first["id"]);
     let (_, json) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
     assert_eq!(json["lines"][0]["fulfilled_quantity"], 1);
+}
+
+#[tokio::test]
+async fn a_store_starts_with_a_default_location() {
+    let app = app().await;
+    let (status, json) = send(&app, "GET", "/admin/locations", None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let items = json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "Default");
+    assert_eq!(items[0]["markets"], json!([]));
 }

@@ -34,6 +34,12 @@
 | FU8 | **Order actions are `POST` sub-resources**: `POST /admin/orders/{id}/fulfillments`, `POST /admin/orders/{id}/cancel`, as `POST …/paid` already is. Settles 0007 §10's question. *Hard to reverse* |
 | FU9 | **New scopes `fulfillments:read` and `fulfillments:write`**, apart from `orders:write`, so a shipping app can record shipments without editing or cancelling orders (Shopify does the same). Cancelling an order needs `orders:write` (Q4, *Decided*) |
 
+*Decided while building (2026-10-16), FU10:* **every store has a location.** A
+fulfilment names one, so on first start the host creates "Default" (serving no market,
+like a store that hasn't set up stock) when there is none, as Shopify stores always
+have one (`ensure_default_location` in `hypha-inventory`, called next to the owner's
+setup). `GET /admin/locations` lists them for the fulfil dialog.
+
 ## 1. What others do
 
 **Shopify** ([`FulfillmentOrder`](https://shopify.dev/docs/api/admin-graphql/latest/objects/FulfillmentOrder), [`Fulfillment`](https://shopify.dev/docs/api/admin-graphql/latest/objects/Fulfillment), [`orderCancel`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/orderCancel))

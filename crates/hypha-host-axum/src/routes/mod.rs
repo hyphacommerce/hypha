@@ -179,6 +179,7 @@ macro_rules! route_table {
             [admin, POST, "/admin/apps/{key}/deliveries/{id}/retry", apps::retry],
             [admin, GET, "/admin/events/{id}", apps::event],
             // inventory
+            [admin, GET, "/admin/locations", inventory::list_locations_handler],
             [admin, POST, "/admin/locations", inventory::create_location_handler],
             [admin, GET, "/admin/locations/{id}", inventory::fetch_location],
             [admin, PATCH, "/admin/locations/{id}", inventory::update_location_handler],

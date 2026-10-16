@@ -638,7 +638,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Every stock location. A store starts with one, "Default", serving no market. */
+        get: operations["admin.inventory.list_locations"];
         put?: never;
         /** Creates a stock location. */
         post: operations["admin.inventory.create_location"];
@@ -2181,6 +2182,10 @@ export interface components {
          * @example loc_0190f1a2b3c47d8e9f00112233445566
          */
         LocationId: string;
+        LocationList: {
+            /** @description By priority, then ID. */
+            items: components["schemas"]["LocationResponse"][];
+        };
         LocationResponse: {
             address?: components["schemas"]["PostalAddressResponse"] | null;
             id: components["schemas"]["LocationId"];
@@ -6909,6 +6914,53 @@ export interface operations {
             };
             /** @description Over a rate limit (`rate_limited`); see `Retry-After` */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.inventory.list_locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocationList"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

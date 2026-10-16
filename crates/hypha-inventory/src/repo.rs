@@ -14,6 +14,8 @@ pub trait LocationRepo {
     async fn get(&self, id: LocationId) -> Result<Option<Location>, RepoError>;
     /// The locations whose stock counts for `market`, by priority (then ID).
     async fn serving(&self, market: MarketId) -> Result<Vec<Location>, RepoError>;
+    /// Every location, by priority (then ID). A store has a handful.
+    async fn list(&self) -> Result<Vec<Location>, RepoError>;
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError>;
     async fn update(&self, location: &mut Location) -> Result<(), RepoError>;
 }

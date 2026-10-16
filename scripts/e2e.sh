@@ -560,6 +560,8 @@ step "remove it again" 404 line_not_found -X DELETE "$BASE/storefront/carts/$STO
 step "lower warehouse priority" 200 - -X PATCH "$BASE/admin/locations/$WAREHOUSE" -H "$JSON" -d '{"priority":5}'
 contains "priority is stored" '"priority":5'
 step "get warehouse" 200 - "$BASE/admin/locations/$WAREHOUSE"
+step "list locations" 200 - "$BASE/admin/locations"
+contains "the store started with a default one" '"name":"Default"'
 
 echo "## customers"
 step "create customer" 201 - -X POST "$BASE/admin/customers" -H "$JSON" \

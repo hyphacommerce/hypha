@@ -2201,6 +2201,21 @@
         "pattern": "^loc_[0-9a-f]{32}$",
         "type": "string"
       },
+      "LocationList": {
+        "properties": {
+          "items": {
+            "description": "By priority, then ID.",
+            "items": {
+              "$ref": "#/components/schemas/LocationResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "LocationResponse": {
         "properties": {
           "address": {
@@ -9771,6 +9786,63 @@
       }
     },
     "/admin/locations": {
+      "get": {
+        "operationId": "admin.inventory.list_locations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every stock location. A store starts with one, \"Default\", serving no market.",
+        "tags": [
+          "inventory"
+        ],
+        "x-hypha-scopes": [
+          "inventory:read"
+        ]
+      },
       "post": {
         "operationId": "admin.inventory.create_location",
         "requestBody": {
