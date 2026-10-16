@@ -476,6 +476,9 @@ default facets):
 | 50,000 | ~190 ms | 7–145 ms |
 | 200,000 | ~0.75 s (was 5 s) | 5–180 ms; full-market filters up to ~0.5 s |
 
+A full rebuild of 1,000 products (`POST /admin/search/reindex`) takes ~1.5 s: a step
+that expands a full rebuild says there's more, so the job doesn't wait its interval.
+
 **Guidance:** the built-in engine serves a market of up to about 50,000 variant
 documents well. Past that, counting distinct listings over every matching row is the
 floor in SQL; that's what step 7's Meilisearch engine is for.

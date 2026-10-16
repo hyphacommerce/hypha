@@ -462,6 +462,20 @@ fn changing_only_the_facets_rebuilds_nothing() {
 }
 
 #[test]
+fn a_full_rebuild_says_there_is_more_to_do_at_once() {
+    let w = World::new();
+    w.settle();
+    block_on(reindex(&Ctx::system(), &w.ports)).unwrap();
+    let synced = block_on(sync(&w.ports, &w.index, &w.clock, &SyncSettings::default())).unwrap();
+    assert_eq!((synced.progress.done, synced.progress.more), (1, true));
+    assert_eq!(
+        w.ports.search_queue.targets().len(),
+        3,
+        "every product queued"
+    );
+}
+
+#[test]
 fn reindex_queues_everything_and_status_counts() {
     let w = World::new();
     w.settle();

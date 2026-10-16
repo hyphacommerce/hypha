@@ -113,7 +113,7 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
         .search_queue()
         .lease(now, now.plus(settings.lease), settings.batch)
         .await?;
-    let progress = Progress::of(marks.len() as u32, settings.batch);
+    let mut progress = Progress::of(marks.len() as u32, settings.batch);
     if marks.is_empty() {
         return Ok(Synced {
             progress,
@@ -129,6 +129,8 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
             Target::All => {
                 queue_every_product(ports).await?;
                 finished.push(*mark);
+                // It just queued every product: carry on without waiting the interval.
+                progress.more = true;
             }
             Target::Product(id) => {
                 products.insert(id);
