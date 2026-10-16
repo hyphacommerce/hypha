@@ -48,6 +48,22 @@ pub async fn tax_class_repo<R: TaxClassRepo>(make: impl AsyncFn() -> R) {
     class_keys(&make().await).await;
     scenario("tax class: products are assigned, moved and queried in batches");
     class_assignments(&make().await).await;
+    scenario("tax class: list_all returns every class, oldest first");
+    class_list_all(&make().await).await;
+}
+
+async fn class_list_all<R: TaxClassRepo>(repo: &R) {
+    assert_eq!(repo.list_all().await, Ok(vec![]));
+    for n in [2, 1] {
+        repo.insert(&mut class(n)).await.unwrap();
+    }
+    assert_eq!(
+        repo.list_all().await,
+        Ok(vec![
+            repo.get(class_id(1)).await.unwrap().unwrap(),
+            repo.get(class_id(2)).await.unwrap().unwrap(),
+        ])
+    );
 }
 
 async fn class_round_trips<R: TaxClassRepo>(repo: &R) {
@@ -103,6 +119,23 @@ pub async fn tax_region_repo<R: TaxRegionRepo>(make: impl AsyncFn() -> R) {
     region_stale(&make().await).await;
     scenario("tax region: countries stay unique on update");
     region_country_on_update(&make().await).await;
+    scenario("tax region: list_all returns every region with its rates, oldest first");
+    region_list_all(&make().await).await;
+}
+
+async fn region_list_all<R: TaxRegionRepo>(repo: &R) {
+    assert_eq!(repo.list_all().await, Ok(vec![]));
+    let mut hr = region(2, "HR");
+    hr.set_class_rate(class_id(7), rate(50_000));
+    repo.insert(&mut hr).await.unwrap();
+    repo.insert(&mut region(1, "DE")).await.unwrap();
+    assert_eq!(
+        repo.list_all().await,
+        Ok(vec![
+            repo.get(region_id(1)).await.unwrap().unwrap(),
+            repo.get(region_id(2)).await.unwrap().unwrap(),
+        ])
+    );
 }
 
 async fn region_round_trips<R: TaxRegionRepo>(repo: &R) {

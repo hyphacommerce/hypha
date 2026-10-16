@@ -48,6 +48,32 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
         .map_err(|e| corrupt(format!("tax class {id}: {e}")))
     }
 
+    async fn list_all(&self) -> Result<Vec<TaxClass>, RepoError> {
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                &format!(
+                    "SELECT id, version, name, {} FROM tax_classes ORDER BY id",
+                    stamp_columns(""),
+                ),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter()
+            .map(|row| {
+                TaxClass::restore(TaxClassSnapshot {
+                    id: TaxClassId::from_uuid(col(row, "id")?),
+                    version: version_from_db(col(row, "version")?)?,
+                    stamps: stamps_from_row(row)?,
+                    name: col(row, "name")?,
+                })
+                .map_err(corrupt)
+            })
+            .collect()
+    }
+
     async fn insert(&self, class: &mut TaxClass) -> Result<(), RepoError> {
         stamp_insert(class, self.now());
         let s = class.snapshot();
@@ -166,6 +192,11 @@ impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
         consistent_read!(conn.client(), |tx| {
             load_region(tx, "country = $1", country.as_str(), Type::TEXT).await
         })
+    }
+
+    async fn list_all(&self) -> Result<Vec<TaxRegion>, RepoError> {
+        let mut conn = self.conn().await;
+        consistent_read!(conn.client(), |tx| load_regions(tx, "TRUE", &[]).await)
     }
 
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
@@ -298,46 +329,66 @@ async fn load_region<T: tokio_postgres::types::ToSql + Sync>(
     value: T,
     value_type: Type,
 ) -> Result<Option<TaxRegion>, RepoError> {
-    let Some(row) = client
-        .query_typed_opt(
+    Ok(load_regions(client, filter, &[(&value, value_type)])
+        .await?
+        .pop())
+}
+
+/// The regions `filter` keeps, oldest first, each with its class rates: two queries
+/// however many there are.
+async fn load_regions(
+    client: &impl GenericClient,
+    filter: &'static str,
+    params: &[(&(dyn tokio_postgres::types::ToSql + Sync), Type)],
+) -> Result<Vec<TaxRegion>, RepoError> {
+    let rows = client
+        .query_typed(
             &format!(
-                "SELECT id, version, country, default_rate, {} FROM tax_regions WHERE {filter}",
+                "SELECT id, version, country, default_rate, {} FROM tax_regions WHERE {filter}
+                 ORDER BY id",
                 stamp_columns(""),
             ),
-            &[(&value, value_type)],
+            params,
         )
         .await
-        .map_err(repo_error)?
-    else {
-        return Ok(None);
-    };
-    let id: Uuid = col(&row, "id")?;
-    let class_rates = client
-        .query_typed(
-            "SELECT tax_class_id, rate FROM tax_region_class_rates
-             WHERE tax_region_id = $1 ORDER BY position",
-            &[(&id, Type::UUID)],
-        )
-        .await
-        .map_err(repo_error)?
+        .map_err(repo_error)?;
+    let ids = rows
         .iter()
-        .map(|r| {
-            Ok(ClassRate {
-                class: TaxClassId::from_uuid(col(r, "tax_class_id")?),
-                rate: tax_rate_from_db(col(r, "rate")?)?,
-            })
+        .map(|row| col::<Uuid>(row, "id"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut rates: HashMap<Uuid, Vec<ClassRate>> = HashMap::new();
+    if !ids.is_empty() {
+        for r in client
+            .query_typed(
+                "SELECT tax_region_id, tax_class_id, rate FROM tax_region_class_rates
+                 WHERE tax_region_id = ANY($1) ORDER BY tax_region_id, position",
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?
+        {
+            rates
+                .entry(col(&r, "tax_region_id")?)
+                .or_default()
+                .push(ClassRate {
+                    class: TaxClassId::from_uuid(col(&r, "tax_class_id")?),
+                    rate: tax_rate_from_db(col(&r, "rate")?)?,
+                });
+        }
+    }
+    rows.iter()
+        .map(|row| {
+            let id: Uuid = col(row, "id")?;
+            let country: String = col(row, "country")?;
+            let snapshot = TaxRegionSnapshot {
+                id: TaxRegionId::from_uuid(id),
+                version: version_from_db(col(row, "version")?)?,
+                stamps: stamps_from_row(row)?,
+                country: CountryCode::new(&country).map_err(corrupt)?,
+                default_rate: tax_rate_from_db(col(row, "default_rate")?)?,
+                class_rates: rates.remove(&id).unwrap_or_default(),
+            };
+            TaxRegion::restore(snapshot).map_err(|e| corrupt(format!("tax region {id}: {e}")))
         })
-        .collect::<Result<Vec<_>, RepoError>>()?;
-    let country: String = col(&row, "country")?;
-    let snapshot = TaxRegionSnapshot {
-        id: TaxRegionId::from_uuid(id),
-        version: version_from_db(col(&row, "version")?)?,
-        stamps: stamps_from_row(&row)?,
-        country: CountryCode::new(&country).map_err(corrupt)?,
-        default_rate: tax_rate_from_db(col(&row, "default_rate")?)?,
-        class_rates,
-    };
-    TaxRegion::restore(snapshot)
-        .map(Some)
-        .map_err(|e| corrupt(format!("tax region {id}: {e}")))
+        .collect()
 }

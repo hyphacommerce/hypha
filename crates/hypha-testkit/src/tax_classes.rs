@@ -43,6 +43,10 @@ impl TaxClassRepo for InMemoryTaxClassRepo {
         Ok(self.classes.get(&id))
     }
 
+    async fn list_all(&self) -> Result<Vec<TaxClass>, RepoError> {
+        Ok(self.classes.all_oldest_first())
+    }
+
     async fn insert(&self, class: &mut TaxClass) -> Result<(), RepoError> {
         stamp_insert(class, self.outbox.now());
         let events = class.take_events();

@@ -1,13 +1,14 @@
 use hypha_core::{
     AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, ErrorCode,
-    HasBatch, IdGenerator, MarketId, Money, MoneyError, PendingEvent, Price, PriceListId,
-    ProductId, RepoError, Scope, StageEvents, Subject, VariantId, report_duplicate,
+    HasBatch, IdGenerator, MarketId, Money, MoneyError, Page, PageRequest, PendingEvent, Price,
+    PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, VariantId, report_duplicate,
 };
 use thiserror::Error;
 
 use crate::{
-    Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasPriceLists, Market, MarketError,
-    MarketRepo, PriceList, PriceListError, PriceListRepo, StageCatalogProducts, StageFixedPrices,
+    Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market,
+    MarketError, MarketRepo, PriceList, PriceListError, PriceListRepo, StageCatalogProducts,
+    StageFixedPrices,
     events::{
         CATALOG, CatalogProductsAdded, CatalogProductsRemoved, PRICE_LIST, PricesRemoved, PricesSet,
     },
@@ -442,4 +443,114 @@ where
     };
     batch.record_events(vec![PendingEvent::new(catalog_subject(catalog_id), &event)]);
     Ok(ports.commit(batch).await?)
+}
+
+// ---------- reads (design note 0021, SU3) ----------
+
+/// A market as the admin reads it: the market and the ID of its catalog, if it has one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketView {
+    pub market: Market,
+    pub catalog: Option<CatalogId>,
+}
+
+/// Every market, oldest first, each with its catalog.
+pub async fn list_markets<S: HasMarkets + HasCatalogs>(
+    ctx: &Ctx,
+    ports: &S,
+) -> Result<Vec<MarketView>, CommandError> {
+    ctx.require(Scope::MarketsRead)?;
+    let markets = ports.markets().list_all().await?;
+    let catalogs = ports.catalogs().list_all().await?;
+    Ok(markets
+        .into_iter()
+        .map(|market| {
+            let catalog = catalogs
+                .iter()
+                .find(|c| c.context() == CatalogContext::Market(market.id()))
+                .map(|c| c.id());
+            MarketView { market, catalog }
+        })
+        .collect())
+}
+
+pub async fn get_market<S: HasMarkets + HasCatalogs>(
+    ctx: &Ctx,
+    ports: &S,
+    id: MarketId,
+) -> Result<MarketView, CommandError> {
+    ctx.require(Scope::MarketsRead)?;
+    let market = ports
+        .markets()
+        .get(id)
+        .await?
+        .ok_or(CommandError::MarketNotFound(id))?;
+    let catalog = ports
+        .catalogs()
+        .get_by_context(CatalogContext::Market(id))
+        .await?
+        .map(|c| c.id());
+    Ok(MarketView { market, catalog })
+}
+
+pub async fn get_catalog<C: CatalogRepo>(
+    ctx: &Ctx,
+    catalogs: &C,
+    id: CatalogId,
+) -> Result<Catalog, CommandError> {
+    ctx.require(Scope::MarketsRead)?;
+    catalogs
+        .get(id)
+        .await?
+        .ok_or(CommandError::CatalogNotFound(id))
+}
+
+/// A page of the catalog's products, newest first. Only IDs: markets is a leaf and
+/// doesn't know products; callers load them.
+pub async fn list_catalog_products<C: CatalogRepo>(
+    ctx: &Ctx,
+    catalogs: &C,
+    id: CatalogId,
+    page: PageRequest<ProductId>,
+) -> Result<Page<ProductId>, CommandError> {
+    ctx.require(Scope::MarketsRead)?;
+    if catalogs.get(id).await?.is_none() {
+        return Err(CommandError::CatalogNotFound(id));
+    }
+    Ok(catalogs.product_page(id, page).await?)
+}
+
+/// Every price list, oldest first.
+pub async fn list_price_lists<P: PriceListRepo>(
+    ctx: &Ctx,
+    lists: &P,
+) -> Result<Vec<PriceList>, CommandError> {
+    ctx.require(Scope::PricingRead)?;
+    Ok(lists.list_all().await?)
+}
+
+pub async fn get_price_list<P: PriceListRepo>(
+    ctx: &Ctx,
+    lists: &P,
+    id: PriceListId,
+) -> Result<PriceList, CommandError> {
+    ctx.require(Scope::PricingRead)?;
+    lists
+        .get(id)
+        .await?
+        .ok_or(CommandError::PriceListNotFound(id))
+}
+
+/// A page of the list's fixed prices, newest variant first.
+pub async fn list_fixed_prices<P: PriceListRepo>(
+    ctx: &Ctx,
+    lists: &P,
+    id: PriceListId,
+    page: PageRequest<VariantId>,
+) -> Result<Page<(VariantId, Price)>, CommandError> {
+    ctx.require(Scope::PricingRead)?;
+    if lists.get(id).await?.is_none() {
+        return Err(CommandError::PriceListNotFound(id));
+    }
+    Ok(lists.fixed_price_page(id, page).await?)
 }

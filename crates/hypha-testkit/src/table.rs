@@ -111,6 +111,21 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         Page::from_overfetch(fetched, page.limit)
     }
 
+    /// Every row, oldest first by key (UUIDv7 IDs sort by creation time): what a
+    /// database's `ORDER BY id` returns. Hidden like `all`.
+    pub(crate) fn all_oldest_first(&self) -> Vec<T>
+    where
+        K: Ord,
+    {
+        if self.hiding() {
+            return Vec::new();
+        }
+        let rows = self.rows.lock().unwrap();
+        let mut found: Vec<(&K, &T)> = rows.iter().collect();
+        found.sort_unstable_by_key(|(key, _)| *key);
+        found.into_iter().map(|(_, row)| row.clone()).collect()
+    }
+
     pub(crate) fn all(&self) -> Vec<T> {
         if self.hiding() {
             return Vec::new();
@@ -227,6 +242,20 @@ pub(crate) fn missing(what: &str, id: impl std::fmt::Display) -> RepoError {
 /// For tables with no unique keys besides the ID.
 pub(crate) fn no_unique_keys<T>(_: &T, _: &T) -> Option<&'static str> {
     None
+}
+
+/// A page of `(key, value)` pairs stored apart from their table (membership, fixed
+/// prices), newest first by key below `page.after`: `Table::page` for a plain map.
+pub(crate) fn page_of<K: Ord + Copy, V: Clone>(
+    entries: impl Iterator<Item = (K, V)>,
+    page: PageRequest<K>,
+) -> Page<(K, V)> {
+    let mut found: Vec<(K, V)> = entries
+        .filter(|(key, _)| page.after.is_none_or(|after| *key < after))
+        .collect();
+    found.sort_unstable_by(|(a, _), (b, _)| b.cmp(a));
+    found.truncate(page.limit.get() as usize + 1);
+    Page::from_overfetch(found, page.limit)
 }
 
 #[cfg(test)]

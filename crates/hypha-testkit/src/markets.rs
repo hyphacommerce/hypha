@@ -53,7 +53,7 @@ impl MarketRepo for InMemoryMarketRepo {
     }
 
     async fn list_all(&self) -> Result<Vec<Market>, RepoError> {
-        Ok(self.markets.all())
+        Ok(self.markets.all_oldest_first())
     }
 
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError> {

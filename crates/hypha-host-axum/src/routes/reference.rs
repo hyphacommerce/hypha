@@ -2,7 +2,7 @@
 //! them. Anyone with admin credentials may read them; they hold nothing about the store.
 
 use axum::{Json, extract::State};
-use hypha_core::Currency;
+use hypha_core::{CountryCode, Currency};
 use serde::Serialize;
 
 use crate::{
@@ -47,6 +47,42 @@ pub(super) async fn currencies<S: Storage>(
                 code,
                 name: code.name(),
                 minor_units: code.minor_units(),
+            })
+            .collect(),
+    }))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct CountryResponse {
+    code: CountryCode,
+    /// The English name ("South Korea"). UIs show their own language's name
+    /// (`Intl.DisplayNames`) and fall back to this.
+    name: &'static str,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct CountryListResponse {
+    /// Sorted by code: the assigned ISO 3166-1 codes, so it comes in one response.
+    items: Vec<CountryResponse>,
+}
+
+/// Every country a market, address or tax region can name.
+#[utoipa::path(
+    get,
+    path = "/admin/countries",
+    responses((status = 200, description = "OK", body = CountryListResponse)),
+    extensions(("x-hypha-scopes" = json!([]))),
+)]
+pub(super) async fn countries<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<CountryListResponse>, ApiError> {
+    caller.authenticate(&state).await?;
+    Ok(Json(CountryListResponse {
+        items: CountryCode::all()
+            .map(|code| CountryResponse {
+                code,
+                name: code.name(),
             })
             .collect(),
     }))

@@ -482,6 +482,99 @@ async fn markets_take_any_iso_currency_but_only_assigned_countries() {
     );
 }
 
+#[tokio::test]
+async fn the_admin_reads_its_whole_setup() {
+    let app = app().await;
+    let product = create_product(&app, "setup-mug").await;
+    let body = r#"{"name":"Eurozone","countries":["HR","DE"],"currency":"EUR"}"#;
+    let (_, market) = send(&app, "POST", "/admin/markets", Some(body)).await;
+    assert_eq!(market["catalog"], Value::Null);
+    let market_id = market["id"].as_str().unwrap();
+    let body = format!(r#"{{"market":"{market_id}"}}"#);
+    let (_, catalog) = send(&app, "POST", "/admin/catalogs", Some(&body)).await;
+    let catalog_id = catalog["id"].as_str().unwrap();
+    let body = format!(r#"{{"products":["{product}","prod_00000000000000000000000000000063"]}}"#);
+    let url = format!("/admin/catalogs/{catalog_id}/products");
+    let (status, _) = send(&app, "POST", &url, Some(&body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, markets) = send(&app, "GET", "/admin/markets", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(markets["items"][0]["catalog"], json!(catalog_id));
+    let (_, fetched) = send(&app, "GET", &format!("/admin/markets/{market_id}"), None).await;
+    assert_eq!(fetched["catalog"], json!(catalog_id));
+    let body = r#"{"country":"SI"}"#;
+    let url = format!("/admin/markets/{market_id}/countries");
+    let (_, changed) = send(&app, "POST", &url, Some(body)).await;
+    assert_eq!(
+        changed["catalog"],
+        json!(catalog_id),
+        "a write shows the catalog too"
+    );
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/admin/markets/mkt_00000000000000000000000000000063",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "market_not_found")
+    );
+
+    let (status, fetched) = send(&app, "GET", &format!("/admin/catalogs/{catalog_id}"), None).await;
+    assert_eq!(
+        (status, &fetched["market"]),
+        (StatusCode::OK, &json!(market_id))
+    );
+    let url = format!("/admin/catalogs/{catalog_id}/products?limit=1");
+    let (_, page) = send(&app, "GET", &url, None).await;
+    assert_eq!(page["items"][0]["handle"], json!("setup-mug"));
+    assert_eq!(page["has_more"], json!(true));
+    let cursor = page["next_cursor"].as_str().unwrap();
+    let url = format!("/admin/catalogs/{catalog_id}/products?limit=1&cursor={cursor}");
+    let (_, page) = send(&app, "GET", &url, None).await;
+    // An ID that names no product is listed with no fields.
+    assert_eq!(
+        page["items"][0],
+        json!({"id": "prod_00000000000000000000000000000063", "title": null, "handle": null, "status": null})
+    );
+
+    let body = r#"{"currency":"EUR","adjustment_bps":-1000}"#;
+    let (_, list) = send(&app, "POST", "/admin/price-lists", Some(body)).await;
+    let list_id = list["id"].as_str().unwrap();
+    let (_, lists) = send(&app, "GET", "/admin/price-lists", None).await;
+    assert_eq!(lists["items"][0]["adjustment_bps"], json!(-1000));
+    let (status, _) = send(&app, "GET", &format!("/admin/price-lists/{list_id}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let url = format!("/admin/price-lists/{list_id}/fixed-prices");
+    let (status, prices) = send(&app, "GET", &url, None).await;
+    assert_eq!((status, &prices["items"]), (StatusCode::OK, &json!([])));
+
+    let (_, _) = send(
+        &app,
+        "POST",
+        "/admin/tax-classes",
+        Some(r#"{"name":"Reduced"}"#),
+    )
+    .await;
+    let body = r#"{"country":"HR","default_rate_ppm":250000}"#;
+    let (_, _) = send(&app, "POST", "/admin/tax-regions", Some(body)).await;
+    let (status, classes) = send(&app, "GET", "/admin/tax-classes", None).await;
+    assert_eq!(
+        (status, &classes["items"][0]["name"]),
+        (StatusCode::OK, &json!("Reduced"))
+    );
+    let (_, regions) = send(&app, "GET", "/admin/tax-regions", None).await;
+    assert_eq!(regions["items"][0]["country"], json!("HR"));
+
+    let (_, countries) = send(&app, "GET", "/admin/countries", None).await;
+    let countries = countries["items"].as_array().unwrap();
+    assert_eq!(countries.len(), 249);
+    assert!(countries.contains(&json!({"code": "RS", "name": "Serbia"})));
+}
+
 async fn create_product(app: &TestApp, handle: &str) -> String {
     let body = json!({
         "handle": handle,

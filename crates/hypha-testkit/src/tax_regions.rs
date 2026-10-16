@@ -48,6 +48,10 @@ impl TaxRegionRepo for InMemoryTaxRegionRepo {
         Ok(self.regions.find(|r| r.country() == country))
     }
 
+    async fn list_all(&self) -> Result<Vec<TaxRegion>, RepoError> {
+        Ok(self.regions.all_oldest_first())
+    }
+
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
         stamp_insert(region, self.outbox.now());
         let events = region.take_events();

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    BasisPoints, CatalogId, CountryCode, Currency, MarketId, Money, Price, PriceListId, ProductId,
-    RepoError, VariantId, Version, Versioned,
+    BasisPoints, CatalogId, CountryCode, Currency, MarketId, Money, Page, PageLimit, PageRequest,
+    Price, PriceListId, ProductId, RepoError, VariantId, Version, Versioned,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo, repo::keys,
@@ -75,6 +75,23 @@ pub async fn market_repo<R: MarketRepo>(make: impl AsyncFn() -> R) {
     market_country_freed(&make().await).await;
     scenario("market: stale and missing updates fail");
     market_stale(&make().await).await;
+    scenario("market: list_all returns every market, oldest first");
+    market_list_all(&make().await).await;
+}
+
+async fn market_list_all<R: MarketRepo>(repo: &R) {
+    assert_eq!(repo.list_all().await, Ok(vec![]));
+    for (n, country) in [(3, "HR"), (1, "RS"), (2, "DE")] {
+        repo.insert(&mut market(n, &[country])).await.unwrap();
+    }
+    let ids: Vec<MarketId> = repo
+        .list_all()
+        .await
+        .unwrap()
+        .iter()
+        .map(|m| m.id())
+        .collect();
+    assert_eq!(ids, vec![mid(1), mid(2), mid(3)]);
 }
 
 async fn market_round_trips<R: MarketRepo>(repo: &R) {
@@ -188,6 +205,76 @@ pub async fn catalog_repo<R: CatalogRepo>(make: impl AsyncFn() -> R) {
     catalog_products(&make().await).await;
     scenario("catalog: adding products to a missing catalog fails");
     catalog_products_need_the_catalog(&make().await).await;
+    scenario("catalog: list_all returns every catalog, oldest first");
+    catalog_list_all(&make().await).await;
+    scenario("catalog: a catalog's products come in pages, newest first");
+    catalog_product_pages(&make().await).await;
+}
+
+async fn catalog_list_all<R: CatalogRepo>(repo: &R) {
+    assert_eq!(repo.list_all().await, Ok(vec![]));
+    for (n, market) in [(2, 20), (1, 10)] {
+        repo.insert(&mut catalog(n, market, None)).await.unwrap();
+    }
+    let all = repo.list_all().await.unwrap();
+    let ids: Vec<CatalogId> = all.iter().map(|c| c.id()).collect();
+    assert_eq!(ids, vec![cid(1), cid(2)]);
+    assert_eq!(all[0], repo.get(cid(1)).await.unwrap().unwrap());
+}
+
+fn page<Id>(after: Option<Id>, limit: u32) -> PageRequest<Id> {
+    PageRequest {
+        after,
+        limit: PageLimit::new(limit).unwrap(),
+    }
+}
+
+async fn catalog_product_pages<R: CatalogRepo>(repo: &R) {
+    let mut a = catalog(1, 10, None);
+    let mut b = catalog(2, 20, None);
+    repo.insert(&mut a).await.unwrap();
+    repo.insert(&mut b).await.unwrap();
+    assert_eq!(
+        repo.product_page(a.id(), page(None, 2)).await,
+        Ok(Page {
+            items: vec![],
+            has_more: false
+        })
+    );
+    repo.add_products(a.id(), &[pid(1), pid(3), pid(2)])
+        .await
+        .unwrap();
+    repo.add_products(b.id(), &[pid(4)]).await.unwrap();
+
+    assert_eq!(
+        repo.product_page(a.id(), page(None, 2)).await,
+        Ok(Page {
+            items: vec![pid(3), pid(2)],
+            has_more: true
+        })
+    );
+    assert_eq!(
+        repo.product_page(a.id(), page(Some(pid(2)), 2)).await,
+        Ok(Page {
+            items: vec![pid(1)],
+            has_more: false
+        })
+    );
+    // Pages are per catalog, and an unknown catalog has none.
+    assert_eq!(
+        repo.product_page(b.id(), page(None, 10))
+            .await
+            .unwrap()
+            .items,
+        vec![pid(4)]
+    );
+    assert_eq!(
+        repo.product_page(cid(99), page(None, 10))
+            .await
+            .unwrap()
+            .items,
+        vec![]
+    );
 }
 
 async fn catalog_round_trips<R: CatalogRepo>(repo: &R) {
@@ -312,6 +399,62 @@ pub async fn price_list_repo<R: PriceListRepo>(make: impl AsyncFn() -> R) {
     fixed_prices_preconditions(&make().await).await;
     scenario("price list: lists_pricing names the lists with a variant's fixed price");
     lists_pricing(&make().await).await;
+    scenario("price list: list_all returns every list, oldest first");
+    price_list_list_all(&make().await).await;
+    scenario("price list: fixed prices come in pages, newest variant first");
+    fixed_price_pages(&make().await).await;
+}
+
+async fn price_list_list_all<R: PriceListRepo>(repo: &R) {
+    assert_eq!(repo.list_all().await, Ok(vec![]));
+    for n in [2, 1] {
+        repo.insert(&mut price_list(n, Currency::EUR, -500))
+            .await
+            .unwrap();
+    }
+    let all = repo.list_all().await.unwrap();
+    let ids: Vec<PriceListId> = all.iter().map(|l| l.id()).collect();
+    assert_eq!(ids, vec![plid(1), plid(2)]);
+    assert_eq!(all[1], repo.get(plid(2)).await.unwrap().unwrap());
+}
+
+async fn fixed_price_pages<R: PriceListRepo>(repo: &R) {
+    for n in [1, 2] {
+        repo.insert(&mut price_list(n, Currency::EUR, 0))
+            .await
+            .unwrap();
+    }
+    repo.set_fixed_prices(
+        plid(1),
+        &[(vid(1), eur(100)), (vid(3), eur(300)), (vid(2), eur(200))],
+    )
+    .await
+    .unwrap();
+    repo.set_fixed_prices(plid(2), &[(vid(4), eur(400))])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        repo.fixed_price_page(plid(1), page(None, 2)).await,
+        Ok(Page {
+            items: vec![(vid(3), eur(300)), (vid(2), eur(200))],
+            has_more: true
+        })
+    );
+    assert_eq!(
+        repo.fixed_price_page(plid(1), page(Some(vid(2)), 2)).await,
+        Ok(Page {
+            items: vec![(vid(1), eur(100))],
+            has_more: false
+        })
+    );
+    assert_eq!(
+        repo.fixed_price_page(plid(99), page(None, 10))
+            .await
+            .unwrap()
+            .items,
+        vec![]
+    );
 }
 
 async fn lists_pricing<R: PriceListRepo>(repo: &R) {

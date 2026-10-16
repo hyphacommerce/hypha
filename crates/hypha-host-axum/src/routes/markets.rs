@@ -1,18 +1,26 @@
 //! Markets, price lists and catalogs (all live in `hypha-markets`).
 
+use std::collections::HashMap;
+
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{
-    CatalogId, CountryCode, Currency, MarketId, Money, PriceListId, ProductId, VariantId,
+    CatalogId, CountryCode, Ctx, Currency, MarketId, Money, PriceListId, ProductId, VariantId,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CreateCatalog, CreateMarket, CreatePriceList, FixedPrice, HasCatalogs,
-    HasMarkets, HasPriceLists, Market, PriceList, UpdateMarket, add_catalog_products,
+    HasMarkets, HasPriceLists, Market, MarketView, PriceList, UpdateMarket, add_catalog_products,
     add_market_country, assign_price_list, create_catalog, create_market, create_price_list,
-    remove_catalog_products, remove_fixed_prices, remove_market_country, set_fixed_prices,
-    update_market,
+    get_catalog, get_market, get_price_list, list_catalog_products, list_fixed_prices,
+    list_markets, list_price_lists, remove_catalog_products, remove_fixed_prices,
+    remove_market_country, set_fixed_prices, update_market,
 };
+use hypha_products::{HasProducts, get_products};
 use serde::{Deserialize, Serialize};
 
+use super::{
+    page::{ListQuery, PageParams, PageResponse},
+    products::StatusDto,
+};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
@@ -48,18 +56,82 @@ pub(super) struct MarketResponse {
     countries: Vec<CountryCode>,
     currency: Currency,
     prices_include_tax: bool,
+    /// The catalog of what it sells, once one is created (`POST /admin/catalogs`).
+    catalog: Option<CatalogId>,
 }
 
-impl From<&Market> for MarketResponse {
-    fn from(m: &Market) -> Self {
+impl MarketResponse {
+    fn new(m: &Market, catalog: Option<CatalogId>) -> Self {
         Self {
             id: m.id(),
             name: m.name().to_string(),
             countries: m.countries().to_vec(),
             currency: m.currency(),
             prices_include_tax: m.prices_include_tax(),
+            catalog,
         }
     }
+}
+
+impl From<&MarketView> for MarketResponse {
+    fn from(v: &MarketView) -> Self {
+        Self::new(&v.market, v.catalog)
+    }
+}
+
+/// The response after a market changed: the market as stored, with its catalog read
+/// back (a write scope covers reading it, `Scope::implied_by`).
+async fn changed_market<S: HasMarkets + HasCatalogs>(
+    ctx: &Ctx,
+    ports: &S,
+    market: &Market,
+) -> Result<MarketResponse, ApiError> {
+    let view = get_market(ctx, ports, market.id()).await?;
+    Ok(MarketResponse::new(market, view.catalog))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct MarketListResponse {
+    /// Oldest first. A store has a handful, so they come in one list.
+    items: Vec<MarketResponse>,
+}
+
+/// Every market, oldest first, with its catalog.
+#[utoipa::path(
+    get,
+    path = "/admin/markets",
+    responses((status = 200, description = "OK", body = MarketListResponse)),
+    extensions(("x-hypha-scopes" = json!(["markets:read"]))),
+)]
+pub(super) async fn list_markets_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<MarketListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let views = list_markets(&ctx, &ports).await?;
+    Ok(Json(MarketListResponse {
+        items: views.iter().map(MarketResponse::from).collect(),
+    }))
+}
+
+/// A market, with its catalog.
+#[utoipa::path(
+    get,
+    path = "/admin/markets/{id}",
+    params(("id" = MarketId, Path)),
+    responses((status = 200, description = "OK", body = MarketResponse)),
+    extensions(("x-hypha-scopes" = json!(["markets:read"]))),
+)]
+pub(super) async fn fetch_market<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<MarketId>,
+) -> Result<Json<MarketResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let view = get_market(&ctx, &ports, id)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
+    Ok(Json(MarketResponse::from(&view)))
 }
 
 /// Creates a market: countries that share a currency.
@@ -84,7 +156,11 @@ pub(super) async fn create_market_handler<S: Storage>(
         prices_include_tax: req.prices_include_tax,
     };
     let market = create_market(&ctx, ports.markets(), &state.ids, input).await?;
-    Ok((StatusCode::CREATED, Json(MarketResponse::from(&market))))
+    // A new market has no catalog yet.
+    Ok((
+        StatusCode::CREATED,
+        Json(MarketResponse::new(&market, None)),
+    ))
 }
 
 /// Changes a market.
@@ -110,7 +186,7 @@ pub(super) async fn update_market_handler<S: Storage>(
     let market = update_market(&ctx, ports.markets(), id, input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
-    Ok(Json(MarketResponse::from(&market)))
+    Ok(Json(changed_market(&ctx, &ports, &market).await?))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -139,7 +215,7 @@ pub(super) async fn add_country_handler<S: Storage>(
     let market = add_market_country(&ctx, ports.markets(), id, &req.country)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
-    Ok(Json(MarketResponse::from(&market)))
+    Ok(Json(changed_market(&ctx, &ports, &market).await?))
 }
 
 /// Removes a country from a market.
@@ -163,7 +239,7 @@ pub(super) async fn remove_country_handler<S: Storage>(
                 .not_found_if("market_not_found")
                 .not_found_if("country_not_in_market")
         })?;
-    Ok(Json(MarketResponse::from(&market)))
+    Ok(Json(changed_market(&ctx, &ports, &market).await?))
 }
 
 // ---------- price lists ----------
@@ -420,4 +496,162 @@ pub(super) async fn assign_price_list_handler<S: Storage>(
     )
     .await?;
     Ok(Json(CatalogResponse::from(&catalog)))
+}
+
+// ---------- reads (design note 0021, SU3) ----------
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct PriceListListResponse {
+    /// Oldest first. A store has a handful, so they come in one list.
+    items: Vec<PriceListResponse>,
+}
+
+/// Every price list, oldest first.
+#[utoipa::path(
+    get,
+    path = "/admin/price-lists",
+    responses((status = 200, description = "OK", body = PriceListListResponse)),
+    extensions(("x-hypha-scopes" = json!(["pricing:read"]))),
+)]
+pub(super) async fn list_price_lists_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<PriceListListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let lists = list_price_lists(&ctx, ports.price_lists()).await?;
+    Ok(Json(PriceListListResponse {
+        items: lists.iter().map(PriceListResponse::from).collect(),
+    }))
+}
+
+/// A price list.
+#[utoipa::path(
+    get,
+    path = "/admin/price-lists/{id}",
+    params(("id" = PriceListId, Path)),
+    responses((status = 200, description = "OK", body = PriceListResponse)),
+    extensions(("x-hypha-scopes" = json!(["pricing:read"]))),
+)]
+pub(super) async fn fetch_price_list<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<PriceListId>,
+) -> Result<Json<PriceListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let list = get_price_list(&ctx, ports.price_lists(), id)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
+    Ok(Json(PriceListResponse::from(&list)))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct FixedPriceResponse {
+    variant: VariantId,
+    price: Money,
+}
+
+type FixedPricePage = PageResponse<FixedPriceResponse>;
+
+/// A price list's fixed prices, newest variant first.
+#[utoipa::path(
+    get,
+    path = "/admin/price-lists/{id}/fixed-prices",
+    params(("id" = PriceListId, Path), PageParams),
+    responses((status = 200, description = "OK", body = FixedPricePage)),
+    extensions(("x-hypha-scopes" = json!(["pricing:read"]))),
+)]
+pub(super) async fn list_fixed_prices_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<PriceListId>,
+    query: ListQuery,
+) -> Result<Json<FixedPricePage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, _, scope) = query.parse()?;
+    let page = list_fixed_prices(&ctx, ports.price_lists(), id, page)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
+    Ok(Json(PageResponse::new(
+        page,
+        &scope,
+        |(variant, _)| *variant,
+        |(variant, price)| {
+            Ok(FixedPriceResponse {
+                variant,
+                price: price.money(),
+            })
+        },
+    )?))
+}
+
+/// A catalog.
+#[utoipa::path(
+    get,
+    path = "/admin/catalogs/{id}",
+    params(("id" = CatalogId, Path)),
+    responses((status = 200, description = "OK", body = CatalogResponse)),
+    extensions(("x-hypha-scopes" = json!(["markets:read"]))),
+)]
+pub(super) async fn fetch_catalog<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<CatalogId>,
+) -> Result<Json<CatalogResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let catalog = get_catalog(&ctx, ports.catalogs(), id)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("catalog_not_found"))?;
+    Ok(Json(CatalogResponse::from(&catalog)))
+}
+
+/// A product in a catalog. Catalogs store product IDs as given, so the product's fields
+/// are `null` for an ID that names no product.
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct CatalogProductResponse {
+    id: ProductId,
+    title: Option<String>,
+    handle: Option<String>,
+    status: Option<StatusDto>,
+}
+
+type CatalogProductPage = PageResponse<CatalogProductResponse>;
+
+/// A catalog's products, newest first.
+#[utoipa::path(
+    get,
+    path = "/admin/catalogs/{id}/products",
+    params(("id" = CatalogId, Path), PageParams),
+    responses((status = 200, description = "OK", body = CatalogProductPage)),
+    extensions(("x-hypha-scopes" = json!(["markets:read", "products:read"]))),
+)]
+pub(super) async fn list_catalog_products_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<CatalogId>,
+    query: ListQuery,
+) -> Result<Json<CatalogProductPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, _, scope) = query.parse()?;
+    let page = list_catalog_products(&ctx, ports.catalogs(), id, page)
+        .await
+        .map_err(|e| ApiError::from(e).not_found_if("catalog_not_found"))?;
+    let mut products: HashMap<ProductId, _> = get_products(&ctx, ports.products(), &page.items)
+        .await?
+        .into_iter()
+        .map(|p| (p.id(), p))
+        .collect();
+    Ok(Json(PageResponse::new(
+        page,
+        &scope,
+        |id| *id,
+        |id| {
+            let product = products.remove(&id);
+            Ok(CatalogProductResponse {
+                id,
+                title: product.as_ref().map(|p| p.title().to_string()),
+                handle: product.as_ref().map(|p| p.handle().as_str().to_string()),
+                status: product.as_ref().map(|p| p.status().into()),
+            })
+        },
+    )?))
 }

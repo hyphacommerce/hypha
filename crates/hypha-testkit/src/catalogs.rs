@@ -4,13 +4,14 @@ use std::{
 };
 
 use hypha_core::{
-    CatalogId, ProductId, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
+    CatalogId, Page, PageRequest, ProductId, Recorded, RepoError, Versioned, stamp_insert,
+    stamp_update,
 };
 use hypha_markets::{Catalog, CatalogContext, CatalogRepo, repo::keys};
 
 use crate::{
     InMemoryOutbox,
-    table::{Table, missing},
+    table::{Table, missing, page_of},
 };
 
 #[derive(Default)]
@@ -68,6 +69,24 @@ impl CatalogRepo for InMemoryCatalogRepo {
 
     async fn get_by_context(&self, context: CatalogContext) -> Result<Option<Catalog>, RepoError> {
         Ok(self.catalogs.find(|c| c.context() == context))
+    }
+
+    async fn list_all(&self) -> Result<Vec<Catalog>, RepoError> {
+        Ok(self.catalogs.all_oldest_first())
+    }
+
+    async fn product_page(
+        &self,
+        catalog: CatalogId,
+        page: PageRequest<ProductId>,
+    ) -> Result<Page<ProductId>, RepoError> {
+        let all = self.products.lock().unwrap();
+        let included = all.get(&catalog).into_iter().flatten().map(|p| (*p, ()));
+        let found = page_of(included, page);
+        Ok(Page {
+            items: found.items.into_iter().map(|(p, ())| p).collect(),
+            has_more: found.has_more,
+        })
     }
 
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError> {

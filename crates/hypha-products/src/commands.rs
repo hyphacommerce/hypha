@@ -120,6 +120,17 @@ pub async fn get_product<R: ProductRepo>(
     load(repo, id).await
 }
 
+/// The products of `ids` that exist, in no particular order: for lists that hold
+/// product IDs (a catalog's products, design note 0021).
+pub async fn get_products<R: ProductRepo>(
+    ctx: &Ctx,
+    repo: &R,
+    ids: &[ProductId],
+) -> Result<Vec<Product>, CommandError> {
+    ctx.require(Scope::ProductsRead)?;
+    Ok(repo.get_many(ids).await?)
+}
+
 /// Moves a product to `status`, following the allowed transitions
 /// (draft ↔ active, active → archived, archived → draft).
 pub async fn set_product_status<R: ProductRepo>(

@@ -5,7 +5,7 @@ use hypha_core::{CountryCode, ProductId, TaxClassId, TaxRate, TaxRegionId};
 use hypha_tax::{
     AssignTaxClass, CreateTaxClass, CreateTaxRegion, HasTaxClasses, HasTaxRegions, TaxClass,
     TaxRegion, assign_tax_class, create_tax_class, create_tax_region, get_tax_region,
-    remove_class_rate, set_class_rate, set_default_rate,
+    list_tax_classes, list_tax_regions, remove_class_rate, set_class_rate, set_default_rate,
 };
 use serde::{Deserialize, Serialize};
 
@@ -258,4 +258,52 @@ pub(super) async fn remove_region_class_rate<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let region = remove_class_rate(&ctx, ports.tax_regions(), id, class).await?;
     Ok(Json(TaxRegionResponse::from(&region)))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct TaxClassListResponse {
+    /// Oldest first. A store has a handful, so they come in one list.
+    items: Vec<TaxClassResponse>,
+}
+
+/// Every tax class, oldest first (design note 0021, SU3).
+#[utoipa::path(
+    get,
+    path = "/admin/tax-classes",
+    responses((status = 200, description = "OK", body = TaxClassListResponse)),
+    extensions(("x-hypha-scopes" = json!(["taxes:read"]))),
+)]
+pub(super) async fn list_classes<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<TaxClassListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let classes = list_tax_classes(&ctx, ports.tax_classes()).await?;
+    Ok(Json(TaxClassListResponse {
+        items: classes.iter().map(TaxClassResponse::from).collect(),
+    }))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct TaxRegionListResponse {
+    /// Oldest first, at most one per country, so they come in one list.
+    items: Vec<TaxRegionResponse>,
+}
+
+/// Every tax region with its class rates, oldest first.
+#[utoipa::path(
+    get,
+    path = "/admin/tax-regions",
+    responses((status = 200, description = "OK", body = TaxRegionListResponse)),
+    extensions(("x-hypha-scopes" = json!(["taxes:read"]))),
+)]
+pub(super) async fn list_regions<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<TaxRegionListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let regions = list_tax_regions(&ctx, ports.tax_regions()).await?;
+    Ok(Json(TaxRegionListResponse {
+        items: regions.iter().map(TaxRegionResponse::from).collect(),
+    }))
 }

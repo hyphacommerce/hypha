@@ -317,6 +317,23 @@ step "add mug and cup to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/p
     -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
 step "assign price list" 200 - -X PUT "$BASE/admin/catalogs/$CATALOG/price-list" -H "$JSON" \
     -d "{\"price_list\":\"$LIST\"}"
+step "list markets" 200 - "$BASE/admin/markets"
+contains "a market names its catalog" "\"catalog\":\"$CATALOG\""
+step "fetch the market" 200 - "$BASE/admin/markets/$MARKET"
+step "an unknown market" 404 market_not_found "$BASE/admin/markets/mkt_00000000000000000000000000000063"
+step "fetch the catalog" 200 - "$BASE/admin/catalogs/$CATALOG"
+contains "with its price list" "\"price_list\":\"$LIST\""
+step "the catalog's products, a page of one" 200 - "$BASE/admin/catalogs/$CATALOG/products?limit=1"
+contains "there are more" '"has_more":true'
+step "an unknown catalog's products" 404 catalog_not_found \
+    "$BASE/admin/catalogs/cat_00000000000000000000000000000063/products"
+step "list price lists" 200 - "$BASE/admin/price-lists"
+contains "with its adjustment" '"adjustment_bps":-1000'
+step "fetch the price list" 200 - "$BASE/admin/price-lists/$LIST"
+step "its fixed prices" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
+contains "the cup at 200" "{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}}"
+step "countries for pickers" 200 - "$BASE/admin/countries"
+contains "Serbia among them" '{"code":"RS","name":"Serbia"}'
 
 step "create cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 contains "cart ships to Croatia" '"country":"HR"'
@@ -541,6 +558,10 @@ step "put book in it" 204 - -X PUT "$BASE/admin/tax-assignments" -H "$JSON" \
 step "create Croatian tax region (25%)" 201 - -X POST "$BASE/admin/tax-regions" -H "$JSON" \
     -d '{"country":"HR","default_rate_ppm":250000}'
 REGION=$(id)
+step "list tax classes" 200 - "$BASE/admin/tax-classes"
+contains "books among them" '"name":"Books"'
+step "list tax regions" 200 - "$BASE/admin/tax-regions"
+contains "Croatia among them" '"country":"HR"'
 step "books pay 5% in Croatia" 200 - -X PUT "$BASE/admin/tax-regions/$REGION/class-rates/$BOOKS" \
     -H "$JSON" -d '{"rate_ppm":50000}'
 contains "class rate is stored" "\"class_rates\":[{\"tax_class\":\"$BOOKS\",\"rate_ppm\":50000}]"

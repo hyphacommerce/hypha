@@ -14,6 +14,8 @@ pub mod keys {
 pub trait TaxClassRepo {
     async fn get(&self, id: TaxClassId) -> Result<Option<TaxClass>, RepoError>;
     async fn insert(&self, class: &mut TaxClass) -> Result<(), RepoError>;
+    /// Every class, oldest first (by ID). A store has a handful.
+    async fn list_all(&self) -> Result<Vec<TaxClass>, RepoError>;
     /// Sets the products' class (`None`: the default rate). Records no event: commands
     /// stage it (`StageTaxAssignments`) with `product.tax_class_set`; this is for
     /// setting up data.
@@ -32,6 +34,8 @@ pub trait TaxClassRepo {
 pub trait TaxRegionRepo {
     async fn get(&self, id: TaxRegionId) -> Result<Option<TaxRegion>, RepoError>;
     async fn get_by_country(&self, country: CountryCode) -> Result<Option<TaxRegion>, RepoError>;
+    /// Every region with its class rates, oldest first (by ID); one per country at most.
+    async fn list_all(&self) -> Result<Vec<TaxRegion>, RepoError>;
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError>;
     async fn update(&self, region: &mut TaxRegion) -> Result<(), RepoError>;
 }

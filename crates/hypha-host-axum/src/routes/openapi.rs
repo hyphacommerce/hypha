@@ -496,7 +496,9 @@ mod tests {
                 "get /admin/apps/{key}/deliveries",
                 "get /admin/assets",
                 "get /admin/assets/{id}/usages",
+                "get /admin/catalogs/{id}/products",
                 "get /admin/orders",
+                "get /admin/price-lists/{id}/fixed-prices",
                 "get /admin/products"
             ]
         );

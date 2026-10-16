@@ -4,13 +4,14 @@ use std::{
 };
 
 use hypha_core::{
-    Price, PriceListId, Recorded, RepoError, VariantId, Versioned, stamp_insert, stamp_update,
+    Page, PageRequest, Price, PriceListId, Recorded, RepoError, VariantId, Versioned, stamp_insert,
+    stamp_update,
 };
 use hypha_markets::{PriceList, PriceListRepo, repo::keys};
 
 use crate::{
     InMemoryOutbox,
-    table::{Table, missing, no_unique_keys},
+    table::{Table, missing, no_unique_keys, page_of},
 };
 
 #[derive(Default)]
@@ -50,6 +51,20 @@ pub(crate) type FixedPrices = HashMap<PriceListId, HashMap<VariantId, Price>>;
 impl PriceListRepo for InMemoryPriceListRepo {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError> {
         Ok(self.price_lists.get(&id))
+    }
+
+    async fn list_all(&self) -> Result<Vec<PriceList>, RepoError> {
+        Ok(self.price_lists.all_oldest_first())
+    }
+
+    async fn fixed_price_page(
+        &self,
+        list: PriceListId,
+        page: PageRequest<VariantId>,
+    ) -> Result<Page<(VariantId, Price)>, RepoError> {
+        let all = self.fixed_prices.lock().unwrap();
+        let prices = all.get(&list).into_iter().flatten().map(|(v, p)| (*v, *p));
+        Ok(page_of(prices, page))
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {

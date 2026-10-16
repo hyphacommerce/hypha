@@ -225,3 +225,21 @@ async fn load_region<R: TaxRegionRepo>(
         .await?
         .ok_or(CommandError::TaxRegionNotFound(id))
 }
+
+/// Every tax class, oldest first (design note 0021, SU3).
+pub async fn list_tax_classes<C: TaxClassRepo>(
+    ctx: &Ctx,
+    classes: &C,
+) -> Result<Vec<TaxClass>, CommandError> {
+    ctx.require(Scope::TaxesRead)?;
+    Ok(classes.list_all().await?)
+}
+
+/// Every tax region with its class rates, oldest first.
+pub async fn list_tax_regions<R: TaxRegionRepo>(
+    ctx: &Ctx,
+    regions: &R,
+) -> Result<Vec<TaxRegion>, CommandError> {
+    ctx.require(Scope::TaxesRead)?;
+    Ok(regions.list_all().await?)
+}

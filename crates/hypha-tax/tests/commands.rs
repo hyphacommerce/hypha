@@ -7,7 +7,8 @@ use hypha_core::{
 use hypha_tax::{
     AssignTaxClass, ClassRate, CommandError, CreateTaxClass, CreateTaxRegion, TaxClassRepo,
     TaxError, TaxRegion, TaxRegionRepo, assign_tax_class, create_tax_class, create_tax_region,
-    get_tax_region, remove_class_rate, set_class_rate, set_default_rate,
+    get_tax_region, list_tax_classes, list_tax_regions, remove_class_rate, set_class_rate,
+    set_default_rate,
 };
 use hypha_testkit::{InMemoryPorts, InMemoryTaxRegionRepo, SequentialIds};
 use pollster::block_on;
@@ -351,5 +352,33 @@ fn region_taken_by_a_concurrent_insert_names_the_owner() {
             country: CountryCode::new("HR").unwrap(),
             region: first.id(),
         })
+    );
+}
+
+#[test]
+fn classes_and_regions_list_oldest_first_for_taxes_read() {
+    let world = World::new();
+    let standard = world.class("Standard");
+    let reduced = world.class("Reduced");
+    let hr = world.region("HR");
+    let de = world.region("DE");
+
+    let classes = block_on(list_tax_classes(&reader(), &world.ports.tax_classes)).unwrap();
+    assert_eq!(
+        classes.iter().map(|c| c.id()).collect::<Vec<_>>(),
+        vec![standard, reduced]
+    );
+    let regions = block_on(list_tax_regions(&reader(), &world.ports.tax_regions)).unwrap();
+    assert_eq!(
+        regions.iter().map(|r| r.id()).collect::<Vec<_>>(),
+        vec![hr, de]
+    );
+
+    let nobody = Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(1))), vec![]);
+    assert_eq!(
+        block_on(list_tax_regions(&nobody, &world.ports.tax_regions)),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::TaxesRead
+        )))
     );
 }

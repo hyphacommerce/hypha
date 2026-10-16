@@ -13,6 +13,10 @@ pub use commands::{
     create_price_list, remove_catalog_products, remove_fixed_prices, remove_market_country,
     set_fixed_prices, update_market,
 };
+pub use commands::{
+    MarketView, get_catalog, get_market, get_price_list, list_catalog_products, list_fixed_prices,
+    list_markets, list_price_lists,
+};
 pub use error::{MarketError, MismatchedPrice, PriceListError};
 pub use events::{
     CatalogChanged, CatalogProductsAdded, CatalogProductsRemoved, MarketChanged, PriceListChanged,

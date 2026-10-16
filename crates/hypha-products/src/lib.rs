@@ -12,8 +12,8 @@ pub mod variant;
 
 pub use commands::{
     AddVariant, CommandError, CreateSimpleProduct, ListProducts, SetProductOptions, UpdateProduct,
-    UpdateVariant, add_product_variant, create_simple_product, get_product, list_products,
-    remove_product_variant, set_product_options, set_product_status, update_product,
+    UpdateVariant, add_product_variant, create_simple_product, get_product, get_products,
+    list_products, remove_product_variant, set_product_options, set_product_status, update_product,
     update_product_variant,
 };
 pub use content::{Description, MAX_TAGS};

@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    CatalogId, CountryCode, MarketId, Price, PriceListId, ProductId, RepoError, VariantId,
+    CatalogId, CountryCode, MarketId, Page, PageRequest, Price, PriceListId, ProductId, RepoError,
+    VariantId,
 };
 
 use crate::{
@@ -30,6 +31,7 @@ pub trait MarketRepo {
     async fn insert(&self, market: &mut Market) -> Result<(), RepoError>;
     /// Stores changes and bumps the version, or fails with `StaleVersion`. Enforces `COUNTRY`.
     async fn update(&self, market: &mut Market) -> Result<(), RepoError>;
+    /// Every market, oldest first (by ID). A store has a handful.
     async fn list_all(&self) -> Result<Vec<Market>, RepoError>;
 }
 
@@ -43,6 +45,8 @@ pub trait CatalogRepo {
     async fn get(&self, id: CatalogId) -> Result<Option<Catalog>, RepoError>;
     /// At most one catalog per context (`keys::CATALOG_CONTEXT`).
     async fn get_by_context(&self, context: CatalogContext) -> Result<Option<Catalog>, RepoError>;
+    /// Every catalog, oldest first (by ID). A store has one per market.
+    async fn list_all(&self) -> Result<Vec<Catalog>, RepoError>;
     /// Stores a new catalog (version 1). Enforces `CATALOG_ID` and `CATALOG_CONTEXT`.
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError>;
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
@@ -66,6 +70,13 @@ pub trait CatalogRepo {
         catalog: CatalogId,
         products: &[ProductId],
     ) -> Result<(), RepoError>;
+    /// A page of the catalog's products, newest first by product ID (design note 0012).
+    /// An unknown catalog has none.
+    async fn product_page(
+        &self,
+        catalog: CatalogId,
+        page: PageRequest<ProductId>,
+    ) -> Result<Page<ProductId>, RepoError>;
     /// Which of `products` the catalog includes.
     async fn included_products(
         &self,
@@ -81,6 +92,8 @@ pub trait CatalogRepo {
 #[allow(async_fn_in_trait)]
 pub trait PriceListRepo {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError>;
+    /// Every price list, oldest first (by ID). A store has a handful.
+    async fn list_all(&self) -> Result<Vec<PriceList>, RepoError>;
     /// Stores a new price list (version 1). Enforces `PRICE_LIST_ID`.
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
@@ -108,6 +121,13 @@ pub trait PriceListRepo {
     /// The price lists with a fixed price for `variant`, by ID: what to clean up when
     /// the variant is removed (design note 0014, section 4).
     async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError>;
+    /// A page of the list's fixed prices, newest variant first (by variant ID). An
+    /// unknown list has none.
+    async fn fixed_price_page(
+        &self,
+        list: PriceListId,
+        page: PageRequest<VariantId>,
+    ) -> Result<Page<(VariantId, Price)>, RepoError>;
     /// The fixed prices of those of `variants` that have one.
     async fn fixed_prices(
         &self,

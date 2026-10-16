@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    BasisPoints, CatalogId, CountryCode, MarketId, Price, PriceListId, ProductId, Recorded,
-    RepoError, VariantId, Version, Versioned, stamp_insert, stamp_update,
+    BasisPoints, CatalogId, CountryCode, MarketId, Page, PageRequest, Price, PriceListId,
+    ProductId, Recorded, RepoError, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, Market, MarketRepo, MarketSnapshot,
@@ -164,7 +164,7 @@ async fn load_markets(
         .query_typed(
             &format!(
                 "SELECT id, version, name, currency, prices_include_tax, {} FROM markets
-                 WHERE $1::uuid IS NULL OR id = $1",
+                 WHERE $1::uuid IS NULL OR id = $1 ORDER BY id",
                 stamp_columns(""),
             ),
             &filter,
@@ -266,6 +266,48 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
             .await
             .map_err(repo_error)?;
         row.as_ref().map(catalog_from_row).transpose()
+    }
+
+    async fn list_all(&self) -> Result<Vec<Catalog>, RepoError> {
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                &format!("SELECT {} FROM catalogs ORDER BY id", catalog_columns()),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter().map(catalog_from_row).collect()
+    }
+
+    async fn product_page(
+        &self,
+        catalog: CatalogId,
+        page: PageRequest<ProductId>,
+    ) -> Result<Page<ProductId>, RepoError> {
+        let after = page.after.map(|id| id.as_uuid());
+        let fetch = i64::from(page.limit.get()) + 1;
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                "SELECT product_id FROM catalog_products
+                 WHERE catalog_id = $1 AND ($2::uuid IS NULL OR product_id < $2)
+                 ORDER BY product_id DESC LIMIT $3",
+                &[
+                    (&catalog.as_uuid(), Type::UUID),
+                    (&after, Type::UUID),
+                    (&fetch, Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        let ids = rows
+            .iter()
+            .map(|r| Ok(ProductId::from_uuid(col(r, "product_id")?)))
+            .collect::<Result<Vec<_>, RepoError>>()?;
+        Ok(Page::from_overfetch(ids, page.limit))
     }
 
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError> {
@@ -434,15 +476,52 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             )
             .await
             .map_err(repo_error)?;
-        let Some(row) = row else { return Ok(None) };
-        let adjustment: i32 = col(&row, "adjustment")?;
-        Ok(Some(PriceList::restore(PriceListSnapshot {
-            id: PriceListId::from_uuid(col(&row, "id")?),
-            version: version_from_db(col(&row, "version")?)?,
-            stamps: stamps_from_row(&row)?,
-            currency: currency_from_db(col(&row, "currency")?)?,
-            adjustment: BasisPoints::new(adjustment).map_err(corrupt)?,
-        })))
+        row.as_ref().map(price_list_from_row).transpose()
+    }
+
+    async fn list_all(&self) -> Result<Vec<PriceList>, RepoError> {
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                &format!(
+                    "SELECT id, version, currency, adjustment, {} FROM price_lists ORDER BY id",
+                    stamp_columns(""),
+                ),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter().map(price_list_from_row).collect()
+    }
+
+    async fn fixed_price_page(
+        &self,
+        list: PriceListId,
+        page: PageRequest<VariantId>,
+    ) -> Result<Page<(VariantId, Price)>, RepoError> {
+        let after = page.after.map(|id| id.as_uuid());
+        let fetch = i64::from(page.limit.get()) + 1;
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                "SELECT variant_id, amount, currency FROM price_list_prices
+                 WHERE price_list_id = $1 AND ($2::uuid IS NULL OR variant_id < $2)
+                 ORDER BY variant_id DESC LIMIT $3",
+                &[
+                    (&list.as_uuid(), Type::UUID),
+                    (&after, Type::UUID),
+                    (&fetch, Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        let prices = rows
+            .iter()
+            .map(fixed_price_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Page::from_overfetch(prices, page.limit))
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
@@ -523,17 +602,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             )
             .await
             .map_err(repo_error)?;
-        rows.iter()
-            .map(|row| {
-                let money = hypha_core::Money::new(
-                    col(row, "amount")?,
-                    currency_from_db(col(row, "currency")?)?,
-                )
-                .map_err(corrupt)?;
-                let price = Price::new(money).map_err(corrupt)?;
-                Ok((VariantId::from_uuid(col(row, "variant_id")?), price))
-            })
-            .collect()
+        rows.iter().map(fixed_price_from_row).collect()
     }
 }
 
@@ -640,4 +709,26 @@ pub(crate) async fn remove_fixed_prices(
     .await
     .map_err(repo_error)?;
     Ok(())
+}
+
+fn price_list_from_row(row: &Row) -> Result<PriceList, RepoError> {
+    let adjustment: i32 = col(row, "adjustment")?;
+    Ok(PriceList::restore(PriceListSnapshot {
+        id: PriceListId::from_uuid(col(row, "id")?),
+        version: version_from_db(col(row, "version")?)?,
+        stamps: stamps_from_row(row)?,
+        currency: currency_from_db(col(row, "currency")?)?,
+        adjustment: BasisPoints::new(adjustment).map_err(corrupt)?,
+    }))
+}
+
+/// A `price_list_prices` row (`variant_id, amount, currency`).
+fn fixed_price_from_row(row: &Row) -> Result<(VariantId, Price), RepoError> {
+    let money = hypha_core::Money::new(
+        col(row, "amount")?,
+        currency_from_db(col(row, "currency")?)?,
+    )
+    .map_err(corrupt)?;
+    let price = Price::new(money).map_err(corrupt)?;
+    Ok((VariantId::from_uuid(col(row, "variant_id")?), price))
 }
