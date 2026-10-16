@@ -11,7 +11,9 @@ use hypha_core::{
 use hypha_inventory::HasInventoryItems;
 use hypha_markets::{HasPriceLists, StageFixedPrices};
 
-use crate::{handlers::run_handler, schedule::next_attempt};
+use core::time::Duration;
+
+use crate::{handlers::run_handler, settings::DispatchSettings};
 
 /// Everything the dispatcher and its handlers read and write. Anything with all of them
 /// is `DispatchPorts` (the blanket impl below).
@@ -60,20 +62,10 @@ impl Progress {
     }
 }
 
-/// Events fanned out, or deliveries run, per call.
-pub const BATCH: u32 = 100;
-/// How long a delivery is leased for: past this, another runner may take it.
-const LEASE_SECS: i64 = 120;
 /// The longest one delivery may take: the slowest webhook timeout allowed, with room for
 /// loading the app and connecting. A runner doesn't start a delivery with less of its
 /// lease left (`has_time`), so a lease never runs out while its delivery is sending.
-const LONGEST_RUN_SECS: i64 = Webhook::MAX_TIMEOUT_MS as i64 / 1000 + 15;
-/// How long events (and their deliveries) are kept (Q7).
-const RETENTION_SECS: i64 = 30 * 24 * 3600;
-/// How long an idempotency key is honoured (design note 0007, section 5).
-const IDEMPOTENCY_SECS: i64 = 24 * 3600;
-/// How long a session is kept after it ended (expired or revoked).
-const ENDED_SESSION_SECS: i64 = 30 * 24 * 3600;
+pub const LONGEST_RUN: Duration = Duration::from_secs(Webhook::MAX_TIMEOUT_MS as u64 / 1000 + 15);
 
 /// Fans out events not fanned out yet: a pending delivery for each destination that
 /// wants them, the handlers (`handlers::destinations`) and every app subscribed to the
@@ -81,6 +73,7 @@ const ENDED_SESSION_SECS: i64 = 30 * 24 * 3600;
 pub async fn fan_out<S: HasOutbox + HasApps>(
     ports: &S,
     clock: &impl Clock,
+    settings: &DispatchSettings,
 ) -> Result<Progress, RepoError> {
     let apps = ports.apps().list().await?;
     let destinations = |event_type: &str| {
@@ -94,27 +87,28 @@ pub async fn fan_out<S: HasOutbox + HasApps>(
     };
     let done = ports
         .outbox()
-        .fan_out(BATCH, clock.now(), &destinations)
+        .fan_out(settings.batch, clock.now(), &destinations)
         .await?;
-    Ok(Progress::of(done, BATCH))
+    Ok(Progress::of(done, settings.batch))
 }
 
 /// Leases the due deliveries, for `run`. Short: get ports for it, then let them go.
 pub async fn lease_due<S: HasOutbox>(
     ports: &S,
     clock: &impl Clock,
+    settings: &DispatchSettings,
 ) -> Result<Vec<Delivery>, RepoError> {
     let now = clock.now();
     ports
         .outbox()
-        .lease_due(now, now.plus_secs(LEASE_SECS), BATCH)
+        .lease_due(now, now.plus(settings.lease), settings.batch)
         .await
 }
 
 /// Whether `delivery` can still run and be recorded within its lease. The rest of a
 /// batch that's run out of time is left: its leases end, and the next lease takes them.
 pub fn has_time(delivery: &Delivery, clock: &impl Clock) -> bool {
-    clock.now().plus_secs(LONGEST_RUN_SECS) <= delivery.leased_until
+    clock.now().plus(LONGEST_RUN) <= delivery.leased_until
 }
 
 /// Why an attempt failed, and whether trying again could help.
@@ -139,12 +133,17 @@ pub enum Prepared {
 
 /// Looks at `delivery`'s destination: a handler, an app to send to as the app is now,
 /// or an outcome already.
-pub async fn prepare<S: HasApps>(ports: &S, clock: &impl Clock, delivery: &Delivery) -> Prepared {
+pub async fn prepare<S: HasApps>(
+    ports: &S,
+    clock: &impl Clock,
+    settings: &DispatchSettings,
+    delivery: &Delivery,
+) -> Prepared {
     match delivery.destination.split_once(':') {
         Some(("handler", _)) => Prepared::Handler,
         Some(("app", key)) => match load_app(ports, key).await {
             Ok(app) => Prepared::Webhook(app),
-            Err(failure) => Prepared::Done(outcome(Err(failure), clock, delivery)),
+            Err(failure) => Prepared::Done(outcome(Err(failure), clock, settings, delivery)),
         },
         _ => Prepared::Done(outcome(
             Err(Failure::Retry(format!(
@@ -152,6 +151,7 @@ pub async fn prepare<S: HasApps>(ports: &S, clock: &impl Clock, delivery: &Deliv
                 delivery.destination
             ))),
             clock,
+            settings,
             delivery,
         )),
     }
@@ -161,6 +161,7 @@ pub async fn prepare<S: HasApps>(ports: &S, clock: &impl Clock, delivery: &Deliv
 pub async fn handle<S: DispatchPorts>(
     ports: &S,
     clock: &impl Clock,
+    settings: &DispatchSettings,
     delivery: &Delivery,
 ) -> DeliveryOutcome {
     let name = delivery
@@ -170,33 +171,36 @@ pub async fn handle<S: DispatchPorts>(
     let result = run_handler(ports, name, &delivery.event)
         .await
         .map_err(Failure::Retry);
-    outcome(result, clock, delivery)
+    outcome(result, clock, settings, delivery)
 }
 
 /// Sends a webhook delivery (`Prepared::Webhook`).
 pub async fn send(
     webhooks: &impl WebhookSender,
     clock: &impl Clock,
+    settings: &DispatchSettings,
     app: &App,
     delivery: &Delivery,
 ) -> DeliveryOutcome {
     let result = webhooks.send(app, delivery).await.map_err(Failure::Retry);
-    outcome(result, clock, delivery)
+    outcome(result, clock, settings, delivery)
 }
 
 /// Runs one delivery with one set of ports and says how it went: a failure is tried
-/// again on the schedule (`next_attempt`), or fails for good after the last attempt.
+/// again on the schedule (`RetrySchedule::next_attempt`), or fails for good after the
+/// last attempt.
 /// A host with a pool uses `prepare`, `handle` and `send` instead, to let its connection
 /// go before a webhook is sent.
 pub async fn run<S: DispatchPorts>(
     ports: &S,
     clock: &impl Clock,
+    settings: &DispatchSettings,
     webhooks: &impl WebhookSender,
     delivery: &Delivery,
 ) -> DeliveryOutcome {
-    match prepare(ports, clock, delivery).await {
-        Prepared::Handler => handle(ports, clock, delivery).await,
-        Prepared::Webhook(app) => send(webhooks, clock, &app, delivery).await,
+    match prepare(ports, clock, settings, delivery).await {
+        Prepared::Handler => handle(ports, clock, settings, delivery).await,
+        Prepared::Webhook(app) => send(webhooks, clock, settings, &app, delivery).await,
         Prepared::Done(outcome) => outcome,
     }
 }
@@ -204,12 +208,16 @@ pub async fn run<S: DispatchPorts>(
 fn outcome(
     result: Result<(), Failure>,
     clock: &impl Clock,
+    settings: &DispatchSettings,
     delivery: &Delivery,
 ) -> DeliveryOutcome {
     match result {
         Ok(()) => DeliveryOutcome::Succeeded,
         Err(Failure::Final(error)) => DeliveryOutcome::Failed { error },
-        Err(Failure::Retry(error)) => match next_attempt(delivery.attempts + 1, clock.now()) {
+        Err(Failure::Retry(error)) => match settings
+            .retry
+            .next_attempt(delivery.attempts + 1, clock.now())
+        {
             Some(at) => DeliveryOutcome::Retry { error, at },
             None => DeliveryOutcome::Failed { error },
         },
@@ -247,45 +255,49 @@ pub async fn record<S: HasOutbox>(ports: &S, outcomes: &[Outcome]) -> Result<(),
 pub async fn deliver_due<S: DispatchPorts>(
     ports: &S,
     clock: &impl Clock,
+    settings: &DispatchSettings,
     webhooks: &impl WebhookSender,
 ) -> Result<Progress, RepoError> {
-    let leased = lease_due(ports, clock).await?;
+    let leased = lease_due(ports, clock, settings).await?;
     let mut outcomes = Vec::with_capacity(leased.len());
     for delivery in leased.iter().take_while(|d| has_time(d, clock)) {
-        let outcome = run(ports, clock, webhooks, delivery).await;
+        let outcome = run(ports, clock, settings, webhooks, delivery).await;
         outcomes.push(Outcome::of(delivery, outcome));
     }
     record(ports, &outcomes).await?;
-    Ok(Progress::of(leased.len() as u32, BATCH))
+    Ok(Progress::of(leased.len() as u32, settings.batch))
 }
 
-/// Deletes events (and their deliveries) older than 30 days (Q7).
+/// Deletes events (and their deliveries) older than `keep_events` (Q7).
 pub async fn prune_events<S: HasOutbox>(
     ports: &S,
     clock: &impl Clock,
+    settings: &DispatchSettings,
 ) -> Result<Progress, RepoError> {
-    let before = clock.now().plus_secs(-RETENTION_SECS);
-    let done = ports.outbox().prune_events(before, BATCH).await?;
-    Ok(Progress::of(done, BATCH))
+    let before = clock.now().minus(settings.keep_events);
+    let done = ports.outbox().prune_events(before, settings.batch).await?;
+    Ok(Progress::of(done, settings.batch))
 }
 
-/// Deletes idempotency records older than a day: past that, a retry with the same key
-/// is a new request (design note 0007, section 5).
+/// Deletes idempotency records older than `keep_idempotency_keys`: past that, a retry
+/// with the same key is a new request (design note 0007, section 5).
 pub async fn prune_idempotency_keys<S: HasIdempotency>(
     ports: &S,
     clock: &impl Clock,
+    settings: &DispatchSettings,
 ) -> Result<Progress, RepoError> {
-    let before = clock.now().plus_secs(-IDEMPOTENCY_SECS);
-    let done = ports.idempotency().prune(before, BATCH).await?;
-    Ok(Progress::of(done, BATCH))
+    let before = clock.now().minus(settings.keep_idempotency_keys);
+    let done = ports.idempotency().prune(before, settings.batch).await?;
+    Ok(Progress::of(done, settings.batch))
 }
 
-/// Deletes sessions that ended (expired or revoked) over 30 days ago.
+/// Deletes sessions that ended (expired or revoked) over `keep_ended_sessions` ago.
 pub async fn prune_sessions<S: HasSessions>(
     ports: &S,
     clock: &impl Clock,
+    settings: &DispatchSettings,
 ) -> Result<Progress, RepoError> {
-    let before = clock.now().plus_secs(-ENDED_SESSION_SECS);
-    let done = ports.sessions().prune(before, BATCH).await?;
-    Ok(Progress::of(done, BATCH))
+    let before = clock.now().minus(settings.keep_ended_sessions);
+    let done = ports.sessions().prune(before, settings.batch).await?;
+    Ok(Progress::of(done, settings.batch))
 }

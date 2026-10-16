@@ -1,6 +1,8 @@
 //! Invites (design note 0008, section 5): how staff join. An admin invites an email
 //! with a role; the emailed token lets the invitee set a name and password.
 
+use core::time::Duration;
+
 use hypha_auth::TokenHash;
 use hypha_core::{Actor, Email, InviteId, RoleId, Timestamp, Version, Versioned};
 
@@ -28,8 +30,7 @@ impl Versioned for Invite {
 }
 
 impl Invite {
-    pub const LIFETIME_SECS: i64 = 7 * 24 * 60 * 60;
-
+    /// An invite that works for `lifetime` (`AuthSettings::invite_lifetime`).
     pub fn new(
         id: InviteId,
         email: Email,
@@ -37,6 +38,7 @@ impl Invite {
         token_hash: TokenHash,
         invited_by: Actor,
         now: Timestamp,
+        lifetime: Duration,
     ) -> Self {
         Self {
             id,
@@ -46,7 +48,7 @@ impl Invite {
             token_hash,
             invited_by,
             created_at: now,
-            expires_at: now.plus_secs(Self::LIFETIME_SECS),
+            expires_at: now.plus(lifetime),
             accepted_at: None,
         }
     }
@@ -88,14 +90,21 @@ impl Invite {
         self.accepted_at.is_none() && now < self.expires_at
     }
 
-    /// Sends the invite again: a new token (the old one stops working), a new expiry,
-    /// and maybe another role. Callers check it isn't accepted.
-    pub fn renew(&mut self, token_hash: TokenHash, role: RoleId, by: Actor, now: Timestamp) {
+    /// Sends the invite again: a new token (the old one stops working), `lifetime` from
+    /// now, and maybe another role. Callers check it isn't accepted.
+    pub fn renew(
+        &mut self,
+        token_hash: TokenHash,
+        role: RoleId,
+        by: Actor,
+        now: Timestamp,
+        lifetime: Duration,
+    ) {
         self.token_hash = token_hash;
         self.role = role;
         self.invited_by = by;
         self.created_at = now;
-        self.expires_at = now.plus_secs(Self::LIFETIME_SECS);
+        self.expires_at = now.plus(lifetime);
     }
 
     /// Callers check `is_usable` first.
@@ -153,6 +162,7 @@ mod tests {
     use super::*;
 
     const NOW: Timestamp = Timestamp::UNIX_EPOCH;
+    const WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
 
     fn invite() -> Invite {
         Invite::new(
@@ -162,14 +172,15 @@ mod tests {
             TokenHash::from_bytes([1; 32]),
             Actor::System,
             NOW,
+            WEEK,
         )
     }
 
     #[test]
     fn usable_for_a_week_until_accepted() {
         let mut i = invite();
-        assert!(i.is_usable(NOW.plus_secs(Invite::LIFETIME_SECS - 1)));
-        assert!(!i.is_usable(NOW.plus_secs(Invite::LIFETIME_SECS)));
+        assert!(i.is_usable(NOW.plus(WEEK).plus_secs(-1)));
+        assert!(!i.is_usable(NOW.plus(WEEK)));
         i.accept(NOW);
         assert!(!i.is_usable(NOW));
     }
@@ -177,9 +188,15 @@ mod tests {
     #[test]
     fn renewing_swaps_the_token_and_restarts_the_week() {
         let mut i = invite();
-        let later = NOW.plus_secs(Invite::LIFETIME_SECS + 10);
+        let later = NOW.plus(WEEK).plus_secs(10);
         let role = RoleId::from_uuid(Uuid::from_u128(3));
-        i.renew(TokenHash::from_bytes([2; 32]), role, Actor::System, later);
+        i.renew(
+            TokenHash::from_bytes([2; 32]),
+            role,
+            Actor::System,
+            later,
+            WEEK,
+        );
         assert!(i.is_usable(later));
         assert_eq!(i.token_hash(), TokenHash::from_bytes([2; 32]));
         assert_eq!(i.role(), role);

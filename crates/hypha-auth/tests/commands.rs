@@ -159,7 +159,21 @@ fn a_session_stops_working_when_it_expires_or_logs_out() {
     );
 
     let token = token_of(&login(&ports, &env));
-    env.advance(hypha_auth::Session::ACTIVE_SECS);
+    env.advance_by(env.auth.session_lifetime);
+    assert_eq!(
+        block_on(authenticate_session(&ports.sessions, &env, &token)).map(|s| s.id()),
+        Err(CommandError::InvalidToken)
+    );
+}
+
+#[test]
+fn a_session_lasts_the_configured_lifetime() {
+    let (ports, mut env) = world();
+    env.auth.session_lifetime = std::time::Duration::from_secs(3600);
+    let token = token_of(&login(&ports, &env));
+    env.advance(3599);
+    assert!(block_on(authenticate_session(&ports.sessions, &env, &token)).is_ok());
+    env.advance(1);
     assert_eq!(
         block_on(authenticate_session(&ports.sessions, &env, &token)).map(|s| s.id()),
         Err(CommandError::InvalidToken)
@@ -301,7 +315,7 @@ fn a_challenge_expires_after_five_minutes() {
     let (ports, env) = world();
     let (secret, _) = enable_mfa(&ports, &env);
     let challenge = token_of(&login(&ports, &env));
-    env.advance(hypha_auth::Session::PENDING_SECS);
+    env.advance_by(env.auth.second_factor_window);
     assert_eq!(
         block_on(finish_login(
             &ports,
@@ -361,7 +375,7 @@ fn wrong_codes_at_confirmation_count_and_lock() {
             Err(CommandError::InvalidMfaCode)
         );
     }
-    let until = env.now().plus_secs(Identity::MFA_LOCK_SECS);
+    let until = env.now().plus(env.auth.second_factor_lock);
     assert_eq!(
         block_on(confirm_totp(
             &ports.identities,
@@ -464,7 +478,7 @@ fn five_wrong_codes_lock_the_second_factor_across_challenges() {
         block_on(finish_login(&ports, &env, &second, "000000")).map(|(s, _)| s.id()),
         Err(CommandError::InvalidMfaCode)
     );
-    let until = env.now().plus_secs(Identity::MFA_LOCK_SECS);
+    let until = env.now().plus(env.auth.second_factor_lock);
     for code in [code(&secret, env.now(), 0), codes[0].clone()] {
         assert_eq!(
             block_on(finish_login(&ports, &env, &second, &code)).map(|(s, _)| s.id()),
@@ -482,7 +496,7 @@ fn five_wrong_codes_lock_the_second_factor_across_challenges() {
         Err(CommandError::MfaLocked { until })
     );
 
-    env.advance(Identity::MFA_LOCK_SECS);
+    env.advance_by(env.auth.second_factor_lock);
     let third = token_of(&login(&ports, &env));
     assert!(
         block_on(finish_login(
@@ -510,7 +524,7 @@ fn wrong_codes_while_logged_in_count_too() {
             Err(CommandError::InvalidMfaCode)
         );
     }
-    let until = env.now().plus_secs(Identity::MFA_LOCK_SECS);
+    let until = env.now().plus(env.auth.second_factor_lock);
     assert_eq!(
         block_on(regenerate_recovery_codes(
             &ports.identities,
@@ -698,7 +712,7 @@ fn a_reset_uses_up_every_other_reset_link() {
     };
     let first = start();
     // A second link (sent once the first is a few minutes old).
-    env.advance(hypha_auth::PasswordReset::RESEND_AFTER_SECS);
+    env.advance_by(env.auth.password_reset_resend_after);
     let second = start();
     block_on(reset_password(
         &ports,
@@ -760,7 +774,8 @@ fn one_reset_email_per_account_every_few_minutes() {
         .map(|(_, reset, _)| reset.id())
     };
     let first = start().unwrap();
-    env.advance(hypha_auth::PasswordReset::RESEND_AFTER_SECS - 1);
+    env.advance_by(env.auth.password_reset_resend_after);
+    env.advance(-1);
     assert_eq!(start(), None);
     env.advance(1);
     let second = start().unwrap();
@@ -808,7 +823,7 @@ fn a_reset_token_expires_after_an_hour() {
     ))
     .unwrap()
     .unwrap();
-    env.advance(hypha_auth::PasswordReset::LIFETIME_SECS);
+    env.advance_by(env.auth.password_reset_lifetime);
     assert_eq!(
         block_on(reset_password(
             &ports,

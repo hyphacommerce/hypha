@@ -4,9 +4,9 @@ use hypha_core::{
 };
 use hypha_media::{
     AssetRepo, AssetStatus, AssetUsage, BlobStore, CommandError, CreateUpload, IN_USE_LISTED,
-    MediaError, MimeType, UpdateAsset, UploadMismatch, UsageOwner, UsageRole, Visibility,
-    complete_upload, create_upload, delete_asset, get_asset, list_asset_usages, list_assets,
-    sweep_abandoned_uploads, update_asset,
+    MediaError, MediaSettings, MimeType, UpdateAsset, UploadMismatch, UsageOwner, UsageRole,
+    Visibility, complete_upload, create_upload, delete_asset, get_asset, list_asset_usages,
+    list_assets, sweep_abandoned_uploads, update_asset,
 };
 use hypha_testkit::{FixedClock, InMemoryAssetRepo, InMemoryBlobStore, SequentialIds};
 use pollster::block_on;
@@ -56,6 +56,7 @@ impl World {
             &self.blobs,
             &self.ids,
             &self.clock,
+            &MediaSettings::default(),
             input,
         ))?;
         Ok(asset.id())
@@ -69,6 +70,7 @@ impl World {
             &self.blobs,
             &self.ids,
             &self.clock,
+            &MediaSettings::default(),
             input,
         ))
         .unwrap();
@@ -97,6 +99,7 @@ fn create_upload_stores_a_pending_asset_and_signs_its_upload() {
         &world.blobs,
         &world.ids,
         &world.clock,
+        &MediaSettings::default(),
         shirt_png(),
     ))
     .unwrap();
@@ -159,6 +162,7 @@ fn uploading_again_after_completing_doesnt_change_the_served_file() {
         &world.blobs,
         &world.ids,
         &world.clock,
+        &MediaSettings::default(),
         shirt_png(),
     ))
     .unwrap();
@@ -374,6 +378,7 @@ fn reading_needs_media_read_and_changing_needs_media_write() {
             &world.blobs,
             &world.ids,
             &world.clock,
+            &MediaSettings::default(),
             shirt_png()
         ))
         .map(|_| ()),
@@ -436,6 +441,7 @@ fn completing_twice_at_once_succeeds_both_times() {
         &world.blobs,
         &world.ids,
         &world.clock,
+        &MediaSettings::default(),
         shirt_png(),
     ))
     .unwrap();
@@ -484,6 +490,7 @@ fn the_sweep_deletes_uploads_abandoned_for_a_day() {
         &world.blobs,
         &world.ids,
         &world.clock,
+        &MediaSettings::default(),
         shirt_png(),
     ))
     .unwrap();
@@ -495,6 +502,7 @@ fn the_sweep_deletes_uploads_abandoned_for_a_day() {
             &world.assets,
             &world.blobs,
             &world.clock,
+            &MediaSettings::default(),
         ))
     };
     assert_eq!(sweep(), Ok(0), "not a day old yet");

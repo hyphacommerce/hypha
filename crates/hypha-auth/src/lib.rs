@@ -14,6 +14,7 @@ pub mod recovery;
 pub mod repo;
 pub mod secret_box;
 pub mod session;
+pub mod settings;
 pub mod token;
 pub mod totp;
 
@@ -38,4 +39,5 @@ pub use repo::{
 };
 pub use secret_box::{SealError, Sealed, SecretBox, XChaChaBox};
 pub use session::{Session, SessionSnapshot, SessionState};
+pub use settings::{AuthSettings, HasAuthSettings};
 pub use token::{NewToken, TokenHash, TokenKind};

@@ -128,7 +128,7 @@ async fn app_from(trusted_proxies: TrustedProxies, media: Option<Media>) -> Test
     )
     .await
     .unwrap();
-    let env = HostEnv::new([7; 32], None).with_hasher(Argon2id::new(8, 1, 1));
+    let env = HostEnv::new([7; 32], None, Default::default()).with_hasher(Argon2id::new(8, 1, 1));
     let state = Arc::new(AppState {
         storage,
         ids: UuidV7Ids,
@@ -148,6 +148,7 @@ async fn app_from(trusted_proxies: TrustedProxies, media: Option<Media>) -> Test
             allow_private: true,
         })
         .unwrap(),
+        dispatch: Default::default(),
     });
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {

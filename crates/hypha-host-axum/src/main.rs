@@ -94,7 +94,7 @@ async fn main() {
         }
     };
     tracing::info!("storage: Postgres (migrations applied)");
-    let env = HostEnv::new(secret_key, admin_url);
+    let env = HostEnv::new(secret_key, admin_url, Default::default());
     serve(routes::postgres_router(), storage, env).await;
 }
 
@@ -230,6 +230,7 @@ async fn serve<S: Storage>(router: Router<SharedState<S>>, storage: S, env: Host
         store_name: store.name().to_string(),
         media,
         outbound,
+        dispatch: Default::default(),
         http: match outbound::client(outbound) {
             Ok(client) => client,
             Err(e) => {

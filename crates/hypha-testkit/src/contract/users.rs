@@ -1,4 +1,4 @@
-use hypha_auth::TokenHash;
+use hypha_auth::{AuthSettings, TokenHash};
 use hypha_core::{
     Actor, Email, InviteId, RepoError, RoleId, Scope, Timestamp, UserId, Version, Versioned,
 };
@@ -39,6 +39,7 @@ pub(super) fn invite(n: u128, email: &str, token: u8) -> Invite {
         TokenHash::from_bytes([token; 32]),
         Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
         Timestamp::from_unix_micros(1_700_000_000_000_001),
+        AuthSettings::default().invite_lifetime,
     )
 }
 
@@ -211,6 +212,7 @@ async fn invite_update<R: InviteRepo>(repo: &R) {
         role_id(2),
         Actor::System,
         Timestamp::from_unix_micros(5),
+        AuthSettings::default().invite_lifetime,
     );
     i.accept(Timestamp::from_unix_micros(6));
     repo.update(&mut i).await.unwrap();

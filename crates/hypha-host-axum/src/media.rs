@@ -2,7 +2,7 @@
 //! are built (`HYPHA_MEDIA_URL`, `HYPHA_MEDIA_TRANSFORMS`).
 
 use hypha_core::{Clock, Timestamp};
-use hypha_media::{Asset, AssetKind, AssetStatus, BlobStore, DOWNLOAD_EXPIRES_IN_SECS, Visibility};
+use hypha_media::{Asset, AssetKind, AssetStatus, BlobStore, MediaSettings, Visibility};
 use hypha_store_s3::{ReqwestClient, S3BlobStore, S3Config};
 
 use crate::{error::ApiError, state::SystemClock};
@@ -14,6 +14,8 @@ pub type HostBlobs = S3BlobStore<ReqwestClient, SystemClock>;
 pub struct Media {
     pub blobs: HostBlobs,
     pub urls: MediaUrls,
+    /// URL lifetimes and the sweep's age (`[media]`, design note 0017).
+    pub settings: MediaSettings,
 }
 
 /// How a thumbnail is made from a public image URL.
@@ -96,6 +98,7 @@ impl Media {
                     .filter(|u| !u.is_empty()),
                 transforms,
             },
+            settings: MediaSettings::default(),
         }))
     }
 
@@ -136,7 +139,11 @@ impl Media {
                 let now: Timestamp = SystemClock.now();
                 let url = self
                     .blobs
-                    .presign_download(asset.key(), now, DOWNLOAD_EXPIRES_IN_SECS)
+                    .presign_download(
+                        asset.key(),
+                        now,
+                        MediaSettings::secs(self.settings.download_expires),
+                    )
                     .await?;
                 Ok(Some(url))
             }

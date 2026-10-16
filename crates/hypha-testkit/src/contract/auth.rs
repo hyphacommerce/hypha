@@ -1,7 +1,7 @@
 use hypha_auth::{
-    ApiKey, ApiKeyKind, ApiKeyParts, ApiKeyRepo, CredentialKind, Identity, IdentityRepo,
-    PasswordHash, PasswordReset, PasswordResetRepo, Principal, PrincipalKind, Sealed, Session,
-    SessionRepo, TokenHash, keys,
+    ApiKey, ApiKeyKind, ApiKeyParts, ApiKeyRepo, AuthSettings, CredentialKind, Identity,
+    IdentityRepo, PasswordHash, PasswordReset, PasswordResetRepo, Principal, PrincipalKind, Sealed,
+    Session, SessionRepo, TokenHash, keys,
 };
 use hypha_core::{
     Actor, ApiKeyId, Email, IdentityId, PasswordResetId, RepoError, Scope, SessionId, Timestamp,
@@ -43,6 +43,10 @@ fn identity_with_mfa(n: u128, email: &str) -> Identity {
     i
 }
 
+fn settings() -> AuthSettings {
+    AuthSettings::default()
+}
+
 pub(super) fn session(n: u128, identity: u128, token: u8) -> Session {
     Session::active(
         SessionId::from_uuid(Uuid::from_u128(n)),
@@ -51,6 +55,7 @@ pub(super) fn session(n: u128, identity: u128, token: u8) -> Session {
         hash(token),
         Timestamp::from_unix_micros(1_700_000_000_000_001),
         None,
+        settings().session_lifetime,
     )
 }
 
@@ -76,6 +81,7 @@ pub(super) fn reset(n: u128, identity: u128, token: u8) -> PasswordReset {
         identity_id(identity),
         hash(token),
         Timestamp::from_unix_micros(1_700_000_000_000_001),
+        settings().password_reset_lifetime,
     )
 }
 
@@ -223,7 +229,7 @@ async fn session_prune<R: SessionRepo>(repo: &R) {
         Ok(None)
     );
     // Later, the others have expired too.
-    let later = created.plus_secs(Session::ACTIVE_SECS + 1);
+    let later = created.plus(settings().session_lifetime).plus_secs(1);
     assert_eq!(repo.prune(later, 10).await, Ok(2));
     assert_eq!(repo.prune(later, 10).await, Ok(0));
 }
@@ -241,6 +247,7 @@ async fn session_round_trips<R: SessionRepo>(repo: &R) {
         staff(1),
         hash(2),
         Timestamp::from_unix_micros(-5),
+        settings().second_factor_window,
     );
     pending.record_failed_attempt(Timestamp::UNIX_EPOCH);
     repo.insert(&mut pending).await.unwrap();
@@ -255,9 +262,14 @@ async fn session_update<R: SessionRepo>(repo: &R) {
         staff(1),
         hash(1),
         Timestamp::UNIX_EPOCH,
+        settings().second_factor_window,
     );
     repo.insert(&mut s).await.unwrap();
-    s.activate(hash(2), Timestamp::from_unix_micros(7));
+    s.activate(
+        hash(2),
+        Timestamp::from_unix_micros(7),
+        settings().session_lifetime,
+    );
     s.revoke(Timestamp::from_unix_micros(8));
     repo.update(&mut s).await.unwrap();
     assert_eq!(s.version(), Version::new(2));
@@ -286,9 +298,10 @@ async fn session_keys<R: SessionRepo>(repo: &R) {
         staff(1),
         hash(3),
         Timestamp::UNIX_EPOCH,
+        settings().second_factor_window,
     );
     repo.insert(&mut b).await.unwrap();
-    b.activate(hash(1), Timestamp::UNIX_EPOCH);
+    b.activate(hash(1), Timestamp::UNIX_EPOCH, settings().session_lifetime);
     assert_eq!(
         repo.update(&mut b).await,
         Err(RepoError::Duplicate(keys::SESSION_TOKEN))
@@ -399,6 +412,7 @@ async fn reset_latest<R: PasswordResetRepo>(repo: &R) {
             identity_id(1),
             hash(token),
             Timestamp::from_unix_micros(micros),
+            settings().password_reset_lifetime,
         )
     };
     let mut older = at(1_000, 1, 1);

@@ -2,6 +2,8 @@
 //! `wasm32-unknown-unknown`, and tests need exact times), so "now" comes in through the
 //! `Clock` port (`ports.rs`).
 
+use core::time::Duration;
+
 /// A point in time: microseconds since the Unix epoch, in UTC.
 ///
 /// Microseconds because Postgres `timestamptz` stores exactly that, so a timestamp
@@ -30,6 +32,28 @@ impl Timestamp {
     /// `secs` seconds later (earlier if negative), saturating at the ends of `i64`.
     pub const fn plus_secs(self, secs: i64) -> Self {
         Self(self.0.saturating_add(secs.saturating_mul(1_000_000)))
+    }
+
+    /// `duration` later, saturating at the end of `i64` (sub-microsecond parts dropped).
+    /// Settings are `Duration`s (design note 0017): a plain number, so it builds for
+    /// wasm, unlike `Instant` and `SystemTime`.
+    pub const fn plus(self, duration: Duration) -> Self {
+        Self(self.0.saturating_add(micros(duration)))
+    }
+
+    /// `duration` earlier, saturating at the start of `i64`.
+    pub const fn minus(self, duration: Duration) -> Self {
+        Self(self.0.saturating_sub(micros(duration)))
+    }
+}
+
+/// A duration's whole microseconds, capped at `i64::MAX`.
+const fn micros(duration: Duration) -> i64 {
+    let micros = duration.as_micros();
+    if micros > i64::MAX as u128 {
+        i64::MAX
+    } else {
+        micros as i64
     }
 }
 
@@ -97,6 +121,18 @@ mod tests {
         fn set_stamps(&mut self, stamps: Stamps) {
             self.0 = Some(stamps);
         }
+    }
+
+    #[test]
+    fn durations_move_by_whole_microseconds_and_saturate() {
+        let t = Timestamp(10);
+        assert_eq!(t.plus(Duration::from_nanos(2_999)), Timestamp(12));
+        assert_eq!(t.minus(Duration::from_micros(20)), Timestamp(-10));
+        assert_eq!(t.plus(Duration::MAX), Timestamp(i64::MAX));
+        assert_eq!(
+            Timestamp(i64::MIN + 1).minus(Duration::from_secs(1)),
+            Timestamp(i64::MIN)
+        );
     }
 
     #[test]

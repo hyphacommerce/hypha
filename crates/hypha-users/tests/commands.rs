@@ -417,7 +417,7 @@ fn an_invite_expires_after_a_week() {
         role: support.id(),
     };
     block_on(invite_user(&owner_ctx(&owner), &ports, &env, input)).unwrap();
-    env.advance(hypha_users::Invite::LIFETIME_SECS);
+    env.advance_by(env.auth.invite_lifetime);
     let accepted = AcceptInvite {
         token: env.last_token().unwrap(),
         name: "Bob".to_string(),

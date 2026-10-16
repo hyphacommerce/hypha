@@ -1,6 +1,8 @@
 //! Sessions (design note 0008, A3 and A4): what a staff member's requests carry after
 //! logging in. Server-side, so revoking one works on the next request.
 
+use core::time::Duration;
+
 use hypha_core::{IdentityId, SessionId, Timestamp, Version, Versioned};
 
 use crate::{identity::Principal, token::TokenHash};
@@ -40,14 +42,10 @@ impl Versioned for Session {
 }
 
 impl Session {
-    /// How long a pending session waits for the second factor.
-    pub const PENDING_SECS: i64 = 5 * 60;
-    /// How long an active session lasts, from login.
-    pub const ACTIVE_SECS: i64 = 7 * 24 * 60 * 60;
     /// Wrong second-factor codes before a pending session is revoked.
     pub const MAX_ATTEMPTS: u32 = 5;
 
-    /// A logged-in session.
+    /// A logged-in session, lasting `lifetime` (`AuthSettings::session_lifetime`).
     pub fn active(
         id: SessionId,
         identity: IdentityId,
@@ -55,6 +53,7 @@ impl Session {
         token_hash: TokenHash,
         now: Timestamp,
         mfa_at: Option<Timestamp>,
+        lifetime: Duration,
     ) -> Self {
         Self {
             id,
@@ -64,18 +63,20 @@ impl Session {
             token_hash,
             state: SessionState::Active { mfa_at },
             created_at: now,
-            expires_at: now.plus_secs(Self::ACTIVE_SECS),
+            expires_at: now.plus(lifetime),
             revoked_at: None,
         }
     }
 
-    /// A session waiting for the second factor.
+    /// A session waiting for the second factor for `window`
+    /// (`AuthSettings::second_factor_window`).
     pub fn pending(
         id: SessionId,
         identity: IdentityId,
         principal: Principal,
         token_hash: TokenHash,
         now: Timestamp,
+        window: Duration,
     ) -> Self {
         Self {
             id,
@@ -85,7 +86,7 @@ impl Session {
             token_hash,
             state: SessionState::Pending { failed_attempts: 0 },
             created_at: now,
-            expires_at: now.plus_secs(Self::PENDING_SECS),
+            expires_at: now.plus(window),
             revoked_at: None,
         }
     }
@@ -138,11 +139,11 @@ impl Session {
     }
 
     /// Finishes the login under a new token, so the pending one can't be replayed. The
-    /// lifetime starts now. Callers check `is_pending` first.
-    pub fn activate(&mut self, token_hash: TokenHash, now: Timestamp) {
+    /// `lifetime` starts now. Callers check `is_pending` first.
+    pub fn activate(&mut self, token_hash: TokenHash, now: Timestamp, lifetime: Duration) {
         self.token_hash = token_hash;
         self.state = SessionState::Active { mfa_at: Some(now) };
-        self.expires_at = now.plus_secs(Self::ACTIVE_SECS);
+        self.expires_at = now.plus(lifetime);
     }
 
     /// Counts a wrong second-factor code; the `MAX_ATTEMPTS`th revokes the session.
@@ -212,6 +213,8 @@ mod tests {
     use super::*;
 
     const NOW: Timestamp = Timestamp::from_unix_micros(1_000_000_000_000);
+    const WINDOW: Duration = Duration::from_secs(300);
+    const LIFETIME: Duration = Duration::from_secs(7 * 24 * 3600);
 
     fn pending() -> Session {
         Session::pending(
@@ -220,11 +223,12 @@ mod tests {
             Principal::Staff(UserId::from_uuid(Uuid::from_u128(3))),
             TokenHash::from_bytes([1; 32]),
             NOW,
+            WINDOW,
         )
     }
 
     #[test]
-    fn a_pending_session_lasts_five_minutes_and_is_not_active() {
+    fn a_pending_session_lasts_its_window_and_is_not_active() {
         let s = pending();
         assert!(s.is_pending(NOW));
         assert!(!s.is_active(NOW));
@@ -236,7 +240,7 @@ mod tests {
     fn activating_swaps_the_token_and_restarts_the_lifetime() {
         let mut s = pending();
         let later = NOW.plus_secs(60);
-        s.activate(TokenHash::from_bytes([2; 32]), later);
+        s.activate(TokenHash::from_bytes([2; 32]), later, LIFETIME);
         assert!(s.is_active(later));
         assert_eq!(s.token_hash(), TokenHash::from_bytes([2; 32]));
         assert_eq!(
@@ -245,7 +249,7 @@ mod tests {
                 mfa_at: Some(later)
             }
         );
-        assert_eq!(s.expires_at(), later.plus_secs(Session::ACTIVE_SECS));
+        assert_eq!(s.expires_at(), later.plus(LIFETIME));
     }
 
     #[test]

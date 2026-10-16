@@ -1,5 +1,7 @@
 //! Password reset requests: a single-use emailed token (design note 0008, section 5).
 
+use core::time::Duration;
+
 use hypha_core::{IdentityId, PasswordResetId, Timestamp, Version, Versioned};
 
 use crate::token::TokenHash;
@@ -26,17 +28,14 @@ impl Versioned for PasswordReset {
 }
 
 impl PasswordReset {
-    /// How long the emailed link works.
-    pub const LIFETIME_SECS: i64 = 60 * 60;
-    /// While the latest link is younger than this and unused, no new one is sent: at
-    /// most one reset email per account every few minutes, however often it's asked.
-    pub const RESEND_AFTER_SECS: i64 = 5 * 60;
-
+    /// A reset whose emailed link works for `lifetime`
+    /// (`AuthSettings::password_reset_lifetime`).
     pub fn new(
         id: PasswordResetId,
         identity: IdentityId,
         token_hash: TokenHash,
         now: Timestamp,
+        lifetime: Duration,
     ) -> Self {
         Self {
             id,
@@ -44,7 +43,7 @@ impl PasswordReset {
             identity,
             token_hash,
             created_at: now,
-            expires_at: now.plus_secs(Self::LIFETIME_SECS),
+            expires_at: now.plus(lifetime),
             used_at: None,
         }
     }
@@ -78,9 +77,10 @@ impl PasswordReset {
         self.used_at.is_none() && now < self.expires_at
     }
 
-    /// Whether a new reset for the same identity should wait (`RESEND_AFTER_SECS`).
-    pub fn blocks_another(&self, now: Timestamp) -> bool {
-        self.used_at.is_none() && now < self.created_at.plus_secs(Self::RESEND_AFTER_SECS)
+    /// Whether a new reset for the same identity should wait: this one is unused and
+    /// younger than `resend_after` (`AuthSettings::password_reset_resend_after`).
+    pub fn blocks_another(&self, now: Timestamp, resend_after: Duration) -> bool {
+        self.used_at.is_none() && now < self.created_at.plus(resend_after)
     }
 
     /// Uses the token up. Callers check `is_usable` first.
@@ -132,13 +132,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn usable_once_within_the_hour() {
+    fn usable_once_within_its_lifetime() {
         let now = Timestamp::UNIX_EPOCH;
         let mut r = PasswordReset::new(
             PasswordResetId::from_uuid(Uuid::from_u128(1)),
             IdentityId::from_uuid(Uuid::from_u128(2)),
             TokenHash::from_bytes([0; 32]),
             now,
+            Duration::from_secs(3600),
         );
         assert!(r.is_usable(now.plus_secs(3599)));
         assert!(!r.is_usable(now.plus_secs(3600)));

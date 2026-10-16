@@ -231,6 +231,7 @@ pub(super) async fn create<S: Storage>(
         &media.blobs,
         &state.ids,
         &state.clock,
+        &media.settings,
         input,
     )
     .await?;

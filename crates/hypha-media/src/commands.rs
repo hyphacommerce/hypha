@@ -11,17 +11,8 @@ use crate::{
     Asset, AssetKind, AssetRepo, AssetStatus, AssetUsage, AssetUsageRepo, BlobError, BlobStore,
     Checksum, HEAD_BYTES, HasAssetUsages, HasAssets, MediaError, MimeType, NewUpload,
     PresignedUpload, UploadMismatch, UploadTerms, UsageOwner, Visibility, repo::keys,
+    settings::MediaSettings,
 };
-
-/// How long an upload URL works.
-pub const UPLOAD_EXPIRES_IN_SECS: u32 = 15 * 60;
-
-/// How long an upload may stay unfinished (or a failed asset stay around) before
-/// `sweep_abandoned_uploads` deletes it.
-pub const ABANDONED_AFTER_SECS: i64 = 24 * 60 * 60;
-
-/// How long a private file's download URL works.
-pub const DOWNLOAD_EXPIRES_IN_SECS: u32 = 15 * 60;
 
 /// How many usages `AssetInUse` carries; `list_asset_usages` pages through all of them.
 pub const IN_USE_LISTED: u32 = 25;
@@ -86,6 +77,7 @@ pub async fn create_upload<R: AssetRepo, B: BlobStore>(
     blobs: &B,
     ids: &impl IdGenerator,
     clock: &impl Clock,
+    settings: &MediaSettings,
     input: CreateUpload,
 ) -> Result<(Asset, PresignedUpload), CommandError> {
     ctx.require(Scope::MediaWrite)?;
@@ -110,7 +102,7 @@ pub async fn create_upload<R: AssetRepo, B: BlobStore>(
         content_length: asset.byte_size(),
         checksum,
         cache_control: asset.visibility().cache_control(),
-        expires_in_secs: UPLOAD_EXPIRES_IN_SECS,
+        expires_in_secs: MediaSettings::secs(settings.upload_expires),
     };
     // To the upload key: the URL stays valid for a while, so it must never be able to
     // write where the checked file is served from (`complete_upload` copies it there).
@@ -296,18 +288,20 @@ pub async fn list_asset_usages<S: HasAssets + HasAssetUsages>(
     Ok(ports.asset_usages().list_usages(id, page).await?)
 }
 
-/// Deletes assets whose upload was abandoned (pending for over a day: the tab closed,
-/// the upload failed) or that failed their check over a day ago, with any file under
-/// their keys. Hosts run it regularly. Returns how many it deleted.
+/// Deletes assets whose upload was abandoned (pending for over `abandoned_after`, a day
+/// by default: the tab closed, the upload failed) or that failed their check that long
+/// ago, with any file under their keys. Hosts run it regularly. Returns how many it
+/// deleted.
 pub async fn sweep_abandoned_uploads<R: AssetRepo, B: BlobStore>(
     ctx: &Ctx,
     assets: &R,
     blobs: &B,
     clock: &impl Clock,
+    settings: &MediaSettings,
 ) -> Result<usize, CommandError> {
     ctx.require(Scope::MediaWrite)?;
     const BATCH: u32 = 100;
-    let before = clock.now().plus_secs(-ABANDONED_AFTER_SECS);
+    let before = clock.now().minus(settings.abandoned_after);
     let mut deleted = 0;
     loop {
         let batch = assets.abandoned(before, BATCH).await?;

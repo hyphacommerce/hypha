@@ -406,7 +406,13 @@ async fn save_invite<R: InviteRepo>(
                 return Err(CommandError::UserExists(email.clone()));
             }
             Some(mut invite) => {
-                invite.renew(token, role, ctx.actor(), env.now());
+                invite.renew(
+                    token,
+                    role,
+                    ctx.actor(),
+                    env.now(),
+                    env.auth_settings().invite_lifetime,
+                );
                 invites.update(&mut invite).await.map(|()| invite)
             }
             None => {
@@ -417,6 +423,7 @@ async fn save_invite<R: InviteRepo>(
                     token,
                     ctx.actor(),
                     env.now(),
+                    env.auth_settings().invite_lifetime,
                 );
                 invites.insert(&mut invite).await.map(|()| invite)
             }

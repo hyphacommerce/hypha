@@ -7,7 +7,9 @@ use hypha_core::{
     BasisPoints, Clock, Currency, Delivery, Money, OutboxRepo, Price, PriceListId, ProductId,
     Quantity, Sealed, VariantId,
 };
-use hypha_dispatch::{MAX_ATTEMPTS, Progress, WebhookSender, deliver_due, fan_out, prune_events};
+use hypha_dispatch::{
+    DispatchSettings, Progress, WebhookSender, deliver_due, fan_out, prune_events,
+};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, ReservationRef};
 use hypha_markets::{PriceList, PriceListRepo};
 use hypha_products::{
@@ -16,6 +18,10 @@ use hypha_products::{
 use hypha_testkit::{FixedClock, InMemoryPorts};
 use pollster::block_on;
 use uuid::Uuid;
+
+fn settings() -> DispatchSettings {
+    DispatchSettings::default()
+}
 
 fn eur(amount: i64) -> Price {
     Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
@@ -115,8 +121,8 @@ fn dispatch(ports: &InMemoryPorts, clock: &FixedClock) -> Progress {
 }
 
 fn dispatch_with(ports: &InMemoryPorts, clock: &FixedClock, webhooks: &Webhooks) -> Progress {
-    block_on(fan_out(ports, clock)).unwrap();
-    block_on(deliver_due(ports, clock, webhooks)).unwrap()
+    block_on(fan_out(ports, clock, &settings())).unwrap();
+    block_on(deliver_due(ports, clock, &settings(), webhooks)).unwrap()
 }
 
 fn cleanup_deliveries(ports: &InMemoryPorts) -> Vec<(String, &'static str, u32, Option<String>)> {
@@ -205,22 +211,28 @@ fn running_a_cleanup_again_is_harmless() {
     let ports = world();
     let clock = FixedClock::default();
     remove(&ports, small());
-    block_on(fan_out(&ports, &clock)).unwrap();
+    block_on(fan_out(&ports, &clock, &settings())).unwrap();
     // A runner leases it and dies; the lease runs out and another runs it, then a
     // third time, as at-least-once allows.
-    let leased = block_on(hypha_dispatch::lease_due(&ports, &clock)).unwrap();
+    let leased = block_on(hypha_dispatch::lease_due(&ports, &clock, &settings())).unwrap();
     assert_eq!(leased.len(), 1);
     block_on(hypha_dispatch::run(
         &ports,
         &clock,
+        &settings(),
         &Webhooks::default(),
         &leased[0],
     ));
     clock.set(FixedClock::DEFAULT.plus_secs(120));
     assert_eq!(
-        block_on(deliver_due(&ports, &clock, &Webhooks::default()))
-            .unwrap()
-            .done,
+        block_on(deliver_due(
+            &ports,
+            &clock,
+            &settings(),
+            &Webhooks::default()
+        ))
+        .unwrap()
+        .done,
         1
     );
     assert_eq!(cleanup_deliveries(&ports)[0].1, "succeeded");
@@ -242,9 +254,14 @@ fn a_failing_delivery_is_retried_on_the_schedule_then_fails() {
     )
     .unwrap();
     assert!(
-        block_on(deliver_due(&ports, &clock, &Webhooks::default()))
-            .unwrap()
-            .done
+        block_on(deliver_due(
+            &ports,
+            &clock,
+            &settings(),
+            &Webhooks::default()
+        ))
+        .unwrap()
+        .done
             > 0
     );
     let failing: Vec<_> = ports
@@ -257,9 +274,14 @@ fn a_failing_delivery_is_retried_on_the_schedule_then_fails() {
     // Not due again before its minute is up.
     clock.set(FixedClock::DEFAULT.plus_secs(59));
     assert_eq!(
-        block_on(deliver_due(&ports, &clock, &Webhooks::default()))
-            .unwrap()
-            .done,
+        block_on(deliver_due(
+            &ports,
+            &clock,
+            &settings(),
+            &Webhooks::default()
+        ))
+        .unwrap()
+        .done,
         0
     );
     // Keep running the dispatcher until nothing is due any more.
@@ -267,7 +289,13 @@ fn a_failing_delivery_is_retried_on_the_schedule_then_fails() {
     for _ in 0..200 {
         at += 3600;
         clock.set(FixedClock::DEFAULT.plus_secs(at));
-        block_on(deliver_due(&ports, &clock, &Webhooks::default())).unwrap();
+        block_on(deliver_due(
+            &ports,
+            &clock,
+            &settings(),
+            &Webhooks::default(),
+        ))
+        .unwrap();
     }
     let failing: Vec<_> = ports
         .outbox
@@ -278,7 +306,7 @@ fn a_failing_delivery_is_retried_on_the_schedule_then_fails() {
     assert!(
         failing
             .iter()
-            .all(|d| d.1 == "failed" && d.2 == MAX_ATTEMPTS),
+            .all(|d| d.1 == "failed" && d.2 == settings().retry.max_attempts()),
         "{failing:?}"
     );
     assert!(failing[0].3.as_deref().unwrap().contains("no handler"));
@@ -293,13 +321,20 @@ fn old_events_are_pruned_after_thirty_days() {
     let written = ports.outbox.events().len();
     assert!(written > 0);
     // Events occur at the ports' clock (the fixed default): not old yet.
-    assert_eq!(block_on(prune_events(&ports, &clock)).unwrap().done, 0);
+    assert_eq!(
+        block_on(prune_events(&ports, &clock, &settings()))
+            .unwrap()
+            .done,
+        0
+    );
     clock.set(FixedClock::DEFAULT.plus_secs(31 * 24 * 3600));
     // The cleanup's own events weren't fanned out yet: they stay until they are.
-    let pruned = block_on(prune_events(&ports, &clock)).unwrap().done as usize;
+    let pruned = block_on(prune_events(&ports, &clock, &settings()))
+        .unwrap()
+        .done as usize;
     assert!(pruned > 0 && pruned < written, "{pruned} of {written}");
-    block_on(fan_out(&ports, &clock)).unwrap();
-    block_on(prune_events(&ports, &clock)).unwrap();
+    block_on(fan_out(&ports, &clock, &settings())).unwrap();
+    block_on(prune_events(&ports, &clock, &settings())).unwrap();
     assert!(ports.outbox.events().is_empty());
 }
 
@@ -393,7 +428,7 @@ fn a_webhook_with_nowhere_to_go_fails_at_once_and_a_paused_app_waits() {
         block_on(ports.apps.insert(&mut app)).unwrap();
     }
     remove(&ports, small());
-    block_on(fan_out(&ports, &clock)).unwrap();
+    block_on(fan_out(&ports, &clock, &settings())).unwrap();
     // Between fanning out and sending, the apps change.
     block_on(ports.apps.delete(&AppKey::new("app_gone").unwrap())).unwrap();
     let mut off = block_on(ports.apps.get(&AppKey::new("app_off").unwrap()))
@@ -408,7 +443,7 @@ fn a_webhook_with_nowhere_to_go_fails_at_once_and_a_paused_app_waits() {
     block_on(ports.apps.update(&mut bare)).unwrap();
 
     let webhooks = Webhooks::default();
-    block_on(deliver_due(&ports, &clock, &webhooks)).unwrap();
+    block_on(deliver_due(&ports, &clock, &settings(), &webhooks)).unwrap();
     assert!(webhooks.sent.borrow().is_empty());
     let mut failed = app_deliveries(&ports);
     failed.sort();
@@ -438,8 +473,8 @@ fn a_delivery_starts_only_with_time_left_on_its_lease() {
     let ports = world();
     let clock = FixedClock::default();
     remove(&ports, small());
-    block_on(fan_out(&ports, &clock)).unwrap();
-    let leased = block_on(hypha_dispatch::lease_due(&ports, &clock)).unwrap();
+    block_on(fan_out(&ports, &clock, &settings())).unwrap();
+    let leased = block_on(hypha_dispatch::lease_due(&ports, &clock, &settings())).unwrap();
     // Leased for 120 s; the longest run is 45 s (a 30 s webhook and room).
     clock.set(FixedClock::DEFAULT.plus_secs(75));
     assert!(hypha_dispatch::has_time(&leased[0], &clock));

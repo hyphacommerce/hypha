@@ -22,15 +22,19 @@ use crate::{
         SessionRepo, StageIdentities, StagePasswordResets, StageSessions,
     },
     secret_box::{SealError, SecretBox},
+    settings::HasAuthSettings,
     token::{NewToken, TokenHash, TokenKind},
     totp,
 };
 
 /// The non-storage ports auth commands use, as one bound (design note 0008, section 8).
 /// Like `hypha_cart::CartPorts`, the blanket impl means nobody implements it by hand.
-pub trait AuthEnv: IdGenerator + Clock + Random + PasswordHasher + SecretBox {}
+pub trait AuthEnv:
+    IdGenerator + Clock + Random + PasswordHasher + SecretBox + HasAuthSettings
+{
+}
 
-impl<T: IdGenerator + Clock + Random + PasswordHasher + SecretBox> AuthEnv for T {}
+impl<T: IdGenerator + Clock + Random + PasswordHasher + SecretBox + HasAuthSettings> AuthEnv for T {}
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -192,7 +196,14 @@ pub fn prepare_login(identity: &Identity, env: &impl AuthEnv) -> LoginStep {
     let token = NewToken::generate(TokenKind::Session, env);
     let now = env.now();
     if identity.mfa_enabled() {
-        let session = Session::pending(id, identity.id(), identity.principal(), token.hash(), now);
+        let session = Session::pending(
+            id,
+            identity.id(),
+            identity.principal(),
+            token.hash(),
+            now,
+            env.auth_settings().second_factor_window,
+        );
         let mut methods = vec![MfaMethod::Totp];
         if identity.recovery_codes_left() > 0 {
             methods.push(MfaMethod::RecoveryCode);
@@ -210,6 +221,7 @@ pub fn prepare_login(identity: &Identity, env: &impl AuthEnv) -> LoginStep {
             token.hash(),
             now,
             None,
+            env.auth_settings().session_lifetime,
         );
         LoginStep::Authenticated { session, token }
     }
@@ -249,6 +261,7 @@ pub fn new_active_session(identity: &Identity, env: &impl AuthEnv) -> (Session, 
         token.hash(),
         env.now(),
         None,
+        env.auth_settings().session_lifetime,
     );
     (session, token)
 }
@@ -297,7 +310,7 @@ fn use_second_factor(
         // guess, so it doesn't count toward the lockout.
         totp::Check::Replayed => Ok(Factor::Replayed),
         totp::Check::Wrong => {
-            identity.record_mfa_failure(now);
+            identity.record_mfa_failure(now, env.auth_settings().second_factor_lock);
             Ok(Factor::Wrong)
         }
     }
@@ -349,7 +362,7 @@ where
         let right = factor == Factor::Right;
         let token = NewToken::generate(TokenKind::Session, env);
         if right {
-            session.activate(token.hash(), now);
+            session.activate(token.hash(), now, env.auth_settings().session_lifetime);
         } else {
             // A replayed code counts on the challenge (it's no way in), not the identity.
             session.record_failed_attempt(now);
@@ -509,7 +522,9 @@ where
         .password_resets()
         .latest_for_identity(identity.id())
         .await?;
-    if latest.is_some_and(|r| r.blocks_another(env.now())) {
+    if latest.is_some_and(|r| {
+        r.blocks_another(env.now(), env.auth_settings().password_reset_resend_after)
+    }) {
         return Ok(None);
     }
     let token = NewToken::generate(TokenKind::PasswordReset, env);
@@ -518,6 +533,7 @@ where
         identity.id(),
         token.hash(),
         env.now(),
+        env.auth_settings().password_reset_lifetime,
     );
     // The identity is written too (unchanged, at its next version): two requests that
     // both passed the check above then conflict on it, and only one link is made.
@@ -655,7 +671,7 @@ pub async fn confirm_totp<R: IdentityRepo>(
             // Nothing changed, so nothing to write.
             totp::Check::Replayed => return Err(CommandError::InvalidMfaCode),
             totp::Check::Wrong => {
-                identity.record_mfa_failure(now);
+                identity.record_mfa_failure(now, env.auth_settings().second_factor_lock);
                 None
             }
         };

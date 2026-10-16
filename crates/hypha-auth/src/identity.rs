@@ -1,6 +1,8 @@
 //! An identity and its credentials (design note 0008, A2): how one principal (a staff
 //! member; later a customer) can prove who they are.
 
+use core::time::Duration;
+
 use hypha_core::{Email, IdentityId, Timestamp, UserId, Version, Versioned};
 use serde::{Deserialize, Serialize};
 
@@ -207,9 +209,9 @@ impl Identity {
         }
     }
 
-    /// Wrong second-factor codes in a row before checks stop for `MFA_LOCK_SECS`.
+    /// Wrong second-factor codes in a row before checks stop for a while
+    /// (`AuthSettings::second_factor_lock`).
     pub const MAX_MFA_FAILURES: u32 = 5;
-    pub const MFA_LOCK_SECS: i64 = 15 * 60;
 
     /// Until when second-factor checks are locked, if they are at `now`.
     pub fn mfa_locked_until(&self, now: Timestamp) -> Option<Timestamp> {
@@ -223,9 +225,9 @@ impl Identity {
     }
 
     /// Counts a wrong second-factor code. The `MAX_MFA_FAILURES`th locks checks for
-    /// `MFA_LOCK_SECS` and starts the count again. Without an authenticator there is
-    /// nothing to count against (and nothing to guess).
-    pub fn record_mfa_failure(&mut self, now: Timestamp) {
+    /// `lock` and starts the count again. Without an authenticator there is nothing to
+    /// count against (and nothing to guess).
+    pub fn record_mfa_failure(&mut self, now: Timestamp, lock: Duration) {
         if let Some(Credential::Totp {
             failed_attempts,
             locked_until,
@@ -235,7 +237,7 @@ impl Identity {
             *failed_attempts += 1;
             if *failed_attempts >= Self::MAX_MFA_FAILURES {
                 *failed_attempts = 0;
-                *locked_until = Some(now.plus_secs(Self::MFA_LOCK_SECS));
+                *locked_until = Some(now.plus(lock));
             }
         }
     }
@@ -551,6 +553,8 @@ mod tests {
 
     use super::*;
 
+    const LOCK: Duration = Duration::from_secs(15 * 60);
+
     fn identity() -> Identity {
         Identity::with_password(
             IdentityId::from_uuid(Uuid::from_u128(1)),
@@ -625,11 +629,11 @@ mod tests {
         let now = Timestamp::UNIX_EPOCH;
         let mut i = with_mfa();
         for _ in 0..4 {
-            i.record_mfa_failure(now);
+            i.record_mfa_failure(now, LOCK);
         }
         assert_eq!(i.mfa_locked_until(now), None);
-        i.record_mfa_failure(now);
-        let until = now.plus_secs(Identity::MFA_LOCK_SECS);
+        i.record_mfa_failure(now, LOCK);
+        let until = now.plus(LOCK);
         assert_eq!(i.mfa_locked_until(now), Some(until));
         assert_eq!(i.mfa_locked_until(until), None);
     }
@@ -639,16 +643,16 @@ mod tests {
         let now = Timestamp::UNIX_EPOCH;
         let mut i = with_mfa();
         for _ in 0..4 {
-            i.record_mfa_failure(now);
+            i.record_mfa_failure(now, LOCK);
         }
         assert!(i.use_recovery_code(h(1)));
         for _ in 0..4 {
-            i.record_mfa_failure(now);
+            i.record_mfa_failure(now, LOCK);
         }
         assert_eq!(i.mfa_locked_until(now), None);
         i.record_totp_step(11).unwrap();
         for _ in 0..4 {
-            i.record_mfa_failure(now);
+            i.record_mfa_failure(now, LOCK);
         }
         assert_eq!(i.mfa_locked_until(now), None);
     }
@@ -658,7 +662,7 @@ mod tests {
         let now = Timestamp::UNIX_EPOCH;
         let mut i = with_mfa();
         for _ in 0..7 {
-            i.record_mfa_failure(now);
+            i.record_mfa_failure(now, LOCK);
         }
         let back = Identity::restore(i.snapshot()).unwrap();
         assert_eq!(back.mfa_locked_until(now), i.mfa_locked_until(now));

@@ -4,8 +4,8 @@ use std::{
 };
 
 use hypha_auth::{
-    Argon2id, HasApiKeys, HashError, Password, PasswordHash, PasswordHasher, SealError, Sealed,
-    SecretBox, XChaChaBox,
+    Argon2id, AuthSettings, HasApiKeys, HasAuthSettings, HashError, Password, PasswordHash,
+    PasswordHasher, SealError, Sealed, SecretBox, XChaChaBox,
 };
 use hypha_checkout::CheckoutPorts;
 use hypha_core::HasBatch;
@@ -51,16 +51,19 @@ pub struct HostEnv {
     /// Where the admin panel lives, for links in emails. Unset: the email shows the
     /// bare token.
     admin_url: Option<String>,
+    /// Session, second-factor, reset and invite lifetimes (`[auth]`, design note 0017).
+    auth: AuthSettings,
 }
 
 impl HostEnv {
     /// `secret_key` seals TOTP secrets (`HYPHA_SECRET_KEY`); losing it makes every
     /// authenticator unreadable, so it must stay the same across restarts.
-    pub fn new(secret_key: [u8; 32], admin_url: Option<String>) -> Self {
+    pub fn new(secret_key: [u8; 32], admin_url: Option<String>, auth: AuthSettings) -> Self {
         Self {
             secret_box: XChaChaBox::new(secret_key),
             hasher: Argon2id::OWASP,
             admin_url: admin_url.map(|url| url.trim_end_matches('/').to_string()),
+            auth,
         }
     }
 
@@ -76,6 +79,12 @@ impl HostEnv {
             Some(base) => format!("{base}{path}?token={token}"),
             None => format!("token {token} (set HYPHA_ADMIN_URL for a link)"),
         }
+    }
+}
+
+impl HasAuthSettings for HostEnv {
+    fn auth_settings(&self) -> &AuthSettings {
+        &self.auth
     }
 }
 
@@ -225,6 +234,8 @@ pub struct AppState<S> {
     pub http: reqwest::Client,
     /// Whether those calls may reach private addresses (`HYPHA_ALLOW_PRIVATE_CALLBACKS`).
     pub outbound: crate::outbound::OutboundPolicy,
+    /// The event jobs' batch, lease, retries and retention (design note 0017).
+    pub dispatch: hypha_dispatch::DispatchSettings,
 }
 
 impl<S: Storage> AppState<S> {

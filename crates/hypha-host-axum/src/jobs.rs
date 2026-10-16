@@ -147,10 +147,10 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
     let no_connection = |_| "no connection".to_string();
     let (fanned, leased) = {
         let ports = state.public_ports().await.map_err(no_connection)?;
-        let fanned = fan_out(&ports, &state.clock)
+        let fanned = fan_out(&ports, &state.clock, &state.dispatch)
             .await
             .map_err(|e| e.to_string())?;
-        let leased = lease_due(&ports, &state.clock)
+        let leased = lease_due(&ports, &state.clock, &state.dispatch)
             .await
             .map_err(|e| e.to_string())?;
         (fanned, leased)
@@ -159,13 +159,24 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
     for delivery in leased.iter().take_while(|d| has_time(d, &state.clock)) {
         let prepared = {
             let ports = state.public_ports().await.map_err(no_connection)?;
-            match prepare(&ports, &state.clock, delivery).await {
-                Prepared::Handler => Prepared::Done(handle(&ports, &state.clock, delivery).await),
+            match prepare(&ports, &state.clock, &state.dispatch, delivery).await {
+                Prepared::Handler => {
+                    Prepared::Done(handle(&ports, &state.clock, &state.dispatch, delivery).await)
+                }
                 other => other,
             }
         };
         let outcome = match prepared {
-            Prepared::Webhook(app) => send(&state.webhooks(), &state.clock, &app, delivery).await,
+            Prepared::Webhook(app) => {
+                send(
+                    &state.webhooks(),
+                    &state.clock,
+                    &state.dispatch,
+                    &app,
+                    delivery,
+                )
+                .await
+            }
             Prepared::Done(outcome) => outcome,
             // Handled above, with the ports.
             Prepared::Handler => continue,
@@ -181,7 +192,7 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
     }
     let ports = state.public_ports().await.map_err(no_connection)?;
     record(&ports, &outcomes).await.map_err(|e| e.to_string())?;
-    Ok(fanned.more || leased.len() >= hypha_dispatch::BATCH as usize)
+    Ok(fanned.more || leased.len() >= state.dispatch.batch as usize)
 }
 
 /// Deletes uploads abandoned for over a day (design note 0013, section 3).
@@ -198,6 +209,7 @@ async fn media_sweep(state: &AppState<PgStorage>) -> Step {
         hypha_media::HasAssets::assets(&ports),
         &media.blobs,
         &state.clock,
+        &media.settings,
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -214,13 +226,13 @@ async fn prune(state: &AppState<PgStorage>) -> Step {
         .public_ports()
         .await
         .map_err(|_| "no connection".to_string())?;
-    let events = prune_events(&ports, &state.clock)
+    let events = prune_events(&ports, &state.clock, &state.dispatch)
         .await
         .map_err(|e| e.to_string())?;
-    let keys = prune_idempotency_keys(&ports, &state.clock)
+    let keys = prune_idempotency_keys(&ports, &state.clock, &state.dispatch)
         .await
         .map_err(|e| e.to_string())?;
-    let sessions = prune_sessions(&ports, &state.clock)
+    let sessions = prune_sessions(&ports, &state.clock, &state.dispatch)
         .await
         .map_err(|e| e.to_string())?;
     if events.done + keys.done + sessions.done > 0 {

@@ -7,8 +7,8 @@ use std::sync::{
 };
 
 use hypha_auth::{
-    Argon2id, HashError, Password, PasswordHash, PasswordHasher, SealError, Sealed, SecretBox,
-    XChaChaBox,
+    Argon2id, AuthSettings, HasAuthSettings, HashError, Password, PasswordHash, PasswordHasher,
+    SealError, Sealed, SecretBox, XChaChaBox,
 };
 use hypha_core::{Clock, IdGenerator, Notifier, NotifyError, Random, Timestamp};
 use hypha_users::StaffEmail;
@@ -22,6 +22,8 @@ use crate::{FixedClock, SequentialIds};
 pub struct TestEnv {
     pub ids: SequentialIds,
     pub clock: FixedClock,
+    /// The defaults unless a test sets its own.
+    pub auth: AuthSettings,
     random: AtomicU64,
     secret_box: XChaChaBox,
     sent: Mutex<Vec<StaffEmail>>,
@@ -33,6 +35,7 @@ impl Default for TestEnv {
         Self {
             ids: SequentialIds::default(),
             clock: FixedClock::default(),
+            auth: AuthSettings::default(),
             random: AtomicU64::new(0),
             secret_box: XChaChaBox::new([7; 32]),
             sent: Mutex::new(Vec::new()),
@@ -69,6 +72,11 @@ impl TestEnv {
         self.clock.set(self.clock.now().plus_secs(secs));
     }
 
+    /// Moves the clock `duration` on.
+    pub fn advance_by(&self, duration: std::time::Duration) {
+        self.clock.set(self.clock.now().plus(duration));
+    }
+
     pub fn now(&self) -> Timestamp {
         self.clock.now()
     }
@@ -77,6 +85,12 @@ impl TestEnv {
 impl IdGenerator for TestEnv {
     fn new_uuid(&self) -> Uuid {
         self.ids.new_uuid()
+    }
+}
+
+impl HasAuthSettings for TestEnv {
+    fn auth_settings(&self) -> &AuthSettings {
+        &self.auth
     }
 }
 
