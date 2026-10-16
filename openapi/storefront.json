@@ -557,6 +557,59 @@
         ],
         "type": "object"
       },
+      "OptionId": {
+        "description": "A OptionId: `opt_` and 32 hex digits.",
+        "examples": [
+          "opt_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^opt_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "OptionResponse": {
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/OptionId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/OptionValueResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "values"
+        ],
+        "type": "object"
+      },
+      "OptionValueId": {
+        "description": "A OptionValueId: `optval_` and 32 hex digits.",
+        "examples": [
+          "optval_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^optval_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "OptionValueResponse": {
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/OptionValueId"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
       "OrderId": {
         "description": "A OrderId: `ord_` and 32 hex digits.",
         "examples": [
@@ -1402,9 +1455,71 @@
         ],
         "type": "object"
       },
-      "StorefrontProductResponse": {
-        "description": "A product as a storefront sees it (design note 0010, S5): active products only, without\nadmin fields. A draft or archived product is `404 product_not_found`, the same as one\nthat doesn't exist, so a storefront can't tell them apart.\n\nNo prices: a product's base price isn't what a shopper pays (their market's price\nlist and currency decide that), so showing it would mislead. Until product listing\nbrings prices per market, the cart is where a storefront gets them.",
+      "StorefrontCountryListResponse": {
         "properties": {
+          "items": {
+            "description": "Sorted by country code: every country some market sells to.",
+            "items": {
+              "$ref": "#/components/schemas/StorefrontCountryResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "StorefrontCountryResponse": {
+        "description": "A country a market sells to, with what a storefront needs to show prices there.",
+        "properties": {
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "market": {
+            "$ref": "#/components/schemas/MarketId"
+          },
+          "minor_units": {
+            "description": "Digits after the decimal point of the currency (2 for EUR, 0 for JPY).",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "description": "The English name; UIs show local names (`Intl.DisplayNames`).",
+            "type": "string"
+          },
+          "prices_include_tax": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "country",
+          "name",
+          "market",
+          "currency",
+          "minor_units",
+          "prices_include_tax"
+        ],
+        "type": "object"
+      },
+      "StorefrontProductResponse": {
+        "description": "A product as a storefront sees it (design note 0010, S5): active products only, without\nadmin fields. A draft or archived product is `404 product_not_found`, the same as one\nthat doesn't exist, so a storefront can't tell them apart.\n\nPrices and stock are the shopper's: with `country`, each variant carries its price\nin that country's market and whether it can be bought now (design note 0021, SU7),\npriced as a cart prices it. Without `country`, there are none: a product's base price\nisn't what any shopper pays.",
+        "properties": {
+          "currency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Currency",
+                "description": "The currency of the prices; `null` when there are none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "description": {
             "description": "Sanitised HTML (scripts, styles and event attributes removed), safe to render.",
             "type": [
@@ -1425,9 +1540,30 @@
             },
             "type": "array"
           },
+          "options": {
+            "description": "What a shopper picks a variant by, in order.",
+            "items": {
+              "$ref": "#/components/schemas/OptionResponse"
+            },
+            "type": "array"
+          },
+          "prices_include_tax": {
+            "description": "Whether the prices include tax (the market's rule); `null` when there are none.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "product_type": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "sold_in_country": {
+            "description": "Whether `country`'s market sells the product; `null` without `country`. A\nproduct not sold there has no prices: show it as unavailable in the country.",
+            "type": [
+              "boolean",
               "null"
             ]
           },
@@ -1459,6 +1595,7 @@
           "handle",
           "title",
           "tags",
+          "options",
           "variants",
           "media"
         ],
@@ -1500,6 +1637,13 @@
       },
       "StorefrontVariantResponse": {
         "properties": {
+          "available": {
+            "description": "Whether one can be bought now (in stock, or stock isn't tracked); `null` where\nthere's no price.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "id": {
             "$ref": "#/components/schemas/VariantId"
           },
@@ -1513,10 +1657,36 @@
                 "type": "null"
               }
             ]
+          },
+          "price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "In `country`'s market; `null` without `country` or where it isn't sold."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "selections": {
+            "description": "One value per option, in the order of `options`.",
+            "items": {
+              "$ref": "#/components/schemas/OptionValueId"
+            },
+            "type": "array"
+          },
+          "title": {
+            "description": "Its option values (\"M / Blue\"); `null` for a product without options.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "id"
+          "id",
+          "selections"
         ],
         "type": "object"
       },
@@ -2965,16 +3135,86 @@
         ]
       }
     },
-    "/storefront/products/{id}": {
+    "/storefront/countries": {
       "get": {
-        "operationId": "storefront.products.fetch",
+        "operationId": "storefront.markets.storefront_countries",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorefrontCountryListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Where the store sells: each country with its market's currency (design note 0021,\nSU6). What a country picker and a storefront's routing need.",
+        "tags": [
+          "markets"
+        ],
+        "x-hypha-scopes": [
+          "markets:read"
+        ]
+      }
+    },
+    "/storefront/products/by-handle/{handle}": {
+      "get": {
+        "operationId": "storefront.products.fetch_by_handle",
         "parameters": [
           {
+            "description": "The product's handle.",
+            "example": "ceramic-mug",
             "in": "path",
-            "name": "id",
+            "name": "handle",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/ProductId"
+              "type": "string"
+            }
+          },
+          {
+            "description": "Where the shopper is (ISO 3166-1 alpha-2): its market prices and stocks the\nvariants. Without it, the product comes without prices.",
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -2997,7 +3237,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
           },
           "401": {
             "content": {
@@ -3045,7 +3285,105 @@
             "publishable_key": []
           }
         ],
-        "summary": "An active product sold through the caller's channel; drafts, archived products and\nproducts the channel doesn't sell read as missing.",
+        "summary": "A product page in one read (design note 0021, SU7): the product by its handle,\npriced in `country`, with the same rules as the read by ID.",
+        "tags": [
+          "products"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      }
+    },
+    "/storefront/products/{id}": {
+      "get": {
+        "operationId": "storefront.products.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          },
+          {
+            "description": "Where the shopper is (ISO 3166-1 alpha-2): its market prices and stocks the\nvariants. Without it, the product comes without prices.",
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorefrontProductResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "An active product sold through the caller's channel, priced in `country`; drafts,\narchived products and products the channel doesn't sell read as missing.",
         "tags": [
           "products"
         ],

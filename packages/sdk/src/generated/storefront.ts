@@ -165,6 +165,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/countries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Where the store sells: each country with its market's currency (design note 0021,
+         *     SU6). What a country picker and a storefront's routing need.
+         */
+        get: operations["storefront.markets.storefront_countries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/products/by-handle/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A product page in one read (design note 0021, SU7): the product by its handle,
+         *     priced in `country`, with the same rules as the read by ID.
+         */
+        get: operations["storefront.products.fetch_by_handle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/products/{id}": {
         parameters: {
             query?: never;
@@ -173,8 +213,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * An active product sold through the caller's channel; drafts, archived products and
-         *     products the channel doesn't sell read as missing.
+         * An active product sold through the caller's channel, priced in `country`; drafts,
+         *     archived products and products the channel doesn't sell read as missing.
          */
         get: operations["storefront.products.fetch"];
         put?: never;
@@ -439,6 +479,25 @@ export interface components {
             estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
             name: string;
             option: components["schemas"]["ShippingOptionId"];
+        };
+        /**
+         * @description A OptionId: `opt_` and 32 hex digits.
+         * @example opt_0190f1a2b3c47d8e9f00112233445566
+         */
+        OptionId: string;
+        OptionResponse: {
+            id: components["schemas"]["OptionId"];
+            name: string;
+            values: components["schemas"]["OptionValueResponse"][];
+        };
+        /**
+         * @description A OptionValueId: `optval_` and 32 hex digits.
+         * @example optval_0190f1a2b3c47d8e9f00112233445566
+         */
+        OptionValueId: string;
+        OptionValueResponse: {
+            id: components["schemas"]["OptionValueId"];
+            label: string;
         };
         /**
          * @description A OrderId: `ord_` and 32 hex digits.
@@ -707,23 +766,52 @@ export interface components {
         ShippingOptionsResponse: {
             groups: components["schemas"]["GroupOffersResponse"][];
         };
+        StorefrontCountryListResponse: {
+            /** @description Sorted by country code: every country some market sells to. */
+            items: components["schemas"]["StorefrontCountryResponse"][];
+        };
+        /** @description A country a market sells to, with what a storefront needs to show prices there. */
+        StorefrontCountryResponse: {
+            country: components["schemas"]["CountryCode"];
+            currency: components["schemas"]["Currency"];
+            market: components["schemas"]["MarketId"];
+            /**
+             * Format: int32
+             * @description Digits after the decimal point of the currency (2 for EUR, 0 for JPY).
+             */
+            minor_units: number;
+            /** @description The English name; UIs show local names (`Intl.DisplayNames`). */
+            name: string;
+            prices_include_tax: boolean;
+        };
         /**
          * @description A product as a storefront sees it (design note 0010, S5): active products only, without
          *     admin fields. A draft or archived product is `404 product_not_found`, the same as one
          *     that doesn't exist, so a storefront can't tell them apart.
          *
-         *     No prices: a product's base price isn't what a shopper pays (their market's price
-         *     list and currency decide that), so showing it would mislead. Until product listing
-         *     brings prices per market, the cart is where a storefront gets them.
+         *     Prices and stock are the shopper's: with `country`, each variant carries its price
+         *     in that country's market and whether it can be bought now (design note 0021, SU7),
+         *     priced as a cart prices it. Without `country`, there are none: a product's base price
+         *     isn't what any shopper pays.
          */
         StorefrontProductResponse: {
+            currency?: components["schemas"]["Currency"] | null;
             /** @description Sanitised HTML (scripts, styles and event attributes removed), safe to render. */
             description?: string | null;
             handle: string;
             id: components["schemas"]["ProductId"];
             /** @description In order; the first is the featured item. */
             media: components["schemas"]["ProductMediaResponse"][];
+            /** @description What a shopper picks a variant by, in order. */
+            options: components["schemas"]["OptionResponse"][];
+            /** @description Whether the prices include tax (the market's rule); `null` when there are none. */
+            prices_include_tax?: boolean | null;
             product_type?: string | null;
+            /**
+             * @description Whether `country`'s market sells the product; `null` without `country`. A
+             *     product not sold there has no prices: show it as unavailable in the country.
+             */
+            sold_in_country?: boolean | null;
             /** @description In the merchant's order. */
             tags: string[];
             title: string;
@@ -743,8 +831,18 @@ export interface components {
             name: string;
         };
         StorefrontVariantResponse: {
+            /**
+             * @description Whether one can be bought now (in stock, or stock isn't tracked); `null` where
+             *     there's no price.
+             */
+            available?: boolean | null;
             id: components["schemas"]["VariantId"];
             media_asset_id?: components["schemas"]["AssetId"] | null;
+            price?: components["schemas"]["Money"] | null;
+            /** @description One value per option, in the order of `options`. */
+            selections: components["schemas"]["OptionValueId"][];
+            /** @description Its option values ("M / Blue"); `null` for a product without options. */
+            title?: string | null;
         };
         /**
          * @description A TaxClassId: `txc_` and 32 hex digits.
@@ -1787,9 +1885,139 @@ export interface operations {
             };
         };
     };
-    "storefront.products.fetch": {
+    "storefront.markets.storefront_countries": {
         parameters: {
             query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorefrontCountryListResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.products.fetch_by_handle": {
+        parameters: {
+            query?: {
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market prices and stocks the
+                 *     variants. Without it, the product comes without prices.
+                 */
+                country?: string;
+            };
+            header?: never;
+            path: {
+                /**
+                 * @description The product's handle.
+                 * @example ceramic-mug
+                 */
+                handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorefrontProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.products.fetch": {
+        parameters: {
+            query?: {
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market prices and stocks the
+                 *     variants. Without it, the product comes without prices.
+                 */
+                country?: string;
+            };
             header?: never;
             path: {
                 id: components["schemas"]["ProductId"];
@@ -1807,7 +2035,7 @@ export interface operations {
                     "application/json": components["schemas"]["StorefrontProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
             400: {
                 headers: {
                     [name: string]: unknown;

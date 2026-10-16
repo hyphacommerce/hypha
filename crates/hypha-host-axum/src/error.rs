@@ -402,7 +402,7 @@ impl From<hypha_merchandising::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::Product(p) => product_status(p),
-            E::ProductNotFound(_) => StatusCode::NOT_FOUND,
+            E::ProductNotFound(_) | E::HandleNotFound(_) => StatusCode::NOT_FOUND,
             // Assets arrive in the body.
             E::AssetNotFound(_)
             | E::AssetNotReady(_)

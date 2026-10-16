@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId},
+    extract::{Caller, JsonBody, PathId, Storefront},
     patch,
     state::{SharedState, Storage},
 };
@@ -654,4 +654,58 @@ pub(super) async fn list_catalog_products_handler<S: Storage>(
             })
         },
     )?))
+}
+
+// ---------- storefront (design note 0021, SU6) ----------
+
+/// A country a market sells to, with what a storefront needs to show prices there.
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct StorefrontCountryResponse {
+    country: CountryCode,
+    /// The English name; UIs show local names (`Intl.DisplayNames`).
+    name: &'static str,
+    market: MarketId,
+    currency: Currency,
+    /// Digits after the decimal point of the currency (2 for EUR, 0 for JPY).
+    #[schema(minimum = 0)]
+    minor_units: u8,
+    prices_include_tax: bool,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct StorefrontCountryListResponse {
+    /// Sorted by country code: every country some market sells to.
+    items: Vec<StorefrontCountryResponse>,
+}
+
+/// Where the store sells: each country with its market's currency (design note 0021,
+/// SU6). What a country picker and a storefront's routing need.
+#[utoipa::path(
+    get,
+    path = "/storefront/countries",
+    responses((status = 200, description = "OK", body = StorefrontCountryListResponse)),
+    extensions(("x-hypha-scopes" = json!(["markets:read"]))),
+)]
+pub(super) async fn storefront_countries<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+) -> Result<Json<StorefrontCountryListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let views = list_markets(&ctx, &ports).await?;
+    let mut items: Vec<StorefrontCountryResponse> = views
+        .iter()
+        .flat_map(|v| {
+            let m = &v.market;
+            m.countries().iter().map(|c| StorefrontCountryResponse {
+                country: *c,
+                name: c.name(),
+                market: m.id(),
+                currency: m.currency(),
+                minor_units: m.currency().minor_units(),
+                prices_include_tax: m.prices_include_tax(),
+            })
+        })
+        .collect();
+    items.sort_by_key(|i| i.country.as_str());
+    Ok(Json(StorefrontCountryListResponse { items }))
 }

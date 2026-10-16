@@ -8,7 +8,7 @@ pub mod commands;
 pub mod view;
 
 pub use commands::{
-    CommandError, MerchandisingPorts, get_product_view, list_product_views, set_product_media,
-    set_variant_media,
+    CommandError, MerchandisingPorts, get_product_view, get_product_view_by_handle,
+    list_product_views, set_product_media, set_variant_media,
 };
 pub use view::{ProductSummaryView, ProductView};

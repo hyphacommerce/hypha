@@ -354,6 +354,19 @@ step "a mug not published to the key's channel is refused" 422 product_not_publi
 step "and isn't there for the storefront" 404 product_not_found "$BASE/storefront/products/$MUG"
 step "publish mug and cup to the Online Store" 204 - -X POST "$BASE/admin/channels/$ONLINE_STORE/products" \
     -H "$JSON" -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
+step "the cup's page, priced in Croatia" 200 - "$BASE/storefront/products/by-handle/cup?country=HR"
+contains "at its fixed price" '"price":{"amount":200,"currency":"EUR"},"available":true'
+contains "sold there" '"sold_in_country":true,"currency":"EUR"'
+step "the mug by ID, -10%" 200 - "$BASE/storefront/products/$MUG?country=HR"
+contains "at 9.00" '"price":{"amount":900,"currency":"EUR"}'
+step "the mug where the store doesn't sell" 200 - "$BASE/storefront/products/by-handle/mug?country=US"
+contains "not sold there" '"sold_in_country":false,"currency":null'
+step "a page without a country has no prices" 200 - "$BASE/storefront/products/by-handle/mug"
+contains "none" '"price":null,"available":null'
+step "an unknown handle" 404 product_not_found "$BASE/storefront/products/by-handle/no-such-thing?country=HR"
+step "an unknown parameter" 400 invalid_query "$BASE/storefront/products/by-handle/mug?currency=EUR"
+step "where the store sells" 200 - "$BASE/storefront/countries"
+contains "Croatia, in euros" "{\"country\":\"HR\",\"name\":\"Croatia\",\"market\":\"$MARKET\",\"currency\":\"EUR\",\"minor_units\":2"
 step "create an Outlet channel" 201 - -X POST "$BASE/admin/channels" -H "$JSON" \
     -d '{"name":"Outlet","kind":"custom"}'
 OUTLET=$(id)

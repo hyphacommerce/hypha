@@ -1224,3 +1224,98 @@ fn losing_the_race_for_a_key_replays_the_winner() {
     let loser_cart = CartId::from_uuid(Uuid::from_u128(2));
     assert_eq!(block_on(world.carts.get(loser_cart)), Ok(None));
 }
+
+// ---------- a product's offer in a country (design note 0021, SU7) ----------
+
+fn product(world: &World, name: &str) -> Product {
+    block_on(world.products.get(pid(name))).unwrap().unwrap()
+}
+
+fn shopper() -> Ctx {
+    Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
+        vec![Scope::ProductsRead],
+    )
+}
+
+#[test]
+fn a_product_is_priced_and_stocked_in_the_countrys_market() {
+    let world = World::new();
+    world.set_adjustment(-1000);
+    world.stock("mug", 1);
+    let offer = block_on(hypha_cart::price_product(
+        &shopper(),
+        &world.ports,
+        &product(&world, "mug"),
+        "HR",
+    ))
+    .unwrap();
+    assert_eq!(offer.market.as_ref().map(|m| m.id()), Some(market_id()));
+    assert_eq!(
+        offer.variants,
+        vec![hypha_cart::VariantOffer {
+            variant: vid("mug"),
+            price: Some(Price::new(eur(900)).unwrap()),
+            available: true,
+        }]
+    );
+    assert!(offer.sold());
+
+    world.sell_elsewhere("mug", 1);
+    let offer = block_on(hypha_cart::price_product(
+        &shopper(),
+        &world.ports,
+        &product(&world, "mug"),
+        "HR",
+    ))
+    .unwrap();
+    assert!(!offer.variants[0].available, "sold out");
+    assert!(offer.sold(), "still sold there, just not in stock");
+}
+
+#[test]
+fn a_product_outside_the_catalog_or_country_is_not_sold_there() {
+    let world = World::new();
+    let poster = block_on(hypha_cart::price_product(
+        &shopper(),
+        &world.ports,
+        &product(&world, "poster"),
+        "HR",
+    ))
+    .unwrap();
+    assert!(poster.market.is_some() && !poster.sold());
+    assert_eq!(
+        (poster.variants[0].price, poster.variants[0].available),
+        (None, false)
+    );
+
+    let elsewhere = block_on(hypha_cart::price_product(
+        &shopper(),
+        &world.ports,
+        &product(&world, "mug"),
+        "US",
+    ))
+    .unwrap();
+    assert!(elsewhere.market.is_none() && !elsewhere.sold());
+
+    assert_eq!(
+        block_on(hypha_cart::price_product(
+            &shopper(),
+            &world.ports,
+            &product(&world, "mug"),
+            "hr"
+        )),
+        Err(CommandError::Country(CountryError::NotUppercase))
+    );
+    assert_eq!(
+        block_on(hypha_cart::price_product(
+            &Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(1))), vec![]),
+            &world.ports,
+            &product(&world, "mug"),
+            "HR"
+        )),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::ProductsRead
+        )))
+    );
+}

@@ -392,6 +392,33 @@ pub fn idempotent_response(status: StatusCode, body: impl Serialize, replayed: b
     response
 }
 
+/// A route's query string, read but not yet parsed: call `parse` after authenticating,
+/// like `JsonBody`, so strangers get a 401 first. `F` refuses unknown parameters
+/// (`#[serde(deny_unknown_fields)]`); anything malformed is `400 invalid_query`. Lists
+/// use `ListQuery`, which adds the page.
+pub(crate) struct Query<F> {
+    query: Option<String>,
+    _params: PhantomData<fn() -> F>,
+}
+
+impl<S: Send + Sync, F> FromRequestParts<S> for Query<F> {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        Ok(Self {
+            query: parts.uri.query().map(str::to_string),
+            _params: PhantomData,
+        })
+    }
+}
+
+impl<F: DeserializeOwned> Query<F> {
+    pub(crate) fn parse(self) -> Result<F, ApiError> {
+        serde_html_form::from_str(self.query.as_deref().unwrap_or(""))
+            .map_err(ApiError::invalid_query)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

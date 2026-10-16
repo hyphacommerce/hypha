@@ -1,6 +1,7 @@
 pub mod cart;
 pub mod commands;
 pub mod error;
+pub mod offer;
 pub mod pricing;
 pub mod repo;
 pub mod shipping;
@@ -15,6 +16,7 @@ pub use commands::{
     set_cart_customer, set_cart_email, set_line_quantity, set_shipping_address, shipping_offers,
 };
 pub use error::{CartError, LineError, RestoreError};
+pub use offer::{ProductOffer, VariantOffer, price_product};
 pub use pricing::{
     LineDetails, LineStatus, PricedCart, PricedLine, Publication, check_stock,
     price_cart_with_shipping, price_line,

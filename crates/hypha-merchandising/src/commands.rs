@@ -10,7 +10,7 @@ use hypha_media::{
     Visibility, repo::keys as media_keys,
 };
 use hypha_products::{
-    HasProducts, ListProducts, ProductError, ProductFilter, ProductRepo, StageProducts,
+    Handle, HasProducts, ListProducts, ProductError, ProductFilter, ProductRepo, StageProducts,
 };
 use thiserror::Error;
 
@@ -26,6 +26,9 @@ pub enum CommandError {
     Repo(#[from] RepoError),
     #[error("product {0} not found")]
     ProductNotFound(ProductId),
+    /// No product has this handle (or it isn't a handle at all, so none can).
+    #[error("no product has the handle {0:?}")]
+    HandleNotFound(String),
     #[error("asset {0} not found")]
     AssetNotFound(AssetId),
     /// Only assets whose upload completed can be attached.
@@ -45,7 +48,9 @@ impl ErrorCode for CommandError {
             CommandError::Auth(e) => e.code(),
             CommandError::Product(e) => e.code(),
             CommandError::Repo(e) => e.code(),
-            CommandError::ProductNotFound(_) => "product_not_found",
+            CommandError::ProductNotFound(_) | CommandError::HandleNotFound(_) => {
+                "product_not_found"
+            }
             CommandError::AssetNotFound(_) => "asset_not_found",
             CommandError::AssetNotReady(_) => "asset_not_ready",
             CommandError::AssetNotPublic(_) => "asset_not_public",
@@ -173,6 +178,24 @@ pub async fn get_product_view<S: HasProducts + HasAssets>(
 ) -> Result<ProductView, CommandError> {
     ctx.require(Scope::ProductsRead)?;
     let product = load(ports, id).await?;
+    Ok(ProductView::load(ports.assets(), product).await?)
+}
+
+/// A product with its media, by handle: how a storefront's product page finds it
+/// (design note 0021, SU7).
+pub async fn get_product_view_by_handle<S: HasProducts + HasAssets>(
+    ctx: &Ctx,
+    ports: &S,
+    handle: &str,
+) -> Result<ProductView, CommandError> {
+    ctx.require(Scope::ProductsRead)?;
+    let not_found = || CommandError::HandleNotFound(handle.to_string());
+    let handle = Handle::new(handle).map_err(|_| not_found())?;
+    let product = ports
+        .products()
+        .get_by_handle(&handle)
+        .await?
+        .ok_or_else(not_found)?;
     Ok(ProductView::load(ports.assets(), product).await?)
 }
 

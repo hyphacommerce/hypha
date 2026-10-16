@@ -1796,9 +1796,10 @@ async fn a_storefront_sees_active_products_only_without_admin_fields() {
         (&json!(null), &json!([]))
     );
     assert!(json.get("status").is_none());
-    // No prices: the base price isn't what a shopper in a market pays.
+    // No prices without a country: the base price isn't what a shopper in a market pays.
     assert!(json["variants"][0]["id"].is_string());
-    assert!(json["variants"][0].get("price").is_none());
+    assert_eq!(json["variants"][0]["price"], Value::Null);
+    assert_eq!(json["sold_in_country"], Value::Null);
 }
 
 #[tokio::test]
@@ -4021,5 +4022,117 @@ async fn search_settings_reindex_and_status_over_http() {
     assert_eq!(
         (status, code(&body)),
         (StatusCode::FORBIDDEN, "admin_credentials_required")
+    );
+}
+
+// ---------- storefront reads (design note 0021, step 4) ----------
+
+#[tokio::test]
+async fn a_product_page_is_one_read_priced_in_the_shoppers_country() {
+    let app = app().await;
+    let (market, mug_variant) = market_selling_a_mug(&app).await;
+    let pk = publishable(&app).await;
+    let get = |path: String| {
+        let (app, pk) = (&app, pk.clone());
+        async move { send_as(app, &pk, "GET", &path, None).await }
+    };
+
+    let (status, page) = get("/storefront/products/by-handle/mug?country=HR".into()).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(
+        (
+            &page["sold_in_country"],
+            &page["currency"],
+            &page["prices_include_tax"]
+        ),
+        (&json!(true), &json!("EUR"), &json!(false))
+    );
+    let variant = &page["variants"][0];
+    assert_eq!(
+        (&variant["id"], &variant["price"], &variant["available"]),
+        (
+            &json!(mug_variant),
+            &json!({"amount": 1000, "currency": "EUR"}),
+            &json!(true)
+        )
+    );
+    assert_eq!(page["options"], json!([]));
+
+    // By ID, the same read; without a country, no prices.
+    let id = page["id"].as_str().unwrap().to_string();
+    let (_, by_id) = get(format!("/storefront/products/{id}?country=HR")).await;
+    assert_eq!(by_id, page);
+    let (_, bare) = get(format!("/storefront/products/{id}")).await;
+    assert_eq!(
+        (
+            &bare["sold_in_country"],
+            &bare["variants"][0]["price"],
+            &bare["variants"][0]["available"]
+        ),
+        (&Value::Null, &Value::Null, &Value::Null)
+    );
+
+    // A country the store doesn't sell to: the product, marked not sold there (Q2).
+    let (status, elsewhere) = get("/storefront/products/by-handle/mug?country=US".into()).await;
+    assert_eq!(
+        (
+            status,
+            &elsewhere["sold_in_country"],
+            &elsewhere["currency"],
+            &elsewhere["variants"][0]["price"]
+        ),
+        (StatusCode::OK, &json!(false), &Value::Null, &Value::Null)
+    );
+
+    for (path, want, want_code) in [
+        (
+            "/storefront/products/by-handle/cup?country=HR",
+            StatusCode::NOT_FOUND,
+            "product_not_found",
+        ),
+        (
+            "/storefront/products/by-handle/Not%20A%20Handle",
+            StatusCode::NOT_FOUND,
+            "product_not_found",
+        ),
+        (
+            "/storefront/products/by-handle/mug?country=hr",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_country_code",
+        ),
+        (
+            "/storefront/products/by-handle/mug?country=XK",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_country_code",
+        ),
+        (
+            "/storefront/products/by-handle/mug?currency=EUR",
+            StatusCode::BAD_REQUEST,
+            "invalid_query",
+        ),
+    ] {
+        let (status, body) = get(path.to_string()).await;
+        assert_eq!((status, code(&body)), (want, want_code), "{path}");
+    }
+
+    // A draft reads as missing.
+    send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{id}/status"),
+        Some(r#"{"status":"draft"}"#),
+    )
+    .await;
+    let (status, body) = get("/storefront/products/by-handle/mug?country=HR".into()).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "product_not_found")
+    );
+
+    let (status, countries) = get("/storefront/countries".into()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        countries["items"],
+        json!([{"country": "HR", "name": "Croatia", "market": market, "currency": "EUR", "minor_units": 2, "prices_include_tax": false}])
     );
 }

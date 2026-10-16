@@ -220,6 +220,8 @@ macro_rules! route_table {
             // ---------- storefront ----------
             [storefront, GET, "/storefront/store", stores::fetch_storefront],
             [storefront, GET, "/storefront/products/{id}", products::fetch_storefront],
+            [storefront, GET, "/storefront/products/by-handle/{handle}", products::fetch_by_handle_storefront],
+            [storefront, GET, "/storefront/countries", markets::storefront_countries],
             [storefront, GET, "/storefront/search", search::storefront_search],
             [storefront, POST, "/storefront/carts", carts::create],
             [storefront, GET, "/storefront/carts/{id}", carts::fetch],

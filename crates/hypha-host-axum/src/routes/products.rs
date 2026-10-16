@@ -2,20 +2,24 @@ use hypha_core::Stamped;
 
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
+use hypha_cart::{ProductOffer, price_product};
+use hypha_channels::HasChannels;
 use hypha_channels::{channels_of_products, product_channels};
 use hypha_core::{
-    AssetId, ChannelId, Ctx, Money, OptionId, OptionValueId, ProductId, VariantId, Weight,
+    AssetId, ChannelId, Ctx, Currency, Money, OptionId, OptionValueId, ProductId, VariantId, Weight,
 };
+use hypha_inventory::{HasInventoryItems, HasLocations};
+use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_media::{Asset, HasAssets};
 use hypha_merchandising::{
-    ProductSummaryView, ProductView, get_product_view, list_product_views, set_product_media,
-    set_variant_media,
+    ProductSummaryView, ProductView, get_product_view, get_product_view_by_handle,
+    list_product_views, set_product_media, set_variant_media,
 };
 use hypha_products::{
     AddVariant, CreateSimpleProduct, HasProducts, ListProducts, OptionDraft, OptionValueDraft,
-    Product, ProductStatus, SetProductOptions, UpdateProduct, UpdateVariant, add_product_variant,
-    create_simple_product, remove_product_variant, set_product_options, set_product_status,
-    update_product, update_product_variant,
+    Product, ProductOption, ProductStatus, SetProductOptions, UpdateProduct, UpdateVariant,
+    add_product_variant, create_simple_product, remove_product_variant, set_product_options,
+    set_product_status, update_product, update_product_variant,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,10 +29,10 @@ use super::{
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId, Storefront},
+    extract::{Caller, JsonBody, PathId, Query, Storefront},
     media::Media,
     patch,
-    state::{SharedState, Storage},
+    state::{AppState, SharedState, Storage},
 };
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -177,6 +181,23 @@ pub(super) struct OptionValueResponse {
     label: String,
 }
 
+impl From<&ProductOption> for OptionResponse {
+    fn from(o: &ProductOption) -> Self {
+        Self {
+            id: o.id(),
+            name: o.name().to_string(),
+            values: o
+                .values()
+                .iter()
+                .map(|v| OptionValueResponse {
+                    id: v.id(),
+                    label: v.label().to_string(),
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct VariantResponse {
     id: VariantId,
@@ -214,22 +235,7 @@ impl ProductResponse {
             vendor: p.vendor().map(str::to_string),
             product_type: p.product_type().map(str::to_string),
             tags: p.tags().to_vec(),
-            options: p
-                .options()
-                .iter()
-                .map(|o| OptionResponse {
-                    id: o.id(),
-                    name: o.name().to_string(),
-                    values: o
-                        .values()
-                        .iter()
-                        .map(|v| OptionValueResponse {
-                            id: v.id(),
-                            label: v.label().to_string(),
-                        })
-                        .collect(),
-                })
-                .collect(),
+            options: p.options().iter().map(OptionResponse::from).collect(),
             variants: p
                 .variants()
                 .iter()
@@ -440,9 +446,10 @@ pub(super) async fn fetch<S: Storage>(
 /// admin fields. A draft or archived product is `404 product_not_found`, the same as one
 /// that doesn't exist, so a storefront can't tell them apart.
 ///
-/// No prices: a product's base price isn't what a shopper pays (their market's price
-/// list and currency decide that), so showing it would mislead. Until product listing
-/// brings prices per market, the cart is where a storefront gets them.
+/// Prices and stock are the shopper's: with `country`, each variant carries its price
+/// in that country's market and whether it can be bought now (design note 0021, SU7),
+/// priced as a cart prices it. Without `country`, there are none: a product's base price
+/// isn't what any shopper pays.
 #[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct StorefrontProductResponse {
     id: ProductId,
@@ -454,21 +461,45 @@ pub(super) struct StorefrontProductResponse {
     product_type: Option<String>,
     /// In the merchant's order.
     tags: Vec<String>,
+    /// What a shopper picks a variant by, in order.
+    options: Vec<OptionResponse>,
     variants: Vec<StorefrontVariantResponse>,
     /// In order; the first is the featured item.
     media: Vec<ProductMediaResponse>,
+    /// Whether `country`'s market sells the product; `null` without `country`. A
+    /// product not sold there has no prices: show it as unavailable in the country.
+    sold_in_country: Option<bool>,
+    /// The currency of the prices; `null` when there are none.
+    currency: Option<Currency>,
+    /// Whether the prices include tax (the market's rule); `null` when there are none.
+    prices_include_tax: Option<bool>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub(super) struct StorefrontVariantResponse {
     id: VariantId,
+    /// Its option values ("M / Blue"); `null` for a product without options.
+    title: Option<String>,
+    /// One value per option, in the order of `options`.
+    selections: Vec<OptionValueId>,
     /// The item of the product's `media` this variant shows (an image), if any.
     media_asset_id: Option<AssetId>,
+    /// In `country`'s market; `null` without `country` or where it isn't sold.
+    price: Option<Money>,
+    /// Whether one can be bought now (in stock, or stock isn't tracked); `null` where
+    /// there's no price.
+    available: Option<bool>,
 }
 
 impl StorefrontProductResponse {
-    async fn new(view: &ProductView, media: Option<&Media>) -> Result<Self, ApiError> {
+    async fn new(
+        view: &ProductView,
+        offer: Option<&ProductOffer>,
+        media: Option<&Media>,
+    ) -> Result<Self, ApiError> {
         let p = &view.product;
+        let sold = offer.map(ProductOffer::sold);
+        let market = offer.filter(|o| o.sold()).and_then(|o| o.market.as_ref());
         Ok(Self {
             id: p.id(),
             handle: p.handle().as_str().to_string(),
@@ -477,25 +508,76 @@ impl StorefrontProductResponse {
             vendor: p.vendor().map(str::to_string),
             product_type: p.product_type().map(str::to_string),
             tags: p.tags().to_vec(),
+            options: p.options().iter().map(OptionResponse::from).collect(),
             variants: p
                 .variants()
                 .iter()
-                .map(|v| StorefrontVariantResponse {
-                    id: v.id(),
-                    media_asset_id: v.media(),
+                .map(|v| {
+                    let priced = market
+                        .and(offer)
+                        .and_then(|o| o.variants.iter().find(|offered| offered.variant == v.id()));
+                    StorefrontVariantResponse {
+                        id: v.id(),
+                        title: p.variant_title(v.id()),
+                        selections: v.selections().to_vec(),
+                        media_asset_id: v.media(),
+                        price: priced.and_then(|o| o.price).map(|price| price.money()),
+                        available: priced.filter(|o| o.price.is_some()).map(|o| o.available),
+                    }
                 })
                 .collect(),
             media: media_items(&view.media, media).await?,
+            sold_in_country: sold,
+            currency: market.map(|m| m.currency()),
+            prices_include_tax: market.map(|m| m.prices_include_tax()),
         })
     }
 }
 
-/// An active product sold through the caller's channel; drafts, archived products and
-/// products the channel doesn't sell read as missing.
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(super) struct ProductCountryParams {
+    /// Where the shopper is (ISO 3166-1 alpha-2): its market prices and stocks the
+    /// variants. Without it, the product comes without prices.
+    country: Option<String>,
+}
+
+/// The storefront's response for `view`, after the checks every storefront read makes:
+/// a draft, archived or unpublished product reads as missing (0020, CH6).
+async fn storefront_product<P>(
+    state: &AppState<impl Storage>,
+    ports: &P,
+    ctx: &Ctx,
+    view: ProductView,
+    country: Option<String>,
+) -> Result<Json<StorefrontProductResponse>, ApiError>
+where
+    P: HasChannels + HasMarkets + HasCatalogs + HasPriceLists + HasInventoryItems + HasLocations,
+{
+    let id = view.product.id();
+    let published = match ctx.channel() {
+        Some(channel) => hypha_channels::is_published(ports, channel, id).await?,
+        None => false,
+    };
+    if view.product.status() != ProductStatus::Active || !published {
+        return Err(hypha_products::CommandError::ProductNotFound(id).into());
+    }
+    let offer = match country {
+        Some(country) => Some(price_product(ctx, ports, &view.product, &country).await?),
+        None => None,
+    };
+    Ok(Json(
+        StorefrontProductResponse::new(&view, offer.as_ref(), state.media.as_ref()).await?,
+    ))
+}
+
+/// An active product sold through the caller's channel, priced in `country`; drafts,
+/// archived products and products the channel doesn't sell read as missing.
 #[utoipa::path(
     get,
     path = "/storefront/products/{id}",
-    params(("id" = ProductId, Path)),
+    params(("id" = ProductId, Path), ProductCountryParams),
     responses((status = 200, description = "OK", body = StorefrontProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
@@ -503,20 +585,36 @@ pub(super) async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<ProductId>,
+    query: Query<ProductCountryParams>,
 ) -> Result<Json<StorefrontProductResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    let params = query.parse()?;
     let view = get_product_view(&ctx, &ports, id).await?;
-    // Like a draft, a product the caller's channel doesn't sell isn't there (0020, CH6).
-    let published = match ctx.channel() {
-        Some(channel) => hypha_channels::is_published(&ports, channel, id).await?,
-        None => false,
-    };
-    if view.product.status() != ProductStatus::Active || !published {
-        return Err(hypha_products::CommandError::ProductNotFound(id).into());
-    }
-    Ok(Json(
-        StorefrontProductResponse::new(&view, state.media.as_ref()).await?,
-    ))
+    storefront_product(&state, &ports, &ctx, view, params.country).await
+}
+
+/// A product page in one read (design note 0021, SU7): the product by its handle,
+/// priced in `country`, with the same rules as the read by ID.
+#[utoipa::path(
+    get,
+    path = "/storefront/products/by-handle/{handle}",
+    params(
+        ("handle" = String, Path, description = "The product's handle.", example = "ceramic-mug"),
+        ProductCountryParams
+    ),
+    responses((status = 200, description = "OK", body = StorefrontProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:read"]))),
+)]
+pub(super) async fn fetch_by_handle_storefront<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(handle): PathId<String>,
+    query: Query<ProductCountryParams>,
+) -> Result<Json<StorefrontProductResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let params = query.parse()?;
+    let view = get_product_view_by_handle(&ctx, &ports, &handle).await?;
+    storefront_product(&state, &ports, &ctx, view, params.country).await
 }
 
 /// Changes a product's status (draft, active, archived).
