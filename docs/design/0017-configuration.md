@@ -221,7 +221,7 @@ read-only settings route), never from a copy in the admin.
 
 - Every duration and interval is above zero; `burst` is at least 1;
   `server.shutdown_grace` is at least a second.
-- `server.max_body` is 1KiB to 64MiB: every route's JSON fits, and anonymous clients can't
+- `server.max_body` is 1KiB to 64MiB (256KiB since 0019, for product descriptions): every route's JSON fits, and anonymous clients can't
   make the server buffer more before their 401 (files go to storage directly).
 - `jobs.dispatch.batch` is 1 to 1,000.
 - `jobs.dispatch.lease` is at least the slowest webhook's run (its 30-second timeout plus

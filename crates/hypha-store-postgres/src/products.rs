@@ -54,7 +54,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
             .client()
             .query_typed(
                 &format!(
-                    "SELECT p.id, p.handle, p.title, p.status, c.variants, {},
+                    "SELECT p.id, p.handle, p.title, p.status, p.vendor, p.product_type, c.variants, {},
                         r.currencies, r.mins, r.maxes,
                         (SELECT asset_id FROM product_media
                          WHERE product_id = p.id AND position = 0) AS featured
@@ -177,12 +177,18 @@ pub(crate) async fn insert_product(
     s: &ProductSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
-        "INSERT INTO products (id, version, handle, title, status) VALUES ($1, 1, $2, $3, $4)",
+        "INSERT INTO products
+             (id, version, handle, title, status, description, vendor, product_type, tags)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.handle, Type::TEXT),
             (&s.title, Type::TEXT),
             (&s.status.as_str(), Type::TEXT),
+            (&s.description, Type::TEXT),
+            (&s.vendor, Type::TEXT),
+            (&s.product_type, Type::TEXT),
+            (&s.tags, Type::TEXT_ARRAY),
         ],
     )
     .await
@@ -201,7 +207,8 @@ pub(crate) async fn update_product(
     // The version check comes first; nothing else is touched if it fails.
     let bumped = tx
         .query_typed_opt(
-            "UPDATE products SET version = version + 1, handle = $3, title = $4, status = $5
+            "UPDATE products SET version = version + 1, handle = $3, title = $4, status = $5,
+                    description = $6, vendor = $7, product_type = $8, tags = $9
                  WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -209,6 +216,10 @@ pub(crate) async fn update_product(
                 (&s.handle, Type::TEXT),
                 (&s.title, Type::TEXT),
                 (&s.status.as_str(), Type::TEXT),
+                (&s.description, Type::TEXT),
+                (&s.vendor, Type::TEXT),
+                (&s.product_type, Type::TEXT),
+                (&s.tags, Type::TEXT_ARRAY),
             ],
         )
         .await
@@ -361,7 +372,9 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
     let products = client
         .query_typed(
             &format!(
-                "SELECT id, version, handle, title, status, {} FROM products WHERE id = ANY($1)",
+                "SELECT id, version, handle, title, status, description, vendor, product_type,
+                        tags, {}
+                 FROM products WHERE id = ANY($1)",
                 stamp_columns(""),
             ),
             &param,
@@ -477,6 +490,10 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
                 status: status
                     .parse()
                     .map_err(|s| corrupt(format!("product status {s:?}")))?,
+                description: col(row, "description")?,
+                vendor: col(row, "vendor")?,
+                product_type: col(row, "product_type")?,
+                tags: col(row, "tags")?,
                 options: options.remove(&id).unwrap_or_default(),
                 variants: variants.remove(&id).unwrap_or_default(),
                 media: media.remove(&id).unwrap_or_default(),
@@ -522,6 +539,8 @@ fn summary_from_db(row: &Row) -> Result<ProductSummary, RepoError> {
         status: status
             .parse()
             .map_err(|s| corrupt(format!("product status {s:?}")))?,
+        vendor: col(row, "vendor")?,
+        product_type: col(row, "product_type")?,
         variant_count: usize::try_from(variants).map_err(corrupt)?,
         price_ranges,
         featured_media: col::<Option<Uuid>>(row, "featured")?.map(AssetId::from_uuid),

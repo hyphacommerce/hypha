@@ -79,6 +79,12 @@ pub(super) struct ProductResponse {
     handle: String,
     title: String,
     status: StatusDto,
+    /// Sanitised HTML (scripts, styles and event attributes removed), safe to render.
+    description: Option<String>,
+    vendor: Option<String>,
+    product_type: Option<String>,
+    /// In the merchant's order.
+    tags: Vec<String>,
     /// What variants differ by (Size, Color), in display order; empty for a product
     /// with a single variant.
     options: Vec<OptionResponse>,
@@ -190,6 +196,10 @@ impl ProductResponse {
             handle: p.handle().as_str().to_string(),
             title: p.title().to_string(),
             status: p.status().into(),
+            description: p.description().map(|d| d.as_html().to_string()),
+            vendor: p.vendor().map(str::to_string),
+            product_type: p.product_type().map(str::to_string),
+            tags: p.tags().to_vec(),
             options: p
                 .options()
                 .iter()
@@ -253,6 +263,8 @@ pub(super) struct ProductSummaryResponse {
     handle: String,
     title: String,
     status: StatusDto,
+    vendor: Option<String>,
+    product_type: Option<String>,
     variant_count: u64,
     /// The lowest and highest variant price in each currency the variants are priced
     /// in, ordered by currency code: usually one.
@@ -287,6 +299,8 @@ impl ProductSummaryResponse {
             handle: p.handle.as_str().to_string(),
             title: p.title.clone(),
             status: p.status.into(),
+            vendor: p.vendor.clone(),
+            product_type: p.product_type.clone(),
             variant_count: p.variant_count as u64,
             price_ranges: p
                 .price_ranges
@@ -389,6 +403,12 @@ pub(super) struct StorefrontProductResponse {
     id: ProductId,
     handle: String,
     title: String,
+    /// Sanitised HTML (scripts, styles and event attributes removed), safe to render.
+    description: Option<String>,
+    vendor: Option<String>,
+    product_type: Option<String>,
+    /// In the merchant's order.
+    tags: Vec<String>,
     variants: Vec<StorefrontVariantResponse>,
     /// In order; the first is the featured item.
     media: Vec<ProductMediaResponse>,
@@ -408,6 +428,10 @@ impl StorefrontProductResponse {
             id: p.id(),
             handle: p.handle().as_str().to_string(),
             title: p.title().to_string(),
+            description: p.description().map(|d| d.as_html().to_string()),
+            vendor: p.vendor().map(str::to_string),
+            product_type: p.product_type().map(str::to_string),
+            tags: p.tags().to_vec(),
             variants: p
                 .variants()
                 .iter()
@@ -476,9 +500,27 @@ pub(super) struct UpdateProductRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     handle: Option<String>,
+    /// HTML, up to 64 KiB; it's sanitised (scripts, styles and event attributes are
+    /// removed), and the response has what was kept. `null` clears it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>, required = false)]
+    description: Option<Option<String>>,
+    /// `null` clears it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>, required = false)]
+    vendor: Option<Option<String>>,
+    /// `null` clears it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>, required = false)]
+    product_type: Option<Option<String>>,
+    /// Replaces every tag. Up to 250; blanks are dropped and duplicates (ignoring case)
+    /// keep their first spelling.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = Vec<String>, required = false)]
+    tags: Option<Vec<String>>,
 }
 
-/// Renames a product or changes its handle.
+/// Changes a product's title, handle, description, vendor, product type or tags.
 #[utoipa::path(
     patch,
     path = "/admin/products/{id}",
@@ -498,6 +540,10 @@ pub(super) async fn update<S: Storage>(
     let input = UpdateProduct {
         title: req.title,
         handle: req.handle,
+        description: req.description,
+        vendor: req.vendor,
+        product_type: req.product_type,
+        tags: req.tags,
     };
     let product = update_product(&ctx, ports.products(), id, input).await?;
     respond(&state, &ports, product).await

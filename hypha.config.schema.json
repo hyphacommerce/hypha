@@ -521,7 +521,7 @@
           "default": "127.0.0.1:3000"
         },
         "max_body": {
-          "description": "The largest request body accepted: 1KiB to 64MiB. Files don't count: they're\nuploaded to storage directly.",
+          "description": "The largest request body accepted: 256KiB to 64MiB. Files don't count: they're\nuploaded to storage directly.",
           "$ref": "#/$defs/Size",
           "default": "2MiB"
         },

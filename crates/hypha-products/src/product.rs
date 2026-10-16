@@ -6,6 +6,7 @@ use hypha_core::{
 };
 
 use crate::{
+    content::{self, Description},
     error::ProductError,
     events::Changes,
     handle::Handle,
@@ -67,6 +68,11 @@ pub struct Product {
     handle: Handle,
     title: String,
     status: ProductStatus,
+    /// What it says about itself (design note 0019, section 2).
+    description: Option<Description>,
+    vendor: Option<String>,
+    product_type: Option<String>,
+    tags: Vec<String>,
     options: Vec<ProductOption>,
     variants: Vec<Variant>,
     /// Ordered; the first is the featured item. Asset IDs only: products don't know
@@ -123,6 +129,10 @@ impl Product {
             handle,
             title: required_text("title", &title)?,
             status: ProductStatus::Draft,
+            description: None,
+            vendor: None,
+            product_type: None,
+            tags: Vec::new(),
             options: Vec::new(),
             variants: vec![Variant::new(variant_id, None, price, Vec::new())],
             media: Vec::new(),
@@ -149,6 +159,10 @@ impl Product {
             handle,
             title: required_text("title", &title)?,
             status: ProductStatus::Draft,
+            description: None,
+            vendor: None,
+            product_type: None,
+            tags: Vec::new(),
             options,
             variants: Vec::new(),
             media: Vec::new(),
@@ -259,6 +273,23 @@ impl Product {
         self.status
     }
 
+    pub fn description(&self) -> Option<&Description> {
+        self.description.as_ref()
+    }
+
+    pub fn vendor(&self) -> Option<&str> {
+        self.vendor.as_deref()
+    }
+
+    pub fn product_type(&self) -> Option<&str> {
+        self.product_type.as_deref()
+    }
+
+    /// In the order the merchant gave them.
+    pub fn tags(&self) -> &[String] {
+        &self.tags
+    }
+
     pub fn options(&self) -> &[ProductOption] {
         &self.options
     }
@@ -358,6 +389,11 @@ pub struct ProductSnapshot {
     pub handle: String,
     pub title: String,
     pub status: ProductStatus,
+    /// Sanitised HTML; sanitised again on `restore`.
+    pub description: Option<String>,
+    pub vendor: Option<String>,
+    pub product_type: Option<String>,
+    pub tags: Vec<String>,
     /// Empty for a simple product.
     pub options: Vec<OptionSnapshot>,
     /// In display order. A simple product has exactly one, with no selections.
@@ -402,6 +438,10 @@ impl Product {
             handle: self.handle.as_str().to_string(),
             title: self.title.clone(),
             status: self.status,
+            description: self.description.as_ref().map(|d| d.as_html().to_string()),
+            vendor: self.vendor.clone(),
+            product_type: self.product_type.clone(),
+            tags: self.tags.clone(),
             options: self
                 .options
                 .iter()
@@ -460,6 +500,15 @@ impl Product {
             handle,
             title: required_text("title", &s.title)?,
             status: s.status,
+            description: s
+                .description
+                .as_deref()
+                .map(Description::new)
+                .transpose()?
+                .flatten(),
+            vendor: optional_text("vendor", s.vendor)?,
+            product_type: optional_text("product type", s.product_type)?,
+            tags: content::tags(s.tags)?,
             options,
             variants: Vec::with_capacity(s.variants.len()),
             media: Vec::new(),
@@ -843,6 +892,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(Product::restore(p.snapshot()), Ok(p));
+    }
+
+    #[test]
+    fn restore_round_trips_content() {
+        let mut p = simple();
+        p.set_description(Some("<p>Stoneware</p>")).unwrap();
+        p.set_vendor(Some("Acme".to_string())).unwrap();
+        p.set_product_type(Some("Mug".to_string())).unwrap();
+        p.set_tags(vec!["Kitchen".to_string(), "Gift".to_string()])
+            .unwrap();
+        assert_eq!(Product::restore(p.snapshot()), Ok(p));
+    }
+
+    #[test]
+    fn restore_sanitises_the_stored_description() {
+        let mut s = simple().snapshot();
+        s.description = Some("<p>Hi</p><script>x()</script>".to_string());
+        assert_eq!(
+            Product::restore(s).map(|p| p.description().map(|d| d.as_html().to_string())),
+            Ok(Some("<p>Hi</p>".to_string()))
+        );
     }
 
     #[test]

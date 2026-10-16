@@ -198,6 +198,11 @@ SHIRT_S=$(variant)
 step "rename it" 200 - -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" \
     -d '{"title":"Linen shirt","handle":"linen-shirt"}'
 contains "with its new handle" '"handle":"linen-shirt","title":"Linen shirt"'
+step "describe it (design note 0019)" 200 - -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" \
+    -d '{"description":"<p>Soft linen</p><script>x()</script>","vendor":"Acme","product_type":"Shirt","tags":["Summer","summer","Linen"]}'
+contains "sanitised, with its tags deduplicated" '"description":"<p>Soft linen</p>","vendor":"Acme","product_type":"Shirt","tags":["Summer","Linen"]'
+step "too many tags" 422 too_many_tags -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" \
+    -d "{\"tags\":[$(printf '"t%d",' $(seq 0 249))\"t250\"]}"
 step "a taken handle" 409 handle_taken -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" -d '{"handle":"mug"}'
 step "a title can't be cleared" 422 - -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" -d '{"title":null}'
 step "give it a size" 200 - -X PUT "$BASE/admin/products/$SHIRT/options" -H "$JSON" \

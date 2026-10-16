@@ -1002,7 +1002,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Renames a product or changes its handle. */
+        /** Changes a product's title, handle, description, vendor, product type or tags. */
         patch: operations["admin.products.update"];
         trace?: never;
     };
@@ -2495,6 +2495,8 @@ export interface components {
         ProductResponse: {
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
+            /** @description Sanitised HTML (scripts, styles and event attributes removed), safe to render. */
+            description?: string | null;
             handle: string;
             id: components["schemas"]["ProductId"];
             /** @description In order; the first is the featured item. At most 250. */
@@ -2504,11 +2506,15 @@ export interface components {
              *     with a single variant.
              */
             options: components["schemas"]["OptionResponse"][];
+            product_type?: string | null;
             status: components["schemas"]["ProductStatus"];
+            /** @description In the merchant's order. */
+            tags: string[];
             title: string;
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
             variants: components["schemas"]["VariantResponse"][];
+            vendor?: string | null;
         };
         /**
          * @description `ProductStatus` on the wire: snake_case strings. A DTO of its own, so the domain
@@ -2541,12 +2547,14 @@ export interface components {
              *     in, ordered by currency code: usually one.
              */
             price_ranges: components["schemas"]["PriceRangeResponse"][];
+            product_type?: string | null;
             status: components["schemas"]["ProductStatus"];
             title: string;
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
             /** Format: int64 */
             variant_count: number;
+            vendor?: string | null;
         };
         /** @description How an option's price is found: one of a provider's services, or a built-in rate. */
         RateDto: {
@@ -2867,9 +2875,23 @@ export interface components {
         };
         /** @description Title and handle (JSON Merge Patch; neither can be `null`). */
         UpdateProductRequest: {
+            /**
+             * @description HTML, up to 64 KiB; it's sanitised (scripts, styles and event attributes are
+             *     removed), and the response has what was kept. `null` clears it.
+             */
+            description?: string | null;
             /** @description Changing it changes the product's storefront URLs; old ones aren't redirected. */
             handle?: string;
+            /** @description `null` clears it. */
+            product_type?: string | null;
+            /**
+             * @description Replaces every tag. Up to 250; blanks are dropped and duplicates (ignoring case)
+             *     keep their first spelling.
+             */
+            tags?: string[];
             title?: string;
+            /** @description `null` clears it. */
+            vendor?: string | null;
         };
         /** @description JSON Merge Patch: only the fields sent change. */
         UpdateRoleRequest: {

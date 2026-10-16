@@ -59,7 +59,7 @@ function refresh(id: string) {
 
 export async function updateProduct(
   id: string,
-  input: { title: string; handle: string },
+  input: AdminSchemas["UpdateProductRequest"],
 ): Promise<EditResult> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/products/{id}", {

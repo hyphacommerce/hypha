@@ -13,6 +13,8 @@ pub struct ProductSummary {
     pub handle: Handle,
     pub title: String,
     pub status: ProductStatus,
+    pub vendor: Option<String>,
+    pub product_type: Option<String>,
     pub variant_count: usize,
     /// The lowest and highest base price in each currency the variants are priced in,
     /// ordered by currency code (variants may be priced in different currencies).
@@ -60,6 +62,8 @@ impl Product {
             handle: self.handle().clone(),
             title: self.title().to_string(),
             status: self.status(),
+            vendor: self.vendor().map(str::to_string),
+            product_type: self.product_type().map(str::to_string),
             variant_count: self.variants().len(),
             price_ranges,
             featured_media: self.featured_media(),

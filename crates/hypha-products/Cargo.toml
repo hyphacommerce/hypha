@@ -8,6 +8,7 @@ license.workspace = true
 hypha-core.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+ammonia = "4.2.3"
 
 [dev-dependencies]
 uuid.workspace = true

@@ -3186,6 +3186,13 @@
             "description": "When it was created, RFC 3339 in UTC.",
             "type": "string"
           },
+          "description": {
+            "description": "Sanitised HTML (scripts, styles and event attributes removed), safe to render.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "handle": {
             "type": "string"
           },
@@ -3206,8 +3213,21 @@
             },
             "type": "array"
           },
+          "product_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/ProductStatus"
+          },
+          "tags": {
+            "description": "In the merchant's order.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "title": {
             "type": "string"
@@ -3221,6 +3241,12 @@
               "$ref": "#/components/schemas/VariantResponse"
             },
             "type": "array"
+          },
+          "vendor": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -3228,6 +3254,7 @@
           "handle",
           "title",
           "status",
+          "tags",
           "options",
           "variants",
           "media",
@@ -3304,6 +3331,12 @@
             },
             "type": "array"
           },
+          "product_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/ProductStatus"
           },
@@ -3318,6 +3351,12 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "vendor": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -4376,12 +4415,40 @@
         "additionalProperties": false,
         "description": "Title and handle (JSON Merge Patch; neither can be `null`).",
         "properties": {
+          "description": {
+            "description": "HTML, up to 64 KiB; it's sanitised (scripts, styles and event attributes are\nremoved), and the response has what was kept. `null` clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "handle": {
             "description": "Changing it changes the product's storefront URLs; old ones aren't redirected.",
             "type": "string"
           },
+          "product_type": {
+            "description": "`null` clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "description": "Replaces every tag. Up to 250; blanks are dropped and duplicates (ignoring case)\nkeep their first spelling.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "title": {
             "type": "string"
+          },
+          "vendor": {
+            "description": "`null` clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -12820,7 +12887,7 @@
             "bearer": []
           }
         ],
-        "summary": "Renames a product or changes its handle.",
+        "summary": "Changes a product's title, handle, description, vendor, product type or tags.",
         "tags": [
           "products"
         ],

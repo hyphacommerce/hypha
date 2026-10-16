@@ -74,6 +74,10 @@ pub enum ProductError {
     DuplicateMedia(AssetId),
     #[error("asset {0} isn't in the product's media")]
     MediaNotInProduct(AssetId),
+    #[error("a description is at most {max} bytes")]
+    DescriptionTooLong { max: usize },
+    #[error("a product has at most {max} tags")]
+    TooManyTags { max: usize },
 }
 
 fn join(ids: &[VariantId]) -> String {
@@ -122,6 +126,8 @@ impl ErrorCode for ProductError {
             ProductError::TooManyMedia { .. } => "too_many_media",
             ProductError::DuplicateMedia(_) => "duplicate_media",
             ProductError::MediaNotInProduct(_) => "media_not_in_product",
+            ProductError::DescriptionTooLong { .. } => "description_too_long",
+            ProductError::TooManyTags { .. } => "too_many_tags",
         }
     }
 }

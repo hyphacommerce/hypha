@@ -610,12 +610,18 @@ export interface components {
          *     brings prices per market, the cart is where a storefront gets them.
          */
         StorefrontProductResponse: {
+            /** @description Sanitised HTML (scripts, styles and event attributes removed), safe to render. */
+            description?: string | null;
             handle: string;
             id: components["schemas"]["ProductId"];
             /** @description In order; the first is the featured item. */
             media: components["schemas"]["ProductMediaResponse"][];
+            product_type?: string | null;
+            /** @description In the merchant's order. */
+            tags: string[];
             title: string;
             variants: components["schemas"]["StorefrontVariantResponse"][];
+            vendor?: string | null;
         };
         /** @description What a storefront sees of the store: its name. */
         StorefrontStoreResponse: {

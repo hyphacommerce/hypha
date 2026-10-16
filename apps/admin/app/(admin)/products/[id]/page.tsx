@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { ProductStatusBadge } from "@/components/status";
 import { loaded, sessionClient } from "@/lib/hypha";
 
+import { ContentForm } from "./content-form";
 import { DetailsForm } from "./details-form";
 import { MediaSection } from "./media-section";
 import { OptionsEditor } from "./options-editor";
@@ -47,6 +48,20 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           title={product.title}
           handle={product.handle}
           isActive={product.status === "active"}
+        />
+
+        <ContentForm
+          key={JSON.stringify([
+            product.description,
+            product.vendor,
+            product.product_type,
+            product.tags,
+          ])}
+          id={product.id}
+          description={product.description ?? ""}
+          vendor={product.vendor ?? ""}
+          productType={product.product_type ?? ""}
+          tags={product.tags}
         />
 
         <MediaSection

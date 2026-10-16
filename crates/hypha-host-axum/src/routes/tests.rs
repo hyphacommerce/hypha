@@ -276,14 +276,14 @@ async fn the_body_limit_and_rate_limits_are_configurable() {
     let app = app_configured(
         r#"
         [server]
-        max_body = "1KiB"
+        max_body = "256KiB"
 
         [rate_limits]
         login_ip = { burst = 1, per = "1h" }
         "#,
     )
     .await;
-    let big = format!("{{\"title\": \"{}\"}}", "x".repeat(1024));
+    let big = format!("{{\"title\": \"{}\"}}", "x".repeat(256 * 1024));
     let (status, body) = send(&app, "POST", "/admin/products", Some(&big)).await;
     assert_eq!(
         (status, code(&body)),
@@ -618,6 +618,8 @@ async fn a_listed_product_is_a_summary() {
             "handle": "mug",
             "title": "mug",
             "status": "draft",
+            "vendor": null,
+            "product_type": null,
             "variant_count": 1,
             "price_ranges": [{
                 "min": { "amount": 1000, "currency": "EUR" },
@@ -625,6 +627,75 @@ async fn a_listed_product_is_a_summary() {
             }],
             "featured_media": null,
         })
+    );
+}
+
+#[tokio::test]
+async fn a_products_content_is_edited_and_sanitised() {
+    let app = app().await;
+    let id = create_product(&app, "shirt").await;
+    let product = format!("/admin/products/{id}");
+
+    let body = json!({
+        "description": "<p onclick=\"x()\">Soft</p><script>x()</script>",
+        "vendor": "Acme",
+        "product_type": "Shirt",
+        "tags": ["Summer", "summer", "Linen"],
+    });
+    let (status, edited) = send(&app, "PATCH", &product, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(
+        (
+            &edited["description"],
+            &edited["vendor"],
+            &edited["product_type"],
+            &edited["tags"]
+        ),
+        (
+            &json!("<p>Soft</p>"),
+            &json!("Acme"),
+            &json!("Shirt"),
+            &json!(["Summer", "Linen"])
+        )
+    );
+    let (_, list) = send(&app, "GET", "/admin/products", None).await;
+    assert_eq!(
+        (
+            &list["items"][0]["vendor"],
+            &list["items"][0]["product_type"]
+        ),
+        (&json!("Acme"), &json!("Shirt"))
+    );
+
+    let (status, cleared) = send(
+        &app,
+        "PATCH",
+        &product,
+        Some(r#"{"description":null,"vendor":null,"tags":[]}"#),
+    )
+    .await;
+    assert_eq!(
+        (
+            status,
+            &cleared["description"],
+            &cleared["vendor"],
+            &cleared["tags"]
+        ),
+        (StatusCode::OK, &json!(null), &json!(null), &json!([]))
+    );
+
+    let too_many: Vec<String> = (0..=250).map(|i| format!("t{i}")).collect();
+    let body = json!({ "tags": too_many }).to_string();
+    let (status, body) = send(&app, "PATCH", &product, Some(&body)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "too_many_tags")
+    );
+    let body = json!({ "description": "a".repeat(64 * 1024 + 1) }).to_string();
+    let (status, body) = send(&app, "PATCH", &product, Some(&body)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "description_too_long")
     );
 }
 
@@ -1319,6 +1390,10 @@ async fn a_storefront_sees_active_products_only_without_admin_fields() {
     let (status, json) = send_as(&app, &pk, "GET", &path, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["handle"], "mug");
+    assert_eq!(
+        (&json["description"], &json["tags"]),
+        (&json!(null), &json!([]))
+    );
     assert!(json.get("status").is_none());
     // No prices: the base price isn't what a shopper in a market pays.
     assert!(json["variants"][0]["id"].is_string());

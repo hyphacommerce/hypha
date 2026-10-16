@@ -6,8 +6,8 @@ use hypha_core::{
     VariantId,
 };
 use hypha_products::{
-    AddVariant, CommandError, CreateSimpleProduct, Handle, OptionDraft, OptionValueDraft, Product,
-    ProductError, SetProductOptions, UpdateProduct, UpdateVariant, add_product_variant,
+    AddVariant, CommandError, CreateSimpleProduct, Handle, MAX_TAGS, OptionDraft, OptionValueDraft,
+    Product, ProductError, SetProductOptions, UpdateProduct, UpdateVariant, add_product_variant,
     create_simple_product, remove_product_variant, repo::ProductRepo, set_product_options,
     update_product, update_product_variant,
 };
@@ -133,12 +133,93 @@ fn missing_write() -> Result<Product, CommandError> {
 // ---- update_product ----
 
 #[test]
+fn update_product_sets_and_clears_content() {
+    let w = World::new();
+    let p = w.create("shirt");
+    let input = UpdateProduct {
+        description: Some(Some("<p>Soft</p><script>x()</script>".to_string())),
+        vendor: Some(Some(" Acme ".to_string())),
+        product_type: Some(Some("Shirt".to_string())),
+        tags: Some(vec!["Summer".to_string(), "summer".to_string()]),
+        ..UpdateProduct::default()
+    };
+    let updated = block_on(update_product(&w.ctx, &w.repo, p.id(), input)).unwrap();
+    assert_eq!(
+        (
+            updated.description().map(|d| d.as_html()),
+            updated.vendor(),
+            updated.product_type(),
+            updated.tags()
+        ),
+        (
+            Some("<p>Soft</p>"),
+            Some("Acme"),
+            Some("Shirt"),
+            &["Summer".to_string()][..]
+        )
+    );
+    assert_eq!(w.stored(p.id()), updated);
+
+    let clear = UpdateProduct {
+        description: Some(None),
+        vendor: Some(None),
+        tags: Some(vec![]),
+        ..UpdateProduct::default()
+    };
+    let cleared = block_on(update_product(&w.ctx, &w.repo, p.id(), clear)).unwrap();
+    assert_eq!(
+        (
+            cleared.description(),
+            cleared.vendor(),
+            cleared.product_type(),
+            cleared.tags()
+        ),
+        (None, None, Some("Shirt"), &[][..])
+    );
+}
+
+#[test]
+fn update_product_names_the_content_fields_it_changed() {
+    let w = World::new();
+    let p = w.create("shirt");
+    let input = UpdateProduct {
+        vendor: Some(Some("Acme".to_string())),
+        tags: Some(vec!["Summer".to_string()]),
+        ..UpdateProduct::default()
+    };
+    block_on(update_product(&w.ctx, &w.repo, p.id(), input)).unwrap();
+    let updated = w.repo.outbox().events().pop().unwrap();
+    assert_eq!(updated.event_type, "product.updated");
+    assert_eq!(
+        updated.data["fields"],
+        serde_json::json!(["tags", "vendor"])
+    );
+}
+
+#[test]
+fn update_product_refuses_too_many_tags() {
+    let w = World::new();
+    let p = w.create("shirt");
+    let input = UpdateProduct {
+        tags: Some((0..=MAX_TAGS).map(|i| format!("t{i}")).collect()),
+        ..UpdateProduct::default()
+    };
+    assert_eq!(
+        block_on(update_product(&w.ctx, &w.repo, p.id(), input)),
+        Err(CommandError::Product(ProductError::TooManyTags {
+            max: MAX_TAGS
+        }))
+    );
+}
+
+#[test]
 fn update_product_renames_and_changes_the_handle() {
     let w = World::new();
     let p = w.create("shirt");
     let input = UpdateProduct {
         title: Some("Linen shirt".to_string()),
         handle: Some("linen-shirt".to_string()),
+        ..UpdateProduct::default()
     };
     let updated = block_on(update_product(&w.ctx, &w.repo, p.id(), input)).unwrap();
     assert_eq!(
@@ -540,6 +621,7 @@ fn an_edit_that_changes_nothing_records_nothing() {
     let input = UpdateProduct {
         title: Some("Shirt".to_string()),
         handle: Some("shirt".to_string()),
+        ..UpdateProduct::default()
     };
     block_on(update_product(&w.ctx, &w.repo, p.id(), input)).unwrap();
     assert_eq!(w.repo.outbox().types(), ["product.created"]);

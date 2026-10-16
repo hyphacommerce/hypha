@@ -370,7 +370,9 @@ fn product_status(e: &hypha_products::ProductError) -> StatusCode {
         | P::DuplicateOptionLabel { .. }
         | P::TooManyMedia { .. }
         | P::DuplicateMedia(_)
-        | P::MediaNotInProduct(_) => StatusCode::UNPROCESSABLE_ENTITY,
+        | P::MediaNotInProduct(_)
+        | P::DescriptionTooLong { .. }
+        | P::TooManyTags { .. } => StatusCode::UNPROCESSABLE_ENTITY,
     }
 }
 

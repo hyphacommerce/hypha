@@ -10,7 +10,9 @@ use hypha_core::{
 };
 
 use super::{Product, validate_options};
-use crate::{Handle, OptionValue, ProductError, ProductOption, variant::VariantPatch};
+use crate::{
+    Description, Handle, OptionValue, ProductError, ProductOption, content, variant::VariantPatch,
+};
 
 /// An option as a request lists it: an existing one by `id`, or a new one without.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +35,44 @@ impl Product {
         if title != self.title {
             self.title = title;
             self.changes.field("title");
+        }
+        Ok(())
+    }
+
+    /// Sets or clears the description; HTML is sanitised (`Description::new`).
+    pub fn set_description(&mut self, html: Option<&str>) -> Result<(), ProductError> {
+        let description = html.map(Description::new).transpose()?.flatten();
+        if description != self.description {
+            self.description = description;
+            self.changes.field("description");
+        }
+        Ok(())
+    }
+
+    pub fn set_vendor(&mut self, vendor: Option<String>) -> Result<(), ProductError> {
+        let vendor = optional_text("vendor", vendor)?;
+        if vendor != self.vendor {
+            self.vendor = vendor;
+            self.changes.field("vendor");
+        }
+        Ok(())
+    }
+
+    pub fn set_product_type(&mut self, product_type: Option<String>) -> Result<(), ProductError> {
+        let product_type = optional_text("product type", product_type)?;
+        if product_type != self.product_type {
+            self.product_type = product_type;
+            self.changes.field("product_type");
+        }
+        Ok(())
+    }
+
+    /// Replaces the tags (`content::tags` cleans them).
+    pub fn set_tags(&mut self, tags: Vec<String>) -> Result<(), ProductError> {
+        let tags = content::tags(tags)?;
+        if tags != self.tags {
+            self.tags = tags;
+            self.changes.field("tags");
         }
         Ok(())
     }

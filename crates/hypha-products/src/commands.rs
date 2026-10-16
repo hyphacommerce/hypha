@@ -132,9 +132,15 @@ pub async fn set_product_status<R: ProductRepo>(
 pub struct UpdateProduct {
     pub title: Option<String>,
     pub handle: Option<String>,
+    /// `Some(None)` clears it (design note 0019, section 2).
+    pub description: Option<Option<String>>,
+    pub vendor: Option<Option<String>>,
+    pub product_type: Option<Option<String>>,
+    /// Replaces them all.
+    pub tags: Option<Vec<String>>,
 }
 
-/// Renames a product or changes its handle (design note 0014, section 2).
+/// Changes a product's title, handle or content (design notes 0014 and 0019).
 pub async fn update_product<R: ProductRepo>(
     ctx: &Ctx,
     repo: &R,
@@ -147,6 +153,18 @@ pub async fn update_product<R: ProductRepo>(
     let mut product = load(repo, id).await?;
     if let Some(title) = &input.title {
         product.rename(title)?;
+    }
+    if let Some(description) = &input.description {
+        product.set_description(description.as_deref())?;
+    }
+    if let Some(vendor) = input.vendor {
+        product.set_vendor(vendor)?;
+    }
+    if let Some(product_type) = input.product_type {
+        product.set_product_type(product_type)?;
+    }
+    if let Some(tags) = input.tags {
+        product.set_tags(tags)?;
     }
     if let Some(handle) = handle
         && &handle != product.handle()

@@ -36,6 +36,8 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     media_round_trips(&make().await).await;
     scenario("product: variant weight and requires_shipping round trip");
     shipping_facts_round_trip(&make().await).await;
+    scenario("product: description, vendor, product type and tags round trip");
+    content_round_trips(&make().await).await;
     scenario("product: get_by_sku matches the exact SKU");
     sku_lookup(&make().await).await;
     scenario("product: SKUs stay unique across products, on insert and update");
@@ -490,6 +492,29 @@ async fn sku_key<R: ProductRepo>(repo: &R) {
         .unwrap();
     repo.update(&mut first).await.unwrap();
     assert_eq!(repo.get(pid(1)).await, Ok(Some(first)));
+}
+
+async fn content_round_trips<R: ProductRepo>(repo: &R) {
+    let mut p = shirt(1, "shirt");
+    p.set_description(Some("<p>Soft <em>linen</em></p>"))
+        .unwrap();
+    p.set_vendor(Some("Acme".to_string())).unwrap();
+    p.set_product_type(Some("Shirt".to_string())).unwrap();
+    // Order is the merchant's, not alphabetical.
+    p.set_tags(vec!["Summer".to_string(), "Linen".to_string()])
+        .unwrap();
+    repo.insert(&mut p).await.unwrap();
+    assert_eq!(repo.get(p.id()).await, Ok(Some(p.clone())));
+    let listed = repo.list(None, page(None, 10)).await.unwrap();
+    assert_eq!(listed.items, vec![p.summary()]);
+
+    p.set_description(None).unwrap();
+    p.set_vendor(None).unwrap();
+    p.set_tags(vec![]).unwrap();
+    repo.update(&mut p).await.unwrap();
+    assert_eq!(repo.get(p.id()).await, Ok(Some(p.clone())));
+    let listed = repo.list(None, page(None, 10)).await.unwrap();
+    assert_eq!(listed.items, vec![p.summary()]);
 }
 
 async fn shipping_facts_round_trip<R: ProductRepo>(repo: &R) {

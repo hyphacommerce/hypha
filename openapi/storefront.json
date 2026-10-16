@@ -1165,6 +1165,13 @@
       "StorefrontProductResponse": {
         "description": "A product as a storefront sees it (design note 0010, S5): active products only, without\nadmin fields. A draft or archived product is `404 product_not_found`, the same as one\nthat doesn't exist, so a storefront can't tell them apart.\n\nNo prices: a product's base price isn't what a shopper pays (their market's price\nlist and currency decide that), so showing it would mislead. Until product listing\nbrings prices per market, the cart is where a storefront gets them.",
         "properties": {
+          "description": {
+            "description": "Sanitised HTML (scripts, styles and event attributes removed), safe to render.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "handle": {
             "type": "string"
           },
@@ -1178,6 +1185,19 @@
             },
             "type": "array"
           },
+          "product_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "description": "In the merchant's order.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "title": {
             "type": "string"
           },
@@ -1186,12 +1206,19 @@
               "$ref": "#/components/schemas/StorefrontVariantResponse"
             },
             "type": "array"
+          },
+          "vendor": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "id",
           "handle",
           "title",
+          "tags",
           "variants",
           "media"
         ],
