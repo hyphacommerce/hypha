@@ -382,3 +382,67 @@ async fn existing_products_stay_sold_in_the_online_store() {
         .get(0);
     assert_eq!(published, 2);
 }
+
+/// Core before the ISO tables (design note 0021): migrations 0001 to 0039.
+const BEFORE_REFERENCE_CODES: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(39).0,
+};
+
+#[tokio::test]
+async fn reference_codes_name_every_stored_code_core_no_longer_reads() {
+    let Some(mut client) = fresh_schema("migrate_0040_codes").await else {
+        return;
+    };
+    migrate(&mut client, &[BEFORE_REFERENCE_CODES])
+        .await
+        .unwrap();
+    // Any capital letters passed 0011's checks: these are a metal and an unassigned code.
+    client
+        .batch_execute(
+            "INSERT INTO markets (id, version, name, currency)
+                 VALUES ('00000000-0000-0000-0000-000000000001', 1, 'Gold', 'XAU');
+             INSERT INTO market_countries (market_id, position, country)
+                 VALUES ('00000000-0000-0000-0000-000000000001', 0, 'XK'),
+                        ('00000000-0000-0000-0000-000000000001', 1, 'HR');
+             INSERT INTO tax_regions (id, version, country, default_rate)
+                 VALUES ('00000000-0000-0000-0000-000000000002', 1, 'XK', 0);",
+        )
+        .await
+        .unwrap();
+
+    let error = migrate(&mut client, &[CORE]).await.unwrap_err().to_string();
+    assert!(
+        error.contains(
+            "market_countries.country 'XK'; markets.currency 'XAU'; tax_regions.country 'XK'"
+        ),
+        "{error}"
+    );
+    assert!(!error.contains("'HR'"), "{error}");
+}
+
+/// 0040's lists, read from the SQL: `name text[] := ARRAY[ 'A', 'B', … ];`.
+fn listed_in_0040(name: &str) -> Vec<String> {
+    let sql = include_str!("../migrations/0040_reference_codes.sql");
+    let opening = format!("{name} text[] := ARRAY[");
+    let list = &sql[sql.find(&opening).unwrap() + opening.len()..];
+    let list = &list[..list.find(']').unwrap()];
+    list.split(',')
+        .map(|code| code.trim().trim_matches('\'').to_string())
+        .collect()
+}
+
+/// Removing a code from core's tables stops rows that use it from loading, so it needs a
+/// new migration that checks for it (0040's lists stay as they were applied).
+#[test]
+fn every_code_0040_accepts_is_still_in_core() {
+    let currencies = listed_in_0040("currencies");
+    let countries = listed_in_0040("countries");
+    assert_eq!((currencies.len(), countries.len()), (155, 249));
+    for code in &currencies {
+        assert!(hypha_core::Currency::new(code).is_ok(), "{code}");
+    }
+    for code in &countries {
+        assert!(hypha_core::CountryCode::new(code).is_ok(), "{code}");
+    }
+}

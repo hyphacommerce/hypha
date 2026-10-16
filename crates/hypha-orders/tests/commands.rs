@@ -16,7 +16,7 @@ fn order_id() -> OrderId {
 }
 
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur).unwrap()
+    Money::new(amount, Currency::EUR).unwrap()
 }
 
 /// A repo holding one pending order: 2 mugs at 5.00, untaxed.
@@ -29,7 +29,7 @@ fn repo_with_order() -> InMemoryOrderRepo {
         cart: CartId::from_uuid(Uuid::from_u128(2)),
         channel: hypha_core::ChannelId::from_uuid(Uuid::from_u128(500)),
         market: MarketId::from_uuid(Uuid::from_u128(3)),
-        currency: Currency::Eur,
+        currency: Currency::EUR,
         country: CountryCode::new("HR").unwrap(),
         taxes_included: false,
         customer: CustomerId::from_uuid(Uuid::from_u128(4)),

@@ -86,7 +86,7 @@ mod tests {
     }
 
     fn eur(amount: i64) -> Money {
-        Money::new(amount, Currency::Eur).unwrap()
+        Money::new(amount, Currency::EUR).unwrap()
     }
 
     fn croatia(prices_include_tax: bool) -> TaxContext {

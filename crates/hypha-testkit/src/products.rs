@@ -139,7 +139,7 @@ mod tests {
             Handle::new(handle).unwrap(),
             "Test".to_string(),
             VariantId::from_uuid(Uuid::from_u128(n + 1000)),
-            Price::new(Money::new(1000, Currency::Eur).unwrap()).unwrap(),
+            Price::new(Money::new(1000, Currency::EUR).unwrap()).unwrap(),
         )
         .unwrap()
     }
@@ -218,7 +218,7 @@ mod tests {
             Handle::new("cup").unwrap(),
             "Cup".to_string(),
             VariantId::from_uuid(Uuid::from_u128(1001)),
-            Price::new(Money::new(1, Currency::Eur).unwrap()).unwrap(),
+            Price::new(Money::new(1, Currency::EUR).unwrap()).unwrap(),
         )
         .unwrap();
         assert_eq!(

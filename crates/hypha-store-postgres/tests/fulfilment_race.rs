@@ -69,7 +69,7 @@ async fn shop(url: &str, schema: &str) -> PgStore<Client> {
     let mut location = Location::new(warehouse(), "Zagreb".to_string(), vec![market], 0).unwrap();
     LocationRepo::insert(&store, &mut location).await.unwrap();
 
-    let eur = |amount| Money::new(amount, Currency::Eur).unwrap();
+    let eur = |amount| Money::new(amount, Currency::EUR).unwrap();
     let variant = VariantId::from_uuid(Uuid::from_u128(1005));
     let mut order = Order::place(NewOrder {
         id: order_id(),
@@ -78,7 +78,7 @@ async fn shop(url: &str, schema: &str) -> PgStore<Client> {
         cart: CartId::from_uuid(Uuid::from_u128(1006)),
         channel: hypha_core::ChannelId::from_uuid(Uuid::from_u128(500)),
         market,
-        currency: Currency::Eur,
+        currency: Currency::EUR,
         country: CountryCode::new("HR").unwrap(),
         taxes_included: true,
         customer: CustomerId::from_uuid(Uuid::from_u128(1007)),

@@ -32,7 +32,7 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
 }
 
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur).unwrap()
+    Money::new(amount, Currency::EUR).unwrap()
 }
 
 fn oid(n: u128) -> OrderId {
@@ -112,7 +112,7 @@ fn order_with(n: u128, lines: Vec<OrderLine>, taxes_included: bool) -> Order {
         cart: CartId::from_uuid(Uuid::from_u128(1000 + n)),
         channel: hypha_core::ChannelId::from_uuid(Uuid::from_u128(500 + n)),
         market: MarketId::from_uuid(Uuid::from_u128(2000 + n)),
-        currency: Currency::Eur,
+        currency: Currency::EUR,
         country: CountryCode::new("HR").unwrap(),
         taxes_included,
         customer: CustomerId::from_uuid(Uuid::from_u128(3000 + n)),
@@ -121,7 +121,7 @@ fn order_with(n: u128, lines: Vec<OrderLine>, taxes_included: bool) -> Order {
         shipping_address: None,
         shipping_lines: vec![],
         subtotal,
-        shipping_total: Money::zero(Currency::Eur),
+        shipping_total: Money::zero(Currency::EUR),
         tax_total,
         total,
     })

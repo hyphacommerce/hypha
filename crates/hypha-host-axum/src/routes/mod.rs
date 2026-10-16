@@ -19,6 +19,7 @@ mod me;
 mod orders;
 mod page;
 mod products;
+mod reference;
 mod search;
 mod shipping;
 mod staff;
@@ -70,6 +71,8 @@ macro_rules! route_table {
             // ---------- admin ----------
             [admin, GET, "/admin/store", stores::fetch],
             [admin, PATCH, "/admin/store", stores::update],
+            // reference data for pickers (0021)
+            [admin, GET, "/admin/currencies", reference::currencies],
             // staff auth (no credentials needed; rate limited, 0009)
             [admin, POST, "/admin/auth/login", auth::login_handler],
             [admin, POST, "/admin/auth/login/mfa", auth::finish_login_handler],

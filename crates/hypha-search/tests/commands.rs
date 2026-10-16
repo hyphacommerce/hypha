@@ -60,7 +60,7 @@ fn warehouse() -> LocationId {
     LocationId::from_uuid(id(1300))
 }
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur).unwrap()
+    Money::new(amount, Currency::EUR).unwrap()
 }
 fn price(amount: i64) -> Price {
     Price::new(eur(amount)).unwrap()
@@ -87,8 +87,8 @@ impl World {
         };
         let p = &w.ports;
         for (market, country, currency) in [
-            (hr_market(), "HR", Currency::Eur),
-            (us_market(), "US", Currency::Usd),
+            (hr_market(), "HR", Currency::EUR),
+            (us_market(), "US", Currency::USD),
         ] {
             let mut m = Market::new(
                 market,
@@ -162,7 +162,7 @@ impl World {
         }
 
         let list = PriceListId::from_uuid(id(1500));
-        let mut prices = PriceList::new(list, Currency::Eur, BasisPoints::new(-1000).unwrap());
+        let mut prices = PriceList::new(list, Currency::EUR, BasisPoints::new(-1000).unwrap());
         block_on(p.price_lists.insert(&mut prices)).unwrap();
         block_on(
             p.price_lists

@@ -199,13 +199,13 @@ mod tests {
             mid(n),
             "Test".to_string(),
             countries.iter().map(|s| cc(s)).collect(),
-            Currency::Eur,
+            Currency::EUR,
         )
     }
 
     #[test]
     fn a_market_needs_a_name() {
-        let unnamed = Market::new(mid(1), " ".to_string(), vec![cc("HR")], Currency::Eur);
+        let unnamed = Market::new(mid(1), " ".to_string(), vec![cc("HR")], Currency::EUR);
         assert_eq!(
             unnamed,
             Err(MarketError::Text(hypha_core::TextError::Missing("name")))

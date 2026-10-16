@@ -33,7 +33,7 @@ fn reader() -> Ctx {
 }
 
 fn flat() -> OptionRate {
-    let price = Price::new(Money::new(490, Currency::Eur).unwrap()).unwrap();
+    let price = Price::new(Money::new(490, Currency::EUR).unwrap()).unwrap();
     OptionRate::Builtin(BuiltinRate::flat(vec![price]).unwrap())
 }
 

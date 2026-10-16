@@ -73,7 +73,7 @@ mod tests {
             Handle::new("stoneware-mug").unwrap(),
             "Čaša Mug".to_string(),
             VariantId::from_uuid(Uuid::from_u128(2)),
-            Price::new(Money::new(1000, Currency::Eur).unwrap()).unwrap(),
+            Price::new(Money::new(1000, Currency::EUR).unwrap()).unwrap(),
         )
         .unwrap();
         p.update_variant(

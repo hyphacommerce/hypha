@@ -1,58 +1,15 @@
-use std::{fmt, str::FromStr};
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod basis_points;
+mod currency;
 mod price;
 mod tax_rate;
 
 pub use basis_points::BasisPoints;
+pub use currency::{Currency, CurrencyError};
 pub use price::Price;
 pub use tax_rate::TaxRate;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "UPPERCASE")]
-pub enum Currency {
-    Eur,
-    Usd,
-    Rsd,
-}
-
-impl Currency {
-    /// ISO 4217 code, the same string used in JSON.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Currency::Eur => "EUR",
-            Currency::Usd => "USD",
-            Currency::Rsd => "RSD",
-        }
-    }
-}
-
-impl fmt::Display for Currency {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// A currency code Hypha doesn't support.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("unknown currency {0:?}")]
-pub struct UnknownCurrency(pub String);
-
-impl FromStr for Currency {
-    type Err = UnknownCurrency;
-
-    /// Parses the ISO 4217 code produced by `as_str` (e.g. "EUR"); case-sensitive.
-    fn from_str(code: &str) -> Result<Self, Self::Err> {
-        [Currency::Eur, Currency::Usd, Currency::Rsd]
-            .into_iter()
-            .find(|c| c.as_str() == code)
-            .ok_or_else(|| UnknownCurrency(code.to_string()))
-    }
-}
 
 /// An amount in minor units (1050 = €10.50) and its currency.
 ///
@@ -201,41 +158,11 @@ mod tests {
     use super::*;
 
     fn eur(n: i64) -> Money {
-        Money::new(n, Currency::Eur).unwrap()
+        Money::new(n, Currency::EUR).unwrap()
     }
 
     fn bp(n: i32) -> BasisPoints {
         BasisPoints::new(n).unwrap()
-    }
-
-    // ---- currency ----
-
-    #[test]
-    fn currency_parses_its_own_code_only() {
-        for c in [Currency::Eur, Currency::Usd, Currency::Rsd] {
-            assert_eq!(c.as_str().parse::<Currency>(), Ok(c));
-        }
-        assert_eq!(
-            "eur".parse::<Currency>(),
-            Err(UnknownCurrency("eur".to_string()))
-        );
-    }
-
-    #[test]
-    fn currency_display_matches_json() {
-        for c in [Currency::Eur, Currency::Usd, Currency::Rsd] {
-            assert_eq!(serde_json::to_string(&c).unwrap(), format!("\"{c}\""));
-        }
-    }
-
-    #[test]
-    fn currency_serializes_uppercase() {
-        assert_eq!(serde_json::to_string(&Currency::Eur).unwrap(), "\"EUR\"");
-        assert_eq!(
-            serde_json::from_str::<Currency>("\"RSD\"").unwrap(),
-            Currency::Rsd
-        );
-        assert!(serde_json::from_str::<Currency>("\"Eur\"").is_err());
     }
 
     // ---- range ----
@@ -249,15 +176,15 @@ mod tests {
     #[test]
     fn rejects_amounts_beyond_the_cap() {
         assert_eq!(
-            Money::new(Money::MAX_AMOUNT + 1, Currency::Eur),
+            Money::new(Money::MAX_AMOUNT + 1, Currency::EUR),
             Err(MoneyError::Overflow)
         );
         assert_eq!(
-            Money::new(-Money::MAX_AMOUNT - 1, Currency::Eur),
+            Money::new(-Money::MAX_AMOUNT - 1, Currency::EUR),
             Err(MoneyError::Overflow)
         );
         assert_eq!(
-            Money::new(i64::MIN, Currency::Eur),
+            Money::new(i64::MIN, Currency::EUR),
             Err(MoneyError::Overflow)
         );
     }
@@ -290,10 +217,10 @@ mod tests {
 
     #[test]
     fn rejects_mismatched_currency() {
-        let usd = Money::new(420, Currency::Usd).unwrap();
+        let usd = Money::new(420, Currency::USD).unwrap();
         assert_eq!(
             eur(69).checked_add(usd),
-            Err(MoneyError::CurrencyMismatch(Currency::Eur, Currency::Usd))
+            Err(MoneyError::CurrencyMismatch(Currency::EUR, Currency::USD))
         );
     }
 
@@ -319,10 +246,10 @@ mod tests {
 
     #[test]
     fn sub_rejects_mismatched_currency() {
-        let rsd = Money::new(420, Currency::Rsd).unwrap();
+        let rsd = Money::new(420, Currency::RSD).unwrap();
         assert_eq!(
             eur(69).checked_sub(rsd),
-            Err(MoneyError::CurrencyMismatch(Currency::Eur, Currency::Rsd))
+            Err(MoneyError::CurrencyMismatch(Currency::EUR, Currency::RSD))
         );
     }
 
@@ -338,10 +265,10 @@ mod tests {
 
     #[test]
     fn mul_within_range() {
-        let usd = Money::new(69, Currency::Usd).unwrap();
+        let usd = Money::new(69, Currency::USD).unwrap();
         assert_eq!(
             usd.checked_mul(420),
-            Ok(Money::new(28980, Currency::Usd).unwrap())
+            Ok(Money::new(28980, Currency::USD).unwrap())
         );
     }
 
@@ -355,8 +282,8 @@ mod tests {
 
     #[test]
     fn mul_by_zero_gives_zero() {
-        let rsd = Money::new(69, Currency::Rsd).unwrap();
-        assert_eq!(rsd.checked_mul(0), Ok(Money::zero(Currency::Rsd)));
+        let rsd = Money::new(69, Currency::RSD).unwrap();
+        assert_eq!(rsd.checked_mul(0), Ok(Money::zero(Currency::RSD)));
     }
 
     // ---- sum ----
@@ -364,39 +291,39 @@ mod tests {
     #[test]
     fn sum_empty_is_zero() {
         let empty: Vec<Money> = vec![];
-        assert_eq!(Money::sum(&empty, Currency::Eur), Ok(eur(0)));
+        assert_eq!(Money::sum(&empty, Currency::EUR), Ok(eur(0)));
     }
 
     #[test]
     fn sum_adds_all_items() {
         let items = vec![eur(67), eur(69), eur(420)];
-        assert_eq!(Money::sum(&items, Currency::Eur), Ok(eur(556)));
+        assert_eq!(Money::sum(&items, Currency::EUR), Ok(eur(556)));
     }
 
     #[test]
     fn sum_rejects_mixed_currency() {
-        let items = vec![eur(69), Money::new(420, Currency::Rsd).unwrap()];
+        let items = vec![eur(69), Money::new(420, Currency::RSD).unwrap()];
         assert_eq!(
-            Money::sum(&items, Currency::Eur),
-            Err(MoneyError::CurrencyMismatch(Currency::Eur, Currency::Rsd))
+            Money::sum(&items, Currency::EUR),
+            Err(MoneyError::CurrencyMismatch(Currency::EUR, Currency::RSD))
         );
     }
 
     #[test]
     fn sum_overflows() {
         let items = vec![eur(Money::MAX_AMOUNT), eur(1)];
-        assert_eq!(Money::sum(&items, Currency::Eur), Err(MoneyError::Overflow));
+        assert_eq!(Money::sum(&items, Currency::EUR), Err(MoneyError::Overflow));
     }
 
     #[test]
     fn sum_respects_currency_param() {
         let items = vec![
-            Money::new(69, Currency::Usd).unwrap(),
-            Money::new(67, Currency::Usd).unwrap(),
+            Money::new(69, Currency::USD).unwrap(),
+            Money::new(67, Currency::USD).unwrap(),
         ];
         assert_eq!(
-            Money::sum(&items, Currency::Eur),
-            Err(MoneyError::CurrencyMismatch(Currency::Eur, Currency::Usd))
+            Money::sum(&items, Currency::EUR),
+            Err(MoneyError::CurrencyMismatch(Currency::EUR, Currency::USD))
         );
     }
 
@@ -454,10 +381,10 @@ mod tests {
 
     #[test]
     fn adjust_keeps_currency() {
-        let rsd = Money::new(1000, Currency::Rsd).unwrap();
+        let rsd = Money::new(1000, Currency::RSD).unwrap();
         assert_eq!(
             rsd.adjust(bp(-1000)),
-            Ok(Money::new(900, Currency::Rsd).unwrap())
+            Ok(Money::new(900, Currency::RSD).unwrap())
         );
     }
 

@@ -113,11 +113,11 @@ mod tests {
     }
 
     fn eur(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+        Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
     }
 
     fn rsd(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Rsd).unwrap()).unwrap()
+        Price::new(Money::new(amount, Currency::RSD).unwrap()).unwrap()
     }
 
     fn market(currency: Currency) -> Market {
@@ -151,27 +151,27 @@ mod tests {
 
     #[test]
     fn uses_base_price_without_price_list() {
-        let ctx = context(Currency::Eur, None);
+        let ctx = context(Currency::EUR, None);
         assert_eq!(resolve_price(&ctx, pid(), vid(), eur(1000)), Ok(eur(1000)));
     }
 
     #[test]
     fn fixed_price_wins_over_adjustment() {
-        let mut ctx = context(Currency::Eur, Some(list(Currency::Eur, -5000)));
+        let mut ctx = context(Currency::EUR, Some(list(Currency::EUR, -5000)));
         ctx.fixed_prices.insert(vid(), eur(777));
         assert_eq!(resolve_price(&ctx, pid(), vid(), eur(1000)), Ok(eur(777)));
     }
 
     #[test]
     fn adjusts_base_price_without_fixed_price() {
-        let ctx = context(Currency::Eur, Some(list(Currency::Eur, -1000)));
+        let ctx = context(Currency::EUR, Some(list(Currency::EUR, -1000)));
         assert_eq!(resolve_price(&ctx, pid(), vid(), eur(1000)), Ok(eur(900)));
     }
 
     #[test]
     fn adjustment_rounds_half_away_from_zero() {
         // 999 * 0.95 = 949.05 -> 949; 1010 * 0.95 = 959.5 -> 960
-        let ctx = context(Currency::Eur, Some(list(Currency::Eur, -500)));
+        let ctx = context(Currency::EUR, Some(list(Currency::EUR, -500)));
         assert_eq!(resolve_price(&ctx, pid(), vid(), eur(999)), Ok(eur(949)));
         assert_eq!(resolve_price(&ctx, pid(), vid(), eur(1010)), Ok(eur(960)));
     }
@@ -180,7 +180,7 @@ mod tests {
     fn rejects_market_without_catalog() {
         let ctx = PricingContext {
             catalog: None,
-            ..context(Currency::Eur, None)
+            ..context(Currency::EUR, None)
         };
         assert_eq!(
             resolve_price(&ctx, pid(), vid(), eur(1000)),
@@ -195,7 +195,7 @@ mod tests {
     fn rejects_product_missing_from_catalog() {
         let ctx = PricingContext {
             included_products: HashSet::new(),
-            ..context(Currency::Eur, None)
+            ..context(Currency::EUR, None)
         };
         assert_eq!(
             resolve_price(&ctx, pid(), vid(), eur(1000)),
@@ -210,7 +210,7 @@ mod tests {
     fn rejects_missing_price_list() {
         let ctx = PricingContext {
             price_list: None,
-            ..context(Currency::Eur, Some(list(Currency::Eur, 0)))
+            ..context(Currency::EUR, Some(list(Currency::EUR, 0)))
         };
         assert_eq!(
             resolve_price(&ctx, pid(), vid(), eur(1000)),
@@ -220,31 +220,31 @@ mod tests {
 
     #[test]
     fn rejects_base_price_in_other_currency_without_price_list() {
-        let ctx = context(Currency::Rsd, None);
+        let ctx = context(Currency::RSD, None);
         assert_eq!(
             resolve_price(&ctx, pid(), vid(), eur(1000)),
             Err(PricingError::CurrencyMismatch {
-                expected: Currency::Rsd,
-                found: Currency::Eur,
+                expected: Currency::RSD,
+                found: Currency::EUR,
             })
         );
     }
 
     #[test]
     fn rejects_base_price_in_other_currency_without_fixed_price() {
-        let ctx = context(Currency::Rsd, Some(list(Currency::Rsd, 0)));
+        let ctx = context(Currency::RSD, Some(list(Currency::RSD, 0)));
         assert_eq!(
             resolve_price(&ctx, pid(), vid(), eur(1000)),
             Err(PricingError::CurrencyMismatch {
-                expected: Currency::Rsd,
-                found: Currency::Eur,
+                expected: Currency::RSD,
+                found: Currency::EUR,
             })
         );
     }
 
     #[test]
     fn fixed_price_covers_base_price_in_other_currency() {
-        let mut ctx = context(Currency::Rsd, Some(list(Currency::Rsd, 0)));
+        let mut ctx = context(Currency::RSD, Some(list(Currency::RSD, 0)));
         ctx.fixed_prices.insert(vid(), rsd(117_000));
         assert_eq!(
             resolve_price(&ctx, pid(), vid(), eur(1000)),
@@ -254,13 +254,13 @@ mod tests {
 
     #[test]
     fn rejects_price_list_in_other_currency_than_market() {
-        let mut ctx = context(Currency::Rsd, Some(list(Currency::Eur, 0)));
+        let mut ctx = context(Currency::RSD, Some(list(Currency::EUR, 0)));
         ctx.fixed_prices.insert(vid(), eur(900));
         assert_eq!(
             resolve_price(&ctx, pid(), vid(), eur(1000)),
             Err(PricingError::CurrencyMismatch {
-                expected: Currency::Rsd,
-                found: Currency::Eur,
+                expected: Currency::RSD,
+                found: Currency::EUR,
             })
         );
     }

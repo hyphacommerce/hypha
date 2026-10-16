@@ -1075,7 +1075,7 @@ mod tests {
 
     #[test]
     fn checkout_errors_carry_their_data_in_details() {
-        let eur = |n| hypha_core::Money::new(n, hypha_core::Currency::Eur).unwrap();
+        let eur = |n| hypha_core::Money::new(n, hypha_core::Currency::EUR).unwrap();
         let e = ApiError::from(hypha_checkout::CommandError::TotalChanged {
             expected: eur(1000),
             actual: eur(1200),

@@ -432,6 +432,56 @@ async fn changing_the_store_needs_stores_write_even_with_nothing_to_change() {
 
 // ---------- lists (design note 0012) ----------
 
+#[tokio::test]
+async fn currencies_list_every_iso_code_with_its_minor_units() {
+    let app = app().await;
+    let (status, body) = send(&app, "GET", "/admin/currencies", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), hypha_core::Currency::all().count());
+    let jpy = items.iter().find(|c| c["code"] == "JPY").unwrap();
+    assert_eq!(
+        jpy,
+        &json!({"code": "JPY", "name": "Japanese Yen", "minor_units": 0})
+    );
+
+    let (status, body) = send_with(&app, &[], "GET", "/admin/currencies", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNAUTHORIZED, "unauthenticated")
+    );
+}
+
+#[tokio::test]
+async fn markets_take_any_iso_currency_but_only_assigned_countries() {
+    let app = app().await;
+    let body = r#"{"name":"Japan","countries":["JP"],"currency":"JPY"}"#;
+    let (status, market) = send(&app, "POST", "/admin/markets", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{market}");
+    assert_eq!(market["currency"], "JPY");
+
+    let body = r#"{"name":"Kosovo","countries":["XK"],"currency":"EUR"}"#;
+    let (status, error) = send(&app, "POST", "/admin/markets", Some(body)).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unknown_country_code")
+    );
+
+    let body = r#"{"name":"Gold","countries":["CH"],"currency":"XAU"}"#;
+    let (status, error) = send(&app, "POST", "/admin/markets", Some(body)).await;
+    // DTOs read `Currency` itself, so it fails as the body, with the reason in the message.
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body")
+    );
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown currency \"XAU\"")
+    );
+}
+
 async fn create_product(app: &TestApp, handle: &str) -> String {
     let body = json!({
         "handle": handle,
@@ -481,7 +531,7 @@ async fn the_dispatcher_cleans_up_after_a_removed_variant() {
     };
     let app = app().await;
     let id = |n: u128| uuid::Uuid::from_u128(n);
-    let eur = |a: i64| Price::new(Money::new(a, Currency::Eur).unwrap()).unwrap();
+    let eur = |a: i64| Price::new(Money::new(a, Currency::EUR).unwrap()).unwrap();
     let (s, l) = (VariantId::from_uuid(id(11)), VariantId::from_uuid(id(12)));
     let product = ProductId::from_uuid(id(1));
     let list = PriceListId::from_uuid(id(5));
@@ -513,7 +563,7 @@ async fn the_dispatcher_cleans_up_after_a_removed_variant() {
         ProductRepo::insert(ports.products(), &mut shirt)
             .await
             .unwrap();
-        let mut prices = PriceList::new(list, Currency::Eur, BasisPoints::new(0).unwrap());
+        let mut prices = PriceList::new(list, Currency::EUR, BasisPoints::new(0).unwrap());
         PriceListRepo::insert(ports.price_lists(), &mut prices)
             .await
             .unwrap();

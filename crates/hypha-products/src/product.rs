@@ -578,7 +578,7 @@ mod tests {
     }
 
     fn price() -> Price {
-        Price::new(Money::new(1000, Currency::Eur).unwrap()).unwrap()
+        Price::new(Money::new(1000, Currency::EUR).unwrap()).unwrap()
     }
 
     fn new_var(id: u128, selections: Vec<OptionValueId>) -> NewVariant {
@@ -947,7 +947,7 @@ mod tests {
     #[test]
     fn restore_rejects_negative_price() {
         let mut s = simple().snapshot();
-        s.variants[0].base_price = Money::new(-1, Currency::Eur).unwrap();
+        s.variants[0].base_price = Money::new(-1, Currency::EUR).unwrap();
         assert_eq!(
             Product::restore(s),
             Err(ProductError::InvalidPrice(MoneyError::Negative))

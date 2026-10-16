@@ -53,7 +53,7 @@ fn ebook() -> VariantId {
     VariantId::from_uuid(Uuid::from_u128(1201))
 }
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur).unwrap()
+    Money::new(amount, Currency::EUR).unwrap()
 }
 fn price(amount: i64) -> Price {
     Price::new(eur(amount)).unwrap()
@@ -109,7 +109,7 @@ impl World {
             market_id(),
             "Eurozone".to_string(),
             vec![hr()],
-            Currency::Eur,
+            Currency::EUR,
         )
         .unwrap();
         block_on(p.markets.insert(&mut market)).unwrap();
@@ -145,7 +145,7 @@ impl World {
         );
         block_on(p.catalogs.insert(&mut catalog)).unwrap();
         block_on(p.catalogs.add_products(catalog_id, &[pid(1100), pid(1101)])).unwrap();
-        let mut list = PriceList::new(list_id, Currency::Eur, BasisPoints::new(0).unwrap());
+        let mut list = PriceList::new(list_id, Currency::EUR, BasisPoints::new(0).unwrap());
         block_on(p.price_lists.insert(&mut list)).unwrap();
 
         let mut zone = ShippingZone::new(zone_id(), "Croatia", vec![hr()]).unwrap();

@@ -40,13 +40,13 @@ impl World {
             market_id(),
             "Eurozone".to_string(),
             vec![CountryCode::new("HR").unwrap()],
-            Currency::Eur,
+            Currency::EUR,
         )
         .unwrap();
         let mut catalog = Catalog::new(catalog_id(), CatalogContext::Market(market_id()), None);
         block_on(world.markets.insert(&mut market)).unwrap();
         block_on(world.catalogs.insert(&mut catalog)).unwrap();
-        for (n, currency) in [(10, Currency::Eur), (11, Currency::Rsd)] {
+        for (n, currency) in [(10, Currency::EUR), (11, Currency::RSD)] {
             let mut list = PriceList::new(list_id(n), currency, BasisPoints::ZERO);
             block_on(world.price_lists.insert(&mut list)).unwrap();
         }
@@ -93,8 +93,8 @@ fn rejects_list_in_other_currency_and_stores_nothing() {
     assert_eq!(
         world.assign(&Ctx::system(), catalog_id(), Some(list_id(11))),
         Err(CommandError::CurrencyMismatch {
-            expected: Currency::Eur,
-            found: Currency::Rsd,
+            expected: Currency::EUR,
+            found: Currency::RSD,
         })
     );
     assert_eq!(world.stored_price_list(), None);

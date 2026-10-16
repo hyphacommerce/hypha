@@ -73,7 +73,7 @@ mod tests {
     use crate::money::Currency;
 
     fn eur(n: i64) -> Money {
-        Money::new(n, Currency::Eur).unwrap()
+        Money::new(n, Currency::EUR).unwrap()
     }
 
     fn rate(ppm: u32) -> TaxRate {
@@ -158,10 +158,10 @@ mod tests {
 
     #[test]
     fn tax_keeps_currency() {
-        let rsd = Money::new(1000, Currency::Rsd).unwrap();
+        let rsd = Money::new(1000, Currency::RSD).unwrap();
         assert_eq!(
             rate(200_000).tax_on_net(rsd),
-            Ok(Money::new(200, Currency::Rsd).unwrap())
+            Ok(Money::new(200, Currency::RSD).unwrap())
         )
     }
 }

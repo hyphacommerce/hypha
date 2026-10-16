@@ -292,7 +292,7 @@ mod tests {
     }
 
     fn eur(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+        Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
     }
     fn key(k: &str) -> ProviderKey {
         ProviderKey::new(k).unwrap()
@@ -347,7 +347,7 @@ mod tests {
 
     fn request(weight: Option<u32>) -> RateRequest {
         RateRequest {
-            currency: Currency::Eur,
+            currency: Currency::EUR,
             origin: None,
             destination: Address::new(AddressParts {
                 first_name: None,
@@ -369,7 +369,7 @@ mod tests {
                 unit_price: eur(1000),
                 weight: weight.map(Weight::from_grams),
             }],
-            subtotal: Money::new(2000, Currency::Eur).unwrap(),
+            subtotal: Money::new(2000, Currency::EUR).unwrap(),
         }
     }
 
@@ -569,7 +569,7 @@ mod tests {
     #[test]
     fn rates_in_another_currency_fail_the_provider() {
         let z = zone(vec![option(1, by("app_dhl", "express"), false)]);
-        let usd = Price::new(Money::new(1000, Currency::Usd).unwrap()).unwrap();
+        let usd = Price::new(Money::new(1000, Currency::USD).unwrap()).unwrap();
         let providers = fake([("app_dhl".to_string(), Ok(vec![rate("express", usd)]))]);
         let outcomes = pollster::block_on(offers(&z, &providers, &request(None)));
         assert!(matches!(
@@ -584,7 +584,7 @@ mod tests {
     #[test]
     fn weight_tiers_use_the_groups_weight_times_quantities() {
         let table = RateTable::new(
-            Currency::Eur,
+            Currency::EUR,
             vec![
                 Tier {
                     up_to: Some(1000),

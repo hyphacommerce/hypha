@@ -71,11 +71,11 @@ async fn shop(url: &str, schema: &str, on_hand: i64) -> (PgStore<Client>, Client
     let store = PgStore::new(client, clock());
 
     let hr = hypha_core::CountryCode::new("HR").unwrap();
-    let mut m = Market::new(market(), "Croatia".to_string(), vec![hr], Currency::Eur).unwrap();
+    let mut m = Market::new(market(), "Croatia".to_string(), vec![hr], Currency::EUR).unwrap();
     MarketRepo::insert(&store, &mut m).await.unwrap();
 
     let product_id = ProductId::from_uuid(Uuid::from_u128(1004));
-    let price = Price::new(Money::new(1000, Currency::Eur).unwrap()).unwrap();
+    let price = Price::new(Money::new(1000, Currency::EUR).unwrap()).unwrap();
     let mut product = Product::new_simple(
         product_id,
         Handle::new("mug").unwrap(),

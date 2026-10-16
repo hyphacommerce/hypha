@@ -218,7 +218,7 @@ pub fn search_fixture() -> Vec<SearchDocument> {
 
     let market = |n: u128| MarketId::from_uuid(Uuid::from_u128(n));
     let product = |n: u128| ProductId::from_uuid(Uuid::from_u128(n));
-    let eur = |amount: i64| Money::new(amount, Currency::Eur).unwrap_or_else(|e| panic!("{e}"));
+    let eur = |amount: i64| Money::new(amount, Currency::EUR).unwrap_or_else(|e| panic!("{e}"));
     struct V {
         n: u128,
         options: &'static [(&'static str, &'static str)],

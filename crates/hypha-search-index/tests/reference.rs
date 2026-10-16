@@ -173,7 +173,7 @@ fn price_bounds_are_inclusive_and_the_range_ignores_them() {
     };
     let results = run(&q);
     assert_eq!(hits(&results), [v(21), v(13), v(11)]);
-    let eur = |n| Money::new(n, hypha_core::Currency::Eur).unwrap();
+    let eur = |n| Money::new(n, hypha_core::Currency::EUR).unwrap();
     assert_eq!(results.price, Some((eur(900), eur(3200))));
 }
 

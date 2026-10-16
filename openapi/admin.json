@@ -1577,14 +1577,50 @@
         ]
       },
       "Currency": {
-        "description": "Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
-        "enum": [
-          "EUR",
-          "USD",
-          "RSD"
+        "description": "An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.",
+        "examples": [
+          "EUR"
         ],
-        "type": "string",
-        "x-hypha-open-enum": true
+        "pattern": "^[A-Z]{3}$",
+        "type": "string"
+      },
+      "CurrencyListResponse": {
+        "properties": {
+          "items": {
+            "description": "Sorted by code. A fixed list of about 150, so it comes in one response.",
+            "items": {
+              "$ref": "#/components/schemas/CurrencyResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CurrencyResponse": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "minor_units": {
+            "description": "Digits after the decimal point (0 for JPY, 2 for EUR, 3 for KWD). Amounts are\nalways integers in minor units: 1050 is 10.50 EUR but 1050 JPY.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "description": "The English name (\"Japanese Yen\"). UIs show their own language's name\n(`Intl.DisplayNames`) and fall back to this.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "minor_units"
+        ],
+        "type": "object"
       },
       "CustomerId": {
         "description": "A CustomerId: `cus_` and 32 hex digits.",
@@ -2582,14 +2618,12 @@
             "type": "integer"
           },
           "currency": {
-            "description": "Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
-            "enum": [
-              "EUR",
-              "USD",
-              "RSD"
+            "description": "An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.",
+            "examples": [
+              "EUR"
             ],
-            "type": "string",
-            "x-hypha-open-enum": true
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
           }
         },
         "required": [
@@ -8781,6 +8815,63 @@
         "x-hypha-scopes": [
           "products:write"
         ]
+      }
+    },
+    "/admin/currencies": {
+      "get": {
+        "operationId": "admin.reference.currencies",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrencyListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every currency a market or price can use, with its minor units.",
+        "tags": [
+          "reference"
+        ],
+        "x-hypha-scopes": []
       }
     },
     "/admin/customers": {

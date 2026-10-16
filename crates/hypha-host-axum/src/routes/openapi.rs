@@ -436,7 +436,8 @@ mod tests {
         let json: Value = serde_json::from_str(&document_json(Doc::Admin)).unwrap();
         let schema = |name: &str| json["components"]["schemas"][name].clone();
         assert_eq!(schema("FulfillmentStatusDto")[OPEN_ENUM], Value::Bool(true));
-        assert_eq!(schema("Currency")[OPEN_ENUM], Value::Bool(true));
+        // Every ISO code is accepted (design note 0021, SU1): a pattern, not an enum.
+        assert_eq!(schema("Currency").get("enum"), None);
         assert_eq!(schema("KindRequest").get(OPEN_ENUM), None);
     }
 

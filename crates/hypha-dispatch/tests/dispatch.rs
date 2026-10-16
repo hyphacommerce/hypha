@@ -27,7 +27,7 @@ fn settings() -> DispatchSettings {
 }
 
 fn eur(amount: i64) -> Price {
-    Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+    Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
 }
 fn product_id() -> ProductId {
     ProductId::from_uuid(Uuid::from_u128(1))
@@ -76,7 +76,7 @@ fn world() -> InMemoryPorts {
     shirt.add_variant(variant(large(), 22)).unwrap();
     block_on(ports.products.insert(&mut shirt)).unwrap();
     for n in [1, 2] {
-        let mut prices = PriceList::new(list(n), Currency::Eur, BasisPoints::new(0).unwrap());
+        let mut prices = PriceList::new(list(n), Currency::EUR, BasisPoints::new(0).unwrap());
         block_on(ports.price_lists.insert(&mut prices)).unwrap();
         block_on(
             ports

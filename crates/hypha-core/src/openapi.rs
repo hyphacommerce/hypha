@@ -10,7 +10,7 @@ use utoipa::{
     openapi::{KnownFormat, ObjectBuilder, RefOr, Schema, SchemaFormat, Type, schema::SchemaType},
 };
 
-use crate::{BasisPoints, CountryCode, Email, Money, TaxRate};
+use crate::{BasisPoints, CountryCode, Currency, Email, Language, Money, TaxRate, Timezone};
 
 /// A string schema with a pattern, an example and a description.
 pub(crate) fn string_schema(pattern: &str, example: &str, description: &str) -> RefOr<Schema> {
@@ -41,6 +41,65 @@ impl PartialSchema for CountryCode {
 impl ToSchema for CountryCode {
     fn name() -> Cow<'static, str> {
         Cow::Borrowed("CountryCode")
+    }
+}
+
+impl PartialSchema for Currency {
+    fn schema() -> RefOr<Schema> {
+        string_schema(
+            "^[A-Z]{3}$",
+            "EUR",
+            "An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) \
+             aren't accepted.",
+        )
+    }
+}
+
+impl ToSchema for Currency {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("Currency")
+    }
+}
+
+impl PartialSchema for Language {
+    fn schema() -> RefOr<Schema> {
+        ObjectBuilder::new()
+            .schema_type(SchemaType::new(Type::String))
+            .pattern(Some(
+                "^[A-Za-z]{2,3}(-[A-Za-z]{4})?(-([A-Za-z]{2}|[0-9]{3}))?\
+                 (-([A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*$",
+            ))
+            .max_length(Some(Language::MAX_LEN))
+            .examples(["en-GB"])
+            .description(Some(
+                "A BCP 47 language tag: a language, then optionally a script, region and \
+                 variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.",
+            ))
+            .into()
+    }
+}
+
+impl ToSchema for Language {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("Language")
+    }
+}
+
+impl PartialSchema for Timezone {
+    fn schema() -> RefOr<Schema> {
+        ObjectBuilder::new()
+            .schema_type(SchemaType::new(Type::String))
+            .examples(["Europe/Belgrade"])
+            .description(Some(
+                "An IANA time zone name, as `Intl.supportedValuesOf(\"timeZone\")` lists them.",
+            ))
+            .into()
+    }
+}
+
+impl ToSchema for Timezone {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("Timezone")
     }
 }
 
@@ -155,25 +214,22 @@ mod tests {
             schema["properties"]["amount"]["maximum"],
             json!(Money::MAX_AMOUNT)
         );
-        let money = serde_json::to_value(Money::new(1050, Currency::Eur).unwrap()).unwrap();
+        let money = serde_json::to_value(Money::new(1050, Currency::EUR).unwrap()).unwrap();
         assert_eq!(money, json!({ "amount": 1050, "currency": "EUR" }));
     }
 
     #[test]
-    fn enums_list_exactly_their_json_names() {
-        let currencies = json_of::<Currency>();
-        let names: Vec<String> = [Currency::Eur, Currency::Usd, Currency::Rsd]
-            .iter()
-            .map(|c| {
-                serde_json::to_value(c)
-                    .unwrap()
-                    .as_str()
-                    .unwrap()
-                    .to_string()
-            })
-            .collect();
-        assert_eq!(currencies["enum"], json!(names));
+    fn currency_is_a_pattern_every_code_matches() {
+        let schema = json_of::<Currency>();
+        assert_eq!(schema["pattern"], "^[A-Z]{3}$");
+        assert_eq!(schema.get("enum"), None);
+        assert!(Currency::all().all(|c| {
+            c.as_str().len() == 3 && c.as_str().bytes().all(|b| b.is_ascii_uppercase())
+        }));
+    }
 
+    #[test]
+    fn scopes_list_exactly_their_json_names() {
         let scopes = json_of::<Scope>();
         let names: Vec<&str> = Scope::ALL.iter().map(|s| s.as_str()).collect();
         assert_eq!(scopes["enum"], json!(names));

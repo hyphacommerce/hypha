@@ -67,7 +67,7 @@ fn val(n: u128) -> OptionValueId {
 }
 
 fn eur(amount: i64) -> Price {
-    Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+    Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
 }
 
 /// Simple product `n` with the given variant ID.
@@ -158,7 +158,7 @@ fn shirt_in_two_currencies(n: u128) -> Product {
     )
     .unwrap();
     p.add_variant(variant(2, eur(1700))).unwrap();
-    let usd = Price::new(Money::new(2000, Currency::Usd).unwrap()).unwrap();
+    let usd = Price::new(Money::new(2000, Currency::USD).unwrap()).unwrap();
     p.add_variant(variant(3, usd)).unwrap();
     p
 }

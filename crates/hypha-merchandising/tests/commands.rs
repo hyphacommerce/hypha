@@ -30,7 +30,7 @@ fn vid(n: u128) -> VariantId {
 /// 1–3 PNGs, 4 a video, 5 a PDF, 6 a private PNG, 7 a pending PNG.
 fn world() -> InMemoryPorts {
     let ports = InMemoryPorts::default();
-    let price = Price::new(Money::new(1000, Currency::Eur).unwrap()).unwrap();
+    let price = Price::new(Money::new(1000, Currency::EUR).unwrap()).unwrap();
     let size = ProductOption::new(
         hypha_core::OptionId::from_uuid(Uuid::from_u128(100)),
         "Size".to_string(),

@@ -453,6 +453,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/currencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every currency a market or price can use, with its minor units. */
+        get: operations["admin.reference.currencies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/customers": {
         parameters: {
             query?: never;
@@ -2070,10 +2087,28 @@ export interface components {
             token: string;
         };
         /**
-         * @description Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
-         * @enum {string}
+         * @description An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.
+         * @example EUR
          */
         Currency: string;
+        CurrencyListResponse: {
+            /** @description Sorted by code. A fixed list of about 150, so it comes in one response. */
+            items: components["schemas"]["CurrencyResponse"][];
+        };
+        CurrencyResponse: {
+            code: components["schemas"]["Currency"];
+            /**
+             * Format: int32
+             * @description Digits after the decimal point (0 for JPY, 2 for EUR, 3 for KWD). Amounts are
+             *     always integers in minor units: 1050 is 10.50 EUR but 1050 JPY.
+             */
+            minor_units: number;
+            /**
+             * @description The English name ("Japanese Yen"). UIs show their own language's name
+             *     (`Intl.DisplayNames`) and fall back to this.
+             */
+            name: string;
+        };
         /**
          * @description A CustomerId: `cus_` and 32 hex digits.
          * @example cus_0190f1a2b3c47d8e9f00112233445566
@@ -2428,8 +2463,8 @@ export interface components {
              */
             amount: number;
             /**
-             * @description Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
-             * @enum {string}
+             * @description An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.
+             * @example EUR
              */
             currency: string;
         };
@@ -6140,6 +6175,53 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.reference.currencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrencyListResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

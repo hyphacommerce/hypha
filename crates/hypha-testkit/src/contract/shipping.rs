@@ -69,28 +69,28 @@ fn price(amount: i64, currency: Currency) -> Price {
 /// Weight tiers in EUR and USD, the largest bound and amount there are.
 fn weight_tiers() -> OptionRate {
     let eur = RateTable::new(
-        Currency::Eur,
+        Currency::EUR,
         vec![
             Tier {
                 up_to: Some(1),
-                price: price(0, Currency::Eur),
+                price: price(0, Currency::EUR),
             },
             Tier {
                 up_to: Some(u64::MAX),
-                price: price(500, Currency::Eur),
+                price: price(500, Currency::EUR),
             },
             Tier {
                 up_to: None,
-                price: price(Money::MAX_AMOUNT, Currency::Eur),
+                price: price(Money::MAX_AMOUNT, Currency::EUR),
             },
         ],
     )
     .unwrap();
     let usd = RateTable::new(
-        Currency::Usd,
+        Currency::USD,
         vec![Tier {
             up_to: None,
-            price: price(700, Currency::Usd),
+            price: price(700, Currency::USD),
         }],
     )
     .unwrap();
@@ -136,7 +136,7 @@ async fn zone_round_trips<R: ShippingZoneRepo>(repo: &R) {
     let mut z = zone(1, "EU", &["SI", "HR", "AT"]);
     z.add_option(full_option(11)).unwrap();
     z.add_option(provider_option(12)).unwrap();
-    let flat = BuiltinRate::flat(vec![price(490, Currency::Eur)]).unwrap();
+    let flat = BuiltinRate::flat(vec![price(490, Currency::EUR)]).unwrap();
     z.add_option(NewOption {
         rate: OptionRate::Builtin(flat),
         ..provider_option(13)

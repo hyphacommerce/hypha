@@ -43,7 +43,7 @@ fn product(n: u128) -> Product {
         Handle::new(&format!("p{n}")).unwrap(),
         "Product".to_string(),
         VariantId::from_uuid(Uuid::from_u128(n * 100)),
-        Price::new(Money::new(1000, Currency::Eur).unwrap()).unwrap(),
+        Price::new(Money::new(1000, Currency::EUR).unwrap()).unwrap(),
     )
     .unwrap()
 }

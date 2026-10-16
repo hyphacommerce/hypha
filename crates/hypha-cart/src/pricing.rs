@@ -415,7 +415,7 @@ mod tests {
     }
 
     fn eur(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+        Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
     }
 
     fn qty(n: u32) -> Quantity {
@@ -439,7 +439,7 @@ mod tests {
     /// An EUR market whose catalog (no price list) includes `products`.
     fn pricing(products: &[u128]) -> PricingContext {
         PricingContext {
-            market: Market::new(mid(), "Eurozone".to_string(), vec![hr()], Currency::Eur).unwrap(),
+            market: Market::new(mid(), "Eurozone".to_string(), vec![hr()], Currency::EUR).unwrap(),
             catalog: Some(Catalog::new(
                 CatalogId::from_uuid(Uuid::from_u128(200)),
                 CatalogContext::Market(mid()),
@@ -499,7 +499,7 @@ mod tests {
     }
 
     fn money(amount: i64) -> Money {
-        Money::new(amount, Currency::Eur).unwrap()
+        Money::new(amount, Currency::EUR).unwrap()
     }
 
     fn priced(unit: i64, total: i64) -> LineStatus {
@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn empty_cart_totals_zero_in_market_currency() {
         let priced = price_cart(&cart(&[]), &[], &pricing(&[]), &no_tax(), &no_stock());
-        assert_eq!(priced.total, Money::zero(Currency::Eur));
+        assert_eq!(priced.total, Money::zero(Currency::EUR));
         assert!(priced.lines.is_empty());
         assert!(priced.is_fully_available());
     }
@@ -545,7 +545,7 @@ mod tests {
     fn uses_price_list_prices() {
         let list = PriceList::new(
             PriceListId::from_uuid(Uuid::from_u128(400)),
-            Currency::Eur,
+            Currency::EUR,
             BasisPoints::new(-1000).unwrap(),
         );
         let mut ctx = pricing(&[1, 2]);
@@ -586,7 +586,7 @@ mod tests {
                 LineStatus::Unavailable(LineError::ProductNotActive(pid(2)))
             ]
         );
-        assert_eq!(result.total, Money::new(1000, Currency::Eur).unwrap());
+        assert_eq!(result.total, Money::new(1000, Currency::EUR).unwrap());
         assert!(!result.is_fully_available());
         assert_eq!(
             result
@@ -610,14 +610,14 @@ mod tests {
             statuses(&result),
             vec![LineStatus::Unavailable(LineError::ProductNotFound(pid(1)))]
         );
-        assert_eq!(result.total, Money::zero(Currency::Eur));
+        assert_eq!(result.total, Money::zero(Currency::EUR));
     }
 
     #[test]
     fn the_cart_names_its_market_and_currency() {
         let priced = price_cart(&cart(&[]), &[], &pricing(&[]), &no_tax(), &no_stock());
         assert_eq!(priced.market, mid());
-        assert_eq!(priced.currency, Currency::Eur);
+        assert_eq!(priced.currency, Currency::EUR);
     }
 
     /// Active "Shirt" (product 5) with a Size option and variant 15: size M, SKU "SH-M".
@@ -735,7 +735,7 @@ mod tests {
         );
         assert_eq!(
             result.total,
-            Money::new(Money::MAX_AMOUNT, Currency::Eur).unwrap()
+            Money::new(Money::MAX_AMOUNT, Currency::EUR).unwrap()
         );
     }
 

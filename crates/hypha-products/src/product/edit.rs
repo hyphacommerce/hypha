@@ -398,7 +398,7 @@ mod tests {
         AssetId::from_uuid(Uuid::from_u128(n))
     }
     fn price(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+        Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
     }
 
     fn new_var(id: u128, selections: Vec<OptionValueId>) -> NewVariant {

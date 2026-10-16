@@ -50,7 +50,7 @@ fn mug_item() -> InventoryItemId {
 }
 
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur).unwrap()
+    Money::new(amount, Currency::EUR).unwrap()
 }
 
 fn line(id: OrderLineId, variant: u128, quantity: u32) -> OrderLine {
@@ -104,7 +104,7 @@ impl World {
             cart: CartId::from_uuid(Uuid::from_u128(6001)),
             channel: hypha_core::ChannelId::from_uuid(Uuid::from_u128(500)),
             market,
-            currency: Currency::Eur,
+            currency: Currency::EUR,
             country: CountryCode::new("HR").unwrap(),
             taxes_included: true,
             customer: CustomerId::from_uuid(Uuid::from_u128(7001)),

@@ -87,7 +87,7 @@ mod tests {
             MarketId::from_uuid(Uuid::from_u128(n)),
             "Test".to_string(),
             vec![CountryCode::new(country).unwrap()],
-            Currency::Eur,
+            Currency::EUR,
         )
         .unwrap()
     }

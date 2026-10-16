@@ -210,14 +210,12 @@
         "type": "object"
       },
       "Currency": {
-        "description": "Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
-        "enum": [
-          "EUR",
-          "USD",
-          "RSD"
+        "description": "An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.",
+        "examples": [
+          "EUR"
         ],
-        "type": "string",
-        "x-hypha-open-enum": true
+        "pattern": "^[A-Z]{3}$",
+        "type": "string"
       },
       "CustomerId": {
         "description": "A CustomerId: `cus_` and 32 hex digits.",
@@ -502,14 +500,12 @@
             "type": "integer"
           },
           "currency": {
-            "description": "Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
-            "enum": [
-              "EUR",
-              "USD",
-              "RSD"
+            "description": "An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.",
+            "examples": [
+              "EUR"
             ],
-            "type": "string",
-            "x-hypha-open-enum": true
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
           }
         },
         "required": [

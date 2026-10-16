@@ -29,7 +29,7 @@ fn balkans(countries: &[&str]) -> CreateMarket {
     CreateMarket {
         name: "Balkans".to_string(),
         countries: countries.iter().map(|c| c.to_string()).collect(),
-        currency: Currency::Rsd,
+        currency: Currency::RSD,
         prices_include_tax: true,
     }
 }
@@ -141,7 +141,7 @@ fn create_market_requires_markets_write() {
 
 fn eur_list(adjustment: i32) -> CreatePriceList {
     CreatePriceList {
-        currency: Currency::Eur,
+        currency: Currency::EUR,
         adjustment,
     }
 }
@@ -154,7 +154,7 @@ fn fixed(variant: u128, amount: i64, currency: Currency) -> FixedPrice {
 }
 
 fn eur(amount: i64) -> Price {
-    Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+    Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
 }
 
 /// A stored EUR price list with no adjustment.
@@ -226,7 +226,7 @@ fn set_fixed_prices_stores_them() {
         &Ctx::system(),
         &ports,
         list,
-        vec![fixed(1, 900, Currency::Eur), fixed(2, 0, Currency::Eur)],
+        vec![fixed(1, 900, Currency::EUR), fixed(2, 0, Currency::EUR)],
     ))
     .unwrap();
 
@@ -248,7 +248,7 @@ fn set_fixed_prices_rejects_negative_price_and_stores_nothing() {
             &Ctx::system(),
             &ports,
             list,
-            vec![fixed(1, 900, Currency::Eur), fixed(2, -1, Currency::Eur)]
+            vec![fixed(1, 900, Currency::EUR), fixed(2, -1, Currency::EUR)]
         )),
         Err(CommandError::Money(MoneyError::Negative))
     );
@@ -270,7 +270,7 @@ fn set_fixed_prices_rejects_duplicate_variant() {
             &Ctx::system(),
             &ports,
             list,
-            vec![fixed(1, 900, Currency::Eur), fixed(1, 800, Currency::Eur)]
+            vec![fixed(1, 900, Currency::EUR), fixed(1, 800, Currency::EUR)]
         )),
         Err(CommandError::PriceList(
             PriceListError::DuplicateFixedPrice(vid(1))
@@ -290,13 +290,13 @@ fn set_fixed_prices_rejects_other_currency_and_stores_nothing() {
             &Ctx::system(),
             &ports,
             list,
-            vec![fixed(1, 900, Currency::Eur), fixed(2, 900, Currency::Usd)]
+            vec![fixed(1, 900, Currency::EUR), fixed(2, 900, Currency::USD)]
         )),
         Err(CommandError::PriceList(PriceListError::CurrencyMismatch {
-            expected: Currency::Eur,
+            expected: Currency::EUR,
             prices: vec![MismatchedPrice {
                 variant: vid(2),
-                found: Currency::Usd,
+                found: Currency::USD,
             }],
         }))
     );
@@ -347,7 +347,7 @@ fn remove_fixed_prices_deletes_them() {
         &Ctx::system(),
         &ports,
         list,
-        vec![fixed(1, 900, Currency::Eur), fixed(2, 800, Currency::Eur)],
+        vec![fixed(1, 900, Currency::EUR), fixed(2, 800, Currency::EUR)],
     ))
     .unwrap();
 
@@ -693,7 +693,7 @@ fn country_taken_by_a_concurrent_insert_names_the_owner() {
         MarketId::from_uuid(Uuid::from_u128(500)),
         "First".to_string(),
         vec![cc("RS")],
-        Currency::Rsd,
+        Currency::RSD,
     )
     .unwrap();
     block_on(markets.insert(&mut first)).unwrap();

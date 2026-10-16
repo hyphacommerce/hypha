@@ -83,7 +83,7 @@ fn vid(name: &str) -> VariantId {
 }
 
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur).unwrap()
+    Money::new(amount, Currency::EUR).unwrap()
 }
 
 /// The repositories (`InMemoryPorts`, reached through `Deref`), an ID generator and a
@@ -115,7 +115,7 @@ impl World {
             market_id(),
             "Eurozone".to_string(),
             vec![hr()],
-            Currency::Eur,
+            Currency::EUR,
         )
         .unwrap();
         block_on(world.markets.insert(&mut market)).unwrap();
@@ -164,7 +164,7 @@ impl World {
                 block_on(self.price_lists.update(&mut list)).unwrap();
             }
             None => {
-                let mut list = PriceList::new(list_id(), Currency::Eur, bp);
+                let mut list = PriceList::new(list_id(), Currency::EUR, bp);
                 block_on(self.price_lists.insert(&mut list)).unwrap();
             }
         }

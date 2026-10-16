@@ -781,7 +781,7 @@ mod tests {
     use super::*;
 
     fn eur(amount: i64) -> Money {
-        Money::new(amount, Currency::Eur).unwrap()
+        Money::new(amount, Currency::EUR).unwrap()
     }
 
     fn line_id(n: u128) -> OrderLineId {
@@ -899,7 +899,7 @@ mod tests {
             cart: CartId::from_uuid(Uuid::from_u128(2)),
             channel: ChannelId::from_uuid(Uuid::from_u128(500)),
             market: MarketId::from_uuid(Uuid::from_u128(3)),
-            currency: Currency::Eur,
+            currency: Currency::EUR,
             country: CountryCode::new("HR").unwrap(),
             taxes_included: false,
             customer: CustomerId::from_uuid(Uuid::from_u128(4)),
@@ -1176,12 +1176,12 @@ mod tests {
     #[test]
     fn every_amount_is_in_the_order_currency() {
         let mut new = new_order();
-        new.lines[1].unit_price = Price::new(Money::new(400, Currency::Usd).unwrap()).unwrap();
+        new.lines[1].unit_price = Price::new(Money::new(400, Currency::USD).unwrap()).unwrap();
         assert_eq!(
             Order::place(new),
             Err(OrderError::CurrencyMismatch {
-                expected: Currency::Eur,
-                found: Currency::Usd
+                expected: Currency::EUR,
+                found: Currency::USD
             })
         );
     }

@@ -168,16 +168,16 @@ mod tests {
     use super::*;
 
     fn eur(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+        Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
     }
     fn usd(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Usd).unwrap()).unwrap()
+        Price::new(Money::new(amount, Currency::USD).unwrap()).unwrap()
     }
     fn tier(up_to: Option<u64>, price: Price) -> Tier {
         Tier { up_to, price }
     }
     fn subtotal(amount: i64) -> Money {
-        Money::new(amount, Currency::Eur).unwrap()
+        Money::new(amount, Currency::EUR).unwrap()
     }
     fn grams(g: u32) -> Option<TotalWeight> {
         Some(TotalWeight::default().add(Weight::from_grams(g), 1))
@@ -186,7 +186,7 @@ mod tests {
     /// Free over 50.00 EUR, 4.90 below.
     fn free_over_50() -> BuiltinRate {
         let table = RateTable::new(
-            Currency::Eur,
+            Currency::EUR,
             vec![tier(Some(5000), eur(490)), tier(None, eur(0))],
         )
         .unwrap();
@@ -198,7 +198,7 @@ mod tests {
         let rate = BuiltinRate::flat(vec![eur(500), usd(600)]).unwrap();
         assert_eq!(rate.price(subtotal(1), None), Ok(eur(500)));
         assert_eq!(
-            rate.price(Money::new(99_999, Currency::Usd).unwrap(), None),
+            rate.price(Money::new(99_999, Currency::USD).unwrap(), None),
             Ok(usd(600))
         );
     }
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn weight_tiers_need_the_weight() {
         let table = RateTable::new(
-            Currency::Eur,
+            Currency::EUR,
             vec![
                 tier(Some(1000), eur(400)),
                 tier(Some(5000), eur(800)),
@@ -244,36 +244,36 @@ mod tests {
     #[test]
     fn a_table_needs_tiers_rising_to_an_open_last_one() {
         assert_eq!(
-            RateTable::new(Currency::Eur, vec![]),
-            Err(ShippingError::EmptyRateTable(Currency::Eur))
+            RateTable::new(Currency::EUR, vec![]),
+            Err(ShippingError::EmptyRateTable(Currency::EUR))
         );
         assert_eq!(
-            RateTable::new(Currency::Eur, vec![tier(Some(10), eur(1))]),
-            Err(ShippingError::LastTierBounded(Currency::Eur))
+            RateTable::new(Currency::EUR, vec![tier(Some(10), eur(1))]),
+            Err(ShippingError::LastTierBounded(Currency::EUR))
         );
         assert_eq!(
             RateTable::new(
-                Currency::Eur,
+                Currency::EUR,
                 vec![
                     tier(Some(10), eur(1)),
                     tier(Some(10), eur(2)),
                     tier(None, eur(3))
                 ]
             ),
-            Err(ShippingError::TiersNotAscending(Currency::Eur))
+            Err(ShippingError::TiersNotAscending(Currency::EUR))
         );
         assert_eq!(
             RateTable::new(
-                Currency::Eur,
+                Currency::EUR,
                 vec![tier(Some(0), eur(1)), tier(None, eur(3))]
             ),
-            Err(ShippingError::TiersNotAscending(Currency::Eur))
+            Err(ShippingError::TiersNotAscending(Currency::EUR))
         );
         assert_eq!(
-            RateTable::new(Currency::Eur, vec![tier(None, usd(1))]),
+            RateTable::new(Currency::EUR, vec![tier(None, usd(1))]),
             Err(ShippingError::TierCurrencyMismatch {
-                table: Currency::Eur,
-                tier: Currency::Usd
+                table: Currency::EUR,
+                tier: Currency::USD
             })
         );
     }
@@ -283,16 +283,16 @@ mod tests {
         assert_eq!(BuiltinRate::flat(vec![]), Err(ShippingError::NoRateTables));
         assert_eq!(
             BuiltinRate::flat(vec![eur(1), eur(2)]),
-            Err(ShippingError::DuplicateRateCurrency(Currency::Eur))
+            Err(ShippingError::DuplicateRateCurrency(Currency::EUR))
         );
         let tiered = RateTable::new(
-            Currency::Eur,
+            Currency::EUR,
             vec![tier(Some(10), eur(1)), tier(None, eur(2))],
         )
         .unwrap();
         assert_eq!(
             BuiltinRate::new(RateBasis::Flat, vec![tiered]),
-            Err(ShippingError::FlatRateWithTiers(Currency::Eur))
+            Err(ShippingError::FlatRateWithTiers(Currency::EUR))
         );
     }
 }

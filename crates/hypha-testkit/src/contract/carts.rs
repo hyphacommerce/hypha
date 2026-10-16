@@ -166,7 +166,7 @@ async fn shipping_round_trips<R: CartRepo>(repo: &R) {
 
     // A provider's quote, every field set and the largest amount.
     let quote = StoredQuote {
-        amount: Price::new(Money::new(Money::MAX_AMOUNT, Currency::Eur).unwrap()).unwrap(),
+        amount: Price::new(Money::new(Money::MAX_AMOUNT, Currency::EUR).unwrap()).unwrap(),
         provider: ProviderKey::new("spore_dhl").unwrap(),
         service: "EXPRESS".to_string(),
         reference: Some("q-1".to_string()),

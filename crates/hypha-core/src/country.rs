@@ -3,6 +3,10 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::tables::COUNTRIES;
+
+/// An ISO 3166-1 alpha-2 country code (design note 0021, SU2): one of the officially
+/// assigned codes in core's table, so `XK` or `UK` don't pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct CountryCode([u8; 2]);
@@ -13,12 +17,15 @@ pub enum CountryError {
     InvalidLength(usize),
     #[error("country code must be uppercase ASCII letters")]
     NotUppercase,
+    #[error("unknown country code {0:?}: expected an ISO 3166-1 alpha-2 code such as \"HR\"")]
+    Unknown(String),
 }
 
 impl crate::ErrorCode for CountryError {
     fn code(&self) -> &'static str {
         match self {
             CountryError::InvalidLength(_) | CountryError::NotUppercase => "invalid_country_code",
+            CountryError::Unknown(_) => "unknown_country_code",
         }
     }
 }
@@ -33,12 +40,38 @@ impl CountryCode {
             return Err(CountryError::NotUppercase);
         }
 
-        let b = s.as_bytes();
-        Ok(Self([b[0], b[1]]))
+        let i = COUNTRIES
+            .binary_search_by(|entry| entry.0.cmp(s))
+            .map_err(|_| CountryError::Unknown(s.to_string()))?;
+        Ok(Self::from_entry(COUNTRIES[i].0))
     }
 
-    pub fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.0).expect("country code is ASCII")
+    /// Every assigned code, sorted.
+    pub fn all() -> impl Iterator<Item = CountryCode> {
+        COUNTRIES.iter().map(|entry| Self::from_entry(entry.0))
+    }
+
+    /// Table codes are two ASCII letters (a test in `tables` checks it).
+    fn from_entry(code: &str) -> Self {
+        let b = code.as_bytes();
+        Self([b[0], b[1]])
+    }
+
+    /// This code's row in the table.
+    fn entry(&self) -> &'static (&'static str, &'static str) {
+        let i = COUNTRIES
+            .binary_search_by(|entry| entry.0.as_bytes().cmp(&self.0[..]))
+            .expect("every CountryCode holds a code from the table");
+        &COUNTRIES[i]
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        self.entry().0
+    }
+
+    /// The English name ("South Korea"), for agents and the CLI; UIs show local names.
+    pub fn name(&self) -> &'static str {
+        self.entry().1
     }
 }
 
@@ -91,6 +124,40 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unassigned_codes() {
+        for code in ["XK", "UK", "EU", "ZZ", "AA"] {
+            assert_eq!(
+                CountryCode::new(code),
+                Err(CountryError::Unknown(code.to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_every_table_code() {
+        assert_eq!(CountryCode::all().count(), COUNTRIES.len());
+        for code in CountryCode::all() {
+            assert_eq!(CountryCode::new(code.as_str()), Ok(code));
+        }
+    }
+
+    #[test]
+    fn names_are_english() {
+        assert_eq!(CountryCode::new("RS").unwrap().name(), "Serbia");
+        assert_eq!(CountryCode::new("KR").unwrap().name(), "South Korea");
+    }
+
+    #[test]
+    fn unknown_has_its_own_code() {
+        use crate::ErrorCode;
+        assert_eq!(
+            CountryError::Unknown("XK".to_string()).code(),
+            "unknown_country_code"
+        );
+        assert_eq!(CountryError::NotUppercase.code(), "invalid_country_code");
+    }
+
+    #[test]
     fn serializes_as_string() {
         let code = CountryCode::new("HR").unwrap();
         assert_eq!(serde_json::to_string(&code).unwrap(), "\"HR\"");
@@ -99,5 +166,6 @@ mod tests {
     #[test]
     fn deserialize_rejects_invalid() {
         assert!(serde_json::from_str::<CountryCode>("\"hr\"").is_err());
+        assert!(serde_json::from_str::<CountryCode>("\"XK\"").is_err());
     }
 }

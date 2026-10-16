@@ -29,7 +29,7 @@ fn hr() -> CountryCode {
     CountryCode::new("HR").unwrap()
 }
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur).unwrap()
+    Money::new(amount, Currency::EUR).unwrap()
 }
 fn price(amount: i64) -> Price {
     Price::new(eur(amount)).unwrap()
@@ -91,7 +91,7 @@ impl World {
         let p = &w.ports;
         let market_id = MarketId::from_uuid(Uuid::from_u128(1000));
         let mut market =
-            Market::new(market_id, "Eurozone".to_string(), vec![hr()], Currency::Eur).unwrap();
+            Market::new(market_id, "Eurozone".to_string(), vec![hr()], Currency::EUR).unwrap();
         block_on(p.markets.insert(&mut market)).unwrap();
         for (n, variant, amount, shipped) in
             [(1100, mug(), 1000, true), (1101, ebook(), 500, false)]
@@ -126,7 +126,7 @@ impl World {
             ProductId::from_uuid(Uuid::from_u128(1101)),
         ];
         block_on(p.catalogs.add_products(catalog_id, &products)).unwrap();
-        let mut list = PriceList::new(list_id, Currency::Eur, BasisPoints::new(0).unwrap());
+        let mut list = PriceList::new(list_id, Currency::EUR, BasisPoints::new(0).unwrap());
         block_on(p.price_lists.insert(&mut list)).unwrap();
 
         let mut zone = ShippingZone::new(zone_id(), "Croatia", vec![hr()]).unwrap();

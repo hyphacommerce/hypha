@@ -152,13 +152,13 @@ mod tests {
     }
 
     fn eur(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+        Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
     }
 
     /// A repo holding the price list `list_id()`.
     fn with_list() -> InMemoryPriceListRepo {
         let repo = InMemoryPriceListRepo::default();
-        let mut list = PriceList::new(list_id(), Currency::Eur, BasisPoints::ZERO);
+        let mut list = PriceList::new(list_id(), Currency::EUR, BasisPoints::ZERO);
         block_on(repo.insert(&mut list)).unwrap();
         repo
     }
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn saves_and_loads_price_lists() {
         let repo = InMemoryPriceListRepo::default();
-        let mut list = PriceList::new(list_id(), Currency::Eur, BasisPoints::ZERO);
+        let mut list = PriceList::new(list_id(), Currency::EUR, BasisPoints::ZERO);
         block_on(repo.insert(&mut list)).unwrap();
         assert_eq!(block_on(repo.get(list.id())), Ok(Some(list)));
     }

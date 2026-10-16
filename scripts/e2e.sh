@@ -288,6 +288,13 @@ contains "the variant shows nothing now" '"media_asset_id":null'
 step "delete the asset" 204 - -X DELETE "$BASE/admin/assets/$ASSET"
 step "it is gone" 404 asset_not_found "$BASE/admin/assets/$ASSET"
 
+step "currencies for pickers" 200 - "$BASE/admin/currencies"
+contains "yen has no minor units" '{"code":"JPY","name":"Japanese Yen","minor_units":0}'
+contains "dinar has three" '{"code":"KWD","name":"Kuwaiti Dinar","minor_units":3}'
+step "market in a metal" 422 invalid_body -X POST "$BASE/admin/markets" -H "$JSON" \
+    -d '{"name":"Gold","countries":["CH"],"currency":"XAU"}'
+step "market to an unassigned country" 422 unknown_country_code -X POST "$BASE/admin/markets" -H "$JSON" \
+    -d '{"name":"Nowhere","countries":["ZZ"],"currency":"EUR"}'
 step "create market" 201 - -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"Eurozone","countries":["HR","DE"],"currency":"EUR"}'
 MARKET=$(id)
@@ -853,8 +860,8 @@ step "unknown route" 404 route_not_found "$BASE/nope"
 step "wrong method" 405 method_not_allowed -X DELETE "$BASE/admin/products/$MUG"
 step "malformed json" 400 malformed_json -X POST "$BASE/admin/markets" -H "$JSON" -d '{"name":'
 step "missing field" 422 invalid_body -X POST "$BASE/admin/markets" -H "$JSON" -d '{"name":"X"}'
-step "unknown currency" 422 invalid_body -X POST "$BASE/admin/markets" -H "$JSON" \
-    -d '{"name":"UK","countries":["GB"],"currency":"GBP"}'
+step "withdrawn currency" 422 invalid_body -X POST "$BASE/admin/markets" -H "$JSON" \
+    -d '{"name":"Croatia 2022","countries":["HR"],"currency":"HRK"}'
 step "amount beyond 2^53-1" 422 invalid_body -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"huge","title":"Huge","price":{"amount":9007199254740992,"currency":"EUR"}}'
 step "wrong id prefix" 400 invalid_path "$BASE/storefront/carts/$MUG"
@@ -895,6 +902,8 @@ step "add archived mug" 422 product_not_active -X POST "$BASE/storefront/carts/$
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "cart to a country without market" 422 no_market_for_country -X POST "$BASE/storefront/carts" -H "$JSON" \
     -d '{"country":"US"}'
+step "cart to an unassigned country" 422 unknown_country_code -X POST "$BASE/storefront/carts" -H "$JSON" \
+    -d '{"country":"XK"}'
 step "cart to a lowercase country" 422 invalid_country_code -X POST "$BASE/storefront/carts" -H "$JSON" \
     -d '{"country":"us"}'
 step "second tax region for a country" 409 tax_region_exists -X POST "$BASE/admin/tax-regions" -H "$JSON" \

@@ -436,7 +436,7 @@ mod tests {
         CountryCode::new(code).unwrap()
     }
     fn flat() -> OptionRate {
-        let price = Price::new(Money::new(500, Currency::Eur).unwrap()).unwrap();
+        let price = Price::new(Money::new(500, Currency::EUR).unwrap()).unwrap();
         OptionRate::Builtin(BuiltinRate::flat(vec![price]).unwrap())
     }
     fn option(n: u128, code: &str) -> NewOption {

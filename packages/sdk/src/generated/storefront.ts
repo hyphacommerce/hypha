@@ -301,8 +301,8 @@ export interface components {
             country: string;
         };
         /**
-         * @description Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
-         * @enum {string}
+         * @description An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.
+         * @example EUR
          */
         Currency: string;
         /**
@@ -422,8 +422,8 @@ export interface components {
              */
             amount: number;
             /**
-             * @description Known values: `EUR`, `USD`, `RSD`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
-             * @enum {string}
+             * @description An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.
+             * @example EUR
              */
             currency: string;
         };

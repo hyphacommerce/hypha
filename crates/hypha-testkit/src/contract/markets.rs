@@ -42,7 +42,7 @@ fn market(n: u128, countries: &[&str]) -> Market {
         mid(n),
         format!("Market {n}"),
         countries.iter().map(|c| cc(c)).collect(),
-        Currency::Eur,
+        Currency::EUR,
     )
     .unwrap()
 }
@@ -56,7 +56,7 @@ fn price_list(n: u128, currency: Currency, bp: i32) -> PriceList {
 }
 
 fn eur(amount: i64) -> Price {
-    Price::new(Money::new(amount, Currency::Eur).unwrap()).unwrap()
+    Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
 }
 
 // ---------- markets ----------
@@ -316,7 +316,7 @@ pub async fn price_list_repo<R: PriceListRepo>(make: impl AsyncFn() -> R) {
 
 async fn lists_pricing<R: PriceListRepo>(repo: &R) {
     for n in [1, 2, 3] {
-        repo.insert(&mut price_list(n, Currency::Eur, 0))
+        repo.insert(&mut price_list(n, Currency::EUR, 0))
             .await
             .unwrap();
     }
@@ -333,9 +333,9 @@ async fn lists_pricing<R: PriceListRepo>(repo: &R) {
 
 async fn price_list_round_trips<R: PriceListRepo>(repo: &R) {
     for mut list in [
-        price_list(1, Currency::Eur, -1000),
-        price_list(2, Currency::Rsd, 0),
-        price_list(3, Currency::Usd, BasisPoints::MIN),
+        price_list(1, Currency::EUR, -1000),
+        price_list(2, Currency::RSD, 0),
+        price_list(3, Currency::USD, BasisPoints::MIN),
     ] {
         repo.insert(&mut list).await.unwrap();
         assert_eq!(list.version(), Version::new(1));
@@ -345,7 +345,7 @@ async fn price_list_round_trips<R: PriceListRepo>(repo: &R) {
 }
 
 async fn price_list_update<R: PriceListRepo>(repo: &R) {
-    let mut list = price_list(1, Currency::Eur, 0);
+    let mut list = price_list(1, Currency::EUR, 0);
     repo.insert(&mut list).await.unwrap();
 
     list.set_adjustment(BasisPoints::new(2500).unwrap());
@@ -356,10 +356,10 @@ async fn price_list_update<R: PriceListRepo>(repo: &R) {
 }
 
 async fn price_list_keys_and_stale<R: PriceListRepo>(repo: &R) {
-    let mut list = price_list(1, Currency::Eur, 0);
+    let mut list = price_list(1, Currency::EUR, 0);
     repo.insert(&mut list).await.unwrap();
     assert_eq!(
-        repo.insert(&mut price_list(1, Currency::Rsd, 0)).await,
+        repo.insert(&mut price_list(1, Currency::RSD, 0)).await,
         Err(RepoError::Duplicate(keys::PRICE_LIST_ID))
     );
 
@@ -370,14 +370,14 @@ async fn price_list_keys_and_stale<R: PriceListRepo>(repo: &R) {
     assert_eq!(repo.get(list.id()).await, Ok(Some(list)));
 
     assert_eq!(
-        repo.update(&mut price_list(9, Currency::Eur, 0)).await,
+        repo.update(&mut price_list(9, Currency::EUR, 0)).await,
         Err(RepoError::StaleVersion)
     );
 }
 
 async fn price_list_fixed_prices<R: PriceListRepo>(repo: &R) {
-    let mut a = price_list(1, Currency::Eur, 0);
-    let mut b = price_list(2, Currency::Eur, 0);
+    let mut a = price_list(1, Currency::EUR, 0);
+    let mut b = price_list(2, Currency::EUR, 0);
     repo.insert(&mut a).await.unwrap();
     repo.insert(&mut b).await.unwrap();
 
@@ -439,7 +439,7 @@ async fn fixed_prices_preconditions<R: PriceListRepo>(repo: &R) {
             .is_err()
     );
 
-    let mut list = price_list(1, Currency::Eur, 0);
+    let mut list = price_list(1, Currency::EUR, 0);
     repo.insert(&mut list).await.unwrap();
     assert!(
         repo.set_fixed_prices(list.id(), &[(vid(1), eur(100)), (vid(1), eur(200))])

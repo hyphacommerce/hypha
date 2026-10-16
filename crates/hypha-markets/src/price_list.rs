@@ -180,7 +180,7 @@ mod tests {
     fn eur_list() -> PriceList {
         PriceList::new(
             PriceListId::from_uuid(Uuid::from_u128(1)),
-            Currency::Eur,
+            Currency::EUR,
             BasisPoints::ZERO,
         )
     }
@@ -190,7 +190,7 @@ mod tests {
         let markup = BasisPoints::new(1500).unwrap();
         let list = PriceList::new(
             PriceListId::from_uuid(Uuid::from_u128(1)),
-            Currency::Eur,
+            Currency::EUR,
             markup,
         );
         assert_eq!(list.adjustment(), markup);
@@ -207,8 +207,8 @@ mod tests {
     #[test]
     fn accepts_prices_in_list_currency() {
         let prices = [
-            (vid(1), price(1000, Currency::Eur)),
-            (vid(2), price(0, Currency::Eur)),
+            (vid(1), price(1000, Currency::EUR)),
+            (vid(2), price(0, Currency::EUR)),
         ];
         assert_eq!(eur_list().check_fixed_prices(&prices), Ok(()));
     }
@@ -221,22 +221,22 @@ mod tests {
     #[test]
     fn reports_every_mismatch_sorted_by_variant() {
         let prices = [
-            (vid(3), price(300, Currency::Rsd)),
-            (vid(2), price(200, Currency::Eur)),
-            (vid(1), price(100, Currency::Usd)),
+            (vid(3), price(300, Currency::RSD)),
+            (vid(2), price(200, Currency::EUR)),
+            (vid(1), price(100, Currency::USD)),
         ];
         assert_eq!(
             eur_list().check_fixed_prices(&prices),
             Err(PriceListError::CurrencyMismatch {
-                expected: Currency::Eur,
+                expected: Currency::EUR,
                 prices: vec![
                     MismatchedPrice {
                         variant: vid(1),
-                        found: Currency::Usd,
+                        found: Currency::USD,
                     },
                     MismatchedPrice {
                         variant: vid(3),
-                        found: Currency::Rsd,
+                        found: Currency::RSD,
                     },
                 ],
             })
@@ -246,8 +246,8 @@ mod tests {
     #[test]
     fn rejects_duplicate_variant() {
         let prices = [
-            (vid(1), price(900, Currency::Eur)),
-            (vid(1), price(800, Currency::Eur)),
+            (vid(1), price(900, Currency::EUR)),
+            (vid(1), price(800, Currency::EUR)),
         ];
         assert_eq!(
             eur_list().check_fixed_prices(&prices),

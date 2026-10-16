@@ -90,7 +90,7 @@ impl World {
 }
 
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur).unwrap()
+    Money::new(amount, Currency::EUR).unwrap()
 }
 
 fn new_option(name: &str, labels: &[&str]) -> OptionDraft {

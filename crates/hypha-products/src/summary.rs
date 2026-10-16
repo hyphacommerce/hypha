@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn a_summary_counts_variants_and_spans_their_prices() {
-        let eur = |a| price(a, Currency::Eur);
+        let eur = |a| price(a, Currency::EUR);
         let summary = priced(&[eur(1500), eur(900), eur(1700)]).summary();
         assert_eq!(summary.variant_count, 3);
         assert_eq!(
@@ -140,21 +140,21 @@ mod tests {
     #[test]
     fn a_summary_has_one_price_range_per_currency_by_code() {
         let summary = priced(&[
-            price(2000, Currency::Usd),
-            price(1500, Currency::Eur),
-            price(1000, Currency::Usd),
+            price(2000, Currency::USD),
+            price(1500, Currency::EUR),
+            price(1000, Currency::USD),
         ])
         .summary();
         assert_eq!(
             summary.price_ranges,
             vec![
                 PriceRange {
-                    min: price(1500, Currency::Eur),
-                    max: price(1500, Currency::Eur)
+                    min: price(1500, Currency::EUR),
+                    max: price(1500, Currency::EUR)
                 },
                 PriceRange {
-                    min: price(1000, Currency::Usd),
-                    max: price(2000, Currency::Usd)
+                    min: price(1000, Currency::USD),
+                    max: price(2000, Currency::USD)
                 },
             ]
         );

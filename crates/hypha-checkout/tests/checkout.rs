@@ -44,7 +44,7 @@ fn hr() -> CountryCode {
 }
 
 fn eur(amount: i64) -> Money {
-    Money::new(amount, Currency::Eur).unwrap()
+    Money::new(amount, Currency::EUR).unwrap()
 }
 
 fn ana() -> Email {
@@ -78,7 +78,7 @@ impl World {
             market_id(),
             "Croatia".to_string(),
             vec![hr()],
-            Currency::Eur,
+            Currency::EUR,
         )
         .unwrap();
         block_on(world.markets.insert(&mut market)).unwrap();

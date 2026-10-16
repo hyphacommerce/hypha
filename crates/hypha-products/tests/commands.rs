@@ -15,7 +15,7 @@ fn mug() -> CreateSimpleProduct {
     CreateSimpleProduct {
         handle: "mug".to_string(),
         title: "Mug".to_string(),
-        price: Money::new(1000, Currency::Eur).unwrap(),
+        price: Money::new(1000, Currency::EUR).unwrap(),
     }
 }
 fn handle(s: &str) -> Handle {
@@ -101,7 +101,7 @@ fn rejects_negative_price() {
     let repo = InMemoryProductRepo::default();
     let ids = SequentialIds::default();
     let input = CreateSimpleProduct {
-        price: Money::new(-1, Currency::Eur).unwrap(),
+        price: Money::new(-1, Currency::EUR).unwrap(),
         ..mug()
     };
 

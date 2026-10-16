@@ -26,14 +26,14 @@ mod tests {
 
     #[test]
     fn accepts_zero() {
-        let zero = Money::zero(Currency::Eur);
+        let zero = Money::zero(Currency::EUR);
         let price = Price::new(zero).unwrap();
         assert_eq!(price.money(), zero);
     }
 
     #[test]
     fn rejects_negative() {
-        let minus_one = Money::new(-1, Currency::Eur).unwrap();
+        let minus_one = Money::new(-1, Currency::EUR).unwrap();
         assert_eq!(Price::new(minus_one), Err(MoneyError::Negative));
     }
 }
