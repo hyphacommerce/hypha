@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use hypha_core::{ProductId, Quantity, Stamped, Timestamp};
+use hypha_core::{ChannelId, ProductId, Quantity, Stamped, Timestamp};
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, resolve_price};
 use hypha_products::{Product, ProductStatus};
@@ -14,11 +14,13 @@ use hypha_search_index::{PriceRange, SearchDocument, SearchSettings};
 /// include it. `pricing` and `stock` must have been loaded for this product's variants
 /// (`hypha_pricing::load_pricing`, `StockContext::load`), the same way a cart is, so
 /// search and cart agree on prices and stock.
+/// `channels` are the ones the product is published to (`ChannelRepo::channels_of`).
 pub fn build_documents(
     product: &Product,
     pricing: &PricingContext,
     stock: &StockContext,
     settings: &SearchSettings,
+    channels: &[ChannelId],
 ) -> Vec<SearchDocument> {
     if product.status() != ProductStatus::Active {
         return Vec::new();
@@ -58,6 +60,7 @@ pub fn build_documents(
             product: product.id(),
             variant: variant.id(),
             listing: listing_key(product.id(), &options, &split),
+            channels: channels.to_vec(),
             handle: product.handle().as_str().to_string(),
             title: product.title().to_string(),
             variant_title: product.variant_title(variant.id()),

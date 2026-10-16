@@ -2,7 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
-use hypha_core::{MarketId, Money};
+use hypha_core::{ChannelId, MarketId, Money};
 
 use crate::SearchDocument;
 
@@ -92,6 +92,9 @@ pub struct PriceBounds {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchQuery {
     pub market: MarketId,
+    /// Only documents published to this channel (a storefront's); `None` searches them
+    /// all (staff).
+    pub channel: Option<ChannelId>,
     /// From `terms::terms`; empty lists everything.
     pub terms: Vec<String>,
     pub filters: Vec<Filter>,

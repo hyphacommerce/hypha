@@ -4,7 +4,9 @@
 //! loaded, and every query in a battery (terms, filters, price, availability, groups,
 //! sorts, pages, facets) must answer exactly as the reference does, ranking included.
 
-use hypha_core::{MarketId, ProductId, RepoError, Timestamp, VariantId, Version, Versioned};
+use hypha_core::{
+    ChannelId, MarketId, ProductId, RepoError, Timestamp, VariantId, Version, Versioned,
+};
 use hypha_search_index::{
     FacetKey, FacetSetting, Filter, Group, PriceBounds, SearchDocument, SearchIndex, SearchQuery,
     SearchQueue, SearchSettings, SearchSettingsRepo, Sort, Target, keys, reference, terms,
@@ -43,6 +45,7 @@ async fn load<I: SearchIndex>(index: &I, documents: &[SearchDocument]) {
 fn query(market_n: u128) -> SearchQuery {
     SearchQuery {
         market: market(market_n),
+        channel: None,
         terms: vec![],
         filters: vec![],
         price: PriceBounds::default(),
@@ -186,6 +189,19 @@ async fn battery<I: SearchIndex>(index: &I) {
     });
     base(&|q| q.market = market(2));
     base(&|q| q.market = market(9));
+    let channel = |n: u128| Some(ChannelId::from_uuid(Uuid::from_u128(n)));
+    base(&|q| q.channel = channel(1));
+    base(&|q| q.channel = channel(2));
+    base(&|q| q.channel = channel(9));
+    base(&|q| {
+        q.channel = channel(2);
+        q.terms = terms_("shirt");
+        q.filters = vec![filter(FacetKey::Option("color".into()), &["Red"])];
+    });
+    base(&|q| {
+        q.channel = channel(1);
+        q.market = market(2);
+    });
 
     for base in bases {
         for group in [Group::Listing, Group::Product, Group::Variant] {

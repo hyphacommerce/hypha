@@ -211,9 +211,10 @@ impl SearchSettingsRepo for InMemorySearchSettingsRepo {
 
 /// Documents for engine tests (design note 0019): two markets; shirts with options
 /// split by colour, a product without options, ties on price and creation time, a
-/// title beyond ASCII and unavailable variants.
+/// title beyond ASCII and unavailable variants. Channel 1 sells products 1–3, channel 2
+/// products 1 and 4 (design note 0020).
 pub fn search_fixture() -> Vec<SearchDocument> {
-    use hypha_core::{Currency, Money, VariantId};
+    use hypha_core::{ChannelId, Currency, Money, VariantId};
     use hypha_search_index::PriceRange;
     use uuid::Uuid;
 
@@ -339,6 +340,12 @@ pub fn search_fixture() -> Vec<SearchDocument> {
     let mut documents = Vec::new();
     for p in products {
         let id = product(p.n);
+        let channel = |n: u128| ChannelId::from_uuid(Uuid::from_u128(n));
+        let channels = match p.n {
+            1 => vec![channel(1), channel(2)],
+            4 => vec![channel(2)],
+            _ => vec![channel(1)],
+        };
         let prices: Vec<i64> = p.variants.iter().map(|v| v.price).collect();
         let range = |prices: &[i64]| PriceRange {
             min: eur(*prices.iter().min().unwrap_or(&0)),
@@ -371,6 +378,7 @@ pub fn search_fixture() -> Vec<SearchDocument> {
                 product: id,
                 variant: VariantId::from_uuid(Uuid::from_u128(variant.n)),
                 listing: listing(variant),
+                channels: channels.clone(),
                 handle: p.title.to_lowercase().replace(' ', "-"),
                 title: p.title.to_string(),
                 variant_title: (!options.is_empty()).then(|| {

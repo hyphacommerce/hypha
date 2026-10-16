@@ -708,6 +708,39 @@ fn event(event_type: &str, data: serde_json::Value) -> hypha_core::StoredEvent {
 }
 
 #[test]
+fn a_storefront_searches_only_what_its_channel_publishes() {
+    let w = World::new();
+    // Publishes every product before the first sync builds their documents.
+    let storefront = w.ports.storefront();
+    let channel = storefront.channel().unwrap();
+    w.settle();
+    assert!(
+        w.documents(hr_market())
+            .iter()
+            .all(|d| d.channels == [channel])
+    );
+    let linen = || SearchInput {
+        q: Some("linen".to_string()),
+        ..input("HR")
+    };
+    let found = block_on(search(&storefront, &w.ports, &w.index, linen())).unwrap();
+    assert_eq!(found.results.total, 1);
+
+    block_on(hypha_channels::unpublish_products(
+        &Ctx::system(),
+        &w.ports,
+        channel,
+        vec![shirt()],
+    ))
+    .unwrap();
+    w.settle();
+    let found = block_on(search(&storefront, &w.ports, &w.index, linen())).unwrap();
+    assert_eq!(found.results.total, 0);
+    // Staff search every channel.
+    assert_eq!(w.search(linen()).unwrap().results.total, 1);
+}
+
+#[test]
 fn each_event_marks_what_it_changes() {
     use hypha_search::handler::targets;
     let product = serde_json::json!({ "product": shirt() });
@@ -719,6 +752,11 @@ fn each_event_marks_what_it_changes() {
     assert_eq!(
         targets(&event("catalog.products_removed", products)),
         Ok(vec![Target::Product(shirt()), Target::Product(mug())])
+    );
+    let published = serde_json::json!({ "channel": "chan_x", "products": [mug()] });
+    assert_eq!(
+        targets(&event("channel.products_unpublished", published)),
+        Ok(vec![Target::Product(mug())])
     );
     let variants = serde_json::json!({ "price_list": "pl_x", "variants": [red_s()] });
     assert_eq!(

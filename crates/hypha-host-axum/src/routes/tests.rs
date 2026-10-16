@@ -3417,6 +3417,55 @@ async fn settle_search(app: &TestApp) {
 }
 
 #[tokio::test]
+async fn a_storefront_searches_what_its_channel_publishes() {
+    let app = app().await;
+    let ids = shop_selling(&app, &["mug", "cup"]).await;
+    let (_, outlet) = send(
+        &app,
+        "POST",
+        "/admin/channels",
+        Some(r#"{"name":"Outlet","kind":"custom"}"#),
+    )
+    .await;
+    let outlet = outlet["id"].as_str().unwrap().to_string();
+    let outlet_key = key(
+        &app,
+        json!({"kind": "publishable", "name": "Outlet", "channel": outlet}),
+    )
+    .await;
+    let pk = publishable(&app).await;
+    let titles = |found: &Value| -> Vec<String> {
+        let items = found["items"].as_array().unwrap();
+        items
+            .iter()
+            .map(|h| h["title"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let url = "/storefront/search?country=HR&sort=title";
+
+    settle_search(&app).await;
+    let (_, found) = send_as(&app, &pk, "GET", url, None).await;
+    assert_eq!(titles(&found), ["cup", "mug"]);
+    let (_, found) = send_as(&app, &outlet_key, "GET", url, None).await;
+    assert_eq!(found["total"], 0, "the outlet sells nothing yet");
+
+    // Moving the cup to the outlet moves it in search too.
+    let body = json!({ "channels": [outlet] }).to_string();
+    let path = format!("/admin/products/{}/channels", ids[1]);
+    let (status, json) = send(&app, "PUT", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    settle_search(&app).await;
+    let (_, found) = send_as(&app, &pk, "GET", url, None).await;
+    assert_eq!(titles(&found), ["mug"]);
+    assert_eq!(
+        found["facets"][0]["key"], "product_type",
+        "facets still come"
+    );
+    let (_, found) = send_as(&app, &outlet_key, "GET", url, None).await;
+    assert_eq!(titles(&found), ["cup"]);
+}
+
+#[tokio::test]
 async fn the_storefront_searches_its_market() {
     let app = app().await;
     let mug = shop_selling_a_mug(&app).await;
@@ -3620,6 +3669,7 @@ async fn search_filters_repeat_and_facets_count_listings() {
         Some(&body),
     )
     .await;
+    publish(&app, &[&mug]).await;
     settle_search(&app).await;
     let pk = publishable(&app).await;
 

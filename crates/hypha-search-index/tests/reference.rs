@@ -21,6 +21,7 @@ fn v(n: u128) -> VariantId {
 fn query() -> SearchQuery {
     SearchQuery {
         market: MarketId::from_uuid(Uuid::from_u128(1)),
+        channel: None,
         terms: vec![],
         filters: vec![],
         price: PriceBounds::default(),

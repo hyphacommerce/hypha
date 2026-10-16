@@ -136,6 +136,7 @@ pub async fn search<S: HasMarkets + HasSearchSettings, I: SearchIndex>(
 
     let query = SearchQuery {
         market: market.id(),
+        channel: ctx.channel(),
         terms,
         filters,
         price: PriceBounds {

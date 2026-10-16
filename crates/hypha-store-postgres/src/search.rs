@@ -20,8 +20,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use hypha_core::{
-    AssetId, MarketId, Money, ProductId, RepoError, Timestamp, VariantId, Version, Versioned,
-    stamp_insert, stamp_update,
+    AssetId, ChannelId, MarketId, Money, ProductId, RepoError, Timestamp, VariantId, Version,
+    Versioned, stamp_insert, stamp_update,
 };
 use hypha_search_index::{
     FacetCounts, FacetKey, FacetValue, Group, Hit, IndexError, MAX_FACET_VALUES, Mark, PriceRange,
@@ -55,11 +55,12 @@ const SEARCH_WORK_MEM: &str = "64MB";
 const INSERT_ROWS: usize = 1000;
 
 /// The columns a document is written with, in order (one placeholder each, but `tsv`).
-const COLUMNS: &str = "market_id, product_id, variant_id, listing, handle, title, title_sort,
+const COLUMNS: &str =
+    "market_id, product_id, variant_id, listing, channels, handle, title, title_sort,
     variant_title, description, vendor, product_type, tags, sku, option_names, option_values,
     currency, price, product_min, product_max, listing_min, listing_max, available, image_id,
     created_us, position, terms_a, terms_b, terms_d, tsv, facets";
-const PER_ROW: usize = 30;
+const PER_ROW: usize = 31;
 
 // ---------- the engine ----------
 
@@ -208,6 +209,13 @@ async fn insert_documents(
             params.add(d.product.as_uuid(), Type::UUID),
             params.add(d.variant.as_uuid(), Type::UUID),
             params.add(d.listing.clone(), Type::TEXT),
+            params.add(
+                d.channels
+                    .iter()
+                    .map(|c| c.as_uuid())
+                    .collect::<Vec<Uuid>>(),
+                Type::UUID_ARRAY,
+            ),
             params.add(d.handle.clone(), Type::TEXT),
             params.add(d.title.clone(), Type::TEXT),
             params.add(d.title.to_lowercase(), Type::TEXT),
@@ -296,6 +304,13 @@ fn conditions(q: &SearchQuery, params: &mut Params, except: Except<'_>) -> Strin
         sql.push(format!(
             "d.tsv @@ {}::tsquery",
             params.add(tsquery.join(" & "), Type::TEXT)
+        ));
+    }
+    if let Some(channel) = q.channel {
+        // GIN-indexed: `@>` (contains) is what the index answers, not `= ANY`.
+        sql.push(format!(
+            "d.channels @> ARRAY[{}]::uuid[]",
+            params.add(channel.as_uuid(), Type::UUID)
         ));
     }
     if let Some(available) = q.available {
@@ -587,6 +602,10 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
         product: ProductId::from_uuid(col(row, "product_id")?),
         variant: VariantId::from_uuid(col(row, "variant_id")?),
         listing: col(row, "listing")?,
+        channels: col::<Vec<Uuid>>(row, "channels")?
+            .into_iter()
+            .map(ChannelId::from_uuid)
+            .collect(),
         handle: col(row, "handle")?,
         title: col(row, "title")?,
         variant_title: col(row, "variant_title")?,

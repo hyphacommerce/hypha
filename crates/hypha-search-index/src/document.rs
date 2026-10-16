@@ -2,7 +2,7 @@
 //! its product's fields, priced and stocked as a shopper in that market sees it. Built
 //! by `hypha_search::build_documents`; engines store them as they like.
 
-use hypha_core::{AssetId, MarketId, Money, ProductId, Timestamp, VariantId};
+use hypha_core::{AssetId, ChannelId, MarketId, Money, ProductId, Timestamp, VariantId};
 
 use crate::terms;
 
@@ -43,6 +43,9 @@ pub struct SearchDocument {
     /// What `group=listing` collapses on: the product ID, followed by the split
     /// options' values when the merchant splits listings (`prod_…|color=Red`).
     pub listing: String,
+    /// The channels the product is published to, sorted (design note 0020): the same on
+    /// every document of the product.
+    pub channels: Vec<ChannelId>,
     pub handle: String,
     pub title: String,
     /// "M / Blue"; `None` for a product without options.

@@ -11,6 +11,7 @@
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
 
+use hypha_channels::{ChannelRepo, HasChannels};
 use hypha_core::{
     Clock, ErrorCode, PageLimit, PageRequest, ProductId, Progress, RepoError, VariantId,
 };
@@ -34,6 +35,7 @@ pub trait SyncPorts:
     HasSearchQueue
     + HasSearchSettings
     + HasProducts
+    + HasChannels
     + HasMarkets
     + HasCatalogs
     + HasPriceLists
@@ -46,6 +48,7 @@ impl<T> SyncPorts for T where
     T: HasSearchQueue
         + HasSearchSettings
         + HasProducts
+        + HasChannels
         + HasMarkets
         + HasCatalogs
         + HasPriceLists
@@ -202,6 +205,9 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
         items,
         locations: vec![],
     };
+    // Publications don't depend on the market either.
+    let channels = ports.channels().channels_of(&writing).await?;
+    let channels_of = |id: ProductId| channels.get(&id).map_or(&[][..], Vec::as_slice);
 
     for market in ports.markets().list_all().await? {
         let pricing = load_pricing(ports, market.id(), &writing, &variants).await?;
@@ -210,7 +216,9 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
             Some(pricing) => writing
                 .iter()
                 .filter_map(|id| loaded.get(id))
-                .flat_map(|p| build_documents(p, pricing, &stock, &search_settings))
+                .flat_map(|p| {
+                    build_documents(p, pricing, &stock, &search_settings, channels_of(p.id()))
+                })
                 .collect(),
             // The market went while we loaded.
             None => Vec::new(),

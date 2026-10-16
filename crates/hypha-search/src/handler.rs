@@ -18,6 +18,8 @@ const PRODUCT_EVENTS: &[&str] = &[
     "product.variant_removed",
 ];
 const CATALOG_PRODUCTS: &[&str] = &["catalog.products_added", "catalog.products_removed"];
+/// Which channels sell a product (design note 0020); a channel's name isn't in documents.
+const PUBLICATIONS: &[&str] = &["channel.products_published", "channel.products_unpublished"];
 const VARIANT_PRICES: &[&str] = &["price_list.prices_set", "price_list.prices_removed"];
 const STOCK: &[&str] = &["inventory_item.changed", "inventory_item.deleted"];
 /// Rare and wide: which products a market sells, at what price, from where.
@@ -38,6 +40,7 @@ impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
         [
             PRODUCT_EVENTS,
             CATALOG_PRODUCTS,
+            PUBLICATIONS,
             VARIANT_PRICES,
             STOCK,
             EVERYTHING,
@@ -83,7 +86,7 @@ pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
 
     if PRODUCT_EVENTS.contains(&t) {
         parse("product", |id| id.parse().ok().map(Target::Product))
-    } else if CATALOG_PRODUCTS.contains(&t) {
+    } else if CATALOG_PRODUCTS.contains(&t) || PUBLICATIONS.contains(&t) {
         parse("products", |id| id.parse().ok().map(Target::Product))
     } else if VARIANT_PRICES.contains(&t) {
         parse("variants", |id| id.parse().ok().map(Target::Variant))
