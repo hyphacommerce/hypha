@@ -4,7 +4,7 @@
 
 use hypha_core::{EventHandler, StoredEvent};
 
-use crate::{HasSearchQueue, SearchQueue, Target};
+use hypha_search_index::{HasSearchQueue, SearchQueue, Target};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SearchIndexer;

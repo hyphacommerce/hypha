@@ -12,10 +12,12 @@ use hypha_pricing::load_pricing;
 use hypha_products::{HasProducts, Product, ProductFilter, ProductRepo};
 use thiserror::Error;
 
-use crate::{
+use hypha_search_index::{
     HasSearchQueue, HasSearchSettings, IndexError, SearchIndex, SearchQueue, SearchSettingsRepo,
-    Target, build_documents,
+    Target,
 };
+
+use crate::build_documents;
 
 /// Everything the sync job reads: the queue and settings, and what documents are made
 /// of. Anything with all of them is `SyncPorts` (the blanket impl below).
@@ -173,10 +175,4 @@ async fn queue_every_product<S: SyncPorts>(ports: &S) -> Result<(), RepoError> {
             _ => return Ok(()),
         }
     }
-}
-
-/// Queues a rebuild of everything (design note 0019, section 5): after a new engine or
-/// a lost index. The host's reindex route calls it through `reindex`.
-pub async fn queue_all<S: HasSearchQueue>(ports: &S) -> Result<(), RepoError> {
-    ports.search_queue().mark(&[Target::All]).await
 }

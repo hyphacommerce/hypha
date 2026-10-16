@@ -1,11 +1,11 @@
 //! What every search engine, queue and settings store must do (design note 0019).
 //!
-//! An engine is held to `hypha_search::reference::search`: the fixture's documents are
+//! An engine is held to `hypha_search_index::reference::search`: the fixture's documents are
 //! loaded, and every query in a battery (terms, filters, price, availability, groups,
 //! sorts, pages, facets) must answer exactly as the reference does, ranking included.
 
 use hypha_core::{MarketId, ProductId, RepoError, Timestamp, VariantId, Version, Versioned};
-use hypha_search::{
+use hypha_search_index::{
     FacetKey, FacetSetting, Filter, Group, PriceBounds, SearchDocument, SearchIndex, SearchQuery,
     SearchQueue, SearchSettings, SearchSettingsRepo, Sort, Target, keys, reference, terms,
 };

@@ -282,14 +282,14 @@ impl hypha_apps::HasApps for InMemoryPorts {
     }
 }
 
-impl hypha_search::HasSearchQueue for InMemoryPorts {
+impl hypha_search_index::HasSearchQueue for InMemoryPorts {
     type SearchQueue = InMemorySearchQueue;
     fn search_queue(&self) -> &InMemorySearchQueue {
         &self.search_queue
     }
 }
 
-impl hypha_search::HasSearchSettings for InMemoryPorts {
+impl hypha_search_index::HasSearchSettings for InMemoryPorts {
     type SearchSettings = InMemorySearchSettingsRepo;
     fn search_settings(&self) -> &InMemorySearchSettingsRepo {
         &self.search_settings

@@ -4,7 +4,7 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
 use hypha_core::{MarketId, ProductId, RepoError, Timestamp, stamp_insert, stamp_update};
-use hypha_search::{
+use hypha_search_index::{
     IndexError, Mark, SearchDocument, SearchIndex, SearchQuery, SearchQueue, SearchResults,
     SearchSettings, SearchSettingsRepo, Target, keys, reference,
 };
@@ -14,7 +14,7 @@ use crate::{
     table::{Table, no_unique_keys},
 };
 
-/// An engine over a list of documents, answering with `hypha_search::reference`.
+/// An engine over a list of documents, answering with `hypha_search_index::reference`.
 #[derive(Default)]
 pub struct InMemorySearchIndex {
     documents: Mutex<Vec<SearchDocument>>,
@@ -213,7 +213,7 @@ impl SearchSettingsRepo for InMemorySearchSettingsRepo {
 /// title beyond ASCII and unavailable variants.
 pub fn search_fixture() -> Vec<SearchDocument> {
     use hypha_core::{Currency, Money, VariantId};
-    use hypha_search::PriceRange;
+    use hypha_search_index::PriceRange;
     use uuid::Uuid;
 
     let market = |n: u128| MarketId::from_uuid(Uuid::from_u128(n));

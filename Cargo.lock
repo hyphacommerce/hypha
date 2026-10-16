@@ -1156,6 +1156,19 @@ dependencies = [
  "hypha-markets",
  "hypha-pricing",
  "hypha-products",
+ "hypha-search-index",
+ "hypha-testkit",
+ "pollster",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-search-index"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
  "hypha-testkit",
  "pollster",
  "serde",
@@ -1261,7 +1274,7 @@ dependencies = [
  "hypha-media",
  "hypha-orders",
  "hypha-products",
- "hypha-search",
+ "hypha-search-index",
  "hypha-shipping",
  "hypha-stores",
  "hypha-tax",

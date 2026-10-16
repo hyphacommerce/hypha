@@ -16,10 +16,10 @@ use hypha_markets::{
 use hypha_products::{
     Handle, NewVariant, OptionValue, Product, ProductOption, ProductRepo, ProductStatus,
 };
-use hypha_search::{
-    CommandError, FacetKey, Group, SearchDocument, SearchError, SearchIndexer, SearchInput,
-    SearchStatus, SyncSettings, Target, UpdateSearchSettings, get_search_settings, reindex, search,
-    search_status, sync, update_search_settings,
+use hypha_search::{CommandError, SearchIndexer, SearchInput, SyncSettings, search, sync};
+use hypha_search_index::{
+    CommandError as IndexError, FacetKey, Group, SearchDocument, SearchError, SearchStatus, Target,
+    UpdateSearchSettings, get_search_settings, reindex, search_status, update_search_settings,
 };
 use hypha_testkit::{FixedClock, InMemoryPorts, InMemorySearchIndex};
 use pollster::block_on;
@@ -540,11 +540,13 @@ fn searching_needs_products_read_and_settings_need_write() {
         Actor::User(UserId::from_uuid(id(9))),
         vec![Scope::OrdersRead],
     );
-    let missing = |scope| Err(CommandError::Auth(AuthError::MissingScope(scope)));
     assert_eq!(
         block_on(search(&ctx, &w.ports, &w.index, input("HR"))).map(|_| ()),
-        missing(Scope::ProductsRead)
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::ProductsRead
+        )))
     );
+    let missing = |scope| Err(IndexError::Auth(AuthError::MissingScope(scope)));
     assert_eq!(
         block_on(get_search_settings(&ctx, &w.ports)).map(|_| ()),
         missing(Scope::ProductsRead)
@@ -600,7 +602,7 @@ fn settings_are_stored_on_first_save_and_updated_after() {
     assert_eq!(changes, 2);
     assert_eq!(
         save(&["a", "b", "c", "d"]).map(|_| ()),
-        Err(CommandError::Search(SearchError::TooManySplits { max: 3 }))
+        Err(IndexError::Search(SearchError::TooManySplits { max: 3 }))
     );
 }
 

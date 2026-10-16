@@ -10,12 +10,12 @@ hypha-inventory = { path = "../hypha-inventory" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-pricing = { path = "../hypha-pricing" }
 hypha-products = { path = "../hypha-products" }
-serde.workspace = true
+hypha-search-index = { path = "../hypha-search-index" }
 serde_json.workspace = true
 thiserror.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
+uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
 pollster = "0.4"
 

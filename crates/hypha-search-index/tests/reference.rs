@@ -7,7 +7,7 @@
 //! 900) and Linen Towel (4, 1200, out of stock), the last two created at once.
 
 use hypha_core::{MarketId, Money, VariantId};
-use hypha_search::{
+use hypha_search_index::{
     FacetKey, FacetValue, Filter, Group, PriceBounds, SearchQuery, SearchResults, Sort, reference,
     terms,
 };

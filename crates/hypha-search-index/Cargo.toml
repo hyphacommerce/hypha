@@ -1,0 +1,19 @@
+[package]
+name = "hypha-search-index"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "0.4"
+
+[lints]
+workspace = true
