@@ -9,6 +9,7 @@ mod auth;
 
 pub(crate) use auth::password_reset_in_background;
 mod carts;
+mod channels;
 mod customers;
 mod fulfillments;
 mod health;
@@ -191,6 +192,13 @@ macro_rules! route_table {
             [admin, POST, "/admin/inventory-items/{id}/levels/{location_id}/adjustments", inventory::adjust_level],
             [admin, GET, "/admin/variants/{id}/inventory", inventory::fetch_variant_inventory],
 
+            [admin, GET, "/admin/channels", channels::list],
+            [admin, POST, "/admin/channels", channels::create],
+            [admin, GET, "/admin/channels/{id}", channels::fetch],
+            [admin, PATCH, "/admin/channels/{id}", channels::update],
+            [admin, POST, "/admin/channels/{id}/products", channels::publish],
+            [admin, DELETE, "/admin/channels/{id}/products", channels::unpublish],
+            [admin, PUT, "/admin/products/{id}/channels", channels::set_for_product],
             [admin, GET, "/admin/search/settings", search::fetch_settings],
             [admin, PATCH, "/admin/search/settings", search::update_settings],
             [admin, GET, "/admin/search/status", search::status],

@@ -1019,6 +1019,7 @@ dependencies = [
  "hypha-apps",
  "hypha-auth",
  "hypha-cart",
+ "hypha-channels",
  "hypha-checkout",
  "hypha-config",
  "hypha-core",

@@ -4,8 +4,8 @@ use hypha_auth::{
     Session, SessionRepo, TokenHash, keys,
 };
 use hypha_core::{
-    Actor, ApiKeyId, Email, IdentityId, PasswordResetId, RepoError, Scope, SessionId, Timestamp,
-    UserId, Version, Versioned,
+    Actor, ApiKeyId, ChannelId, Email, IdentityId, PasswordResetId, RepoError, Scope, SessionId,
+    Timestamp, UserId, Version, Versioned,
 };
 use uuid::Uuid;
 
@@ -60,15 +60,16 @@ pub(super) fn session(n: u128, identity: u128, token: u8) -> Session {
 }
 
 fn key(n: u128, token: u8, kind: ApiKeyKind) -> ApiKey {
-    let scopes = match kind {
-        ApiKeyKind::Secret => Some(vec![Scope::OrdersRead, Scope::ProductsWrite]),
-        ApiKeyKind::Publishable => None,
+    let (scopes, channel) = match kind {
+        ApiKeyKind::Secret => (Some(vec![Scope::OrdersRead, Scope::ProductsWrite]), None),
+        ApiKeyKind::Publishable => (None, Some(ChannelId::from_uuid(Uuid::from_u128(500)))),
     };
     let parts = ApiKeyParts {
         id: ApiKeyId::from_uuid(Uuid::from_u128(n)),
         kind,
         name: format!("Key {n}"),
         scopes,
+        channel,
         created_by: Actor::User(UserId::from_uuid(Uuid::from_u128(77))),
         created_at: Timestamp::from_unix_micros(1_700_000_000_000_001),
     };
@@ -357,6 +358,7 @@ async fn key_round_trips<R: ApiKeyRepo>(repo: &R) {
             kind: ApiKeyKind::Secret,
             name: "Key".to_string(),
             scopes: Some(vec![Scope::Checkout]),
+            channel: None,
             created_by: actor,
             created_at: Timestamp::UNIX_EPOCH,
         };

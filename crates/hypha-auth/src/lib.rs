@@ -20,11 +20,11 @@ pub mod totp;
 
 pub use api_key::{ApiKey, ApiKeyKind, ApiKeyParts, ApiKeySnapshot};
 pub use commands::{
-    AuthEnv, CommandError, CreateApiKey, LoginStep, MfaMethod, TotpSetup, authenticate_api_key,
-    authenticate_session, change_password, check_password, confirm_totp, create_api_key,
-    disable_mfa, finish_login, get_api_key, hash_new_password, logout, new_active_session,
-    open_session, prepare_login, regenerate_recovery_codes, require_grantable, reset_password,
-    revoke_api_key, start_password_reset, start_totp, withdraw_password_resets,
+    AuthEnv, ChannelDirectory, CommandError, CreateApiKey, LoginStep, MfaMethod, TotpSetup,
+    authenticate_api_key, authenticate_session, change_password, check_password, confirm_totp,
+    create_api_key, disable_mfa, finish_login, get_api_key, hash_new_password, logout,
+    new_active_session, open_session, prepare_login, regenerate_recovery_codes, require_grantable,
+    reset_password, revoke_api_key, start_password_reset, start_totp, withdraw_password_resets,
 };
 pub use error::{ApiKeyError, IdentityError, RestoreError};
 pub use identity::{

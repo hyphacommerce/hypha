@@ -8,8 +8,8 @@ use hypha_auth::{
     TokenHash,
 };
 use hypha_core::{
-    ApiKeyId, IdentityId, PasswordResetId, RepoError, SessionId, Timestamp, UserId, Version,
-    Versioned,
+    ApiKeyId, ChannelId, IdentityId, PasswordResetId, RepoError, SessionId, Timestamp, UserId,
+    Version, Versioned,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -430,7 +430,7 @@ pub(crate) async fn revoke_sessions(
 
 fn key_columns() -> String {
     format!(
-        "id, version, kind, name, token_hash, last_four, scopes, created_by_kind,
+        "id, version, kind, name, token_hash, last_four, scopes, channel_id, created_by_kind,
          created_by_id, {}, {}",
         micros("created_at"),
         micros("revoked_at")
@@ -449,6 +449,7 @@ fn key_from_row(row: &Row) -> Result<ApiKey, RepoError> {
         token_hash: token_hash_from_db(col(row, "token_hash")?)?,
         last_four: col(row, "last_four")?,
         scopes: scopes_from_db(col(row, "scopes")?)?,
+        channel: col::<Option<uuid::Uuid>>(row, "channel_id")?.map(ChannelId::from_uuid),
         created_by: actor_from_db(&created_by_kind, col(row, "created_by_id")?)?,
         created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
         revoked_at: opt_ts(col(row, "revoked_at")?),
@@ -510,8 +511,8 @@ pub(crate) async fn insert_api_key(
     tx.query_typed(
         &format!(
             "INSERT INTO api_keys (id, version, kind, name, token_hash, last_four,
-                 scopes, created_by_kind, created_by_id, created_at, revoked_at)
-             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, {}, {})",
+                 scopes, created_by_kind, created_by_id, created_at, revoked_at, channel_id)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, {}, {}, $11)",
             ts(9),
             ts(10)
         ),
@@ -526,6 +527,7 @@ pub(crate) async fn insert_api_key(
             (&by_id, Type::UUID),
             (&s.created_at.unix_micros(), Type::INT8),
             (&opt_micros(s.revoked_at), Type::INT8),
+            (&s.channel.map(|c| c.as_uuid()), Type::UUID),
         ],
     )
     .await
@@ -701,4 +703,14 @@ pub(crate) async fn insert_password_reset(
         .await
         .map_err(repo_error)?;
     Ok(())
+}
+
+/// A channel exists for a new publishable key (design note 0020): `hypha-auth` asks
+/// through its port, the channels table answers.
+impl<C: PgConnection> hypha_auth::ChannelDirectory for PgStore<C> {
+    async fn channel_exists(&self, channel: ChannelId) -> Result<bool, RepoError> {
+        Ok(hypha_channels::ChannelRepo::get(self, channel)
+            .await?
+            .is_some())
+    }
 }

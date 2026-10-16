@@ -153,9 +153,15 @@ if [[ $BODY != *'"status":"authenticated"'* ]]; then
 fi
 SESSION=$(token)
 AUTH=(-H "authorization: Bearer $SESSION")
+step "the Online Store channel (design note 0020)" 200 - "$BASE/admin/channels"
+contains "every store starts with one" '"name":"Online Store","kind":"online_store"'
+ONLINE_STORE=$(sed -E 's/.*"items":\[\{"id":"([^"]+)".*/\1/' <<<"$BODY")
 step "a publishable key for the storefront steps" 201 - -X POST "$BASE/admin/api-keys" -H "$JSON" \
-    -d '{"kind":"publishable","name":"e2e storefront"}'
+    -d "{\"kind\":\"publishable\",\"name\":\"e2e storefront\",\"channel\":\"$ONLINE_STORE\"}"
+contains "sells through it" "\"channel\":\"$ONLINE_STORE\""
 SF_AUTH=(-H "x-publishable-key: $(token)")
+step "a publishable key needs a channel" 422 api_key_channel_required -X POST "$BASE/admin/api-keys" \
+    -H "$JSON" -d '{"kind":"publishable","name":"Nowhere"}'
 
 echo
 echo "## happy path"
@@ -959,7 +965,7 @@ AUTH=("${SAVED_AUTH[@]}")
 step "a publishable key's scopes are fixed" 422 api_key_scopes_fixed -X POST \
     "$BASE/admin/api-keys" -H "$JSON" -d '{"kind":"publishable","name":"Shop","scopes":["orders:read"]}'
 step "create a publishable key" 201 - -X POST "$BASE/admin/api-keys" -H "$JSON" \
-    -d '{"kind":"publishable","name":"Storefront"}'
+    -d "{\"kind\":\"publishable\",\"name\":\"Storefront\",\"channel\":\"$ONLINE_STORE\"}"
 PUBLISHABLE=$(token)
 SAVED_SF_AUTH=("${SF_AUTH[@]}")
 SF_AUTH=(-H "x-publishable-key: $PUBLISHABLE")

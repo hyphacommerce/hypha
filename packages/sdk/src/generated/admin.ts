@@ -399,6 +399,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every channel, oldest first. */
+        get: operations["admin.channels.list"];
+        put?: never;
+        /** Creates a channel. It sells nothing until products are published to it. */
+        post: operations["admin.channels.create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/channels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A channel. */
+        get: operations["admin.channels.fetch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Renames a channel. Its kind can't change. */
+        patch: operations["admin.channels.update"];
+        trace?: never;
+    };
+    "/admin/channels/{id}/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publishes products to the channel; ones already published are left as they are. */
+        post: operations["admin.channels.publish"];
+        /** Unpublishes products from the channel; ones not published are left as they are. */
+        delete: operations["admin.channels.unpublish"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/customers": {
         parameters: {
             query?: never;
@@ -1006,6 +1060,23 @@ export interface paths {
         patch: operations["admin.products.update"];
         trace?: never;
     };
+    "/admin/products/{id}/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Sets the channels a product is sold through (the product page's Publishing card). */
+        put: operations["admin.channels.set_for_product"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/products/{id}/media": {
         parameters: {
             query?: never;
@@ -1606,6 +1677,7 @@ export interface components {
          */
         ApiKeyId: string;
         ApiKeyResponse: {
+            channel?: components["schemas"]["ChannelId"] | null;
             created_at: string;
             id: components["schemas"]["ApiKeyId"];
             kind: string;
@@ -1815,6 +1887,35 @@ export interface components {
             current_password: string;
             new_password: string;
         };
+        /**
+         * @description A ChannelId: `chan_` and 32 hex digits.
+         * @example chan_0190f1a2b3c47d8e9f00112233445566
+         */
+        ChannelId: string;
+        /**
+         * @description What a channel is for. More kinds may come: show unknown ones as `custom`.
+         *
+         *     Known values: `online_store`, `agentic`, `custom`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        ChannelKind: string;
+        ChannelListResponse: {
+            /** @description Oldest first. A store has a handful, so they come in one list. */
+            items: components["schemas"]["ChannelResponse"][];
+        };
+        ChannelProductsRequest: {
+            /** @description Product IDs. They aren't checked: an unknown one is stored and never matches. */
+            products: components["schemas"]["ProductId"][];
+        };
+        ChannelResponse: {
+            /** @description When it was created, RFC 3339 in UTC. */
+            created_at: string;
+            id: components["schemas"]["ChannelId"];
+            kind: components["schemas"]["ChannelKind"];
+            name: string;
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
+        };
         ClassRateResponse: {
             rate_ppm: components["schemas"]["TaxRate"];
             tax_class: components["schemas"]["TaxClassId"];
@@ -1833,6 +1934,7 @@ export interface components {
          */
         CountryCode: string;
         CreateApiKeyRequest: {
+            channel?: components["schemas"]["ChannelId"] | null;
             kind: components["schemas"]["KindRequest"];
             name: string;
             /** @description Required for a secret key; a publishable key always has the storefront scopes. */
@@ -1882,6 +1984,11 @@ export interface components {
         };
         CreateCatalogRequest: {
             market: components["schemas"]["MarketId"];
+        };
+        CreateChannelRequest: {
+            kind: components["schemas"]["ChannelKind"];
+            /** @description Up to 255 characters, unique ignoring case. */
+            name: string;
         };
         CreateCustomerRequest: {
             email: string;
@@ -2523,6 +2630,14 @@ export interface components {
             max: components["schemas"]["Money"];
             min: components["schemas"]["Money"];
         };
+        ProductChannelsRequest: {
+            /** @description Every channel the product is sold through; the others stop selling it. */
+            channels: components["schemas"]["ChannelId"][];
+        };
+        ProductChannelsResponse: {
+            /** @description Sorted. */
+            channels: components["schemas"]["ChannelId"][];
+        };
         /**
          * @description A ProductId: `prod_` and 32 hex digits.
          * @example prod_0190f1a2b3c47d8e9f00112233445566
@@ -2919,6 +3034,10 @@ export interface components {
             alt?: string | null;
             /** @description The library's label; up to 255 characters. */
             title?: string | null;
+        };
+        /** @description A JSON Merge Patch of a channel. */
+        UpdateChannelRequest: {
+            name?: string;
         };
         /**
          * @description JSON Merge Patch (see `patch`): only the fields sent change, `null` clears a name or
@@ -5412,6 +5531,533 @@ export interface operations {
         };
         responses: {
             /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.channels.list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelListResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.channels.create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateChannelRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.channels.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.channels.update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateChannelRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.channels.publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelProductsRequest"];
+            };
+        };
+        responses: {
+            /** @description Published */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.channels.unpublish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelProductsRequest"];
+            };
+        };
+        responses: {
+            /** @description Unpublished */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -9353,6 +9999,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.channels.set_for_product": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductChannelsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductChannelsResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */

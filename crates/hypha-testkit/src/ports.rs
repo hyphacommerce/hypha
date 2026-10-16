@@ -305,3 +305,14 @@ impl hypha_channels::HasChannels for InMemoryPorts {
         &self.channels
     }
 }
+
+impl hypha_auth::ChannelDirectory for InMemoryPorts {
+    async fn channel_exists(
+        &self,
+        channel: hypha_core::ChannelId,
+    ) -> Result<bool, hypha_core::RepoError> {
+        Ok(hypha_channels::ChannelRepo::get(&self.channels, channel)
+            .await?
+            .is_some())
+    }
+}

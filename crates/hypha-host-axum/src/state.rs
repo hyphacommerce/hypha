@@ -355,11 +355,14 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_apps::HasApps
         + hypha_search_index::HasSearchQueue
         + hypha_search_index::HasSearchSettings
+        + hypha_channels::HasChannels
+        + hypha_auth::ChannelDirectory
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts
                        + hypha_markets::StageFixedPrices
-                       + hypha_tax::StageTaxAssignments,
+                       + hypha_tax::StageTaxAssignments
+                       + hypha_channels::StagePublications,
         >
     where
         Self: 'a;

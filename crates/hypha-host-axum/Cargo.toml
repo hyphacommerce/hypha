@@ -24,6 +24,7 @@ hypha-users = { path = "../hypha-users" }
 hypha-dispatch = { path = "../hypha-dispatch" }
 hypha-search = { path = "../hypha-search" }
 hypha-search-index = { path = "../hypha-search-index" }
+hypha-channels = { path = "../hypha-channels" }
 hypha-media = { path = "../hypha-media" }
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-shipping = { path = "../hypha-shipping" }

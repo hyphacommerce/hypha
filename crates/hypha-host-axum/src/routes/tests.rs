@@ -192,8 +192,9 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
         kind: ApiKeyKind::Secret,
         name: "Tests".to_string(),
         scopes: Some(Scope::ALL.to_vec()),
+        channel: None,
     };
-    let (_, token) = create_api_key(&Ctx::system(), ports.api_keys(), &state.env, input)
+    let (_, token) = create_api_key(&Ctx::system(), ports.api_keys(), &ports, &state.env, input)
         .await
         .unwrap();
     TestApp {
@@ -1336,13 +1337,9 @@ async fn a_key_has_only_its_scopes() {
 #[tokio::test]
 async fn a_publishable_key_works_on_the_storefront_only() {
     let app = app().await;
-    let (status, created) = send(
-        &app,
-        "POST",
-        "/admin/api-keys",
-        Some(r#"{"kind":"publishable","name":"Storefront"}"#),
-    )
-    .await;
+    let body =
+        json!({ "kind": "publishable", "name": "Storefront", "channel": online_store(&app).await });
+    let (status, created) = send(&app, "POST", "/admin/api-keys", Some(&body.to_string())).await;
     assert_eq!(status, StatusCode::CREATED);
     assert!(
         created["redacted"]
@@ -1389,8 +1386,141 @@ async fn the_storefront_takes_no_admin_credentials() {
 
 /// A publishable key, made with the admin key.
 async fn publishable(app: &TestApp) -> String {
-    let body = json!({ "kind": "publishable", "name": "Storefront" });
+    let body = json!({
+        "kind": "publishable",
+        "name": "Storefront",
+        "channel": online_store(app).await,
+    });
     key(app, body).await
+}
+
+/// The channel every store starts with (migration 0036).
+async fn online_store(app: &TestApp) -> String {
+    let (_, channels) = send(app, "GET", "/admin/channels", None).await;
+    channels["items"][0]["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn channels_are_listed_created_renamed_and_publish_products() {
+    let app = app().await;
+    let (status, channels) = send(&app, "GET", "/admin/channels", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        (&channels["items"][0]["name"], &channels["items"][0]["kind"]),
+        (&json!("Online Store"), &json!("online_store"))
+    );
+
+    let body = r#"{"name":"Outlet","kind":"custom"}"#;
+    let (status, outlet) = send(&app, "POST", "/admin/channels", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{outlet}");
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/channels",
+        Some(r#"{"name":"OUTLET","kind":"custom"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "channel_name_taken")
+    );
+    let outlet_url = format!("/admin/channels/{}", outlet["id"].as_str().unwrap());
+    let (status, renamed) = send(
+        &app,
+        "PATCH",
+        &outlet_url,
+        Some(r#"{"name":"Outlet store"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, &renamed["name"]),
+        (StatusCode::OK, &json!("Outlet store"))
+    );
+    let missing = "/admin/channels/chan_00000000000000000000000000000009";
+    let (status, body) = send(&app, "GET", missing, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "channel_not_found")
+    );
+
+    let mug = create_product(&app, "mug").await;
+    let body = json!({ "products": [mug] }).to_string();
+    let (status, _) = send(&app, "POST", &format!("{outlet_url}/products"), Some(&body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let channels = json!({ "channels": [online_store(&app).await] }).to_string();
+    let (status, set) = send(
+        &app,
+        "PUT",
+        &format!("/admin/products/{mug}/channels"),
+        Some(&channels),
+    )
+    .await;
+    assert_eq!(
+        (status, &set["channels"]),
+        (StatusCode::OK, &json!([online_store(&app).await]))
+    );
+    let (status, body) = send(
+        &app,
+        "PUT",
+        "/admin/products/prod_00000000000000000000000000000009/channels",
+        Some(&channels),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "product_not_found")
+    );
+    let unknown = r#"{"channels":["chan_00000000000000000000000000000009"]}"#;
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &format!("/admin/products/{mug}/channels"),
+        Some(unknown),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "channel_not_found")
+    );
+}
+
+#[tokio::test]
+async fn a_publishable_key_needs_a_channel_and_a_secret_key_none() {
+    let app = app().await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/api-keys",
+        Some(r#"{"kind":"publishable","name":"Web"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "api_key_channel_required")
+    );
+    let unknown =
+        r#"{"kind":"publishable","name":"Web","channel":"chan_00000000000000000000000000000009"}"#;
+    let (status, body) = send(&app, "POST", "/admin/api-keys", Some(unknown)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "channel_not_found")
+    );
+    let body = json!({ "kind": "secret", "name": "Server", "scopes": ["products:read"], "channel": online_store(&app).await }).to_string();
+    let (status, body) = send(&app, "POST", "/admin/api-keys", Some(&body)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "api_key_channel_not_allowed"
+        )
+    );
+    let body = json!({ "kind": "publishable", "name": "Web", "channel": online_store(&app).await })
+        .to_string();
+    let (status, created) = send(&app, "POST", "/admin/api-keys", Some(&body)).await;
+    assert_eq!(
+        (status, &created["channel"]),
+        (StatusCode::CREATED, &json!(online_store(&app).await))
+    );
 }
 
 #[tokio::test]

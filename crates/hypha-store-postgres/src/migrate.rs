@@ -204,6 +204,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "channels",
             sql: include_str!("../migrations/0036_channels.sql"),
         },
+        Migration {
+            version: 37,
+            name: "api_key_channels",
+            sql: include_str!("../migrations/0037_api_key_channels.sql"),
+        },
     ],
 };
 

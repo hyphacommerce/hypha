@@ -461,6 +461,23 @@ impl From<hypha_stores::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_channels::CommandError> for ApiError {
+    fn from(e: hypha_channels::CommandError) -> Self {
+        use hypha_channels::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // In a body (a product's channels) unless a route says it's its URL's.
+            E::Channel(_) | E::ChannelNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::NameTaken(_) => StatusCode::CONFLICT,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 impl From<hypha_search_index::CommandError> for ApiError {
     fn from(e: hypha_search_index::CommandError) -> Self {
         use hypha_search_index::CommandError as E;
@@ -929,9 +946,16 @@ impl From<hypha_auth::CommandError> for ApiError {
             | E::Identity(
                 I::MfaAlreadyEnabled | I::MfaNotEnabled | I::MfaSetupNotStarted | I::NoPassword,
             ) => StatusCode::CONFLICT,
-            E::Password(_) | E::ApiKey(K::Text(_) | K::NoScopes | K::PublishableScopesFixed) => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
+            E::Password(_)
+            | E::ApiKey(
+                K::Text(_)
+                | K::NoScopes
+                | K::PublishableScopesFixed
+                | K::ChannelRequired
+                | K::ChannelNotAllowed,
+            )
+            // A new key's channel arrives in the body.
+            | E::ChannelNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             // A session whose identity is gone, a sealed secret that won't open, a hasher
             // failure: all server-side.
             E::IdentityNotFound(_) | E::Hash(_) | E::Seal(_) => return Self::internal(e),

@@ -337,6 +337,17 @@
       },
       "ApiKeyResponse": {
         "properties": {
+          "channel": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ChannelId",
+                "description": "A publishable key's sales channel; `null` for a secret key."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string"
           },
@@ -993,6 +1004,84 @@
         ],
         "type": "object"
       },
+      "ChannelId": {
+        "description": "A ChannelId: `chan_` and 32 hex digits.",
+        "examples": [
+          "chan_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^chan_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "ChannelKind": {
+        "description": "What a channel is for. More kinds may come: show unknown ones as `custom`.\n\nKnown values: `online_store`, `agentic`, `custom`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "online_store",
+          "agentic",
+          "custom"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "ChannelListResponse": {
+        "properties": {
+          "items": {
+            "description": "Oldest first. A store has a handful, so they come in one list.",
+            "items": {
+              "$ref": "#/components/schemas/ChannelResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ChannelProductsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "products": {
+            "description": "Product IDs. They aren't checked: an unknown one is stored and never matches.",
+            "items": {
+              "$ref": "#/components/schemas/ProductId"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "products"
+        ],
+        "type": "object"
+      },
+      "ChannelResponse": {
+        "properties": {
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChannelKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "ClassRateResponse": {
         "properties": {
           "rate_ppm": {
@@ -1048,6 +1137,17 @@
       "CreateApiKeyRequest": {
         "additionalProperties": false,
         "properties": {
+          "channel": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ChannelId",
+                "description": "Required for a publishable key: the sales channel its storefront sells through\n(`GET /admin/channels`). A secret key has none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "kind": {
             "$ref": "#/components/schemas/KindRequest"
           },
@@ -1197,6 +1297,23 @@
         },
         "required": [
           "market"
+        ],
+        "type": "object"
+      },
+      "CreateChannelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ChannelKind"
+          },
+          "name": {
+            "description": "Up to 255 characters, unique ignoring case.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
         ],
         "type": "object"
       },
@@ -3154,6 +3271,37 @@
         ],
         "type": "object"
       },
+      "ProductChannelsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "channels": {
+            "description": "Every channel the product is sold through; the others stop selling it.",
+            "items": {
+              "$ref": "#/components/schemas/ChannelId"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "channels"
+        ],
+        "type": "object"
+      },
+      "ProductChannelsResponse": {
+        "properties": {
+          "channels": {
+            "description": "Sorted.",
+            "items": {
+              "$ref": "#/components/schemas/ChannelId"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "channels"
+        ],
+        "type": "object"
+      },
       "ProductId": {
         "description": "A ProductId: `prod_` and 32 hex digits.",
         "examples": [
@@ -4349,6 +4497,16 @@
               "string",
               "null"
             ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdateChannelRequest": {
+        "additionalProperties": false,
+        "description": "A JSON Merge Patch of a channel.",
+        "properties": {
+          "name": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -7932,6 +8090,670 @@
         ],
         "x-hypha-scopes": [
           "markets:write"
+        ]
+      }
+    },
+    "/admin/channels": {
+      "get": {
+        "operationId": "admin.channels.list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every channel, oldest first.",
+        "tags": [
+          "channels"
+        ],
+        "x-hypha-scopes": [
+          "channels:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.channels.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChannelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Creates a channel. It sells nothing until products are published to it.",
+        "tags": [
+          "channels"
+        ],
+        "x-hypha-scopes": [
+          "channels:write"
+        ]
+      }
+    },
+    "/admin/channels/{id}": {
+      "get": {
+        "operationId": "admin.channels.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A channel.",
+        "tags": [
+          "channels"
+        ],
+        "x-hypha-scopes": [
+          "channels:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.channels.update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateChannelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Renames a channel. Its kind can't change.",
+        "tags": [
+          "channels"
+        ],
+        "x-hypha-scopes": [
+          "channels:write"
+        ]
+      }
+    },
+    "/admin/channels/{id}/products": {
+      "delete": {
+        "operationId": "admin.channels.unpublish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelProductsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Unpublished"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Unpublishes products from the channel; ones not published are left as they are.",
+        "tags": [
+          "channels"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      },
+      "post": {
+        "operationId": "admin.channels.publish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelProductsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Published"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publishes products to the channel; ones already published are left as they are.",
+        "tags": [
+          "channels"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
         ]
       }
     },
@@ -13004,6 +13826,145 @@
         "summary": "Changes a product's title, handle, description, vendor, product type or tags.",
         "tags": [
           "products"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/products/{id}/channels": {
+      "put": {
+        "operationId": "admin.channels.set_for_product",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductChannelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductChannelsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets the channels a product is sold through (the product page's Publishing card).",
+        "tags": [
+          "channels"
         ],
         "x-hypha-scopes": [
           "products:write"

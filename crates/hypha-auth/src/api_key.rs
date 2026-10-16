@@ -1,6 +1,6 @@
 //! API keys (design note 0008, A8): how scripts, integrations and storefronts call.
 
-use hypha_core::{Actor, ApiKeyId, Scope, Timestamp, Version, Versioned, required_text};
+use hypha_core::{Actor, ApiKeyId, ChannelId, Scope, Timestamp, Version, Versioned, required_text};
 
 use crate::{error::ApiKeyError, error::RestoreError, token::TokenHash};
 
@@ -38,6 +38,9 @@ pub struct ApiKey {
     token_hash: TokenHash,
     last_four: String,
     scopes: Vec<Scope>,
+    /// The sales channel a publishable key sells through (design note 0020, CH4); a
+    /// secret key has none.
+    channel: Option<ChannelId>,
     created_by: Actor,
     created_at: Timestamp,
     revoked_at: Option<Timestamp>,
@@ -60,6 +63,8 @@ pub struct ApiKeyParts {
     pub name: String,
     /// Required for a secret key; must be `None` for a publishable one.
     pub scopes: Option<Vec<Scope>>,
+    /// Required for a publishable key; must be `None` for a secret one.
+    pub channel: Option<ChannelId>,
     pub created_by: Actor,
     pub created_at: Timestamp,
 }
@@ -81,6 +86,11 @@ impl ApiKey {
         if scopes.is_empty() {
             return Err(ApiKeyError::NoScopes);
         }
+        match (parts.kind, parts.channel) {
+            (ApiKeyKind::Publishable, None) => return Err(ApiKeyError::ChannelRequired),
+            (ApiKeyKind::Secret, Some(_)) => return Err(ApiKeyError::ChannelNotAllowed),
+            _ => {}
+        }
         Ok(Self {
             id: parts.id,
             version: Version::NEW,
@@ -89,6 +99,7 @@ impl ApiKey {
             token_hash,
             last_four: last_four.to_string(),
             scopes,
+            channel: parts.channel,
             created_by: parts.created_by,
             created_at: parts.created_at,
             revoked_at: None,
@@ -128,6 +139,11 @@ impl ApiKey {
         &self.scopes
     }
 
+    /// The channel a publishable key sells through; `None` for a secret key.
+    pub fn channel(&self) -> Option<ChannelId> {
+        self.channel
+    }
+
     pub fn created_by(&self) -> Actor {
         self.created_by
     }
@@ -158,6 +174,7 @@ impl ApiKey {
             token_hash: self.token_hash,
             last_four: self.last_four.clone(),
             scopes: self.scopes.clone(),
+            channel: self.channel,
             created_by: self.created_by,
             created_at: self.created_at,
             revoked_at: self.revoked_at,
@@ -179,6 +196,7 @@ impl ApiKey {
             kind: s.kind,
             name: s.name,
             scopes,
+            channel: s.channel,
             created_by: s.created_by,
             created_at: s.created_at,
         };
@@ -206,6 +224,7 @@ pub struct ApiKeySnapshot {
     pub token_hash: TokenHash,
     pub last_four: String,
     pub scopes: Vec<Scope>,
+    pub channel: Option<ChannelId>,
     pub created_by: Actor,
     pub created_at: Timestamp,
     pub revoked_at: Option<Timestamp>,
@@ -223,7 +242,9 @@ mod tests {
             id: ApiKeyId::from_uuid(Uuid::from_u128(1)),
             kind,
             name: " Importer ".to_string(),
-            scopes,
+            scopes: scopes.clone(),
+            channel: (kind == ApiKeyKind::Publishable)
+                .then(|| hypha_core::ChannelId::from_uuid(Uuid::from_u128(9))),
             created_by: Actor::System,
             created_at: Timestamp::UNIX_EPOCH,
         }

@@ -6,8 +6,8 @@
 //! the request body: that is their authorization.
 
 use hypha_core::{
-    Actor, ApiKeyId, AuthError, Clock, Ctx, Email, ErrorCode, HasBatch, IdGenerator, IdentityId,
-    PasswordResetId, Random, RepoError, Scope, SessionId, Timestamp,
+    Actor, ApiKeyId, AuthError, ChannelId, Clock, Ctx, Email, ErrorCode, HasBatch, IdGenerator,
+    IdentityId, PasswordResetId, Random, RepoError, Scope, SessionId, Timestamp,
 };
 use thiserror::Error;
 
@@ -74,6 +74,8 @@ pub enum CommandError {
     /// Granting a scope the caller doesn't hold (design note 0008, section 4).
     #[error("you can't grant {0}, which you don't have")]
     CannotGrant(Scope),
+    #[error("channel {0} not found")]
+    ChannelNotFound(ChannelId),
 }
 
 impl ErrorCode for CommandError {
@@ -94,6 +96,7 @@ impl ErrorCode for CommandError {
             CommandError::ApiKeyRevoked(_) => "api_key_revoked",
             CommandError::IdentityNotFound(_) => "identity_not_found",
             CommandError::CannotGrant(_) => "not_allowed_to_grant",
+            CommandError::ChannelNotFound(_) => "channel_not_found",
         }
     }
 }
@@ -719,6 +722,17 @@ pub struct CreateApiKey {
     pub name: String,
     /// Required for a secret key; `None` for a publishable one.
     pub scopes: Option<Vec<Scope>>,
+    /// Required for a publishable key (the channel its storefront sells through);
+    /// `None` for a secret one.
+    pub channel: Option<ChannelId>,
+}
+
+/// Whether a sales channel exists (design note 0020): what creating a publishable key
+/// asks, without `hypha-auth` depending on `hypha-channels`. Storage adapters, which
+/// see both, implement it.
+#[allow(async_fn_in_trait)]
+pub trait ChannelDirectory {
+    async fn channel_exists(&self, channel: ChannelId) -> Result<bool, RepoError>;
 }
 
 /// Creates a key and returns it with its token, which is never shown again. The caller
@@ -726,10 +740,16 @@ pub struct CreateApiKey {
 pub async fn create_api_key<R: ApiKeyRepo>(
     ctx: &Ctx,
     keys: &R,
+    channels: &impl ChannelDirectory,
     env: &(impl IdGenerator + Clock + Random),
     input: CreateApiKey,
 ) -> Result<(ApiKey, NewToken), CommandError> {
     ctx.require(Scope::ApiKeysWrite)?;
+    if let Some(channel) = input.channel
+        && !channels.channel_exists(channel).await?
+    {
+        return Err(CommandError::ChannelNotFound(channel));
+    }
     let token = NewToken::generate(
         match input.kind {
             ApiKeyKind::Secret => TokenKind::SecretKey,
@@ -742,6 +762,7 @@ pub async fn create_api_key<R: ApiKeyRepo>(
         kind: input.kind,
         name: input.name,
         scopes: input.scopes,
+        channel: input.channel,
         created_by: ctx.actor(),
         created_at: env.now(),
     };
@@ -779,7 +800,8 @@ pub async fn revoke_api_key<R: ApiKeyRepo>(
     Ok(key)
 }
 
-/// The `Ctx` for a request carrying an API key: the key as the actor, with its scopes.
+/// The `Ctx` for a request carrying an API key: the key as the actor, with its scopes,
+/// and a publishable key's channel (design note 0020, CH5).
 pub async fn authenticate_api_key<R: ApiKeyRepo>(
     keys: &R,
     token: &str,
@@ -795,5 +817,9 @@ pub async fn authenticate_api_key<R: ApiKeyRepo>(
         .await?
         .filter(|k| k.revoked_at().is_none())
         .ok_or(CommandError::InvalidToken)?;
-    Ok(Ctx::new(Actor::ApiKey(key.id()), key.scopes().to_vec()))
+    let actor = Actor::ApiKey(key.id());
+    Ok(match key.channel() {
+        Some(channel) => Ctx::in_channel(actor, key.scopes().to_vec(), channel),
+        None => Ctx::new(actor, key.scopes().to_vec()),
+    })
 }

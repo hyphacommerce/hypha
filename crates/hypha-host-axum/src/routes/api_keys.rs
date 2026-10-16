@@ -5,7 +5,7 @@ use axum::{Json, extract::State, http::StatusCode};
 use hypha_auth::{
     ApiKey, ApiKeyKind, CreateApiKey, HasApiKeys, create_api_key, get_api_key, revoke_api_key,
 };
-use hypha_core::{ApiKeyId, Scope};
+use hypha_core::{ApiKeyId, ChannelId, Scope};
 use serde::{Deserialize, Serialize};
 
 use super::rfc3339;
@@ -29,6 +29,9 @@ pub(super) struct CreateApiKeyRequest {
     name: String,
     /// Required for a secret key; a publishable key always has the storefront scopes.
     scopes: Option<Vec<Scope>>,
+    /// Required for a publishable key: the sales channel its storefront sells through
+    /// (`GET /admin/channels`). A secret key has none.
+    channel: Option<ChannelId>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -39,6 +42,8 @@ pub(super) struct ApiKeyResponse {
     /// `hypha_sk_…a1b2`: enough to tell keys apart.
     redacted: String,
     scopes: Vec<Scope>,
+    /// A publishable key's sales channel; `null` for a secret key.
+    channel: Option<ChannelId>,
     created_at: String,
     revoked_at: Option<String>,
 }
@@ -51,6 +56,7 @@ impl ApiKeyResponse {
             name: k.name().to_string(),
             redacted: k.redacted(),
             scopes: k.scopes().to_vec(),
+            channel: k.channel(),
             created_at: rfc3339(k.created_at())?,
             revoked_at: k.revoked_at().map(rfc3339).transpose()?,
         })
@@ -87,8 +93,9 @@ pub(super) async fn create<S: Storage>(
         },
         name: req.name,
         scopes: req.scopes,
+        channel: req.channel,
     };
-    let (key, token) = create_api_key(&ctx, ports.api_keys(), &state.env, input).await?;
+    let (key, token) = create_api_key(&ctx, ports.api_keys(), &ports, &state.env, input).await?;
     let response = CreatedApiKeyResponse {
         key: ApiKeyResponse::new(&key)?,
         token: token.expose().to_string(),
