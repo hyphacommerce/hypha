@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     Handle, NewVariant, OptionDraft, Product, ProductError, ProductFilter, ProductRepo,
-    ProductStatus, ProductSummary, VariantPatch, repo::keys,
+    ProductStatus, ProductSummary, VariantDraft, VariantPatch, repo::keys,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -206,7 +206,7 @@ pub async fn update_product<R: ProductRepo>(
         }
         product.set_handle(handle);
     }
-    save(repo, &mut product, None).await?;
+    save(repo, &mut product, &[]).await?;
     Ok(product)
 }
 
@@ -229,7 +229,7 @@ pub async fn set_product_options<R: ProductRepo, I: IdGenerator>(
     ctx.require(Scope::ProductsWrite)?;
     let mut product = load(repo, id).await?;
     product.set_options(input.options, &input.remove_variants, ids)?;
-    save(repo, &mut product, None).await?;
+    save(repo, &mut product, &[]).await?;
     Ok(product)
 }
 
@@ -273,7 +273,7 @@ pub async fn add_product_variant<R: ProductRepo, I: IdGenerator>(
         .variant(variant)
         .and_then(|v| v.sku())
         .map(str::to_string);
-    save(repo, &mut product, sku.as_deref()).await?;
+    save(repo, &mut product, sku.as_slice()).await?;
     Ok(product)
 }
 
@@ -316,8 +316,68 @@ pub async fn update_product_variant<R: ProductRepo>(
         .variant(variant)
         .and_then(|v| v.sku())
         .map(str::to_string);
-    let changed = sku.as_deref().filter(|_| sku != sku_before);
-    save(repo, &mut product, changed).await?;
+    // Only a SKU this change gave the variant needs checking against other products.
+    let changed: Vec<String> = sku
+        .into_iter()
+        .filter(|sku| Some(sku) != sku_before.as_ref())
+        .collect();
+    save(repo, &mut product, &changed).await?;
+    Ok(product)
+}
+
+/// A variant in a whole list (`set_product_variants`): an existing one by `id`, or a new
+/// one without. Every field is given, as in a `PUT`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetVariant {
+    pub id: Option<VariantId>,
+    pub sku: Option<String>,
+    pub price: Money,
+    pub selections: Vec<OptionValueId>,
+    pub weight: Option<Weight>,
+    pub requires_shipping: bool,
+}
+
+/// Sets a product's whole variant list in one write (design note 0021, Q1): listed
+/// variants with an ID are updated, those without are added, and stored ones left out
+/// are removed, all or nothing, with one set of events. The admin's "Create all
+/// variants" sends its combinations this way: nothing here expands options, and
+/// `Product::MAX_VARIANTS` bounds the list.
+pub async fn set_product_variants<R: ProductRepo, I: IdGenerator>(
+    ctx: &Ctx,
+    repo: &R,
+    ids: &I,
+    id: ProductId,
+    variants: Vec<SetVariant>,
+) -> Result<Product, CommandError> {
+    ctx.require(Scope::ProductsWrite)?;
+    let drafts = variants
+        .into_iter()
+        .map(|v| {
+            Ok(VariantDraft {
+                id: v.id,
+                sku: v.sku,
+                price: Price::new(v.price)?,
+                selections: v.selections,
+                weight: v.weight,
+                requires_shipping: v.requires_shipping,
+            })
+        })
+        .collect::<Result<Vec<_>, CommandError>>()?;
+    let mut product = load(repo, id).await?;
+    let skus_before: Vec<String> = product
+        .variants()
+        .iter()
+        .filter_map(|v| v.sku().map(str::to_string))
+        .collect();
+    product.set_variants(drafts, ids)?;
+    let new_skus: Vec<String> = product
+        .variants()
+        .iter()
+        .filter_map(|v| v.sku())
+        .filter(|sku| !skus_before.iter().any(|before| before == sku))
+        .map(str::to_string)
+        .collect();
+    save(repo, &mut product, &new_skus).await?;
     Ok(product)
 }
 
@@ -332,7 +392,7 @@ pub async fn remove_product_variant<R: ProductRepo>(
     ctx.require(Scope::ProductsWrite)?;
     let mut product = load(repo, id).await?;
     product.remove_variant(variant)?;
-    save(repo, &mut product, None).await?;
+    save(repo, &mut product, &[]).await?;
     Ok(product)
 }
 
@@ -340,29 +400,40 @@ async fn load<R: ProductRepo>(repo: &R, id: ProductId) -> Result<Product, Comman
     repo.get(id).await?.ok_or(CommandError::ProductNotFound(id))
 }
 
-/// Writes a changed product. `new_sku` is a SKU this change gave a variant: it's checked
-/// against other products first, and a concurrent write that takes it first reports the
-/// same `SkuTaken`, like a taken handle.
+/// Writes a changed product. `new_skus` are SKUs this change gave variants: they're
+/// checked against other products first, and a concurrent write that takes one first
+/// reports the same `SkuTaken`, like a taken handle.
 async fn save<R: ProductRepo>(
     repo: &R,
     product: &mut Product,
-    new_sku: Option<&str>,
+    new_skus: &[String],
 ) -> Result<(), CommandError> {
-    if let Some(sku) = new_sku
-        && let Some(taken) = sku_taken(repo, product.id(), sku).await?
-    {
+    if let Some(taken) = first_sku_taken(repo, product.id(), new_skus).await? {
         return Err(taken);
     }
-    let written = repo.update(product).await;
-    match (written, new_sku) {
-        (Err(RepoError::Duplicate(key)), Some(sku)) if key == keys::VARIANT_SKU => {
-            let taken = sku_taken(repo, product.id(), sku).await?;
+    match repo.update(product).await {
+        Err(RepoError::Duplicate(key)) if key == keys::VARIANT_SKU && !new_skus.is_empty() => {
+            let taken = first_sku_taken(repo, product.id(), new_skus).await?;
             Err(taken.unwrap_or(RepoError::Duplicate(key).into()))
         }
-        (written, _) => {
+        written => {
             report_duplicate(written, keys::HANDLE, handle_taken(repo, product.handle())).await
         }
     }
+}
+
+/// `SkuTaken` for the first of `skus` another product has.
+async fn first_sku_taken<R: ProductRepo>(
+    repo: &R,
+    own: ProductId,
+    skus: &[String],
+) -> Result<Option<CommandError>, CommandError> {
+    for sku in skus {
+        if let Some(taken) = sku_taken(repo, own, sku).await? {
+            return Ok(Some(taken));
+        }
+    }
+    Ok(None)
 }
 
 /// `SkuTaken` naming the other product that has `sku`, if one does.

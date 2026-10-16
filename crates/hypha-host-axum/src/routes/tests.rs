@@ -4193,3 +4193,56 @@ async fn markets_are_renamed_price_lists_adjusted_and_keys_listed() {
         "tokens are shown only once"
     );
 }
+
+#[tokio::test]
+async fn a_products_whole_variant_list_is_set_in_one_put() {
+    let app = app().await;
+    let product = create_product(&app, "tee").await;
+    let options = r#"{"options":[{"name":"Size","values":[{"label":"S"},{"label":"M"}]}],"remove_variants":[]}"#;
+    let url = format!("/admin/products/{product}/options");
+    let (status, tee) = send(&app, "PUT", &url, Some(options)).await;
+    assert_eq!(status, StatusCode::OK, "{tee}");
+    let values = &tee["options"][0]["values"];
+    let (small, medium) = (values[0]["id"].clone(), values[1]["id"].clone());
+    let first = tee["variants"][0]["id"].clone();
+
+    // "Create all variants": the admin sends every combination as an explicit list.
+    let body = json!({"variants": [
+        {"id": first, "sku": "TEE-S", "price": {"amount": 1000, "currency": "EUR"}, "selections": [small], "weight_grams": 180, "requires_shipping": true},
+        {"id": null, "sku": "TEE-M", "price": {"amount": 1100, "currency": "EUR"}, "selections": [medium], "weight_grams": null, "requires_shipping": true}
+    ]});
+    let url = format!("/admin/products/{product}/variants");
+    let (status, tee) = send(&app, "PUT", &url, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{tee}");
+    let skus: Vec<&Value> = tee["variants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| &v["sku"])
+        .collect();
+    assert_eq!(skus, [&json!("TEE-S"), &json!("TEE-M")]);
+    assert_eq!(tee["variants"][0]["weight_grams"], json!(180));
+
+    // Every key is required, so nothing is cleared by leaving it out.
+    let body = json!({"variants": [{"id": first, "price": {"amount": 1000, "currency": "EUR"}, "selections": [small], "weight_grams": null, "requires_shipping": true}]});
+    let (status, error) = send(&app, "PUT", &url, Some(&body.to_string())).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body")
+    );
+    let body = json!({"variants": [
+        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "selections": [small], "weight_grams": null, "requires_shipping": true},
+        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "selections": [small], "weight_grams": null, "requires_shipping": true}
+    ]});
+    let (status, error) = send(&app, "PUT", &url, Some(&body.to_string())).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::CONFLICT, "duplicate_option_combination")
+    );
+    let (_, stored) = send(&app, "GET", &format!("/admin/products/{product}"), None).await;
+    assert_eq!(
+        stored["variants"].as_array().unwrap().len(),
+        2,
+        "a refused list changes nothing"
+    );
+}

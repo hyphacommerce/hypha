@@ -106,6 +106,7 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/products/{id}", products::update],
             [admin, PATCH, "/admin/products/{id}/status", products::set_status],
             [admin, PUT, "/admin/products/{id}/options", products::set_options],
+            [admin, PUT, "/admin/products/{id}/variants", products::set_variants],
             [admin, POST, "/admin/products/{id}/variants", products::add_variant],
             [admin, PATCH, "/admin/products/{id}/variants/{variant_id}", products::update_variant],
             [admin, DELETE, "/admin/products/{id}/variants/{variant_id}", products::remove_variant],

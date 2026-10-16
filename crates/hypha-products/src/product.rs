@@ -16,7 +16,7 @@ use crate::{
 
 mod edit;
 
-pub use edit::{OptionDraft, OptionValueDraft};
+pub use edit::{OptionDraft, OptionValueDraft, VariantDraft};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProductStatus {

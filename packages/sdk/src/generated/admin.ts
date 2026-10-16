@@ -1221,7 +1221,11 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /**
+         * Sets a product's whole variant list in one write (design note 0021, Q1): all or
+         *     nothing, with one set of events. A variant keeps its media.
+         */
+        put: operations["admin.products.set_variants"];
         /** Adds a variant: one combination of option values that isn't taken yet. */
         post: operations["admin.products.add_variant"];
         delete?: never;
@@ -3049,6 +3053,36 @@ export interface components {
         };
         SetVariantMediaRequest: {
             asset?: components["schemas"]["AssetId"] | null;
+        };
+        /**
+         * @description A variant in a whole list. Every key is required, `null` where allowed: a `PUT`
+         *     replaces the list, so a missing key would silently clear what's stored.
+         */
+        SetVariantRequest: {
+            id: components["schemas"]["VariantId"] | null;
+            /** @description The base price, before markets and price lists. */
+            price: components["schemas"]["Money"];
+            requires_shipping: boolean;
+            /**
+             * @description One value per option, in the order of the product's `options`; empty for a
+             *     product without options.
+             */
+            selections: components["schemas"]["OptionValueId"][];
+            /** @description Unique across the store; `null` for none. */
+            sku: string | null;
+            /**
+             * Format: int32
+             * @description `null` when not entered.
+             */
+            weight_grams: number | null;
+        };
+        SetVariantsRequest: {
+            /**
+             * @description The product's variants after the change, in order: listed variants with an `id`
+             *     are updated, those without are added, and stored ones left out are removed.
+             *     1 to 2,048; options are never expanded into variants here.
+             */
+            variants: components["schemas"]["SetVariantRequest"][];
         };
         /**
          * @description A ShippingGroupId: `shgrp_` and 32 hex digits.
@@ -11367,6 +11401,113 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SetStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.set_variants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetVariantsRequest"];
             };
         };
         responses: {

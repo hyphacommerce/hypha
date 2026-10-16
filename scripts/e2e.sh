@@ -244,6 +244,13 @@ step "the S variant's SKU and price" 200 - -X PATCH "$BASE/admin/products/$SHIRT
 contains "are stored" '"price":{"amount":1400,"currency":"EUR"},"sku":"SHIRT-S"'
 step "a SKU another variant has" 409 sku_taken -X PATCH "$BASE/admin/products/$SHIRT/variants/$SHIRT_S" -H "$JSON" \
     -d '{"sku":"SHIRT-M"}'
+VARIANTS="{\"variants\":[{\"id\":\"$SHIRT_M\",\"sku\":\"SHIRT-M\",\"price\":{\"amount\":1600,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_M\"],\"weight_grams\":null,\"requires_shipping\":true},{\"id\":\"$SHIRT_S\",\"sku\":\"SHIRT-S\",\"price\":{\"amount\":1400,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_S\"],\"weight_grams\":250,\"requires_shipping\":true}]}"
+step "the whole variant list in one PUT (0021 Q1)" 200 - -X PUT "$BASE/admin/products/$SHIRT/variants" \
+    -H "$JSON" -d "$VARIANTS"
+contains "M first now, S weighed" '"weight_grams":250'
+step "a list leaving a key out" 422 invalid_body -X PUT "$BASE/admin/products/$SHIRT/variants" -H "$JSON" \
+    -d "{\"variants\":[{\"id\":\"$SHIRT_S\",\"price\":{\"amount\":1400,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_S\"],\"weight_grams\":null,\"requires_shipping\":true}]}"
+step "an empty list" 409 no_variants -X PUT "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d '{"variants":[]}'
 ONLY_S="{\"options\":[{\"id\":\"$SIZE\",\"name\":\"Size\",\"values\":[{\"id\":\"$SIZE_S\",\"label\":\"S\"}]}]"
 step "removing M while a variant uses it" 409 option_value_in_use -X PUT "$BASE/admin/products/$SHIRT/options" \
     -H "$JSON" -d "$ONLY_S}"

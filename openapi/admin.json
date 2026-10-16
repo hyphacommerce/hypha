@@ -4332,6 +4332,78 @@
         },
         "type": "object"
       },
+      "SetVariantRequest": {
+        "additionalProperties": false,
+        "description": "A variant in a whole list. Every key is required, `null` where allowed: a `PUT`\nreplaces the list, so a missing key would silently clear what's stored.",
+        "properties": {
+          "id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VariantId",
+                "description": "The variant to keep; `null` adds one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The base price, before markets and price lists."
+          },
+          "requires_shipping": {
+            "type": "boolean"
+          },
+          "selections": {
+            "description": "One value per option, in the order of the product's `options`; empty for a\nproduct without options.",
+            "items": {
+              "$ref": "#/components/schemas/OptionValueId"
+            },
+            "type": "array"
+          },
+          "sku": {
+            "description": "Unique across the store; `null` for none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "weight_grams": {
+            "description": "`null` when not entered.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sku",
+          "price",
+          "selections",
+          "weight_grams",
+          "requires_shipping"
+        ],
+        "type": "object"
+      },
+      "SetVariantsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "variants": {
+            "description": "The product's variants after the change, in order: listed variants with an `id`\nare updated, those without are added, and stored ones left out are removed.\n1 to 2,048; options are never expanded into variants here.",
+            "items": {
+              "$ref": "#/components/schemas/SetVariantRequest"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "variants"
+        ],
+        "type": "object"
+      },
       "ShippingGroupId": {
         "description": "A ShippingGroupId: `shgrp_` and 32 hex digits.",
         "examples": [
@@ -15938,6 +16010,143 @@
           }
         ],
         "summary": "Adds a variant: one combination of option values that isn't taken yet.",
+        "tags": [
+          "products"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      },
+      "put": {
+        "operationId": "admin.products.set_variants",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVariantsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets a product's whole variant list in one write (design note 0021, Q1): all or\nnothing, with one set of events. A variant keeps its media.",
         "tags": [
           "products"
         ],

@@ -17,9 +17,10 @@ use hypha_merchandising::{
 };
 use hypha_products::{
     AddVariant, CreateSimpleProduct, HasProducts, ListProducts, OptionDraft, OptionValueDraft,
-    Product, ProductOption, ProductStatus, SetProductOptions, UpdateProduct, UpdateVariant,
-    add_product_variant, create_simple_product, remove_product_variant, set_product_options,
-    set_product_status, update_product, update_product_variant,
+    Product, ProductOption, ProductStatus, SetProductOptions, SetVariant, UpdateProduct,
+    UpdateVariant, add_product_variant, create_simple_product, remove_product_variant,
+    set_product_options, set_product_status, set_product_variants, update_product,
+    update_product_variant,
 };
 use serde::{Deserialize, Serialize};
 
@@ -827,6 +828,74 @@ pub(super) async fn add_variant<S: Storage>(
         StatusCode::CREATED,
         respond(&state, &ports, &ctx, product).await?,
     ))
+}
+
+/// A variant in a whole list. Every key is required, `null` where allowed: a `PUT`
+/// replaces the list, so a missing key would silently clear what's stored.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SetVariantRequest {
+    /// The variant to keep; `null` adds one.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schema(required = true)]
+    id: Option<VariantId>,
+    /// Unique across the store; `null` for none.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schema(required = true)]
+    sku: Option<String>,
+    /// The base price, before markets and price lists.
+    price: Money,
+    /// One value per option, in the order of the product's `options`; empty for a
+    /// product without options.
+    selections: Vec<OptionValueId>,
+    /// `null` when not entered.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schema(required = true)]
+    weight_grams: Option<u32>,
+    requires_shipping: bool,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SetVariantsRequest {
+    /// The product's variants after the change, in order: listed variants with an `id`
+    /// are updated, those without are added, and stored ones left out are removed.
+    /// 1 to 2,048; options are never expanded into variants here.
+    variants: Vec<SetVariantRequest>,
+}
+
+/// Sets a product's whole variant list in one write (design note 0021, Q1): all or
+/// nothing, with one set of events. A variant keeps its media.
+#[utoipa::path(
+    put,
+    path = "/admin/products/{id}/variants",
+    params(("id" = ProductId, Path)),
+    request_body = SetVariantsRequest,
+    responses((status = 200, description = "OK", body = ProductResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
+pub(super) async fn set_variants<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<ProductId>,
+    body: JsonBody<SetVariantsRequest>,
+) -> Result<Json<ProductResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let variants = req
+        .variants
+        .into_iter()
+        .map(|v| SetVariant {
+            id: v.id,
+            sku: v.sku,
+            price: v.price,
+            selections: v.selections,
+            weight: v.weight_grams.map(Weight::from_grams),
+            requires_shipping: v.requires_shipping,
+        })
+        .collect();
+    let product = set_product_variants(&ctx, ports.products(), &state.ids, id, variants).await?;
+    respond(&state, &ports, &ctx, product).await
 }
 
 /// A variant's SKU, price and option values (JSON Merge Patch).

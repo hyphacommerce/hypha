@@ -626,3 +626,221 @@ fn an_edit_that_changes_nothing_records_nothing() {
     block_on(update_product(&w.ctx, &w.repo, p.id(), input)).unwrap();
     assert_eq!(w.repo.outbox().types(), ["product.created"]);
 }
+
+// ---------- the whole variant list (design note 0021, Q1) ----------
+
+fn set(
+    id: Option<VariantId>,
+    sku: Option<&str>,
+    price: i64,
+    selections: Vec<OptionValueId>,
+) -> hypha_products::SetVariant {
+    hypha_products::SetVariant {
+        id,
+        sku: sku.map(str::to_string),
+        price: eur(price),
+        selections,
+        weight: None,
+        requires_shipping: true,
+    }
+}
+
+impl World {
+    fn set_variants(
+        &self,
+        product: ProductId,
+        variants: Vec<hypha_products::SetVariant>,
+    ) -> Result<Product, CommandError> {
+        block_on(hypha_products::set_product_variants(
+            &self.ctx, &self.repo, &self.ids, product, variants,
+        ))
+    }
+}
+
+#[test]
+fn a_whole_variant_list_updates_adds_and_removes_in_one_write() {
+    let w = World::new();
+    let mut shirt = w.shirt("shirt");
+    let [s, m] = [shirt.variants()[0].id(), shirt.variants()[1].id()];
+    let size = &shirt.options()[0];
+    let (small, medium) = (size.values()[0].id(), size.values()[1].id());
+    // A third size for the new variant.
+    let options = SetProductOptions {
+        options: vec![OptionDraft {
+            id: Some(size.id()),
+            name: "Size".to_string(),
+            values: vec![
+                OptionValueDraft {
+                    id: Some(small),
+                    label: "S".to_string(),
+                },
+                OptionValueDraft {
+                    id: Some(medium),
+                    label: "M".to_string(),
+                },
+                OptionValueDraft {
+                    id: None,
+                    label: "L".to_string(),
+                },
+            ],
+        }],
+        remove_variants: vec![],
+    };
+    shirt = block_on(set_product_options(
+        &w.ctx,
+        &w.repo,
+        &w.ids,
+        shirt.id(),
+        options,
+    ))
+    .unwrap();
+    let large = shirt.options()[0].values()[2].id();
+    let before = w.repo.outbox().events().len();
+
+    // M first and repriced, S left out, L added.
+    let saved = w
+        .set_variants(
+            shirt.id(),
+            vec![
+                set(Some(m), Some("SH-M"), 1500, vec![medium]),
+                set(None, None, 1600, vec![large]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(saved.variants().len(), 2);
+    assert_eq!(
+        (saved.variants()[0].id(), saved.variants()[0].sku()),
+        (m, Some("SH-M"))
+    );
+    assert_eq!(saved.variants()[0].base_price().money(), eur(1500));
+    assert_eq!(saved.variants()[1].selections(), &[large]);
+    assert_eq!(w.stored(shirt.id()), saved);
+    // Bound first: `types` borrows from the events, so they must outlive it.
+    let events = w.repo.outbox().events();
+    let types: Vec<&str> = events[before..]
+        .iter()
+        .map(|e| e.event_type.as_str())
+        .collect();
+    assert_eq!(
+        types,
+        [
+            "product.variant_added",
+            "product.variant_updated",
+            "product.variant_removed"
+        ]
+    );
+    assert!(saved.variant(s).is_none());
+}
+
+#[test]
+fn a_variant_list_that_breaks_a_rule_changes_nothing() {
+    let w = World::new();
+    let shirt = w.shirt("shirt");
+    let [s, m] = [shirt.variants()[0].id(), shirt.variants()[1].id()];
+    let small = shirt.options()[0].values()[0].id();
+    let medium = shirt.options()[0].values()[1].id();
+    let cases = [
+        (vec![], CommandError::Product(ProductError::NoVariants)),
+        (
+            vec![
+                set(Some(s), None, 1000, vec![small]),
+                set(Some(m), None, 1000, vec![small]),
+            ],
+            CommandError::Product(ProductError::DuplicateCombination),
+        ),
+        (
+            vec![
+                set(Some(s), Some("X"), 1000, vec![small]),
+                set(Some(m), Some("X"), 1000, vec![medium]),
+            ],
+            CommandError::Product(ProductError::DuplicateSku("X".to_string())),
+        ),
+        (
+            vec![
+                set(Some(s), None, 1000, vec![small]),
+                set(Some(s), None, 1000, vec![medium]),
+            ],
+            CommandError::Product(ProductError::DuplicateVariantId(s)),
+        ),
+        (
+            vec![set(
+                Some(VariantId::from_uuid(Uuid::from_u128(999))),
+                None,
+                1000,
+                vec![small],
+            )],
+            CommandError::Product(ProductError::VariantNotFound(VariantId::from_uuid(
+                Uuid::from_u128(999),
+            ))),
+        ),
+        (
+            vec![set(None, None, 1000, vec![])],
+            CommandError::Product(ProductError::SelectionCountMismatch {
+                expected: 1,
+                got: 0,
+            }),
+        ),
+        (
+            vec![set(Some(s), None, -1, vec![small])],
+            CommandError::Money(MoneyError::Negative),
+        ),
+    ];
+    for (variants, error) in cases {
+        assert_eq!(w.set_variants(shirt.id(), variants), Err(error));
+    }
+    assert_eq!(w.stored(shirt.id()), shirt);
+}
+
+#[test]
+fn a_variant_list_is_bounded_by_max_variants() {
+    let w = World::new();
+    let product = w.create("plain");
+    let too_many: Vec<_> = (0..=Product::MAX_VARIANTS)
+        .map(|_| set(None, None, 100, vec![]))
+        .collect();
+    assert_eq!(
+        w.set_variants(product.id(), too_many),
+        Err(CommandError::Product(ProductError::TooManyVariants {
+            max: Product::MAX_VARIANTS
+        }))
+    );
+}
+
+#[test]
+fn a_new_sku_in_a_list_is_checked_against_other_products() {
+    let w = World::new();
+    let mug = w.create("mug");
+    w.set_sku(mug.id(), mug.variants()[0].id(), "MUG").unwrap();
+    let cup = w.create("cup");
+    assert_eq!(
+        w.set_variants(
+            cup.id(),
+            vec![set(Some(cup.variants()[0].id()), Some("MUG"), 100, vec![])]
+        ),
+        Err(CommandError::SkuTaken {
+            sku: "MUG".to_string(),
+            product: mug.id()
+        })
+    );
+}
+
+#[test]
+fn reordering_variants_records_the_order() {
+    let w = World::new();
+    let shirt = w.shirt("shirt");
+    let [s, m] = [shirt.variants()[0].id(), shirt.variants()[1].id()];
+    let small = shirt.options()[0].values()[0].id();
+    let medium = shirt.options()[0].values()[1].id();
+    let price = |v: VariantId| shirt.variant(v).unwrap().base_price().money().amount();
+    w.set_variants(
+        shirt.id(),
+        vec![
+            set(Some(m), None, price(m), vec![medium]),
+            set(Some(s), None, price(s), vec![small]),
+        ],
+    )
+    .unwrap();
+    let last = w.repo.outbox().events().pop().unwrap();
+    assert_eq!(last.event_type, "product.updated");
+    assert_eq!(last.data["fields"], serde_json::json!(["variant_order"]));
+}

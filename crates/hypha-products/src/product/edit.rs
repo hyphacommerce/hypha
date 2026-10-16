@@ -6,13 +6,27 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AssetId, IdGenerator, OptionId, OptionValueId, VariantId, optional_text, required_text,
+    AssetId, IdGenerator, OptionId, OptionValueId, Price, VariantId, Weight, optional_text,
+    required_text,
 };
 
 use super::{Product, validate_options};
 use crate::{
-    Description, Handle, OptionValue, ProductError, ProductOption, content, variant::VariantPatch,
+    Description, Handle, OptionValue, ProductError, ProductOption, content,
+    variant::{Variant, VariantPatch},
 };
+
+/// A variant as a request lists it in a whole list (`Product::set_variants`): an
+/// existing one by `id`, or a new one without. Every field is given, as in a `PUT`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantDraft {
+    pub id: Option<VariantId>,
+    pub sku: Option<String>,
+    pub price: Price,
+    pub selections: Vec<OptionValueId>,
+    pub weight: Option<Weight>,
+    pub requires_shipping: bool,
+}
 
 /// An option as a request lists it: an existing one by `id`, or a new one without.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,6 +307,122 @@ impl Product {
         for field in changed {
             self.changes.variant_field(id, field);
         }
+        Ok(())
+    }
+
+    /// Replaces the variant list with `drafts`, in order (design note 0021, Q1): a draft
+    /// with an ID updates that variant, one without adds a variant (IDs from `ids`),
+    /// and a variant left out is removed. The rules are `add_variant`'s, over the whole
+    /// list: 1 to `MAX_VARIANTS` variants, each naming one value per option, no two
+    /// with the same combination or SKU. A variant keeps its media; new ones have none.
+    pub fn set_variants(
+        &mut self,
+        drafts: Vec<VariantDraft>,
+        ids: &impl IdGenerator,
+    ) -> Result<(), ProductError> {
+        if drafts.is_empty() {
+            return Err(ProductError::NoVariants);
+        }
+        if drafts.len() > Self::MAX_VARIANTS {
+            return Err(ProductError::TooManyVariants {
+                max: Self::MAX_VARIANTS,
+            });
+        }
+        let mut listed = HashSet::new();
+        let mut combinations = HashSet::new();
+        let mut skus = HashSet::new();
+        let mut variants = Vec::with_capacity(drafts.len());
+        for draft in drafts {
+            if draft.selections.len() != self.options.len() {
+                return Err(ProductError::SelectionCountMismatch {
+                    expected: self.options.len(),
+                    got: draft.selections.len(),
+                });
+            }
+            for (option, selection) in self.options.iter().zip(&draft.selections) {
+                if !option.has_value(*selection) {
+                    return Err(ProductError::UnknownOptionValue(*selection));
+                }
+            }
+            if !combinations.insert(draft.selections.clone()) {
+                return Err(ProductError::DuplicateCombination);
+            }
+            let sku = optional_text("sku", draft.sku)?;
+            if let Some(sku) = &sku
+                && !skus.insert(sku.clone())
+            {
+                return Err(ProductError::DuplicateSku(sku.clone()));
+            }
+            let mut variant = match draft.id {
+                Some(id) => {
+                    if !listed.insert(id) {
+                        return Err(ProductError::DuplicateVariantId(id));
+                    }
+                    self.variant(id)
+                        .cloned()
+                        .ok_or(ProductError::VariantNotFound(id))?
+                }
+                None => Variant::new(
+                    VariantId::from_uuid(ids.new_uuid()),
+                    None,
+                    draft.price,
+                    Vec::new(),
+                ),
+            };
+            variant.set_sku(sku);
+            variant.set_base_price(draft.price);
+            variant.set_selections(draft.selections);
+            variant.set_weight(draft.weight);
+            variant.set_requires_shipping(draft.requires_shipping);
+            variants.push(variant);
+        }
+
+        // Everything checked: record what changed, then swap the list in.
+        let before: Vec<VariantId> = self.variants.iter().map(|v| v.id()).collect();
+        for old in &self.variants {
+            if !variants.iter().any(|v| v.id() == old.id()) {
+                self.changes.variant_removed(old.id());
+            }
+        }
+        for new in &variants {
+            let Some(old) = self.variant(new.id()) else {
+                self.changes.variant_added(new.id());
+                continue;
+            };
+            let mut changed = Vec::new();
+            if old.sku() != new.sku() {
+                changed.push("sku");
+            }
+            if old.base_price() != new.base_price() {
+                changed.push("price");
+            }
+            if old.selections() != new.selections() {
+                changed.push("selections");
+            }
+            if old.weight() != new.weight() {
+                changed.push("weight");
+            }
+            if old.requires_shipping() != new.requires_shipping() {
+                changed.push("requires_shipping");
+            }
+            for field in changed {
+                self.changes.variant_field(new.id(), field);
+            }
+        }
+        let kept: Vec<VariantId> = before
+            .iter()
+            .copied()
+            .filter(|id| variants.iter().any(|v| v.id() == *id))
+            .collect();
+        let kept_in_new_order: Vec<VariantId> = variants
+            .iter()
+            .map(|v| v.id())
+            .filter(|id| kept.contains(id))
+            .collect();
+        if kept != kept_in_new_order {
+            self.changes.field("variant_order");
+        }
+        self.variants = variants;
         Ok(())
     }
 
