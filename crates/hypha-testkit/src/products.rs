@@ -88,6 +88,18 @@ impl ProductRepo for InMemoryProductRepo {
             .find(|p| p.variants().iter().any(|v| v.id() == variant)))
     }
 
+    async fn ids_of_variants(&self, variants: &[VariantId]) -> Result<Vec<ProductId>, RepoError> {
+        let mut ids: Vec<ProductId> = self
+            .products
+            .all()
+            .iter()
+            .filter(|p| p.variants().iter().any(|v| variants.contains(&v.id())))
+            .map(|p| p.id())
+            .collect();
+        ids.sort();
+        Ok(ids)
+    }
+
     async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError> {
         Ok(self
             .products

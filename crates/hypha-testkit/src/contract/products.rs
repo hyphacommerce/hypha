@@ -40,6 +40,8 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     shipping_facts_round_trip(&make().await).await;
     scenario("product: description, vendor, product type and tags round trip");
     content_round_trips(&make().await).await;
+    scenario("product: ids_of_variants finds each owner once");
+    ids_of_variants(&make().await).await;
     scenario("product: get_by_sku matches the exact SKU");
     sku_lookup(&make().await).await;
     scenario("product: SKUs stay unique across products, on insert and update");
@@ -558,6 +560,20 @@ async fn sku_key<R: ProductRepo>(repo: &R) {
         .unwrap();
     repo.update(&mut first).await.unwrap();
     assert_eq!(repo.get(pid(1)).await, Ok(Some(first)));
+}
+
+async fn ids_of_variants<R: ProductRepo>(repo: &R) {
+    // Shirt 1 has variants 101 and 102; product 2 has 201.
+    repo.insert(&mut shirt(1, "shirt")).await.unwrap();
+    repo.insert(&mut simple(2, "mug")).await.unwrap();
+    repo.insert(&mut simple(3, "cup")).await.unwrap();
+    let mut found = repo
+        .ids_of_variants(&[vid(101), vid(102), vid(201), vid(999)])
+        .await
+        .unwrap();
+    found.sort();
+    assert_eq!(found, [pid(1), pid(2)]);
+    assert_eq!(repo.ids_of_variants(&[]).await, Ok(vec![]));
 }
 
 async fn content_round_trips<R: ProductRepo>(repo: &R) {

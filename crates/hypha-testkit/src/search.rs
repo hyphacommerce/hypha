@@ -35,11 +35,11 @@ impl SearchIndex for InMemorySearchIndex {
     async fn replace(
         &self,
         market: MarketId,
-        product: ProductId,
+        products: &[ProductId],
         documents: &[SearchDocument],
     ) -> Result<(), IndexError> {
         let mut all = self.lock();
-        all.retain(|d| !(d.market == market && d.product == product));
+        all.retain(|d| !(d.market == market && products.contains(&d.product)));
         all.extend_from_slice(documents);
         Ok(())
     }
@@ -148,18 +148,19 @@ impl SearchQueue for InMemorySearchQueue {
             .collect())
     }
 
-    async fn finish(&self, marks: &[Mark]) -> Result<(), RepoError> {
+    async fn finish(&self, marks: &[Mark]) -> Result<Vec<Target>, RepoError> {
         let mut state = self.lock();
+        let mut gone = Vec::new();
         for mark in marks {
             match state.marks.get_mut(&mark.target) {
                 Some(queued) if queued.generation == mark.generation => {
                     state.marks.remove(&mark.target);
                 }
                 Some(queued) => queued.leased_until = None,
-                None => {}
+                None => gone.push(mark.target),
             }
         }
-        Ok(())
+        Ok(gone)
     }
 
     async fn queued(&self) -> Result<u64, RepoError> {
@@ -311,7 +312,9 @@ pub fn search_fixture() -> Vec<SearchDocument> {
             n: 4,
             market: 1,
             title: "Linen Towel",
-            description: "",
+            // Words a database's own parser might split or drop: Unicode digits and
+            // marks, and a run longer than a term may be (`MAX_TERM_CHARS`).
+            description: "Plush, naïve x² cotton. zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
             vendor: None,
             product_type: None,
             tags: &[],

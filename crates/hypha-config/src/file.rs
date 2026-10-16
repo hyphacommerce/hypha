@@ -47,8 +47,9 @@ pub struct Server {
     /// token. `HYPHA_ADMIN_URL` wins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_url: Option<String>,
-    /// The largest request body accepted: 256KiB to 64MiB. Files don't count: they're
-    /// uploaded to storage directly.
+    /// The largest request body accepted: 1KiB to 64MiB. Files don't count: they're
+    /// uploaded to storage directly. Below 256KiB, a product's longest description may
+    /// not fit.
     pub max_body: Size,
     /// How long stopping waits for jobs, and then for background work, to finish. At
     /// least 1 second.

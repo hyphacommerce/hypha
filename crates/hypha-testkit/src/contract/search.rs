@@ -22,19 +22,21 @@ fn product(n: u128) -> ProductId {
     ProductId::from_uuid(Uuid::from_u128(n))
 }
 
-/// Loads the fixture into `index`, product by product per market.
+/// Loads the fixture into `index`: one `replace` per market, for all its products.
 async fn load<I: SearchIndex>(index: &I, documents: &[SearchDocument]) {
-    let mut keys: Vec<(MarketId, ProductId)> =
-        documents.iter().map(|d| (d.market, d.product)).collect();
-    keys.sort();
-    keys.dedup();
-    for (m, p) in keys {
+    let mut markets: Vec<MarketId> = documents.iter().map(|d| d.market).collect();
+    markets.sort();
+    markets.dedup();
+    for m in markets {
         let docs: Vec<SearchDocument> = documents
             .iter()
-            .filter(|d| d.market == m && d.product == p)
+            .filter(|d| d.market == m)
             .cloned()
             .collect();
-        index.replace(m, p, &docs).await.unwrap();
+        let mut products: Vec<ProductId> = docs.iter().map(|d| d.product).collect();
+        products.sort();
+        products.dedup();
+        index.replace(m, &products, &docs).await.unwrap();
     }
 }
 
@@ -90,7 +92,10 @@ async fn replace<I: SearchIndex>(index: &I) {
         .collect();
     shirt.pop();
     shirt[0].price = hypha_core::Money::new(1, shirt[0].price.currency()).unwrap();
-    index.replace(market(1), product(1), &shirt).await.unwrap();
+    index
+        .replace(market(1), &[product(1)], &shirt)
+        .await
+        .unwrap();
     let mut all = query(1);
     all.group = Group::Variant;
     all.limit = 100;
@@ -105,8 +110,16 @@ async fn replace<I: SearchIndex>(index: &I) {
         reference::search(&expected, &all)
     );
 
-    // Empty removes the product from that market only.
-    index.replace(market(1), product(3), &[]).await.unwrap();
+    // Without documents, a product leaves that market only; one call does both.
+    let towel: Vec<SearchDocument> = fixture
+        .iter()
+        .filter(|d| d.product == product(4))
+        .cloned()
+        .collect();
+    index
+        .replace(market(1), &[product(3), product(4)], &towel)
+        .await
+        .unwrap();
     expected.retain(|d| !(d.market == market(1) && d.product == product(3)));
     assert_eq!(
         index.search(&all).await.unwrap(),
@@ -136,6 +149,8 @@ async fn battery<I: SearchIndex>(index: &I) {
     base(&|q| q.terms = terms_("ČAŠ"));
     base(&|q| q.terms = terms_("ls-red"));
     base(&|q| q.terms = terms_("tea"));
+    base(&|q| q.terms = terms_("x²"));
+    base(&|q| q.terms = terms_("plu naï"));
     base(&|q| q.terms = terms_("zzz"));
     base(&|q| q.filters = vec![filter(FacetKey::Option("color".into()), &["Red"])]);
     base(&|q| q.filters = vec![filter(FacetKey::Option("color".into()), &["Red", "Blue"])]);
@@ -242,7 +257,7 @@ async fn queued_once<Q: SearchQueue>(queue: &Q) {
         [targets[0], targets[1], targets[2]],
         "oldest marked first; marking again doesn't move it back"
     );
-    queue.finish(&leased).await.unwrap();
+    assert_eq!(queue.finish(&leased).await, Ok(vec![]));
     assert_eq!(queue.queued().await, Ok(1));
     let rest = queue.lease(at(0), at(60), 10).await.unwrap();
     assert_eq!(
@@ -259,10 +274,11 @@ async fn leases<Q: SearchQueue>(queue: &Q) {
     // The lease ended: another runner takes it (the first died).
     let again = queue.lease(at(60), at(120), 10).await.unwrap();
     assert_eq!(again, first);
-    queue.finish(&again).await.unwrap();
+    assert_eq!(queue.finish(&again).await, Ok(vec![]));
     assert_eq!(queue.queued().await, Ok(0));
-    // Finishing what's gone does nothing.
-    queue.finish(&first).await.unwrap();
+    // The first runner finishes late: its mark is gone, so it says so.
+    assert_eq!(queue.finish(&first).await, Ok(vec![Target::All]));
+    assert_eq!(queue.queued().await, Ok(0));
 }
 
 async fn marked_again<Q: SearchQueue>(queue: &Q) {
@@ -270,7 +286,7 @@ async fn marked_again<Q: SearchQueue>(queue: &Q) {
     queue.mark(&[target]).await.unwrap();
     let leased = queue.lease(at(0), at(60), 10).await.unwrap();
     queue.mark(&[target]).await.unwrap();
-    queue.finish(&leased).await.unwrap();
+    assert_eq!(queue.finish(&leased).await, Ok(vec![]));
     assert_eq!(queue.queued().await, Ok(1), "the newer mark stays");
     // And its lease is free at once.
     let next = queue.lease(at(1), at(61), 10).await.unwrap();

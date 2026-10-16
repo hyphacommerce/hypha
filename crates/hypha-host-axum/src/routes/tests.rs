@@ -276,14 +276,14 @@ async fn the_body_limit_and_rate_limits_are_configurable() {
     let app = app_configured(
         r#"
         [server]
-        max_body = "256KiB"
+        max_body = "1KiB"
 
         [rate_limits]
         login_ip = { burst = 1, per = "1h" }
         "#,
     )
     .await;
-    let big = format!("{{\"title\": \"{}\"}}", "x".repeat(256 * 1024));
+    let big = format!("{{\"title\": \"{}\"}}", "x".repeat(1024));
     let (status, body) = send(&app, "POST", "/admin/products", Some(&big)).await;
     assert_eq!(
         (status, code(&body)),

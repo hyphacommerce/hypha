@@ -663,7 +663,7 @@ contains "pages with a cursor" '"has_more":true,"next_cursor":"'
 step "a filter is key:value" 422 invalid_filter "$BASE/storefront/search?country=HR&filter=Red"
 step "an unknown facet" 422 unknown_facet "$BASE/storefront/search?country=HR&filter=colour:Red"
 step "no market sells to Japan" 422 no_market_for_country "$BASE/storefront/search?country=JP"
-step "too deep" 422 search_too_deep "$BASE/storefront/search?country=HR&limit=100&cursor=$(printf '{"v":1,"after":"950","filters":[["country","HR"]]}' | base64 | tr '+/' '-_' | tr -d '=\n')"
+step "pages stop 1000 deep" 422 search_too_deep "$BASE/storefront/search?country=HR&cursor=$(printf '{"v":1,"after":"1000","filters":[["country","HR"]]}' | base64 | tr '+/' '-_' | tr -d '=\n')"
 step "search settings" 200 - "$BASE/admin/search/settings"
 contains "the defaults" '{"split_by":[],"facets":[]}'
 step "split listings by colour" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" \

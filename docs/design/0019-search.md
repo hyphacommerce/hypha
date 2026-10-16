@@ -416,8 +416,9 @@ trait, SE10; shared pricing and stock loaders; `Progress` in core) and the crate
 (SE11). Steps 6 (admin settings screen) and 7 (Meilisearch) are still to do.
 
 - **Products** gained `description` (sanitised HTML, `ammonia`), `vendor`,
-  `product_type` and `tags` (migration 0033); `server.max_body` is at least 256 KiB so
-  a full description fits. The admin list filters by `q` (title, handle, SKU; `strpos`
+  `product_type` and `tags` (migration 0033). Below a 256 KiB `server.max_body`, the
+  longest description may not fit; the limit's minimum stays 1 KiB (operators' values
+  stay valid). The admin list filters by `q` (title, handle, SKU; `strpos`
   on `lower()`, so `%` and `_` are plain text).
 - **Locations** record `location.changed` naming the fields that changed; search
   rebuilds everything only when `markets` changed.
@@ -434,4 +435,48 @@ trait, SE10; shared pricing and stock loaders; `Progress` in core) and the crate
 - **Tests:** the reference by hand (13), the engine contract (330 queries against the
   reference) on memory and Postgres, the queue and settings contracts, command and
   handler tests, route tests, and an e2e section.
+
+### Review and performance (2026-10-16)
+
+`/code-review high` and a load test (documents seeded straight into Postgres, searches
+timed through the HTTP API, release build) led to:
+
+- **Descriptions:** the 64 KiB limit applies to the sanitised HTML too (escaping can
+  grow it), so an accepted description always loads again; `restore` no longer
+  sanitises (it was parsing up to 64 KiB of HTML on every product load, carts included)
+  and only checks the length (`Description::stored`).
+- **Paging:** a page that would end past 1,000 results is cut short there, and
+  `next_cursor` stops at the limit; only starting at 1,000 or later is `422
+  search_too_deep`.
+- **Sync:** failures are per product (one the engine refuses or that can't load fails
+  alone; the rest of its batch is finished); variant marks resolve in one query
+  (`ProductRepo::ids_of_variants`); stock items load once per step, not per market; each
+  market's batch is one `replace` (`SearchIndex::replace` takes a batch of products). A
+  runner whose lease ran out and finds its mark gone (`SearchQueue::finish` returns
+  those) marks the target again, so its possibly older documents are rebuilt.
+- **Terms** longer than 100 characters are dropped (`MAX_TERM_CHARS`); engines cap
+  lexemes too, and this keeps them in agreement. Postgres builds `tsv` with
+  `array_to_tsvector` of the terms and queries with `'term':*`, so its parser plays no
+  part and the index alone decides a match (migration 0035; it empties the index, which
+  the host rebuilds at start).
+- **The Postgres search** is one statement: narrow matched rows, the group sort without
+  the facets, product-level facets (vendor, type, tags: the same on every variant)
+  counted once per group from its representative, `DISTINCT` skipped for
+  `group=variant`, 64 MB `work_mem` for the transaction; default option facets come
+  from `search_option_counts`, kept as documents are written.
+- `server.max_body` keeps its 1 KiB minimum (operators' values stay valid); below 256
+  KiB a full description may not fit. `SyncError` implements `ErrorCode`.
+
+Measured (one market; products of 10 variants; full listing = no `q`, no filters, all
+default facets):
+
+| Documents | Full listing | Filtered or text searches |
+| --- | --- | --- |
+| 20,000 | ~95 ms | 8–100 ms |
+| 50,000 | ~190 ms | 7–145 ms |
+| 200,000 | ~0.75 s (was 5 s) | 5–180 ms; full-market filters up to ~0.5 s |
+
+**Guidance:** the built-in engine serves a market of up to about 50,000 variant
+documents well. Past that, counting distinct listings over every matching row is the
+floor in SQL; that's what step 7's Meilisearch engine is for.
 

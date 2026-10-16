@@ -208,6 +208,7 @@ impl World {
             &SyncSettings::default(),
         ))
         .unwrap()
+        .progress
         .more
             || !self.ports.search_queue.targets().is_empty()
         {}
@@ -286,6 +287,77 @@ fn a_store_syncs_into_documents_priced_and_stocked_per_market() {
     assert_eq!(available, [true, true, true, false]);
     // EUR prices don't resolve in a USD market until exchange rates exist.
     assert!(w.documents(us_market()).is_empty());
+}
+
+/// An engine that refuses one product's documents, as an external engine might.
+struct Refusing<'a> {
+    inner: &'a InMemorySearchIndex,
+    refuse: ProductId,
+}
+
+impl hypha_search_index::SearchIndex for Refusing<'_> {
+    async fn replace(
+        &self,
+        market: MarketId,
+        products: &[ProductId],
+        documents: &[SearchDocument],
+    ) -> Result<(), hypha_search_index::IndexError> {
+        if products.contains(&self.refuse) {
+            return Err(hypha_search_index::IndexError("too large".to_string()));
+        }
+        self.inner.replace(market, products, documents).await
+    }
+
+    async fn search(
+        &self,
+        query: &hypha_search_index::SearchQuery,
+    ) -> Result<hypha_search_index::SearchResults, hypha_search_index::IndexError> {
+        self.inner.search(query).await
+    }
+
+    async fn option_names(
+        &self,
+        market: MarketId,
+    ) -> Result<Vec<String>, hypha_search_index::IndexError> {
+        self.inner.option_names(market).await
+    }
+
+    async fn count(&self) -> Result<u64, hypha_search_index::IndexError> {
+        self.inner.count().await
+    }
+}
+
+#[test]
+fn a_product_the_engine_refuses_fails_alone() {
+    let w = World::new();
+    w.deliver();
+    let refusing = Refusing {
+        inner: &w.index,
+        refuse: mug(),
+    };
+    // Until nothing more can be done: the mug's marks are leased after each failure.
+    let mut failed = Vec::new();
+    loop {
+        let synced = block_on(sync(
+            &w.ports,
+            &refusing,
+            &w.clock,
+            &SyncSettings::default(),
+        ))
+        .unwrap();
+        failed.extend(synced.failed.iter().map(|(id, _)| *id));
+        if synced.progress.done == 0 {
+            break;
+        }
+    }
+    failed.dedup();
+    assert_eq!(failed, [mug()]);
+    // The shirt is in; the mug's marks (its product, its stock) wait for their lease.
+    let variants: Vec<VariantId> = w.documents(hr_market()).iter().map(|d| d.variant).collect();
+    assert_eq!(variants, [red_s(), red_m(), blue_s()]);
+    let mut waiting = w.ports.search_queue.targets();
+    waiting.sort();
+    assert_eq!(waiting, [Target::Product(mug()), Target::Variant(mug_v())]);
 }
 
 #[test]
@@ -518,15 +590,13 @@ fn bad_searches_say_what_is_wrong() {
         err(SearchError::InvalidLimit { max: 100 })
     );
     assert_eq!(
-        with(&|i| {
-            i.offset = 991;
-            i.limit = 10;
-        }),
+        with(&|i| i.offset = 1000),
         err(SearchError::TooDeep { max: 1000 })
     );
+    // The last page is cut short at the limit instead of refused.
     assert_eq!(
         with(&|i| {
-            i.offset = 990;
+            i.offset = 999;
             i.limit = 10;
         }),
         Ok(())

@@ -228,8 +228,9 @@ pub(super) async fn storefront_search<S: Storage>(
         min: r.min,
         max: r.max,
     };
+    // Pages stop at `MAX_DEPTH`: past it, there is no next page to offer.
     let shown = u64::from(offset) + results.hits.len() as u64;
-    let has_more = shown < results.total;
+    let has_more = shown < results.total.min(u64::from(hypha_search_index::MAX_DEPTH));
     let items = results
         .hits
         .into_iter()

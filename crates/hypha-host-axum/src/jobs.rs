@@ -229,7 +229,7 @@ pub(crate) async fn search_sync(state: &AppState<PgStorage>) -> Step {
         .public_ports()
         .await
         .map_err(|_| "no connection".to_string())?;
-    let progress = hypha_search::sync(
+    let synced = hypha_search::sync(
         &ports,
         &state.storage.search(&ports),
         &state.clock,
@@ -237,7 +237,10 @@ pub(crate) async fn search_sync(state: &AppState<PgStorage>) -> Step {
     )
     .await
     .map_err(|e| e.to_string())?;
-    Ok(progress.more)
+    for (product, error) in &synced.failed {
+        tracing::warn!(%product, "search: rebuilding a product failed, retried later: {error}");
+    }
+    Ok(synced.progress.more)
 }
 
 /// Deletes uploads abandoned for over `media.abandoned_after` (design note 0013,

@@ -25,6 +25,10 @@ pub trait ProductRepo {
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError>;
     /// The product that owns `variant`.
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError>;
+    /// The products owning any of `variants`, each once, in no particular order;
+    /// variants no product has are skipped. One query however many (search's sync
+    /// resolves a batch of stock and price changes with it).
+    async fn ids_of_variants(&self, variants: &[VariantId]) -> Result<Vec<ProductId>, RepoError>;
     /// The product with a variant whose SKU is exactly `sku`.
     async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError>;
     /// A page of product summaries, newest first (by ID; design note 0012), only the

@@ -153,6 +153,25 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         })
     }
 
+    async fn ids_of_variants(&self, variants: &[VariantId]) -> Result<Vec<ProductId>, RepoError> {
+        if variants.is_empty() {
+            return Ok(vec![]);
+        }
+        let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                "SELECT DISTINCT product_id FROM variants WHERE id = ANY($1)",
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter()
+            .map(|row| Ok(ProductId::from_uuid(col(row, "product_id")?)))
+            .collect()
+    }
+
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
         stamp_insert(product, self.now());
         let s = product.snapshot();

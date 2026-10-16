@@ -2,12 +2,20 @@
 //! rebuild, and the merchant's settings.
 //!
 //! The engine answers exactly as `hypha_search_index::reference::search` (the
-//! `search_index` contract checks it): terms, scores and facet values are computed in
-//! Rust when a document is written (`SearchDocument::terms`, `::facet_values`) and only
-//! compared in SQL, titles sort by a lowercased copy made in Rust, and text compares
-//! byte by byte (`COLLATE "C"`), so the database's locale changes nothing. `tsv` only
-//! narrows a text search through its GIN index; whether a document matches is decided
-//! on the terms.
+//! `search_index` contract checks it). Everything that defines a match or an order is
+//! computed in Rust when a document is written: its terms (`SearchDocument::terms`;
+//! `tsv` is `array_to_tsvector` of them, so Postgres's parser plays no part and the GIN
+//! index alone decides a text match), its facet values, a lowercased title. SQL only
+//! compares them, byte by byte (`COLLATE "C"`), so the database's locale changes
+//! nothing.
+//!
+//! A search is one statement in one snapshot: the matching rows, narrow (no display
+//! columns), materialised once; each group's representative (`DISTINCT ON`, skipped
+//! for `group=variant`); the page; and from the same matched rows the total, the price
+//! range and the facets without an active filter (one pass for all of them). A facet
+//! that is filtered ignores its own filter, so it gets a pass of its own. Only the
+//! page's rows are read whole. The default option facets come from
+//! `search_option_counts`, kept as documents are written.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -39,27 +47,90 @@ use crate::{
 /// Separates a facet's key from its value in `facets` (`option.color` 0x1F `Red`).
 const SEPARATOR: char = '\u{1f}';
 
+/// Memory for a search's sorts and hashes, set for its transaction only: the default
+/// (4 MB) spills a large market's grouping to disk.
+const SEARCH_WORK_MEM: &str = "64MB";
+
+/// Documents written per `INSERT`: Postgres takes at most 65,535 parameters.
+const INSERT_ROWS: usize = 1000;
+
+/// The columns a document is written with, in order (one placeholder each, but `tsv`).
+const COLUMNS: &str = "market_id, product_id, variant_id, listing, handle, title, title_sort,
+    variant_title, description, vendor, product_type, tags, sku, option_names, option_values,
+    currency, price, product_min, product_max, listing_min, listing_max, available, image_id,
+    created_us, position, terms_a, terms_b, terms_d, tsv, facets";
+const PER_ROW: usize = 30;
+
 // ---------- the engine ----------
 
 impl<C: PgConnection> SearchIndex for PgStore<C> {
     async fn replace(
         &self,
         market: MarketId,
-        product: ProductId,
+        products: &[ProductId],
         documents: &[SearchDocument],
     ) -> Result<(), IndexError> {
+        if products.is_empty() {
+            return Ok(());
+        }
+        let product_ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
+        // The option facets each document adds, to keep `search_option_counts`.
+        let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+        for document in documents {
+            for (key, _) in document.facet_values() {
+                if key.starts_with("option.") {
+                    *counts.entry(key).or_default() += 1;
+                }
+            }
+        }
         in_transaction!(self, |tx| {
-            tx.query_typed(
-                "DELETE FROM search_documents WHERE market_id = $1 AND product_id = $2",
-                &[
-                    (&market.as_uuid(), Type::UUID),
-                    (&product.as_uuid(), Type::UUID),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-            for document in documents {
-                insert_document(tx, document).await?;
+            let gone = tx
+                .query_typed(
+                    "WITH gone AS (
+                         DELETE FROM search_documents
+                         WHERE market_id = $1 AND product_id = ANY($2) RETURNING facets
+                     )
+                     SELECT split_part(fv, chr(31), 1) AS key, count(*) AS n
+                     FROM gone, unnest(gone.facets) fv
+                     WHERE starts_with(fv, 'option.') GROUP BY 1",
+                    &[
+                        (&market.as_uuid(), Type::UUID),
+                        (&product_ids, Type::UUID_ARRAY),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
+            for row in &gone {
+                *counts.entry(col(row, "key")?).or_default() -= col::<i64>(row, "n")?;
+            }
+            for chunk in documents.chunks(INSERT_ROWS) {
+                insert_documents(tx, chunk).await?;
+            }
+            // In key order, so runners updating the same market lock rows alike.
+            let (keys, deltas): (Vec<String>, Vec<i64>) =
+                counts.into_iter().filter(|(_, n)| *n != 0).unzip();
+            if !keys.is_empty() {
+                tx.query_typed(
+                    "INSERT INTO search_option_counts (market_id, key, documents)
+                     SELECT $1, k, n FROM unnest($2::text[], $3::bigint[]) AS c (k, n)
+                     ORDER BY k COLLATE \"C\"
+                     ON CONFLICT (market_id, key)
+                     DO UPDATE SET documents = search_option_counts.documents + EXCLUDED.documents",
+                    &[
+                        (&market.as_uuid(), Type::UUID),
+                        (&keys, Type::TEXT_ARRAY),
+                        (&deltas, Type::INT8_ARRAY),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
+                tx.query_typed(
+                    "DELETE FROM search_option_counts
+                     WHERE market_id = $1 AND key = ANY($2) AND documents <= 0",
+                    &[(&market.as_uuid(), Type::UUID), (&keys, Type::TEXT_ARRAY)],
+                )
+                .await
+                .map_err(repo_error)?;
             }
             Ok(())
         })?;
@@ -68,7 +139,12 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
 
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError> {
         let mut conn = self.conn().await;
-        let results = consistent_read!(conn.client(), |tx| run_search(tx, query).await)?;
+        let results = consistent_read!(conn.client(), |tx| {
+            tx.batch_execute(&format!("SET LOCAL work_mem = '{SEARCH_WORK_MEM}'"))
+                .await
+                .map_err(repo_error)?;
+            run_search(tx, query).await
+        })?;
         Ok(results)
     }
 
@@ -77,27 +153,22 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
         let rows = conn
             .client()
             .query_typed(
-                "SELECT split_part(fv, chr(31), 1) AS key, count(*) AS n
-                 FROM search_documents d, unnest(d.facets) fv
-                 WHERE d.market_id = $1 AND starts_with(fv, 'option.')
-                 GROUP BY 1",
+                "SELECT key FROM search_option_counts WHERE market_id = $1
+                 ORDER BY documents DESC, key COLLATE \"C\"",
                 &[(&market.as_uuid(), Type::UUID)],
             )
             .await
             .map_err(repo_error)?;
-        let mut names = rows
+        Ok(rows
             .iter()
             .map(|row| {
                 let key: String = col(row, "key")?;
-                let n: i64 = col(row, "n")?;
                 match key.parse::<FacetKey>() {
-                    Ok(FacetKey::Option(name)) => Ok((name, n)),
-                    _ => Err(corrupt(format!("search facet key {key:?}"))),
+                    Ok(FacetKey::Option(name)) => Ok(name),
+                    _ => Err(corrupt(format!("search option key {key:?}"))),
                 }
             })
-            .collect::<Result<Vec<_>, RepoError>>()?;
-        names.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        Ok(names.into_iter().map(|(name, _)| name).collect())
+            .collect::<Result<Vec<_>, RepoError>>()?)
     }
 
     async fn count(&self) -> Result<u64, IndexError> {
@@ -112,62 +183,70 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
     }
 }
 
-async fn insert_document(tx: &impl GenericClient, d: &SearchDocument) -> Result<(), RepoError> {
-    let terms = d.terms();
-    let all_terms = terms.all().join(" ");
-    let (option_names, option_values): (Vec<&str>, Vec<&str>) = d
-        .options
-        .iter()
-        .map(|(n, v)| (n.as_str(), v.as_str()))
-        .unzip();
-    let facets: Vec<String> = d
-        .facet_values()
-        .into_iter()
-        .map(|(key, value)| format!("{key}{SEPARATOR}{value}"))
-        .collect();
-    let position = i32::try_from(d.position).map_err(corrupt)?;
+/// One `INSERT` for `documents` (at most `INSERT_ROWS`).
+async fn insert_documents(
+    tx: &impl GenericClient,
+    documents: &[SearchDocument],
+) -> Result<(), RepoError> {
+    if documents.is_empty() {
+        return Ok(());
+    }
+    let mut params = Params::default();
+    let mut rows = Vec::with_capacity(documents.len());
+    for d in documents {
+        let terms = d.terms();
+        let all_terms = terms.all();
+        let (names, values): (Vec<String>, Vec<String>) = d.options.iter().cloned().unzip();
+        let facets: Vec<String> = d
+            .facet_values()
+            .into_iter()
+            .map(|(key, value)| format!("{key}{SEPARATOR}{value}"))
+            .collect();
+        let position = i32::try_from(d.position).map_err(corrupt)?;
+        let placeholders = [
+            params.add(d.market.as_uuid(), Type::UUID),
+            params.add(d.product.as_uuid(), Type::UUID),
+            params.add(d.variant.as_uuid(), Type::UUID),
+            params.add(d.listing.clone(), Type::TEXT),
+            params.add(d.handle.clone(), Type::TEXT),
+            params.add(d.title.clone(), Type::TEXT),
+            params.add(d.title.to_lowercase(), Type::TEXT),
+            params.add(d.variant_title.clone(), Type::TEXT),
+            params.add(d.description.clone(), Type::TEXT),
+            params.add(d.vendor.clone(), Type::TEXT),
+            params.add(d.product_type.clone(), Type::TEXT),
+            params.add(d.tags.clone(), Type::TEXT_ARRAY),
+            params.add(d.sku.clone(), Type::TEXT),
+            params.add(names, Type::TEXT_ARRAY),
+            params.add(values, Type::TEXT_ARRAY),
+            params.add(d.price.currency().as_str().to_string(), Type::TEXT),
+            params.add(d.price.amount(), Type::INT8),
+            params.add(d.product_price.min.amount(), Type::INT8),
+            params.add(d.product_price.max.amount(), Type::INT8),
+            params.add(d.listing_price.min.amount(), Type::INT8),
+            params.add(d.listing_price.max.amount(), Type::INT8),
+            params.add(d.available, Type::BOOL),
+            params.add(d.image.map(|a| a.as_uuid()), Type::UUID),
+            params.add(d.created_at.unix_micros(), Type::INT8),
+            params.add(position, Type::INT4),
+            params.add(terms.a, Type::TEXT_ARRAY),
+            params.add(terms.b, Type::TEXT_ARRAY),
+            params.add(terms.d, Type::TEXT_ARRAY),
+            format!(
+                "array_to_tsvector({}::text[])",
+                params.add(all_terms, Type::TEXT_ARRAY)
+            ),
+            params.add(facets, Type::TEXT_ARRAY),
+        ];
+        debug_assert_eq!(placeholders.len(), PER_ROW);
+        rows.push(format!("({})", placeholders.join(", ")));
+    }
     tx.query_typed(
-        "INSERT INTO search_documents (
-             market_id, product_id, variant_id, listing, handle, title, title_sort,
-             variant_title, description, vendor, product_type, tags, sku, option_names,
-             option_values, currency, price, product_min, product_max, listing_min,
-             listing_max, available, image_id, created_us, position, terms_a, terms_b,
-             terms_d, tsv, facets)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                 $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
-                 to_tsvector('simple', $29), $30)",
-        &[
-            (&d.market.as_uuid(), Type::UUID),
-            (&d.product.as_uuid(), Type::UUID),
-            (&d.variant.as_uuid(), Type::UUID),
-            (&d.listing, Type::TEXT),
-            (&d.handle, Type::TEXT),
-            (&d.title, Type::TEXT),
-            (&d.title.to_lowercase(), Type::TEXT),
-            (&d.variant_title, Type::TEXT),
-            (&d.description, Type::TEXT),
-            (&d.vendor, Type::TEXT),
-            (&d.product_type, Type::TEXT),
-            (&d.tags, Type::TEXT_ARRAY),
-            (&d.sku, Type::TEXT),
-            (&option_names, Type::TEXT_ARRAY),
-            (&option_values, Type::TEXT_ARRAY),
-            (&d.price.currency().as_str(), Type::TEXT),
-            (&d.price.amount(), Type::INT8),
-            (&d.product_price.min.amount(), Type::INT8),
-            (&d.product_price.max.amount(), Type::INT8),
-            (&d.listing_price.min.amount(), Type::INT8),
-            (&d.listing_price.max.amount(), Type::INT8),
-            (&d.available, Type::BOOL),
-            (&d.image.map(|a| a.as_uuid()), Type::UUID),
-            (&d.created_at.unix_micros(), Type::INT8),
-            (&position, Type::INT4),
-            (&terms.a, Type::TEXT_ARRAY),
-            (&terms.b, Type::TEXT_ARRAY),
-            (&terms.d, Type::TEXT_ARRAY),
-            (&all_terms, Type::TEXT),
-            (&facets, Type::TEXT_ARRAY),
-        ],
+        &format!(
+            "INSERT INTO search_documents ({COLUMNS}) VALUES {}",
+            rows.join(", ")
+        ),
+        &params.as_slice(),
     )
     .await
     .map_err(repo_error)?;
@@ -210,17 +289,13 @@ fn conditions(q: &SearchQuery, params: &mut Params, except: Except<'_>) -> Strin
         params.add(q.market.as_uuid(), Type::UUID)
     )];
     if !q.terms.is_empty() {
-        // The index narrows (every term a prefix of a lexeme); the terms decide.
-        let tsquery: Vec<String> = q.terms.iter().map(|t| format!("{t}:*")).collect();
+        // Every term a prefix of one of the document's terms: exactly `tsv @@` with
+        // prefix lexemes, since `tsv` holds the same terms. Terms are letters and digits
+        // (`terms::terms`), so quoting them needs no escapes.
+        let tsquery: Vec<String> = q.terms.iter().map(|t| format!("'{t}':*")).collect();
         sql.push(format!(
-            "d.tsv @@ to_tsquery('simple', {})",
+            "d.tsv @@ {}::tsquery",
             params.add(tsquery.join(" & "), Type::TEXT)
-        ));
-        sql.push(format!(
-            "NOT EXISTS (SELECT 1 FROM unnest({}::text[]) q WHERE NOT EXISTS (
-                 SELECT 1 FROM unnest(d.terms_a || d.terms_b || d.terms_d) t
-                 WHERE starts_with(t, q)))",
-            params.add(q.terms.clone(), Type::TEXT_ARRAY)
         ));
     }
     if let Some(available) = q.available {
@@ -254,18 +329,19 @@ fn conditions(q: &SearchQuery, params: &mut Params, except: Except<'_>) -> Strin
     sql.join(" AND ")
 }
 
+/// The group key of `d`, as compared and hashed (bytes, never the locale's order).
 fn group_expr(group: Group) -> &'static str {
     match group {
-        Group::Listing => "d.listing",
+        Group::Listing => "d.listing COLLATE \"C\"",
         Group::Product => "d.product_id::text",
         Group::Variant => "d.variant_id::text",
     }
 }
 
 /// `reference::score` in SQL: per query term, 10, 4 or 1 for the best field it
-/// prefixes a term of, summed.
-fn score_expr(q: &SearchQuery, params: &mut Params) -> String {
-    if q.terms.is_empty() {
+/// prefixes a term of, summed. Only computed when the sort needs it.
+fn score_expr(q: &SearchQuery, sort: Sort, params: &mut Params) -> String {
+    if q.terms.is_empty() || sort != Sort::Relevance {
         return "0".to_string();
     }
     let has =
@@ -280,14 +356,43 @@ fn score_expr(q: &SearchQuery, params: &mut Params) -> String {
     )
 }
 
+/// `keys`' facet values with how many groups have them, as `(fv, n)` rows, from
+/// `source`'s rows (each with its `facets` and its group `g`). `distinct`: a group can
+/// have several of the rows (else each row is its own group, and counting is enough).
+fn facet_branch(source: &str, keys: &[&FacetKey], distinct: bool, params: &mut Params) -> String {
+    let prefixes: Vec<String> = keys.iter().map(|k| format!("{k}{SEPARATOR}")).collect();
+    let prefixes = params.add(prefixes, Type::TEXT_ARRAY);
+    let of_keys = format!("split_part(fv, chr(31), 1) || chr(31) = ANY({prefixes}::text[])");
+    if distinct {
+        format!(
+            "SELECT fv, count(*) AS n FROM (
+                 SELECT DISTINCT fv, g FROM {source}, unnest(facets) fv WHERE {of_keys}
+             ) x GROUP BY fv"
+        )
+    } else {
+        format!(
+            "SELECT fv, count(*) AS n FROM {source}, unnest(facets) fv WHERE {of_keys}
+             GROUP BY fv"
+        )
+    }
+}
+
+/// Vendor, product type and tags are the product's, the same on all its variants: a
+/// listing or product group has one set of them, so they count once per group, from
+/// its representative, instead of over every matching variant.
+fn product_level(key: &FacetKey) -> bool {
+    !matches!(key, FacetKey::Option(_))
+}
+
 async fn run_search(tx: &impl GenericClient, q: &SearchQuery) -> Result<SearchResults, RepoError> {
     let sort = reference::effective_sort(q);
     let group = group_expr(q.group);
-
-    // Hits: matches with their group and score; each group's representative; the page.
     let mut params = Params::default();
     let matched = conditions(q, &mut params, Except::Nothing);
-    let score = score_expr(q, &mut params);
+    let score = score_expr(q, sort, &mut params);
+    let market = params.add(q.market.as_uuid(), Type::UUID);
+
+    // Each group's representative, then the page: the reference's orders.
     let within = match sort {
         Sort::PriceAsc => "price ASC, product_id, position",
         Sort::PriceDesc => "price DESC, product_id, position",
@@ -301,55 +406,121 @@ async fn run_search(tx: &impl GenericClient, q: &SearchQuery) -> Result<SearchRe
         Sort::Title => "title_sort COLLATE \"C\" ASC, ",
         Sort::Newest => "",
     };
+    let between = format!(
+        "{by_sort}created_us DESC, product_id DESC, listing COLLATE \"C\" ASC, position ASC"
+    );
+    // Narrow: the facets stay behind, so the sort that collapses groups stays small.
+    let best_columns =
+        "variant_id, product_id, g, score, price, created_us, title_sort, listing, position";
+    let best = match q.group {
+        // Every variant is its own group: nothing to collapse.
+        Group::Variant => format!("SELECT {best_columns} FROM m"),
+        _ => format!("SELECT DISTINCT ON (g) {best_columns} FROM m ORDER BY g, {within}"),
+    };
     let offset = params.add(i64::from(q.offset), Type::INT8);
     let limit = params.add(i64::from(q.limit), Type::INT8);
-    let hits_sql = format!(
-        "WITH m AS (
-             SELECT d.*, {group} AS g, {score} AS score
-             FROM search_documents d WHERE {matched}
-         ), best AS (
-             SELECT DISTINCT ON (g) m.*, count(*) OVER (PARTITION BY g) AS matched
-             FROM m ORDER BY g, {within}
-         )
-         SELECT * FROM best
-         ORDER BY {by_sort}created_us DESC, product_id DESC, listing COLLATE \"C\" ASC,
-                  position ASC
-         OFFSET {offset} LIMIT {limit}"
-    );
-    let hits = tx
-        .query_typed(&hits_sql, &params.as_slice())
-        .await
-        .map_err(repo_error)?
-        .iter()
-        .map(|row| {
-            Ok(Hit {
-                document: document_from_row(row)?,
-                matched: u32::try_from(col::<i64>(row, "matched")?).map_err(corrupt)?,
-            })
-        })
-        .collect::<Result<Vec<_>, RepoError>>()?;
 
-    // The number of groups, and the price range ignoring the price bounds.
-    let mut params = Params::default();
-    let matched = conditions(q, &mut params, Except::Nothing);
-    let unbounded = conditions(q, &mut params, Except::Price);
-    let row = tx
-        .query_typed_one(
-            &format!(
-                "SELECT (SELECT count(DISTINCT {group}) FROM search_documents d WHERE {matched})
-                            AS total,
-                        min(d.price) AS low, max(d.price) AS high, min(d.currency) AS currency
-                 FROM search_documents d WHERE {unbounded}"
-            ),
-            &params.as_slice(),
+    // The price range ignores the price bounds: from the matched rows when there are
+    // none, else from a pass of its own.
+    let price = if q.price.min.is_none() && q.price.max.is_none() {
+        "(SELECT min(price) FROM m) AS low, (SELECT max(price) FROM m) AS high".to_string()
+    } else {
+        let unbounded = conditions(q, &mut params, Except::Price);
+        format!(
+            "(SELECT min(d.price) FROM search_documents d WHERE {unbounded}) AS low,
+             (SELECT max(d.price) FROM search_documents d WHERE {unbounded}) AS high"
         )
+    };
+
+    // Facets: the unfiltered ones from the matched rows (product-level ones from the
+    // groups' representatives); each filtered one over the rows that pass every other
+    // condition.
+    let filtered: BTreeSet<&FacetKey> = q.filters.iter().map(|f| &f.key).collect();
+    let free: Vec<&FacetKey> = q.facets.iter().filter(|k| !filtered.contains(k)).collect();
+    let grouped = q.group != Group::Variant;
+    let (per_product, per_variant): (Vec<&FacetKey>, Vec<&FacetKey>) = if grouped {
+        free.iter().partition(|k| product_level(k))
+    } else {
+        (vec![], free.clone())
+    };
+    let mut branches = Vec::new();
+    if !per_product.is_empty() {
+        let representatives = format!(
+            "(SELECT b.g, d.facets FROM best b JOIN search_documents d
+              ON d.market_id = {market} AND d.variant_id = b.variant_id) r"
+        );
+        branches.push(facet_branch(
+            &representatives,
+            &per_product,
+            false,
+            &mut params,
+        ));
+    }
+    if !per_variant.is_empty() {
+        branches.push(facet_branch("m", &per_variant, grouped, &mut params));
+    }
+    for key in q.facets.iter().filter(|k| filtered.contains(k)) {
+        let conds = conditions(q, &mut params, Except::Facet(key));
+        let source =
+            format!("(SELECT {group} AS g, d.facets FROM search_documents d WHERE {conds}) own");
+        branches.push(facet_branch(&source, &[key], grouped, &mut params));
+    }
+    let facets = if branches.is_empty() {
+        "NULL::text[] AS facet_values, NULL::bigint[] AS facet_counts".to_string()
+    } else {
+        "(SELECT array_agg(fv) FROM f) AS facet_values,
+         (SELECT array_agg(n) FROM f) AS facet_counts"
+            .to_string()
+    };
+    let facet_cte = if branches.is_empty() {
+        String::new()
+    } else {
+        format!(", f AS MATERIALIZED ({})", branches.join(" UNION ALL "))
+    };
+
+    let sql = format!(
+        "WITH m AS MATERIALIZED (
+             SELECT d.variant_id, d.product_id, {group} AS g, {score} AS score, d.price,
+                    d.created_us, d.title_sort, d.listing, d.position, d.facets
+             FROM search_documents d WHERE {matched}
+         ),
+         best AS MATERIALIZED ({best}),
+         page AS (SELECT * FROM best ORDER BY {between} OFFSET {offset} LIMIT {limit}),
+         counts AS (
+             SELECT g, count(*) AS matched FROM m
+             WHERE g IN (SELECT g FROM page) GROUP BY g
+         ){facet_cte},
+         summary AS (
+             SELECT (SELECT count(*) FROM best) AS total, {price}, {facets},
+                    (SELECT currency FROM search_documents WHERE market_id = {market} LIMIT 1)
+                        AS market_currency
+         )
+         SELECT s.total, s.low, s.high, s.facet_values, s.facet_counts, s.market_currency,
+                p.variant_id AS hit, c.matched, d.*
+         FROM summary s
+         LEFT JOIN page p ON true
+         LEFT JOIN counts c ON c.g = p.g
+         LEFT JOIN search_documents d ON d.market_id = {market} AND d.variant_id = p.variant_id
+         ORDER BY {}",
+        between
+            .split(", ")
+            .map(|key| format!("p.{key}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let rows = tx
+        .query_typed(&sql, &params.as_slice())
         .await
         .map_err(repo_error)?;
-    let total = u64::try_from(col::<i64>(&row, "total")?).map_err(corrupt)?;
+    let first = rows
+        .first()
+        .ok_or_else(|| corrupt("a search returned no summary"))?;
+
+    let total = u64::try_from(col::<i64>(first, "total")?).map_err(corrupt)?;
     let price = match (
-        col::<Option<i64>>(&row, "low")?,
-        col::<Option<i64>>(&row, "high")?,
-        col::<Option<String>>(&row, "currency")?,
+        col::<Option<i64>>(first, "low")?,
+        col::<Option<i64>>(first, "high")?,
+        col::<Option<String>>(first, "market_currency")?,
     ) {
         (Some(low), Some(high), Some(currency)) => {
             let currency = currency_from_db(&currency)?;
@@ -358,56 +529,32 @@ async fn run_search(tx: &impl GenericClient, q: &SearchQuery) -> Result<SearchRe
         }
         _ => None,
     };
-
-    Ok(SearchResults {
-        hits,
-        total,
-        facets: facet_counts(tx, q, group).await?,
-        price,
-    })
-}
-
-/// Each asked-for facet's values, counting groups and ignoring the facet's own filter,
-/// in one statement.
-async fn facet_counts(
-    tx: &impl GenericClient,
-    q: &SearchQuery,
-    group: &str,
-) -> Result<Vec<FacetCounts>, RepoError> {
-    if q.facets.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut params = Params::default();
-    let branches: Vec<String> = q
-        .facets
+    let hits = rows
         .iter()
-        .map(|key| {
-            let conds = conditions(q, &mut params, Except::Facet(key));
-            let prefix = params.add(format!("{key}{SEPARATOR}"), Type::TEXT);
-            format!(
-                "SELECT fv, count(DISTINCT {group}) AS n
-                 FROM search_documents d, unnest(d.facets) fv
-                 WHERE {conds} AND starts_with(fv, {prefix})
-                 GROUP BY fv"
-            )
+        .filter(|row| matches!(col::<Option<Uuid>>(row, "hit"), Ok(Some(_))))
+        .map(|row| {
+            Ok(Hit {
+                document: document_from_row(row)?,
+                matched: u32::try_from(col::<i64>(row, "matched")?).map_err(corrupt)?,
+            })
         })
-        .collect();
-    let rows = tx
-        .query_typed(&branches.join(" UNION ALL "), &params.as_slice())
-        .await
-        .map_err(repo_error)?;
+        .collect::<Result<Vec<_>, RepoError>>()?;
+
+    let values: Vec<String> =
+        col::<Option<Vec<String>>>(first, "facet_values")?.unwrap_or_default();
+    let counts: Vec<i64> = col::<Option<Vec<i64>>>(first, "facet_counts")?.unwrap_or_default();
     let mut by_key: BTreeMap<String, Vec<FacetValue>> = BTreeMap::new();
-    for row in &rows {
-        let entry: String = col(row, "fv")?;
+    for (entry, n) in values.into_iter().zip(counts) {
         let (key, value) = entry
             .split_once(SEPARATOR)
             .ok_or_else(|| corrupt(format!("search facet {entry:?}")))?;
         by_key.entry(key.to_string()).or_default().push(FacetValue {
             value: value.to_string(),
-            count: u64::try_from(col::<i64>(row, "n")?).map_err(corrupt)?,
+            count: u64::try_from(n).map_err(corrupt)?,
         });
     }
-    Ok(q.facets
+    let facets = q
+        .facets
         .iter()
         .map(|key| {
             let mut values = by_key.remove(&key.to_string()).unwrap_or_default();
@@ -418,7 +565,14 @@ async fn facet_counts(
                 values,
             }
         })
-        .collect())
+        .collect();
+
+    Ok(SearchResults {
+        hits,
+        total,
+        facets,
+        price,
+    })
 }
 
 fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
@@ -553,33 +707,49 @@ impl<C: PgConnection> SearchQueue for PgStore<C> {
         Ok(marks.into_iter().map(|(_, mark)| mark).collect())
     }
 
-    async fn finish(&self, marks: &[Mark]) -> Result<(), RepoError> {
+    async fn finish(&self, marks: &[Mark]) -> Result<Vec<Target>, RepoError> {
         if marks.is_empty() {
-            return Ok(());
+            return Ok(vec![]);
         }
         let targets: Vec<String> = marks.iter().map(|m| target_to_db(m.target)).collect();
         let generations: Vec<i64> = marks.iter().map(|m| m.generation).collect();
-        in_transaction!(self, |tx| {
-            tx.query_typed(
-                "DELETE FROM search_queue q
-                 USING unnest($1::text[], $2::bigint[]) AS f (target, generation)
-                 WHERE q.target = f.target AND q.generation = f.generation",
-                &[
-                    (&targets, Type::TEXT_ARRAY),
-                    (&generations, Type::INT8_ARRAY),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
+        let (finished, present) = in_transaction!(self, |tx| {
+            let targets_of = |rows: Vec<Row>| {
+                rows.iter()
+                    .map(|row| col::<String>(row, "target"))
+                    .collect::<Result<BTreeSet<String>, RepoError>>()
+            };
+            let deleted = tx
+                .query_typed(
+                    "DELETE FROM search_queue q
+                     USING unnest($1::text[], $2::bigint[]) AS f (target, generation)
+                     WHERE q.target = f.target AND q.generation = f.generation
+                     RETURNING q.target",
+                    &[
+                        (&targets, Type::TEXT_ARRAY),
+                        (&generations, Type::INT8_ARRAY),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
             // Marked again meanwhile: free for the next run at once.
-            tx.query_typed(
-                "UPDATE search_queue SET leased_until = NULL WHERE target = ANY($1)",
-                &[(&targets, Type::TEXT_ARRAY)],
-            )
-            .await
-            .map_err(repo_error)?;
-            Ok(())
-        })
+            let kept = tx
+                .query_typed(
+                    "UPDATE search_queue SET leased_until = NULL WHERE target = ANY($1)
+                     RETURNING target",
+                    &[(&targets, Type::TEXT_ARRAY)],
+                )
+                .await
+                .map_err(repo_error)?;
+            Ok((targets_of(deleted)?, targets_of(kept)?))
+        })?;
+        // Neither finished now nor still queued: someone else finished it.
+        Ok(marks
+            .iter()
+            .zip(&targets)
+            .filter(|(_, t)| !finished.contains(*t) && !present.contains(*t))
+            .map(|(m, _)| m.target)
+            .collect())
     }
 
     async fn queued(&self) -> Result<u64, RepoError> {

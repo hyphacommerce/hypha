@@ -15,21 +15,38 @@ use crate::ProductError;
 pub struct Description(String);
 
 impl Description {
-    /// Longest description accepted, in bytes of the HTML sent.
+    /// Longest description, in bytes of HTML, both as sent and as sanitised (escaping
+    /// can make it longer: `<` becomes `&lt;`, links gain a `rel`).
     pub const MAX_LEN: usize = 64 * 1024;
 
     /// Sanitises `html`. `None` when nothing is left (blank, or only markup that was
-    /// removed).
+    /// removed). The limit applies to what's stored, so a description accepted here
+    /// always loads again (`stored`).
     pub fn new(html: &str) -> Result<Option<Self>, ProductError> {
         if html.len() > Self::MAX_LEN {
             return Err(ProductError::DescriptionTooLong { max: Self::MAX_LEN });
         }
         let clean = ammonia::clean(html);
         let clean = clean.trim();
+        if clean.len() > Self::MAX_LEN {
+            return Err(ProductError::DescriptionTooLong { max: Self::MAX_LEN });
+        }
         if text_of(clean).is_empty() && !clean.contains("<img") {
             return Ok(None);
         }
         Ok(Some(Self(clean.to_string())))
+    }
+
+    /// A description as `new` stored it, for `Product::restore`. Sanitising is a
+    /// transformation, not a check, and it's done on the way in: running it again on
+    /// every load (carts, checkout, search) would parse up to 64 KiB of HTML per product
+    /// for nothing. Only the length is checked again. Storage is trusted to hand back
+    /// what it was given, as for every other field.
+    pub fn stored(html: String) -> Result<Option<Self>, ProductError> {
+        if html.len() > Self::MAX_LEN {
+            return Err(ProductError::DescriptionTooLong { max: Self::MAX_LEN });
+        }
+        Ok((!html.is_empty()).then_some(Self(html)))
     }
 
     pub fn as_html(&self) -> &str {
@@ -146,6 +163,30 @@ mod tests {
         assert_eq!(
             html(r#"<img src="https://x.test/a.png">"#),
             Some(r#"<img src="https://x.test/a.png">"#.to_string())
+        );
+    }
+
+    #[test]
+    fn the_limit_applies_to_the_sanitised_html_too() {
+        // 30 000 `<` are 30 000 bytes sent and 120 000 stored (`&lt;`).
+        assert_eq!(
+            Description::new(&"<".repeat(30_000)),
+            Err(ProductError::DescriptionTooLong {
+                max: Description::MAX_LEN
+            })
+        );
+    }
+
+    #[test]
+    fn a_stored_description_is_taken_as_stored() {
+        let d = Description::new("<p>Hi</p>").unwrap().unwrap();
+        assert_eq!(Description::stored(d.as_html().to_string()), Ok(Some(d)));
+        assert_eq!(Description::stored(String::new()), Ok(None));
+        assert_eq!(
+            Description::stored("a".repeat(Description::MAX_LEN + 1)),
+            Err(ProductError::DescriptionTooLong {
+                max: Description::MAX_LEN
+            })
         );
     }
 

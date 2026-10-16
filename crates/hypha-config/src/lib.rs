@@ -326,10 +326,11 @@ const PRESIGN_MAX: Duration = Duration::from_secs(7 * 24 * 3600);
 /// The longest a lifetime or a retry wait may be. Far enough that no store needs more,
 /// near enough that every expiry stays a date clients can read.
 const LONGEST: Duration = Duration::from_secs(365 * 24 * 3600);
-/// The largest and smallest request body limits: every route's JSON fits in the
-/// smallest (a product's 64 KiB description, escaped, is the largest; design note 0019),
-/// and files go to storage directly, so the largest is generous.
-const BODY_MIN: u64 = 256 << 10;
+/// The largest and smallest request body limits; files go to storage directly, so the
+/// largest is generous. Values valid before stay valid (key names and accepted values
+/// are a contract with operators): below 256 KiB, a product's longest description (64
+/// KiB, escaped in JSON) may be refused with `413 body_too_large` (design note 0019).
+const BODY_MIN: u64 = 1 << 10;
 const BODY_MAX: u64 = 64 << 20;
 /// How long a run gets past a delivery's longest, to record what happened.
 const RECORD_TIME: Duration = Duration::from_secs(15);
@@ -874,11 +875,11 @@ mod tests {
     }
 
     #[test]
-    fn the_body_limit_is_256kib_to_64mib() {
+    fn the_body_limit_is_1kib_to_64mib() {
         for (value, ok) in [
             ("0B", false),
-            ("262143B", false),
-            ("256KiB", true),
+            ("1023B", false),
+            ("1KiB", true),
             ("64MiB", true),
             ("67108865B", false),
             ("4GiB", false),
@@ -890,7 +891,7 @@ mod tests {
                 assert_eq!(
                     problems(result),
                     [format!(
-                        "server.max_body: is {}, 256KiB to 64MiB",
+                        "server.max_body: is {}, 1KiB to 64MiB",
                         value.parse::<Size>().unwrap()
                     )],
                     "{value}"

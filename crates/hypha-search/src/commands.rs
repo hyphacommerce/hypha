@@ -104,9 +104,12 @@ pub async fn search<S: HasMarkets + HasSearchSettings, I: SearchIndex>(
     if input.limit == 0 || input.limit > MAX_LIMIT {
         return Err(SearchError::InvalidLimit { max: MAX_LIMIT }.into());
     }
-    if input.offset.saturating_add(input.limit) > MAX_DEPTH {
+    // A page may start at most `MAX_DEPTH - 1` results in; one that would end past
+    // the limit is cut short there, so following `next_cursor` never fails.
+    if input.offset >= MAX_DEPTH {
         return Err(SearchError::TooDeep { max: MAX_DEPTH }.into());
     }
+    let limit = input.limit.min(MAX_DEPTH - input.offset);
 
     let settings = ports.search_settings().get().await?.unwrap_or_default();
     let (facets, labels) = if settings.facets().is_empty() {
@@ -144,7 +147,7 @@ pub async fn search<S: HasMarkets + HasSearchSettings, I: SearchIndex>(
         group: input.group,
         facets,
         offset: input.offset,
-        limit: input.limit,
+        limit,
     };
     let results = index.search(&query).await?;
     Ok(Found {

@@ -13,13 +13,14 @@ use crate::{IndexError, SearchDocument, SearchQuery, SearchResults, SearchSettin
 /// the database can be the request's ports themselves.
 #[allow(async_fn_in_trait)]
 pub trait SearchIndex {
-    /// Makes `documents` the documents of `product` in `market`: adds, replaces, and
-    /// removes the ones not in `documents` (all of them when it's empty). Every
-    /// document is of that product in that market.
+    /// Makes `documents` the documents of `products` in `market`: each product's
+    /// documents there are replaced by its ones in `documents` (removed when it has
+    /// none). Every document is of one of `products`, in `market`. One call per market
+    /// for a whole batch, so an engine can write it at once.
     async fn replace(
         &self,
         market: MarketId,
-        product: ProductId,
+        products: &[ProductId],
         documents: &[SearchDocument],
     ) -> Result<(), IndexError>;
 
@@ -39,10 +40,10 @@ impl<T: SearchIndex + ?Sized> SearchIndex for &T {
     async fn replace(
         &self,
         market: MarketId,
-        product: ProductId,
+        products: &[ProductId],
         documents: &[SearchDocument],
     ) -> Result<(), IndexError> {
-        (**self).replace(market, product, documents).await
+        (**self).replace(market, products, documents).await
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError> {
@@ -93,8 +94,10 @@ pub trait SearchQueue {
         limit: u32,
     ) -> Result<Vec<Mark>, RepoError>;
     /// Removes the marks still at the generation leased; a mark marked again since
-    /// stays, with its lease freed so the next run takes it.
-    async fn finish(&self, marks: &[Mark]) -> Result<(), RepoError>;
+    /// stays, with its lease freed so the next run takes it. Returns the targets whose
+    /// mark was gone: another runner took and finished it after this lease ran out, so
+    /// what this runner wrote may be older than that runner's work (mark them again).
+    async fn finish(&self, marks: &[Mark]) -> Result<Vec<Target>, RepoError>;
     /// How many targets are queued.
     async fn queued(&self) -> Result<u64, RepoError>;
 }

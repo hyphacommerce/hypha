@@ -389,7 +389,7 @@ pub struct ProductSnapshot {
     pub handle: String,
     pub title: String,
     pub status: ProductStatus,
-    /// Sanitised HTML; sanitised again on `restore`.
+    /// Sanitised HTML, as `Description::new` made it (`restore` doesn't sanitise again).
     pub description: Option<String>,
     pub vendor: Option<String>,
     pub product_type: Option<String>,
@@ -500,10 +500,10 @@ impl Product {
             handle,
             title: required_text("title", &s.title)?,
             status: s.status,
+            // Sanitised when it was set; only the length is checked again.
             description: s
                 .description
-                .as_deref()
-                .map(Description::new)
+                .map(Description::stored)
                 .transpose()?
                 .flatten(),
             vendor: optional_text("vendor", s.vendor)?,
@@ -906,12 +906,14 @@ mod tests {
     }
 
     #[test]
-    fn restore_sanitises_the_stored_description() {
+    fn restore_rejects_a_stored_description_over_the_limit() {
         let mut s = simple().snapshot();
-        s.description = Some("<p>Hi</p><script>x()</script>".to_string());
+        s.description = Some("a".repeat(Description::MAX_LEN + 1));
         assert_eq!(
-            Product::restore(s).map(|p| p.description().map(|d| d.as_html().to_string())),
-            Ok(Some("<p>Hi</p>".to_string()))
+            Product::restore(s),
+            Err(ProductError::DescriptionTooLong {
+                max: Description::MAX_LEN
+            })
         );
     }
 
