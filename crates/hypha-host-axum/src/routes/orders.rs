@@ -4,12 +4,13 @@ use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_checkout::{Checkout, checkout};
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId, OrderLineId,
-    ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
+    CartId, CountryCode, Currency, CustomerId, Email, LocationId, MarketId, Money, OrderId,
+    OrderLineId, ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
+use hypha_order_actions::{BuyerEmail, CancelOrder, OrderView, cancel_order, order_view};
 use hypha_orders::{
     CancelReason, FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, OrderSummary,
-    get_order, list_orders, mark_order_paid,
+    list_orders, mark_order_paid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +22,7 @@ use super::{
 };
 use crate::{
     error::{ApiError, ApiErrorBody},
-    extract::{Caller, KeyedJson, PathId, Storefront, idempotent_response},
+    extract::{Caller, JsonBody, KeyedJson, PathId, Storefront, idempotent_response},
     rate_limit::{self, Rule},
     state::{SharedState, Storage},
 };
@@ -373,22 +374,108 @@ pub(super) async fn list<S: Storage>(
     )?))
 }
 
-/// An order.
+/// Units of a line still to ship, and where they wait (design note 0018, FU4).
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct UnfulfilledDto {
+    line: OrderLineId,
+    /// The location holding them for the line; `null` for units held nowhere (an
+    /// untracked item): any location.
+    location: Option<LocationId>,
+    quantity: u32,
+}
+
+/// An order as the admin sees it: with what's left to ship, by location.
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct AdminOrderResponse {
+    #[serde(flatten)]
+    order: OrderResponse,
+    /// Per line with anything left, in line order; empty once everything shipped or the
+    /// order was cancelled.
+    unfulfilled: Vec<UnfulfilledDto>,
+}
+
+impl AdminOrderResponse {
+    fn new(view: &OrderView) -> Result<Self, ApiError> {
+        Ok(Self {
+            order: OrderResponse::new(&view.order)?,
+            unfulfilled: view
+                .unfulfilled
+                .iter()
+                .map(|u| UnfulfilledDto {
+                    line: u.line,
+                    location: u.location,
+                    quantity: u.quantity,
+                })
+                .collect(),
+        })
+    }
+}
+
+/// An order, with what's left to ship.
 #[utoipa::path(
     get,
     path = "/admin/orders/{id}",
     params(("id" = OrderId, Path)),
-    responses((status = 200, description = "OK", body = OrderResponse)),
+    responses((status = 200, description = "OK", body = AdminOrderResponse)),
     extensions(("x-hypha-scopes" = json!(["orders:read"]))),
 )]
 pub(super) async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<OrderId>,
-) -> Result<Json<OrderResponse>, ApiError> {
+) -> Result<Json<AdminOrderResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let order = get_order(&ctx, ports.orders(), id).await?;
-    Ok(Json(OrderResponse::new(&order)?))
+    let view = order_view(&ctx, &ports, id).await?;
+    Ok(Json(AdminOrderResponse::new(&view)?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CancelOrderRequest {
+    reason: CancelReasonDto,
+    /// Email the buyer that the order is cancelled (`false` if absent).
+    #[serde(default)]
+    notify: bool,
+}
+
+/// Cancels the order: every line's reserved stock is released. Refused while
+/// fulfilments stand (`order_has_fulfillments`, 409, listing them): cancel those first.
+/// A paid order stays paid; refund it outside Hypha for now. Cancelling it again
+/// changes nothing.
+#[utoipa::path(
+    post,
+    path = "/admin/orders/{id}/cancel",
+    params(("id" = OrderId, Path)),
+    request_body = CancelOrderRequest,
+    responses((status = 200, description = "OK", body = AdminOrderResponse)),
+    extensions(("x-hypha-scopes" = json!(["orders:write"]))),
+)]
+pub(super) async fn cancel<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<OrderId>,
+    body: JsonBody<CancelOrderRequest>,
+) -> Result<Json<AdminOrderResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let before = hypha_orders::get_order(&ctx, ports.orders(), id).await?;
+    let input = CancelOrder {
+        order: id,
+        reason: req.reason.into(),
+    };
+    let order = cancel_order(&ctx, &ports, &state.clock, input).await?;
+    // Only the request that cancelled it tells the buyer.
+    if req.notify
+        && before.cancelled().is_none()
+        && let Some(email) = BuyerEmail::cancelled(&order)
+    {
+        super::fulfillments::notify_buyer(&state, email);
+    }
+    // A cancelled order has nothing left to ship.
+    Ok(Json(AdminOrderResponse::new(&OrderView {
+        order,
+        unfulfilled: Vec::new(),
+    })?))
 }
 
 /// Records that the order is paid (e.g. a bank transfer arrived). Marking a paid order

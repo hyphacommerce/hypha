@@ -10,6 +10,7 @@ mod auth;
 pub(crate) use auth::password_reset_in_background;
 mod carts;
 mod customers;
+mod fulfillments;
 mod health;
 mod inventory;
 mod markets;
@@ -129,6 +130,13 @@ macro_rules! route_table {
             [admin, GET, "/admin/orders", orders::list],
             [admin, GET, "/admin/orders/{id}", orders::fetch],
             [admin, POST, "/admin/orders/{id}/paid", orders::mark_paid],
+            [admin, POST, "/admin/orders/{id}/cancel", orders::cancel],
+            // fulfilments (design note 0018)
+            [admin, POST, "/admin/orders/{id}/fulfillments", fulfillments::create],
+            [admin, GET, "/admin/orders/{id}/fulfillments", fulfillments::list],
+            [admin, GET, "/admin/fulfillments/{id}", fulfillments::fetch],
+            [admin, PATCH, "/admin/fulfillments/{id}", fulfillments::update],
+            [admin, POST, "/admin/fulfillments/{id}/cancel", fulfillments::cancel],
             // customers
             [admin, POST, "/admin/customers", customers::create],
             [admin, GET, "/admin/customers/{id}", customers::fetch],

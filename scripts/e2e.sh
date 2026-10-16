@@ -117,6 +117,8 @@ wait_for() {
 id() { sed -E 's/^[^"]*"id":"([^"]+)".*/\1/' <<<"$BODY"; }
 # The first address id of the last customer response.
 address() { sed -E 's/.*"addresses":\[\{"id":"(addr_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
+# The Nth order line id (1-based) of the last order response.
+ordl() { grep -o '"id":"ordl_[0-9a-f]*"' <<<"$BODY" | sed -n "${1}p" | sed -E 's/.*"(ordl_[0-9a-f]+)"/\1/'; }
 # The "customer" of the last order response.
 customer() { sed -E 's/.*"customer":"(cus_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 # The "token" of the last response (a session, a challenge or a new key).
@@ -638,6 +640,58 @@ contains "the same guest customer" "\"customer\":\"$GUEST\""
 step "every lamp is reserved" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
 contains "4 of 4" '"on_hand":4,"reserved":4,"available":0'
 step "the first order is unchanged" 200 - "$BASE/admin/orders/$SHOP_ORDER"
+
+echo "## fulfilment (design note 0018)"
+# The shop order: 2 lamps, reserved at the warehouse (4 on hand, 4 reserved with the
+# second order's), and a book.
+step "the shop order" 200 - "$BASE/admin/orders/$SHOP_ORDER"
+LAMP_LINE=$(ordl 1)
+contains "its lamps wait at the warehouse" "{\"line\":\"$LAMP_LINE\",\"location\":\"$WAREHOUSE\",\"quantity\":2}"
+FULFILS="$BASE/admin/orders/$SHOP_ORDER/fulfillments"
+ONE_LAMP="{\"location\":\"$WAREHOUSE\",\"lines\":[{\"line\":\"$LAMP_LINE\",\"quantity\":1}],\"tracking\":[{\"carrier\":\"DHL\",\"number\":\"JD1\",\"url\":\"https://dhl.example/JD1\"}],\"notify\":true}"
+step "fulfil 3 of 2 lamps" 409 over_fulfilled -X POST "$FULFILS" -H "$JSON" \
+    -d "{\"location\":\"$WAREHOUSE\",\"lines\":[{\"line\":\"$LAMP_LINE\",\"quantity\":3}]}"
+contains "what's left comes back" "\"details\":{\"line\":\"$LAMP_LINE\",\"requested\":3,\"unfulfilled\":2}"
+step "fulfil from an unknown location" 422 location_not_found -X POST "$FULFILS" -H "$JSON" \
+    -d "{\"location\":\"loc_00000000000000000000000000000063\",\"lines\":[{\"line\":\"$LAMP_LINE\",\"quantity\":1}]}"
+step "fulfil a lamp" 201 - -X POST "$FULFILS" -H "$JSON" -H 'idempotency-key: ship-1' -d "$ONE_LAMP"
+FULFILLMENT=$(id)
+contains "it shipped" '"status":"shipped"'
+replayed "a retried fulfilment replays" -X POST "$FULFILS" -H "$JSON" -H 'idempotency-key: ship-1' -d "$ONE_LAMP"
+step "the lamp left the warehouse" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
+contains "3 on hand, 3 reserved" '"on_hand":3,"reserved":3,"available":0'
+step "the order is partly fulfilled" 200 - "$BASE/admin/orders/$SHOP_ORDER"
+contains "one lamp left" '"fulfillment_status":"partially_fulfilled"'
+step "new tracking" 200 - -X PATCH "$BASE/admin/fulfillments/$FULFILLMENT" -H "$JSON" \
+    -d '{"tracking":[{"number":"JD2"}],"notify":true}'
+contains "replaces the old" '"tracking":[{"carrier":null,"number":"JD2","url":null}]'
+step "null tracking" 422 invalid_body -X PATCH "$BASE/admin/fulfillments/$FULFILLMENT" -H "$JSON" \
+    -d '{"tracking":null}'
+step "list the order's fulfilments" 200 - "$FULFILS"
+contains "one" "\"items\":[{\"id\":\"$FULFILLMENT\""
+step "cancel the order while it's partly shipped" 409 order_has_fulfillments -X POST \
+    "$BASE/admin/orders/$SHOP_ORDER/cancel" -H "$JSON" -d '{"reason":"customer"}'
+contains "naming the fulfilment" "\"details\":{\"fulfillments\":[\"$FULFILLMENT\"]}"
+step "take the fulfilment back" 200 - -X POST "$BASE/admin/fulfillments/$FULFILLMENT/cancel"
+contains "it's cancelled" '"status":"cancelled"'
+step "the lamp is back" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
+contains "4 on hand, 4 reserved" '"on_hand":4,"reserved":4,"available":0'
+step "a cancelled fulfilment's tracking" 409 fulfillment_cancelled -X PATCH \
+    "$BASE/admin/fulfillments/$FULFILLMENT" -H "$JSON" -d '{"tracking":[]}'
+step "cancel the order" 200 - -X POST "$BASE/admin/orders/$SHOP_ORDER/cancel" -H "$JSON" \
+    -d '{"reason":"customer","notify":true}'
+contains "with its reason" '"cancel_reason":"customer"'
+contains "nothing left to ship" '"unfulfilled":[]'
+step "its lamps are released" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
+contains "4 on hand, 2 reserved" '"on_hand":4,"reserved":2,"available":2'
+step "fulfil a cancelled order" 409 order_cancelled -X POST "$FULFILS" -H "$JSON" -d "$ONE_LAMP"
+step "mark a cancelled order paid" 409 order_cancelled -X POST "$BASE/admin/orders/$SHOP_ORDER/paid"
+step "an unknown cancel reason" 422 invalid_body -X POST "$BASE/admin/orders/$SHOP_ORDER/cancel" -H "$JSON" \
+    -d '{"reason":"bored"}'
+step "unknown fulfilment" 404 fulfillment_not_found "$BASE/admin/fulfillments/ful_00000000000000000000000000000063"
+step "fulfilments of an unknown order" 404 order_not_found \
+    "$BASE/admin/orders/ord_00000000000000000000000000000063/fulfillments"
+
 step "stop tracking lamps again" 200 - -X PATCH "$BASE/admin/inventory-items/$LAMP_ITEM" -H "$JSON" \
     -d '{"tracked":false}'
 

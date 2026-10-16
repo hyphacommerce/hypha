@@ -171,6 +171,49 @@ impl Notifier<StaffEmail> for HostEnv {
     }
 }
 
+impl Notifier<hypha_order_actions::BuyerEmail> for HostEnv {
+    async fn notify(&self, message: hypha_order_actions::BuyerEmail) -> Result<(), NotifyError> {
+        use hypha_order_actions::BuyerEmail as B;
+        let tracked = |tracking: &[hypha_fulfillment::Tracking]| {
+            tracking
+                .iter()
+                .map(|t| {
+                    let link = t.url().map(|u| format!(" ({u})")).unwrap_or_default();
+                    format!("{} {}{link}", t.carrier().unwrap_or("tracking"), t.number())
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let (to, subject, body) = match &message {
+            B::Shipped {
+                to,
+                order,
+                tracking,
+            } => (
+                to,
+                format!("Order {order} is on its way"),
+                tracked(tracking),
+            ),
+            B::TrackingUpdated {
+                to,
+                order,
+                tracking,
+            } => (
+                to,
+                format!("New tracking for order {order}"),
+                tracked(tracking),
+            ),
+            B::Cancelled { to, order, reason } => (
+                to,
+                format!("Order {order} is cancelled"),
+                format!("reason: {reason}"),
+            ),
+        };
+        tracing::info!(%to, subject, body, "email (logged, not sent)");
+        Ok(())
+    }
+}
+
 /// Work that runs after its response went out (password reset requests), with a fixed
 /// number of slots. When they are full, new work is dropped and logged: anonymous
 /// requests can't pile up tasks that each wait for a pooled connection, and the client
@@ -299,6 +342,7 @@ pub type SharedState<S> = Arc<AppState<S>>;
 #[allow(async_fn_in_trait)]
 pub trait Storage: Send + Sync + 'static {
     type Ports<'a>: CheckoutPorts
+        + hypha_order_actions::OrderActionPorts
         + StaffPorts
         + HasApiKeys
         + hypha_media::HasAssets

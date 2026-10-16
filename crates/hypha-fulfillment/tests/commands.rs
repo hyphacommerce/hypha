@@ -93,13 +93,14 @@ fn an_orders_fulfilments_come_newest_first() {
 #[test]
 fn updating_tracking_stores_it() {
     let repo = repo();
-    let f = block_on(update_tracking(
+    let (f, changed) = block_on(update_tracking(
         &Ctx::system(),
         &repo,
         fid(1),
         &[input("2", Some("https://gls.example/2"))],
     ))
     .unwrap();
+    assert!(changed);
     assert_eq!(f.version(), Version::new(2));
     assert_eq!(block_on(repo.get(fid(1))), Ok(Some(f)));
     assert_eq!(
@@ -120,7 +121,8 @@ fn the_same_tracking_writes_nothing() {
         number: "1".to_string(),
         url: None,
     }];
-    let f = block_on(update_tracking(&Ctx::system(), &repo, fid(1), &tracking)).unwrap();
+    let (f, changed) = block_on(update_tracking(&Ctx::system(), &repo, fid(1), &tracking)).unwrap();
+    assert!(!changed);
     assert_eq!(f.version(), Version::new(1));
 }
 

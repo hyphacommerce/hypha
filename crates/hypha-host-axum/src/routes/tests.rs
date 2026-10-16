@@ -1997,6 +1997,11 @@ async fn rate_provider(app: &TestApp, key: &str, callback: &str) -> String {
 
 /// A market for HR in EUR selling one active 10 EUR mug; returns the mug's variant.
 async fn shop_selling_a_mug(app: &TestApp) -> String {
+    market_selling_a_mug(app).await.1
+}
+
+/// `shop_selling_a_mug`, with the market's ID too.
+async fn market_selling_a_mug(app: &TestApp) -> (String, String) {
     let (_, market) = send(
         app,
         "POST",
@@ -2028,7 +2033,10 @@ async fn shop_selling_a_mug(app: &TestApp) -> String {
     let body = json!({ "products": [mug_id] }).to_string();
     let (status, _) = send(app, "POST", &path, Some(&body)).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    mug["variants"][0]["id"].as_str().unwrap().to_string()
+    (
+        market["id"].as_str().unwrap().to_string(),
+        mug["variants"][0]["id"].as_str().unwrap().to_string(),
+    )
 }
 
 #[tokio::test]
@@ -2725,4 +2733,292 @@ async fn every_route_refuses_the_other_surfaces_credentials() {
             }
         }
     }
+}
+
+// ---------- fulfilment (design note 0018) ----------
+
+/// A shop selling mugs that need no shipping, 10 at the warehouse, and an order for 3
+/// placed through the storefront. Returns (order ID, its line ID, the warehouse's ID).
+async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) {
+    let (market, mug) = market_selling_a_mug(app).await;
+    let (_, mugs) = send(app, "GET", "/admin/products?limit=1", None).await;
+    let product = mugs["items"][0]["id"].as_str().unwrap().to_string();
+    let (status, json) = send(
+        app,
+        "PATCH",
+        &format!("/admin/products/{product}/variants/{mug}"),
+        Some(r#"{"requires_shipping":false}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let body = json!({"name": "Warehouse", "markets": [market]}).to_string();
+    let (_, location) = send(app, "POST", "/admin/locations", Some(&body)).await;
+    let location = location["id"].as_str().unwrap().to_string();
+    let body = json!({ "variant": mug }).to_string();
+    let (_, item) = send(app, "POST", "/admin/inventory-items", Some(&body)).await;
+    let level = format!(
+        "/admin/inventory-items/{}/levels/{location}",
+        item["id"].as_str().unwrap()
+    );
+    let (status, json) = send(app, "PUT", &level, Some(r#"{"on_hand":10}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+
+    let pk = publishable(app).await;
+    let (_, cart) = send_as(
+        app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let cart_path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let line = json!({"variant": mug, "quantity": 3}).to_string();
+    send_as(app, &pk, "POST", &format!("{cart_path}/lines"), Some(&line)).await;
+    send_as(
+        app,
+        &pk,
+        "PUT",
+        &format!("{cart_path}/email"),
+        Some(r#"{"email":"ana@example.hr"}"#),
+    )
+    .await;
+    let (status, order) = send_as(
+        app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{order}");
+    (
+        order["id"].as_str().unwrap().to_string(),
+        order["lines"][0]["id"].as_str().unwrap().to_string(),
+        location,
+    )
+}
+
+#[tokio::test]
+async fn an_order_is_fulfilled_and_taken_back_over_http() {
+    let app = app().await;
+    let (order, line, warehouse) = placed_order_for_three_mugs(&app).await;
+    let order_path = format!("/admin/orders/{order}");
+
+    // Everything waits at the warehouse.
+    let (status, json) = send(&app, "GET", &order_path, None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["fulfillment_status"], "unfulfilled");
+    assert_eq!(
+        json["unfulfilled"],
+        json!([{"line": line, "location": warehouse, "quantity": 3}])
+    );
+    assert_eq!(json["lines"][0]["fulfilled_quantity"], 0);
+
+    let ship = |quantity: u32| {
+        json!({"location": warehouse, "lines": [{"line": line, "quantity": quantity}],
+            "tracking": [{"carrier": "DHL", "number": "JD1", "url": "https://dhl.example/JD1"}],
+            "notify": true})
+        .to_string()
+    };
+    let fulfillments = format!("{order_path}/fulfillments");
+    let (status, shipped) = send(&app, "POST", &fulfillments, Some(&ship(2))).await;
+    assert_eq!(status, StatusCode::CREATED, "{shipped}");
+    assert_eq!(shipped["status"], "shipped");
+    assert_eq!(shipped["lines"], json!([{"line": line, "quantity": 2}]));
+    assert_eq!(shipped["tracking"][0]["number"], "JD1");
+    assert!(shipped["id"].as_str().unwrap().starts_with("ful_"));
+
+    let (_, json) = send(&app, "GET", &order_path, None).await;
+    assert_eq!(json["fulfillment_status"], "partially_fulfilled");
+    assert_eq!(json["lines"][0]["fulfilled_quantity"], 2);
+    assert_eq!(json["unfulfilled"][0]["quantity"], 1);
+
+    // More than is left: what's left comes back to act on.
+    let (status, json) = send(&app, "POST", &fulfillments, Some(&ship(2))).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "over_fulfilled")
+    );
+    assert_eq!(
+        json["details"],
+        json!({"line": line, "requested": 2, "unfulfilled": 1})
+    );
+
+    // The tracking changes; the list shows it.
+    let fulfillment = format!("/admin/fulfillments/{}", shipped["id"].as_str().unwrap());
+    let tracking = r#"{"tracking":[{"number":"JD2"}],"notify":true}"#;
+    let (status, json) = send(&app, "PATCH", &fulfillment, Some(tracking)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        json["tracking"],
+        json!([{"carrier": null, "number": "JD2", "url": null}])
+    );
+    let (_, list) = send(&app, "GET", &fulfillments, None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list["items"][0]["tracking"][0]["number"], "JD2");
+
+    // Standing fulfilments block cancelling the order.
+    let cancel = format!("{order_path}/cancel");
+    let reason = r#"{"reason":"customer"}"#;
+    let (status, json) = send(&app, "POST", &cancel, Some(reason)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "order_has_fulfillments")
+    );
+    assert_eq!(json["details"], json!({"fulfillments": [shipped["id"]]}));
+
+    // Taken back: its units are reserved again.
+    let (status, json) = send(&app, "POST", &format!("{fulfillment}/cancel"), None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["status"], "cancelled");
+    assert!(json["cancelled_at"].is_string());
+    let (_, json) = send(&app, "GET", &order_path, None).await;
+    assert_eq!(json["fulfillment_status"], "unfulfilled");
+    assert_eq!(json["unfulfilled"][0]["quantity"], 3);
+    let (status, json) = send(&app, "PATCH", &fulfillment, Some(tracking)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "fulfillment_cancelled")
+    );
+
+    // Now the order cancels, and stays cancelled with its first reason.
+    let (status, json) = send(
+        &app,
+        "POST",
+        &cancel,
+        Some(r#"{"reason":"inventory","notify":true}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["cancel_reason"], "inventory");
+    assert!(json["cancelled_at"].is_string());
+    assert_eq!(json["unfulfilled"], json!([]));
+    let (_, again) = send(&app, "POST", &cancel, Some(reason)).await;
+    assert_eq!(again["cancel_reason"], "inventory");
+    let (status, json) = send(&app, "POST", &fulfillments, Some(&ship(1))).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "order_cancelled")
+    );
+    let (status, json) = send(&app, "POST", &format!("{order_path}/paid"), None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "order_cancelled")
+    );
+
+    // The list shows the cancellation too.
+    let (_, page) = send(&app, "GET", "/admin/orders", None).await;
+    assert!(page["items"][0]["cancelled_at"].is_string());
+}
+
+#[tokio::test]
+async fn bad_fulfilments_are_refused_with_codes() {
+    let app = app().await;
+    let (order, line, warehouse) = placed_order_for_three_mugs(&app).await;
+    let fulfillments = format!("/admin/orders/{order}/fulfillments");
+    let post = |body: Value| {
+        let app = &app;
+        let path = fulfillments.clone();
+        async move { send(app, "POST", &path, Some(&body.to_string())).await }
+    };
+    let unknown_location = format!("loc_{}", "0".repeat(32));
+    for (body, status, expected) in [
+        (
+            json!({"location": unknown_location, "lines": [{"line": line, "quantity": 1}]}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "location_not_found",
+        ),
+        (
+            json!({"location": warehouse, "lines": [{"line": format!("ordl_{}", "0".repeat(32)), "quantity": 1}]}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_order_line",
+        ),
+        (
+            json!({"location": warehouse, "lines": []}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "fulfillment_has_no_lines",
+        ),
+        (
+            json!({"location": warehouse, "lines": [{"line": line, "quantity": 0}]}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_quantity",
+        ),
+        (
+            json!({"location": warehouse, "lines": [{"line": line, "quantity": 1}],
+                "tracking": [{"number": "1", "url": "dhl.example"}]}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_tracking_url",
+        ),
+    ] {
+        let (got, json) = post(body).await;
+        assert_eq!((got, code(&json)), (status, expected), "{json}");
+    }
+    let missing = format!("/admin/orders/ord_{}/fulfillments", "0".repeat(32));
+    let (status, json) = send(&app, "GET", &missing, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "order_not_found")
+    );
+    let missing = format!("/admin/fulfillments/ful_{}", "0".repeat(32));
+    let (status, json) = send(&app, "GET", &missing, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "fulfillment_not_found")
+    );
+}
+
+#[tokio::test]
+async fn fulfilling_needs_fulfillment_scopes_and_cancelling_orders_write() {
+    let app = app().await;
+    let (order, line, warehouse) = placed_order_for_three_mugs(&app).await;
+    let orders_only = key(
+        &app,
+        json!({"kind": "secret", "name": "o", "scopes": ["orders:write"]}),
+    )
+    .await;
+    let shipper = key(
+        &app,
+        json!({"kind": "secret", "name": "s", "scopes": ["fulfillments:write"]}),
+    )
+    .await;
+    let body = json!({"location": warehouse, "lines": [{"line": line, "quantity": 1}]}).to_string();
+    let fulfillments = format!("/admin/orders/{order}/fulfillments");
+    let (status, _) = send_as(&app, &orders_only, "POST", &fulfillments, Some(&body)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, json) = send_as(&app, &shipper, "POST", &fulfillments, Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+    // A shipper reads fulfilments but can't cancel the order.
+    let (status, _) = send_as(&app, &shipper, "GET", &fulfillments, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let cancel = format!("/admin/orders/{order}/cancel");
+    let (status, _) = send_as(
+        &app,
+        &shipper,
+        "POST",
+        &cancel,
+        Some(r#"{"reason":"staff"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_retried_fulfilment_replays_the_first() {
+    let app = app().await;
+    let (order, line, warehouse) = placed_order_for_three_mugs(&app).await;
+    let body = json!({"location": warehouse, "lines": [{"line": line, "quantity": 1}]}).to_string();
+    let path = format!("/admin/orders/{order}/fulfillments");
+    let auth = format!("Bearer {}", app.admin_key);
+    let headers = [
+        (AUTHORIZATION.as_str(), auth.as_str()),
+        ("idempotency-key", "ship-1"),
+    ];
+    let (status, first) = send_with(&app, &headers, "POST", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    let (status, again) = send_with(&app, &headers, "POST", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
+    assert_eq!(again["id"], first["id"]);
+    let (_, json) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
+    assert_eq!(json["lines"][0]["fulfilled_quantity"], 1);
 }

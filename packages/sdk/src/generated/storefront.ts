@@ -221,6 +221,13 @@ export interface components {
          */
         AssetKindDto: string;
         /**
+         * @description `CancelReason` on the wire (design note 0018).
+         *
+         *     Known values: `customer`, `inventory`, `fraud`, `declined`, `staff`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        CancelReasonDto: string;
+        /**
          * @description A CartId: `cart_` and 32 hex digits.
          * @example cart_0190f1a2b3c47d8e9f00112233445566
          */
@@ -318,7 +325,7 @@ export interface components {
         /**
          * @description `FulfillmentStatus` on the wire.
          *
-         *     Known values: `unfulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `unfulfilled`, `partially_fulfilled`, `fulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         FulfillmentStatusDto: string;
@@ -402,6 +409,11 @@ export interface components {
          */
         OrderLineId: string;
         OrderLineResponse: {
+            /**
+             * Format: int32
+             * @description How many of `quantity` standing fulfilments shipped.
+             */
+            fulfilled_quantity: number;
             id: components["schemas"]["OrderLineId"];
             product: components["schemas"]["ProductId"];
             product_title: string;
@@ -416,6 +428,9 @@ export interface components {
             variant_title?: string | null;
         };
         OrderResponse: {
+            cancel_reason?: components["schemas"]["CancelReasonDto"] | null;
+            /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
+            cancelled_at?: string | null;
             cart: components["schemas"]["CartId"];
             country: components["schemas"]["CountryCode"];
             /** @description When it was created, RFC 3339 in UTC. */

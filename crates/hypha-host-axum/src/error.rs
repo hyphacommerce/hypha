@@ -53,6 +53,10 @@ pub struct ApiErrorBody {
 ///   `provider_failed`, `service_not_quoted` or `backup_not_needed`
 /// - `shipping_option_unavailable` (checkout): `{"reason"}`: `shipping_option_unavailable`,
 ///   `no_price_in_currency`, `weight_unknown` or a money error code; pick again
+/// - `over_fulfilled`: `{"line": "ordl_…", "requested": n, "unfulfilled": n}`, what the
+///   line has left to ship
+/// - `order_has_fulfillments`: `{"fulfillments": ["ful_…"]}`, the standing ones to cancel
+///   first
 /// - `asset_in_use`: `{"usages": [{"owner": {"kind", "id"}, "role"}], "has_more"}`, the first
 ///   25; `GET /admin/assets/{id}/usages` pages through all of them
 ///
@@ -622,6 +626,96 @@ impl From<hypha_orders::CommandError> for ApiError {
             ) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
+    }
+}
+
+/// The status of a fulfilment rule: bad input in the body (422), or a cancelled
+/// fulfilment in the URL (409).
+fn fulfillment_error_status(e: &hypha_fulfillment::FulfillmentError) -> StatusCode {
+    use hypha_fulfillment::FulfillmentError as F;
+    match e {
+        F::Cancelled(_) => StatusCode::CONFLICT,
+        F::Text(_)
+        | F::NoLines
+        | F::DuplicateLine(_)
+        | F::TooMuchTracking { .. }
+        | F::InvalidTrackingUrl(_) => StatusCode::UNPROCESSABLE_ENTITY,
+    }
+}
+
+/// What a client acts on when it asked for more than a line has left.
+fn order_details(e: &hypha_orders::OrderError) -> Option<Value> {
+    match e {
+        hypha_orders::OrderError::OverFulfilled {
+            line,
+            requested,
+            unfulfilled,
+        } => Some(json!({ "line": line, "requested": requested, "unfulfilled": unfulfilled })),
+        _ => None,
+    }
+}
+
+impl From<hypha_fulfillment::CommandError> for ApiError {
+    fn from(e: hypha_fulfillment::CommandError) -> Self {
+        use hypha_fulfillment::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Fulfilments only ever arrive in URLs.
+            E::FulfillmentNotFound(_) => StatusCode::NOT_FOUND,
+            E::Fulfillment(f) => fulfillment_error_status(f),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
+impl From<hypha_order_actions::CommandError> for ApiError {
+    fn from(e: hypha_order_actions::CommandError) -> Self {
+        use hypha_inventory::InventoryError as I;
+        use hypha_order_actions::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // The order or fulfilment in the URL; the location comes in the body.
+            E::OrderNotFound(_) | E::FulfillmentNotFound(_) => StatusCode::NOT_FOUND,
+            E::LocationNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::HasFulfillments { .. } => StatusCode::CONFLICT,
+            E::Order(o) => match order_error_status(o) {
+                Some(status) => status,
+                None => return Self::internal(e),
+            },
+            E::Fulfillment(f) => fulfillment_error_status(f),
+            E::Quantity(_) | E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            // A count that would leave the representable range: the stock's state.
+            E::Inventory(I::StockOutOfRange(_)) => StatusCode::CONFLICT,
+            // Order line references and deletions are built by the workflow: a bug.
+            E::Inventory(
+                I::Text(_)
+                | I::Address(_)
+                | I::DuplicateMarket(_)
+                | I::OnHandChanged { .. }
+                | I::Quantity(_)
+                | I::InvalidReference
+                | I::ReferenceInUse(_)
+                | I::OutOfStock { .. }
+                | I::DuplicateLine { .. }
+                | I::StillReserved,
+            ) => return Self::internal(e),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = match &e {
+            E::HasFulfillments { fulfillments, .. } => {
+                Some(json!({ "fulfillments": fulfillments }))
+            }
+            E::Order(o) => order_details(o),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 

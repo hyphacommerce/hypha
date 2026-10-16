@@ -486,6 +486,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/fulfillments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A fulfilment. */
+        get: operations["admin.fulfillments.fetch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Changes a standing fulfilment's tracking. A cancelled one is refused
+         *     (`fulfillment_cancelled`, 409).
+         */
+        patch: operations["admin.fulfillments.update"];
+        trace?: never;
+    };
+    "/admin/fulfillments/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Takes back a fulfilment recorded by mistake: its lines count as unfulfilled again,
+         *     and its units are back in stock at its location, reserved for their lines.
+         *     Cancelling it again changes nothing.
+         */
+        post: operations["admin.fulfillments.cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/inventory-items": {
         parameters: {
             query?: never;
@@ -818,10 +860,54 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** An order. */
+        /** An order, with what's left to ship. */
         get: operations["admin.orders.fetch"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/orders/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancels the order: every line's reserved stock is released. Refused while
+         *     fulfilments stand (`order_has_fulfillments`, 409, listing them): cancel those first.
+         *     A paid order stays paid; refund it outside Hypha for now. Cancelling it again
+         *     changes nothing.
+         */
+        post: operations["admin.orders.cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/orders/{id}/fulfillments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The order's fulfilments, newest first, cancelled ones too. */
+        get: operations["admin.fulfillments.list"];
+        put?: never;
+        /**
+         * Records that lines of the order left a location: the order counts them as
+         *     fulfilled, and their units come out of the location's stock. Takes an
+         *     `Idempotency-Key` header: a retry returns the fulfilment the first request recorded.
+         */
+        post: operations["admin.fulfillments.create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1443,6 +1529,14 @@ export interface components {
              */
             delta: number;
         };
+        /** @description An order as the admin sees it: with what's left to ship, by location. */
+        AdminOrderResponse: components["schemas"]["OrderResponse"] & {
+            /**
+             * @description Per line with anything left, in line order; empty once everything shipped or the
+             *     order was cancelled.
+             */
+            unfulfilled: components["schemas"]["UnfulfilledDto"][];
+        };
         /**
          * @description A ApiKeyId: `key_` and 32 hex digits.
          * @example key_0190f1a2b3c47d8e9f00112233445566
@@ -1583,6 +1677,18 @@ export interface components {
          * @enum {string}
          */
         BasisDto: string;
+        CancelOrderRequest: {
+            /** @description Email the buyer that the order is cancelled (`false` if absent). */
+            notify?: boolean;
+            reason: components["schemas"]["CancelReasonDto"];
+        };
+        /**
+         * @description `CancelReason` on the wire (design note 0018).
+         *
+         *     Known values: `customer`, `inventory`, `fraud`, `declined`, `staff`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        CancelReasonDto: string;
         /**
          * @description A CartId: `cart_` and 32 hex digits.
          * @example cart_0190f1a2b3c47d8e9f00112233445566
@@ -1719,6 +1825,19 @@ export interface components {
             first_name?: string | null;
             last_name?: string | null;
             phone?: string | null;
+        };
+        CreateFulfillmentRequest: {
+            /** @description Each order line once; at most what it has left to ship. */
+            lines: components["schemas"]["FulfillmentLineDto"][];
+            /**
+             * @description Where the units leave from. Another location than the one holding them is fine:
+             *     its stock goes down, and the reservation elsewhere is released.
+             */
+            location: components["schemas"]["LocationId"];
+            /** @description Email the buyer a shipping confirmation (`false` if absent). */
+            notify?: boolean;
+            /** @description At most 10. */
+            tracking?: components["schemas"]["TrackingDto"][];
         };
         CreateInventoryItemRequest: {
             /** @description Keep selling when stock runs out. Defaults to false. */
@@ -1932,9 +2051,45 @@ export interface components {
             variant: components["schemas"]["VariantId"];
         };
         /**
+         * @description A FulfillmentId: `ful_` and 32 hex digits.
+         * @example ful_0190f1a2b3c47d8e9f00112233445566
+         */
+        FulfillmentId: string;
+        FulfillmentLineDto: {
+            /** @description An order line of the order in the URL. */
+            line: components["schemas"]["OrderLineId"];
+            /** Format: int32 */
+            quantity: number;
+        };
+        FulfillmentList: {
+            /** @description Newest first, cancelled ones too. */
+            items: components["schemas"]["FulfillmentResponse"][];
+        };
+        FulfillmentResponse: {
+            /** @description RFC 3339, UTC; `null` unless cancelled. */
+            cancelled_at?: string | null;
+            /** @description When it was recorded, RFC 3339 in UTC. */
+            created_at: string;
+            id: components["schemas"]["FulfillmentId"];
+            lines: components["schemas"]["FulfillmentLineDto"][];
+            location: components["schemas"]["LocationId"];
+            order: components["schemas"]["OrderId"];
+            status: components["schemas"]["FulfillmentStateDto"];
+            tracking: components["schemas"]["TrackingDto"][];
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
+        };
+        /**
+         * @description `FulfillmentState` on the wire.
+         *
+         *     Known values: `shipped`, `cancelled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        FulfillmentStateDto: string;
+        /**
          * @description `FulfillmentStatus` on the wire.
          *
-         *     Known values: `unfulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `unfulfilled`, `partially_fulfilled`, `fulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         FulfillmentStatusDto: string;
@@ -2133,6 +2288,11 @@ export interface components {
          */
         OrderLineId: string;
         OrderLineResponse: {
+            /**
+             * Format: int32
+             * @description How many of `quantity` standing fulfilments shipped.
+             */
+            fulfilled_quantity: number;
             id: components["schemas"]["OrderLineId"];
             product: components["schemas"]["ProductId"];
             product_title: string;
@@ -2147,6 +2307,9 @@ export interface components {
             variant_title?: string | null;
         };
         OrderResponse: {
+            cancel_reason?: components["schemas"]["CancelReasonDto"] | null;
+            /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
+            cancelled_at?: string | null;
             cart: components["schemas"]["CartId"];
             country: components["schemas"]["CountryCode"];
             /** @description When it was created, RFC 3339 in UTC. */
@@ -2209,6 +2372,8 @@ export interface components {
         };
         /** @description An order in a list: what a table of orders shows, without lines. */
         OrderSummaryResponse: {
+            /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
+            cancelled_at?: string | null;
             country: components["schemas"]["CountryCode"];
             customer: components["schemas"]["CustomerId"];
             email: components["schemas"]["Email"];
@@ -2415,7 +2580,7 @@ export interface components {
             scopes: components["schemas"]["Scope"][];
         };
         /**
-         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         Scope: string;
@@ -2609,6 +2774,21 @@ export interface components {
             /** @description `otpauth://…`, for a QR code. */
             uri: string;
         };
+        /** @description A tracking number, with the carrier and a URL to follow it when known. */
+        TrackingDto: {
+            /** @description "DHL Express"; free text. */
+            carrier?: string | null;
+            number: string;
+            /** @description `http://` or `https://`, at most 2048 characters. */
+            url?: string | null;
+        };
+        /** @description Units of a line still to ship, and where they wait (design note 0018, FU4). */
+        UnfulfilledDto: {
+            line: components["schemas"]["OrderLineId"];
+            location?: components["schemas"]["LocationId"] | null;
+            /** Format: int32 */
+            quantity: number;
+        };
         /** @description Callback, timeout, services (JSON Merge Patch; none take `null`). */
         UpdateAppProviderRequest: {
             callback_url?: string;
@@ -2642,6 +2822,13 @@ export interface components {
             first_name?: string | null;
             last_name?: string | null;
             phone?: string | null;
+        };
+        /** @description A JSON Merge Patch of a fulfilment: absent fields stay as they are. */
+        UpdateFulfillmentRequest: {
+            /** @description Email the buyer the new tracking, if it changed (`false` if absent). */
+            notify?: boolean;
+            /** @description Replaces every tracking number (at most 10; `[]` removes them). */
+            tracking?: components["schemas"]["TrackingDto"][];
         };
         /** @description Every field optional: only the ones sent change. */
         UpdateInventoryItemRequest: {
@@ -5812,6 +5999,256 @@ export interface operations {
             };
         };
     };
+    "admin.fulfillments.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["FulfillmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FulfillmentResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.fulfillments.update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["FulfillmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateFulfillmentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FulfillmentResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.fulfillments.cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["FulfillmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FulfillmentResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.inventory.create_item": {
         parameters: {
             query?: never;
@@ -7757,7 +8194,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OrderResponse"];
+                    "application/json": components["schemas"]["AdminOrderResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). */
@@ -7789,6 +8226,292 @@ export interface operations {
             };
             /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.orders.cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["OrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.fulfillments.list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["OrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FulfillmentList"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.fulfillments.create": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                id: components["schemas"]["OrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateFulfillmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    /** @description `true` when this answer replays an earlier request with the same `Idempotency-Key`. */
+                    "Idempotent-Replayed"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FulfillmentResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

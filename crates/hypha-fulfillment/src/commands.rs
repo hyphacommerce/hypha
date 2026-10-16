@@ -64,21 +64,23 @@ pub async fn list_order_fulfillments<R: FulfillmentRepo>(
     Ok(fulfillments.list_for_order(order).await?)
 }
 
-/// Replaces a standing fulfilment's tracking (design note 0018, section 3). The same
-/// tracking writes nothing; a cancelled fulfilment is refused (`fulfillment_cancelled`).
+/// Replaces a standing fulfilment's tracking (design note 0018, section 3), and says
+/// whether it changed (the buyer may be told then). The same tracking writes nothing; a
+/// cancelled fulfilment is refused (`fulfillment_cancelled`).
 pub async fn update_tracking<R: FulfillmentRepo>(
     ctx: &Ctx,
     fulfillments: &R,
     id: FulfillmentId,
     tracking: &[TrackingInput],
-) -> Result<Fulfillment, CommandError> {
+) -> Result<(Fulfillment, bool), CommandError> {
     ctx.require(Scope::FulfillmentsWrite)?;
     let tracking = TrackingInput::parse_all(tracking)?;
     let mut fulfillment = load(fulfillments, id).await?;
-    if fulfillment.set_tracking(tracking)? {
+    let changed = fulfillment.set_tracking(tracking)?;
+    if changed {
         fulfillments.update(&mut fulfillment).await?;
     }
-    Ok(fulfillment)
+    Ok((fulfillment, changed))
 }
 
 async fn load<R: FulfillmentRepo>(

@@ -286,6 +286,29 @@
         ],
         "type": "object"
       },
+      "AdminOrderResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/OrderResponse"
+          },
+          {
+            "properties": {
+              "unfulfilled": {
+                "description": "Per line with anything left, in line order; empty once everything shipped or the\norder was cancelled.",
+                "items": {
+                  "$ref": "#/components/schemas/UnfulfilledDto"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "unfulfilled"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "An order as the admin sees it: with what's left to ship, by location."
+      },
       "ApiKeyId": {
         "description": "A ApiKeyId: `key_` and 32 hex digits.",
         "examples": [
@@ -709,6 +732,22 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "CancelOrderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "notify": {
+            "description": "Email the buyer that the order is cancelled (`false` if absent).",
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/CancelReasonDto"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
       },
       "CancelReasonDto": {
         "description": "`CancelReason` on the wire (design note 0018).\n\nKnown values: `customer`, `inventory`, `fraud`, `declined`, `staff`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
@@ -1170,6 +1209,38 @@
         },
         "required": [
           "email"
+        ],
+        "type": "object"
+      },
+      "CreateFulfillmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "lines": {
+            "description": "Each order line once; at most what it has left to ship.",
+            "items": {
+              "$ref": "#/components/schemas/FulfillmentLineDto"
+            },
+            "type": "array"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationId",
+            "description": "Where the units leave from. Another location than the one holding them is fine:\nits stock goes down, and the reservation elsewhere is released."
+          },
+          "notify": {
+            "description": "Email the buyer a shipping confirmation (`false` if absent).",
+            "type": "boolean"
+          },
+          "tracking": {
+            "description": "At most 10.",
+            "items": {
+              "$ref": "#/components/schemas/TrackingDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "location",
+          "lines"
         ],
         "type": "object"
       },
@@ -1742,6 +1813,111 @@
           "price"
         ],
         "type": "object"
+      },
+      "FulfillmentId": {
+        "description": "A FulfillmentId: `ful_` and 32 hex digits.",
+        "examples": [
+          "ful_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^ful_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "FulfillmentLineDto": {
+        "additionalProperties": false,
+        "properties": {
+          "line": {
+            "$ref": "#/components/schemas/OrderLineId",
+            "description": "An order line of the order in the URL."
+          },
+          "quantity": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "FulfillmentList": {
+        "properties": {
+          "items": {
+            "description": "Newest first, cancelled ones too.",
+            "items": {
+              "$ref": "#/components/schemas/FulfillmentResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "FulfillmentResponse": {
+        "properties": {
+          "cancelled_at": {
+            "description": "RFC 3339, UTC; `null` unless cancelled.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "When it was recorded, RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/FulfillmentId"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/FulfillmentLineDto"
+            },
+            "type": "array"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationId"
+          },
+          "order": {
+            "$ref": "#/components/schemas/OrderId"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FulfillmentStateDto"
+          },
+          "tracking": {
+            "items": {
+              "$ref": "#/components/schemas/TrackingDto"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "order",
+          "location",
+          "status",
+          "lines",
+          "tracking",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "FulfillmentStateDto": {
+        "description": "`FulfillmentState` on the wire.\n\nKnown values: `shipped`, `cancelled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "shipped",
+          "cancelled"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "FulfillmentStatusDto": {
         "description": "`FulfillmentStatus` on the wire.\n\nKnown values: `unfulfilled`, `partially_fulfilled`, `fulfilled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
@@ -3912,6 +4088,62 @@
         ],
         "type": "object"
       },
+      "TrackingDto": {
+        "additionalProperties": false,
+        "description": "A tracking number, with the carrier and a URL to follow it when known.",
+        "properties": {
+          "carrier": {
+            "description": "\"DHL Express\"; free text.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number": {
+            "type": "string"
+          },
+          "url": {
+            "description": "`http://` or `https://`, at most 2048 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "type": "object"
+      },
+      "UnfulfilledDto": {
+        "description": "Units of a line still to ship, and where they wait (design note 0018, FU4).",
+        "properties": {
+          "line": {
+            "$ref": "#/components/schemas/OrderLineId"
+          },
+          "location": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocationId",
+                "description": "The location holding them for the line; `null` for units held nowhere (an\nuntracked item): any location."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "quantity"
+        ],
+        "type": "object"
+      },
       "UpdateAppProviderRequest": {
         "additionalProperties": false,
         "description": "Callback, timeout, services (JSON Merge Patch; none take `null`).",
@@ -4007,6 +4239,24 @@
               "string",
               "null"
             ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdateFulfillmentRequest": {
+        "additionalProperties": false,
+        "description": "A JSON Merge Patch of a fulfilment: absent fields stay as they are.",
+        "properties": {
+          "notify": {
+            "description": "Email the buyer the new tracking, if it changed (`false` if absent).",
+            "type": "boolean"
+          },
+          "tracking": {
+            "description": "Replaces every tracking number (at most 10; `[]` removes them).",
+            "items": {
+              "$ref": "#/components/schemas/TrackingDto"
+            },
+            "type": "array"
           }
         },
         "type": "object"
@@ -8323,6 +8573,331 @@
         ]
       }
     },
+    "/admin/fulfillments/{id}": {
+      "get": {
+        "operationId": "admin.fulfillments.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/FulfillmentId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A fulfilment.",
+        "tags": [
+          "fulfillments"
+        ],
+        "x-hypha-scopes": [
+          "fulfillments:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.fulfillments.update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/FulfillmentId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFulfillmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes a standing fulfilment's tracking. A cancelled one is refused\n(`fulfillment_cancelled`, 409).",
+        "tags": [
+          "fulfillments"
+        ],
+        "x-hypha-scopes": [
+          "fulfillments:write"
+        ]
+      }
+    },
+    "/admin/fulfillments/{id}/cancel": {
+      "post": {
+        "operationId": "admin.fulfillments.cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/FulfillmentId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Takes back a fulfilment recorded by mistake: its lines count as unfulfilled again,\nand its units are back in stock at its location, reserved for their lines.\nCancelling it again changes nothing.",
+        "tags": [
+          "fulfillments"
+        ],
+        "x-hypha-scopes": [
+          "fulfillments:write"
+        ]
+      }
+    },
     "/admin/inventory-items": {
       "post": {
         "operationId": "admin.inventory.create_item",
@@ -10792,7 +11367,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrderResponse"
+                  "$ref": "#/components/schemas/AdminOrderResponse"
                 }
               }
             },
@@ -10854,12 +11429,397 @@
             "bearer": []
           }
         ],
-        "summary": "An order.",
+        "summary": "An order, with what's left to ship.",
         "tags": [
           "orders"
         ],
         "x-hypha-scopes": [
           "orders:read"
+        ]
+      }
+    },
+    "/admin/orders/{id}/cancel": {
+      "post": {
+        "operationId": "admin.orders.cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancels the order: every line's reserved stock is released. Refused while\nfulfilments stand (`order_has_fulfillments`, 409, listing them): cancel those first.\nA paid order stays paid; refund it outside Hypha for now. Cancelling it again\nchanges nothing.",
+        "tags": [
+          "orders"
+        ],
+        "x-hypha-scopes": [
+          "orders:write"
+        ]
+      }
+    },
+    "/admin/orders/{id}/fulfillments": {
+      "get": {
+        "operationId": "admin.fulfillments.list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The order's fulfilments, newest first, cancelled ones too.",
+        "tags": [
+          "fulfillments"
+        ],
+        "x-hypha-scopes": [
+          "fulfillments:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.fulfillments.create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          },
+          {
+            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFulfillmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentResponse"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Idempotent-Replayed": {
+                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Records that lines of the order left a location: the order counts them as\nfulfilled, and their units come out of the location's stock. Takes an\n`Idempotency-Key` header: a retry returns the fulfilment the first request recorded.",
+        "tags": [
+          "fulfillments"
+        ],
+        "x-hypha-scopes": [
+          "fulfillments:write"
         ]
       }
     },
