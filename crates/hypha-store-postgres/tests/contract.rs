@@ -22,6 +22,12 @@ fn database_url() -> Option<String> {
 /// A store on a fresh, fully migrated schema. Each test uses its own schema name, so
 /// tests running in parallel never see each other's rows.
 async fn fresh_store(url: &str, schema: &str) -> PgStore<Client> {
+    fresh_store_then(url, schema, "").await
+}
+
+/// `fresh_store`, then `sql` (to undo what migrations seed, such as the Online Store
+/// channel).
+async fn fresh_store_then(url: &str, schema: &str, sql: &str) -> PgStore<Client> {
     let (mut client, connection) = hypha_store_postgres::database_config(url)
         .expect("DATABASE_URL")
         .connect(NoTls)
@@ -36,6 +42,9 @@ async fn fresh_store(url: &str, schema: &str) -> PgStore<Client> {
         .await
         .expect("reset schema");
     migrate(&mut client, &[CORE]).await.expect("migrate");
+    if !sql.is_empty() {
+        client.batch_execute(sql).await.expect("after migrating");
+    }
     PgStore::new(client, clock())
 }
 
@@ -243,4 +252,14 @@ async fn search_settings_repo() {
     let Some(url) = database_url() else { return };
     contract::search_settings_repo(async || fresh_store(&url, "contract_search_settings").await)
         .await;
+}
+
+#[tokio::test]
+async fn channel_repo() {
+    let Some(url) = database_url() else { return };
+    // The migration's Online Store would be in every list: start without it.
+    contract::channel_repo(async || {
+        fresh_store_then(&url, "contract_channels", "DELETE FROM channels").await
+    })
+    .await;
 }

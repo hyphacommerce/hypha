@@ -232,3 +232,8 @@ fn search_settings_repo() {
         InMemorySearchSettingsRepo::default()
     }));
 }
+
+#[test]
+fn channel_repo() {
+    block_on(contract::channel_repo(async || InMemoryPorts::default()));
+}

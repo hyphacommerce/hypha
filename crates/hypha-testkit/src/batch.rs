@@ -3,10 +3,11 @@ use hypha_auth::{
     keys as auth_keys,
 };
 use hypha_cart::{Cart, StageCarts, repo::keys as cart_keys};
+use hypha_channels::StagePublications;
 use hypha_core::{
-    CatalogId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId,
-    ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId,
-    Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
+    CatalogId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
+    PriceListId, ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency,
+    TaxClassId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
 use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
@@ -67,6 +68,7 @@ enum Staged {
     PasswordReset(PasswordReset),
     UsedUpResets(IdentityId, Timestamp),
     CatalogProducts(CatalogId, Vec<ProductId>, bool),
+    Publications(ChannelId, Vec<ProductId>, bool),
     TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
     FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
     Events(Vec<PendingEvent>, Option<Version>),
@@ -310,6 +312,8 @@ impl HasBatch for InMemoryPorts {
         let usages_before = usages.clone();
         let mut memberships = self.catalogs.lock_products();
         let memberships_before = memberships.clone();
+        let mut publications = self.channels.lock_products();
+        let publications_before = publications.clone();
         let mut fixed_prices = self.price_lists.lock_fixed_prices();
         let fixed_prices_before = fixed_prices.clone();
         let mut tax_classes = self.tax_classes.lock_assignments();
@@ -481,6 +485,19 @@ impl HasBatch for InMemoryPorts {
                             }
                         }
                     }
+                    Staged::Publications(channel, products, publish) => {
+                        if !self.channels.exists(channel) {
+                            return Err(missing("channel", channel));
+                        }
+                        let published = publications.entry(channel).or_default();
+                        for product in products {
+                            if publish {
+                                published.insert(product);
+                            } else {
+                                published.remove(&product);
+                            }
+                        }
+                    }
                     Staged::TaxAssignment(products, class) => {
                         for product in products {
                             match class {
@@ -516,11 +533,22 @@ impl HasBatch for InMemoryPorts {
             *usages = usages_before;
             *fulfillments = fulfillments_before;
             *memberships = memberships_before;
+            *publications = publications_before;
             *fixed_prices = fixed_prices_before;
             *tax_classes = tax_classes_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written
+    }
+}
+
+impl StagePublications for InMemoryBatch {
+    fn publish_products(&mut self, channel: ChannelId, products: &[ProductId]) {
+        self.stage(Staged::Publications(channel, products.to_vec(), true));
+    }
+
+    fn unpublish_products(&mut self, channel: ChannelId, products: &[ProductId]) {
+        self.stage(Staged::Publications(channel, products.to_vec(), false));
     }
 }
 

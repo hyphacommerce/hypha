@@ -199,6 +199,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "search_speed",
             sql: include_str!("../migrations/0035_search_speed.sql"),
         },
+        Migration {
+            version: 36,
+            name: "channels",
+            sql: include_str!("../migrations/0036_channels.sql"),
+        },
     ],
 };
 

@@ -6,9 +6,9 @@ use hypha_auth::{
 };
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_core::{
-    CatalogId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId,
-    ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId,
-    Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
+    CatalogId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
+    PriceListId, ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency,
+    TaxClassId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
@@ -88,6 +88,8 @@ enum Staged {
     TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
     /// Catalog membership: added (`true`) or removed.
     CatalogProducts(CatalogId, Vec<ProductId>, bool),
+    /// Publications: published (`true`) or unpublished.
+    Publications(ChannelId, Vec<ProductId>, bool),
     /// Fixed prices set (`Some` price) or removed (`None`), per variant.
     FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
     /// Events about the aggregate staged just before, with the version that write gives
@@ -127,13 +129,14 @@ impl Staged {
             Staged::UsedUpResets(..) => 21,
             // These two are gathered and written in one statement each, last.
             Staged::CatalogProducts(..) => 22,
-            Staged::FixedPrices(..) => 23,
-            Staged::TaxAssignment(..) => 24,
-            Staged::Idempotency(_) => 25,
-            Staged::InventoryItem(_) => 26,
-            Staged::DeletedInventoryItem(_) => 27,
+            Staged::Publications(..) => 23,
+            Staged::FixedPrices(..) => 24,
+            Staged::TaxAssignment(..) => 25,
+            Staged::Idempotency(_) => 26,
+            Staged::InventoryItem(_) => 27,
+            Staged::DeletedInventoryItem(_) => 28,
             // Inserts into a table nothing else locks: anywhere would do.
-            Staged::Events(..) => 28,
+            Staged::Events(..) => 29,
         }
     }
 
@@ -171,6 +174,7 @@ impl Staged {
                     a.id.cmp(&b.id)
                 }
                 (Staged::CatalogProducts(a, ..), Staged::CatalogProducts(b, ..)) => a.cmp(b),
+                (Staged::Publications(a, ..), Staged::Publications(b, ..)) => a.cmp(b),
                 (Staged::FixedPrices(a, _), Staged::FixedPrices(b, _)) => a.cmp(b),
                 _ => Ordering::Equal,
             })
@@ -458,6 +462,12 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                 Staged::CatalogProducts(catalog, products, false) => {
                     remove_catalog_products(&tx, catalog, &products).await?
                 }
+                Staged::Publications(channel, products, true) => {
+                    crate::channels::publish(&tx, channel, &products).await?
+                }
+                Staged::Publications(channel, products, false) => {
+                    crate::channels::unpublish(&tx, channel, &products).await?
+                }
                 Staged::FixedPrices(list, changes) => {
                     let set: Vec<(VariantId, Price)> = changes
                         .iter()
@@ -491,6 +501,16 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         update_items(&tx, items).await?;
         delete_items(&tx, &deleted).await?;
         tx.commit().await.map_err(repo_error)
+    }
+}
+
+impl hypha_channels::StagePublications for PgBatch {
+    fn publish_products(&mut self, channel: ChannelId, products: &[ProductId]) {
+        self.stage(Staged::Publications(channel, products.to_vec(), true));
+    }
+
+    fn unpublish_products(&mut self, channel: ChannelId, products: &[ProductId]) {
+        self.stage(Staged::Publications(channel, products.to_vec(), false));
     }
 }
 

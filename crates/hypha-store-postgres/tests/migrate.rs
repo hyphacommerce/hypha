@@ -346,3 +346,39 @@ async fn product_editing_refuses_rows_that_would_stop_loading() {
             .contains("000000000001")
     );
 }
+
+/// Core before sales channels (design note 0020): migrations 0001 to 0035.
+const BEFORE_CHANNELS: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(35).0,
+};
+
+#[tokio::test]
+async fn existing_products_stay_sold_in_the_online_store() {
+    let Some(mut client) = fresh_schema("migrate_0036_channels").await else {
+        return;
+    };
+    migrate(&mut client, &[BEFORE_CHANNELS]).await.unwrap();
+    old_product(&client, 1, "Size", "S", &[None]).await;
+    old_product(&client, 2, "Size", "M", &[None]).await;
+    migrate(&mut client, &[CORE]).await.unwrap();
+
+    let channels = client
+        .query("SELECT name, kind FROM channels", &[])
+        .await
+        .unwrap();
+    assert_eq!(channels.len(), 1);
+    assert_eq!(
+        (
+            channels[0].get::<_, String>(0),
+            channels[0].get::<_, String>(1)
+        ),
+        ("Online Store".to_string(), "online_store".to_string())
+    );
+    let published: i64 = client
+        .query_one("SELECT count(*) FROM channel_products", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(published, 2);
+}

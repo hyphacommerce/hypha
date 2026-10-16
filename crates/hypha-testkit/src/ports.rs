@@ -14,12 +14,13 @@ use hypha_users::{HasInvites, HasRoles, HasUsers};
 
 use crate::{
     InMemoryApiKeyRepo, InMemoryAppProviderRepo, InMemoryAppRepo, InMemoryAssetRepo,
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCustomerRepo, InMemoryFulfillmentRepo,
-    InMemoryIdempotencyRepo, InMemoryIdentityRepo, InMemoryInventoryItemRepo, InMemoryInviteRepo,
-    InMemoryLocationRepo, InMemoryMarketRepo, InMemoryOrderRepo, InMemoryOutbox,
-    InMemoryPasswordResetRepo, InMemoryPriceListRepo, InMemoryProductRepo, InMemoryRoleRepo,
-    InMemorySearchQueue, InMemorySearchSettingsRepo, InMemorySessionRepo, InMemoryShippingZoneRepo,
-    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
+    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryChannelRepo, InMemoryCustomerRepo,
+    InMemoryFulfillmentRepo, InMemoryIdempotencyRepo, InMemoryIdentityRepo,
+    InMemoryInventoryItemRepo, InMemoryInviteRepo, InMemoryLocationRepo, InMemoryMarketRepo,
+    InMemoryOrderRepo, InMemoryOutbox, InMemoryPasswordResetRepo, InMemoryPriceListRepo,
+    InMemoryProductRepo, InMemoryRoleRepo, InMemorySearchQueue, InMemorySearchSettingsRepo,
+    InMemorySessionRepo, InMemoryShippingZoneRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
+    InMemoryUserRepo,
 };
 
 /// Every repository of one store, in memory: the tests' world. It has every accessor, so it is `hypha_cart::CartPorts`; the fields are
@@ -53,6 +54,7 @@ pub struct InMemoryPorts {
     pub roles: InMemoryRoleRepo,
     pub invites: InMemoryInviteRepo,
     // Search's queue and settings (design note 0019); the engine is passed apart.
+    pub channels: InMemoryChannelRepo,
     pub search_queue: InMemorySearchQueue,
     pub search_settings: InMemorySearchSettingsRepo,
 }
@@ -86,6 +88,7 @@ impl Default for InMemoryPorts {
             users: InMemoryUserRepo::default(),
             roles: InMemoryRoleRepo::default(),
             invites: InMemoryInviteRepo::default(),
+            channels: InMemoryChannelRepo::sharing(&outbox),
             search_queue: InMemorySearchQueue::default(),
             search_settings: InMemorySearchSettingsRepo::sharing(&outbox),
             outbox,
@@ -293,5 +296,12 @@ impl hypha_search_index::HasSearchSettings for InMemoryPorts {
     type SearchSettings = InMemorySearchSettingsRepo;
     fn search_settings(&self) -> &InMemorySearchSettingsRepo {
         &self.search_settings
+    }
+}
+
+impl hypha_channels::HasChannels for InMemoryPorts {
+    type Channels = InMemoryChannelRepo;
+    fn channels(&self) -> &InMemoryChannelRepo {
+        &self.channels
     }
 }
