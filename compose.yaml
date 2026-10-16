@@ -33,7 +33,16 @@ services:
   # Credentials are in dev/seaweedfs-s3.json.
   s3:
     image: chrislusf/seaweedfs:4.48
-    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/config/s3.json
+    # Capacity is set, not derived from the machine's free disk: by default the volume
+    # server allows (free space / volume size) volumes, which on a CI runner's small disk
+    # is a handful, all taken by the first collection, so uploads to `hypha-media` failed
+    # ("no free volumes left"). 50 volumes of 100 MB: 5 GB, plenty for development.
+    # Master, volume server and gateway reach each other over loopback (`-ip`) and
+    # listen on every interface for the published port (`-ip.bind`).
+    command: >-
+      server -dir=/data -ip=127.0.0.1 -ip.bind=0.0.0.0
+      -master.volumeSizeLimitMB=100 -volume.max=50
+      -s3 -s3.port=8333 -s3.config=/config/s3.json
     ports:
       - "8333:8333"
     volumes:
