@@ -36,7 +36,13 @@ export function OptionsEditor({
   savedTitles: Record<string, string>;
   onChange: (change: Partial<Draft>) => void;
 }) {
-  const [message, setMessage] = useState<{ status: "error" | "success"; text: string }>();
+  // A message belongs to the options it was about: after a save or a discard the draft
+  // gets new options, and the message goes with the old ones.
+  const [message, setMessage] = useState<{
+    status: "error" | "success";
+    text: string;
+    options: OptionDraft[];
+  }>();
   const list = draft.options;
   const removed = orphaned(draft);
 
@@ -57,12 +63,13 @@ export function OptionsEditor({
   const createAll = () => {
     const result = withAllCombinations(draft);
     if ("error" in result) {
-      setMessage({ status: "error", text: result.error });
+      setMessage({ status: "error", text: result.error, options: draft.options });
       return;
     }
     const added = result.draft.variants.length - draft.variants.length;
     onChange({ options: result.draft.options, variants: result.draft.variants });
     setMessage({
+      options: result.draft.options,
       status: "success",
       text:
         added === 0
@@ -84,7 +91,9 @@ export function OptionsEditor({
           </Text>
         </VStack>
 
-        {message && <Banner status={message.status} title={message.text} />}
+        {message && message.options === list && (
+          <Banner status={message.status} title={message.text} />
+        )}
         {removed.length > 0 && (
           <Banner
             status="warning"
