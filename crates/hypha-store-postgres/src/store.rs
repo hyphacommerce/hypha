@@ -326,8 +326,7 @@ macro_rules! consistent_read {
         let db = $crate::store::Db::new(&read, statements);
         let $tx = &db;
         let value: Result<_, hypha_core::RepoError> = async { $body }.await;
-        $crate::store::end_read(read);
-        value
+        $crate::store::end_transaction(read, value).await
     }};
 }
 pub(crate) use consistent_read;
@@ -368,22 +367,24 @@ macro_rules! in_transaction {
 }
 pub(crate) use in_transaction;
 
-/// Ends a read-only snapshot without waiting for it: dropping the transaction queues
-/// its ROLLBACK on the connection (tokio-postgres's `Drop`), which goes out with the
-/// next query instead of costing a round trip of its own. Nothing was written, so
-/// rolling back reads the same as committing; the connection is back to normal before
-/// anything after it runs.
-pub(crate) fn end_read(read: Transaction<'_>) {
-    drop(read);
-}
-
-/// Commits a write if it succeeded; on error the transaction is dropped, which
-/// rolls it back.
+/// Ends a transaction explicitly, waiting for it: COMMIT if `value` succeeded, else
+/// ROLLBACK (which a failed write needs anyway). Never by dropping it: tokio-postgres
+/// then queues a ROLLBACK without waiting, which works against Postgres directly but
+/// stalled the next query through Hyperdrive (design note 0026, §8).
 pub(crate) async fn end_transaction<T>(
     tx: Transaction<'_>,
     value: Result<T, RepoError>,
 ) -> Result<T, RepoError> {
-    let value = value?;
-    tx.commit().await.map_err(repo_error)?;
-    Ok(value)
+    match value {
+        Ok(value) => {
+            tx.commit().await.map_err(repo_error)?;
+            Ok(value)
+        }
+        Err(e) => {
+            // The error the caller needs is `e`; a failed rollback means the connection
+            // is gone, which the next query will report.
+            let _ = tx.rollback().await;
+            Err(e)
+        }
+    }
 }

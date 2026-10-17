@@ -23,7 +23,7 @@ use crate::{
     error::{corrupt, repo_error},
     outbox::insert_events,
     store::Queries,
-    store::{PgConnection, PgStore, consistent_read, in_transaction},
+    store::{PgConnection, PgStore, consistent_read, end_transaction, in_transaction},
 };
 
 impl<C: PgConnection> OrderRepo for PgStore<C> {
@@ -197,8 +197,8 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         let row = tx
             .query_typed_one("SELECT nextval('order_numbers') AS number", &[])
             .await
-            .map_err(repo_error)?;
-        tx.commit().await.map_err(repo_error)?;
+            .map_err(repo_error);
+        let row = end_transaction(tx, row).await?;
         OrderNumber::new(col(&row, "number")?).map_err(corrupt)
     }
 }

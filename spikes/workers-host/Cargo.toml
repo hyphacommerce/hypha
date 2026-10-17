@@ -1,0 +1,31 @@
+# The Workers host spike (design note 0026, §8): the real product read (commands,
+# Postgres adapter) behind axum, on workers-rs, through Hyperdrive. Not a workspace
+# member: its own workspace, built with `worker-build`.
+[package]
+name = "hypha-workers-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[workspace]
+
+[dependencies]
+worker = { version = "=0.8.7", features = ["http", "axum", "tokio-postgres"] }
+axum = { version = "0.8", default-features = false, features = ["json", "query", "matched-path"] }
+tower-service = "0.3"
+tokio-postgres = { version = "0.7.18", default-features = false, features = ["js", "with-uuid-1"] }
+wasm-bindgen-futures = "0.4"
+serde_json = "1"
+hypha-core = { path = "../../crates/hypha-core" }
+hypha-store-postgres = { path = "../../crates/hypha-store-postgres" }
+hypha-merchandising = { path = "../../crates/hypha-merchandising" }
+hypha-cart = { path = "../../crates/hypha-cart" }
+hypha-auth = { path = "../../crates/hypha-auth" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
