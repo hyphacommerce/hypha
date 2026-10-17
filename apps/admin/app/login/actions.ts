@@ -7,6 +7,7 @@ import {
   endSession,
   heldChallenge,
   holdChallenge,
+  landing,
   publicClient,
   sessionClient,
   startSession,
@@ -25,7 +26,7 @@ export async function login(
   if (error) return { error: describe(error) };
   if (data.status === "authenticated") {
     await startSession(data.session);
-    redirect(await takeNext());
+    redirect(await landing(data.session.token, await takeNext()));
   }
   await holdChallenge(data.challenge);
   redirect("/login/mfa");
@@ -42,7 +43,7 @@ export async function finishLogin(_previous: FormState, code: string): Promise<F
   if (error) return { error: describe(error) };
   if (data.status !== "authenticated") redirect("/login");
   await startSession(data.session);
-  redirect(await takeNext());
+  redirect(await landing(data.session.token, await takeNext()));
 }
 
 /** Ends the session on the API and forgets it here. */

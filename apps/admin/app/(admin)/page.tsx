@@ -1,5 +1,6 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
@@ -68,14 +69,17 @@ function SetupChecklist({ steps }: { steps: SetupStep[] }) {
   return (
     <Card>
       <VStack gap={4}>
-        <VStack gap={1}>
-          <Text type="display-3" as="h2">
-            Get ready to sell
-          </Text>
-          <Text type="supporting" color="secondary">
-            {done} of {steps.length} done. Each step opens the screen it's done on.
-          </Text>
-        </VStack>
+        <HStack gap={3} hAlign="between" vAlign="start" wrap="wrap">
+          <VStack gap={1}>
+            <Text type="display-3" as="h2">
+              Get ready to sell
+            </Text>
+            <Text type="supporting" color="secondary">
+              {done} of {steps.length} done. Each step opens the screen it's done on.
+            </Text>
+          </VStack>
+          <Button label="Set up your store" variant="primary" href="/setup" />
+        </HStack>
         <VStack gap={3}>
           {steps.map((step) => (
             <HStack key={step.label} gap={3} vAlign="start">

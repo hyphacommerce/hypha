@@ -99,6 +99,23 @@ export function safeNext(path: string | null | undefined): string {
   return path;
 }
 
+/**
+ * Where to land after signing in with `token`: `next`, except that an empty store (no
+ * market and no product) starts at the setup wizard (design note 0024, AU11). A read the
+ * user's scopes don't allow counts as not empty, so nobody is sent somewhere they can't
+ * act.
+ */
+export async function landing(token: string, next: string): Promise<string> {
+  if (next !== "/") return next;
+  const client = createAdminClient(apiUrl(), token);
+  const [markets, products] = await Promise.all([
+    client.GET("/admin/markets"),
+    client.GET("/admin/products", { params: { query: { limit: 1 } } }),
+  ]);
+  const isEmpty = markets.data?.items.length === 0 && products.data?.items.length === 0;
+  return isEmpty ? "/setup" : next;
+}
+
 /** Remembers where to go after the next login, for a few minutes. */
 export async function rememberNext(path: string) {
   (await cookies()).set(NEXT_COOKIE, safeNext(path), { ...cookieBase, maxAge: 15 * 60 });
