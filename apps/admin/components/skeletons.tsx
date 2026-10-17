@@ -51,14 +51,14 @@ export function CardSkeleton({ lines = 4 }: { lines?: number }) {
   );
 }
 
-/** A list page: its title, then a table. */
-export function ListPageSkeleton({ title }: { title: string }) {
+/** A list page: its title (and its add button, when it has one), then a table. */
+export function ListPageSkeleton({ title, hasAction = false }: { title: string; hasAction?: boolean }) {
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <HStack hAlign="between" vAlign="center">
           <Title title={title} />
-          <Skeleton width={120} height={36} />
+          {hasAction && <Skeleton width={120} height={36} />}
         </HStack>
         <TableSkeleton />
       </VStack>

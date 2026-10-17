@@ -1,5 +1,5 @@
 import { ListPageSkeleton } from "@/components/skeletons";
 
 export default function Loading() {
-  return <ListPageSkeleton title="Media" />;
+  return <ListPageSkeleton title="Media" hasAction />;
 }

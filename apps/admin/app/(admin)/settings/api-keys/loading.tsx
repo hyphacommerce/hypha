@@ -1,5 +1,5 @@
 import { ListPageSkeleton } from "@/components/skeletons";
 
 export default function Loading() {
-  return <ListPageSkeleton title="API keys" />;
+  return <ListPageSkeleton title="API keys" hasAction />;
 }
