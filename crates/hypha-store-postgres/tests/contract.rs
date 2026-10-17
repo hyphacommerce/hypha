@@ -265,6 +265,12 @@ async fn channel_repo() {
 }
 
 #[tokio::test]
+async fn product_list() {
+    let Some(url) = database_url() else { return };
+    contract::product_list(async || fresh_store(&url, "contract_product_list").await).await;
+}
+
+#[tokio::test]
 async fn category_repo() {
     let Some(url) = database_url() else { return };
     contract::category_repo(async || fresh_store(&url, "contract_categories").await).await;

@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use hypha_core::{Page, PageRequest, RepoError, Version, Versioned};
+use hypha_core::{Direction, Keyset, Page, PageRequest, RepoError, SortKey, Version, Versioned};
 
 /// One in-memory "table" of aggregates with the same write rules a database adapter
 /// has: `insert` fails on a duplicate ID or unique key, `update` fails with
@@ -107,6 +107,48 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
             .into_iter()
             .take(page.limit.get() as usize + 1)
             .map(|(_, row)| view(row))
+            .collect();
+        Page::from_overfetch(fetched, page.limit)
+    }
+
+    /// A page of the rows `matches` keeps in a sorted list (design note 0024, AU2): each
+    /// viewed by `view`, ordered by `key` of the view and then by ID in `direction`,
+    /// after `after` when given; what a database does with `WHERE (key, id) > ($key,
+    /// $after) ORDER BY key, id LIMIT n + 1`. Views every matching row (tests are small).
+    /// Hidden like `page`.
+    pub(crate) fn page_sorted<U>(
+        &self,
+        matches: impl Fn(&T) -> bool,
+        page: &PageRequest<Keyset<K>>,
+        direction: Direction,
+        view: impl Fn(&T) -> U,
+        key: impl Fn(&U) -> SortKey,
+    ) -> Page<U>
+    where
+        K: Ord + Copy,
+    {
+        if self.hiding() {
+            return Page::from_overfetch(Vec::new(), page.limit);
+        }
+        let rows = self.rows.lock().unwrap();
+        let mut found: Vec<(SortKey, K, U)> = rows
+            .iter()
+            .filter(|(_, row)| matches(row))
+            .map(|(id, row)| {
+                let viewed = view(row);
+                (key(&viewed), *id, viewed)
+            })
+            .filter(|(key, id, _)| {
+                page.after
+                    .as_ref()
+                    .is_none_or(|after| after.precedes(key, id, direction))
+            })
+            .collect();
+        found.sort_by(|a, b| Keyset::order((&a.0, &a.1), (&b.0, &b.1), direction));
+        let fetched = found
+            .into_iter()
+            .take(page.limit.get() as usize + 1)
+            .map(|(_, _, viewed)| viewed)
             .collect();
         Page::from_overfetch(fetched, page.limit)
     }

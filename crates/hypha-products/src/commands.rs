@@ -1,12 +1,13 @@
 use hypha_core::{
-    AuthError, Ctx, ErrorCode, IdGenerator, Money, MoneyError, OptionValueId, Page, PageRequest,
-    Price, ProductId, RepoError, Scope, VariantId, Weight, report_duplicate,
+    AuthError, Ctx, ErrorCode, IdGenerator, Keyset, Money, MoneyError, OptionValueId, Page,
+    PageRequest, Price, ProductId, RepoError, Scope, VariantId, Weight, report_duplicate,
 };
 use thiserror::Error;
 
 use crate::{
-    Handle, NewVariant, OptionDraft, Product, ProductError, ProductFilter, ProductRepo,
-    ProductStatus, ProductSummary, VariantDraft, VariantPatch, repo::keys,
+    Handle, NewVariant, OptionDraft, Product, ProductError, ProductFilter, ProductFilterInput,
+    ProductRepo, ProductSort, ProductStatus, ProductSummary, VariantDraft, VariantPatch,
+    repo::keys,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -90,25 +91,25 @@ async fn handle_taken<R: ProductRepo>(
         }))
 }
 
-/// A list's filters as a request gives them; `list_products` checks them.
+/// A list's filters and order as a request gives them; `list_products` checks them.
 #[derive(Debug, Default)]
 pub struct ListProducts {
-    pub status: Option<ProductStatus>,
-    /// Text the title, handle or a SKU contains, ignoring case (design note 0019, SE8).
-    pub q: Option<String>,
+    pub filter: ProductFilterInput,
+    pub sort: ProductSort,
 }
 
-/// A page of product summaries, newest first, narrowed by `input` (design notes 0012,
-/// 0019).
+/// A page of product summaries in `input.sort`'s order, narrowed by its filter (design
+/// notes 0012, 0019, 0024). `page.after`'s key must fit the sort (`ProductSort::fits`;
+/// hosts check cursors).
 pub async fn list_products<R: ProductRepo>(
     ctx: &Ctx,
     repo: &R,
     input: ListProducts,
-    page: PageRequest<ProductId>,
+    page: PageRequest<Keyset<ProductId>>,
 ) -> Result<Page<ProductSummary>, CommandError> {
     ctx.require(Scope::ProductsRead)?;
-    let filter = ProductFilter::new(input.status, input.q)?;
-    Ok(repo.list(&filter, page).await?)
+    let filter = ProductFilter::new(input.filter)?;
+    Ok(repo.list(&filter, input.sort, page).await?)
 }
 
 pub async fn get_product<R: ProductRepo>(

@@ -1,26 +1,52 @@
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
+
 use hypha_core::{
-    Page, PageRequest, ProductId, Recorded, RepoError, VariantId, Versioned, stamp_insert,
+    Keyset, Page, PageRequest, ProductId, Recorded, RepoError, VariantId, Versioned, stamp_insert,
     stamp_update,
 };
 use hypha_products::{
-    Handle, Product, ProductFilter, ProductSummary,
+    Handle, Product, ProductFilter, ProductSort, ProductSummary,
     repo::{ProductRepo, keys},
 };
 
-use crate::{InMemoryOutbox, table::Table};
+use crate::{
+    InMemoryCategoryRepo, InMemoryChannelRepo, InMemoryOutbox, categories::Members,
+    channels::Publications, table::Table,
+};
 
 #[derive(Default)]
 pub struct InMemoryProductRepo {
     pub(crate) products: Table<ProductId, Product>,
     pub(crate) outbox: InMemoryOutbox,
+    /// The categories' membership and the channels' publications, which the list
+    /// filters by, as a database joins them (design note 0024, AU5). Empty unless
+    /// shared (`InMemoryPorts` shares its repos').
+    members: Arc<Mutex<Members>>,
+    publications: Arc<Mutex<Publications>>,
 }
 
 impl InMemoryProductRepo {
     /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
     pub fn sharing(outbox: &InMemoryOutbox) -> Self {
         Self {
-            products: Table::default(),
             outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+
+    /// The same repo, reading category membership and publications from these repos.
+    pub fn joining(
+        self,
+        categories: &InMemoryCategoryRepo,
+        channels: &InMemoryChannelRepo,
+    ) -> Self {
+        Self {
+            members: categories.members.clone(),
+            publications: channels.products.clone(),
+            ..self
         }
     }
 
@@ -71,11 +97,50 @@ impl ProductRepo for InMemoryProductRepo {
     async fn list(
         &self,
         filter: &ProductFilter,
-        page: PageRequest<ProductId>,
+        sort: ProductSort,
+        page: PageRequest<Keyset<ProductId>>,
     ) -> Result<Page<ProductSummary>, RepoError> {
-        Ok(self
-            .products
-            .page(|p| filter.matches(p), page, Product::summary))
+        if let Some(after) = &page.after
+            && !sort.fits(&after.key)
+        {
+            return Err(RepoError::Backend(format!(
+                "a {:?} position for a {sort:?} list",
+                after.key
+            )));
+        }
+        // Copied first, so no other lock is held while the table's is.
+        let copy = |set: Option<&HashSet<ProductId>>| set.cloned().unwrap_or_default();
+        let in_category = filter.category().map(|c| {
+            copy(
+                self.members
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&c),
+            )
+        });
+        let in_channel = filter.channel().map(|c| {
+            copy(
+                self.publications
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&c),
+            )
+        });
+        let has =
+            |set: &Option<HashSet<ProductId>>, id| set.as_ref().is_some_and(|s| s.contains(&id));
+        Ok(self.products.page_sorted(
+            |p| {
+                filter.matches(
+                    p,
+                    |_| has(&in_category, p.id()),
+                    |_| has(&in_channel, p.id()),
+                )
+            },
+            &page,
+            sort.direction(),
+            Product::summary,
+            |s: &ProductSummary| sort.key(s),
+        ))
     }
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {

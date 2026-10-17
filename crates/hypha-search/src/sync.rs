@@ -14,14 +14,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use hypha_categories::{CategoryRepo, CategoryTree, HasCategories};
 use hypha_channels::{ChannelRepo, HasChannels};
 use hypha_core::{
-    CategoryId, Clock, ErrorCode, PageLimit, PageRequest, ProductId, Progress, RepoError, VariantId,
+    CategoryId, Clock, ErrorCode, Keyset, PageLimit, PageRequest, ProductId, Progress, RepoError,
+    SortKey, VariantId,
 };
 use hypha_inventory::{
     HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo, StockContext,
 };
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, MarketRepo};
 use hypha_pricing::load_pricing;
-use hypha_products::{HasProducts, Product, ProductFilter, ProductRepo};
+use hypha_products::{HasProducts, Product, ProductFilter, ProductRepo, ProductSort};
 use hypha_search_index::{
     HasSearchQueue, HasSearchSettings, IndexError, Mark, SearchDocument, SearchIndex, SearchQueue,
     SearchSettingsRepo, Target,
@@ -323,6 +324,7 @@ async fn queue_every_product<S: SyncPorts>(ports: &S) -> Result<(), RepoError> {
             .products()
             .list(
                 &every,
+                ProductSort::Oldest,
                 PageRequest {
                     after,
                     limit: PageLimit::new(PageLimit::MAX)
@@ -333,7 +335,12 @@ async fn queue_every_product<S: SyncPorts>(ports: &S) -> Result<(), RepoError> {
         let targets: Vec<Target> = page.items.iter().map(|p| Target::Product(p.id)).collect();
         ports.search_queue().mark(&targets).await?;
         match page.items.last() {
-            Some(last) if page.has_more => after = Some(last.id),
+            Some(last) if page.has_more => {
+                after = Some(Keyset {
+                    key: SortKey::Id,
+                    id: last.id,
+                })
+            }
             _ => return Ok(()),
         }
     }

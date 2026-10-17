@@ -16292,12 +16292,15 @@
             }
           },
           {
-            "description": "Only products in this status.",
+            "description": "Only products in this status; repeat for any of several (`status=draft&status=active`).",
             "in": "query",
             "name": "status",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/ProductStatus"
+              "items": {
+                "$ref": "#/components/schemas/ProductStatus"
+              },
+              "type": "array"
             }
           },
           {
@@ -16307,6 +16310,69 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Only products of this vendor, matched whole, ignoring case.",
+            "in": "query",
+            "name": "vendor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only products of this product type, matched whole, ignoring case.",
+            "in": "query",
+            "name": "product_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only products with this tag, matched whole, ignoring case.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only products directly in this category (not those below it). An ID that names\nno category matches nothing.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CategoryId"
+            }
+          },
+          {
+            "description": "Only products published to this sales channel. An ID that names no channel\nmatches nothing.",
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "description": "The order of a product list (design note 0024, AU1). Default `newest`. Titles\ncompare lowercased, character by character (accented letters after `z`); ties go by\ncreation, in the same direction.\n\nKnown values: `newest`, `oldest`, `title_asc`, `title_desc`, `updated_desc`, `updated_asc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "newest",
+                "oldest",
+                "title_asc",
+                "title_desc",
+                "updated_desc",
+                "updated_asc"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
             }
           }
         ],
@@ -16377,7 +16443,7 @@
             "bearer": []
           }
         ],
-        "summary": "Products in any status, newest first, optionally of one status.",
+        "summary": "Products in any status, newest first or in `sort`'s order, narrowed by the filters\n(every one given must match).",
         "tags": [
           "products"
         ],

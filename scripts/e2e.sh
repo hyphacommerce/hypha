@@ -208,7 +208,15 @@ step "products by text (design note 0019)" 200 - "$BASE/admin/products?q=MU"
 contains "finds the mug by its title" "\"items\":[{\"id\":\"$MUG\""
 step "text too long" 422 field_too_long "$BASE/admin/products?q=$(printf 'x%.0s' {1..256})"
 step "a page too large" 422 invalid_limit "$BASE/admin/products?limit=500"
-step "an unknown filter" 400 invalid_query "$BASE/admin/products?sort=title"
+step "an unknown filter" 400 invalid_query "$BASE/admin/products?colour=red"
+step "an unknown sort" 400 invalid_query "$BASE/admin/products?sort=title"
+step "products oldest first (design note 0024)" 200 - "$BASE/admin/products?sort=oldest&limit=1"
+contains "starts with the mug" "\"items\":[{\"id\":\"$MUG\""
+NEXT=$(sed -E 's/.*"next_cursor":"([^"]+)".*/\1/' <<<"$BODY")
+step "the next page of that sort" 200 - "$BASE/admin/products?sort=oldest&limit=1&cursor=$NEXT"
+contains "is the cup" "\"id\":\"$CUP\""
+step "that cursor under another sort" 400 invalid_cursor "$BASE/admin/products?sort=title_asc&limit=1&cursor=$NEXT"
+step "products of any of two statuses, by title" 200 - "$BASE/admin/products?status=active&status=draft&sort=title_desc"
 step "a cursor from another list" 400 invalid_cursor "$BASE/admin/products?cursor=ord_00000000000000000000000000000000"
 
 # product editing (design note 0014), on a product of its own

@@ -1,10 +1,12 @@
+use hypha_categories::{Category, CategoryRepo, HasCategories, NewCategory};
+use hypha_channels::{Channel, ChannelKind, ChannelRepo, HasChannels};
 use hypha_core::{
-    AssetId, Currency, Money, OptionId, OptionValueId, PageLimit, PageRequest, Price, ProductId,
-    RepoError, VariantId, Version, Versioned,
+    AssetId, CategoryId, ChannelId, Currency, Keyset, Money, OptionId, OptionValueId, PageLimit,
+    PageRequest, Price, ProductId, RepoError, SortKey, VariantId, Version, Versioned,
 };
 use hypha_products::{
-    Handle, NewVariant, OptionValue, Product, ProductFilter, ProductOption, ProductRepo,
-    ProductStatus, VariantPatch, repo::keys,
+    Handle, HasProducts, NewVariant, OptionValue, Product, ProductFilter, ProductFilterInput,
+    ProductOption, ProductRepo, ProductSort, ProductStatus, VariantPatch, repo::keys,
 };
 use uuid::Uuid;
 
@@ -34,6 +36,10 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     list_pages(&make().await).await;
     scenario("product: list by text in the title, handle or a SKU, ignoring case");
     list_by_text(&make().await).await;
+    scenario("product: every sort orders by its key, then ID, and pages across ties");
+    list_sorted(&make().await).await;
+    scenario("product: list by several statuses, vendor, product type and tag");
+    list_by_details(&make().await).await;
     scenario("product: media and variant media round trip, in order");
     media_round_trips(&make().await).await;
     scenario("product: variant weight and requires_shipping round trip");
@@ -46,6 +52,67 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     sku_lookup(&make().await).await;
     scenario("product: SKUs stay unique across products, on insert and update");
     sku_key(&make().await).await;
+}
+
+/// Runs the scenarios of product lists filtered by other domains' membership (design
+/// note 0024, AU5): categories and channels, as the adapter stores them.
+pub async fn product_list<S>(make: impl AsyncFn() -> S)
+where
+    S: HasProducts + HasCategories + HasChannels,
+{
+    scenario("product list: by category and by channel, alone, together, and unknown");
+    by_membership(&make().await).await;
+}
+
+async fn by_membership<S: HasProducts + HasCategories + HasChannels>(ports: &S) {
+    let repo = ports.products();
+    for n in 1..=4 {
+        repo.insert(&mut simple(n, &format!("p{n}"))).await.unwrap();
+    }
+    let cat = CategoryId::from_uuid(Uuid::from_u128(50));
+    let mut category = Category::new(NewCategory {
+        id: cat,
+        name: "Kitchen".to_string(),
+        handle: Handle::new("kitchen").unwrap(),
+        description: None,
+        parent: None,
+        position: 0,
+        visible: true,
+    })
+    .unwrap();
+    ports.categories().insert(&mut category).await.unwrap();
+    ports
+        .categories()
+        .add_products(cat, &[pid(1), pid(3)])
+        .await
+        .unwrap();
+    let chan = ChannelId::from_uuid(Uuid::from_u128(60));
+    let mut channel = Channel::new(chan, "Market stall", ChannelKind::Custom).unwrap();
+    ports.channels().insert(&mut channel).await.unwrap();
+    ports
+        .channels()
+        .publish(chan, &[pid(3), pid(4)])
+        .await
+        .unwrap();
+
+    let found = async |category, channel| {
+        let filter = ProductFilter::new(ProductFilterInput {
+            category,
+            channel,
+            ..ProductFilterInput::default()
+        })
+        .unwrap();
+        all_pages(repo, &filter, ProductSort::Oldest, 1).await
+    };
+    assert_eq!(found(Some(cat), None).await, [pid(1), pid(3)]);
+    assert_eq!(found(None, Some(chan)).await, [pid(3), pid(4)]);
+    assert_eq!(found(Some(cat), Some(chan)).await, [pid(3)]);
+    let unknown = CategoryId::from_uuid(Uuid::from_u128(99));
+    assert_eq!(
+        found(Some(unknown), None).await,
+        Vec::<ProductId>::new(),
+        "an unknown category matches nothing"
+    );
 }
 
 // ---------- fixtures ----------
@@ -336,9 +403,12 @@ async fn handle_key_on_update<R: ProductRepo>(repo: &R) {
     assert_eq!(repo.get(pid(2)).await, Ok(Some(cup)));
 }
 
-fn page(after: Option<u128>, limit: u32) -> PageRequest<ProductId> {
+fn page(after: Option<u128>, limit: u32) -> PageRequest<Keyset<ProductId>> {
     PageRequest {
-        after: after.map(pid),
+        after: after.map(|n| Keyset {
+            key: SortKey::Id,
+            id: pid(n),
+        }),
         limit: PageLimit::new(limit).unwrap(),
     }
 }
@@ -349,8 +419,15 @@ async fn listed<R: ProductRepo>(
     after: Option<u128>,
     limit: u32,
 ) -> (Vec<ProductId>, bool) {
-    let filter = ProductFilter::new(status, None).unwrap();
-    let page = repo.list(&filter, page(after, limit)).await.unwrap();
+    let filter = ProductFilter::new(ProductFilterInput {
+        statuses: status.into_iter().collect(),
+        ..ProductFilterInput::default()
+    })
+    .unwrap();
+    let page = repo
+        .list(&filter, ProductSort::Newest, page(after, limit))
+        .await
+        .unwrap();
     (page.items.iter().map(|p| p.id).collect(), page.has_more)
 }
 
@@ -387,9 +464,17 @@ async fn list_by_text<R: ProductRepo>(repo: &R) {
         repo.insert(p).await.unwrap();
     }
 
-    let found = async |status, q: &str| {
-        let filter = ProductFilter::new(status, Some(q.to_string())).unwrap();
-        let page = repo.list(&filter, page(None, 10)).await.unwrap();
+    let found = async |status: Option<ProductStatus>, q: &str| {
+        let filter = ProductFilter::new(ProductFilterInput {
+            statuses: status.into_iter().collect(),
+            q: Some(q.to_string()),
+            ..ProductFilterInput::default()
+        })
+        .unwrap();
+        let page = repo
+            .list(&filter, ProductSort::Newest, page(None, 10))
+            .await
+            .unwrap();
         page.items.iter().map(|p| p.id).collect::<Vec<_>>()
     };
     assert_eq!(
@@ -436,7 +521,11 @@ async fn list_pages<R: ProductRepo>(repo: &R) {
 
     // Summaries of the stored products.
     let first = repo
-        .list(&ProductFilter::default(), page(None, 2))
+        .list(
+            &ProductFilter::default(),
+            ProductSort::Newest,
+            page(None, 2),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -488,6 +577,221 @@ async fn list_pages<R: ProductRepo>(repo: &R) {
     assert_eq!(
         listed(repo, Some(ProductStatus::Archived), None, 10).await,
         (vec![], false)
+    );
+}
+
+/// Every page of `sort`'s list under `filter`, `limit` at a time, each continued from
+/// the last item's position.
+async fn all_pages<R: ProductRepo>(
+    repo: &R,
+    filter: &ProductFilter,
+    sort: ProductSort,
+    limit: u32,
+) -> Vec<ProductId> {
+    let mut found = Vec::new();
+    let mut after = None;
+    loop {
+        let page = repo
+            .list(
+                filter,
+                sort,
+                PageRequest {
+                    after: after.clone(),
+                    limit: PageLimit::new(limit).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        found.extend(page.items.iter().map(|s| s.id));
+        match page.items.last() {
+            Some(last) if page.has_more => {
+                after = Some(Keyset {
+                    key: sort.key(last),
+                    id: last.id,
+                })
+            }
+            _ => return found,
+        }
+    }
+}
+
+const SORTS: [ProductSort; 6] = [
+    ProductSort::Newest,
+    ProductSort::Oldest,
+    ProductSort::TitleAsc,
+    ProductSort::TitleDesc,
+    ProductSort::UpdatedDesc,
+    ProductSort::UpdatedAsc,
+];
+
+async fn list_sorted<R: ProductRepo>(repo: &R) {
+    // Titles that tie once lowercased ("apple", "banana"), one beyond ASCII, inserted
+    // out of order; some updated, so their last change differs where the clock moves.
+    let titles = [
+        (3, "banana"),
+        (1, "Apple"),
+        (6, "apple"),
+        (2, "Čaša"),
+        (5, "cherry"),
+        (4, "Banana"),
+    ];
+    for (n, title) in titles {
+        let mut p = simple(n, &format!("p{n}"));
+        p.rename(title).unwrap();
+        repo.insert(&mut p).await.unwrap();
+    }
+    for n in [2, 6] {
+        let mut p = repo.get(pid(n)).await.unwrap().unwrap();
+        p.set_status(ProductStatus::Active).unwrap();
+        repo.update(&mut p).await.unwrap();
+    }
+
+    let mut summaries = Vec::new();
+    for (n, _) in titles {
+        summaries.push(repo.get(pid(n)).await.unwrap().unwrap().summary());
+    }
+    let every = ProductFilter::default();
+    for sort in SORTS {
+        let mut expected = summaries.clone();
+        expected.sort_by(|a, b| {
+            Keyset::order(
+                (&sort.key(a), &a.id),
+                (&sort.key(b), &b.id),
+                sort.direction(),
+            )
+        });
+        let expected: Vec<ProductId> = expected.iter().map(|s| s.id).collect();
+        for limit in [1, 2, 4, 10] {
+            assert_eq!(
+                all_pages(repo, &every, sort, limit).await,
+                expected,
+                "{sort:?} by {limit}"
+            );
+        }
+    }
+    // Spelled out for two, so the rule itself is pinned, not only agreement with `key`.
+    assert_eq!(
+        all_pages(repo, &every, ProductSort::TitleAsc, 2).await,
+        [pid(1), pid(6), pid(3), pid(4), pid(5), pid(2)],
+        "ties by ID; Č after the ASCII letters"
+    );
+    assert_eq!(
+        all_pages(repo, &every, ProductSort::TitleDesc, 4).await,
+        [pid(2), pid(5), pid(4), pid(3), pid(6), pid(1)]
+    );
+
+    // Filters apply to sorted lists too.
+    let active = ProductFilter::new(ProductFilterInput {
+        statuses: vec![ProductStatus::Active],
+        ..ProductFilterInput::default()
+    })
+    .unwrap();
+    assert_eq!(
+        all_pages(repo, &active, ProductSort::TitleAsc, 1).await,
+        [pid(6), pid(2)]
+    );
+
+    // A position from another sort is refused, not misread.
+    assert!(matches!(
+        repo.list(
+            &every,
+            ProductSort::TitleAsc,
+            PageRequest {
+                after: Some(Keyset {
+                    key: SortKey::Id,
+                    id: pid(1)
+                }),
+                limit: PageLimit::new(2).unwrap(),
+            },
+        )
+        .await,
+        Err(RepoError::Backend(_))
+    ));
+}
+
+async fn list_by_details<R: ProductRepo>(repo: &R) {
+    // 1: Acme mug tagged Gift; 2: acme mug, active; 3: archived, Other vendor, tags
+    // gift-card and Kitchen; 4: no details.
+    let details = [
+        (1, Some("Acme"), Some("Mug"), vec!["Gift", "Kitchen"]),
+        (2, Some("ACME"), Some("mug"), vec![]),
+        (3, Some("Other"), Some("Bowl"), vec!["gift-card", "kitchen"]),
+        (4, None, None, vec![]),
+    ];
+    for (n, vendor, product_type, tags) in details {
+        let mut p = simple(n, &format!("p{n}"));
+        p.set_vendor(vendor.map(str::to_string)).unwrap();
+        p.set_product_type(product_type.map(str::to_string))
+            .unwrap();
+        p.set_tags(tags.into_iter().map(str::to_string).collect())
+            .unwrap();
+        match n {
+            2 => p.set_status(ProductStatus::Active).unwrap(),
+            3 => {
+                p.set_status(ProductStatus::Active).unwrap();
+                p.set_status(ProductStatus::Archived).unwrap();
+            }
+            _ => {}
+        }
+        repo.insert(&mut p).await.unwrap();
+    }
+    let found = async |input: ProductFilterInput| {
+        let filter = ProductFilter::new(input).unwrap();
+        all_pages(repo, &filter, ProductSort::Oldest, 10).await
+    };
+    let none = ProductFilterInput::default;
+    let text = |t: &str| Some(t.to_string());
+    assert_eq!(
+        found(ProductFilterInput {
+            statuses: vec![ProductStatus::Active, ProductStatus::Archived],
+            ..none()
+        })
+        .await,
+        [pid(2), pid(3)]
+    );
+    assert_eq!(
+        found(ProductFilterInput {
+            vendor: text("acme"),
+            ..none()
+        })
+        .await,
+        [pid(1), pid(2)],
+        "vendor, ignoring case"
+    );
+    assert_eq!(
+        found(ProductFilterInput {
+            vendor: text("Ac"),
+            ..none()
+        })
+        .await,
+        Vec::<ProductId>::new(),
+        "whole, not a part"
+    );
+    assert_eq!(
+        found(ProductFilterInput {
+            product_type: text("MUG"),
+            statuses: vec![ProductStatus::Draft],
+            ..none()
+        })
+        .await,
+        [pid(1)]
+    );
+    assert_eq!(
+        found(ProductFilterInput {
+            tag: text("KITCHEN"),
+            ..none()
+        })
+        .await,
+        [pid(1), pid(3)]
+    );
+    assert_eq!(
+        found(ProductFilterInput {
+            tag: text("gift"),
+            ..none()
+        })
+        .await,
+        [pid(1)],
+        "a whole tag, not gift-card"
     );
 }
 
@@ -588,7 +892,11 @@ async fn content_round_trips<R: ProductRepo>(repo: &R) {
     repo.insert(&mut p).await.unwrap();
     assert_eq!(repo.get(p.id()).await, Ok(Some(p.clone())));
     let listed = repo
-        .list(&ProductFilter::default(), page(None, 10))
+        .list(
+            &ProductFilter::default(),
+            ProductSort::Newest,
+            page(None, 10),
+        )
         .await
         .unwrap();
     assert_eq!(listed.items, vec![p.summary()]);
@@ -599,7 +907,11 @@ async fn content_round_trips<R: ProductRepo>(repo: &R) {
     repo.update(&mut p).await.unwrap();
     assert_eq!(repo.get(p.id()).await, Ok(Some(p.clone())));
     let listed = repo
-        .list(&ProductFilter::default(), page(None, 10))
+        .list(
+            &ProductFilter::default(),
+            ProductSort::Newest,
+            page(None, 10),
+        )
         .await
         .unwrap();
     assert_eq!(listed.items, vec![p.summary()]);

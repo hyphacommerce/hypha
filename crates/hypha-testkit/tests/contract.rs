@@ -18,6 +18,11 @@ fn product_repo() {
 }
 
 #[test]
+fn product_list() {
+    block_on(contract::product_list(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn market_repo() {
     block_on(contract::market_repo(async || {
         InMemoryMarketRepo::default()

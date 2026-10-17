@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use hypha_channels::{Channel, ChannelRepo, keys};
@@ -19,8 +19,9 @@ pub(crate) type Publications = HashMap<ChannelId, HashSet<ProductId>>;
 #[derive(Default)]
 pub struct InMemoryChannelRepo {
     channels: Table<ChannelId, Channel>,
-    /// Stored apart from the channels, like a separate table would be.
-    products: Mutex<Publications>,
+    /// Stored apart from the channels, like a separate table would be; shared with the
+    /// product repo, whose list filters by channel (design note 0024, AU5).
+    pub(crate) products: Arc<Mutex<Publications>>,
     pub(crate) outbox: InMemoryOutbox,
 }
 

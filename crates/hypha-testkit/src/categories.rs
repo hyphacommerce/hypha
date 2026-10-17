@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use hypha_categories::{Category, CategoryRepo, keys};
@@ -20,8 +20,9 @@ pub(crate) type Members = HashMap<CategoryId, HashSet<ProductId>>;
 #[derive(Default)]
 pub struct InMemoryCategoryRepo {
     pub(crate) categories: Table<CategoryId, Category>,
-    /// Stored apart from the categories, like a separate table would be.
-    members: Mutex<Members>,
+    /// Stored apart from the categories, like a separate table would be; shared with the
+    /// product repo, whose list filters by category (design note 0024, AU5).
+    pub(crate) members: Arc<Mutex<Members>>,
     pub(crate) outbox: InMemoryOutbox,
 }
 

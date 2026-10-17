@@ -827,6 +827,74 @@ async fn products_list_newest_first_in_pages() {
 }
 
 #[tokio::test]
+async fn products_list_sorted_and_filtered_in_pages() {
+    let app = app().await;
+    let banana = create_product(&app, "banana").await;
+    let apple = create_product(&app, "apple").await;
+    let cherry = create_product(&app, "cherry").await;
+    let uri = format!("/admin/products/{cherry}/status");
+    send(&app, "PATCH", &uri, Some(r#"{"status":"active"}"#)).await;
+    let uri = format!("/admin/products/{banana}");
+    let (status, _) = send(&app, "PATCH", &uri, Some(r#"{"vendor":"Acme"}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, first) = send(&app, "GET", "/admin/products?sort=title_asc&limit=2", None).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(ids(&first), [apple.as_str(), banana.as_str()]);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let uri = format!("/admin/products?sort=title_asc&limit=2&cursor={cursor}");
+    let (_, second) = send(&app, "GET", &uri, None).await;
+    assert_eq!(ids(&second), [cherry.as_str()]);
+    // The same cursor under another sort is another list's.
+    let uri = format!("/admin/products?sort=title_desc&limit=2&cursor={cursor}");
+    let (status, body) = send(&app, "GET", &uri, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_cursor")
+    );
+
+    let (_, desc) = send(&app, "GET", "/admin/products?sort=title_desc", None).await;
+    assert_eq!(
+        ids(&desc),
+        [cherry.as_str(), banana.as_str(), apple.as_str()]
+    );
+    let (_, oldest) = send(&app, "GET", "/admin/products?sort=oldest", None).await;
+    assert_eq!(
+        ids(&oldest),
+        [banana.as_str(), apple.as_str(), cherry.as_str()]
+    );
+    let (_, changed) = send(
+        &app,
+        "GET",
+        "/admin/products?sort=updated_desc&limit=1",
+        None,
+    )
+    .await;
+    assert_eq!(ids(&changed), [banana.as_str()], "changed last");
+
+    let uri = "/admin/products?status=active&status=draft&sort=title_asc";
+    let (_, both) = send(&app, "GET", uri, None).await;
+    assert_eq!(ids(&both).len(), 3);
+    let (_, acme) = send(&app, "GET", "/admin/products?vendor=ACME", None).await;
+    assert_eq!(ids(&acme), [banana.as_str()]);
+    let unknown = "pcat_00000000000000000000000000000001";
+    let (status, none) = send(
+        &app,
+        "GET",
+        &format!("/admin/products?category={unknown}"),
+        None,
+    )
+    .await;
+    assert_eq!((status, ids(&none).len()), (StatusCode::OK, 0));
+
+    let (status, body) = send(&app, "GET", "/admin/products?sort=price", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+}
+
+#[tokio::test]
 async fn products_are_listed_by_text() {
     let app = app().await;
     let mug = create_product(&app, "stoneware-mug").await;

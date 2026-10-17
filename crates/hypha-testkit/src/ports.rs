@@ -66,9 +66,11 @@ impl Default for InMemoryPorts {
     fn default() -> Self {
         let outbox = InMemoryOutbox::default();
         let (apps, app_providers) = crate::apps::linked(&outbox);
+        let channels = InMemoryChannelRepo::sharing(&outbox);
+        let categories = InMemoryCategoryRepo::sharing(&outbox);
         Self {
             carts: InMemoryCartRepo::sharing(&outbox),
-            products: InMemoryProductRepo::sharing(&outbox),
+            products: InMemoryProductRepo::sharing(&outbox).joining(&categories, &channels),
             markets: InMemoryMarketRepo::sharing(&outbox),
             catalogs: InMemoryCatalogRepo::sharing(&outbox),
             price_lists: InMemoryPriceListRepo::sharing(&outbox),
@@ -91,8 +93,8 @@ impl Default for InMemoryPorts {
             users: InMemoryUserRepo::default(),
             roles: InMemoryRoleRepo::default(),
             invites: InMemoryInviteRepo::default(),
-            channels: InMemoryChannelRepo::sharing(&outbox),
-            categories: InMemoryCategoryRepo::sharing(&outbox),
+            channels,
+            categories,
             search_queue: InMemorySearchQueue::default(),
             search_settings: InMemorySearchSettingsRepo::sharing(&outbox),
             outbox,

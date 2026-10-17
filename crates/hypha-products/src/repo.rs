@@ -1,6 +1,6 @@
-use hypha_core::{Page, PageRequest, ProductId, RepoError, VariantId};
+use hypha_core::{Keyset, Page, PageRequest, ProductId, RepoError, VariantId};
 
-use crate::{Handle, Product, ProductFilter, ProductSummary};
+use crate::{Handle, Product, ProductFilter, ProductSort, ProductSummary};
 
 /// Uniqueness rules a `ProductRepo` enforces, reported as `RepoError::Duplicate(key)`.
 /// Adapters map their constraint names to these.
@@ -31,14 +31,17 @@ pub trait ProductRepo {
     async fn ids_of_variants(&self, variants: &[VariantId]) -> Result<Vec<ProductId>, RepoError>;
     /// The product with a variant whose SKU is exactly `sku`.
     async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError>;
-    /// A page of product summaries, newest first (by ID; design note 0012), only the
-    /// products `filter` matches (`ProductFilter::matches`). Each equals
-    /// `Product::summary` of the stored product; an adapter may compute them without
-    /// loading whole products.
+    /// A page of product summaries in `sort`'s order (design notes 0012 and 0024): the
+    /// products after `page.after` by `ProductSort::key` and then ID, only those `filter`
+    /// matches (`ProductFilter::matches`, with the category and channel membership as
+    /// stored). Each equals `Product::summary` of the stored product; an adapter may
+    /// compute them without loading whole products. The caller passes a position whose
+    /// key fits the sort (`ProductSort::fits`); one that doesn't is a `Backend` error.
     async fn list(
         &self,
         filter: &ProductFilter,
-        page: PageRequest<ProductId>,
+        sort: ProductSort,
+        page: PageRequest<Keyset<ProductId>>,
     ) -> Result<Page<ProductSummary>, RepoError>;
     /// Stores a new product and sets its version to 1. Fails with `Duplicate` on any
     /// key in `keys`.

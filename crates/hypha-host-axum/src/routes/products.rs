@@ -7,8 +7,8 @@ use hypha_categories::categories_of_products;
 use hypha_channels::HasChannels;
 use hypha_channels::{channels_of_products, product_channels};
 use hypha_core::{
-    AssetId, CategoryId, ChannelId, Ctx, Currency, Money, OptionId, OptionValueId, ProductId,
-    VariantId, Weight,
+    AssetId, CategoryId, ChannelId, Ctx, Currency, Keyset, Money, OptionId, OptionValueId,
+    ProductId, SortKey, VariantId, Weight,
 };
 use hypha_inventory::{HasInventoryItems, HasLocations};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
@@ -19,16 +19,16 @@ use hypha_merchandising::{
 };
 use hypha_products::{
     AddVariant, CreateSimpleProduct, HasProducts, ListProducts, OptionDraft, OptionValueDraft,
-    Product, ProductOption, ProductStatus, SetProductOptions, SetVariant, UpdateProduct,
-    UpdateVariant, add_product_variant, create_simple_product, remove_product_variant,
-    set_product_options, set_product_status, set_product_variants, update_product,
-    update_product_variant,
+    Product, ProductFilterInput, ProductOption, ProductSort, ProductStatus, SetProductOptions,
+    SetVariant, UpdateProduct, UpdateVariant, add_product_variant, create_simple_product,
+    remove_product_variant, set_product_options, set_product_status, set_product_variants,
+    update_product, update_product_variant,
 };
 use serde::{Deserialize, Serialize};
 
 use super::{
     assets::AssetKindDto,
-    page::{ListQuery, PageParams, PageResponse},
+    page::{ListQuery, PageParams, PageResponse, SortedFilters},
 };
 use crate::{
     error::ApiError,
@@ -296,12 +296,68 @@ async fn respond_view<S: Storage>(
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub(super) struct ProductFilters {
-    /// Only products in this status.
-    status: Option<StatusDto>,
+    /// Only products in this status; repeat for any of several (`status=draft&status=active`).
+    #[serde(default)]
+    status: Vec<StatusDto>,
     /// Only products whose title, handle or a variant's SKU contains this text, ignoring
     /// case. Up to 255 characters; blank filters nothing. Reads the products as they are
     /// now (drafts too); storefronts search with `/storefront/search`.
     q: Option<String>,
+    /// Only products of this vendor, matched whole, ignoring case.
+    vendor: Option<String>,
+    /// Only products of this product type, matched whole, ignoring case.
+    product_type: Option<String>,
+    /// Only products with this tag, matched whole, ignoring case.
+    tag: Option<String>,
+    /// Only products directly in this category (not those below it). An ID that names
+    /// no category matches nothing.
+    #[param(value_type = Option<CategoryId>)]
+    category: Option<CategoryId>,
+    /// Only products published to this sales channel. An ID that names no channel
+    /// matches nothing.
+    #[param(value_type = Option<ChannelId>)]
+    channel: Option<ChannelId>,
+    #[param(inline)]
+    sort: Option<ProductSortDto>,
+}
+
+/// The order of a product list (design note 0024, AU1). Default `newest`. Titles
+/// compare lowercased, character by character (accented letters after `z`); ties go by
+/// creation, in the same direction.
+#[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ProductSortDto {
+    Newest,
+    Oldest,
+    TitleAsc,
+    TitleDesc,
+    UpdatedDesc,
+    UpdatedAsc,
+}
+
+impl From<ProductSortDto> for ProductSort {
+    fn from(s: ProductSortDto) -> Self {
+        match s {
+            ProductSortDto::Newest => ProductSort::Newest,
+            ProductSortDto::Oldest => ProductSort::Oldest,
+            ProductSortDto::TitleAsc => ProductSort::TitleAsc,
+            ProductSortDto::TitleDesc => ProductSort::TitleDesc,
+            ProductSortDto::UpdatedDesc => ProductSort::UpdatedDesc,
+            ProductSortDto::UpdatedAsc => ProductSort::UpdatedAsc,
+        }
+    }
+}
+
+impl ProductFilters {
+    fn sort(&self) -> ProductSort {
+        self.sort.map(Into::into).unwrap_or_default()
+    }
+}
+
+impl SortedFilters for ProductFilters {
+    fn fits(&self, key: &SortKey) -> bool {
+        self.sort().fits(key)
+    }
 }
 
 /// A product in a list: what a table of products shows, without options or variants
@@ -378,7 +434,8 @@ impl ProductSummaryResponse {
 /// A page of products (named for the documents: utoipa's `body =` takes a plain name).
 type ProductSummaryPage = PageResponse<ProductSummaryResponse>;
 
-/// Products in any status, newest first, optionally of one status.
+/// Products in any status, newest first or in `sort`'s order, narrowed by the filters
+/// (every one given must match).
 #[utoipa::path(
     get,
     path = "/admin/products",
@@ -392,10 +449,19 @@ pub(super) async fn list<S: Storage>(
     query: ListQuery<ProductFilters>,
 ) -> Result<Json<ProductSummaryPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, filters, scope) = query.parse()?;
+    let (page, filters, scope) = query.parse_sorted()?;
+    let sort = filters.sort();
     let input = ListProducts {
-        status: filters.status.map(Into::into),
-        q: filters.q,
+        filter: ProductFilterInput {
+            statuses: filters.status.into_iter().map(Into::into).collect(),
+            q: filters.q,
+            vendor: filters.vendor,
+            product_type: filters.product_type,
+            tag: filters.tag,
+            category: filters.category,
+            channel: filters.channel,
+        },
+        sort,
     };
     let page = list_product_views(&ctx, &ports, input, page).await?;
     let ids: Vec<ProductId> = page.items.iter().map(|v| v.summary.id).collect();
@@ -410,10 +476,13 @@ pub(super) async fn list<S: Storage>(
             ProductSummaryResponse::new(view, of, in_categories, state.media.as_ref()).await?,
         );
     }
-    Ok(Json(PageResponse::with_items(
+    Ok(Json(PageResponse::sorted(
         &page,
         &scope,
-        |v| v.summary.id,
+        |v| Keyset {
+            key: sort.key(&v.summary),
+            id: v.summary.id,
+        },
         items,
     )?))
 }

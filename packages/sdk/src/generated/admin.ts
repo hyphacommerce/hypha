@@ -1185,7 +1185,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Products in any status, newest first, optionally of one status. */
+        /**
+         * Products in any status, newest first or in `sort`'s order, narrowed by the filters
+         *     (every one given must match).
+         */
         get: operations["admin.products.list"];
         put?: never;
         /** Creates a product with one variant, as a draft. */
@@ -11736,14 +11739,31 @@ export interface operations {
                 cursor?: string;
                 /** @description Items per page, 1 to 100 (default 50). */
                 limit?: number;
-                /** @description Only products in this status. */
-                status?: components["schemas"]["ProductStatus"];
+                /** @description Only products in this status; repeat for any of several (`status=draft&status=active`). */
+                status?: components["schemas"]["ProductStatus"][];
                 /**
                  * @description Only products whose title, handle or a variant's SKU contains this text, ignoring
                  *     case. Up to 255 characters; blank filters nothing. Reads the products as they are
                  *     now (drafts too); storefronts search with `/storefront/search`.
                  */
                 q?: string;
+                /** @description Only products of this vendor, matched whole, ignoring case. */
+                vendor?: string;
+                /** @description Only products of this product type, matched whole, ignoring case. */
+                product_type?: string;
+                /** @description Only products with this tag, matched whole, ignoring case. */
+                tag?: string;
+                /**
+                 * @description Only products directly in this category (not those below it). An ID that names
+                 *     no category matches nothing.
+                 */
+                category?: components["schemas"]["CategoryId"];
+                /**
+                 * @description Only products published to this sales channel. An ID that names no channel
+                 *     matches nothing.
+                 */
+                channel?: components["schemas"]["ChannelId"];
+                sort?: "newest" | "oldest" | "title_asc" | "title_desc" | "updated_desc" | "updated_asc";
             };
             header?: never;
             path?: never;

@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    AssetId, Money, OptionId, OptionValueId, Page, PageRequest, Price, ProductId, Recorded,
-    RepoError, VariantId, Version, Versioned, Weight, stamp_insert, stamp_update,
+    AssetId, Direction, Keyset, Money, OptionId, OptionValueId, Page, PageRequest, Price,
+    ProductId, Recorded, RepoError, SortKey, VariantId, Version, Versioned, Weight, stamp_insert,
+    stamp_update,
 };
 use hypha_products::{
     Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductFilter, ProductRepo,
-    ProductSnapshot, ProductSummary, VariantSnapshot,
+    ProductSnapshot, ProductSort, ProductSummary, VariantSnapshot,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -40,7 +41,8 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
 
     /// One query whatever the page holds: each product's variant count and price ranges
     /// are aggregated in SQL (per product, only for the rows the limit keeps), so no
-    /// variant rows leave the database.
+    /// variant rows leave the database. Each sort has an index with the ID (migrations
+    /// 0017, 0044); the position is a row comparison, `(key, id) > ($key, $id)`.
     ///
     /// The text filter is `strpos` on `lower(…)`, not `ILIKE`: the merchant's `%` and `_`
     /// are plain characters, with nothing to escape. It scans (no trigram index: design
@@ -48,18 +50,64 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     async fn list(
         &self,
         filter: &ProductFilter,
-        page: PageRequest<ProductId>,
+        sort: ProductSort,
+        page: PageRequest<Keyset<ProductId>>,
     ) -> Result<Page<ProductSummary>, RepoError> {
-        let status = filter.status().map(|s| s.as_str());
+        let (key, at) = match sort {
+            ProductSort::Newest | ProductSort::Oldest => ("p.id", None),
+            ProductSort::TitleAsc | ProductSort::TitleDesc => (
+                r#"(lower(p.title) COLLATE "C")"#,
+                Some(r#"($5::text COLLATE "C")"#),
+            ),
+            ProductSort::UpdatedDesc | ProductSort::UpdatedAsc => (
+                "p.updated_at",
+                Some("('epoch'::timestamptz + $6::bigint * interval '1 microsecond')"),
+            ),
+        };
+        let (cmp, dir) = match sort.direction() {
+            Direction::Ascending => (">", "ASC"),
+            Direction::Descending => ("<", "DESC"),
+        };
+        let (position, order) = match at {
+            None => (format!("p.id {cmp} $2"), format!("p.id {dir}")),
+            Some(at) => (
+                format!("({key}, p.id) {cmp} ({at}, $2)"),
+                format!("{key} {dir}, p.id {dir}"),
+            ),
+        };
+        let (mut text_key, mut time_key) = (None::<String>, None::<i64>);
+        let after = match &page.after {
+            None => None,
+            Some(after) => {
+                match (&after.key, sort) {
+                    (SortKey::Id, ProductSort::Newest | ProductSort::Oldest) => {}
+                    (SortKey::Text(t), ProductSort::TitleAsc | ProductSort::TitleDesc) => {
+                        text_key = Some(t.clone())
+                    }
+                    (SortKey::Time(t), ProductSort::UpdatedDesc | ProductSort::UpdatedAsc) => {
+                        time_key = Some(t.unix_micros())
+                    }
+                    (key, sort) => {
+                        return Err(RepoError::Backend(format!(
+                            "a {key:?} position for a {sort:?} list"
+                        )));
+                    }
+                }
+                Some(after.id.as_uuid())
+            }
+        };
+        let statuses: Option<Vec<&str>> = (!filter.statuses().is_empty())
+            .then(|| filter.statuses().iter().map(|s| s.as_str()).collect());
         let q = filter.q().map(|q| q.as_str());
-        let after = page.after.map(|id| id.as_uuid());
+        let category = filter.category().map(|c| c.as_uuid());
+        let channel = filter.channel().map(|c| c.as_uuid());
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
             .client()
             .query_typed(
                 &format!(
-                    "SELECT p.id, p.handle, p.title, p.status, p.vendor, p.product_type, c.variants, {},
+                    "SELECT p.id, p.handle, p.title, p.status, p.vendor, p.product_type, c.variants, {stamps},
                         r.currencies, r.mins, r.maxes,
                         (SELECT asset_id FROM product_media
                          WHERE product_id = p.id AND position = 0) AS featured
@@ -77,20 +125,39 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                          FROM variants WHERE product_id = p.id GROUP BY price_currency
                      ) by_currency
                  ) r
-                 WHERE ($1::text IS NULL OR p.status = $1) AND ($2::uuid IS NULL OR p.id < $2)
+                 WHERE ($1::text[] IS NULL OR p.status = ANY($1))
+                   AND ($2::uuid IS NULL OR {position})
                    AND ($4::text IS NULL
                         OR strpos(lower(p.title), lower($4)) > 0
                         OR strpos(lower(p.handle), lower($4)) > 0
                         OR EXISTS (SELECT 1 FROM variants v WHERE v.product_id = p.id
                                    AND strpos(lower(v.sku), lower($4)) > 0))
-                 ORDER BY p.id DESC LIMIT $3",
-                    stamp_columns("p."),
+                   AND ($7::text IS NULL OR lower(p.vendor) = lower($7))
+                   AND ($8::text IS NULL OR lower(p.product_type) = lower($8))
+                   AND ($9::text IS NULL
+                        OR EXISTS (SELECT 1 FROM unnest(p.tags) AS t (tag)
+                                   WHERE lower(t.tag) = lower($9)))
+                   AND ($10::uuid IS NULL
+                        OR EXISTS (SELECT 1 FROM category_products cp
+                                   WHERE cp.product_id = p.id AND cp.category_id = $10))
+                   AND ($11::uuid IS NULL
+                        OR EXISTS (SELECT 1 FROM channel_products chp
+                                   WHERE chp.product_id = p.id AND chp.channel_id = $11))
+                 ORDER BY {order} LIMIT $3",
+                    stamps = stamp_columns("p."),
                 ),
                 &[
-                    (&status, Type::TEXT),
+                    (&statuses, Type::TEXT_ARRAY),
                     (&after, Type::UUID),
                     (&fetch, Type::INT8),
                     (&q, Type::TEXT),
+                    (&text_key, Type::TEXT),
+                    (&time_key, Type::INT8),
+                    (&filter.vendor(), Type::TEXT),
+                    (&filter.product_type(), Type::TEXT),
+                    (&filter.tag(), Type::TEXT),
+                    (&category, Type::UUID),
+                    (&channel, Type::UUID),
                 ],
             )
             .await

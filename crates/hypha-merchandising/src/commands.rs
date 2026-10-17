@@ -3,7 +3,7 @@
 
 use hypha_categories::{Category, CategoryRepo, HasCategories, StageCategories};
 use hypha_core::{
-    AssetId, AuthError, CategoryId, Ctx, ErrorCode, HasBatch, Page, PageRequest, ProductId,
+    AssetId, AuthError, CategoryId, Ctx, ErrorCode, HasBatch, Keyset, Page, PageRequest, ProductId,
     RepoError, Scope, VariantId, retry_on_conflict,
 };
 use hypha_media::{
@@ -274,11 +274,11 @@ pub async fn list_product_views<S: HasProducts + HasAssets>(
     ctx: &Ctx,
     ports: &S,
     input: ListProducts,
-    page: PageRequest<ProductId>,
+    page: PageRequest<Keyset<ProductId>>,
 ) -> Result<Page<ProductSummaryView>, CommandError> {
     ctx.require(Scope::ProductsRead)?;
-    let filter = ProductFilter::new(input.status, input.q)?;
-    let page = ports.products().list(&filter, page).await?;
+    let filter = ProductFilter::new(input.filter)?;
+    let page = ports.products().list(&filter, input.sort, page).await?;
     let featured: Vec<AssetId> = page.items.iter().filter_map(|s| s.featured_media).collect();
     let assets = ports.assets().get_many(&featured).await?;
     let items = page

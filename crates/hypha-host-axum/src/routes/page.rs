@@ -4,15 +4,16 @@
 //! filters in `params(...)`, and answers with a `PageResponse<ItemDto>`.
 //!
 //! Cursors are opaque to clients (design note 0016, section 9): base64url of a small
-//! JSON object with a version, the last item's ID and the list's filters, so a cursor
-//! only continues the list it came from, and a later sort order can add its sort key
-//! without changing the API.
+//! JSON object with a version, the last item's ID, its sort key in a sorted list
+//! (design note 0024, AU2) and the list's filters (`sort` among them), so a cursor only
+//! continues the list it came from. A sorted list parses with `parse_sorted` and
+//! answers with `PageResponse::sorted`.
 
 use std::{borrow::Cow, fmt::Display, marker::PhantomData, str::FromStr};
 
 use axum::{extract::FromRequestParts, http::request::Parts};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use hypha_core::{Page, PageLimit, PageRequest};
+use hypha_core::{Keyset, Page, PageLimit, PageRequest, SortKey, Timestamp};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use utoipa::{
     PartialSchema, ToSchema,
@@ -47,7 +48,10 @@ impl<T> PageResponse<T> {
         id: impl Fn(&U) -> Id,
         item: impl FnMut(U) -> Result<T, ApiError>,
     ) -> Result<Self, ApiError> {
-        let next_cursor = next_cursor(&page, scope, id)?;
+        let next_cursor = next_cursor(&page, scope, |u| Keyset {
+            key: SortKey::Id,
+            id: id(u),
+        })?;
         Ok(Self {
             items: page.items.into_iter().map(item).collect::<Result<_, _>>()?,
             has_more: page.has_more,
@@ -63,10 +67,29 @@ impl<T> PageResponse<T> {
         id: impl Fn(&U) -> Id,
         items: Vec<T>,
     ) -> Result<Self, ApiError> {
+        let next_cursor = next_cursor(page, scope, |u| Keyset {
+            key: SortKey::Id,
+            id: id(u),
+        })?;
         Ok(Self {
             items,
             has_more: page.has_more,
-            next_cursor: next_cursor(page, scope, id)?,
+            next_cursor,
+        })
+    }
+
+    /// The response for a page of a sorted list, `items` already made: the next cursor
+    /// holds the last item's `position` (its sort key and ID).
+    pub(crate) fn sorted<U, Id: Display>(
+        page: &Page<U>,
+        scope: &ListScope,
+        position: impl Fn(&U) -> Keyset<Id>,
+        items: Vec<T>,
+    ) -> Result<Self, ApiError> {
+        Ok(Self {
+            items,
+            has_more: page.has_more,
+            next_cursor: next_cursor(page, scope, position)?,
         })
     }
 }
@@ -79,33 +102,70 @@ pub(crate) struct ListScope {
 }
 
 /// A cursor's content: `v` is the format (bumped if it changes), `after` the last
-/// item's ID. Encoded as base64url JSON; clients never read it.
+/// item's ID, `key` its sort key in a list sorted by something besides the ID (absent
+/// otherwise). Encoded as base64url JSON; clients never read it. Version 1 had no
+/// `key`; its cursors still continue lists in ID order.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Cursor {
     v: u8,
     after: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key: Option<CursorKey>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     filters: Vec<(String, String)>,
 }
 
+/// `SortKey` in a cursor (`{"text": "mug"}`, `{"time": µs}`, `{"int": n}`).
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum CursorKey {
+    Text(String),
+    Time(i64),
+    Int(i64),
+}
+
+impl CursorKey {
+    fn of(key: SortKey) -> Option<Self> {
+        match key {
+            SortKey::Id => None,
+            SortKey::Text(text) => Some(CursorKey::Text(text)),
+            SortKey::Time(at) => Some(CursorKey::Time(at.unix_micros())),
+            SortKey::Int(n) => Some(CursorKey::Int(n)),
+        }
+    }
+
+    fn into_key(key: Option<Self>) -> SortKey {
+        match key {
+            None => SortKey::Id,
+            Some(CursorKey::Text(text)) => SortKey::Text(text),
+            Some(CursorKey::Time(us)) => SortKey::Time(Timestamp::from_unix_micros(us)),
+            Some(CursorKey::Int(n)) => SortKey::Int(n),
+        }
+    }
+}
+
 impl Cursor {
-    const VERSION: u8 = 1;
+    const VERSION: u8 = 2;
 
     fn encode(&self) -> Result<String, ApiError> {
         let json = serde_json::to_vec(self).map_err(ApiError::internal)?;
         Ok(URL_SAFE_NO_PAD.encode(json))
     }
 
-    /// The ID after which `scope`'s list continues, or `None` for a cursor that isn't
-    /// one of ours, is from another version, or was made with other filters.
-    fn decode<Id: FromStr>(cursor: &str, scope: &ListScope) -> Option<Id> {
+    /// The position after which `scope`'s list continues, or `None` for a cursor that
+    /// isn't one of ours, is from an unknown version, or was made with other filters.
+    fn decode<Id: FromStr>(cursor: &str, scope: &ListScope) -> Option<Keyset<Id>> {
         let json = URL_SAFE_NO_PAD.decode(cursor).ok()?;
         let cursor: Cursor = serde_json::from_slice(&json).ok()?;
-        if cursor.v != Self::VERSION || cursor.filters != scope.filters {
+        let known = cursor.v == Self::VERSION || (cursor.v == 1 && cursor.key.is_none());
+        if !known || cursor.filters != scope.filters {
             return None;
         }
-        cursor.after.parse().ok()
+        Some(Keyset {
+            id: cursor.after.parse().ok()?,
+            key: CursorKey::into_key(cursor.key),
+        })
     }
 }
 
@@ -115,6 +175,7 @@ pub(crate) fn cursor_at(scope: &ListScope, after: impl Display) -> Result<String
     Cursor {
         v: Cursor::VERSION,
         after: after.to_string(),
+        key: None,
         filters: scope.filters.clone(),
     }
     .encode()
@@ -124,18 +185,26 @@ pub(crate) fn cursor_at(scope: &ListScope, after: impl Display) -> Result<String
 fn next_cursor<U, Id: Display>(
     page: &Page<U>,
     scope: &ListScope,
-    id: impl Fn(&U) -> Id,
+    position: impl Fn(&U) -> Keyset<Id>,
 ) -> Result<Option<String>, ApiError> {
     let Some(last) = page.items.last().filter(|_| page.has_more) else {
         return Ok(None);
     };
+    let at = position(last);
     Cursor {
         v: Cursor::VERSION,
-        after: id(last).to_string(),
+        after: at.id.to_string(),
+        key: CursorKey::of(at.key),
         filters: scope.filters.clone(),
     }
     .encode()
     .map(Some)
+}
+
+/// The filters of a sorted list (design note 0024): whether a cursor's sort key is the
+/// kind the requested sort uses, so a cursor can't be replayed under another sort.
+pub(crate) trait SortedFilters {
+    fn fits(&self, key: &SortKey) -> bool;
 }
 
 /// Written out rather than derived: utoipa's derive names a generic schema
@@ -208,12 +277,48 @@ impl<S: Send + Sync, F> FromRequestParts<S> for ListQuery<F> {
     }
 }
 
+impl<F: DeserializeOwned + SortedFilters> ListQuery<F> {
+    /// `parse` for a sorted list: the page continues after a position (sort key and ID),
+    /// and a cursor whose key isn't the kind the sort uses is `400 invalid_cursor`.
+    pub(crate) fn parse_sorted<Id: FromStr>(
+        self,
+    ) -> Result<(PageRequest<Keyset<Id>>, F, ListScope), ApiError> {
+        let (page, filters, scope) = self.parse_positions()?;
+        if page.after.as_ref().is_some_and(|at| !filters.fits(&at.key)) {
+            return Err(ApiError::invalid_cursor());
+        }
+        Ok((page, filters, scope))
+    }
+}
+
 impl<F: DeserializeOwned> ListQuery<F> {
     /// The page asked for, the filters, and the scope to make the next cursor with. No
     /// `limit` is `PageLimit::DEFAULT`, one out of range is `422 invalid_limit`; a cursor
     /// this list (with these filters) didn't hand out is `400 invalid_cursor`; anything
     /// malformed or unknown is `400 invalid_query`.
     pub(crate) fn parse<Id: FromStr>(self) -> Result<(PageRequest<Id>, F, ListScope), ApiError> {
+        let (page, filters, scope) = self.parse_positions()?;
+        let after = match page.after {
+            None => None,
+            Some(Keyset {
+                key: SortKey::Id,
+                id,
+            }) => Some(id),
+            Some(_) => return Err(ApiError::invalid_cursor()),
+        };
+        Ok((
+            PageRequest {
+                after,
+                limit: page.limit,
+            },
+            filters,
+            scope,
+        ))
+    }
+
+    fn parse_positions<Id: FromStr>(
+        self,
+    ) -> Result<(PageRequest<Keyset<Id>>, F, ListScope), ApiError> {
         let pairs: Vec<(String, String)> =
             serde_urlencoded::from_str(self.query.as_deref().unwrap_or(""))
                 .map_err(ApiError::invalid_query)?;
@@ -333,7 +438,12 @@ mod tests {
             items: vec![id],
             has_more: true,
         };
-        next_cursor(&page, scope, |id| *id).unwrap().unwrap()
+        next_cursor(&page, scope, |id| Keyset {
+            key: SortKey::Id,
+            id: *id,
+        })
+        .unwrap()
+        .unwrap()
     }
 
     fn code<T>(result: Result<T, ApiError>) -> Option<&'static str> {
@@ -425,6 +535,7 @@ mod tests {
         let other = Cursor {
             v: Cursor::VERSION,
             after: order.to_string(),
+            key: None,
             filters: vec![],
         }
         .encode()
@@ -449,6 +560,96 @@ mod tests {
         let cursor = cursor_after(id, &scope);
         let (page, _) = parse::<Two>(&format!("a=1&b=2&cursor={cursor}")).unwrap();
         assert_eq!(page.after, Some(id));
+    }
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Sorted {
+        sort: Option<String>,
+    }
+
+    impl SortedFilters for Sorted {
+        fn fits(&self, key: &SortKey) -> bool {
+            matches!(
+                (self.sort.as_deref(), key),
+                (None, SortKey::Id) | (Some("title"), SortKey::Text(_))
+            )
+        }
+    }
+
+    fn sorted_cursor(key: SortKey, scope: &ListScope) -> String {
+        let id = ProductId::from_uuid(Uuid::from_u128(7));
+        let page = Page {
+            items: vec![id],
+            has_more: true,
+        };
+        next_cursor(&page, scope, |id| Keyset {
+            key: key.clone(),
+            id: *id,
+        })
+        .unwrap()
+        .unwrap()
+    }
+
+    fn parse_sorted(query: &str) -> Result<PageRequest<Keyset<ProductId>>, ApiError> {
+        ListQuery::<Sorted> {
+            query: Some(query.to_string()),
+            _filters: PhantomData,
+        }
+        .parse_sorted()
+        .map(|(page, _, _)| page)
+    }
+
+    #[test]
+    fn a_sorted_cursor_carries_the_sort_key() {
+        let (_, _, scope) = parse_scoped::<Sorted>("sort=title").unwrap();
+        let cursor = sorted_cursor(SortKey::text("Mug"), &scope);
+        assert!(!cursor.contains("mug"), "opaque: {cursor}");
+        let page = parse_sorted(&format!("sort=title&cursor={cursor}")).unwrap();
+        assert_eq!(
+            page.after,
+            Some(Keyset {
+                key: SortKey::text("mug"),
+                id: ProductId::from_uuid(Uuid::from_u128(7)),
+            })
+        );
+    }
+
+    #[test]
+    fn a_cursor_only_continues_its_own_sort() {
+        // Another sort is another list (its scope differs) …
+        let (_, _, by_title) = parse_scoped::<Sorted>("sort=title").unwrap();
+        let cursor = sorted_cursor(SortKey::text("Mug"), &by_title);
+        assert_eq!(
+            code(parse_sorted(&format!("cursor={cursor}"))),
+            Some("invalid_cursor")
+        );
+        // … and a key of the wrong kind for the sort is refused even with a scope
+        // that matches (a hand-made cursor).
+        let wrong = sorted_cursor(SortKey::Int(3), &by_title);
+        assert_eq!(
+            code(parse_sorted(&format!("sort=title&cursor={wrong}"))),
+            Some("invalid_cursor")
+        );
+        // An unsorted list refuses a keyed cursor.
+        let keyed = sorted_cursor(SortKey::text("a"), &ListScope::default());
+        assert_eq!(
+            code(parse::<NoFilters>(&format!("cursor={keyed}"))),
+            Some("invalid_cursor")
+        );
+    }
+
+    #[test]
+    fn version_1_cursors_still_continue() {
+        let id = ProductId::from_uuid(Uuid::from_u128(7));
+        let v1 = URL_SAFE_NO_PAD.encode(format!(r#"{{"v":1,"after":"{id}"}}"#));
+        let (page, _) = parse::<NoFilters>(&format!("cursor={v1}")).unwrap();
+        assert_eq!(page.after, Some(id));
+        let v3 = URL_SAFE_NO_PAD.encode(format!(r#"{{"v":3,"after":"{id}"}}"#));
+        assert_eq!(
+            code(parse::<NoFilters>(&format!("cursor={v3}"))),
+            Some("invalid_cursor")
+        );
     }
 
     #[test]

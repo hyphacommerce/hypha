@@ -3,10 +3,16 @@
 //! IDs are UUIDv7, so ordering by ID is ordering by creation time; a page asks for the
 //! items whose ID is below the last one it got (`after`). A cursor like this stays
 //! correct while items are added, unlike an offset, and costs one indexed range scan.
+//!
+//! Lists sorted by something else (design note 0024, AU2) page the same way by a
+//! `Keyset`: the last item's sort key with its ID, which breaks ties. A list that sorts
+//! takes `PageRequest<Keyset<Id>>`.
+
+use std::cmp::Ordering;
 
 use thiserror::Error;
 
-use crate::ErrorCode;
+use crate::{ErrorCode, Timestamp};
 
 /// How many items a page may hold: 1 to `MAX`, `DEFAULT` when not asked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +71,57 @@ impl<Id> Default for PageRequest<Id> {
     }
 }
 
+/// The value a sorted list orders by, at one item (design note 0024, AU2): what a
+/// cursor carries besides the item's ID. Each sort uses one kind.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SortKey {
+    /// Sorted by ID alone (creation order): nothing besides the ID.
+    Id,
+    /// Text compared by its bytes after Unicode lowercasing (titles, emails).
+    Text(String),
+    Time(Timestamp),
+    /// A whole number, such as an amount in minor units.
+    Int(i64),
+}
+
+impl SortKey {
+    /// Text as text sorts compare it: Unicode lowercase, then by bytes (adapters compare
+    /// `lower(…) COLLATE "C"`).
+    pub fn text(text: &str) -> Self {
+        SortKey::Text(text.to_lowercase())
+    }
+}
+
+/// Which way a list is sorted; the ID breaks ties in the same direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Ascending,
+    Descending,
+}
+
+/// Where a sorted list continues: after the item with this sort key and ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Keyset<Id> {
+    pub key: SortKey,
+    pub id: Id,
+}
+
+impl<Id: Ord> Keyset<Id> {
+    /// How two items compare in a list sorted `direction`: by key, then by ID.
+    pub fn order(a: (&SortKey, &Id), b: (&SortKey, &Id), direction: Direction) -> Ordering {
+        let ascending = a.0.cmp(b.0).then_with(|| a.1.cmp(b.1));
+        match direction {
+            Direction::Ascending => ascending,
+            Direction::Descending => ascending.reverse(),
+        }
+    }
+
+    /// Whether the item at `key` and `id` comes after this position.
+    pub fn precedes(&self, key: &SortKey, id: &Id, direction: Direction) -> bool {
+        Self::order((&self.key, &self.id), (key, id), direction) == Ordering::Less
+    }
+}
+
 /// One page, newest first. `has_more` says whether a page after it has items; its
 /// cursor is the last item's ID.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +143,26 @@ impl<T> Page<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_keyset_breaks_ties_by_id_in_the_same_direction() {
+        let at = Keyset {
+            key: SortKey::text("Mug"),
+            id: 5,
+        };
+        let mug = SortKey::text("MUG");
+        assert!(at.precedes(&mug, &6, Direction::Ascending));
+        assert!(!at.precedes(&mug, &4, Direction::Ascending));
+        assert!(at.precedes(&mug, &4, Direction::Descending));
+        assert!(!at.precedes(&mug, &5, Direction::Descending), "not itself");
+        assert!(at.precedes(&SortKey::text("a"), &9, Direction::Descending));
+        assert!(at.precedes(&SortKey::text("z"), &1, Direction::Ascending));
+    }
+
+    #[test]
+    fn text_keys_ignore_case_beyond_ascii() {
+        assert_eq!(SortKey::text("ČAŠA"), SortKey::text("čaša"));
+    }
 
     #[test]
     fn a_limit_is_1_to_100() {

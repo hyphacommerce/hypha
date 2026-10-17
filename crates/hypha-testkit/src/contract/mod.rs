@@ -56,7 +56,7 @@ pub use markets::{catalog_repo, market_repo, price_list_repo};
 pub use media::{asset_repo, blob_store};
 pub use orders::order_repo;
 pub use outbox::outbox;
-pub use products::product_repo;
+pub use products::{product_list, product_repo};
 pub use search::{search_index, search_queue, search_settings_repo};
 pub use shipping::{app_provider_repo, shipping_zone_repo};
 pub use staff_batch::staff_batch;

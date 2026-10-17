@@ -4,8 +4,8 @@ use hypha_core::{
 };
 use hypha_products::{
     CommandError, CreateSimpleProduct, Handle, HandleError, ListProducts, ProductError,
-    ProductStatus, create_simple_product, get_product, list_products, repo::ProductRepo,
-    set_product_status,
+    ProductFilterInput, ProductStatus, create_simple_product, get_product, list_products,
+    repo::ProductRepo, set_product_status,
 };
 use hypha_testkit::{InMemoryProductRepo, SequentialIds};
 use pollster::block_on;
@@ -226,7 +226,10 @@ fn list_products_filters_by_status() {
     .unwrap();
     assert_eq!(all.items, vec![cup.summary(), mug.summary()]);
     let active = ListProducts {
-        status: Some(ProductStatus::Active),
+        filter: ProductFilterInput {
+            statuses: vec![ProductStatus::Active],
+            ..ProductFilterInput::default()
+        },
         ..ListProducts::default()
     };
     let active = block_on(list_products(&ctx, &repo, active, PageRequest::default())).unwrap();
@@ -244,7 +247,10 @@ fn list_products_filters_by_text() {
     let cup = block_on(create_simple_product(&ctx, &repo, &ids, cup_input)).unwrap();
 
     let q = |text: &str| ListProducts {
-        q: Some(text.to_string()),
+        filter: ProductFilterInput {
+            q: Some(text.to_string()),
+            ..ProductFilterInput::default()
+        },
         ..ListProducts::default()
     };
     let found = block_on(list_products(

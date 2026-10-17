@@ -53,7 +53,7 @@ pub use ids::{
 };
 pub use language::{Language, LanguageError};
 pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};
-pub use page::{Page, PageError, PageLimit, PageRequest};
+pub use page::{Direction, Keyset, Page, PageError, PageLimit, PageRequest, SortKey};
 pub use ports::{
     Clock, HasBatch, IdGenerator, Notifier, NotifyError, Progress, Random, RepoError,
     report_duplicate,

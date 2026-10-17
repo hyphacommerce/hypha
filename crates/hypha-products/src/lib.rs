@@ -18,7 +18,7 @@ pub use commands::{
 pub use content::MAX_TAGS;
 pub use error::ProductError;
 pub use events::{ProductCreated, ProductUpdated, VariantAdded, VariantRemoved, VariantUpdated};
-pub use filter::{ProductFilter, ProductQuery};
+pub use filter::{ProductFilter, ProductFilterInput, ProductQuery, ProductSort};
 /// Shared with categories, so they live in core (design note 0022).
 pub use hypha_core::{Description, Handle, HandleError};
 pub use option::{OptionValue, ProductOption};
