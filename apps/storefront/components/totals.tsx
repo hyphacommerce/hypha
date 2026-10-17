@@ -4,7 +4,7 @@ import { Text } from "@astryxdesign/core/Text";
 
 import { type Money, formatMoney } from "@/lib/money";
 
-import { LineImage } from "./cart-line";
+import { LineImage } from "./line-image";
 
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (

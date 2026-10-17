@@ -15,6 +15,7 @@ import {
   GlobeEuropeAfricaIcon,
   HomeIcon,
   MagnifyingGlassIcon,
+  PhotoIcon,
   PuzzlePieceIcon,
   RocketLaunchIcon,
   ShoppingBagIcon,
@@ -48,11 +49,9 @@ const NAV: { title: string; items: NavItem[] }[] = [
         label: "Products",
         href: "/products",
         icon: CubeIcon,
-        children: [
-          { label: "Categories", href: "/products/categories" },
-          { label: "Media", href: "/media" },
-        ],
+        children: [{ label: "Categories", href: "/products/categories" }],
       },
+      { label: "Media", href: "/media", icon: PhotoIcon },
       { label: "Customers", href: "/customers", icon: UsersIcon },
       {
         label: "Markets",

@@ -7,7 +7,8 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
-import { CartLine, lineImage } from "@/components/cart-line";
+import { CartLine } from "@/components/cart-line";
+import { lineImage } from "@/components/line-image";
 import { Totals } from "@/components/totals";
 import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";

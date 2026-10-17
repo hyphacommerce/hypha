@@ -6,7 +6,7 @@ import { Text } from "@astryxdesign/core/Text";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { lineImage } from "@/components/cart-line";
+import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
 import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
