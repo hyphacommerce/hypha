@@ -232,3 +232,19 @@ pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestam
         .map_err(|_| "no connection".to_string())?;
     ports.outbox().next_due().await.map_err(|e| e.to_string())
 }
+
+/// How many search targets are queued, for a host whose runs don't follow each other on
+/// a timer (design note 0026, W7): a mark marked again while another run held it is left
+/// for the next run, which on Workers may be an hour away.
+pub async fn search_queued<S: Storage>(state: &AppState<S>) -> Result<u64, String> {
+    use hypha_search_index::{HasSearchQueue, SearchQueue};
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "no connection".to_string())?;
+    ports
+        .search_queue()
+        .queued()
+        .await
+        .map_err(|e| e.to_string())
+}

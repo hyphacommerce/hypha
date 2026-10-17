@@ -45,7 +45,7 @@ mod worker_main {
     use hypha_config::Config;
     use hypha_core::{Clock, Timestamp};
     use hypha_http::host::{AfterWrites, BoxFuture, HostBackground, HostLimiter};
-    use hypha_http::jobs::{self, Step};
+    use hypha_http::jobs::{self, Ran, Step};
     use hypha_http::rate_limit::{Decision, Rule};
     use hypha_http::state::{AppState, HostEnv, HostParts, SharedState, Storage};
     use hypha_stores::StoreRepo;
@@ -343,7 +343,7 @@ mod worker_main {
                 if jobs.search_sync.enabled {
                     run = run.and(
                         steps("search sync", &state, Some(deadline), || {
-                            jobs::search_sync(&state)
+                            search_step(&state)
                         })
                         .await,
                     );
@@ -388,9 +388,7 @@ mod worker_main {
                     run = run.and(steps("dispatch", &state, None, || jobs::dispatch(&state)).await);
                 }
                 if jobs.search_sync.enabled {
-                    run = run.and(
-                        steps("search sync", &state, None, || jobs::search_sync(&state)).await,
-                    );
+                    run = run.and(steps("search sync", &state, None, || search_step(&state)).await);
                 }
                 if let Some(kv) = &kv {
                     let known = read.and_then(|marks| marks.due);
@@ -442,6 +440,22 @@ mod worker_main {
         // Stopped with more to do.
         run.left = true;
         run
+    }
+
+    /// A search sync step that says there's more while marks are queued after it
+    /// worked. A mark marked again while this run held it waits for the next run, which
+    /// natively is the next timer but here may be the safety net's tick (W7); marks
+    /// another run holds are that run's to finish, so the next step finds none and stops.
+    async fn search_step(state: &AppState<WorkersStorage>) -> Step {
+        let ran = jobs::search_sync(state).await?;
+        if ran.more || ran.idle {
+            return Ok(ran);
+        }
+        let queued = jobs::search_queued(state).await?;
+        Ok(Ran {
+            more: queued > 0,
+            ..ran
+        })
     }
 
     fn millis(at: Timestamp) -> u64 {
