@@ -1,7 +1,7 @@
 //! Hypha's API on Cloudflare Workers (design note 0026): `hypha-http`'s routes, as on the
 //! VPS, over Postgres through Hyperdrive, with the runtime's clock, randomness and
-//! `fetch`. The database is set up beforehand (W9: the native host's startup, later
-//! `hypha … setup` from the CLI): this Worker runs no migrations and creates no store.
+//! `fetch`. The database is set up beforehand (W9: `hypha-host-axum setup`, which
+//! `hypha deploy` runs): this Worker runs no migrations and creates no store.
 //!
 //! An isolate builds its `AppState` and router once, on its first event (`Isolate`), and
 //! serves every request with them: the configuration, the store, recently authenticated
@@ -171,7 +171,7 @@ mod worker_main {
             .map_err(|e| e.to_string())?;
         let [store] = stores.as_slice() else {
             return Err(format!(
-                "expected one store, found {}: set the database up with the host's setup first",
+                "expected one store, found {}: set the database up with `hypha-host-axum setup` first",
                 stores.len()
             ));
         };

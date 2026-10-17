@@ -1,6 +1,6 @@
 # The API on Cloudflare Workers (design note 0026). `wrangler dev` runs it against the
-# compose Postgres (`localConnectionString`), on a database the native host set up
-# first (W9); `hypha deploy` (later) writes the deployment's own values.
+# compose Postgres (`localConnectionString`), on a database `hypha-host-axum setup`
+# prepared first (W9); `hypha deploy` (later) writes the deployment's own values.
 name = "hypha-api"
 main = "build/worker/shim.mjs"
 compatibility_date = "2026-10-01"

@@ -163,7 +163,8 @@ the domains; `hypha deploy` then:
    for background work, dispatch and search sync after each write (W6's first half),
    and crons for every job. Rate limits count per isolate for now (W8 pending). The e2e
    script passes against `wrangler dev` (641 steps), on a database the native host set
-   up (W9).
+   up (W9: `hypha-host-axum setup`, since 2026-10-18, does a start's preparation and
+   exits).
    Reviewed (2026-10-18): Hyperdrive's query cache must be off (`--caching-disabled`;
    it serves reads outside transactions, such as session and key lookups, up to a
    minute old); the dispatch step after a write starts no delivery that couldn't end

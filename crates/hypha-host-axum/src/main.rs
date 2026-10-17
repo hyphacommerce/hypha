@@ -12,7 +12,7 @@ use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
 use hypha_http::host::HostLimiter;
 use hypha_http::rate_limit::RateLimiter;
-use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, Storage};
+use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, SharedState, Storage};
 
 mod calls;
 mod handlers;
@@ -107,8 +107,15 @@ async fn main() {
             }
             return;
         }
-        _ => {}
+        Some("setup") | None => {}
+        Some(other) => {
+            eprintln!("unknown command {other:?}: expected setup, config or openapi");
+            std::process::exit(1);
+        }
     }
+    // `setup` prepares the database as a start would, then exits (design note 0026,
+    // W9): for hosts that can't, such as a Worker.
+    let setup_only = args.get(1).is_some();
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -173,7 +180,12 @@ async fn main() {
         config.auth,
         runtime.clone(),
     );
-    serve(storage, env, runtime, config).await;
+    let prepared = prepare(storage, env, runtime, config).await;
+    if setup_only {
+        tracing::info!("setup done: migrations, the store, the owner, the location, search");
+        return;
+    }
+    serve(prepared).await;
 }
 
 /// With no staff user yet, `HYPHA_OWNER_EMAIL` and `HYPHA_OWNER_PASSWORD` (and
@@ -190,7 +202,7 @@ async fn ensure_owner<S: Storage>(state: &AppState<S>) -> Result<(), String> {
         if !ports.users().any().await.map_err(|e| e.to_string())? {
             tracing::warn!(
                 "no staff user yet: set HYPHA_OWNER_EMAIL and HYPHA_OWNER_PASSWORD to create \
-                 the owner, then restart"
+                 the owner, then restart (or run setup)"
             );
         }
         return Ok(());
@@ -251,21 +263,20 @@ async fn ensure_search_index<S: Storage>(state: &AppState<S>) -> Result<(), Stri
     Ok(())
 }
 
-async fn serve(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Config) {
+/// What a start prepares before serving: the state, with the store, the owner, the
+/// default location and the search index set up, and the host pieces `serve` runs.
+struct Prepared {
+    state: SharedState<PgStorage>,
+    background: Background,
+    limiter: Arc<MemoryRateLimiter>,
+    wake: runner::Wake,
+}
+
+/// Everything a start does before listening, which `setup` does alone: the store (one per
+/// deployment), the media bucket if asked for, the owner, the default location and the
+/// search index. Migrations ran in `PgStorage::connect`. Exits on failure.
+async fn prepare(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Config) -> Prepared {
     let ids = runtime.ids.clone();
-    let trusted_proxies = &config.server.trusted_proxies;
-    // The one setting that silently goes wrong behind a proxy (design note 0009, §8).
-    if trusted_proxies.is_empty() {
-        tracing::info!(
-            "rate limits key clients by their socket address; behind a proxy or load \
-             balancer, set server.trusted_proxies or every client shares one limit"
-        );
-    } else {
-        tracing::info!(
-            ?trusted_proxies,
-            "rate limits read X-Forwarded-For from trusted proxies"
-        );
-    }
     // One store per deployment (design note 0006, model A): created on first start.
     let name = std::env::var("HYPHA_STORE_NAME").unwrap_or_else(|_| "My store".to_string());
     let store = match storage.directory().await {
@@ -281,7 +292,7 @@ async fn serve(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Confi
             std::process::exit(1);
         }
     };
-    tracing::info!(store = %store.id(), name = store.name(), "serving store");
+    tracing::info!(store = %store.id(), name = store.name(), "store");
 
     let media = match hypha_http::media::Media::from_config(
         &config.media,
@@ -320,11 +331,6 @@ async fn serve(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Confi
             "outbound.allow_private: apps may be called at private addresses; development only"
         );
     }
-    if !config.jobs.dispatch.enabled {
-        tracing::info!("jobs: events aren't delivered from this instance (jobs.dispatch)");
-    }
-    let grace = config.server.shutdown_grace;
-    let addr = config.server.bind.clone();
     let background = Background::default();
     let limiter = Arc::new(MemoryRateLimiter::new(&config.rate_limits));
     let wake = runner::Wake::default();
@@ -363,6 +369,40 @@ async fn serve(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Confi
         tracing::error!("search setup failed: {e}");
         std::process::exit(1);
     }
+    Prepared {
+        state,
+        background,
+        limiter,
+        wake,
+    }
+}
+
+async fn serve(prepared: Prepared) {
+    let Prepared {
+        state,
+        background,
+        limiter,
+        wake,
+    } = prepared;
+    let config = &state.config;
+    let trusted_proxies = &config.server.trusted_proxies;
+    // The one setting that silently goes wrong behind a proxy (design note 0009, §8).
+    if trusted_proxies.is_empty() {
+        tracing::info!(
+            "rate limits key clients by their socket address; behind a proxy or load \
+             balancer, set server.trusted_proxies or every client shares one limit"
+        );
+    } else {
+        tracing::info!(
+            ?trusted_proxies,
+            "rate limits read X-Forwarded-For from trusted proxies"
+        );
+    }
+    if !config.jobs.dispatch.enabled {
+        tracing::info!("jobs: events aren't delivered from this instance (jobs.dispatch)");
+    }
+    let grace = config.server.shutdown_grace;
+    let addr = config.server.bind.clone();
     tracing::warn!("emails (invites, password resets) are logged, not sent: development only");
     let router: Router<_> = hypha_http::router!(PgStorage);
     let app = router
