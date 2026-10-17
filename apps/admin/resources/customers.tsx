@@ -10,6 +10,7 @@ import { UsersIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
 import { DateTime } from "@/components/date-time";
+import { customerName } from "@/lib/format";
 import {
   type FilterDef,
   ResourceTable,
@@ -40,10 +41,6 @@ const FILTERS: FilterDef[] = [
 ];
 
 /** "Ana Horvat", or nothing for a customer known only by email. */
-export function customerName(c: { first_name?: string | null; last_name?: string | null }) {
-  return [c.first_name, c.last_name].filter(Boolean).join(" ");
-}
-
 export function CustomersTable({
   page,
 }: {

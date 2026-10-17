@@ -115,3 +115,8 @@ export const CANCEL_REASONS: Record<string, string> = {
   staff: "Staff error",
   other: "Other",
 };
+
+/** "Ana Horvat", "Ana", or "" without a name. */
+export function customerName(c: { first_name?: string | null; last_name?: string | null }): string {
+  return [c.first_name, c.last_name].filter(Boolean).join(" ");
+}

@@ -10,9 +10,8 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 
 import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
-
+import { customerName } from "@/lib/format";
 import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
-import { customerName } from "@/resources/customers";
 
 type Address = AdminSchemas["AddressResponse"];
 
