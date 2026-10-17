@@ -14,6 +14,7 @@ import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { AdjustmentsHorizontalIcon } from "@heroicons/react/24/outline";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
@@ -184,6 +185,7 @@ export function FacetPanel({ base, state, facets, priceHint, currency, onDone }:
 
 /** Above the results: the count, the sort, and (on phones) the filters in a sheet. */
 export function ListingToolbar(props: Props & { total: number; sort: Sort }) {
+  const isWide = useMediaQuery("(min-width: 900px)", true);
   const { go, pending } = useGo(props.base);
   const [sheet, setSheet] = useState(false);
   const active = props.state.filters.length + (props.state.min || props.state.max ? 1 : 0);
@@ -193,7 +195,8 @@ export function ListingToolbar(props: Props & { total: number; sort: Sort }) {
         {props.total} {props.total === 1 ? "product" : "products"}
       </Text>
       <HStack gap={2} vAlign="center">
-        <div className="shop-narrow-only">
+        {!isWide && (
+        <>
           <Button
             label={active > 0 ? `Filters (${active})` : "Filters"}
             icon={<Icon icon={AdjustmentsHorizontalIcon} />}
@@ -202,7 +205,8 @@ export function ListingToolbar(props: Props & { total: number; sort: Sort }) {
           <BottomSheet label="Filters" isOpen={sheet} onOpenChange={setSheet} height="tall">
             <FacetPanel {...props} onDone={() => setSheet(false)} />
           </BottomSheet>
-        </div>
+        </>
+        )}
         <Selector
           label="Sort"
           isLabelHidden

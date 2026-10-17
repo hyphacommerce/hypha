@@ -9,6 +9,13 @@ import { link } from "@/lib/site";
 
 import { ProductForm } from "./product-form";
 
+/** Static, refreshed at most every five minutes (design note 0024, §7). None is built
+ * ahead (no API at build time): each product renders on its first visit, then is kept. */
+export const revalidate = 300;
+export function generateStaticParams() {
+  return [];
+}
+
 type Props = {
   params: Promise<{ country: string; handle: string }>;
 };
@@ -52,7 +59,7 @@ export default async function ProductPage({ params }: Props) {
           <Banner
             status="warning"
             title={`Not sold in ${country.name}`}
-            description="Pick another country at the top to see where it's sold."
+            description="Switch currency at the top to shop where it is sold."
           />
         </VStack>
       ) : (

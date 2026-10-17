@@ -15,12 +15,13 @@ type Hit = StorefrontSchemas["SearchHitResponse"];
 export function ProductGrid({
   hits,
   digits,
-  hrefOf,
+  productBase,
   minWidth = 160,
 }: {
   hits: Hit[];
   digits: number;
-  hrefOf: (hit: Hit) => string;
+  /** Product pages' URL prefix (`/hr/p`): a string, so client components can pass it. */
+  productBase: string;
   minWidth?: number;
 }) {
   return (
@@ -32,7 +33,7 @@ export function ProductGrid({
           <ClickableCard
             key={hit.listing}
             label={hit.title}
-            href={hrefOf(hit)}
+            href={`${productBase}/${hit.handle}`}
             variant="transparent"
             padding={0}
           >

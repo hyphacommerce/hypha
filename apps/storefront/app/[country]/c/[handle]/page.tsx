@@ -3,15 +3,25 @@ import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import { Listing } from "@/components/listing";
+import { ProductGrid } from "@/components/product-grid";
 import { api, countryOf, loaded } from "@/lib/api";
-import type { ListingParams } from "@/lib/listing";
+import { readListingPage } from "@/lib/listing-data";
 import { link } from "@/lib/site";
+
+/** Static, refreshed at most every five minutes (design note 0024, §7). */
+export const revalidate = 300;
+
+/** None ahead (no API at build time): each category renders on its first visit, then
+ * is kept and refreshed in the background. */
+export function generateStaticParams() {
+  return [];
+}
 
 type Props = {
   params: Promise<{ country: string; handle: string }>;
-  searchParams: Promise<ListingParams>;
 };
 
 async function load(handle: string) {
@@ -30,14 +40,22 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 /**
  * A category (design note 0023, §3): its breadcrumb and subcategories, then its
  * products, those of its subcategories included, through search (0022, CA3). A hidden
- * category is a 404.
+ * category is a 404. The page is static with its first page of products; filtering,
+ * sorting and paging read the rest in the browser (`Listing`).
  */
-export default async function CategoryPage({ params, searchParams }: Props) {
+export default async function CategoryPage({ params }: Props) {
   const { country: folder, handle } = await params;
   const country = await countryOf(folder);
   const code = country.country;
   const category = await load(handle);
   const ancestors = [...category.ancestors].reverse();
+  const first = await readListingPage({
+    country: code,
+    digits: country.minor_units,
+    params: {},
+    category: category.id,
+  });
+  const productBase = link(code, "/p");
 
   return (
     <VStack gap={6}>
@@ -70,13 +88,21 @@ export default async function CategoryPage({ params, searchParams }: Props) {
           </HStack>
         )}
       </VStack>
-      <Listing
-        country={country}
-        params={await searchParams}
-        base={link(code, `/c/${handle}`)}
-        category={category.id}
-        productHref={(h) => link(code, `/p/${h}`)}
-      />
+      {/* The URL's query is only known in the browser on a static page. */}
+      <Suspense
+        fallback={<ProductGrid hits={first.items} digits={country.minor_units} productBase={productBase} />}
+      >
+        <Listing
+          country={code}
+          digits={country.minor_units}
+          currency={country.currency}
+          base={link(code, `/c/${handle}`)}
+          productBase={productBase}
+          category={category.id}
+          initial={first}
+          initialQuery=""
+        />
+      </Suspense>
     </VStack>
   );
 }

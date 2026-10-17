@@ -140,6 +140,29 @@ empty states that say what to do next. Known gaps to close on the way:
 - Cart and checkout from `payment-form` without the card section: contact, address,
   shipping option (`RadioList`), a sticky summary, "Place order".
 
+**The showcase pass (Danilo, 2026-10-17):**
+
+- **Static by default.** Every page under a country is static with ISR (`revalidate =
+  300`, empty `generateStaticParams`: nothing is built ahead, since there's no API at
+  build time; a page renders on its first visit and refreshes in the background), except
+  search, cart, checkout, order and account, which render per request.
+- **The cart lives in the browser.** A static page can't read the cart cookie, so a
+  `CartProvider` reads the cart through a server action once the page is in, and the
+  cart's actions answer with the cart. The header's count, a cart drawer (Astryx
+  `Dialog` against the end edge) and the cart page share it and its lines.
+- **Static listings, filtered in the browser.** A category page renders its first page;
+  a filter, sort or page in the URL is read through a server action (`listingPage`), so
+  the page stays static. Search reads its query on the server.
+- **No country picker.** `proxy.ts` already finds the country (cookie, geolocation,
+  the store's first); the header offers the store's currencies instead, as Shopify
+  themes do, and picking one moves to a country paying in it.
+- **Astryx for the frame too:** `Layout` (header, content, footer) and `TopNav` (the
+  store, categories with a mega menu for subcategories, search in a `Popover`, currency,
+  account, cart). Only image fills, sticky columns and the merchant's HTML have CSS.
+- **Home:** a hero, category tiles, new arrivals, a shelf per top category, and the best
+  prices. A "sale" shelf needs compare-at prices, which the API doesn't have yet.
+- **Account** is a placeholder until customer accounts (0008 §9).
+
 ## 8. Build order
 
 1. Core keyset paging and the cursor's version 2; product sorts and filters (repo,

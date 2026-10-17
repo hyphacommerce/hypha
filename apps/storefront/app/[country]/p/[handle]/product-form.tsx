@@ -22,7 +22,7 @@ import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { StorefrontSchemas } from "@hypha/sdk/storefront";
 import { useState, useTransition } from "react";
 
-import { addToCart } from "@/app/[country]/actions";
+import { useCart } from "@/components/cart/cart-provider";
 import { formatMoney } from "@/lib/money";
 
 type Product = StorefrontSchemas["StorefrontProductResponse"];
@@ -59,6 +59,7 @@ export function ProductForm({
 }) {
   // Start on the first variant that can be bought, else the first.
   const start = product.variants.find((v) => v.available) ?? product.variants[0];
+  const cart = useCart();
   const [selections, setSelections] = useState<string[]>(start?.selections ?? []);
   const [quantity, setQuantity] = useState(1);
   const [error, setError] = useState<string>();
@@ -90,8 +91,8 @@ export function ProductForm({
   const add = () => {
     if (!variant) return;
     startAdding(async () => {
-      const result = await addToCart({ country, variant: variant.id, quantity });
-      if (result) setError(result.error);
+      // Opens the cart drawer when it's in.
+      setError(await cart.add(variant.id, quantity));
     });
   };
 
@@ -106,7 +107,7 @@ export function ProductForm({
       : "Sold out";
 
   return (
-    <div className="shop-split">
+    <Grid columns={{ minWidth: 340, repeat: "fit" }} gap={8}>
       <VStack gap={3}>
         <div className="shop-rounded">
           <AspectRatio ratio={4 / 5}>
@@ -277,6 +278,6 @@ export function ProductForm({
           </CollapsibleGroup>
         </VStack>
       </div>
-    </div>
+    </Grid>
   );
 }

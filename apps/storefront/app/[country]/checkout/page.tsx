@@ -1,3 +1,4 @@
+import { Grid } from "@astryxdesign/core/Grid";
 import { Card } from "@astryxdesign/core/Card";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -13,6 +14,9 @@ import { formatMoney } from "@/lib/money";
 import { cartId, link } from "@/lib/site";
 
 import { DetailsForm, PlaceOrder, ShippingChoice } from "./checkout-forms";
+
+/** Per request: it reads the shopper's cart or query (design note 0024, §7). */
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Checkout" };
 
@@ -55,7 +59,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
       <Heading level={1} type="display-2">
         Checkout
       </Heading>
-      <div className="shop-split" data-variant="summary">
+      <Grid columns={{ minWidth: 360, repeat: "fit" }} gap={8}>
         <VStack gap={8}>
           <DetailsForm
             country={code}
@@ -141,7 +145,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
             </VStack>
           </Card>
         </div>
-      </div>
+      </Grid>
     </VStack>
   );
 }

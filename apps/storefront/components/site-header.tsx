@@ -1,77 +1,108 @@
 "use client";
 
-// The header on every page of a country (design note 0023, §3): the store's name,
-// search, the country picker and the cart, then the top categories.
+// The header on every page of a country (design note 0024, §7), Astryx's TopNav: the
+// store's name, its top categories (a menu for one with subcategories), then search, the
+// currency, the account and the cart, which opens the cart drawer. Static pages render
+// it; the cart's count comes from the cart provider once the page is here.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
-import { Link } from "@astryxdesign/core/Link";
-import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
-import { Text } from "@astryxdesign/core/Text";
-import { ShoppingBagIcon } from "@heroicons/react/24/outline";
+import { Popover } from "@astryxdesign/core/Popover";
+import { HStack } from "@astryxdesign/core/Stack";
+import {
+  TopNav,
+  TopNavHeading,
+  TopNavItem,
+  TopNavMegaMenu,
+  TopNavMegaMenuItem,
+} from "@astryxdesign/core/TopNav";
+import { MagnifyingGlassIcon, ShoppingBagIcon, UserIcon } from "@heroicons/react/24/outline";
+import { usePathname } from "next/navigation";
 
-import { CountryPicker } from "./country-picker";
+import { useCart } from "./cart/cart-provider";
+import { type CountryOption, CurrencySwitcher } from "./currency-switcher";
 import { SearchBox } from "./search-box";
+
+export type NavCategory = {
+  id: string;
+  name: string;
+  href: string;
+  children: { id: string; name: string; href: string }[];
+};
 
 export type HeaderProps = {
   storeName: string;
   country: string;
   homeHref: string;
   searchHref: string;
-  cartHref: string;
-  cartCount: number;
-  countries: { code: string; name: string; currency: string }[];
-  categories: { id: string; name: string; href: string }[];
+  accountHref: string;
+  countries: CountryOption[];
+  categories: NavCategory[];
 };
 
 export function SiteHeader(props: HeaderProps) {
-  const cart = props.cartCount > 0 ? `Cart, ${props.cartCount} items` : "Cart";
+  const pathname = usePathname();
+  const { count, open } = useCart();
   return (
-    <header className="shop-header">
-      <div className="shop-page">
-        <VStack gap={2} paddingBlock={3}>
-          <HStack gap={4} vAlign="center" wrap="wrap">
-            <Link href={props.homeHref} color="primary">
-              <Text type="large" weight="semibold" as="span">
-                <span style={{ fontFamily: "var(--font-family-heading)", fontSize: "1.35rem" }}>
-                  {props.storeName}
-                </span>
-              </Text>
-            </Link>
-            <StackItem size="fill">
-              <div style={{ minWidth: 200, maxWidth: 480 }}>
-                <SearchBox country={props.country} searchHref={props.searchHref} />
-              </div>
-            </StackItem>
-            <HStack gap={1} vAlign="center">
-              <CountryPicker current={props.country} countries={props.countries} />
-              <Button
-                label={cart}
-                href={props.cartHref}
-                variant="ghost"
-                icon={<Icon icon={ShoppingBagIcon} />}
-                endContent={
-                  props.cartCount > 0 ? <Badge label={String(props.cartCount)} /> : undefined
-                }
-              >
-                Cart
-              </Button>
-            </HStack>
-          </HStack>
-          {props.categories.length > 0 && (
-            <nav aria-label="Categories">
-              <HStack gap={4} wrap="wrap">
-                {props.categories.map((c) => (
-                  <Link key={c.id} href={c.href} color="secondary">
-                    {c.name}
-                  </Link>
-                ))}
-              </HStack>
-            </nav>
-          )}
-        </VStack>
-      </div>
-    </header>
+    <TopNav
+      label="Store"
+      heading={<TopNavHeading heading={props.storeName} headingHref={props.homeHref} />}
+      startContent={props.categories.map((c) =>
+        c.children.length > 0 ? (
+          <TopNavMegaMenu
+            key={c.id}
+            label={c.name}
+            items={[c, ...c.children].map((item) => (
+              <TopNavMegaMenuItem
+                key={item.id}
+                title={item.id === c.id ? `All ${c.name}` : item.name}
+                href={item.href}
+              />
+            ))}
+          />
+        ) : (
+          <TopNavItem
+            key={c.id}
+            label={c.name}
+            href={c.href}
+            isSelected={pathname.startsWith(c.href)}
+          />
+        ),
+      )}
+      endContent={
+        <HStack gap={1} vAlign="center">
+          <Popover
+            label="Search"
+            placement="below"
+            alignment="end"
+            width={420}
+            content={<SearchBox country={props.country} searchHref={props.searchHref} />}
+          >
+            <Button
+              label="Search"
+              variant="ghost"
+              isIconOnly
+              icon={<Icon icon={MagnifyingGlassIcon} />}
+            />
+          </Popover>
+          <CurrencySwitcher current={props.country} countries={props.countries} />
+          <TopNavItem
+            label="Account"
+            href={props.accountHref}
+            isIconOnly
+            icon={<Icon icon={UserIcon} />}
+          />
+          <Button
+            label="Cart"
+            aria-label={count > 0 ? `Cart, ${count} items` : "Cart"}
+            variant="ghost"
+            icon={<Icon icon={ShoppingBagIcon} />}
+            endContent={count > 0 ? <Badge label={String(count)} /> : undefined}
+            clickAction={open}
+          />
+        </HStack>
+      }
+    />
   );
 }

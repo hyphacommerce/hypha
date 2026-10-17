@@ -13,6 +13,9 @@ import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { link } from "@/lib/site";
 
+/** Per request: it reads the shopper's cart or query (design note 0024, §7). */
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = { title: "Thank you" };
 
 /**

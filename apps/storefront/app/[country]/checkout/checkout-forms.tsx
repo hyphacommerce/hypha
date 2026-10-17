@@ -85,7 +85,7 @@ export function DetailsForm({
             Shipping address
           </Text>
           <Text type="supporting">
-            Ships to {countryName}. To ship elsewhere, change the country at the top.
+            Ships to {countryName}. To ship elsewhere, switch the currency at the top.
           </Text>
         </VStack>
         <Grid columns={{ minWidth: 220 }} gap={3}>

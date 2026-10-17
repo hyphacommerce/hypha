@@ -1,23 +1,31 @@
 "use server";
 
 // Every change a shopper makes, as server actions (design note 0023, SF5): the cart ID
-// stays in an httpOnly cookie and the publishable key on the server. The forms are
-// Astryx components (0024, AU12) holding their own state, so each action takes typed
-// input and returns the shopper's message when the API refused, for the form to show.
-// One that moves the shopper on (to the cart, the confirmation) redirects; one that
-// changes the page it's on returns, and the form refreshes the page (and the header's
-// cart count) with `router.refresh()`.
+// stays in an httpOnly cookie and the publishable key on the server. Pages other than
+// search, cart, checkout and account are static (ISR), so they never read the cookie:
+// the header and the cart drawer read the cart through `loadCart` once the page is in
+// the browser, and the cart's actions answer with the cart, for the drawer to show.
+// The forms take typed input and get the shopper's message back when the API refused.
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+
 import { api, describe, loadCountries } from "@/lib/api";
+import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
 /** What a refused action tells its form. */
 export type ActionResult = { error: string } | undefined;
+
+/** The shopper's cart as the API prices it. */
+export type Cart = StorefrontSchemas["CartResponse"];
+
+/** A cart action's answer: the cart as it is now, or why it was refused. */
+export type CartResult = { cart: Cart | null; error?: string };
 
 type ApiError = { code: string; error: string };
 
@@ -54,38 +62,49 @@ async function currentCart(country: string): Promise<string> {
   return id;
 }
 
-/** Adds a variant to the cart, then shows the cart. */
+/** The shopper's open cart in `country`, priced; `null` without one (or once it's an
+ * order). For the header and the drawer, which can't read it while the page renders. */
+export async function loadCart(country: string): Promise<Cart | null> {
+  const id = await cartId(country);
+  if (!id) return null;
+  const { data } = await api().GET("/storefront/carts/{id}", { params: { path: { id } } });
+  return data && !data.order ? data : null;
+}
+
+/** Adds a variant to the cart (opening one if needed), and answers with the cart. */
 export async function addToCart(input: {
   country: string;
   variant: string;
   quantity: number;
-}): Promise<ActionResult> {
+}): Promise<CartResult> {
   const id = await openCart(input.country);
-  const { error } = await api().POST("/storefront/carts/{id}/lines", {
+  const { data, error } = await api().POST("/storefront/carts/{id}/lines", {
     params: { path: { id } },
     body: { variant: input.variant, quantity: Math.max(1, Math.floor(input.quantity) || 1) },
   });
-  if (error) return refused(error);
-  redirect(link(input.country, "/cart"));
+  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  return { cart: data };
 }
 
-/** Sets a line's quantity; 0 removes it. */
+/** Sets a line's quantity (0 removes it), and answers with the cart. */
 export async function setQuantity(input: {
   country: string;
   variant: string;
   quantity: number;
-}): Promise<ActionResult> {
-  const id = await currentCart(input.country);
+}): Promise<CartResult> {
+  const id = await cartId(input.country);
+  if (!id) return { cart: null };
   const client = api();
   const path = { id, variant: input.variant };
-  const { error } =
+  const { data, error } =
     input.quantity > 0
       ? await client.PUT("/storefront/carts/{id}/lines/{variant}", {
           params: { path },
           body: { quantity: Math.floor(input.quantity) },
         })
       : await client.DELETE("/storefront/carts/{id}/lines/{variant}", { params: { path } });
-  if (error) return refused(error);
+  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  return { cart: data ?? (await loadCart(input.country)) };
 }
 
 export type Details = {
@@ -215,4 +234,25 @@ export async function suggest(country: string, q: string): Promise<Suggestion[]>
     href: link(country, `/p/${hit.handle}`),
     image: hit.image?.kind === "image" ? (hit.image.thumbnail_url ?? hit.image.url) : null,
   }));
+}
+
+/**
+ * A listing's page for a query string, when a static category page is filtered, sorted
+ * or paged in the browser (design note 0024, §7): the page itself can't read the URL's
+ * query without becoming dynamic.
+ */
+export async function listingPage(input: {
+  country: string;
+  category?: string;
+  query: string;
+}): Promise<ListingPage> {
+  const known = (await loadCountries()).find((c) => c.country === input.country);
+  const params: Record<string, string[]> = {};
+  for (const [key, value] of new URLSearchParams(input.query)) (params[key] ??= []).push(value);
+  return readListingPage({
+    country: input.country,
+    digits: known?.minor_units ?? 2,
+    params,
+    category: input.category,
+  });
 }

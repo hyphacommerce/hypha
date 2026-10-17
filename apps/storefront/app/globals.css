@@ -9,8 +9,9 @@
 @import "@fontsource-variable/fraunces";
 @import "@fontsource-variable/instrument-sans";
 
-/* What Astryx's components don't express: the page's width, image fills, sticky
-   columns, and the merchant's HTML descriptions. Everything else is components. */
+/* What Astryx's components don't express: image fills, sticky columns and the
+   merchant's HTML descriptions. Everything else, the page's frame included, is
+   components (design note 0024, §7). */
 
 body {
   min-height: 100vh;
@@ -21,53 +22,12 @@ body {
   font-family: var(--font-family-body);
 }
 
-.shop-page {
-  width: 100%;
-  max-width: 1200px;
-  margin-inline: auto;
-  padding-inline: var(--spacing-4);
-}
-
-@media (min-width: 768px) {
-  .shop-page {
-    padding-inline: var(--spacing-6);
-  }
-}
-
-.shop-main {
-  flex: 1;
-  padding-block: var(--spacing-6) var(--spacing-10);
-}
-
-.shop-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--color-background-body);
-  border-bottom: var(--border-width) solid var(--color-border);
-}
-
-.shop-footer {
-  border-top: var(--border-width) solid var(--color-border);
-  background: var(--color-background-muted);
-  padding-block: var(--spacing-8);
-}
-
 /* A media URL filling its AspectRatio box (no Image primitive in Astryx). */
 .shop-fill {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
-}
-
-/* A product name that links to its page: the text's colour, underlined on hover. */
-.shop-link {
-  color: inherit;
-  text-decoration: none;
-}
-.shop-link:hover {
-  text-decoration: underline;
 }
 
 .shop-rounded {
@@ -83,42 +43,6 @@ body {
     position: sticky;
     top: calc(var(--spacing-10) + var(--spacing-10));
     align-self: start;
-  }
-}
-
-/* Two columns from 900px: gallery and info, facets and results, form and summary. */
-.shop-split {
-  display: grid;
-  gap: var(--spacing-8);
-  align-items: start;
-}
-
-@media (min-width: 900px) {
-  .shop-split {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-  .shop-split[data-variant="sidebar"] {
-    grid-template-columns: 240px minmax(0, 1fr);
-  }
-  .shop-split[data-variant="summary"] {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  }
-}
-
-/* The facet panel shows beside the results on wide screens; phones open it in a
-   bottom sheet instead. */
-.shop-wide-only {
-  display: none;
-}
-.shop-narrow-only {
-  display: block;
-}
-@media (min-width: 900px) {
-  .shop-wide-only {
-    display: block;
-  }
-  .shop-narrow-only {
-    display: none;
   }
 }
 

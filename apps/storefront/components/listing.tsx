@@ -1,136 +1,135 @@
+"use client";
+
 // A product listing through search (design notes 0023, SF7, and 0024, §7): a category
 // page and the search page are both this, with `category` or `q`. Facets and the price
-// range narrow it, the sort orders it, Previous and Next page through it, all in the URL.
+// range narrow it, the sort orders it, Previous and Next page through it, all in the
+// URL. A category page is static, so it renders its first page; when the URL asks for
+// another (a filter, a sort, a page), this reads it through `listingPage`.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
 
-import type { Country } from "@/lib/api";
-import { api } from "@/lib/api";
-import {
-  type ListingParams,
-  changed,
-  listingHref,
-  nextPage,
-  previousPage,
-  readListing,
-  sortOf,
-  toMinor,
-} from "@/lib/listing";
+import { listingPage } from "@/app/[country]/actions";
+import { changed, listingHref, nextPage, previousPage, sortOf } from "@/lib/listing";
+import type { ListingPage } from "@/lib/listing-data";
 
 import { FacetPanel, ListingToolbar } from "./listing-controls";
 import { ProductGrid } from "./product-grid";
 
-/** Minor units as major ones for the range fields' hints ("1050" → "10.5"). */
-function major(amount: number, digits: number): string {
-  return String(amount / 10 ** digits);
+/** The URL's listing parameters, in a stable order, to tell one listing from another. */
+function listingQuery(params: URLSearchParams): string {
+  const keys = ["q", "filter", "min", "max", "sort", "cursor", "back"];
+  const kept = new URLSearchParams();
+  for (const key of keys) for (const value of params.getAll(key)) kept.append(key, value);
+  return kept.toString();
 }
 
-export async function Listing({
+export function Listing({
   country,
-  params,
+  digits,
+  currency,
   base,
+  productBase,
   category,
-  productHref,
+  initial,
+  initialQuery,
 }: {
-  country: Country;
-  params: ListingParams;
+  country: string;
+  digits: number;
+  currency: string;
   /** This page's URL, without a query. */
   base: string;
+  /** Product pages' URL prefix (`/hr/p`). */
+  productBase: string;
   category?: string;
-  productHref: (handle: string) => string;
+  /** The page the server rendered, for `initialQuery`. */
+  initial: ListingPage;
+  initialQuery: string;
 }) {
-  const state = readListing(params);
-  const digits = country.minor_units;
-  const sort = sortOf(state);
+  const query = listingQuery(useSearchParams());
+  // Facets beside the results on wide screens; on phones the toolbar's Filters button
+  // opens them in a bottom sheet.
+  const isWide = useMediaQuery("(min-width: 900px)", true);
+  const [shown, setShown] = useState({ query: initialQuery, page: initial });
+  const [isLoading, startLoading] = useTransition();
 
-  const { data, error } = await api().GET("/storefront/search", {
-    params: {
-      query: {
-        country: country.country,
-        q: state.q,
-        filter: state.filters,
-        price_min: toMinor(state.min, digits),
-        price_max: toMinor(state.max, digits),
-        category,
-        sort,
-        cursor: state.cursor,
-        limit: 24,
-      },
-    },
-  });
-  if (error) {
-    // A stale cursor or filter in a hand-edited URL: start the listing again.
+  useEffect(() => {
+    if (query === shown.query) return;
+    if (query === initialQuery) {
+      setShown({ query, page: initial });
+      return;
+    }
+    startLoading(async () => {
+      const page = await listingPage({ country, category, query });
+      setShown({ query, page });
+    });
+  }, [query, shown.query, initialQuery, initial, country, category]);
+
+  const page = shown.page;
+  const { state } = page;
+  if (page.error) {
     return (
       <Banner
         status="warning"
         title="This listing couldn't be shown"
-        description={error.error}
+        description={page.error}
         endContent={<Button label="Start again" href={base} size="sm" />}
       />
     );
   }
-
-  const facets = data.facets.filter((f) => f.values.length > 0);
-  const controls = {
-    base,
-    state,
-    facets,
-    currency: country.currency,
-    priceHint: data.price
-      ? { min: major(data.price.min.amount, digits), max: major(data.price.max.amount, digits) }
-      : undefined,
-  };
+  const controls = { base, state, facets: page.facets, currency, priceHint: page.priceHint };
   const previous = previousPage(state);
   const narrowed = state.filters.length > 0 || state.min !== undefined || state.max !== undefined;
 
   return (
-    <div className="shop-split" data-variant="sidebar">
-      <aside className="shop-wide-only" aria-label="Filters">
-        <FacetPanel {...controls} />
-      </aside>
-      <VStack gap={5}>
-        <ListingToolbar {...controls} total={data.total} sort={sort} />
-        {data.items.length === 0 ? (
-          <EmptyState
-            title="No products here"
-            description={
-              narrowed ? "Nothing matches these filters." : "Nothing is for sale here yet."
-            }
-            actions={
-              narrowed ? (
-                <Button
-                  label="Clear filters"
-                  href={listingHref(base, changed(state, { filters: [], min: undefined, max: undefined }))}
-                />
-              ) : undefined
-            }
-          />
-        ) : (
-          <ProductGrid
-            hits={data.items}
-            digits={digits}
-            hrefOf={(hit) => productHref(hit.handle)}
-            minWidth={150}
-          />
-        )}
-        {(previous || data.next_cursor) && (
-          <HStack gap={2} hAlign="center">
-            <Button
-              label="Previous"
-              href={previous ? listingHref(base, previous) : undefined}
-              isDisabled={!previous}
+    <HStack gap={8} vAlign="start">
+      {isWide && (
+        <VStack width={240} gap={4}>
+          <FacetPanel {...controls} />
+        </VStack>
+      )}
+      <StackItem size="fill">
+        <VStack gap={5}>
+          <ListingToolbar {...controls} total={page.total} sort={sortOf(state)} />
+          {page.items.length === 0 ? (
+            <EmptyState
+              title="No products here"
+              description={narrowed ? "Nothing matches these filters." : "Nothing is for sale here yet."}
+              actions={
+                narrowed ? (
+                  <Button
+                    label="Clear filters"
+                    href={listingHref(base, changed(state, { filters: [], min: undefined, max: undefined }))}
+                  />
+                ) : undefined
+              }
             />
-            <Button
-              label="Next"
-              href={data.next_cursor ? listingHref(base, nextPage(state, data.next_cursor)) : undefined}
-              isDisabled={!data.next_cursor}
-            />
-          </HStack>
-        )}
-      </VStack>
-    </div>
+          ) : (
+            <div style={{ opacity: isLoading ? 0.5 : 1, transition: "opacity 120ms" }}>
+              <ProductGrid hits={page.items} digits={digits} productBase={productBase} minWidth={180} />
+            </div>
+          )}
+          {(previous || page.nextCursor) && (
+            <HStack gap={2} hAlign="center">
+              <Button
+                label="Previous"
+                href={previous ? listingHref(base, previous) : undefined}
+                isDisabled={!previous}
+              />
+              <Button
+                label="Next"
+                href={page.nextCursor ? listingHref(base, nextPage(state, page.nextCursor)) : undefined}
+                isDisabled={!page.nextCursor}
+              />
+            </HStack>
+          )}
+        </VStack>
+      </StackItem>
+    </HStack>
   );
 }
