@@ -11,6 +11,8 @@
     "sdk:check": "pnpm --filter @hypha/sdk check",
     "admin:dev": "pnpm --filter admin dev",
     "admin:build": "pnpm --filter admin build",
+    "storefront:dev": "pnpm --filter storefront dev",
+    "storefront:build": "pnpm --filter storefront build",
     "typecheck": "pnpm -r typecheck"
   }
 }

@@ -77,3 +77,5 @@ jobs:
       - run: pnpm typecheck
       # Standard Next.js still builds the admin (design note 0011, P2).
       - run: pnpm --filter admin exec next build
+      # And the storefront (design note 0023, SF1).
+      - run: pnpm --filter storefront exec next build
