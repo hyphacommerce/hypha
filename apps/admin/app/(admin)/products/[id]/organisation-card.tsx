@@ -1,9 +1,8 @@
 "use client";
 
 import { Card } from "@astryxdesign/core/Card";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
-import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Tokenizer } from "@astryxdesign/core/Tokenizer";
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
@@ -19,11 +18,10 @@ const firstWithLabel = (items: SearchableItem[], label: string) =>
   items.findIndex((item) => item.label.toLowerCase() === label.toLowerCase());
 
 /**
- * What the product says about itself (design note 0019, section 2): description,
- * vendor, product type and tags, part of the editor's draft. The description is HTML;
- * the API sanitises it, and after saving the form shows what was kept.
+ * How the product is organised (design note 0019, section 2): vendor, product type and
+ * tags, which shoppers filter by. Part of the editor's draft.
  */
-export function ContentForm({
+export function OrganisationCard({
   draft,
   onChange,
 }: {
@@ -34,30 +32,21 @@ export function ContentForm({
     <Card>
       <VStack gap={4}>
         <Text type="display-3" as="h2">
-          Content
+          Organisation
         </Text>
-        <TextArea
-          label="Description"
-          description="HTML: paragraphs, headings, lists, links and images. Scripts and styles are removed when it's saved."
+        <TextInput
+          label="Vendor"
           isOptional
-          rows={8}
-          value={draft.description}
-          onChange={(description) => onChange({ description })}
+          value={draft.vendor}
+          onChange={(vendor) => onChange({ vendor })}
         />
-        <HStack gap={4}>
-          <TextInput
-            label="Vendor"
-            isOptional
-            value={draft.vendor}
-            onChange={(vendor) => onChange({ vendor })}
-          />
-          <TextInput
-            label="Product type"
-            isOptional
-            value={draft.productType}
-            onChange={(productType) => onChange({ productType })}
-          />
-        </HStack>
+        <TextInput
+          label="Product type"
+          isOptional
+          placeholder="Mug, T-shirt…"
+          value={draft.productType}
+          onChange={(productType) => onChange({ productType })}
+        />
         <Tokenizer
           label="Tags"
           description="Shoppers can filter by them. Up to 250."

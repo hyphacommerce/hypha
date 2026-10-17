@@ -10,36 +10,48 @@ import { type ReactNode, useEffect, useState, useTransition } from "react";
 import { useCurrencies } from "@/components/currencies";
 import type { CategoryNode } from "@/lib/categories";
 
-import { saveProduct } from "../actions";
+import { type Stock, saveProduct } from "../actions";
 import { CategoriesCard } from "./categories-card";
-import { ContentForm } from "./content-form";
 import { DetailsForm } from "./details-form";
 import { type Draft, changes, fromProduct, plan, rebaseOptions } from "./draft";
 import { OptionsEditor } from "./options-editor";
+import { OrganisationCard } from "./organisation-card";
 import { VariantsSection } from "./variants-section";
 
 type Product = AdminSchemas["ProductResponse"];
 
 /**
  * The product's details, content, categories, options and variants as one draft (design
- * notes 0021, section 8, and 0022, section 5): edits change only the draft, and a bar at the top saves or discards them
- * together. Media and publishing (`media`, `publishing`) act at once, as before: an
- * upload can't wait for Save, and publishing is its own decision.
+ * notes 0021, section 8, and 0022, section 5): edits change only the draft, and a bar at
+ * the top saves or discards them together. Media, publishing and stock act at once, as
+ * before: an upload can't wait for Save, and publishing is its own decision. Two columns
+ * (design note 0024, section 6): what the product is on the left, how it's sold and
+ * organised on the right.
  *
  * When the saved product changes under the editor (after a save, an upload, publishing),
  * the draft follows it unless it has unsaved changes of its own.
  */
 export function ProductEditor({
   product,
+  summary,
   publishing,
   media,
+  identifiers,
   categoryTree,
+  stock,
+  locations,
 }: {
   product: Product;
+  /** Cards for the side column, around the draft's own. */
+  summary: ReactNode;
   publishing: ReactNode;
   media: ReactNode;
+  identifiers: ReactNode;
   /** `undefined` when the tree couldn't be read: no Categories card then. */
   categoryTree?: CategoryNode[];
+  /** The variants' stock by variant ID; `undefined` without `inventory:read`. */
+  stock?: Record<string, Stock>;
+  locations: AdminSchemas["LocationResponse"][];
 }) {
   const currencies = useCurrencies();
   const currency = product.variants[0]?.price.currency ?? "EUR";
@@ -139,18 +151,33 @@ export function ProductEditor({
         </div>
       )}
 
-      <DetailsForm
-        draft={draft}
-        savedHandle={base.handle}
-        isActive={base.status === "active"}
-        onChange={edit}
-      />
-      {publishing}
-      {categoryTree && <CategoriesCard tree={categoryTree} draft={draft} onChange={edit} />}
-      <ContentForm draft={draft} onChange={edit} />
-      {media}
-      <OptionsEditor draft={draft} savedTitles={savedTitles} onChange={edit} />
-      <VariantsSection product={base} draft={draft} currency={currency} onChange={edit} />
+      <div className="product-editor-columns">
+        <div>
+          <DetailsForm
+            draft={draft}
+            savedHandle={base.handle}
+            isActive={base.status === "active"}
+            onChange={edit}
+          />
+          {media}
+          <OptionsEditor draft={draft} savedTitles={savedTitles} onChange={edit} />
+          <VariantsSection
+            product={base}
+            draft={draft}
+            currency={currency}
+            stock={stock}
+            locations={locations}
+            onChange={edit}
+          />
+        </div>
+        <div>
+          {summary}
+          {publishing}
+          {categoryTree && <CategoriesCard tree={categoryTree} draft={draft} onChange={edit} />}
+          <OrganisationCard draft={draft} onChange={edit} />
+          {identifiers}
+        </div>
+      </div>
     </>
   );
 }

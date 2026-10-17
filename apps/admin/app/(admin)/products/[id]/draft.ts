@@ -90,12 +90,14 @@ export function valuesOf(option: OptionDraft): ValueDraft[] {
 }
 
 /** The value keys a variant selects, one per option in order; `null` where its value
- * was removed from the draft (the variant goes with it). */
+ * was removed from the draft (the variant goes with it). An option with no values yet
+ * (being typed in) selects `""`: it removes nothing, and saving refuses it. */
 export function resolvedSelections(draft: Draft, variant: VariantDraft): (string | null)[] {
   return draft.options.map((option) => {
     const values = valuesOf(option);
+    if (values.length === 0) return "";
     const chosen = variant.selections[option.key];
-    if (chosen === undefined) return values[0]?.key ?? null;
+    if (chosen === undefined) return values[0].key;
     return values.some((v) => v.key === chosen) ? chosen : null;
   });
 }
@@ -220,6 +222,8 @@ export function plan(
     }
     result.product = body;
   }
+  const problem = optionsProblem(draft);
+  if (problem) return { error: problem };
   const variants = kept(draft);
   if (variants.length === 0) return { error: "A product keeps at least one variant." };
   if (changed.options) {
@@ -263,6 +267,37 @@ export function plan(
   }
   if (changed.categories) result.categories = [...draft.categories].sort();
   return { plan: result };
+}
+
+/** What's wrong with the draft's options before the API sees them, or `null`. */
+export function optionsProblem(draft: Draft): string | null {
+  const names = new Set<string>();
+  for (const option of draft.options) {
+    const name = option.name.trim();
+    if (name === "") return "Name every option, or remove the ones you don't need.";
+    if (names.has(name.toLowerCase())) return `Two options are called ${name}.`;
+    names.add(name.toLowerCase());
+    const labels = valuesOf(option).map((v) => v.label.trim().toLowerCase());
+    if (labels.length === 0) return `Give ${name} at least one value.`;
+    if (labels.includes("")) return `A value of ${name} is blank: enter it or remove it.`;
+    if (new Set(labels).size !== labels.length) return `${name} has the same value twice.`;
+  }
+  return null;
+}
+
+/** How many combinations of the options' values no kept variant has (0 without
+ * options); `null` when there are more than a product may have. */
+export function missingCombinations(draft: Draft): number | null {
+  if (draft.options.length === 0) return 0;
+  const lists = draft.options.map((o) => valuesOf(o).filter((v) => v.label.trim() !== ""));
+  const total = lists.reduce((n, values) => n * values.length, 1);
+  if (total > MAX_VARIANTS) return null;
+  const existing = new Set(kept(draft).map((v) => resolvedSelections(draft, v).join("\n")));
+  let combinations: string[][] = [[]];
+  for (const values of lists) {
+    combinations = combinations.flatMap((keys) => values.map((v) => [...keys, v.key]));
+  }
+  return combinations.filter((keys) => !existing.has(keys.join("\n"))).length;
 }
 
 /** The draft with each option's typed "Add a value" text added as a value, so variants

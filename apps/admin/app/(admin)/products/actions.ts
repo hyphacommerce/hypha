@@ -198,3 +198,70 @@ export async function setProductChannels(id: string, channels: string[]): Promis
   refresh(id);
   return {};
 }
+
+/** A variant's stock (design note 0004): `id` is `null` while it isn't tracked. */
+export type Stock = AdminSchemas["InventoryResponse"];
+
+/** What the stock dialog saves: tracking, and the count on hand per location with the
+ * count it showed, so a sale in the meantime isn't overwritten. */
+export type StockChange = {
+  tracked: boolean;
+  continueSelling: boolean;
+  levels: { location: string; onHand: number; expected: number | null }[];
+};
+
+export async function variantStock(variant: string): Promise<{ stock?: Stock; error?: string }> {
+  const client = await sessionClient();
+  const { data, error } = await client.GET("/admin/variants/{id}/inventory", {
+    params: { path: { id: variant } },
+  });
+  return error ? { error: describe(error) } : { stock: data };
+}
+
+/**
+ * Saves a variant's stock at once, not with the product's Save: starts tracking it when
+ * it wasn't (creating its inventory item), changes tracking or overselling, then sets
+ * each location's count that changed. Stops at the first failure.
+ */
+export async function saveVariantStock(
+  productId: string,
+  current: Stock,
+  change: StockChange,
+): Promise<{ stock?: Stock; error?: string }> {
+  const client = await sessionClient();
+  try {
+    let stock = current;
+    if (stock.id == null) {
+      if (!change.tracked) return { stock };
+      const { data, error } = await client.POST("/admin/inventory-items", {
+        body: { variant: current.variant, tracked: true, continue_selling: change.continueSelling },
+      });
+      if (error) return { error: describe(error) };
+      stock = data;
+    } else if (
+      stock.tracked !== change.tracked ||
+      stock.continue_selling !== change.continueSelling
+    ) {
+      const { data, error } = await client.PATCH("/admin/inventory-items/{id}", {
+        params: { path: { id: stock.id } },
+        body: { tracked: change.tracked, continue_selling: change.continueSelling },
+      });
+      if (error) return { error: describe(error) };
+      stock = data;
+    }
+    const item = stock.id;
+    if (item == null || !change.tracked) return { stock };
+    for (const level of change.levels) {
+      if (level.onHand === level.expected) continue;
+      const { data, error } = await client.PUT("/admin/inventory-items/{id}/levels/{location_id}", {
+        params: { path: { id: item, location_id: level.location } },
+        body: { on_hand: level.onHand, expected_on_hand: level.expected },
+      });
+      if (error) return { error: describe(error), stock };
+      stock = data;
+    }
+    return { stock };
+  } finally {
+    refresh(productId);
+  }
+}

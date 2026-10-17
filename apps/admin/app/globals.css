@@ -37,3 +37,42 @@ html[data-theme="dark"] .hypha-wordmark-light {
 html[data-theme="dark"] .hypha-wordmark-dark {
   display: block;
 }
+
+/* The product editor (design note 0024, section 6): content on the left, settings on
+   the right; one column on narrow screens, settings after the content. */
+.product-editor-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
+  align-items: start;
+}
+
+.product-editor-columns > * {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .product-editor-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Small thumbnails in the variants table, so its inputs keep their room. */
+.variant-thumbnail {
+  width: 40px !important;
+  height: 40px !important;
+  flex-shrink: 0;
+}
+
+/* Text for screen readers only (a column header with no visible title). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
