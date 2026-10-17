@@ -224,6 +224,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An order this storefront placed, for its confirmation page, with its access token: a
+         *     missing or wrong token, or another channel's order, is `404 order_not_found` (as if
+         *     it didn't exist).
+         */
+        get: operations["storefront.orders.fetch_placed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/products/by-handle/{handle}": {
         parameters: {
             query?: never;
@@ -572,6 +593,7 @@ export interface components {
              */
             fulfilled_quantity: number;
             id: components["schemas"]["OrderLineId"];
+            image?: components["schemas"]["ProductMediaResponse"] | null;
             product: components["schemas"]["ProductId"];
             product_title: string;
             /** Format: int32 */
@@ -644,6 +666,17 @@ export interface components {
             /** @description Parts per million: 250000 = 25%. */
             rate_ppm: components["schemas"]["TaxRate"];
             tax_class?: components["schemas"]["TaxClassId"] | null;
+        };
+        /**
+         * @description A storefront's view of an order it placed: the order with its access token, the key
+         *     to reading it again (`GET /storefront/orders/{id}?token=`; design note 0024, §7).
+         */
+        PlacedOrderResponse: components["schemas"]["OrderResponse"] & {
+            /**
+             * @description Lets whoever holds it read this order: keep it with the buyer (a cookie, the
+             *     confirmation email's link), never in a public place. The same for every read.
+             */
+            access_token: string;
         };
         /**
          * @description Sent: checked by `Address::new` (last name, first line and city required; text is
@@ -1169,7 +1202,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OrderResponse"];
+                    "application/json": components["schemas"]["PlacedOrderResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
@@ -2115,6 +2148,76 @@ export interface operations {
             };
             /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.orders.fetch_placed": {
+        parameters: {
+            query: {
+                /** @description The order's `access_token`, from checkout's answer. */
+                token: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["OrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlacedOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

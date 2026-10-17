@@ -544,6 +544,10 @@ contains "the order is #1001" '"number":1001'
 contains "it is pending and unfulfilled" '"financial_status":"pending","fulfillment_status":"unfulfilled"'
 contains "it copies the line" '"product_title":"Mug","variant_title":null,"sku":null,"unit_price":{"amount":900,"currency":"EUR"}'
 contains "its total is 1800" '"total":{"amount":1800,"currency":"EUR"},"lines"'
+ORDER_TOKEN=$(sed -E 's/.*"access_token":"(hypha_ord_[0-9a-f]+)".*/\1/' <<<"$BODY")
+step "the buyer reads the order with its token (design note 0024)" 200 - "$BASE/storefront/orders/$ORDER?token=$ORDER_TOKEN"
+contains "it is the order" "\"id\":\"$ORDER\""
+step "without the right token it isn't there" 404 order_not_found "$BASE/storefront/orders/$ORDER?token=hypha_ord_00"
 step "retry the checkout" 201 - -X POST "$CHECKOUT" -H "$JSON" -H 'idempotency-key: order-1' \
     -d '{"expected_total":{"amount":1800,"currency":"EUR"}}'
 contains "the retry returns the same order" "\"id\":\"$ORDER\""

@@ -2904,6 +2904,7 @@ export interface components {
              */
             fulfilled_quantity: number;
             id: components["schemas"]["OrderLineId"];
+            image?: components["schemas"]["ProductMediaResponse"] | null;
             product: components["schemas"]["ProductId"];
             product_title: string;
             /** Format: int32 */

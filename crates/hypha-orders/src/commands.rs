@@ -49,6 +49,24 @@ pub struct ListOrders {
     pub sort: OrderSort,
 }
 
+/// The order a storefront's buyer placed, for its confirmation (design note 0024, §7):
+/// needs `checkout`, the scope that placed it, and, for a key of one channel, the order
+/// must be that channel's (another channel's is `OrderNotFound`, as if absent). Hosts
+/// check the order's access token before calling this: knowing an order's ID is not
+/// enough to read it.
+pub async fn get_placed_order<R: OrderRepo>(
+    ctx: &Ctx,
+    orders: &R,
+    id: OrderId,
+) -> Result<Order, CommandError> {
+    ctx.require(Scope::Checkout)?;
+    let order = load(orders, id).await?;
+    match ctx.channel() {
+        Some(channel) if channel != order.channel() => Err(CommandError::OrderNotFound(id)),
+        _ => Ok(order),
+    }
+}
+
 pub async fn get_order<R: OrderRepo>(
     ctx: &Ctx,
     orders: &R,

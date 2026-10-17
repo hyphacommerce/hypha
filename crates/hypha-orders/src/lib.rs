@@ -11,7 +11,9 @@ pub mod order;
 pub mod repo;
 pub mod summary;
 
-pub use commands::{CommandError, ListOrders, get_order, list_orders, mark_order_paid};
+pub use commands::{
+    CommandError, ListOrders, get_order, get_placed_order, list_orders, mark_order_paid,
+};
 pub use error::OrderError;
 pub use events::{OrderCancelled, OrderFulfillmentStatusChanged, OrderPaid, OrderPlaced};
 pub use filter::{OrderFilter, OrderFilterInput, OrderSort};

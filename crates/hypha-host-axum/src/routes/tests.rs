@@ -1193,6 +1193,47 @@ async fn orders_list_starts_empty() {
 }
 
 #[tokio::test]
+async fn a_storefront_reads_its_order_with_the_access_token_only() {
+    let app = app().await;
+    let (order, _, _) = placed_order_for_three_mugs(&app).await;
+    let pk = publishable(&app).await;
+    let token = crate::state::HostEnv::new([7; 32], None, hypha_auth::AuthSettings::default())
+        .order_token(order.parse().unwrap());
+    let uri = format!("/storefront/orders/{order}?token={token}");
+    let (status, read) = send_as(&app, &pk, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{read}");
+    assert_eq!(
+        (&read["id"], &read["access_token"]),
+        (&json!(order), &json!(token))
+    );
+    assert!(
+        read["lines"][0].get("image").is_some(),
+        "lines carry their image (null here)"
+    );
+    for wrong in ["hypha_ord_00", "nope"] {
+        let uri = format!("/storefront/orders/{order}?token={wrong}");
+        let (status, body) = send_as(&app, &pk, "GET", &uri, None).await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::NOT_FOUND, "order_not_found"),
+            "{wrong}"
+        );
+    }
+    let (status, body) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("/storefront/orders/{order}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+}
+
+#[tokio::test]
 async fn orders_list_by_filters_and_total() {
     let app = app().await;
     let (order, _, _) = placed_order_for_three_mugs(&app).await;

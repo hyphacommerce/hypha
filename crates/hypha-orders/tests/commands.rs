@@ -6,7 +6,7 @@ use hypha_core::{
 use hypha_orders::{
     CancelReason, CommandError, FinancialStatus, ListOrders, NewOrder, Order, OrderError,
     OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderSort, OrderSummary, get_order,
-    list_orders, mark_order_paid,
+    get_placed_order, list_orders, mark_order_paid,
 };
 use hypha_testkit::InMemoryOrderRepo;
 use pollster::block_on;
@@ -198,6 +198,34 @@ fn list_orders_returns_a_page() {
             items: vec![stored.summary()],
             has_more: false
         }
+    );
+}
+
+#[test]
+fn a_buyer_reads_a_placed_order_in_its_own_channel_only() {
+    let repo = repo_with_order();
+    let key = |channel: u128| {
+        Ctx::in_channel(
+            Actor::System,
+            vec![Scope::Checkout],
+            hypha_core::ChannelId::from_uuid(Uuid::from_u128(channel)),
+        )
+    };
+    let order = block_on(get_placed_order(&key(500), &repo, order_id())).unwrap();
+    assert_eq!(order.id(), order_id());
+    assert_eq!(
+        block_on(get_placed_order(&key(501), &repo, order_id())).map(|o| o.id()),
+        Err(CommandError::OrderNotFound(order_id())),
+        "another channel's order is as if absent"
+    );
+    assert_eq!(
+        block_on(get_placed_order(
+            &user_with(vec![Scope::OrdersRead]),
+            &repo,
+            order_id()
+        ))
+        .map(|o| o.id()),
+        Err(CommandError::Auth(AuthError::MissingScope(Scope::Checkout)))
     );
 }
 

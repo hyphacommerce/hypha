@@ -255,6 +255,7 @@ macro_rules! route_table {
             [storefront, GET, "/storefront/carts/{id}/shipping-options", carts::shipping_options],
             [storefront, PUT, "/storefront/carts/{id}/shipping/{group_id}", carts::select],
             [storefront, POST, "/storefront/carts/{id}/checkout", orders::checkout_handler],
+            [storefront, GET, "/storefront/orders/{id}", orders::fetch_placed],
         }
     };
 }

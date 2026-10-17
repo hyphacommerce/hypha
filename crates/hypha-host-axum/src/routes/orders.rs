@@ -3,27 +3,34 @@ use hypha_core::Stamped;
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_checkout::{Checkout, checkout};
+use std::collections::HashMap;
+
 use hypha_core::{
-    CartId, ChannelId, CountryCode, Currency, CustomerId, Email, Keyset, LocationId, MarketId,
-    Money, OrderId, OrderLineId, ProductId, ShippingGroupId, ShippingOptionId, SortKey, TaxClassId,
-    TaxRate, Timestamp, VariantId,
+    AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, Keyset, LocationId,
+    MarketId, Money, OrderId, OrderLineId, ProductId, ShippingGroupId, ShippingOptionId, SortKey,
+    TaxClassId, TaxRate, Timestamp, VariantId,
 };
+use hypha_media::{AssetRepo, HasAssets};
 use hypha_order_actions::{BuyerEmail, CancelOrder, OrderView, cancel_order, order_view};
 use hypha_orders::{
     CancelReason, FinancialStatus, FulfillmentStatus, HasOrders, ListOrders, Order,
-    OrderFilterInput, OrderLine, OrderSort, OrderSummary, list_orders, mark_order_paid,
+    OrderFilterInput, OrderLine, OrderSort, OrderSummary, get_placed_order, list_orders,
+    mark_order_paid,
 };
+use hypha_products::{HasProducts, ProductRepo};
 use serde::{Deserialize, Serialize};
 
 use super::{
     address::PostalAddressResponse,
     page::{ListQuery, PageParams, PageResponse, SortedFilters},
+    products::ProductMediaResponse,
     rfc3339,
     shipping::DeliveryEstimateDto,
 };
 use crate::{
     error::{ApiError, ApiErrorBody},
-    extract::{Caller, JsonBody, KeyedJson, PathId, Storefront, idempotent_response},
+    extract::{Caller, JsonBody, KeyedJson, PathId, Query, Storefront, idempotent_response},
+    media::Media,
     rate_limit::{self, Rule},
     state::{SharedState, Storage},
 };
@@ -188,6 +195,10 @@ pub(super) struct OrderLineResponse {
     tax: Option<OrderTaxResponse>,
     /// How many of `quantity` standing fulfilments shipped.
     fulfilled_quantity: u32,
+    /// The line's picture as its product is now (an order keeps none): the variant's
+    /// image, else the product's first media item; `null` for a product gone or without
+    /// media, or without file storage.
+    image: Option<ProductMediaResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -200,6 +211,20 @@ pub(super) struct OrderTaxResponse {
 }
 
 impl OrderResponse {
+    /// The response with each line's image (`line_images`).
+    async fn with_images<P: HasProducts + HasAssets>(
+        order: &Order,
+        ports: &P,
+        media: Option<&Media>,
+    ) -> Result<Self, ApiError> {
+        let mut response = Self::new(order)?;
+        let mut images = line_images(order, ports, media).await?;
+        for line in &mut response.lines {
+            line.image = images.remove(&line.id);
+        }
+        Ok(response)
+    }
+
     fn new(order: &Order) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(order.stamps())?;
         Ok(Self {
@@ -269,8 +294,58 @@ impl From<&OrderLine> for OrderLineResponse {
                 tax_class: t.class,
             }),
             fulfilled_quantity: l.fulfilled_quantity,
+            image: None,
         }
     }
+}
+
+/// Each line's image as its product is now: the variant's, else the product's first
+/// media item, loaded in two queries for the order. Lines whose product is gone, or has
+/// no media, get none; so does every line without file storage.
+async fn line_images<P: HasProducts + HasAssets>(
+    order: &Order,
+    ports: &P,
+    media: Option<&Media>,
+) -> Result<HashMap<OrderLineId, ProductMediaResponse>, ApiError> {
+    let Some(media) = media else {
+        return Ok(HashMap::new());
+    };
+    let mut ids: Vec<ProductId> = order.lines().iter().map(|l| l.product).collect();
+    ids.sort();
+    ids.dedup();
+    let products = ports.products().get_many(&ids).await?;
+    let wanted: Vec<(OrderLineId, AssetId)> = order
+        .lines()
+        .iter()
+        .filter_map(|line| {
+            let product = products.iter().find(|p| p.id() == line.product)?;
+            let variant = product.variants().iter().find(|v| v.id() == line.variant);
+            let asset = variant
+                .and_then(|v| v.media())
+                .or_else(|| product.media().first().copied())?;
+            Some((line.id, asset))
+        })
+        .collect();
+    let assets: Vec<AssetId> = wanted.iter().map(|(_, a)| *a).collect();
+    let found = ports.assets().get_many(&assets).await?;
+    let mut images = HashMap::new();
+    for (line, asset) in wanted {
+        if let Some(asset) = found.iter().find(|a| a.id() == asset) {
+            images.insert(line, ProductMediaResponse::new(asset, media).await?);
+        }
+    }
+    Ok(images)
+}
+
+/// A storefront's view of an order it placed: the order with its access token, the key
+/// to reading it again (`GET /storefront/orders/{id}?token=`; design note 0024, §7).
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct PlacedOrderResponse {
+    #[serde(flatten)]
+    order: OrderResponse,
+    /// Lets whoever holds it read this order: keep it with the buyer (a cookie, the
+    /// confirmation email's link), never in a public place. The same for every read.
+    access_token: String,
 }
 
 /// Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns
@@ -280,7 +355,7 @@ impl From<&OrderLine> for OrderLineResponse {
     path = "/storefront/carts/{id}/checkout",
     params(("id" = CartId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CheckoutRequest,
-    responses((status = 201, description = "Created", body = OrderResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 201, description = "Created", body = PlacedOrderResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub(super) async fn checkout_handler<S: Storage>(
@@ -300,11 +375,51 @@ pub(super) async fn checkout_handler<S: Storage>(
     };
     let rates = state.rates(&ports);
     let placed = checkout(&ctx, &ports, &state.ids, &state.clock, &rates, input).await?;
+    let order = &placed.value;
     Ok(idempotent_response(
         StatusCode::CREATED,
-        OrderResponse::new(&placed.value)?,
+        PlacedOrderResponse {
+            order: OrderResponse::with_images(order, &ports, state.media.as_ref()).await?,
+            access_token: state.env.order_token(order.id()),
+        },
         placed.replayed,
     ))
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(super) struct OrderTokenQuery {
+    /// The order's `access_token`, from checkout's answer.
+    token: String,
+}
+
+/// An order this storefront placed, for its confirmation page, with its access token: a
+/// missing or wrong token, or another channel's order, is `404 order_not_found` (as if
+/// it didn't exist).
+#[utoipa::path(
+    get,
+    path = "/storefront/orders/{id}",
+    params(("id" = OrderId, Path), OrderTokenQuery),
+    responses((status = 200, description = "OK", body = PlacedOrderResponse)),
+    extensions(("x-hypha-scopes" = json!(["checkout"]))),
+)]
+pub(super) async fn fetch_placed<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<OrderId>,
+    query: Query<OrderTokenQuery>,
+) -> Result<Json<PlacedOrderResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let token = query.parse()?.token;
+    if !state.env.is_order_token(id, &token) {
+        return Err(hypha_orders::CommandError::OrderNotFound(id).into());
+    }
+    let order = get_placed_order(&ctx, ports.orders(), id).await?;
+    Ok(Json(PlacedOrderResponse {
+        order: OrderResponse::with_images(&order, &ports, state.media.as_ref()).await?,
+        access_token: token,
+    }))
 }
 
 /// An order in a list: what a table of orders shows, without lines.
@@ -524,10 +639,11 @@ pub(super) struct AdminOrderResponse {
 }
 
 impl AdminOrderResponse {
-    fn new(view: &OrderView) -> Result<Self, ApiError> {
+    /// `order` is `view.order`'s response, with its images (`OrderResponse::with_images`).
+    fn new(view: &OrderView, order: OrderResponse) -> Result<Self, ApiError> {
         let cancelled = view.order.cancelled();
         Ok(Self {
-            order: OrderResponse::new(&view.order)?,
+            order,
             cancelled_at: cancelled.map(|c| rfc3339(c.at)).transpose()?,
             cancel_reason: cancelled.map(|c| c.reason.into()),
             unfulfilled: view
@@ -558,7 +674,8 @@ pub(super) async fn fetch<S: Storage>(
 ) -> Result<Json<AdminOrderResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let view = order_view(&ctx, &ports, id).await?;
-    Ok(Json(AdminOrderResponse::new(&view)?))
+    let order = OrderResponse::with_images(&view.order, &ports, state.media.as_ref()).await?;
+    Ok(Json(AdminOrderResponse::new(&view, order)?))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -603,10 +720,12 @@ pub(super) async fn cancel<S: Storage>(
         super::fulfillments::notify_buyer(&state, email);
     }
     // A cancelled order has nothing left to ship.
-    Ok(Json(AdminOrderResponse::new(&OrderView {
+    let response = OrderResponse::with_images(&order, &ports, state.media.as_ref()).await?;
+    let view = OrderView {
         order,
         unfulfilled: Vec::new(),
-    })?))
+    };
+    Ok(Json(AdminOrderResponse::new(&view, response)?))
 }
 
 /// Records that the order is paid (e.g. a bank transfer arrived). Marking a paid order
@@ -625,5 +744,7 @@ pub(super) async fn mark_paid<S: Storage>(
 ) -> Result<Json<OrderResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let order = mark_order_paid(&ctx, ports.orders(), id).await?;
-    Ok(Json(OrderResponse::new(&order)?))
+    Ok(Json(
+        OrderResponse::with_images(&order, &ports, state.media.as_ref()).await?,
+    ))
 }

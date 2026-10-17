@@ -9,7 +9,7 @@ use hypha_auth::{
 };
 use hypha_checkout::CheckoutPorts;
 use hypha_core::HasBatch;
-use hypha_core::{Clock, IdGenerator, Notifier, NotifyError, Random, StoreId, Timestamp};
+use hypha_core::{Clock, IdGenerator, Notifier, NotifyError, OrderId, Random, StoreId, Timestamp};
 use hypha_store_postgres::{CORE, PgConnection, PgStore, database_config, migrate};
 use hypha_stores::StoreRepo;
 use hypha_users::{StaffEmail, StaffPorts};
@@ -43,10 +43,16 @@ impl Clock for SystemClock {
     }
 }
 
+/// The prefix of an order's access token (`HostEnv::order_token`).
+const ORDER_TOKEN_PREFIX: &str = "hypha_ord_";
+
 /// The non-storage ports auth commands use (`hypha_auth::AuthEnv`) and the staff
 /// emails' `Notifier`, for real.
 pub struct HostEnv {
     secret_box: XChaChaBox,
+    /// Signs orders' access tokens (`order_token`): derived from `HYPHA_SECRET_KEY`, so
+    /// the same key gives the same tokens across restarts.
+    order_key: [u8; 32],
     hasher: Argon2id,
     /// Where the admin panel lives, for links in emails. Unset: the email shows the
     /// bare token.
@@ -60,8 +66,15 @@ impl HostEnv {
     /// authenticator unreadable, so it must stay the same across restarts.
     /// `admin_url` is without a trailing `/`, as `hypha-config` gives it.
     pub fn new(secret_key: [u8; 32], admin_url: Option<String>, auth: AuthSettings) -> Self {
+        use sha2::Digest;
+        let order_key = sha2::Sha256::new()
+            .chain_update(b"hypha order access token\0")
+            .chain_update(secret_key)
+            .finalize()
+            .into();
         Self {
             secret_box: XChaChaBox::new(secret_key),
+            order_key,
             hasher: Argon2id::OWASP,
             admin_url,
             auth,
@@ -73,6 +86,49 @@ impl HostEnv {
     pub fn with_hasher(mut self, hasher: Argon2id) -> Self {
         self.hasher = hasher;
         self
+    }
+
+    /// The token that lets a buyer read the order they placed (design note 0024, §7):
+    /// `hypha_ord_` and a hex HMAC-SHA256 of the order's ID. Derived rather than stored,
+    /// so a replayed checkout answers with the same token, and nothing needs migrating;
+    /// a new `HYPHA_SECRET_KEY` makes old tokens stop working.
+    pub fn order_token(&self, order: OrderId) -> String {
+        use hmac::Mac;
+        let hex: String = self
+            .order_mac(order)
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        format!("{ORDER_TOKEN_PREFIX}{hex}")
+    }
+
+    /// Whether `token` is `order`'s access token, compared in constant time.
+    pub fn is_order_token(&self, order: OrderId, token: &str) -> bool {
+        use hmac::Mac;
+        let Some(hex) = token.strip_prefix(ORDER_TOKEN_PREFIX) else {
+            return false;
+        };
+        let bytes: Option<Vec<u8>> = (0..hex.len())
+            .step_by(2)
+            .map(|i| {
+                hex.get(i..i + 2)
+                    .and_then(|b| u8::from_str_radix(b, 16).ok())
+            })
+            .collect();
+        match bytes {
+            Some(bytes) if hex.len() == 64 => self.order_mac(order).verify_slice(&bytes).is_ok(),
+            _ => false,
+        }
+    }
+
+    fn order_mac(&self, order: OrderId) -> hmac::Hmac<sha2::Sha256> {
+        use hmac::{KeyInit, Mac};
+        let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(&self.order_key)
+            .unwrap_or_else(|_| unreachable!("HMAC accepts every key length"));
+        mac.update(order.to_string().as_bytes());
+        mac
     }
 
     fn link(&self, path: &str, token: &str) -> String {
@@ -525,6 +581,37 @@ impl Storage for PgStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn order(n: u128) -> OrderId {
+        OrderId::from_uuid(uuid::Uuid::from_u128(n))
+    }
+
+    #[test]
+    fn an_order_token_opens_its_own_order_only() {
+        let env = HostEnv::new([7; 32], None, AuthSettings::default());
+        let token = env.order_token(order(1));
+        assert!(token.starts_with("hypha_ord_") && token.len() == "hypha_ord_".len() + 64);
+        assert_eq!(env.order_token(order(1)), token, "the same every time");
+        assert!(env.is_order_token(order(1), &token));
+        assert!(!env.is_order_token(order(2), &token), "another order's");
+        let other_key = HostEnv::new([8; 32], None, AuthSettings::default());
+        assert!(
+            !other_key.is_order_token(order(1), &token),
+            "under another secret key"
+        );
+        for bad in [
+            "",
+            "hypha_ord_",
+            &token[..token.len() - 2],
+            &token.replace("hypha_ord_", "x"),
+        ] {
+            assert!(!env.is_order_token(order(1), bad), "{bad:?}");
+        }
+        let flipped = format!("{}0", &token[..token.len() - 1]);
+        if flipped != token {
+            assert!(!env.is_order_token(order(1), &flipped));
+        }
+    }
 
     #[tokio::test]
     async fn background_work_beyond_the_slots_is_dropped_and_drain_waits() {

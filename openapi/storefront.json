@@ -683,6 +683,17 @@
           "id": {
             "$ref": "#/components/schemas/OrderLineId"
           },
+          "image": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductMediaResponse",
+                "description": "The line's picture as its product is now (an order keeps none): the variant's\nimage, else the product's first media item; `null` for a product gone or without\nmedia, or without file storage."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "product": {
             "$ref": "#/components/schemas/ProductId"
           },
@@ -961,6 +972,26 @@
           "amount"
         ],
         "type": "object"
+      },
+      "PlacedOrderResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/OrderResponse"
+          },
+          {
+            "properties": {
+              "access_token": {
+                "description": "Lets whoever holds it read this order: keep it with the buyer (a cookie, the\nconfirmation email's link), never in a public place. The same for every read.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "access_token"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "A storefront's view of an order it placed: the order with its access token, the key\nto reading it again (`GET /storefront/orders/{id}?token=`; design note 0024, §7)."
       },
       "PostalAddressRequest": {
         "additionalProperties": false,
@@ -2202,7 +2233,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrderResponse"
+                  "$ref": "#/components/schemas/PlacedOrderResponse"
                 }
               }
             },
@@ -3482,6 +3513,104 @@
         ],
         "x-hypha-scopes": [
           "markets:read"
+        ]
+      }
+    },
+    "/storefront/orders/{id}": {
+      "get": {
+        "operationId": "storefront.orders.fetch_placed",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          },
+          {
+            "description": "The order's `access_token`, from checkout's answer.",
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacedOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "An order this storefront placed, for its confirmation page, with its access token: a\nmissing or wrong token, or another channel's order, is `404 order_not_found` (as if\nit didn't exist).",
+        "tags": [
+          "orders"
+        ],
+        "x-hypha-scopes": [
+          "checkout"
         ]
       }
     },
