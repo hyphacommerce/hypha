@@ -1027,6 +1027,24 @@ name = "hypha-host-axum"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "hypha-config",
+ "hypha-core",
+ "hypha-http",
+ "hypha-inventory",
+ "hypha-search-index",
+ "hypha-stores",
+ "hypha-users",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "hypha-http"
+version = "0.1.0"
+dependencies = [
+ "axum",
  "base64 0.22.1",
  "deadpool",
  "deadpool-postgres",

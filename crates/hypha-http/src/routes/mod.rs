@@ -264,7 +264,7 @@ macro_rules! route_table {
 }
 
 // After `route_table!`: a `macro_rules!` macro is only visible below its definition.
-pub(crate) mod openapi;
+pub mod openapi;
 
 /// Builds the router for one concrete storage from the route table. A macro rather than
 /// a generic function: handlers are generic over the storage, but axum must prove each

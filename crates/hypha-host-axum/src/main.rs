@@ -1,18 +1,3 @@
-mod client_ip;
-mod error;
-mod extract;
-mod handlers;
-mod jobs;
-mod key_cache;
-mod media;
-mod outbound;
-mod patch;
-mod rate_limit;
-mod routes;
-mod shipping;
-mod state;
-mod webhooks;
-
 use std::sync::Arc;
 
 use axum::Router;
@@ -25,14 +10,16 @@ use hypha_inventory::{HasLocations, ensure_default_location};
 use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
-use crate::rate_limit::MemoryRateLimiter;
-use crate::state::{AppState, HostEnv, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids};
+use hypha_http::rate_limit::MemoryRateLimiter;
+use hypha_http::state::{
+    AppState, HostEnv, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids,
+};
 
 /// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
 /// `openapi`) and exits (design note 0010, S6). Run it after changing routes or DTOs;
 /// a test fails while the committed files are out of date.
 fn write_openapi(dir: &str) -> std::io::Result<()> {
-    use routes::openapi::{Doc, document_json};
+    use hypha_http::routes::openapi::{Doc, document_json};
     std::fs::create_dir_all(dir)?;
     for doc in Doc::ALL {
         let path = std::path::Path::new(dir).join(doc.file_name());
@@ -166,7 +153,7 @@ async fn main() {
     };
     tracing::info!("storage: Postgres (migrations applied)");
     let env = HostEnv::new(secret_key, config.server.admin_url.clone(), config.auth);
-    serve(routes::postgres_router(), storage, env, config).await;
+    serve(hypha_http::routes::postgres_router(), storage, env, config).await;
 }
 
 /// A 32-byte key written as 64 hex characters.
@@ -294,7 +281,7 @@ async fn serve<S: Storage>(
     };
     tracing::info!(store = %store.id(), name = store.name(), "serving store");
 
-    let media = match media::Media::from_config(&config.media) {
+    let media = match hypha_http::media::Media::from_config(&config.media) {
         Ok(media) => media,
         Err(e) => {
             tracing::error!("{e}");
@@ -318,7 +305,7 @@ async fn serve<S: Storage>(
         }
     }
 
-    let outbound = outbound::OutboundPolicy {
+    let outbound = hypha_http::outbound::OutboundPolicy {
         allow_private: config.allow_private_callbacks,
     };
     if outbound.allow_private {
@@ -343,7 +330,7 @@ async fn serve<S: Storage>(
         store: store.id(),
         store_name: store.name().to_string(),
         media,
-        http: match outbound::client(outbound) {
+        http: match hypha_http::outbound::client(outbound) {
             Ok(client) => client,
             Err(e) => {
                 tracing::error!("{e}");
@@ -368,7 +355,7 @@ async fn serve<S: Storage>(
     let app = router
         .layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state.wake.dispatch),
-            jobs::wake_after_writes,
+            hypha_http::jobs::wake_after_writes,
         ))
         .layer(TraceLayer::new_for_http())
         .with_state(Arc::clone(&state));
