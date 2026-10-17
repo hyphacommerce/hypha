@@ -17,7 +17,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use hypha_core::{ErrorCode, OrderId, PageError, RepoError, VariantId};
+use hypha_core::{
+    CountryError, CurrencyError, ErrorCode, OrderId, PageError, RepoError, VariantId,
+};
 use serde_json::{Value, json};
 
 /// Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`
@@ -311,6 +313,19 @@ impl From<PathRejection> for ApiError {
 /// `PageLimit` a list command takes.
 impl From<PageError> for ApiError {
     fn from(e: PageError) -> Self {
+        Self::domain(StatusCode::UNPROCESSABLE_ENTITY, e)
+    }
+}
+
+/// A country or currency in a query string (a list's filter) that isn't one.
+impl From<CountryError> for ApiError {
+    fn from(e: CountryError) -> Self {
+        Self::domain(StatusCode::UNPROCESSABLE_ENTITY, e)
+    }
+}
+
+impl From<CurrencyError> for ApiError {
+    fn from(e: CurrencyError) -> Self {
         Self::domain(StatusCode::UNPROCESSABLE_ENTITY, e)
     }
 }
@@ -686,8 +701,10 @@ fn order_error_status(e: &hypha_orders::OrderError) -> Option<StatusCode> {
             Some(StatusCode::CONFLICT)
         }
         O::NotFulfilled { .. } => Some(StatusCode::CONFLICT),
-        // A line ID in the body.
-        O::UnknownLine(_) => Some(StatusCode::UNPROCESSABLE_ENTITY),
+        // A line ID in the body; a list's filter or sort.
+        O::UnknownLine(_) | O::Filter(_) | O::SortNeedsCurrency => {
+            Some(StatusCode::UNPROCESSABLE_ENTITY)
+        }
         O::Text(_)
         | O::Money(_)
         | O::NoLines

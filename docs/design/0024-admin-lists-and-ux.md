@@ -57,12 +57,14 @@
 | `GET /admin/orders` | `oldest`, `total_desc/asc` (within one currency, so only with `currency`) | `q` (number or email), `financial_status`, `fulfillment_status`, `cancelled`, `channel`, `country`, `currency`, `placed_from`, `placed_to` |
 | `GET /admin/assets` | `oldest`, `name_asc/desc` | `q` (file name, alt text) |
 | `GET /admin/customers` (new) | `newest`, `oldest`, `email_asc/desc`, `name_asc/desc` | `q` (email, name, phone) |
-| `GET /admin/users` (new) | `newest`, `email_asc`, `name_asc` | `q`, `role`, `status` |
+| `GET /admin/users` (new) | (unpaged, AU6: a store's staff is short) | |
 | `GET /admin/roles` (new) | (unpaged, AU6) | |
-| `GET /admin/invites` (new) | (unpaged; pending only) | |
+| `GET /admin/invites` (new) | (unpaged; not yet accepted, expired too) | |
 
-- Each new list returns a summary (0012, L7): `CustomerSummary` (email, name, phone,
-  order count, last order), `UserSummary` (email, name, role, status, 2FA on).
+- Customers are a summary (0012, L7): `CustomerSummary` (email, name, phone, address
+  count). Order counts would need orders, a layer the customers crate can't see; a
+  later read in the host can add them. Staff lists return the users, roles and
+  invites as their single reads do.
 - Repository methods and contract scenarios first (CLAUDE.md), then routes, then e2e
   steps.
 - Indexes, one migration per list: `(status, id)` already exists; add `(lower(title),

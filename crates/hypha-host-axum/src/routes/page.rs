@@ -59,25 +59,6 @@ impl<T> PageResponse<T> {
         })
     }
 
-    /// The response for `page` with `items` already made, for DTOs whose making is
-    /// async (asset URLs): one per page item, in order.
-    pub(crate) fn with_items<U, Id: Display>(
-        page: &Page<U>,
-        scope: &ListScope,
-        id: impl Fn(&U) -> Id,
-        items: Vec<T>,
-    ) -> Result<Self, ApiError> {
-        let next_cursor = next_cursor(page, scope, |u| Keyset {
-            key: SortKey::Id,
-            id: id(u),
-        })?;
-        Ok(Self {
-            items,
-            has_more: page.has_more,
-            next_cursor,
-        })
-    }
-
     /// The response for a page of a sorted list, `items` already made: the next cursor
     /// holds the last item's `position` (its sort key and ID).
     pub(crate) fn sorted<U, Id: Display>(

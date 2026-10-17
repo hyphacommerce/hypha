@@ -1,5 +1,10 @@
-use hypha_core::{CustomerId, Email, Recorded, RepoError, Versioned, stamp_insert, stamp_update};
-use hypha_customers::{Customer, CustomerRepo, repo::keys};
+use hypha_core::{
+    CustomerId, Email, Keyset, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert,
+    stamp_update,
+};
+use hypha_customers::{
+    Customer, CustomerFilter, CustomerRepo, CustomerSort, CustomerSummary, repo::keys,
+};
 
 use crate::{InMemoryOutbox, table::Table};
 
@@ -39,6 +44,29 @@ impl InMemoryCustomerRepo {
 }
 
 impl CustomerRepo for InMemoryCustomerRepo {
+    async fn list(
+        &self,
+        filter: &CustomerFilter,
+        sort: CustomerSort,
+        page: PageRequest<Keyset<CustomerId>>,
+    ) -> Result<Page<CustomerSummary>, RepoError> {
+        if let Some(after) = &page.after
+            && !sort.fits(&after.key)
+        {
+            return Err(RepoError::Backend(format!(
+                "a {:?} position for a {sort:?} list",
+                after.key
+            )));
+        }
+        Ok(self.customers.page_sorted(
+            |c| filter.matches(c),
+            &page,
+            sort.direction(),
+            Customer::summary,
+            |s: &CustomerSummary| sort.key(s),
+        ))
+    }
+
     async fn get(&self, id: CustomerId) -> Result<Option<Customer>, RepoError> {
         Ok(self.customers.get(&id))
     }

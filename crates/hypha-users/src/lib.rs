@@ -13,7 +13,8 @@ pub mod user;
 pub use commands::{
     AcceptInvite, CommandError, InviteUser, NewOwner, StaffEmail, StaffPorts, StaffSession,
     UpdateRole, UpdateUser, accept_invite, authenticate_staff, bootstrap_owner, create_role,
-    get_role, get_user, invite_user, login, request_password_reset, update_role, update_user,
+    get_role, get_user, invite_user, list_invites, list_roles, list_users, login,
+    request_password_reset, update_role, update_user,
 };
 pub use error::{RoleError, UserError};
 pub use invite::{Invite, InviteSnapshot};

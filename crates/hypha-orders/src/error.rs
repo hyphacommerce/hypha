@@ -50,6 +50,13 @@ pub enum OrderError {
     /// Cancelling an order with standing fulfilments (design note 0018, FU7).
     #[error("order {0} has fulfilments; cancel them first")]
     HasFulfillments(OrderId),
+    /// A list's text filter that breaks the text rule (design note 0024): the caller's
+    /// input, unlike `Text`, which only bad stored data or a bug breaks.
+    #[error("filter: {0}")]
+    Filter(TextError),
+    /// Sorting a list by total without the `currency` filter (design note 0024).
+    #[error("sorting by total needs one currency: filter by currency")]
+    SortNeedsCurrency,
 }
 
 impl ErrorCode for OrderError {
@@ -72,6 +79,8 @@ impl ErrorCode for OrderError {
             OrderError::OverFulfilled { .. } => "over_fulfilled",
             OrderError::NotFulfilled { .. } => "line_not_fulfilled",
             OrderError::HasFulfillments(_) => "order_has_fulfillments",
+            OrderError::Filter(e) => e.code(),
+            OrderError::SortNeedsCurrency => "sort_needs_currency",
         }
     }
 }

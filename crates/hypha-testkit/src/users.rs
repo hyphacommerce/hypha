@@ -37,6 +37,10 @@ impl UserRepo for InMemoryUserRepo {
         Ok(!self.users.all().is_empty())
     }
 
+    async fn list_all(&self) -> Result<Vec<User>, RepoError> {
+        Ok(self.users.all_oldest_first())
+    }
+
     async fn count_active_with_role(&self, role: RoleId) -> Result<usize, RepoError> {
         Ok(self
             .users
@@ -92,6 +96,10 @@ impl RoleRepo for InMemoryRoleRepo {
         Ok(self.roles.find(Role::is_owner))
     }
 
+    async fn list_all(&self) -> Result<Vec<Role>, RepoError> {
+        Ok(self.roles.all_oldest_first())
+    }
+
     async fn insert(&self, role: &mut Role) -> Result<(), RepoError> {
         self.roles
             .insert(role.id(), role, keys::ROLE_ID, &unique_role)
@@ -129,6 +137,12 @@ impl InviteRepo for InMemoryInviteRepo {
 
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<Invite>, RepoError> {
         Ok(self.invites.find(|i| i.token_hash() == hash))
+    }
+
+    async fn pending(&self) -> Result<Vec<Invite>, RepoError> {
+        let mut pending = self.invites.all_oldest_first();
+        pending.retain(|i| i.accepted_at().is_none());
+        Ok(pending)
     }
 
     async fn insert(&self, invite: &mut Invite) -> Result<(), RepoError> {

@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    Address, CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, Money, OrderId,
-    OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Recorded, RepoError,
-    ShippingGroupId, ShippingOptionId, TaxClassId, TaxRegionId, Timestamp, VariantId, Version,
-    Versioned, stamp_insert, stamp_update,
+    Address, CartId, ChannelId, CountryCode, CustomerId, Direction, Email, Keyset, MarketId, Money,
+    OrderId, OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Recorded, RepoError,
+    ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRegionId, Timestamp, VariantId,
+    Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_orders::{
-    Cancellation, Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot,
-    OrderSummary, OrderTax, OrderTaxSource,
+    Cancellation, Order, OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
+    OrderSnapshot, OrderSort, OrderSummary, OrderTax, OrderTaxSource,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -35,25 +35,106 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
 
     /// One query whatever the page holds: each order's item count is summed in SQL (per
     /// order, only for the rows the limit keeps), so no line rows leave the database.
-    async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<OrderSummary>, RepoError> {
-        let after = page.after.map(|id| id.as_uuid());
+    /// One query per page, the item count summed per kept row. Newest and oldest use the
+    /// primary key; totals (always within one currency) use `orders_by_total` (migration
+    /// 0045). The text filter matches the number exactly or the email by `strpos`.
+    async fn list(
+        &self,
+        filter: &OrderFilter,
+        sort: OrderSort,
+        page: PageRequest<Keyset<OrderId>>,
+    ) -> Result<Page<OrderSummary>, RepoError> {
+        let (cmp, dir) = match sort.direction() {
+            Direction::Ascending => (">", "ASC"),
+            Direction::Descending => ("<", "DESC"),
+        };
+        let mut total_key = None::<i64>;
+        let after = match &page.after {
+            None => None,
+            Some(after) => {
+                match (&after.key, sort) {
+                    (SortKey::Id, OrderSort::Newest | OrderSort::Oldest) => {}
+                    (SortKey::Int(n), OrderSort::TotalDesc | OrderSort::TotalAsc) => {
+                        total_key = Some(*n)
+                    }
+                    (key, sort) => {
+                        return Err(RepoError::Backend(format!(
+                            "a {key:?} position for a {sort:?} list"
+                        )));
+                    }
+                }
+                Some(after.id.as_uuid())
+            }
+        };
+        let (position, order) = match sort {
+            OrderSort::Newest | OrderSort::Oldest => {
+                (format!("o.id {cmp} $1"), format!("o.id {dir}"))
+            }
+            OrderSort::TotalDesc | OrderSort::TotalAsc => (
+                format!("(o.total, o.id) {cmp} ($3, $1)"),
+                format!("o.total {dir}, o.id {dir}"),
+            ),
+        };
         let fetch = i64::from(page.limit.get()) + 1;
+        let financial: Option<Vec<&str>> = (!filter.financial_statuses().is_empty()).then(|| {
+            filter
+                .financial_statuses()
+                .iter()
+                .map(|s| s.as_str())
+                .collect()
+        });
+        let fulfillment: Option<Vec<&str>> =
+            (!filter.fulfillment_statuses().is_empty()).then(|| {
+                filter
+                    .fulfillment_statuses()
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect()
+            });
+        let us = |t: Option<Timestamp>| t.map(|t| t.unix_micros());
         let mut conn = self.conn().await;
         let rows = conn
             .client()
             .query_typed(
                 &format!(
-                    "SELECT o.id, o.number, {},
+                    "SELECT o.id, o.number, {placed},
                      o.channel_id, o.customer_id, o.email, o.country, o.currency, o.total,
-                     o.financial_status, o.fulfillment_status, {},
+                     o.financial_status, o.fulfillment_status, {cancelled},
                      (SELECT coalesce(sum(quantity), 0) FROM order_lines
                       WHERE order_id = o.id)::bigint AS item_count
-                 FROM orders o WHERE ($1::uuid IS NULL OR o.id < $1)
-                 ORDER BY o.id DESC LIMIT $2",
-                    micros("o.placed_at"),
-                    micros("o.cancelled_at"),
+                 FROM orders o
+                 WHERE ($1::uuid IS NULL OR {position})
+                   AND ($4::text IS NULL OR o.number = $5
+                        OR strpos(lower(o.email), lower($4)) > 0)
+                   AND ($6::text[] IS NULL OR o.financial_status = ANY($6))
+                   AND ($7::text[] IS NULL OR o.fulfillment_status = ANY($7))
+                   AND ($8::bool IS NULL OR (o.cancelled_at IS NOT NULL) = $8)
+                   AND ($9::uuid IS NULL OR o.channel_id = $9)
+                   AND ($10::text IS NULL OR o.country = $10)
+                   AND ($11::text IS NULL OR o.currency = $11)
+                   AND ($12::bigint IS NULL
+                        OR o.placed_at >= 'epoch'::timestamptz + $12 * interval '1 microsecond')
+                   AND ($13::bigint IS NULL
+                        OR o.placed_at < 'epoch'::timestamptz + $13 * interval '1 microsecond')
+                 ORDER BY {order} LIMIT $2",
+                    placed = micros("o.placed_at"),
+                    cancelled = micros("o.cancelled_at"),
                 ),
-                &[(&after, Type::UUID), (&fetch, Type::INT8)],
+                &[
+                    (&after, Type::UUID),
+                    (&fetch, Type::INT8),
+                    (&total_key, Type::INT8),
+                    (&filter.q(), Type::TEXT),
+                    (&filter.q_number(), Type::INT8),
+                    (&financial, Type::TEXT_ARRAY),
+                    (&fulfillment, Type::TEXT_ARRAY),
+                    (&filter.cancelled(), Type::BOOL),
+                    (&filter.channel().map(|c| c.as_uuid()), Type::UUID),
+                    (&filter.country().map(|c| c.as_str()), Type::TEXT),
+                    (&filter.currency().map(|c| c.as_str()), Type::TEXT),
+                    (&us(filter.placed_from()), Type::INT8),
+                    (&us(filter.placed_before()), Type::INT8),
+                ],
             )
             .await
             .map_err(repo_error)?;

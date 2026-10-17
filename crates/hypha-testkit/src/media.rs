@@ -3,11 +3,11 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use hypha_core::{AssetId, Page, PageRequest, RepoError, Timestamp};
+use hypha_core::{AssetId, Keyset, Page, PageRequest, RepoError, Timestamp};
 use hypha_media::{
-    Asset, AssetKind, AssetRepo, AssetStatus, AssetUsage, AssetUsageRepo, BlobError, BlobHead,
-    BlobKey, BlobStore, HasAssetUsages, HasAssets, PresignedUpload, UploadTerms, UsageOwner,
-    UsageRole, repo::keys,
+    Asset, AssetFilter, AssetRepo, AssetSort, AssetStatus, AssetUsage, AssetUsageRepo, BlobError,
+    BlobHead, BlobKey, BlobStore, HasAssetUsages, HasAssets, PresignedUpload, UploadTerms,
+    UsageOwner, UsageRole, repo::keys,
 };
 use sha2::{Digest, Sha256};
 
@@ -82,13 +82,24 @@ impl AssetRepo for InMemoryAssetRepo {
 
     async fn list(
         &self,
-        kind: Option<AssetKind>,
-        page: PageRequest<AssetId>,
+        filter: &AssetFilter,
+        sort: AssetSort,
+        page: PageRequest<Keyset<AssetId>>,
     ) -> Result<Page<Asset>, RepoError> {
-        Ok(self.assets.page(
-            |a| a.status() == AssetStatus::Ready && kind.is_none_or(|k| a.kind() == k),
-            page,
+        if let Some(after) = &page.after
+            && !sort.fits(&after.key)
+        {
+            return Err(RepoError::Backend(format!(
+                "a {:?} position for a {sort:?} list",
+                after.key
+            )));
+        }
+        Ok(self.assets.page_sorted(
+            |a| a.status() == AssetStatus::Ready && filter.matches(a),
+            &page,
+            sort.direction(),
             Clone::clone,
+            |a: &Asset| sort.key(a),
         ))
     }
 

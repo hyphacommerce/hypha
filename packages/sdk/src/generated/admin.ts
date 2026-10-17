@@ -159,7 +159,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The library: ready assets, newest first, optionally of one kind. */
+        /**
+         * The library: ready assets, newest first or in `sort`'s order, optionally of one kind
+         *     or matching text.
+         */
         get: operations["admin.assets.list"];
         put?: never;
         /**
@@ -592,7 +595,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Customers, newest first or in `sort`'s order, optionally matching text. */
+        get: operations["admin.customers.list"];
         put?: never;
         /** Creates a customer. */
         post: operations["admin.customers.create"];
@@ -790,7 +794,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Every invite not yet accepted, oldest first, expired ones too (inviting the same
+         *     email again renews one).
+         */
+        get: operations["admin.staff.list_invites"];
         put?: never;
         /** Emails an invite (a new one replaces a pending one). The token is only in the email. */
         post: operations["admin.staff.invite"];
@@ -1032,7 +1040,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Orders, newest first. */
+        /**
+         * Orders, newest first or in `sort`'s order, narrowed by the filters (every one given
+         *     must match).
+         */
         get: operations["admin.orders.list"];
         put?: never;
         post?: never;
@@ -1378,7 +1389,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Every role, oldest first. */
+        get: operations["admin.staff.list_roles"];
         put?: never;
         /** Creates a role; you can only grant scopes you hold. */
         post: operations["admin.staff.create_role"];
@@ -1712,6 +1724,23 @@ export interface paths {
         post?: never;
         /** Removes a tax class's own rate in a region. */
         delete: operations["admin.taxes.remove_region_class_rate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every staff user, oldest first. */
+        get: operations["admin.staff.list_users"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2425,6 +2454,31 @@ export interface components {
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
         };
+        /** @description A page of a list, newest first (design note 0012). */
+        CustomerSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["CustomerSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /** @description A customer in a list: without the address book (design note 0024). */
+        CustomerSummaryResponse: {
+            /**
+             * Format: int64
+             * @description How many addresses the address book holds.
+             */
+            address_count: number;
+            /** @description When the customer was created, RFC 3339 in UTC. */
+            created_at: string;
+            email: components["schemas"]["Email"];
+            first_name?: string | null;
+            id: components["schemas"]["CustomerId"];
+            last_name?: string | null;
+            phone?: string | null;
+            /** @description When the customer last changed, RFC 3339 in UTC. */
+            updated_at: string;
+        };
         /** @description Delivery in days, from `min_days` to `max_days`. */
         DeliveryEstimateDto: {
             /** Format: int32 */
@@ -2654,6 +2708,10 @@ export interface components {
          * @example inv_0190f1a2b3c47d8e9f00112233445566
          */
         InviteId: string;
+        InviteListResponse: {
+            /** @description Oldest first. */
+            items: components["schemas"]["InviteResponse"][];
+        };
         InviteRequest: {
             email: string;
             role: components["schemas"]["RoleId"];
@@ -3158,6 +3216,13 @@ export interface components {
          * @example role_0190f1a2b3c47d8e9f00112233445566
          */
         RoleId: string;
+        RoleListResponse: {
+            /**
+             * @description Oldest first. A store has a handful, so they come in one list (design note 0024,
+             *     AU6).
+             */
+            items: components["schemas"]["RoleResponse"][];
+        };
         RoleResponse: {
             id: components["schemas"]["RoleId"];
             name: string;
@@ -3653,6 +3718,13 @@ export interface components {
          * @example user_0190f1a2b3c47d8e9f00112233445566
          */
         UserId: string;
+        UserListResponse: {
+            /**
+             * @description Oldest first. A store's staff is a short list, so it comes whole (design note
+             *     0024, AU6).
+             */
+            items: components["schemas"]["UserResponse"][];
+        };
         UserResponse: {
             created_at: string;
             email: components["schemas"]["Email"];
@@ -4660,6 +4732,12 @@ export interface operations {
                 limit?: number;
                 /** @description Only assets of this kind. */
                 kind?: components["schemas"]["AssetKindDto"];
+                /**
+                 * @description Only assets whose file name, alt text or title contains this text, ignoring case.
+                 *     Up to 255 characters; blank filters nothing.
+                 */
+                q?: string;
+                sort?: "newest" | "oldest" | "name_asc" | "name_desc";
             };
             header?: never;
             path?: never;
@@ -7727,6 +7805,82 @@ export interface operations {
             };
         };
     };
+    "admin.customers.list": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /**
+                 * @description Only customers whose email, first or last name or phone contains this text,
+                 *     ignoring case. Up to 255 characters; blank filters nothing.
+                 */
+                q?: string;
+                sort?: "newest" | "oldest" | "email_asc" | "email_desc" | "name_asc" | "name_desc";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerSummaryPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.customers.create": {
         parameters: {
             query?: never;
@@ -9074,6 +9228,53 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.staff.list_invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteListResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10632,6 +10833,28 @@ export interface operations {
                 cursor?: string;
                 /** @description Items per page, 1 to 100 (default 50). */
                 limit?: number;
+                /**
+                 * @description The order's number (`1001` or `#1001`), or text its email contains, ignoring case.
+                 *     Up to 255 characters; blank filters nothing.
+                 */
+                q?: string;
+                /** @description Only orders in this payment status; repeat for any of several. */
+                financial_status?: components["schemas"]["FinancialStatusDto"][];
+                /** @description Only orders in this fulfilment status; repeat for any of several. */
+                fulfillment_status?: components["schemas"]["FulfillmentStatusDto"][];
+                /** @description Only cancelled orders (`true`), or only those that aren't (`false`). */
+                cancelled?: boolean;
+                /** @description Only orders placed through this sales channel. */
+                channel?: components["schemas"]["ChannelId"];
+                /** @description Only orders shipped to (or placed in) this country (ISO 3166-1 alpha-2). */
+                country?: string;
+                /** @description Only orders in this currency (ISO 4217); needed to sort by total. */
+                currency?: string;
+                /** @description Only orders placed at or after this instant (RFC 3339). */
+                placed_from?: string;
+                /** @description Only orders placed before this instant (RFC 3339). */
+                placed_before?: string;
+                sort?: "newest" | "oldest" | "total_desc" | "total_asc";
             };
             header?: never;
             path?: never;
@@ -13121,6 +13344,53 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.staff.list_roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleListResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15783,6 +16053,53 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.staff.list_users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserListResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

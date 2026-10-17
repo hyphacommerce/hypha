@@ -499,6 +499,7 @@ mod tests {
                 "get /admin/assets/{id}/usages",
                 "get /admin/catalogs/{id}/products",
                 "get /admin/categories/{id}/products",
+                "get /admin/customers",
                 "get /admin/orders",
                 "get /admin/price-lists/{id}/fixed-prices",
                 "get /admin/products"

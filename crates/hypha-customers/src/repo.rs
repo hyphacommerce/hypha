@@ -1,6 +1,6 @@
-use hypha_core::{CustomerId, Email, RepoError};
+use hypha_core::{CustomerId, Email, Keyset, Page, PageRequest, RepoError};
 
-use crate::Customer;
+use crate::{Customer, CustomerFilter, CustomerSort, CustomerSummary};
 
 pub mod keys {
     pub const CUSTOMER_ID: &str = "customer_id";
@@ -12,6 +12,16 @@ pub mod keys {
 pub trait CustomerRepo {
     async fn get(&self, id: CustomerId) -> Result<Option<Customer>, RepoError>;
     async fn get_by_email(&self, email: &Email) -> Result<Option<Customer>, RepoError>;
+    /// A page of customer summaries in `sort`'s order (design note 0024): those after
+    /// `page.after` by `CustomerSort::key` and then ID, only those `filter` matches. Each
+    /// equals `Customer::summary` of the stored customer. A position whose key doesn't
+    /// fit the sort (`CustomerSort::fits`) is a `Backend` error.
+    async fn list(
+        &self,
+        filter: &CustomerFilter,
+        sort: CustomerSort,
+        page: PageRequest<Keyset<CustomerId>>,
+    ) -> Result<Page<CustomerSummary>, RepoError>;
     async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError>;
     async fn update(&self, customer: &mut Customer) -> Result<(), RepoError>;
 }

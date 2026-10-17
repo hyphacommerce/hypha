@@ -818,6 +818,9 @@ impl UserRepo for DisablingUsers<'_> {
     async fn any(&self) -> Result<bool, hypha_core::RepoError> {
         self.inner.any().await
     }
+    async fn list_all(&self) -> Result<Vec<User>, hypha_core::RepoError> {
+        self.inner.list_all().await
+    }
     async fn count_active_with_role(&self, role: RoleId) -> Result<usize, hypha_core::RepoError> {
         self.inner.count_active_with_role(role).await
     }

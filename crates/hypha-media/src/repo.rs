@@ -1,6 +1,6 @@
-use hypha_core::{AssetId, Page, PageRequest, RepoError, Timestamp};
+use hypha_core::{AssetId, Keyset, Page, PageRequest, RepoError, Timestamp};
 
-use crate::{Asset, AssetKind, AssetUsage, UsageOwner, UsageRole};
+use crate::{Asset, AssetFilter, AssetSort, AssetUsage, UsageOwner, UsageRole};
 
 /// Rules the media repositories enforce, reported as `RepoError::Duplicate(key)` or
 /// `RepoError::Reference(key)`.
@@ -16,12 +16,15 @@ pub trait AssetRepo {
     async fn get(&self, id: AssetId) -> Result<Option<Asset>, RepoError>;
     /// The assets among `ids` that exist, in no particular order, in one query.
     async fn get_many(&self, ids: &[AssetId]) -> Result<Vec<Asset>, RepoError>;
-    /// A page of `ready` assets, newest first (by ID; design note 0012), only those of
-    /// `kind` when given. Pending and failed assets aren't in the library.
+    /// A page of `ready` assets in `sort`'s order (design notes 0012 and 0024): those
+    /// after `page.after` by `AssetSort::key` and then ID, only those `filter` matches
+    /// (`AssetFilter::matches`). Pending and failed assets aren't in the library. A
+    /// position whose key doesn't fit the sort (`AssetSort::fits`) is a `Backend` error.
     async fn list(
         &self,
-        kind: Option<AssetKind>,
-        page: PageRequest<AssetId>,
+        filter: &AssetFilter,
+        sort: AssetSort,
+        page: PageRequest<Keyset<AssetId>>,
     ) -> Result<Page<Asset>, RepoError>;
     /// Up to `limit` assets whose upload was abandoned: `pending` ones created before
     /// `before`, and `failed` ones last changed before it. Oldest first (by ID).

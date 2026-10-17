@@ -1,11 +1,12 @@
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId, OrderLineId,
-    PageLimit, PageRequest, Price, ProductId, Quantity, RepoError, TaxClassId, TaxRate,
-    TaxRegionId, Timestamp, VariantId, Version, Versioned,
+    CartId, ChannelId, CountryCode, Currency, CustomerId, Email, Keyset, MarketId, Money, OrderId,
+    OrderLineId, PageLimit, PageRequest, Price, ProductId, Quantity, RepoError, SortKey,
+    TaxClassId, TaxRate, TaxRegionId, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_orders::{
-    CancelReason, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderLine, OrderNumber,
-    OrderRepo, OrderTax, OrderTaxSource, repo::keys,
+    CancelReason, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderFilter,
+    OrderFilterInput, OrderLine, OrderNumber, OrderRepo, OrderSort, OrderTax, OrderTaxSource,
+    repo::keys,
 };
 use uuid::Uuid;
 
@@ -25,6 +26,10 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     numbers(&make().await).await;
     scenario("order: list pages newest first, after a cursor");
     list_pages(&make().await).await;
+    scenario("order: every sort orders by its key, then ID, and pages across ties");
+    list_sorted(&make().await).await;
+    scenario("order: list by number or email, statuses, channel, country, currency, dates");
+    list_filtered(&make().await).await;
     scenario("order: shipping address and lines round trip, every field");
     shipping_round_trips(&make().await).await;
     scenario("order: fulfilled quantities, the status and a cancellation round trip");
@@ -221,10 +226,17 @@ async fn numbers<R: OrderRepo>(repo: &R) {
 
 async fn listed<R: OrderRepo>(repo: &R, after: Option<u128>, limit: u32) -> (Vec<OrderId>, bool) {
     let page = repo
-        .list(PageRequest {
-            after: after.map(oid),
-            limit: PageLimit::new(limit).unwrap(),
-        })
+        .list(
+            &OrderFilter::default(),
+            OrderSort::Newest,
+            PageRequest {
+                after: after.map(|n| Keyset {
+                    key: SortKey::Id,
+                    id: oid(n),
+                }),
+                limit: PageLimit::new(limit).unwrap(),
+            },
+        )
         .await
         .unwrap();
     (page.items.iter().map(|o| o.id).collect(), page.has_more)
@@ -253,10 +265,14 @@ async fn list_pages<R: OrderRepo>(repo: &R) {
     // Summaries of the stored orders: item counts add up line quantities (order 3's
     // first line has the largest quantity, so a 32-bit sum would overflow).
     let first = repo
-        .list(PageRequest {
-            after: None,
-            limit: PageLimit::new(2).unwrap(),
-        })
+        .list(
+            &OrderFilter::default(),
+            OrderSort::Newest,
+            PageRequest {
+                after: None,
+                limit: PageLimit::new(2).unwrap(),
+            },
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -276,6 +292,244 @@ async fn list_pages<R: OrderRepo>(repo: &R) {
     );
     assert_eq!(listed(repo, Some(1), 2).await, (vec![], false));
     assert_eq!(listed(repo, Some(99), 1).await, (vec![oid(3)], true));
+}
+
+/// An order with one line of `amount` in `currency`, placed `day` days into 2026, to
+/// `email` in `country` through channel `500 + channel`.
+fn varied(n: u128, amount: i64, currency: Currency, email: &str, country: &str, day: i64) -> Order {
+    let money = Money::new(amount, currency).unwrap();
+    let line = OrderLine {
+        unit_price: Price::new(money).unwrap(),
+        total: money,
+        ..plain_line(n * 10)
+    };
+    Order::place(NewOrder {
+        id: oid(n),
+        number: number(1000 + n as i64),
+        placed_at: Timestamp::from_unix_micros(1_767_225_600_000_000 + day * 86_400_000_000),
+        cart: CartId::from_uuid(Uuid::from_u128(1000 + n)),
+        channel: ChannelId::from_uuid(Uuid::from_u128(500 + n % 2)),
+        market: MarketId::from_uuid(Uuid::from_u128(2000 + n)),
+        currency,
+        country: CountryCode::new(country).unwrap(),
+        taxes_included: true,
+        customer: CustomerId::from_uuid(Uuid::from_u128(3000 + n)),
+        email: Email::new(email).unwrap(),
+        lines: vec![line],
+        shipping_address: None,
+        shipping_lines: vec![],
+        subtotal: money,
+        shipping_total: Money::zero(currency),
+        tax_total: Money::zero(currency),
+        total: money,
+    })
+    .unwrap()
+}
+
+/// Every page of `sort`'s list under `filter`, `limit` at a time.
+async fn all_orders<R: OrderRepo>(
+    repo: &R,
+    filter: &OrderFilter,
+    sort: OrderSort,
+    limit: u32,
+) -> Vec<OrderId> {
+    let mut found = Vec::new();
+    let mut after = None;
+    loop {
+        let page = repo
+            .list(
+                filter,
+                sort,
+                PageRequest {
+                    after: after.clone(),
+                    limit: PageLimit::new(limit).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        found.extend(page.items.iter().map(|o| o.id));
+        match page.items.last() {
+            Some(last) if page.has_more => {
+                after = Some(Keyset {
+                    key: sort.key(last),
+                    id: last.id,
+                })
+            }
+            _ => return found,
+        }
+    }
+}
+
+fn filter(input: OrderFilterInput) -> OrderFilter {
+    OrderFilter::new(input).unwrap()
+}
+
+async fn list_sorted<R: OrderRepo>(repo: &R) {
+    // Totals in EUR with a tie (2 and 4), and one in USD that sorts apart.
+    for (n, amount, currency) in [
+        (3, 700, Currency::EUR),
+        (1, 500, Currency::EUR),
+        (4, 900, Currency::EUR),
+        (2, 900, Currency::EUR),
+        (5, 100, Currency::USD),
+    ] {
+        let mut o = varied(n, amount, currency, "a@example.com", "HR", n as i64);
+        repo.insert(&mut o).await.unwrap();
+    }
+    let every = OrderFilter::default();
+    let eur = filter(OrderFilterInput {
+        currency: Some(Currency::EUR),
+        ..OrderFilterInput::default()
+    });
+    for limit in [1, 2, 10] {
+        assert_eq!(
+            all_orders(repo, &every, OrderSort::Oldest, limit).await,
+            [oid(1), oid(2), oid(3), oid(4), oid(5)]
+        );
+        assert_eq!(
+            all_orders(repo, &eur, OrderSort::TotalDesc, limit).await,
+            [oid(4), oid(2), oid(3), oid(1)],
+            "ties by ID, descending too"
+        );
+        assert_eq!(
+            all_orders(repo, &eur, OrderSort::TotalAsc, limit).await,
+            [oid(1), oid(3), oid(2), oid(4)]
+        );
+    }
+    assert!(matches!(
+        repo.list(
+            &eur,
+            OrderSort::TotalAsc,
+            PageRequest {
+                after: Some(Keyset {
+                    key: SortKey::Id,
+                    id: oid(1)
+                }),
+                limit: PageLimit::new(2).unwrap(),
+            },
+        )
+        .await,
+        Err(RepoError::Backend(_))
+    ));
+}
+
+async fn list_filtered<R: OrderRepo>(repo: &R) {
+    // 1: ana, HR, day 1, paid; 2: Ivo, RS, day 2, cancelled; 3: ana in USD, day 3,
+    // fulfilled; 4: ivo, HR, day 4.
+    let mut ana = varied(1, 500, Currency::EUR, "Ana@Example.hr", "HR", 1);
+    ana.mark_paid().unwrap();
+    let mut ivo = varied(2, 500, Currency::EUR, "ivo@example.rs", "RS", 2);
+    ivo.cancel(
+        Timestamp::from_unix_micros(1_767_400_000_000_000),
+        CancelReason::Fraud,
+    )
+    .unwrap();
+    let mut usd = varied(3, 500, Currency::USD, "ana@example.hr", "HR", 3);
+    usd.fulfil(&[(usd.lines()[0].id, Quantity::new(1).unwrap())])
+        .unwrap();
+    let mut later = varied(4, 500, Currency::EUR, "ivo@example.hr", "HR", 4);
+    for o in [&mut ana, &mut ivo, &mut usd, &mut later] {
+        repo.insert(o).await.unwrap();
+    }
+    let found = async |input: OrderFilterInput| {
+        all_orders(repo, &filter(input), OrderSort::Oldest, 1).await
+    };
+    let none = OrderFilterInput::default;
+    let text = |t: &str| Some(t.to_string());
+    assert_eq!(
+        found(OrderFilterInput {
+            q: text("ANA@"),
+            ..none()
+        })
+        .await,
+        [oid(1), oid(3)],
+        "email, ignoring case"
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            q: text("#1002"),
+            ..none()
+        })
+        .await,
+        [oid(2)],
+        "a number"
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            q: text("100"),
+            ..none()
+        })
+        .await,
+        Vec::<OrderId>::new(),
+        "a number matches whole"
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            financial_statuses: vec![FinancialStatus::Paid],
+            ..none()
+        })
+        .await,
+        [oid(1)]
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            fulfillment_statuses: vec![
+                FulfillmentStatus::Fulfilled,
+                FulfillmentStatus::PartiallyFulfilled
+            ],
+            ..none()
+        })
+        .await,
+        [oid(3)]
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            cancelled: Some(true),
+            ..none()
+        })
+        .await,
+        [oid(2)]
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            cancelled: Some(false),
+            ..none()
+        })
+        .await,
+        [oid(1), oid(3), oid(4)]
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            channel: Some(ChannelId::from_uuid(Uuid::from_u128(500))),
+            ..none()
+        })
+        .await,
+        [oid(2), oid(4)]
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            country: Some(CountryCode::new("HR").unwrap()),
+            currency: Some(Currency::EUR),
+            ..none()
+        })
+        .await,
+        [oid(1), oid(4)]
+    );
+    let day = |d: i64| {
+        Some(Timestamp::from_unix_micros(
+            1_767_225_600_000_000 + d * 86_400_000_000,
+        ))
+    };
+    assert_eq!(
+        found(OrderFilterInput {
+            placed_from: day(2),
+            placed_before: day(4),
+            ..none()
+        })
+        .await,
+        [oid(2), oid(3)],
+        "from inclusive, before exclusive"
+    );
 }
 
 async fn shipping_round_trips<R: OrderRepo>(repo: &R) {

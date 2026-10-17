@@ -8,6 +8,7 @@ pub mod asset;
 pub mod blob;
 pub mod commands;
 pub mod error;
+pub mod filter;
 pub mod mime;
 pub mod repo;
 pub mod settings;
@@ -22,6 +23,7 @@ pub use commands::{
     delete_asset, get_asset, list_asset_usages, list_assets, sweep_abandoned_uploads, update_asset,
 };
 pub use error::{BlobError, MediaError, UploadMismatch};
+pub use filter::{AssetFilter, AssetSort};
 pub use mime::{AssetKind, MimeType};
 pub use repo::{AssetRepo, AssetUsageRepo, HasAssetUsages, HasAssets, StageAssetUsages};
 pub use settings::MediaSettings;

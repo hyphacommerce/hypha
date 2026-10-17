@@ -1,7 +1,10 @@
-use hypha_core::{AssetId, Page, PageRequest, RepoError, Timestamp, Version, Versioned};
+use hypha_core::{
+    AssetId, Direction, Keyset, Page, PageRequest, RepoError, SortKey, Timestamp, Version,
+    Versioned,
+};
 use hypha_media::{
-    Asset, AssetKind, AssetRepo, AssetSnapshot, AssetUsage, AssetUsageRepo, BlobKey, Checksum,
-    MimeType, UsageOwner, UsageRole,
+    Asset, AssetFilter, AssetRepo, AssetSnapshot, AssetSort, AssetUsage, AssetUsageRepo, BlobKey,
+    Checksum, MimeType, UsageOwner, UsageRole,
 };
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
@@ -54,13 +57,46 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         rows.iter().map(asset_from_db).collect()
     }
 
+    /// Names sort by `lower(filename) COLLATE "C"`, as `SortKey::text` does (index in
+    /// migration 0045); the text filter is `strpos`, like products'.
     async fn list(
         &self,
-        kind: Option<AssetKind>,
-        page: PageRequest<AssetId>,
+        filter: &AssetFilter,
+        sort: AssetSort,
+        page: PageRequest<Keyset<AssetId>>,
     ) -> Result<Page<Asset>, RepoError> {
-        let kind = kind.map(|k| k.as_str());
-        let after = page.after.map(|id| id.as_uuid());
+        let kind = filter.kind().map(|k| k.as_str());
+        let (cmp, dir) = match sort.direction() {
+            Direction::Ascending => (">", "ASC"),
+            Direction::Descending => ("<", "DESC"),
+        };
+        let mut name_key = None::<String>;
+        let after = match &page.after {
+            None => None,
+            Some(after) => {
+                match (&after.key, sort) {
+                    (SortKey::Id, AssetSort::Newest | AssetSort::Oldest) => {}
+                    (SortKey::Text(t), AssetSort::NameAsc | AssetSort::NameDesc) => {
+                        name_key = Some(t.clone())
+                    }
+                    (key, sort) => {
+                        return Err(RepoError::Backend(format!(
+                            "a {key:?} position for a {sort:?} list"
+                        )));
+                    }
+                }
+                Some(after.id.as_uuid())
+            }
+        };
+        let (position, order) = match sort {
+            AssetSort::Newest | AssetSort::Oldest => (format!("id {cmp} $2"), format!("id {dir}")),
+            AssetSort::NameAsc | AssetSort::NameDesc => (
+                format!(
+                    r#"((lower(filename) COLLATE "C"), id) {cmp} (($5::text COLLATE "C"), $2)"#
+                ),
+                format!(r#"(lower(filename) COLLATE "C") {dir}, id {dir}"#),
+            ),
+        };
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
@@ -69,14 +105,20 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
                 &format!(
                     "SELECT {} FROM assets
                      WHERE status = 'ready' AND ($1::text IS NULL OR kind = $1)
-                       AND ($2::uuid IS NULL OR id < $2)
-                     ORDER BY id DESC LIMIT $3",
+                       AND ($2::uuid IS NULL OR {position})
+                       AND ($4::text IS NULL
+                            OR strpos(lower(filename), lower($4)) > 0
+                            OR strpos(lower(alt), lower($4)) > 0
+                            OR strpos(lower(title), lower($4)) > 0)
+                     ORDER BY {order} LIMIT $3",
                     columns(),
                 ),
                 &[
                     (&kind, Type::TEXT),
                     (&after, Type::UUID),
                     (&fetch, Type::INT8),
+                    (&filter.q(), Type::TEXT),
+                    (&name_key, Type::TEXT),
                 ],
             )
             .await

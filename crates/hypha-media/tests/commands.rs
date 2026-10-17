@@ -258,6 +258,8 @@ fn the_library_lists_ready_assets_only() {
         &Ctx::system(),
         &world.assets,
         None,
+        None,
+        hypha_media::AssetSort::Newest,
         PageRequest::default(),
     ))
     .unwrap();
@@ -409,10 +411,11 @@ impl AssetRepo for LoadedBeforeTheRaceWasLost {
     }
     async fn list(
         &self,
-        kind: Option<hypha_media::AssetKind>,
-        page: PageRequest<AssetId>,
+        filter: &hypha_media::AssetFilter,
+        sort: hypha_media::AssetSort,
+        page: PageRequest<hypha_core::Keyset<AssetId>>,
     ) -> Result<hypha_core::Page<hypha_media::Asset>, RepoError> {
-        self.repo.list(kind, page).await
+        self.repo.list(filter, sort, page).await
     }
     async fn abandoned(
         &self,

@@ -1,8 +1,11 @@
 use hypha_core::{
-    Address, AddressId, AddressParts, CustomerId, Email, Recorded, RepoError, Version, Versioned,
-    stamp_insert, stamp_update,
+    Address, AddressId, AddressParts, CustomerId, Direction, Email, Keyset, Page, PageRequest,
+    Recorded, RepoError, SortKey, Version, Versioned, stamp_insert, stamp_update,
 };
-use hypha_customers::{Customer, CustomerRepo, CustomerSnapshot, SavedAddress};
+use hypha_customers::{
+    Customer, CustomerFilter, CustomerRepo, CustomerSnapshot, CustomerSort, CustomerSummary,
+    SavedAddress,
+};
 use tokio_postgres::{GenericClient, Row, types::Type};
 use uuid::Uuid;
 
@@ -29,6 +32,97 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
         consistent_read!(conn.client(), |tx| {
             load(tx, "email = $1", &email.as_str(), Type::TEXT).await
         })
+    }
+
+    /// Names and emails sort by `lower(…) COLLATE "C"`, as `SortKey::text` does, with
+    /// an index per key (migration 0045); the text filter is `strpos`.
+    async fn list(
+        &self,
+        filter: &CustomerFilter,
+        sort: CustomerSort,
+        page: PageRequest<Keyset<CustomerId>>,
+    ) -> Result<Page<CustomerSummary>, RepoError> {
+        const NAME: &str = r#"(lower(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')) COLLATE "C")"#;
+        const EMAIL: &str = r#"(lower(c.email) COLLATE "C")"#;
+        let (cmp, dir) = match sort.direction() {
+            Direction::Ascending => (">", "ASC"),
+            Direction::Descending => ("<", "DESC"),
+        };
+        let key = match sort {
+            CustomerSort::Newest | CustomerSort::Oldest => None,
+            CustomerSort::EmailAsc | CustomerSort::EmailDesc => Some(EMAIL),
+            CustomerSort::NameAsc | CustomerSort::NameDesc => Some(NAME),
+        };
+        let mut text_key = None::<String>;
+        let after = match &page.after {
+            None => None,
+            Some(after) => {
+                match (&after.key, key) {
+                    (SortKey::Id, None) => {}
+                    (SortKey::Text(t), Some(_)) => text_key = Some(t.clone()),
+                    (found, _) => {
+                        return Err(RepoError::Backend(format!(
+                            "a {found:?} position for a {sort:?} list"
+                        )));
+                    }
+                }
+                Some(after.id.as_uuid())
+            }
+        };
+        let (position, order) = match key {
+            None => (format!("c.id {cmp} $1"), format!("c.id {dir}")),
+            Some(key) => (
+                format!(r#"({key}, c.id) {cmp} (($4::text COLLATE "C"), $1)"#),
+                format!("{key} {dir}, c.id {dir}"),
+            ),
+        };
+        let fetch = i64::from(page.limit.get()) + 1;
+        let mut conn = self.conn().await;
+        let rows = conn
+            .client()
+            .query_typed(
+                &format!(
+                    "SELECT c.id, c.email, c.first_name, c.last_name, c.phone, {stamps},
+                        (SELECT count(*) FROM customer_addresses a
+                         WHERE a.customer_id = c.id) AS address_count
+                     FROM customers c
+                     WHERE ($1::uuid IS NULL OR {position})
+                       AND ($3::text IS NULL
+                            OR strpos(lower(c.email), lower($3)) > 0
+                            OR strpos(lower(c.first_name), lower($3)) > 0
+                            OR strpos(lower(c.last_name), lower($3)) > 0
+                            OR strpos(lower(c.phone), lower($3)) > 0)
+                     ORDER BY {order} LIMIT $2",
+                    stamps = stamp_columns("c."),
+                ),
+                &[
+                    (&after, Type::UUID),
+                    (&fetch, Type::INT8),
+                    (&filter.q(), Type::TEXT),
+                    (&text_key, Type::TEXT),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        let summaries = rows
+            .iter()
+            .map(|row| {
+                let id = CustomerId::from_uuid(col(row, "id")?);
+                let email: String = col(row, "email")?;
+                let addresses: i64 = col(row, "address_count")?;
+                Ok(CustomerSummary {
+                    id,
+                    email: Email::new(&email).map_err(corrupt)?,
+                    first_name: col(row, "first_name")?,
+                    last_name: col(row, "last_name")?,
+                    phone: col(row, "phone")?,
+                    address_count: usize::try_from(addresses)
+                        .map_err(|_| corrupt(format!("customer {id} address count")))?,
+                    stamps: stamps_from_row(row)?,
+                })
+            })
+            .collect::<Result<Vec<_>, RepoError>>()?;
+        Ok(Page::from_overfetch(summaries, page.limit))
     }
 
     async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError> {

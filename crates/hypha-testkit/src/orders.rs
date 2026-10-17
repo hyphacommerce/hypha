@@ -1,9 +1,11 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use hypha_core::{
-    OrderId, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
+    Keyset, OrderId, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
 };
-use hypha_orders::{Order, OrderNumber, OrderRepo, OrderSummary, repo::keys};
+use hypha_orders::{
+    Order, OrderFilter, OrderNumber, OrderRepo, OrderSort, OrderSummary, repo::keys,
+};
 
 use crate::{InMemoryOutbox, table::Table};
 
@@ -63,8 +65,27 @@ impl OrderRepo for InMemoryOrderRepo {
         Ok(self.orders.find(|o| o.number() == number))
     }
 
-    async fn list(&self, page: PageRequest<OrderId>) -> Result<Page<OrderSummary>, RepoError> {
-        Ok(self.orders.page(|_| true, page, Order::summary))
+    async fn list(
+        &self,
+        filter: &OrderFilter,
+        sort: OrderSort,
+        page: PageRequest<Keyset<OrderId>>,
+    ) -> Result<Page<OrderSummary>, RepoError> {
+        if let Some(after) = &page.after
+            && !sort.fits(&after.key)
+        {
+            return Err(RepoError::Backend(format!(
+                "a {:?} position for a {sort:?} list",
+                after.key
+            )));
+        }
+        Ok(self.orders.page_sorted(
+            |o| filter.matches(o),
+            &page,
+            sort.direction(),
+            Order::summary,
+            |s: &OrderSummary| sort.key(s),
+        ))
     }
 
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {

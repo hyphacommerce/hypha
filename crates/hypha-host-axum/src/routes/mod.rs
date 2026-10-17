@@ -90,11 +90,14 @@ macro_rules! route_table {
             [admin, POST, "/admin/me/mfa/totp/disable", me::disable_totp_handler],
             [admin, POST, "/admin/me/mfa/recovery-codes", me::recovery_codes_handler],
             // staff, roles, invites, API keys
+            [admin, GET, "/admin/roles", staff::list_roles_handler],
             [admin, POST, "/admin/roles", staff::create_role_handler],
             [admin, GET, "/admin/roles/{id}", staff::fetch_role],
             [admin, PATCH, "/admin/roles/{id}", staff::update_role_handler],
+            [admin, GET, "/admin/users", staff::list_users_handler],
             [admin, GET, "/admin/users/{id}", staff::fetch_user],
             [admin, PATCH, "/admin/users/{id}", staff::update_user_handler],
+            [admin, GET, "/admin/invites", staff::list_invites_handler],
             [admin, POST, "/admin/invites", staff::invite_handler],
             [admin, GET, "/admin/api-keys", api_keys::list],
             [admin, POST, "/admin/api-keys", api_keys::create],
@@ -155,6 +158,7 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/fulfillments/{id}", fulfillments::update],
             [admin, POST, "/admin/fulfillments/{id}/cancel", fulfillments::cancel],
             // customers
+            [admin, GET, "/admin/customers", customers::list],
             [admin, POST, "/admin/customers", customers::create],
             [admin, GET, "/admin/customers/{id}", customers::fetch],
             [admin, PATCH, "/admin/customers/{id}", customers::update],

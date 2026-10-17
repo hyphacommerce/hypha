@@ -1,7 +1,8 @@
 use hypha_core::{
-    Address, AddressId, AddressParts, CustomerId, Email, RepoError, Version, Versioned,
+    Address, AddressId, AddressParts, CustomerId, Email, Keyset, PageLimit, PageRequest, RepoError,
+    Version, Versioned,
 };
-use hypha_customers::{Customer, CustomerRepo, repo::keys};
+use hypha_customers::{Customer, CustomerFilter, CustomerRepo, CustomerSort, repo::keys};
 use uuid::Uuid;
 
 use super::scenario;
@@ -68,6 +69,124 @@ pub async fn customer_repo<R: CustomerRepo>(make: impl AsyncFn() -> R) {
     keys(&make().await).await;
     scenario("customer: stale and missing updates fail");
     stale(&make().await).await;
+    scenario("customer: list summaries by text, sorted by email or name in pages");
+    listed(&make().await).await;
+}
+
+/// Every page of `sort`'s list under `filter`, `limit` at a time.
+async fn all_customers<R: CustomerRepo>(
+    repo: &R,
+    filter: &CustomerFilter,
+    sort: CustomerSort,
+    limit: u32,
+) -> Vec<CustomerId> {
+    let mut found = Vec::new();
+    let mut after = None;
+    loop {
+        let page = repo
+            .list(
+                filter,
+                sort,
+                PageRequest {
+                    after: after.clone(),
+                    limit: PageLimit::new(limit).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        found.extend(page.items.iter().map(|c| c.id));
+        match page.items.last() {
+            Some(last) if page.has_more => {
+                after = Some(Keyset {
+                    key: sort.key(last),
+                    id: last.id,
+                })
+            }
+            _ => return found,
+        }
+    }
+}
+
+async fn listed<R: CustomerRepo>(repo: &R) {
+    // 1: Ana Horvat with two addresses; 2: no name; 3: Ivo Ćorić, a phone; 4: ana
+    // again by first name only.
+    let mut ana = customer(1, "ana@example.hr");
+    ana.set_first_name(Some("Ana".to_string())).unwrap();
+    ana.set_last_name(Some("Horvat".to_string())).unwrap();
+    ana.add_address(addr_id(1), bare_address("Split"), true, false)
+        .unwrap();
+    ana.add_address(addr_id(2), bare_address("Zagreb"), false, false)
+        .unwrap();
+    let mut ivo = customer(3, "Ivo@Example.rs");
+    ivo.set_first_name(Some("Ivo".to_string())).unwrap();
+    ivo.set_last_name(Some("Ćorić".to_string())).unwrap();
+    ivo.set_phone(Some("+381 60 123".to_string())).unwrap();
+    let mut other = customer(4, "zed@example.com");
+    other.set_first_name(Some("ana".to_string())).unwrap();
+    for c in [
+        &mut ivo,
+        &mut ana,
+        &mut customer(2, "b@example.com"),
+        &mut other,
+    ] {
+        repo.insert(c).await.unwrap();
+    }
+
+    let first = repo
+        .list(
+            &CustomerFilter::default(),
+            CustomerSort::Oldest,
+            PageRequest {
+                after: None,
+                limit: PageLimit::new(1).unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        first.items,
+        vec![repo.get(customer_id(1)).await.unwrap().unwrap().summary()]
+    );
+    assert_eq!(first.items[0].address_count, 2);
+
+    let every = CustomerFilter::default();
+    let ids = |ns: &[u128]| ns.iter().map(|n| customer_id(*n)).collect::<Vec<_>>();
+    for limit in [1, 3, 10] {
+        assert_eq!(
+            all_customers(repo, &every, CustomerSort::EmailAsc, limit).await,
+            ids(&[1, 2, 3, 4]),
+            "emails ignoring case"
+        );
+        assert_eq!(
+            all_customers(repo, &every, CustomerSort::NameAsc, limit).await,
+            ids(&[2, 4, 1, 3]),
+            "no name first, then \"ana \" before \"ana horvat\""
+        );
+        assert_eq!(
+            all_customers(repo, &every, CustomerSort::NameDesc, limit).await,
+            ids(&[3, 1, 4, 2])
+        );
+        assert_eq!(
+            all_customers(repo, &every, CustomerSort::Newest, limit).await,
+            ids(&[4, 3, 2, 1])
+        );
+    }
+    let text = |q: &str| CustomerFilter::new(Some(q.to_string())).unwrap();
+    assert_eq!(
+        all_customers(repo, &text("ANA"), CustomerSort::Oldest, 10).await,
+        ids(&[1, 4]),
+        "email or first name"
+    );
+    assert_eq!(
+        all_customers(repo, &text("ćor"), CustomerSort::Oldest, 10).await,
+        ids(&[3]),
+        "a last name beyond ASCII"
+    );
+    assert_eq!(
+        all_customers(repo, &text("60 1"), CustomerSort::Oldest, 10).await,
+        ids(&[3]),
+        "a phone"
+    );
 }
 
 async fn round_trips<R: CustomerRepo>(repo: &R) {

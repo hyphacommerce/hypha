@@ -2,16 +2,16 @@
 //! straight between the client and storage; these routes sign and check.
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::AssetId;
+use hypha_core::{AssetId, Keyset, SortKey};
 use hypha_media::{
-    Asset, AssetKind, AssetStatus, AssetUsage, CreateUpload, HasAssets, UpdateAsset, UsageOwner,
-    Visibility, complete_upload, create_upload, delete_asset, get_asset, list_asset_usages,
-    list_assets, update_asset,
+    Asset, AssetKind, AssetSort, AssetStatus, AssetUsage, CreateUpload, HasAssets, UpdateAsset,
+    UsageOwner, Visibility, complete_upload, create_upload, delete_asset, get_asset,
+    list_asset_usages, list_assets, update_asset,
 };
 use serde::{Deserialize, Serialize};
 
 use super::{
-    page::{ListQuery, PageParams, PageResponse},
+    page::{ListQuery, PageParams, PageResponse, SortedFilters},
     rfc3339,
 };
 use crate::{
@@ -278,12 +278,46 @@ pub(super) async fn complete<S: Storage>(
 pub(super) struct AssetFilters {
     /// Only assets of this kind.
     kind: Option<AssetKindDto>,
+    /// Only assets whose file name, alt text or title contains this text, ignoring case.
+    /// Up to 255 characters; blank filters nothing.
+    q: Option<String>,
+    #[param(inline)]
+    sort: Option<AssetSortDto>,
+}
+
+/// The order of the library (design note 0024, AU1). Default `newest`. Names compare
+/// lowercased, character by character; ties go by upload, in the same direction.
+#[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum AssetSortDto {
+    Newest,
+    Oldest,
+    NameAsc,
+    NameDesc,
+}
+
+impl AssetFilters {
+    fn sort(&self) -> AssetSort {
+        match self.sort {
+            None | Some(AssetSortDto::Newest) => AssetSort::Newest,
+            Some(AssetSortDto::Oldest) => AssetSort::Oldest,
+            Some(AssetSortDto::NameAsc) => AssetSort::NameAsc,
+            Some(AssetSortDto::NameDesc) => AssetSort::NameDesc,
+        }
+    }
+}
+
+impl SortedFilters for AssetFilters {
+    fn fits(&self, key: &SortKey) -> bool {
+        self.sort().fits(key)
+    }
 }
 
 /// A page of assets (named for the documents: utoipa's `body =` takes a plain name).
 type AssetPage = PageResponse<AssetResponse>;
 
-/// The library: ready assets, newest first, optionally of one kind.
+/// The library: ready assets, newest first or in `sort`'s order, optionally of one kind
+/// or matching text.
 #[utoipa::path(
     get,
     path = "/admin/assets",
@@ -297,17 +331,22 @@ pub(super) async fn list<S: Storage>(
     query: ListQuery<AssetFilters>,
 ) -> Result<Json<AssetPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, filters, scope) = query.parse()?;
+    let (page, filters, scope) = query.parse_sorted()?;
     let media = media(&state)?;
-    let page = list_assets(&ctx, ports.assets(), filters.kind.map(Into::into), page).await?;
+    let sort = filters.sort();
+    let kind = filters.kind.map(Into::into);
+    let page = list_assets(&ctx, ports.assets(), kind, filters.q, sort, page).await?;
     let mut items = Vec::with_capacity(page.items.len());
     for asset in &page.items {
         items.push(AssetResponse::new(asset, media).await?);
     }
-    Ok(Json(PageResponse::with_items(
+    Ok(Json(PageResponse::sorted(
         &page,
         &scope,
-        Asset::id,
+        |a| Keyset {
+            key: sort.key(a),
+            id: a.id(),
+        },
         items,
     )?))
 }

@@ -69,6 +69,20 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
             .transpose()
     }
 
+    async fn list_all(&self) -> Result<Vec<User>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.client()
+            .query_typed(
+                &format!("SELECT {} FROM users ORDER BY id", user_columns()),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(user_from_row)
+            .collect()
+    }
+
     async fn any(&self) -> Result<bool, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
@@ -225,6 +239,20 @@ impl<C: PgConnection> RoleRepo for PgStore<C> {
         select_role(conn.client(), "is_owner", &[]).await
     }
 
+    async fn list_all(&self) -> Result<Vec<Role>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.client()
+            .query_typed(
+                &format!("SELECT {ROLE_COLUMNS} FROM roles ORDER BY id"),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(role_from_row)
+            .collect()
+    }
+
     async fn insert(&self, role: &mut Role) -> Result<(), RepoError> {
         let s = role.snapshot();
         in_transaction!(self, |tx| insert_role(tx, &s).await)?;
@@ -340,6 +368,23 @@ impl<C: PgConnection> InviteRepo for PgStore<C> {
         let mut conn = self.conn().await;
         let bytes = hash.as_bytes().as_slice();
         select_invite(conn.client(), "token_hash = $1", &bytes, Type::BYTEA).await
+    }
+
+    async fn pending(&self) -> Result<Vec<Invite>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.client()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM invites WHERE accepted_at IS NULL ORDER BY id",
+                    invite_columns()
+                ),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(invite_from_row)
+            .collect()
     }
 
     async fn insert(&self, invite: &mut Invite) -> Result<(), RepoError> {

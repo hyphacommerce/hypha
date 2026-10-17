@@ -1136,6 +1136,92 @@ async fn orders_list_starts_empty() {
 }
 
 #[tokio::test]
+async fn orders_list_by_filters_and_total() {
+    let app = app().await;
+    let (order, _, _) = placed_order_for_three_mugs(&app).await;
+    let found = async |query: &str| {
+        let (status, page) = send(&app, "GET", &format!("/admin/orders?{query}"), None).await;
+        assert_eq!(status, StatusCode::OK, "{query}: {page}");
+        ids(&page).len()
+    };
+    assert_eq!(found("q=ANA@EXAMPLE").await, 1);
+    assert_eq!(found("q=nobody").await, 0);
+    assert_eq!(
+        found("financial_status=pending&financial_status=paid").await,
+        1
+    );
+    assert_eq!(found("financial_status=paid").await, 0);
+    assert_eq!(
+        found("fulfillment_status=unfulfilled&cancelled=false").await,
+        1
+    );
+    assert_eq!(found("country=HR&currency=EUR&sort=total_desc").await, 1);
+    assert_eq!(found("placed_from=2000-01-01T00:00:00Z").await, 1);
+    assert_eq!(found("placed_before=2000-01-01T00:00:00Z").await, 0);
+    let (_, page) = send(&app, "GET", "/admin/orders?sort=oldest", None).await;
+    assert_eq!(ids(&page), [order.as_str()]);
+
+    for (query, expected) in [
+        (
+            "sort=total_asc",
+            (StatusCode::UNPROCESSABLE_ENTITY, "sort_needs_currency"),
+        ),
+        (
+            "country=XX",
+            (StatusCode::UNPROCESSABLE_ENTITY, "unknown_country_code"),
+        ),
+        (
+            "currency=EURO",
+            (StatusCode::UNPROCESSABLE_ENTITY, "unknown_currency"),
+        ),
+        (
+            "placed_from=yesterday",
+            (StatusCode::BAD_REQUEST, "invalid_query"),
+        ),
+        (
+            "financial_status=refunded",
+            (StatusCode::BAD_REQUEST, "invalid_query"),
+        ),
+    ] {
+        let (status, body) = send(&app, "GET", &format!("/admin/orders?{query}"), None).await;
+        assert_eq!((status, code(&body)), expected, "{query}");
+    }
+    let long = "x".repeat(256);
+    let (status, body) = send(&app, "GET", &format!("/admin/orders?q={long}"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "field_too_long")
+    );
+}
+
+#[tokio::test]
+async fn customers_list_by_text_and_name() {
+    let app = app().await;
+    for body in [
+        r#"{"email":"zed@example.com","first_name":"Ana"}"#,
+        r#"{"email":"ivo@example.hr","first_name":"Ivo","last_name":"Horvat"}"#,
+    ] {
+        let (status, _) = send(&app, "POST", "/admin/customers", Some(body)).await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+    let (status, page) = send(&app, "GET", "/admin/customers?sort=name_asc&limit=1", None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["items"][0]["email"], "zed@example.com");
+    assert_eq!(page["items"][0]["address_count"], 0);
+    let cursor = page["next_cursor"].as_str().unwrap();
+    let uri = format!("/admin/customers?sort=name_asc&limit=1&cursor={cursor}");
+    let (_, next) = send(&app, "GET", &uri, None).await;
+    assert_eq!(next["items"][0]["email"], "ivo@example.hr");
+    let (_, found) = send(&app, "GET", "/admin/customers?q=horv", None).await;
+    assert_eq!(found["items"].as_array().unwrap().len(), 1);
+    let (status, body) = send(&app, "GET", "/admin/customers?sort=total_desc", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+}
+
+#[tokio::test]
 async fn bad_list_queries_are_rejected_with_codes() {
     let app = app().await;
     for (uri, expected) in [
@@ -1263,6 +1349,10 @@ async fn an_upload_goes_straight_to_storage_and_completes_into_a_ready_asset() {
     assert_eq!(ids(&page), [id]);
     let (_, videos) = send(&app, "GET", "/admin/assets?kind=video", None).await;
     assert_eq!(ids(&videos), Vec::<&str>::new());
+    let (_, named) = send(&app, "GET", "/admin/assets?q=SHIRT&sort=name_asc", None).await;
+    assert_eq!(ids(&named), [id], "by name, sorted by it");
+    let (_, none) = send(&app, "GET", "/admin/assets?q=trousers", None).await;
+    assert_eq!(ids(&none), Vec::<&str>::new());
 
     let uri = format!("/admin/assets/{id}");
     let (status, patched) = send(&app, "PATCH", &uri, Some(r#"{"alt":"A blue shirt"}"#)).await;
@@ -2123,6 +2213,21 @@ async fn roles_and_invites_over_http() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(invited["email"], "bob@example.com");
     assert!(invited.get("token").is_none());
+
+    // The lists staff pages read (design note 0024, AU6).
+    let (status, roles) = send(&app, "GET", "/admin/roles", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let names: Vec<&Value> = roles["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| &r["name"])
+        .collect();
+    assert_eq!(names, [&json!("Owner"), &json!("Support")]);
+    let (_, invites) = send(&app, "GET", "/admin/invites", None).await;
+    assert_eq!(ids(&invites), [invited["id"].as_str().unwrap()]);
+    let (_, users) = send(&app, "GET", "/admin/users", None).await;
+    assert_eq!(users["items"].as_array().unwrap().len(), 1, "the owner");
 
     let unknown_role = "role_00000000000000000000000000000063";
     let (status, body) = send(&app, "GET", &format!("/admin/roles/{unknown_role}"), None).await;

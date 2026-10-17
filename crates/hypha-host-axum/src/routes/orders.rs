@@ -4,20 +4,20 @@ use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_checkout::{Checkout, checkout};
 use hypha_core::{
-    CartId, ChannelId, CountryCode, Currency, CustomerId, Email, LocationId, MarketId, Money,
-    OrderId, OrderLineId, ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate,
-    VariantId,
+    CartId, ChannelId, CountryCode, Currency, CustomerId, Email, Keyset, LocationId, MarketId,
+    Money, OrderId, OrderLineId, ProductId, ShippingGroupId, ShippingOptionId, SortKey, TaxClassId,
+    TaxRate, Timestamp, VariantId,
 };
 use hypha_order_actions::{BuyerEmail, CancelOrder, OrderView, cancel_order, order_view};
 use hypha_orders::{
-    CancelReason, FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, OrderSummary,
-    list_orders, mark_order_paid,
+    CancelReason, FinancialStatus, FulfillmentStatus, HasOrders, ListOrders, Order,
+    OrderFilterInput, OrderLine, OrderSort, OrderSummary, list_orders, mark_order_paid,
 };
 use serde::{Deserialize, Serialize};
 
 use super::{
     address::PostalAddressResponse,
-    page::{ListQuery, PageParams, PageResponse},
+    page::{ListQuery, PageParams, PageResponse, SortedFilters},
     rfc3339,
     shipping::DeliveryEstimateDto,
 };
@@ -39,7 +39,7 @@ pub(super) struct CheckoutRequest {
 
 /// `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
 /// serde and renaming a variant can't silently change the API.
-#[derive(Serialize, utoipa::ToSchema)]
+#[derive(Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum FinancialStatusDto {
     Pending,
@@ -56,7 +56,7 @@ impl From<FinancialStatus> for FinancialStatusDto {
 }
 
 /// `FulfillmentStatus` on the wire.
-#[derive(Serialize, utoipa::ToSchema)]
+#[derive(Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum FulfillmentStatusDto {
     Unfulfilled,
@@ -351,27 +351,149 @@ impl OrderSummaryResponse {
 /// A page of orders (named for the documents: utoipa's `body =` takes a plain name).
 type OrderPage = PageResponse<OrderSummaryResponse>;
 
-/// Orders, newest first.
+impl From<FinancialStatusDto> for FinancialStatus {
+    fn from(s: FinancialStatusDto) -> Self {
+        match s {
+            FinancialStatusDto::Pending => FinancialStatus::Pending,
+            FinancialStatusDto::Paid => FinancialStatus::Paid,
+        }
+    }
+}
+
+impl From<FulfillmentStatusDto> for FulfillmentStatus {
+    fn from(s: FulfillmentStatusDto) -> Self {
+        match s {
+            FulfillmentStatusDto::Unfulfilled => FulfillmentStatus::Unfulfilled,
+            FulfillmentStatusDto::PartiallyFulfilled => FulfillmentStatus::PartiallyFulfilled,
+            FulfillmentStatusDto::Fulfilled => FulfillmentStatus::Fulfilled,
+        }
+    }
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(super) struct OrderFilters {
+    /// The order's number (`1001` or `#1001`), or text its email contains, ignoring case.
+    /// Up to 255 characters; blank filters nothing.
+    q: Option<String>,
+    /// Only orders in this payment status; repeat for any of several.
+    #[serde(default)]
+    financial_status: Vec<FinancialStatusDto>,
+    /// Only orders in this fulfilment status; repeat for any of several.
+    #[serde(default)]
+    fulfillment_status: Vec<FulfillmentStatusDto>,
+    /// Only cancelled orders (`true`), or only those that aren't (`false`).
+    cancelled: Option<bool>,
+    /// Only orders placed through this sales channel.
+    #[param(value_type = Option<ChannelId>)]
+    channel: Option<ChannelId>,
+    /// Only orders shipped to (or placed in) this country (ISO 3166-1 alpha-2).
+    country: Option<String>,
+    /// Only orders in this currency (ISO 4217); needed to sort by total.
+    currency: Option<String>,
+    /// Only orders placed at or after this instant (RFC 3339).
+    placed_from: Option<String>,
+    /// Only orders placed before this instant (RFC 3339).
+    placed_before: Option<String>,
+    #[param(inline)]
+    sort: Option<OrderSortDto>,
+}
+
+/// The order of an order list (design note 0024, AU1). Default `newest`. Sorting by
+/// total needs the `currency` filter (`422 sort_needs_currency`); ties go by placing
+/// order, in the same direction.
+#[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum OrderSortDto {
+    Newest,
+    Oldest,
+    TotalDesc,
+    TotalAsc,
+}
+
+impl OrderFilters {
+    fn sort(&self) -> OrderSort {
+        match self.sort {
+            None | Some(OrderSortDto::Newest) => OrderSort::Newest,
+            Some(OrderSortDto::Oldest) => OrderSort::Oldest,
+            Some(OrderSortDto::TotalDesc) => OrderSort::TotalDesc,
+            Some(OrderSortDto::TotalAsc) => OrderSort::TotalAsc,
+        }
+    }
+
+    fn input(self) -> Result<OrderFilterInput, ApiError> {
+        let instant = |name: &str, value: Option<String>| {
+            value
+                .map(|v| {
+                    v.parse::<jiff::Timestamp>()
+                        .map(|t| Timestamp::from_unix_micros(t.as_microsecond()))
+                        .map_err(|e| {
+                            ApiError::invalid_query(format!("`{name}` is an RFC 3339 instant: {e}"))
+                        })
+                })
+                .transpose()
+        };
+        Ok(OrderFilterInput {
+            q: self.q,
+            financial_statuses: self.financial_status.into_iter().map(Into::into).collect(),
+            fulfillment_statuses: self
+                .fulfillment_status
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            cancelled: self.cancelled,
+            channel: self.channel,
+            country: self.country.as_deref().map(CountryCode::new).transpose()?,
+            currency: self.currency.as_deref().map(Currency::new).transpose()?,
+            placed_from: instant("placed_from", self.placed_from)?,
+            placed_before: instant("placed_before", self.placed_before)?,
+        })
+    }
+}
+
+impl SortedFilters for OrderFilters {
+    fn fits(&self, key: &SortKey) -> bool {
+        self.sort().fits(key)
+    }
+}
+
+/// Orders, newest first or in `sort`'s order, narrowed by the filters (every one given
+/// must match).
 #[utoipa::path(
     get,
     path = "/admin/orders",
-    params(PageParams),
+    params(PageParams, OrderFilters),
     responses((status = 200, description = "OK", body = OrderPage)),
     extensions(("x-hypha-scopes" = json!(["orders:read"]))),
 )]
 pub(super) async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
-    query: ListQuery,
+    query: ListQuery<OrderFilters>,
 ) -> Result<Json<OrderPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, _, scope) = query.parse()?;
-    let page = list_orders(&ctx, ports.orders(), page).await?;
-    Ok(Json(PageResponse::new(
-        page,
+    let (page, filters, scope) = query.parse_sorted()?;
+    let sort = filters.sort();
+    let input = ListOrders {
+        filter: filters.input()?,
+        sort,
+    };
+    let page = list_orders(&ctx, ports.orders(), input, page).await?;
+    let items = page
+        .items
+        .iter()
+        .cloned()
+        .map(OrderSummaryResponse::new)
+        .collect::<Result<_, _>>()?;
+    Ok(Json(PageResponse::sorted(
+        &page,
         &scope,
-        |o| o.id,
-        OrderSummaryResponse::new,
+        |o| Keyset {
+            key: sort.key(o),
+            id: o.id,
+        },
+        items,
     )?))
 }
 

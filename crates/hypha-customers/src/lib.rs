@@ -7,13 +7,16 @@ pub mod commands;
 pub mod customer;
 pub mod error;
 pub mod events;
+pub mod list;
 pub mod repo;
 
 pub use commands::{
     CommandError, CreateCustomer, SaveAddress, UpdateCustomer, add_address, create_customer,
-    find_or_create_customer, get_customer, remove_address, update_address, update_customer,
+    find_or_create_customer, get_customer, list_customers, remove_address, update_address,
+    update_customer,
 };
 pub use customer::{Customer, CustomerSnapshot, SavedAddress};
 pub use error::{CustomerError, RestoreError};
 pub use events::{CustomerCreated, CustomerUpdated};
+pub use list::{CustomerFilter, CustomerSort, CustomerSummary};
 pub use repo::{CustomerRepo, HasCustomers, StageCustomers};

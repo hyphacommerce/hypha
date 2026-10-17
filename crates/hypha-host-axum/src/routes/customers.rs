@@ -4,13 +4,15 @@ use hypha_core::Stamped;
 
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AddressId, AddressParts, CountryCode, CustomerId, Email};
+use hypha_core::{AddressId, AddressParts, CountryCode, CustomerId, Email, Keyset, SortKey};
 use hypha_customers::{
-    CreateCustomer, Customer, HasCustomers, SaveAddress, SavedAddress, UpdateCustomer, add_address,
-    create_customer, get_customer, remove_address, update_address, update_customer,
+    CreateCustomer, Customer, CustomerSort, CustomerSummary, HasCustomers, SaveAddress,
+    SavedAddress, UpdateCustomer, add_address, create_customer, get_customer, list_customers,
+    remove_address, update_address, update_customer,
 };
 use serde::{Deserialize, Serialize};
 
+use super::page::{ListQuery, PageParams, PageResponse, SortedFilters};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
@@ -152,6 +154,119 @@ impl CustomerResponse {
             addresses: c.addresses().iter().map(AddressResponse::from).collect(),
         })
     }
+}
+
+/// A customer in a list: without the address book (design note 0024).
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct CustomerSummaryResponse {
+    id: CustomerId,
+    email: Email,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    phone: Option<String>,
+    /// How many addresses the address book holds.
+    address_count: u64,
+    /// When the customer was created, RFC 3339 in UTC.
+    created_at: String,
+    /// When the customer last changed, RFC 3339 in UTC.
+    updated_at: String,
+}
+
+impl CustomerSummaryResponse {
+    fn new(c: CustomerSummary) -> Result<Self, ApiError> {
+        let (created_at, updated_at) = stamp_times(c.stamps)?;
+        Ok(Self {
+            id: c.id,
+            email: c.email,
+            first_name: c.first_name,
+            last_name: c.last_name,
+            phone: c.phone,
+            address_count: c.address_count as u64,
+            created_at,
+            updated_at,
+        })
+    }
+}
+
+/// A page of customers (named for the documents: utoipa's `body =` takes a plain name).
+type CustomerSummaryPage = PageResponse<CustomerSummaryResponse>;
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(super) struct CustomerFilters {
+    /// Only customers whose email, first or last name or phone contains this text,
+    /// ignoring case. Up to 255 characters; blank filters nothing.
+    q: Option<String>,
+    #[param(inline)]
+    sort: Option<CustomerSortDto>,
+}
+
+/// The order of a customer list (design note 0024, AU1). Default `newest`. A name is
+/// the first name, a space and the last name, compared lowercased character by
+/// character; ties go by creation, in the same direction.
+#[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum CustomerSortDto {
+    Newest,
+    Oldest,
+    EmailAsc,
+    EmailDesc,
+    NameAsc,
+    NameDesc,
+}
+
+impl CustomerFilters {
+    fn sort(&self) -> CustomerSort {
+        match self.sort {
+            None | Some(CustomerSortDto::Newest) => CustomerSort::Newest,
+            Some(CustomerSortDto::Oldest) => CustomerSort::Oldest,
+            Some(CustomerSortDto::EmailAsc) => CustomerSort::EmailAsc,
+            Some(CustomerSortDto::EmailDesc) => CustomerSort::EmailDesc,
+            Some(CustomerSortDto::NameAsc) => CustomerSort::NameAsc,
+            Some(CustomerSortDto::NameDesc) => CustomerSort::NameDesc,
+        }
+    }
+}
+
+impl SortedFilters for CustomerFilters {
+    fn fits(&self, key: &SortKey) -> bool {
+        self.sort().fits(key)
+    }
+}
+
+/// Customers, newest first or in `sort`'s order, optionally matching text.
+#[utoipa::path(
+    get,
+    path = "/admin/customers",
+    params(PageParams, CustomerFilters),
+    responses((status = 200, description = "OK", body = CustomerSummaryPage)),
+    extensions(("x-hypha-scopes" = json!(["customers:read"]))),
+)]
+pub(super) async fn list<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    query: ListQuery<CustomerFilters>,
+) -> Result<Json<CustomerSummaryPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, filters, scope) = query.parse_sorted()?;
+    let sort = filters.sort();
+    let page = list_customers(&ctx, ports.customers(), filters.q, sort, page).await?;
+    let items = page
+        .items
+        .iter()
+        .cloned()
+        .map(CustomerSummaryResponse::new)
+        .collect::<Result<_, _>>()?;
+    Ok(Json(PageResponse::sorted(
+        &page,
+        &scope,
+        |c| Keyset {
+            key: sort.key(c),
+            id: c.id,
+        },
+        items,
+    )?))
 }
 
 /// Creates a customer.

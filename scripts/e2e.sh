@@ -289,6 +289,8 @@ step "complete the upload" 200 - -X POST "$BASE/admin/assets/$ASSET/complete"
 contains "it is ready, with its dimensions" '"width":3,"height":2'
 step "list images" 200 - "$BASE/admin/assets?kind=image"
 contains "the asset is listed" "\"items\":[{\"id\":\"$ASSET\""
+step "the library by name (design note 0024)" 200 - "$BASE/admin/assets?sort=name_asc&q=png"
+step "an unknown library sort" 400 invalid_query "$BASE/admin/assets?sort=size"
 step "set its alt text" 200 - -X PATCH "$BASE/admin/assets/$ASSET" -H "$JSON" -d '{"alt":"A blue shirt"}'
 contains "the alt text is stored" '"alt":"A blue shirt"'
 step "an SVG is refused" 422 unsupported_media_type -X POST "$BASE/admin/assets" -H "$JSON" \
@@ -560,6 +562,12 @@ step "get the order" 200 - "$BASE/admin/orders/$ORDER"
 contains "it has a placed_at" '"placed_at":"20'
 step "list orders" 200 - "$BASE/admin/orders?limit=1"
 contains "the order is listed first" "\"items\":[{\"id\":\"$ORDER\""
+step "orders by status and total (design note 0024)" 200 - "$BASE/admin/orders?financial_status=pending&currency=EUR&sort=total_desc"
+contains "finds the order" "\"id\":\"$ORDER\""
+step "a total sort without a currency" 422 sort_needs_currency "$BASE/admin/orders?sort=total_asc"
+step "orders placed before 2000" 200 - "$BASE/admin/orders?placed_before=2000-01-01T00:00:00Z"
+contains "none" '"items":[]'
+step "a date that isn't one" 400 invalid_query "$BASE/admin/orders?placed_from=yesterday"
 step "mark it paid" 200 - -X POST "$BASE/admin/orders/$ORDER/paid"
 contains "it is paid" '"financial_status":"paid"'
 step "mark it paid again" 200 - -X POST "$BASE/admin/orders/$ORDER/paid"
@@ -698,6 +706,8 @@ contains "email is normalized" '"email":"ana@example.hr","first_name":"Ana"'
 step "rename customer" 200 - -X PATCH "$BASE/admin/customers/$CUSTOMER" -H "$JSON" \
     -d '{"first_name":null,"last_name":"Horvat"}'
 contains "null clears, others change" '"first_name":null,"last_name":"Horvat"'
+step "customers by text, by name (design note 0024)" 200 - "$BASE/admin/customers?q=horvat&sort=name_asc"
+contains "finds her" "\"items\":[{\"id\":\"$CUSTOMER\""
 step "add shipping address" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
 ADDRESS=$(address)
@@ -1144,6 +1154,11 @@ step "invite someone" 201 - -X POST "$BASE/admin/invites" -H "$JSON" \
     -d "{\"email\":\"support@example.com\",\"role\":\"$ROLE\"}"
 step "staff can't be invited" 409 user_exists -X POST "$BASE/admin/invites" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"role\":\"$ROLE\"}"
+step "pending invites (design note 0024)" 200 - "$BASE/admin/invites"
+contains "lists the invite" '"email":"support@example.com"'
+step "every role" 200 - "$BASE/admin/roles"
+step "every staff user" 200 - "$BASE/admin/users"
+contains "the owner is staff" "\"email\":\"$OWNER_EMAIL\""
 AUTH=()
 step "a made-up invite token" 401 invalid_token -X POST "$BASE/admin/invites/accept" -H "$JSON" \
     -d '{"token":"hypha_inv_nope","name":"Eve","password":"eve password"}'

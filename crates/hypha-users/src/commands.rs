@@ -228,6 +228,28 @@ async fn load_role<R: RoleRepo>(roles: &R, id: RoleId) -> Result<Role, CommandEr
     roles.get(id).await?.ok_or(CommandError::RoleNotFound(id))
 }
 
+/// Every role, oldest first (design note 0024, AU6).
+pub async fn list_roles<R: RoleRepo>(ctx: &Ctx, roles: &R) -> Result<Vec<Role>, CommandError> {
+    ctx.require(Scope::UsersRead)?;
+    Ok(roles.list_all().await?)
+}
+
+/// Every staff user, oldest first (design note 0024, AU6).
+pub async fn list_users<R: UserRepo>(ctx: &Ctx, users: &R) -> Result<Vec<User>, CommandError> {
+    ctx.require(Scope::UsersRead)?;
+    Ok(users.list_all().await?)
+}
+
+/// Every invite not yet accepted, oldest first; expired ones too, so staff can renew
+/// them (inviting the same email again).
+pub async fn list_invites<R: InviteRepo>(
+    ctx: &Ctx,
+    invites: &R,
+) -> Result<Vec<Invite>, CommandError> {
+    ctx.require(Scope::UsersRead)?;
+    Ok(invites.pending().await?)
+}
+
 pub async fn get_role<R: RoleRepo>(ctx: &Ctx, roles: &R, id: RoleId) -> Result<Role, CommandError> {
     ctx.require(Scope::UsersRead)?;
     load_role(roles, id).await

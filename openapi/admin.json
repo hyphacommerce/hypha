@@ -2129,6 +2129,84 @@
         ],
         "type": "object"
       },
+      "CustomerSummaryPage": {
+        "description": "A page of a list, newest first (design note 0012).",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CustomerSummaryResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "CustomerSummaryResponse": {
+        "description": "A customer in a list: without the address book (design note 0024).",
+        "properties": {
+          "address_count": {
+            "description": "How many addresses the address book holds.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "When the customer was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "email": {
+            "$ref": "#/components/schemas/Email"
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/CustomerId"
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "description": "When the customer last changed, RFC 3339 in UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "address_count",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "DeliveryEstimateDto": {
         "additionalProperties": false,
         "description": "Delivery in days, from `min_days` to `max_days`.",
@@ -2723,6 +2801,21 @@
         ],
         "pattern": "^inv_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "InviteListResponse": {
+        "properties": {
+          "items": {
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/InviteResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
       },
       "InviteRequest": {
         "additionalProperties": false,
@@ -4346,6 +4439,21 @@
         "pattern": "^role_[0-9a-f]{32}$",
         "type": "string"
       },
+      "RoleListResponse": {
+        "properties": {
+          "items": {
+            "description": "Oldest first. A store has a handful, so they come in one list (design note 0024,\nAU6).",
+            "items": {
+              "$ref": "#/components/schemas/RoleResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "RoleResponse": {
         "properties": {
           "id": {
@@ -5797,6 +5905,21 @@
         "pattern": "^user_[0-9a-f]{32}$",
         "type": "string"
       },
+      "UserListResponse": {
+        "properties": {
+          "items": {
+            "description": "Oldest first. A store's staff is a short list, so it comes whole (design note\n0024, AU6).",
+            "items": {
+              "$ref": "#/components/schemas/UserResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "UserResponse": {
         "properties": {
           "created_at": {
@@ -7228,6 +7351,31 @@
             "schema": {
               "$ref": "#/components/schemas/AssetKindDto"
             }
+          },
+          {
+            "description": "Only assets whose file name, alt text or title contains this text, ignoring case.\nUp to 255 characters; blank filters nothing.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "description": "The order of the library (design note 0024, AU1). Default `newest`. Names compare\nlowercased, character by character; ties go by upload, in the same direction.\n\nKnown values: `newest`, `oldest`, `name_asc`, `name_desc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "newest",
+                "oldest",
+                "name_asc",
+                "name_desc"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
           }
         ],
         "responses": {
@@ -7297,7 +7445,7 @@
             "bearer": []
           }
         ],
-        "summary": "The library: ready assets, newest first, optionally of one kind.",
+        "summary": "The library: ready assets, newest first or in `sort`'s order, optionally of one kind\nor matching text.",
         "tags": [
           "assets"
         ],
@@ -11109,6 +11257,133 @@
       }
     },
     "/admin/customers": {
+      "get": {
+        "operationId": "admin.customers.list",
+        "parameters": [
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only customers whose email, first or last name or phone contains this text,\nignoring case. Up to 255 characters; blank filters nothing.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "description": "The order of a customer list (design note 0024, AU1). Default `newest`. A name is\nthe first name, a space and the last name, compared lowercased character by\ncharacter; ties go by creation, in the same direction.\n\nKnown values: `newest`, `oldest`, `email_asc`, `email_desc`, `name_asc`, `name_desc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "newest",
+                "oldest",
+                "email_asc",
+                "email_desc",
+                "name_asc",
+                "name_desc"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerSummaryPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Customers, newest first or in `sort`'s order, optionally matching text.",
+        "tags": [
+          "customers"
+        ],
+        "x-hypha-scopes": [
+          "customers:read"
+        ]
+      },
       "post": {
         "operationId": "admin.customers.create",
         "requestBody": {
@@ -12898,6 +13173,63 @@
       }
     },
     "/admin/invites": {
+      "get": {
+        "operationId": "admin.staff.list_invites",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every invite not yet accepted, oldest first, expired ones too (inviting the same\nemail again renews one).",
+        "tags": [
+          "staff"
+        ],
+        "x-hypha-scopes": [
+          "users:read"
+        ]
+      },
       "post": {
         "operationId": "admin.staff.invite",
         "requestBody": {
@@ -14832,6 +15164,109 @@
               "minimum": 1,
               "type": "integer"
             }
+          },
+          {
+            "description": "The order's number (`1001` or `#1001`), or text its email contains, ignoring case.\nUp to 255 characters; blank filters nothing.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only orders in this payment status; repeat for any of several.",
+            "in": "query",
+            "name": "financial_status",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/FinancialStatusDto"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Only orders in this fulfilment status; repeat for any of several.",
+            "in": "query",
+            "name": "fulfillment_status",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/FulfillmentStatusDto"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Only cancelled orders (`true`), or only those that aren't (`false`).",
+            "in": "query",
+            "name": "cancelled",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Only orders placed through this sales channel.",
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "description": "Only orders shipped to (or placed in) this country (ISO 3166-1 alpha-2).",
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only orders in this currency (ISO 4217); needed to sort by total.",
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only orders placed at or after this instant (RFC 3339).",
+            "in": "query",
+            "name": "placed_from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only orders placed before this instant (RFC 3339).",
+            "in": "query",
+            "name": "placed_before",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "description": "The order of an order list (design note 0024, AU1). Default `newest`. Sorting by\ntotal needs the `currency` filter (`422 sort_needs_currency`); ties go by placing\norder, in the same direction.\n\nKnown values: `newest`, `oldest`, `total_desc`, `total_asc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "newest",
+                "oldest",
+                "total_desc",
+                "total_asc"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
           }
         ],
         "responses": {
@@ -14901,7 +15336,7 @@
             "bearer": []
           }
         ],
-        "summary": "Orders, newest first.",
+        "summary": "Orders, newest first or in `sort`'s order, narrowed by the filters (every one given\nmust match).",
         "tags": [
           "orders"
         ],
@@ -18167,6 +18602,63 @@
       }
     },
     "/admin/roles": {
+      "get": {
+        "operationId": "admin.staff.list_roles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every role, oldest first.",
+        "tags": [
+          "staff"
+        ],
+        "x-hypha-scopes": [
+          "users:read"
+        ]
+      },
       "post": {
         "operationId": "admin.staff.create_role",
         "requestBody": {
@@ -21545,6 +22037,65 @@
         ],
         "x-hypha-scopes": [
           "taxes:write"
+        ]
+      }
+    },
+    "/admin/users": {
+      "get": {
+        "operationId": "admin.staff.list_users",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every staff user, oldest first.",
+        "tags": [
+          "staff"
+        ],
+        "x-hypha-scopes": [
+          "users:read"
         ]
       }
     },

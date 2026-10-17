@@ -1,11 +1,12 @@
 use hypha_core::{
-    Actor, AuthError, CartId, CountryCode, Ctx, Currency, CustomerId, Email, MarketId, Money,
-    OrderId, OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Scope, Timestamp, UserId,
-    VariantId, Version, Versioned,
+    Actor, AuthError, CartId, CountryCode, Ctx, Currency, CustomerId, Email, Keyset, MarketId,
+    Money, OrderId, OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Scope, Timestamp,
+    UserId, VariantId, Version, Versioned,
 };
 use hypha_orders::{
-    CancelReason, CommandError, FinancialStatus, NewOrder, Order, OrderError, OrderLine,
-    OrderNumber, OrderRepo, OrderSummary, get_order, list_orders, mark_order_paid,
+    CancelReason, CommandError, FinancialStatus, ListOrders, NewOrder, Order, OrderError,
+    OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderSort, OrderSummary, get_order,
+    list_orders, mark_order_paid,
 };
 use hypha_testkit::InMemoryOrderRepo;
 use pollster::block_on;
@@ -147,9 +148,11 @@ impl OrderRepo for LoadedBeforeAChange {
     }
     async fn list(
         &self,
-        page: PageRequest<OrderId>,
+        filter: &OrderFilter,
+        sort: OrderSort,
+        page: PageRequest<Keyset<OrderId>>,
     ) -> Result<Page<OrderSummary>, hypha_core::RepoError> {
-        self.repo.list(page).await
+        self.repo.list(filter, sort, page).await
     }
     async fn insert(&self, order: &mut Order) -> Result<(), hypha_core::RepoError> {
         self.repo.insert(order).await
@@ -181,7 +184,13 @@ fn marking_an_order_paid_twice_at_once_succeeds_both_times() {
 #[test]
 fn list_orders_returns_a_page() {
     let repo = repo_with_order();
-    let page = block_on(list_orders(&Ctx::system(), &repo, PageRequest::default())).unwrap();
+    let page = block_on(list_orders(
+        &Ctx::system(),
+        &repo,
+        ListOrders::default(),
+        PageRequest::default(),
+    ))
+    .unwrap();
     let stored = block_on(repo.get(order_id())).unwrap().unwrap();
     assert_eq!(
         page,
@@ -197,7 +206,12 @@ fn list_orders_needs_orders_read() {
     let repo = repo_with_order();
     let ctx = user_with(vec![Scope::Checkout]);
     assert_eq!(
-        block_on(list_orders(&ctx, &repo, PageRequest::default())),
+        block_on(list_orders(
+            &ctx,
+            &repo,
+            ListOrders::default(),
+            PageRequest::default()
+        )),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::OrdersRead
         )))

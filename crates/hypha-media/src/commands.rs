@@ -2,15 +2,15 @@
 //! and storage; these commands sign uploads, check what was stored and keep the metadata.
 
 use hypha_core::{
-    AssetId, AuthError, Clock, Ctx, ErrorCode, IdGenerator, Page, PageLimit, PageRequest,
+    AssetId, AuthError, Clock, Ctx, ErrorCode, IdGenerator, Keyset, Page, PageLimit, PageRequest,
     RepoError, Scope,
 };
 use thiserror::Error;
 
 use crate::{
-    Asset, AssetKind, AssetRepo, AssetStatus, AssetUsage, AssetUsageRepo, BlobError, BlobStore,
-    Checksum, HEAD_BYTES, HasAssetUsages, HasAssets, MediaError, MimeType, NewUpload,
-    PresignedUpload, UploadMismatch, UploadTerms, UsageOwner, Visibility, repo::keys,
+    Asset, AssetFilter, AssetKind, AssetRepo, AssetSort, AssetStatus, AssetUsage, AssetUsageRepo,
+    BlobError, BlobStore, Checksum, HEAD_BYTES, HasAssetUsages, HasAssets, MediaError, MimeType,
+    NewUpload, PresignedUpload, UploadMismatch, UploadTerms, UsageOwner, Visibility, repo::keys,
     settings::MediaSettings,
 };
 
@@ -189,15 +189,20 @@ pub async fn get_asset<R: AssetRepo>(
     load(assets, id).await
 }
 
-/// A page of the library: ready assets, newest first, only those of `kind` when given.
+/// A page of the library: ready assets in `sort`'s order, narrowed to `kind` and text
+/// `q` (file name, alt text, title) when given. `page.after`'s key must fit the sort
+/// (`AssetSort::fits`; hosts check cursors).
 pub async fn list_assets<R: AssetRepo>(
     ctx: &Ctx,
     assets: &R,
     kind: Option<AssetKind>,
-    page: PageRequest<AssetId>,
+    q: Option<String>,
+    sort: AssetSort,
+    page: PageRequest<Keyset<AssetId>>,
 ) -> Result<Page<Asset>, CommandError> {
     ctx.require(Scope::MediaRead)?;
-    Ok(assets.list(kind, page).await?)
+    let filter = AssetFilter::new(kind, q)?;
+    Ok(assets.list(&filter, sort, page).await?)
 }
 
 /// Changes only the fields that are `Some`, like a JSON Merge Patch: `Some(None)` (or a

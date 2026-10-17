@@ -1,11 +1,11 @@
 use hypha_core::{
     Address, AddressError, AddressId, AddressParts, AuthError, Ctx, CustomerId, Email, EmailError,
-    ErrorCode, IdGenerator, RepoError, Scope, report_duplicate,
+    ErrorCode, IdGenerator, Keyset, Page, PageRequest, RepoError, Scope, report_duplicate,
 };
 use thiserror::Error;
 
 use crate::{
-    Customer, CustomerError,
+    Customer, CustomerError, CustomerFilter, CustomerSort, CustomerSummary,
     repo::{CustomerRepo, keys},
 };
 
@@ -103,6 +103,21 @@ pub async fn get_customer<R: CustomerRepo>(
 ) -> Result<Customer, CommandError> {
     ctx.require(Scope::CustomersRead)?;
     load(customers, id).await
+}
+
+/// A page of customer summaries in `sort`'s order, narrowed to text `q` (email, name,
+/// phone) when given (design note 0024). `page.after`'s key must fit the sort
+/// (`CustomerSort::fits`; hosts check cursors).
+pub async fn list_customers<R: CustomerRepo>(
+    ctx: &Ctx,
+    customers: &R,
+    q: Option<String>,
+    sort: CustomerSort,
+    page: PageRequest<Keyset<CustomerId>>,
+) -> Result<Page<CustomerSummary>, CommandError> {
+    ctx.require(Scope::CustomersRead)?;
+    let filter = CustomerFilter::new(q)?;
+    Ok(customers.list(&filter, sort, page).await?)
 }
 
 /// Changes only the fields that are `Some`, like a JSON Merge Patch: `Some(None)` clears

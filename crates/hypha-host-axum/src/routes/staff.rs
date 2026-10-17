@@ -3,8 +3,9 @@
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{Email, InviteId, RoleId, Scope, UserId};
 use hypha_users::{
-    HasRoles, HasUsers, Invite, InviteUser, Role, RoleScopes, UpdateRole, UpdateUser, User,
-    UserStatus, create_role, get_role, get_user, invite_user, update_role, update_user,
+    HasInvites, HasRoles, HasUsers, Invite, InviteUser, Role, RoleScopes, UpdateRole, UpdateUser,
+    User, UserStatus, create_role, get_role, get_user, invite_user, list_invites, list_roles,
+    list_users, update_role, update_user,
 };
 use serde::{Deserialize, Serialize};
 
@@ -57,6 +58,31 @@ impl From<&Role> for RoleResponse {
             scopes: r.granted(),
         }
     }
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct RoleListResponse {
+    /// Oldest first. A store has a handful, so they come in one list (design note 0024,
+    /// AU6).
+    items: Vec<RoleResponse>,
+}
+
+/// Every role, oldest first.
+#[utoipa::path(
+    get,
+    path = "/admin/roles",
+    responses((status = 200, description = "OK", body = RoleListResponse)),
+    extensions(("x-hypha-scopes" = json!(["users:read"]))),
+)]
+pub(super) async fn list_roles_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<RoleListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let roles = list_roles(&ctx, ports.roles()).await?;
+    Ok(Json(RoleListResponse {
+        items: roles.iter().map(RoleResponse::from).collect(),
+    }))
 }
 
 /// Creates a role; you can only grant scopes you hold.
@@ -175,6 +201,34 @@ pub(super) enum StatusRequest {
     Disabled,
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct UserListResponse {
+    /// Oldest first. A store's staff is a short list, so it comes whole (design note
+    /// 0024, AU6).
+    items: Vec<UserResponse>,
+}
+
+/// Every staff user, oldest first.
+#[utoipa::path(
+    get,
+    path = "/admin/users",
+    responses((status = 200, description = "OK", body = UserListResponse)),
+    extensions(("x-hypha-scopes" = json!(["users:read"]))),
+)]
+pub(super) async fn list_users_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<UserListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let users = list_users(&ctx, ports.users()).await?;
+    Ok(Json(UserListResponse {
+        items: users
+            .iter()
+            .map(UserResponse::new)
+            .collect::<Result<_, _>>()?,
+    }))
+}
+
 /// A staff user.
 #[utoipa::path(
     get,
@@ -248,6 +302,34 @@ impl InviteResponse {
             expires_at: rfc3339(i.expires_at())?,
         })
     }
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct InviteListResponse {
+    /// Oldest first.
+    items: Vec<InviteResponse>,
+}
+
+/// Every invite not yet accepted, oldest first, expired ones too (inviting the same
+/// email again renews one).
+#[utoipa::path(
+    get,
+    path = "/admin/invites",
+    responses((status = 200, description = "OK", body = InviteListResponse)),
+    extensions(("x-hypha-scopes" = json!(["users:read"]))),
+)]
+pub(super) async fn list_invites_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<InviteListResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let invites = list_invites(&ctx, ports.invites()).await?;
+    Ok(Json(InviteListResponse {
+        items: invites
+            .iter()
+            .map(InviteResponse::new)
+            .collect::<Result<_, _>>()?,
+    }))
 }
 
 /// Emails an invite (a new one replaces a pending one). The token is only in the email.

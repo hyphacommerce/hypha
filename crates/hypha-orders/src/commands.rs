@@ -1,7 +1,10 @@
-use hypha_core::{AuthError, Ctx, ErrorCode, OrderId, Page, PageRequest, RepoError, Scope};
+use hypha_core::{AuthError, Ctx, ErrorCode, Keyset, OrderId, Page, PageRequest, RepoError, Scope};
 use thiserror::Error;
 
-use crate::{FinancialStatus, Order, OrderError, OrderRepo, OrderSummary};
+use crate::{
+    FinancialStatus, Order, OrderError, OrderFilter, OrderFilterInput, OrderRepo, OrderSort,
+    OrderSummary,
+};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -30,10 +33,20 @@ impl ErrorCode for CommandError {
 pub async fn list_orders<R: OrderRepo>(
     ctx: &Ctx,
     orders: &R,
-    page: PageRequest<OrderId>,
+    input: ListOrders,
+    page: PageRequest<Keyset<OrderId>>,
 ) -> Result<Page<OrderSummary>, CommandError> {
     ctx.require(Scope::OrdersRead)?;
-    Ok(orders.list(page).await?)
+    let filter = OrderFilter::new(input.filter)?;
+    input.sort.check(&filter)?;
+    Ok(orders.list(&filter, input.sort, page).await?)
+}
+
+/// An order list's filters and order as a request gives them; `list_orders` checks them.
+#[derive(Debug, Default)]
+pub struct ListOrders {
+    pub filter: OrderFilterInput,
+    pub sort: OrderSort,
 }
 
 pub async fn get_order<R: OrderRepo>(

@@ -1,7 +1,9 @@
-use hypha_core::{AssetId, PageLimit, PageRequest, RepoError, Timestamp, Version, Versioned};
+use hypha_core::{
+    AssetId, Keyset, PageLimit, PageRequest, RepoError, SortKey, Timestamp, Version, Versioned,
+};
 use hypha_media::{
-    Asset, AssetKind, AssetRepo, BlobKey, BlobStore, Checksum, FileFacts, MimeType, NewUpload,
-    PresignedUpload, UploadTerms, Visibility, repo::keys,
+    Asset, AssetFilter, AssetKind, AssetRepo, AssetSort, BlobKey, BlobStore, Checksum, FileFacts,
+    MimeType, NewUpload, PresignedUpload, UploadTerms, Visibility, repo::keys,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -18,6 +20,8 @@ pub async fn asset_repo<R: AssetRepo>(make: impl AsyncFn() -> R) {
     asset_unique_id(&make().await).await;
     scenario("asset: list pages ready assets, newest first, by kind");
     asset_list_pages(&make().await).await;
+    scenario("asset: list by text in the name, alt or title; sorted by name in pages");
+    asset_list_sorted(&make().await).await;
     scenario("asset: abandoned finds old pending and failed assets, oldest first");
     asset_abandoned(&make().await).await;
     scenario("asset: delete removes it; deleting again is fine");
@@ -126,10 +130,14 @@ async fn listed<R: AssetRepo>(
     limit: u32,
 ) -> (Vec<AssetId>, bool) {
     let page = PageRequest {
-        after: after.map(aid),
+        after: after.map(|n| Keyset {
+            key: SortKey::Id,
+            id: aid(n),
+        }),
         limit: PageLimit::new(limit).unwrap(),
     };
-    let page = repo.list(kind, page).await.unwrap();
+    let filter = AssetFilter::new(kind, None).unwrap();
+    let page = repo.list(&filter, AssetSort::Newest, page).await.unwrap();
     (page.items.iter().map(Asset::id).collect(), page.has_more)
 }
 
@@ -149,7 +157,8 @@ async fn asset_list_pages<R: AssetRepo>(repo: &R) {
 
     let first = repo
         .list(
-            None,
+            &AssetFilter::default(),
+            AssetSort::Newest,
             PageRequest {
                 after: None,
                 limit: PageLimit::new(2).unwrap(),
@@ -181,6 +190,112 @@ async fn asset_list_pages<R: AssetRepo>(repo: &R) {
     assert_eq!(
         listed(repo, Some(AssetKind::File), None, 10).await,
         (vec![aid(2)], false)
+    );
+}
+
+/// An asset named `filename`, ready.
+fn named(n: u128, filename: &str) -> Asset {
+    let mut asset = Asset::new_upload(NewUpload {
+        id: aid(n),
+        filename: filename.to_string(),
+        mime_type: MimeType::Png,
+        byte_size: 1000,
+        checksum: None,
+        visibility: Visibility::Public,
+        now: NOW,
+    })
+    .unwrap();
+    asset.mark_ready(FileFacts::default(), NOW).unwrap();
+    asset
+}
+
+/// Every page of `sort`'s list under `filter`, `limit` at a time.
+async fn all_assets<R: AssetRepo>(
+    repo: &R,
+    filter: &AssetFilter,
+    sort: AssetSort,
+    limit: u32,
+) -> Vec<AssetId> {
+    let mut found = Vec::new();
+    let mut after = None;
+    loop {
+        let page = repo
+            .list(
+                filter,
+                sort,
+                PageRequest {
+                    after: after.clone(),
+                    limit: PageLimit::new(limit).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        found.extend(page.items.iter().map(Asset::id));
+        match page.items.last() {
+            Some(last) if page.has_more => {
+                after = Some(Keyset {
+                    key: sort.key(last),
+                    id: last.id(),
+                })
+            }
+            _ => return found,
+        }
+    }
+}
+
+async fn asset_list_sorted<R: AssetRepo>(repo: &R) {
+    // Names that tie once lowercased (1 and 4), one beyond ASCII; 2 has alt text, 3 a
+    // title.
+    let mut beach = named(2, "beach.jpg");
+    beach
+        .set_alt(Some("Summer dress".to_string()), NOW)
+        .unwrap();
+    let mut cup = named(3, "cup.png");
+    cup.set_title(Some("SUMMER mug".to_string()), NOW).unwrap();
+    for mut asset in [
+        named(4, "Apple.png"),
+        cup,
+        named(1, "apple.png"),
+        beach,
+        named(5, "Čaša.png"),
+    ] {
+        repo.insert(&mut asset).await.unwrap();
+    }
+    let every = AssetFilter::default();
+    for limit in [1, 2, 10] {
+        assert_eq!(
+            all_assets(repo, &every, AssetSort::NameAsc, limit).await,
+            [aid(1), aid(4), aid(2), aid(3), aid(5)]
+        );
+        assert_eq!(
+            all_assets(repo, &every, AssetSort::NameDesc, limit).await,
+            [aid(5), aid(3), aid(2), aid(4), aid(1)]
+        );
+        assert_eq!(
+            all_assets(repo, &every, AssetSort::Oldest, limit).await,
+            [aid(1), aid(2), aid(3), aid(4), aid(5)]
+        );
+    }
+    let text = |q: &str| AssetFilter::new(None, Some(q.to_string())).unwrap();
+    assert_eq!(
+        all_assets(repo, &text("summer"), AssetSort::Oldest, 10).await,
+        [aid(2), aid(3)],
+        "alt text and title"
+    );
+    assert_eq!(
+        all_assets(repo, &text("APPLE"), AssetSort::Oldest, 10).await,
+        [aid(1), aid(4)],
+        "the file name"
+    );
+    assert_eq!(
+        all_assets(
+            repo,
+            &AssetFilter::new(Some(AssetKind::Video), None).unwrap(),
+            AssetSort::NameAsc,
+            10
+        )
+        .await,
+        Vec::<AssetId>::new()
     );
 }
 

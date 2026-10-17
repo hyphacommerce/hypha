@@ -55,6 +55,17 @@ pub async fn user_repo<R: UserRepo>(make: impl AsyncFn() -> R) {
     user_keys(&make().await).await;
     scenario("user: any and count_active_with_role");
     user_counts(&make().await).await;
+    scenario("user: list_all is every user, oldest first");
+    user_list(&make().await).await;
+}
+
+async fn user_list<R: UserRepo>(repo: &R) {
+    assert_eq!(repo.list_all().await, Ok(vec![]));
+    let mut b = user(2, "b@example.com", 1);
+    let mut a = user(1, "a@example.com", 1);
+    repo.insert(&mut b).await.unwrap();
+    repo.insert(&mut a).await.unwrap();
+    assert_eq!(repo.list_all().await, Ok(vec![a, b]));
 }
 
 async fn user_round_trips<R: UserRepo>(repo: &R) {
@@ -118,6 +129,17 @@ pub async fn role_repo<R: RoleRepo>(make: impl AsyncFn() -> R) {
     role_update(&make().await).await;
     scenario("role: unique ID, name ignoring case, one owner");
     role_keys(&make().await).await;
+    scenario("role: list_all is every role, oldest first");
+    role_list(&make().await).await;
+}
+
+async fn role_list<R: RoleRepo>(repo: &R) {
+    assert_eq!(repo.list_all().await, Ok(vec![]));
+    let mut support = role(2, "Support");
+    let mut owner = Role::owner(role_id(1));
+    repo.insert(&mut support).await.unwrap();
+    repo.insert(&mut owner).await.unwrap();
+    assert_eq!(repo.list_all().await, Ok(vec![owner, support]));
 }
 
 async fn role_round_trips<R: RoleRepo>(repo: &R) {
@@ -186,6 +208,21 @@ pub async fn invite_repo<R: InviteRepo>(make: impl AsyncFn() -> R) {
     invite_update(&make().await).await;
     scenario("invite: unique ID, email and token");
     invite_keys(&make().await).await;
+    scenario("invite: pending is every invite not accepted, oldest first");
+    invite_pending(&make().await).await;
+}
+
+async fn invite_pending<R: InviteRepo>(repo: &R) {
+    assert_eq!(repo.pending().await, Ok(vec![]));
+    let mut later = invite(3, "c@example.com", 3);
+    let mut accepted = invite(2, "b@example.com", 2);
+    let mut first = invite(1, "a@example.com", 1);
+    for i in [&mut later, &mut accepted, &mut first] {
+        repo.insert(i).await.unwrap();
+    }
+    accepted.accept(Timestamp::from_unix_micros(6));
+    repo.update(&mut accepted).await.unwrap();
+    assert_eq!(repo.pending().await, Ok(vec![first, later]));
 }
 
 async fn invite_round_trips<R: InviteRepo>(repo: &R) {
