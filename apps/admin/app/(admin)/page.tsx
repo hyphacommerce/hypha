@@ -26,7 +26,7 @@ export default async function HomePage() {
             Welcome, {me.user.name}
           </Text>
           <Text type="body" color="secondary">
-            Products, orders, markets and store settings are in the menu; customers come next.
+            What needs doing in your store, and your account.
           </Text>
         </VStack>
 

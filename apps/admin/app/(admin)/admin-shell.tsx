@@ -19,7 +19,9 @@ import {
   ShoppingBagIcon,
   Squares2X2Icon,
   PuzzlePieceIcon,
+  RocketLaunchIcon,
   TruckIcon,
+  UserGroupIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import { usePathname } from "next/navigation";
@@ -48,12 +50,13 @@ const NAV: {
   {
     title: "Settings",
     items: [
+      { label: "Setup guide", href: "/setup", icon: RocketLaunchIcon, isReady: true },
       { label: "Store", href: "/settings/store", icon: BuildingStorefrontIcon, isReady: true },
       { label: "Channels", href: "/settings/channels", icon: Squares2X2Icon, isReady: true },
       { label: "Shipping", href: "/settings/shipping", icon: TruckIcon, isReady: true },
       { label: "Search", href: "/settings/search", icon: MagnifyingGlassIcon, isReady: true },
       { label: "Apps", href: "/settings/apps", icon: PuzzlePieceIcon, isReady: true },
-      { label: "Staff", href: "/settings/staff", icon: UsersIcon, isReady: true },
+      { label: "Staff", href: "/settings/staff", icon: UserGroupIcon, isReady: true },
       { label: "API keys", href: "/settings/api-keys", icon: KeyIcon, isReady: true },
     ],
   },
