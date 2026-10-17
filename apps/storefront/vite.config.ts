@@ -6,6 +6,7 @@ import { defineConfig } from "vite";
 // the Cloudflare plugin runs it in workerd, as it will run in production (0023, SF1).
 export default defineConfig({
   server: { port: 3002 },
+  preview: { port: 3002 },
   plugins: [
     vinext(),
     cloudflare({

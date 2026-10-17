@@ -6,6 +6,7 @@ import { defineConfig } from "vite";
 // will run in production (design note 0011, P2).
 export default defineConfig({
   server: { port: 3001 },
+  preview: { port: 3001 },
   plugins: [
     vinext(),
     cloudflare({
