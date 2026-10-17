@@ -1,0 +1,27 @@
+# The API on Cloudflare Workers (design note 0026). `wrangler dev` runs it against the
+# compose Postgres (`localConnectionString`), on a database the native host set up
+# first (W9); `hypha deploy` (later) writes the deployment's own values.
+name = "hypha-api"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-10-01"
+
+[build]
+command = "worker-build --release"
+
+# Postgres through Hyperdrive. The id is the deployment's (`wrangler hyperdrive create`).
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "00000000000000000000000000000000"
+localConnectionString = "postgres://hypha:hypha@localhost:5432/hypha_workers"
+
+# Dispatch and search sync every minute; prune and the media sweep hourly (W6).
+[triggers]
+crons = ["* * * * *", "0 * * * *"]
+
+[observability]
+enabled = true
+
+# Run next to the database: its round trips are most of a request (§8). Set to the
+# database's region, e.g. "aws:eu-central-1" for Neon in Frankfurt.
+# [placement]
+# region = "aws:eu-central-1"

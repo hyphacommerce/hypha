@@ -1,0 +1,9 @@
+# Copy to .dev.vars (ignored) for `wrangler dev`. Secrets in production go through
+# `wrangler secret put`.
+HYPHA_SECRET_KEY=<64 hex characters, the one the native host set the database up with>
+HYPHA_ALLOW_PRIVATE_CALLBACKS=true
+HYPHA_S3_ENDPOINT=http://localhost:8333
+HYPHA_S3_REGION=us-east-1
+HYPHA_S3_BUCKET=hypha-media
+HYPHA_S3_ACCESS_KEY_ID=hypha
+HYPHA_S3_SECRET_ACCESS_KEY=hypha-dev-secret

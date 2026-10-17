@@ -157,8 +157,13 @@ the domains; `hypha deploy` then:
    the Tokio implementations, `PgStorage`, the job runner and the route tests live in
    `hypha-host-axum`; `hypha-http` builds for `wasm32-unknown-unknown` (on CI's wasm
    list). The router is `hypha_http::router!(Storage)`, expanded in the host's crate.
-4. **`hypha-host-workers`**: fetch, the Hyperdrive storage, configuration; the route
-   tests' scenarios run against it in `wrangler dev`.
+4. **`hypha-host-workers`** (done, 2026-10-18): fetch and scheduled handlers, the
+   Hyperdrive storage (a connection per `ports()`), configuration from `HYPHA_CONFIG`
+   and the Worker's variables (W11), `fetch` for app calls and the S3 client, `waitUntil`
+   for background work, dispatch and search sync after each write (W6's first half),
+   and crons for every job. Rate limits count per isolate for now (W8 pending). The e2e
+   script passes against `wrangler dev` (641 steps), on a database the native host set
+   up (W9).
 5. **Jobs** (W6, W7).
 6. **CLI**: `--target cloudflare` (§5).
 7. **Caching**: the storefront's and admin's adapters (0025, §6), and the e2e script

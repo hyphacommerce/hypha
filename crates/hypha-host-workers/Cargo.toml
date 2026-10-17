@@ -1,0 +1,38 @@
+[package]
+name = "hypha-host-workers"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+description = "Hypha's API on Cloudflare Workers (design note 0026): hypha-http's routes over Hyperdrive."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The portable parts (`ids`, `limiter`) build natively, so their tests run with the
+# workspace's.
+[dependencies]
+hypha-http = { path = "../hypha-http" }
+hypha-core.workspace = true
+hypha-config = { path = "../hypha-config" }
+uuid = { workspace = true }
+
+# The Worker itself: `cargo build --target wasm32-unknown-unknown -p hypha-host-workers`
+# and `worker-build` build it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+hypha-store-postgres = { path = "../hypha-store-postgres" }
+hypha-store-s3 = { path = "../hypha-store-s3" }
+hypha-stores = { path = "../hypha-stores" }
+worker = { version = "=0.8.7", features = ["http", "axum", "tokio-postgres"] }
+axum = { version = "0.8", default-features = false, features = ["json", "query", "form", "matched-path", "original-uri"] }
+tower-service = "0.3"
+tokio-postgres = { version = "0.7.18", default-features = false, features = ["js", "with-uuid-1"] }
+wasm-bindgen-futures = "0.4"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# `crypto.getRandomValues` (this crate depends on wasm-bindgen anyway).
+getrandom = { version = "0.4", features = ["wasm_js"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+
+[lints]
+workspace = true
