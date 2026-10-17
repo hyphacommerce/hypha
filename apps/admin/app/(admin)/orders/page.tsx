@@ -1,93 +1,77 @@
-import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Link } from "@astryxdesign/core/Link";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
-} from "@astryxdesign/core/Table";
-import { ShoppingBagIcon } from "@heroicons/react/24/outline";
-import { redirect } from "next/navigation";
+import type { AdminSchemas } from "@hypha/sdk/admin";
 
 import { PageHeader } from "@/components/page-header";
-import { Pager } from "@/components/pager";
-import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
-import { formatDateTime, formatMoney } from "@/lib/format";
-import { channelNames, loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
+import { type SearchParams, dateRange, manyOf, one, oneOf } from "@/components/resource-table/params";
+import { listPage, nextDay, pageQuery, startOfDay } from "@/components/resource-table/server";
+import { channelNames, loadCountries, loadCurrencies, sessionClient } from "@/lib/hypha";
+import { OrdersTable } from "@/resources/orders";
+
+const PAYMENT: AdminSchemas["FinancialStatusDto"][] = ["pending", "paid"];
+const FULFILMENT: AdminSchemas["FulfillmentStatusDto"][] = [
+  "unfulfilled",
+  "partially_fulfilled",
+  "fulfilled",
+];
+const SORTS = ["newest", "oldest", "total_desc", "total_asc"] as const;
 
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const cursor = typeof params.cursor === "string" ? params.cursor : undefined;
-
   const client = await sessionClient();
-  const [result, channelName, currencies] = await Promise.all([
-    client.GET("/admin/orders", { params: { query: { cursor } } }),
+  // Days of the store's calendar: the placed range starts and ends at its midnights.
+  const [store, markets] = await Promise.all([
+    client.GET("/admin/store"),
+    client.GET("/admin/markets"),
+  ]);
+  const timeZone = store.data?.timezone ?? "UTC";
+  const placed = dateRange(params, "placed");
+  const cancelled = one(params, "cancelled");
+  const [result, channelName, currencies, countries] = await Promise.all([
+    client.GET("/admin/orders", {
+      params: {
+        query: {
+          ...pageQuery(params),
+          q: one(params, "q"),
+          financial_status: manyOf(params, "financial_status", PAYMENT),
+          fulfillment_status: manyOf(params, "fulfillment_status", FULFILMENT),
+          cancelled: cancelled === "true" ? true : cancelled === "false" ? false : undefined,
+          channel: one(params, "channel"),
+          country: one(params, "country"),
+          currency: one(params, "currency"),
+          placed_from: placed && startOfDay(placed.start, timeZone),
+          placed_before: placed && startOfDay(nextDay(placed.end), timeZone),
+          sort: oneOf(params, "sort", SORTS),
+        },
+      },
+    }),
     channelNames(client),
     loadCurrencies(),
+    loadCountries(),
   ]);
-  // A hand-edited URL (an old or foreign cursor): start the list again.
-  if (result.response.status === 400) redirect("/orders");
-  const page = loaded(result);
+  const page = listPage(result, "/orders", params);
+
+  const sold = markets.data?.items ?? [];
+  const countryName = new Map(countries.map((c) => [c.code, c.name]));
+  const soldTo = [...new Set(sold.flatMap((m) => m.countries))]
+    .map((code) => ({ value: code, label: countryName.get(code) ?? code }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader title="Orders" />
-
-        {page.items.length === 0 ? (
-          <EmptyState
-            icon={<ShoppingBagIcon width={32} />}
-            title={cursor ? "No more orders" : "No orders yet"}
-            description="Orders placed through checkout show up here, newest first."
-          />
-        ) : (
-          <Table hasHover>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Order</TableHeaderCell>
-                <TableHeaderCell>Placed</TableHeaderCell>
-                <TableHeaderCell>Customer</TableHeaderCell>
-                <TableHeaderCell>Channel</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>Items</TableHeaderCell>
-                <TableHeaderCell>Total</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {page.items.map((order) => (
-                <TableRow key={order.id}>
-                  <TableCell>
-                    <Link href={`/orders/${order.id}`} weight="medium">
-                      #{order.number}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{formatDateTime(order.placed_at)}</TableCell>
-                  <TableCell>{order.email}</TableCell>
-                  <TableCell>{channelName.get(order.channel) ?? order.channel}</TableCell>
-                  <TableCell>
-                    <HStack gap={1} wrap="wrap">
-                      {order.cancelled_at && <CancelledBadge />}
-                      <PaymentBadge status={order.financial_status} />
-                      <FulfillmentBadge status={order.fulfillment_status} />
-                    </HStack>
-                  </TableCell>
-                  <TableCell>{order.item_count}</TableCell>
-                  <TableCell>{formatMoney(order.total, currencies)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-
-        <Pager path="/orders" query={{}} isFirstPage={!cursor} nextCursor={page.next_cursor} />
+        <OrdersTable
+          page={page}
+          currencies={currencies}
+          channels={Object.fromEntries(channelName)}
+          countries={soldTo}
+          orderCurrencies={[...new Set(sold.map((m) => m.currency))].sort()}
+        />
       </VStack>
     </Section>
   );

@@ -1,129 +1,43 @@
-import { AspectRatio } from "@astryxdesign/core/AspectRatio";
-import { Button } from "@astryxdesign/core/Button";
-import { ClickableCard } from "@astryxdesign/core/ClickableCard";
-import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { Grid } from "@astryxdesign/core/Grid";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
-import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
-import { DocumentIcon, FilmIcon, PhotoIcon } from "@heroicons/react/24/outline";
-import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
-import { Pager } from "@/components/pager";
-import { formatBytes } from "@/lib/format";
-import { loaded, sessionClient } from "@/lib/hypha";
+import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
+import { listPage, pageQuery } from "@/components/resource-table/server";
+import { sessionClient } from "@/lib/hypha";
+import { MediaLibrary } from "@/resources/media";
 
 import { Uploader } from "./uploader";
 
-type Kind = AdminSchemas["AssetKindDto"];
-type Asset = AdminSchemas["AssetResponse"];
-
-const FILTERS: { label: string; kind?: Kind }[] = [
-  { label: "All" },
-  { label: "Images", kind: "image" },
-  { label: "Videos", kind: "video" },
-  { label: "Files", kind: "file" },
-];
-
-// Keyed by string: the API may add kinds (design note 0016 §9); those show as files.
-const KIND_ICONS: Record<string, typeof DocumentIcon | undefined> = {
-  image: PhotoIcon,
-  video: FilmIcon,
-  file: DocumentIcon,
-};
-
-function asKind(value: string | string[] | undefined): Kind | undefined {
-  return FILTERS.find((f) => f.kind === value)?.kind;
-}
-
-/** A square preview: the thumbnail for images, the kind's icon for the rest. */
-function Preview({ asset }: { asset: Asset }) {
-  const KindIcon = KIND_ICONS[asset.kind] ?? DocumentIcon;
-  return (
-    <AspectRatio ratio={1} fit={asset.thumbnail_url ? "cover" : "center"}>
-      {asset.thumbnail_url ? (
-        // A plain <img>: the media URLs resize, so no Next.js image pipeline (0011 §2).
-        <img src={asset.thumbnail_url} alt={asset.alt ?? ""} loading="lazy" />
-      ) : (
-        // The heroicon itself, rendered here: a server component can hand a client
-        // component (Astryx's `Icon`) elements, not component functions.
-        <Text color="secondary">
-          <KindIcon width={40} aria-hidden />
-        </Text>
-      )}
-    </AspectRatio>
-  );
-}
+const KINDS: AdminSchemas["AssetKindDto"][] = ["image", "video", "file"];
+const SORTS = ["newest", "oldest", "name_asc", "name_desc"] as const;
 
 export default async function MediaPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const kind = asKind(params.kind);
-  const cursor = typeof params.cursor === "string" ? params.cursor : undefined;
-
   const client = await sessionClient();
-  const result = await client.GET("/admin/assets", { params: { query: { kind, cursor } } });
-  // A hand-edited URL (an old or foreign cursor): start the list again, same filter.
-  if (result.response.status === 400) redirect(kind ? `/media?kind=${kind}` : "/media");
-  const page = loaded(result);
+  const result = await client.GET("/admin/assets", {
+    params: {
+      query: {
+        ...pageQuery(params),
+        q: one(params, "q"),
+        kind: oneOf(params, "kind", KINDS),
+        sort: oneOf(params, "sort", SORTS),
+      },
+    },
+  });
+  const page = listPage(result, "/media", params);
 
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader title="Media" />
         <Uploader />
-
-        <HStack gap={1}>
-          {FILTERS.map((filter) => (
-            <Button
-              key={filter.label}
-              label={filter.label}
-              size="sm"
-              variant={filter.kind === kind ? "secondary" : "ghost"}
-              href={filter.kind ? `/media?kind=${filter.kind}` : "/media"}
-            />
-          ))}
-        </HStack>
-
-        {page.items.length === 0 ? (
-          <EmptyState
-            icon={<PhotoIcon width={32} />}
-            title={cursor ? "No more files" : kind ? `No ${kind}s yet` : "No media yet"}
-            description="Files you upload show up here, newest first, ready to use on products."
-          />
-        ) : (
-          <Grid columns={{ minWidth: 180 }} gap={3}>
-            {page.items.map((asset) => (
-              <ClickableCard
-                key={asset.id}
-                label={asset.title ?? asset.filename}
-                href={`/media/${asset.id}`}
-                padding={0}
-              >
-                <VStack gap={0}>
-                  <Preview asset={asset} />
-                  <VStack gap={0.5} padding={3}>
-                    <Text weight="medium" maxLines={1}>
-                      {asset.title ?? asset.filename}
-                    </Text>
-                    <Text type="supporting">
-                      {asset.width && asset.height
-                        ? `${asset.width} × ${asset.height} · ${formatBytes(asset.byte_size)}`
-                        : formatBytes(asset.byte_size)}
-                    </Text>
-                  </VStack>
-                </VStack>
-              </ClickableCard>
-            ))}
-          </Grid>
-        )}
-
-        <Pager path="/media" query={{ kind }} isFirstPage={!cursor} nextCursor={page.next_cursor} />
+        <MediaLibrary page={page} view={one(params, "view") === "table" ? "table" : "grid"} />
       </VStack>
     </Section>
   );
