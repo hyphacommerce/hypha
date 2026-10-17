@@ -2,7 +2,7 @@
 // deployment's folder. Every question has a flag, so it also runs unattended (an
 // agent, a script): with `--yes`, what isn't given takes its default.
 
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import * as p from "@clack/prompts";
@@ -12,6 +12,7 @@ import {
   type BuildOn,
   type Deployment,
   ENV_FILE,
+  loadEnv,
   saveDeployment,
   saveEnv,
   STATE_FILE,
@@ -20,6 +21,18 @@ import {
 } from "../deployment.ts";
 import { caddyfile, composeFile, configSchema, configToml, newEnv, seaweedConfig } from "../templates.ts";
 import { ask, dirArg, guarded, setUnattended } from "./shared.ts";
+
+/** What `--force` keeps from the deployment's `.env`. */
+const KEPT = [
+  "POSTGRES_PASSWORD",
+  "HYPHA_SECRET_KEY",
+  "S3_ACCESS_KEY",
+  "S3_SECRET_KEY",
+  "HYPHA_OWNER_EMAIL",
+  "HYPHA_OWNER_PASSWORD",
+  "STOREFRONT_KEY",
+  "HYPHA_WEBHOOK_SECRET",
+];
 
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/i;
 
@@ -50,7 +63,7 @@ export const init = defineCommand({
     "build-on": { type: "string", description: "server (default) or here: where the images are built" },
     "remote-dir": { type: "string", default: "/opt/hypha", description: "The deployment's folder on the server" },
     yes: { type: "boolean", alias: "y", description: "Don't ask: defaults for what isn't given" },
-    force: { type: "boolean", description: "Overwrite an existing deployment (new secrets!)" },
+    force: { type: "boolean", description: "Write an existing deployment again (keeps its secrets, owner and keys)" },
   },
   run: ({ args }) =>
     guarded(async () => {
@@ -59,7 +72,7 @@ export const init = defineCommand({
     p.intro("hypha init");
 
     if (!args.force && (await exists(join(dir, STATE_FILE)))) {
-      p.cancel(`${dir} already holds a deployment: \`hypha deploy\` it, or --force to start over (new secrets)`);
+      p.cancel(`${dir} already holds a deployment: \`hypha deploy\` it, or --force to write it again (keeps its secrets)`);
       process.exit(1);
     }
 
@@ -145,18 +158,26 @@ export const init = defineCommand({
       domains,
     };
     const env = newEnv(d, { email, storeName });
+    // Written again (new domains, say): the server's data was made with these, so they
+    // stay, and so do the owner and the storefront's keys.
+    const earlier = args.force ? await loadEnv(dir).catch(() => undefined) : undefined;
+    if (earlier) for (const key of KEPT) {
+      const value = earlier.get(key);
+      if (value !== undefined && value !== "" && env.get(key) !== undefined) env.set(key, value);
+    }
     const acme = args["acme-email"] === "none" ? undefined : (args["acme-email"] || email);
 
-    await mkdir(join(dir, "seaweedfs"), { recursive: true });
+    await mkdir(join(dir, "seaweedfs"), { recursive: true, mode: 0o700 });
+    await chmod(dir, 0o700);
     await saveDeployment(dir, d);
     await saveEnv(dir, env);
     await writeFile(join(dir, "compose.yaml"), await composeFile());
     await writeFile(join(dir, "Caddyfile"), caddyfile(d, acme));
     await writeFile(join(dir, "hypha.config.toml"), configToml());
     await writeFile(join(dir, "hypha.config.schema.json"), await configSchema());
-    await writeFile(join(dir, "seaweedfs", "s3.json"), seaweedConfig(env.get("S3_ACCESS_KEY")!, env.get("S3_SECRET_KEY")!), {
-      mode: 0o600,
-    });
+    await writeFile(join(dir, "seaweedfs", "s3.json"), seaweedConfig(env.get("S3_ACCESS_KEY")!, env.get("S3_SECRET_KEY")!));
+    // SeaweedFS reads it as its own user; the folder (700) is what keeps it private.
+    await chmod(join(dir, "seaweedfs", "s3.json"), 0o644);
     await writeFile(join(dir, ".gitignore"), `# Secrets: never commit these.\n${ENV_FILE}\nseaweedfs/\n`);
 
     const lines = [

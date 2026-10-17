@@ -13,7 +13,7 @@ import { Staff, waitForHealth } from "../api.ts";
 import { apps, type Deployment, ENV_FILE, loadEnv, saveEnv, url } from "../deployment.ts";
 import { build, images } from "../images.ts";
 import { CommandFailed, type Machine } from "../shell.ts";
-import { connectStorefront } from "../storefront.ts";
+import { connectStorefront, syncWebhook } from "../storefront.ts";
 import { dirArg, guarded, open } from "./shared.ts";
 
 /** What the server runs: copied on every deploy. */
@@ -44,7 +44,8 @@ export const deploy = defineCommand({
       const spin = p.spinner();
       spin.start("Copying the deployment and starting it");
       await machine.upload(dir, FILES);
-      if (machine.ssh) await machine.sh(`chmod 600 ${ENV_FILE} seaweedfs/s3.json`);
+      // The folder is root's alone; inside it, the services' containers read their files.
+      if (machine.ssh) await machine.sh(`chmod 700 . && chmod 600 ${ENV_FILE} && chmod 644 seaweedfs/s3.json`);
       await machine.sh("docker compose up -d --remove-orphans", { capture: true });
       spin.message("Waiting for the API (the first time, Caddy is also getting certificates)");
       if (!(await waitForHealth(d, 300))) {
@@ -56,7 +57,17 @@ export const deploy = defineCommand({
       spin.stop("Running");
 
       const env = await loadEnv(dir);
-      if (d.domains.storefront && !env.get("STOREFRONT_KEY")) {
+      if (d.domains.storefront && env.get("STOREFRONT_KEY") && d.target === "vps") {
+        // A changed domain moves the storefront's webhook with it.
+        const email = env.get("HYPHA_OWNER_EMAIL");
+        const password = env.get("HYPHA_OWNER_PASSWORD");
+        if (email && password) {
+          await Staff.login(d, email, password)
+            .then((staff) => syncWebhook(d, staff))
+            .then((moved) => moved && p.log.step(`The storefront's webhook now goes to ${moved}`))
+            .catch((e) => p.log.warn(`Couldn't check the storefront's webhook: ${e instanceof Error ? e.message : e}`));
+        }
+      } else if (d.domains.storefront && !env.get("STOREFRONT_KEY")) {
         spin.start("Connecting the storefront: a publishable key and its webhook");
         const email = env.get("HYPHA_OWNER_EMAIL");
         const password = env.get("HYPHA_OWNER_PASSWORD");

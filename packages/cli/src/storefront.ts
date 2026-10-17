@@ -12,6 +12,21 @@ const EVENTS = ["product.*", "inventory_item.*", "price_list.*", "catalog.*", "c
 /** `webhookSecret` is `null` without a webhook (on this machine). */
 export type StorefrontKeys = { key: string; webhookSecret: string | null };
 
+/** Where the API should deliver the storefront's events. */
+function webhookUrl(d: Deployment): string {
+  return `${url(d, d.domains.storefront!)}/api/revalidate`;
+}
+
+/** Points the storefront's webhook at its current domain; answers the new URL when it
+ * moved, `null` when it was already right. */
+export async function syncWebhook(d: Deployment, staff: Staff): Promise<string | null> {
+  const app = await staff.call<{ webhook: { url: string } | null }>("GET", "/admin/apps/app_storefront");
+  const target = webhookUrl(d);
+  if (app.webhook?.url === target) return null;
+  await staff.call("PATCH", "/admin/apps/app_storefront", { webhook: { url: target } });
+  return target;
+}
+
 /**
  * The app first: it's the call that can be refused (a webhook URL the API won't call),
  * and a refused one leaves nothing behind. On this machine there's no webhook: the API
@@ -29,7 +44,7 @@ export async function connectStorefront(d: Deployment, staff: Staff): Promise<St
       key: "app_storefront",
       name: "Storefront",
       subscriptions: EVENTS,
-      webhook: { url: `${url(d, d.domains.storefront!)}/api/revalidate` },
+      webhook: { url: webhookUrl(d) },
     });
     webhookSecret = app.secret;
   }

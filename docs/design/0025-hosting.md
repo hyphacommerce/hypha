@@ -76,7 +76,9 @@ same stack on this machine under `*.hypha.localhost`, over plain HTTP, to try it
 
 Compiling the API peaks near **3 GB** of memory (its last crate, about two minutes on
 an M-series laptop); the apps' builds under 1 GB. A 4 GB server (Hetzner CX22, CAX11)
-builds with a little swap, which `deploy` offers to add.
+builds with a little swap, which `deploy` offers to add. Running, the whole stack takes
+about 425 MB (measured on a CX22 with the seeded store: S3 145, storefront 90, admin
+70, Postgres 60, the API 35, Caddy 25).
 
 ## 4. Caching on a VPS
 

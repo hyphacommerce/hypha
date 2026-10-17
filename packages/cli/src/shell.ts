@@ -51,9 +51,17 @@ export function run(program: string, args: string[], options: RunOptions = {}): 
 }
 
 /** `a | b`: the first program's output is the second's input. */
-export function pipe(a: [string, string[]], b: [string, string[]], options: { cwd?: string } = {}): Promise<void> {
+export function pipe(
+  a: [string, string[]],
+  b: [string, string[]],
+  options: { cwd?: string; env?: Record<string, string> } = {},
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const first = spawn(a[0], a[1], { cwd: options.cwd, stdio: ["ignore", "pipe", "inherit"] });
+    const first = spawn(a[0], a[1], {
+      cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : process.env,
+      stdio: ["ignore", "pipe", "inherit"],
+    });
     const second = spawn(b[0], b[1], { stdio: ["pipe", "inherit", "inherit"] });
     first.stdout.pipe(second.stdin);
     let failed = false;
@@ -99,10 +107,13 @@ export function server(ssh: string, dir: string): Machine {
         input,
       });
     },
+    // Without macOS's extended attributes (COPYFILE_DISABLE, --no-xattrs), which GNU tar
+    // warns about, and owned by the user extracting them, not this machine's user ID.
     upload(from, files) {
       return pipe(
-        ["tar", ["-C", from, "-czf", "-", ...files]],
-        ["ssh", [...options, ssh, `mkdir -p ${quote(dir)} && tar -C ${quote(dir)} -xzf -`]],
+        ["tar", ["--no-xattrs", "-C", from, "-czf", "-", ...files]],
+        ["ssh", [...options, ssh, `mkdir -p ${quote(dir)} && tar -C ${quote(dir)} --no-same-owner -xzf -`]],
+        { env: { COPYFILE_DISABLE: "1" } },
       );
     },
   };
