@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { loadStore } from "@/lib/api";
 
+import { Providers } from "./providers";
+
 // Every page renders per request, priced for the shopper's country (design note 0023,
 // SF1): nothing is prerendered at build time, when there's no API to read.
 export const dynamic = "force-dynamic";
@@ -20,7 +22,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const store = await loadStore();
   return (
     <html lang={store.default_language}>
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

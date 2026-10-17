@@ -1,470 +1,149 @@
-/* The storefront's look (design note 0023, SF8): plain CSS, a few tokens, system type.
-   A merchant restyles the shop by changing these. */
-:root {
-  --ink: #18181b;
-  --muted: #71717a;
-  --line: #e4e4e7;
-  --soft: #f4f4f5;
-  --paper: #ffffff;
-  --accent: #18181b;
-  --accent-ink: #ffffff;
-  --danger: #b91c1c;
-  --radius: 10px;
-  --width: 1120px;
-  color-scheme: light;
+/* Astryx's pre-built CSS (design note 0024, AU12): reset, components, then the shop's
+   theme (theme/shopTheme.ts, built to theme/shop.css). The order maps to Astryx's
+   cascade layers, so keep it. */
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "../theme/shop.css";
+
+/* The shop's typefaces, self-hosted from npm (SIL OFL): Fraunces and Instrument Sans. */
+@import "@fontsource-variable/fraunces";
+@import "@fontsource-variable/instrument-sans";
+
+/* What Astryx's components don't express: the page's width, image fills, sticky
+   columns, and the merchant's HTML descriptions. Everything else is components. */
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-background-body);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-body);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ink: #f4f4f5;
-    --muted: #a1a1aa;
-    --line: #27272a;
-    --soft: #18181b;
-    --paper: #0a0a0b;
-    --accent: #f4f4f5;
-    --accent-ink: #0a0a0b;
-    --danger: #f87171;
-    color-scheme: dark;
+.shop-page {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-inline: var(--spacing-4);
+}
+
+@media (min-width: 768px) {
+  .shop-page {
+    padding-inline: var(--spacing-6);
   }
 }
 
-* {
-  box-sizing: border-box;
+.shop-main {
+  flex: 1;
+  padding-block: var(--spacing-6) var(--spacing-10);
 }
 
-body {
-  margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+.shop-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--color-background-body);
+  border-bottom: var(--border-width) solid var(--color-border);
 }
 
-a {
-  color: inherit;
+.shop-footer {
+  border-top: var(--border-width) solid var(--color-border);
+  background: var(--color-background-muted);
+  padding-block: var(--spacing-8);
 }
 
-img {
-  max-width: 100%;
+/* A media URL filling its AspectRatio box (no Image primitive in Astryx). */
+.shop-fill {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   display: block;
 }
 
-h1,
-h2,
-h3 {
-  line-height: 1.2;
-  letter-spacing: -0.01em;
+.shop-rounded {
+  border-radius: var(--radius-container);
+  overflow: hidden;
+  background: var(--color-background-muted);
 }
 
-.page {
-  max-width: var(--width);
-  margin: 0 auto;
-  padding: 0 16px;
+/* The product page's info and the checkout's summary stay in view while the other
+   column scrolls; on phones the columns stack and nothing sticks. */
+@media (min-width: 900px) {
+  .shop-sticky {
+    position: sticky;
+    top: calc(var(--spacing-10) + var(--spacing-10));
+    align-self: start;
+  }
 }
 
-/* ---------- header and footer ---------- */
-
-.header {
-  border-bottom: 1px solid var(--line);
+/* Two columns from 900px: gallery and info, facets and results, form and summary. */
+.shop-split {
+  display: grid;
+  gap: var(--spacing-8);
+  align-items: start;
 }
 
-.header-row {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 14px 0;
+@media (min-width: 900px) {
+  .shop-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .shop-split[data-variant="sidebar"] {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+  .shop-split[data-variant="summary"] {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
 }
 
-.brand {
-  font-weight: 700;
-  font-size: 1.15rem;
-  text-decoration: none;
-  margin-right: auto;
+/* The facet panel shows beside the results on wide screens; phones open it in a
+   bottom sheet instead. */
+.shop-wide-only {
+  display: none;
+}
+.shop-narrow-only {
+  display: block;
+}
+@media (min-width: 900px) {
+  .shop-wide-only {
+    display: block;
+  }
+  .shop-narrow-only {
+    display: none;
+  }
 }
 
-.nav {
-  display: flex;
-  gap: 18px;
-  flex-wrap: wrap;
-  padding-bottom: 12px;
+/* The merchant's description: HTML sanitised by the API (scripts, styles and event
+   attributes removed), typeset like body text. */
+.shop-prose {
+  color: var(--color-text-primary);
+  line-height: 1.6;
 }
-
-.nav a {
-  text-decoration: none;
-  color: var(--muted);
+.shop-prose > * + * {
+  margin-top: var(--spacing-3);
 }
-
-.nav a:hover {
-  color: var(--ink);
+.shop-prose h1,
+.shop-prose h2,
+.shop-prose h3 {
+  font-family: var(--font-family-heading);
+  margin-top: var(--spacing-5);
 }
-
-.search-box input {
-  width: 220px;
+.shop-prose ul,
+.shop-prose ol {
+  padding-inline-start: var(--spacing-5);
 }
-
-.footer {
-  border-top: 1px solid var(--line);
-  margin-top: 64px;
-  padding: 32px 0;
-  color: var(--muted);
-  font-size: 0.9rem;
+.shop-prose ul {
+  list-style: disc;
 }
-
-/* ---------- forms ---------- */
-
-input,
-select,
-textarea,
-button {
-  font: inherit;
-  color: inherit;
+.shop-prose ol {
+  list-style: decimal;
 }
-
-input,
-select,
-textarea {
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 10px;
-}
-
-.button {
-  display: inline-block;
-  background: var(--accent);
-  color: var(--accent-ink);
-  border: 0;
-  border-radius: 8px;
-  padding: 10px 18px;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.button-quiet {
-  background: transparent;
-  color: var(--ink);
-  border: 1px solid var(--line);
-}
-
-.link-button {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--muted);
+.shop-prose a {
+  color: var(--color-text-accent);
   text-decoration: underline;
-  cursor: pointer;
 }
-
-.fields {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-}
-
-.fields label,
-.stack label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-.stack {
-  display: grid;
-  gap: 16px;
-  /* Rows keep their height when the column is taller (beside a square gallery). */
-  align-content: start;
-}
-
-.error {
-  border: 1px solid var(--danger);
-  color: var(--danger);
-  border-radius: var(--radius);
-  padding: 10px 14px;
-}
-
-.muted {
-  color: var(--muted);
-}
-
-/* ---------- listings ---------- */
-
-.grid {
-  display: grid;
-  gap: 24px;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-}
-
-.card {
-  text-decoration: none;
-  display: grid;
-  gap: 8px;
-}
-
-.card-image {
-  aspect-ratio: 1;
-  background: var(--soft);
-  border-radius: var(--radius);
-  overflow: hidden;
-  display: grid;
-  place-items: center;
-}
-
-.card-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.card-title {
-  font-weight: 600;
-}
-
-.listing {
-  display: grid;
-  gap: 32px;
-  grid-template-columns: 220px 1fr;
-}
-
-@media (max-width: 760px) {
-  .listing {
-    grid-template-columns: 1fr;
-  }
-}
-
-.facet h3 {
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  margin: 0 0 8px;
-}
-
-.facet ul {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 20px;
-  display: grid;
-  gap: 4px;
-}
-
-.facet a {
-  text-decoration: none;
-}
-
-.facet a[aria-current="true"] {
-  font-weight: 700;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.pager {
-  display: flex;
-  gap: 12px;
-  margin-top: 32px;
-}
-
-.chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.chip {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 6px 14px;
-  text-decoration: none;
-}
-
-.breadcrumb {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin-top: 24px;
-}
-
-.breadcrumb a {
-  text-decoration: none;
-}
-
-/* ---------- product ---------- */
-
-.product {
-  display: grid;
-  gap: 40px;
-  grid-template-columns: 1.1fr 1fr;
-  margin-top: 32px;
-}
-
-@media (max-width: 760px) {
-  .product {
-    grid-template-columns: 1fr;
-  }
-}
-
-.gallery {
-  display: grid;
-  gap: 12px;
-}
-
-.gallery-main {
-  aspect-ratio: 1;
-  background: var(--soft);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-.gallery-main img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.thumbs {
-  display: flex;
-  gap: 8px;
-}
-
-.thumbs img {
-  width: 64px;
-  height: 64px;
-  object-fit: cover;
-  border-radius: 6px;
-}
-
-.price {
-  font-size: 1.4rem;
-  font-weight: 600;
-}
-
-.options fieldset {
-  border: 0;
-  padding: 0;
-  margin: 0 0 16px;
-}
-
-.options legend {
-  font-size: 0.9rem;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-
-.option-values {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.option-value {
-  border: 1px solid var(--line);
-  background: var(--paper);
-  border-radius: 8px;
-  padding: 6px 14px;
-  cursor: pointer;
-}
-
-.option-value[aria-pressed="true"] {
-  border-color: var(--ink);
-  font-weight: 600;
-}
-
-.option-value[data-unavailable="true"] {
-  color: var(--muted);
-  text-decoration: line-through;
-}
-
-.description {
-  color: var(--ink);
-}
-
-/* ---------- cart and checkout ---------- */
-
-.lines {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.lines td,
-.lines th {
-  text-align: left;
-  padding: 12px 8px;
-  border-bottom: 1px solid var(--line);
-  vertical-align: top;
-}
-
-.lines th {
-  font-size: 0.85rem;
-  color: var(--muted);
-  font-weight: 500;
-}
-
-.num {
-  text-align: right !important;
-  white-space: nowrap;
-}
-
-.totals {
-  margin-left: auto;
-  max-width: 320px;
-  display: grid;
-  gap: 6px;
-  margin-top: 16px;
-}
-
-.totals div {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.total-row {
-  font-weight: 700;
-  font-size: 1.1rem;
-  border-top: 1px solid var(--line);
-  padding-top: 8px;
-}
-
-.panel {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 20px;
-}
-
-.checkout {
-  display: grid;
-  gap: 24px;
-  grid-template-columns: 1.4fr 1fr;
-}
-
-@media (max-width: 760px) {
-  .checkout {
-    grid-template-columns: 1fr;
-  }
-}
-
-.offers {
-  display: grid;
-  gap: 8px;
-}
-
-.offer {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px 12px;
+.shop-prose blockquote {
+  border-inline-start: 3px solid var(--color-border-emphasized);
+  padding-inline-start: var(--spacing-3);
+  color: var(--color-text-secondary);
 }

@@ -74,6 +74,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm sdk:check
       - run: pnpm --filter admin theme:check
+      - run: pnpm --filter storefront theme:check
       - run: pnpm typecheck
       # Standard Next.js still builds the admin (design note 0011, P2).
       - run: pnpm --filter admin exec next build

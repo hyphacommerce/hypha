@@ -283,9 +283,27 @@ importers:
 
   apps/storefront:
     dependencies:
+      '@astryxdesign/core':
+        specifier: 0.7.1
+        version: 0.7.1(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@astryxdesign/theme-neutral':
+        specifier: 0.7.1
+        version: 0.7.1(@astryxdesign/core@0.7.1(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(@types/react@19.3.0)(react@19.3.1)
+      '@fontsource-variable/fraunces':
+        specifier: 5.3.0
+        version: 5.3.0
+      '@fontsource-variable/instrument-sans':
+        specifier: 5.3.0
+        version: 5.3.0
+      '@heroicons/react':
+        specifier: 2.2.0
+        version: 2.2.0(react@19.3.1)
       '@hypha/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@stylexjs/stylex':
+        specifier: 0.19.1
+        version: 0.19.1
       '@vinext/cloudflare':
         specifier: 1.1.1
         version: 1.1.1(09b2c307f67186388530b4c20f6c2da5)
@@ -302,6 +320,9 @@ importers:
         specifier: 1.2.0
         version: 1.2.0(@types/node@26.6.5)(@vitejs/plugin-react@6.1.2(vite@8.3.0(@types/node@26.6.5)(jiti@2.7.0)(terser@5.51.2)))(@vitejs/plugin-rsc@0.5.37(react-dom@19.3.1(react@19.3.1))(react-server-dom-webpack@19.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(webpack@5.111.1(lightningcss@1.33.0)(postcss@8.5.30)(sharp@0.35.5(@types/node@26.6.5))))(react@19.3.1)(vite@8.3.0(@types/node@26.6.5)(jiti@2.7.0)(terser@5.51.2)))(next@16.4.1(@babel/core@7.29.7(supports-color@10.2.2))(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react-server-dom-webpack@19.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(webpack@5.111.1(lightningcss@1.33.0)(postcss@8.5.30)(sharp@0.35.5(@types/node@26.6.5))))(react@19.3.1)(vite@8.3.0(@types/node@26.6.5)(jiti@2.7.0)(terser@5.51.2))
     devDependencies:
+      '@astryxdesign/cli':
+        specifier: 0.7.1
+        version: 0.7.1(@astryxdesign/core@0.7.1(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(@astryxdesign/theme-neutral@0.7.1(@astryxdesign/core@0.7.1(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(@types/react@19.3.0)(react@19.3.1))(supports-color@10.2.2)
       '@cloudflare/vite-plugin':
         specifier: 2.0.0-beta.sha-67fa336fd
         version: 2.0.0-beta.sha-67fa336fd(@types/node@26.6.5)(vite@8.3.0(@types/node@26.6.5)(jiti@2.7.0)(terser@5.51.2))(workerd@1.20261012.1)
@@ -696,11 +717,17 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
+  '@fontsource-variable/fraunces@5.3.0':
+    resolution: {integrity: sha512-9BYGySn4AHEJdgp9Z28tQ3X+laJMEOITXkQarZXeloWQZDq5oOvXJ3kDA8c7MGIfpogIaZfjrQBqmda8POOCKA==}
+
   '@fontsource-variable/geist-mono@5.3.0':
     resolution: {integrity: sha512-vBbuwDEo9AkrqADMXOrlAR3DFcJi4/JxeuU43FoiQERnNwsfXNnvxvReZG02cQKmyk4DZkZdBZX3oTDvy2zBAw==}
 
   '@fontsource-variable/geist@5.2.8':
     resolution: {integrity: sha512-cJ6m9e+8MQ5dCYJsLylfZrgBh6KkG4bOLckB35Tr9J/EqdkEM6QllH5PxqP1dhTvFup+HtMRPuz9xOjxXJggxw==}
+
+  '@fontsource-variable/instrument-sans@5.3.0':
+    resolution: {integrity: sha512-u4gKbDBTNFGkg997tfQn3eHOhHuquWUFTRT/rwzuKtrxX5P2ekfs2x+LgBPP4P32+cC+vUwF1Cr+IdRoPQbrGw==}
 
   '@formatjs/fast-memoize@3.1.7':
     resolution: {integrity: sha512-zXfhLpvA6T7+efdt9JLbBwZ00tT7NsBMDVnDu8rpHeNNv8KfRZAMo2gkG0k9lK/Nzc//3kJ9pImsfuJxk3KhUA==}
@@ -2921,9 +2948,13 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
+  '@fontsource-variable/fraunces@5.3.0': {}
+
   '@fontsource-variable/geist-mono@5.3.0': {}
 
   '@fontsource-variable/geist@5.2.8': {}
+
+  '@fontsource-variable/instrument-sans@5.3.0': {}
 
   '@formatjs/fast-memoize@3.1.7': {}
 
