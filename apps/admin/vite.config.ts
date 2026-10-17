@@ -15,10 +15,10 @@ export default defineConfig({
     vinext(),
     !node &&
       cloudflare({
-      viteEnvironment: {
-        name: "rsc",
-        childEnvironments: ["ssr"],
-      },
-    }),
+        viteEnvironment: {
+          name: "rsc",
+          childEnvironments: ["ssr"],
+        },
+      }),
   ],
 });
