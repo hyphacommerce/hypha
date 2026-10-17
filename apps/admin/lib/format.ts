@@ -61,13 +61,37 @@ export function parseMoney(input: string, currency: string, currencies: Currenci
   return Number.isSafeInteger(amount) ? amount : null;
 }
 
-/** "15 Oct 2026, 09:30 UTC". */
-export function formatDateTime(rfc3339: string): string {
-  return `${new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(rfc3339))} UTC`;
+/**
+ * A time in `timeZone` (the store's; `components/date-time.tsx` passes it). `long`:
+ * "15 Oct 2026, 09:30 CEST", for detail pages. `short`, for tables: "15 Oct, 09:30" this
+ * year, "15 Oct 2025" before.
+ */
+export function formatDateTime(
+  rfc3339: string,
+  timeZone = "UTC",
+  style: "long" | "short" = "long",
+): string {
+  const at = new Date(rfc3339);
+  if (Number.isNaN(at.getTime())) return "—";
+  if (style === "long") {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone,
+      timeZoneName: "short",
+    }).format(at);
+  }
+  const year = (d: Date) => new Intl.DateTimeFormat("en-GB", { year: "numeric", timeZone }).format(d);
+  const thisYear = year(at) === year(new Date());
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    ...(thisYear ? { hour: "2-digit", minute: "2-digit" } : { year: "numeric" }),
+    timeZone,
+  }).format(at);
 }
 
 /** "980 B", "1.4 MB": file sizes in powers of 1024, one decimal above a kilobyte. */

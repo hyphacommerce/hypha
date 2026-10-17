@@ -8,8 +8,9 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
+import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
-import { formatDateTime } from "@/lib/format";
+
 import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
 import { customerName } from "@/resources/customers";
 
@@ -73,10 +74,10 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 <MetadataListItem label="Name">{name || "—"}</MetadataListItem>
                 <MetadataListItem label="Phone">{customer.phone ?? "—"}</MetadataListItem>
                 <MetadataListItem label="Customer since">
-                  {formatDateTime(customer.created_at)}
+                  <DateTime value={customer.created_at} />
                 </MetadataListItem>
                 <MetadataListItem label="Last changed">
-                  {formatDateTime(customer.updated_at)}
+                  <DateTime value={customer.updated_at} />
                 </MetadataListItem>
               </MetadataList>
             </VStack>

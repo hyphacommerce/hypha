@@ -17,8 +17,9 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useState, useTransition } from "react";
 
+import { DateTime } from "@/components/date-time";
 import { ShipmentBadge } from "@/components/status";
-import { CANCEL_REASONS, formatDateTime } from "@/lib/format";
+import { CANCEL_REASONS } from "@/lib/format";
 
 import { MAX_TRACKING, NO_TRACKING, type TrackingInput, trackingProblem } from "@/lib/tracking";
 
@@ -275,7 +276,7 @@ function Shipment({
         <HStack gap={2} vAlign="center">
           <ShipmentBadge status={fulfillment.status} />
           <Text type="supporting" color="secondary">
-            From {from}, {formatDateTime(fulfillment.created_at)}
+            From {from}, <DateTime value={fulfillment.created_at} />
           </Text>
         </HStack>
         {stands &&

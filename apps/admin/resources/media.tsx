@@ -16,6 +16,7 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 
+import { DateTime } from "@/components/date-time";
 import { href, withChanges } from "@/components/resource-table/params";
 import {
   type FilterDef,
@@ -23,7 +24,7 @@ import {
   type SortDef,
   type SortOption,
 } from "@/components/resource-table/resource-table";
-import { formatBytes, formatDateTime } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
 
 type Asset = AdminSchemas["AssetResponse"];
 
@@ -182,7 +183,7 @@ export function MediaLibrary({
       key: "uploaded",
       header: "Uploaded",
       width: pixel(190),
-      renderCell: (asset) => formatDateTime(asset.created_at),
+      renderCell: (asset) => <DateTime value={asset.created_at} short />,
     },
   ];
   return (

@@ -23,9 +23,10 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { KeyIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import { formatDateTime } from "@/lib/format";
+
 
 import { type ChannelKind, createChannel, createStorefrontKey, renameChannel } from "./actions";
+import { DateTime } from "@/components/date-time";
 
 type Channel = AdminSchemas["ChannelResponse"];
 
@@ -84,7 +85,7 @@ export function ChannelsCard({ channels }: { channels: Channel[] }) {
                   <Badge label={kindLabel(channel.kind)} />
                 </TableCell>
                 <TableCell>
-                  <Text color="secondary">{formatDateTime(channel.created_at)}</Text>
+                  <Text color="secondary"><DateTime value={channel.created_at} short /></Text>
                 </TableCell>
                 <TableCell>
                   <HStack gap={1} hAlign="end">

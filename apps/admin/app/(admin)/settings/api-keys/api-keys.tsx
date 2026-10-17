@@ -20,8 +20,9 @@ import { KeyIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useState, useTransition } from "react";
 
+import { DateTime } from "@/components/date-time";
 import { ResourceTable } from "@/components/resource-table/resource-table";
-import { formatDateTime } from "@/lib/format";
+
 
 import { createApiKey, revokeApiKey } from "./actions";
 
@@ -74,7 +75,7 @@ export function ApiKeys({
       key: "created_at",
       header: "Created",
       width: pixel(190),
-      renderCell: (k) => formatDateTime(k.created_at),
+      renderCell: (k) => <DateTime value={k.created_at} short />,
     },
     {
       key: "state",

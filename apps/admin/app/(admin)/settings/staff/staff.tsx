@@ -17,8 +17,9 @@ import { EnvelopeIcon, ShieldCheckIcon, UsersIcon } from "@heroicons/react/24/ou
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useState, useTransition } from "react";
 
+import { DateTime } from "@/components/date-time";
 import { ClientResourceTable, byText } from "@/components/resource-table/resource-table";
-import { formatDateTime } from "@/lib/format";
+
 
 import { inviteStaff } from "./actions";
 
@@ -66,7 +67,7 @@ export function Staff({
         <Badge label={u.status === "active" ? "Active" : "Disabled"} variant={u.status === "active" ? "success" : "neutral"} />
       ),
     },
-    { key: "created_at", header: "Since", width: pixel(190), renderCell: (u) => formatDateTime(u.created_at) },
+    { key: "created_at", header: "Since", width: pixel(190), renderCell: (u) => <DateTime value={u.created_at} short /> },
   ];
   const inviteColumns: TableColumn<Invite>[] = [
     { key: "email", header: "Email" },
@@ -79,7 +80,7 @@ export function Staff({
         Date.parse(i.expires_at) < now ? (
           <Badge label="Expired" variant="warning" />
         ) : (
-          formatDateTime(i.expires_at)
+          <DateTime value={i.expires_at} short />
         ),
     },
     {

@@ -15,9 +15,10 @@ import { Text } from "@astryxdesign/core/Text";
 import { InboxIcon } from "@heroicons/react/24/outline";
 import { redirect } from "next/navigation";
 
+import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
 import { Pager } from "@/components/pager";
-import { formatDateTime } from "@/lib/format";
+
 import { loaded, sessionClient } from "@/lib/hypha";
 
 import { RetryButton } from "./retry-button";
@@ -114,7 +115,9 @@ export default async function AppDeliveriesPage({
                         </Text>
                       </VStack>
                     </TableCell>
-                    <TableCell>{formatDateTime(delivery.occurred_at)}</TableCell>
+                    <TableCell>
+                      <DateTime value={delivery.occurred_at} short />
+                    </TableCell>
                     <TableCell>
                       <VStack gap={1}>
                         <HStack gap={1}>
@@ -130,7 +133,7 @@ export default async function AppDeliveriesPage({
                         )}
                         {delivery.status === "pending" && delivery.attempts > 0 && (
                           <Text type="supporting" color="secondary">
-                            Next try {formatDateTime(delivery.next_attempt_at)}
+                            Next try <DateTime value={delivery.next_attempt_at} short />
                           </Text>
                         )}
                       </VStack>

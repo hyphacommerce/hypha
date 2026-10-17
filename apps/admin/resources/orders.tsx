@@ -8,6 +8,7 @@ import { type TableColumn, pixel } from "@astryxdesign/core/Table";
 import { ShoppingBagIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
+import { DateTime } from "@/components/date-time";
 import {
   type FilterDef,
   ResourceTable,
@@ -15,7 +16,7 @@ import {
   type SortOption,
 } from "@/components/resource-table/resource-table";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
-import { type Currencies, formatDateTime, formatMoney } from "@/lib/format";
+import { type Currencies, formatMoney } from "@/lib/format";
 
 type Order = AdminSchemas["OrderSummaryResponse"];
 
@@ -107,7 +108,7 @@ export function OrdersTable({
       key: "placed",
       header: "Placed",
       width: pixel(190),
-      renderCell: (order) => formatDateTime(order.placed_at),
+      renderCell: (order) => <DateTime value={order.placed_at} short />,
     },
     { key: "email", header: "Customer" },
     {
@@ -120,9 +121,14 @@ export function OrdersTable({
       header: "Status",
       renderCell: (order) => (
         <HStack gap={1} wrap="wrap">
-          {order.cancelled_at && <CancelledBadge />}
-          <PaymentBadge status={order.financial_status} />
-          <FulfillmentBadge status={order.fulfillment_status} />
+          {order.cancelled_at ? (
+            <CancelledBadge />
+          ) : (
+            <>
+              <PaymentBadge status={order.financial_status} />
+              <FulfillmentBadge status={order.fulfillment_status} />
+            </>
+          )}
         </HStack>
       ),
     },

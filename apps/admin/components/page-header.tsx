@@ -12,7 +12,7 @@ export function PageHeader({
   actions,
 }: {
   title: string;
-  description?: string;
+  description?: ReactNode;
   /** The parent page, shown as a breadcrumb. */
   back?: { label: string; href: string };
   badges?: ReactNode;

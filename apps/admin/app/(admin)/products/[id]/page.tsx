@@ -5,9 +5,10 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
+import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
 import { ProductStatusBadge } from "@/components/status";
-import { type Currencies, formatDateTime, formatMoney } from "@/lib/format";
+import { type Currencies, formatMoney } from "@/lib/format";
 import { loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
 
 import type { Stock } from "../actions";
@@ -74,10 +75,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
                   </Text>
                 </MetadataListItem>
                 <MetadataListItem label="Created">
-                  <Text type="supporting">{formatDateTime(product.created_at)}</Text>
+                  <Text type="supporting"><DateTime value={product.created_at} /></Text>
                 </MetadataListItem>
                 <MetadataListItem label="Last changed">
-                  <Text type="supporting">{formatDateTime(product.updated_at)}</Text>
+                  <Text type="supporting"><DateTime value={product.updated_at} /></Text>
                 </MetadataListItem>
               </MetadataList>
             </Card>

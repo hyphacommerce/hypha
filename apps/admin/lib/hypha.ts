@@ -374,6 +374,16 @@ export const loadCurrencies = cache(async (): Promise<Currencies> => {
 });
 
 /**
+ * The store's time zone (IANA, from `GET /admin/store`), once per request: times show in
+ * it. UTC when the staff member can't read the store or it has none.
+ */
+export const loadTimeZone = cache(async (): Promise<string> => {
+  const client = await sessionClient();
+  const { data } = await client.GET("/admin/store");
+  return data?.timezone ?? "UTC";
+});
+
+/**
  * Every country an address or market can name (`GET /admin/countries`), once per
  * request, for pickers.
  */

@@ -10,6 +10,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { CubeIcon, PhotoIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
+import { DateTime } from "@/components/date-time";
 import {
   type FilterDef,
   ResourceTable,
@@ -17,7 +18,7 @@ import {
   type SortOption,
 } from "@/components/resource-table/resource-table";
 import { ProductStatusBadge } from "@/components/status";
-import { type Currencies, formatDateTime, formatMoney } from "@/lib/format";
+import { type Currencies, formatMoney } from "@/lib/format";
 
 type Product = AdminSchemas["ProductSummaryResponse"];
 
@@ -179,7 +180,7 @@ export function ProductsTable({
       key: "updated",
       header: "Changed",
       width: pixel(170),
-      renderCell: (product) => <Text color="secondary">{formatDateTime(product.updated_at)}</Text>,
+      renderCell: (product) => <Text color="secondary"><DateTime value={product.updated_at} short /></Text>,
     },
   ];
   return (

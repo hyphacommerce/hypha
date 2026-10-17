@@ -6,8 +6,9 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
+import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
-import { formatBytes, formatDateTime } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
 import { loaded, sessionClient } from "@/lib/hypha";
 
 import { AssetForm } from "./asset-form";
@@ -124,7 +125,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               <MetadataListItem label="Visibility">
                 {asset.visibility === "public" ? "Public" : "Private"}
               </MetadataListItem>
-              <MetadataListItem label="Uploaded">{formatDateTime(asset.created_at)}</MetadataListItem>
+              <MetadataListItem label="Uploaded"><DateTime value={asset.created_at} /></MetadataListItem>
             </MetadataList>
           </VStack>
         </HStack>

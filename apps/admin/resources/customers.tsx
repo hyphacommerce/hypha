@@ -9,13 +9,14 @@ import { Text } from "@astryxdesign/core/Text";
 import { UsersIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
+import { DateTime } from "@/components/date-time";
 import {
   type FilterDef,
   ResourceTable,
   type SortDef,
   type SortOption,
 } from "@/components/resource-table/resource-table";
-import { formatDateTime } from "@/lib/format";
+
 
 type Customer = AdminSchemas["CustomerSummaryResponse"];
 
@@ -77,7 +78,7 @@ export function CustomersTable({
       key: "created",
       header: "Since",
       width: pixel(190),
-      renderCell: (c) => formatDateTime(c.created_at),
+      renderCell: (c) => <DateTime value={c.created_at} short />,
     },
   ];
   return (
