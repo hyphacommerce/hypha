@@ -88,7 +88,75 @@ per-session reads (0024, §6), all live in that process. On Workers (H2) they ne
 Cloudflare's adapters (KV, the Workers Cache), and the admin's cross-request cache
 should go: an isolate that didn't see a write would keep serving the old read.
 
-## 5. Later
+## 6. Measured on the test server, and what changed
+
+A CX22 (2 shared vCPUs, 4 GB) with the seeded store, measured with `pg_stat_statements`
+(on in every deployment), the API's per-request logs and autocannon (50 connections
+from Croatia to Germany). Before building the Workers host: on Workers, every API call
+and every page render is an invocation billed by count and CPU time, and every query
+is a round trip through Hyperdrive.
+
+| | Before | After |
+| --- | --- | --- |
+| Product read (API): throughput | 275 req/s | 484 req/s |
+| Search (API): throughput | 276 req/s | 501 req/s |
+| Product read: Postgres planning / executing, per read | 4.5 ms / 1.2 ms | ~0 / 1.1 ms |
+| Queries while idle | ~5 per second | ~8 per minute |
+| Admin home: API calls / queries | 18 / 154 | 4 / 49 |
+| Product editor: API calls | 3 + one per variant | 6 |
+| Search page render (storefront CPU on the server, from cache) | 33 ms, 208 KB | 31 ms, 153 KB |
+
+- **Postgres planned every query again** (unprepared statements: 80% of its time on a
+  product read). Pooled connections now keep their prepared statements
+  (`StatementCache`, `database.statement_cache`, on by default; off behind a pooler in
+  transaction mode). The repositories run queries through `Queries` (`Db`): prepared
+  when the connection keeps a cache, unprepared otherwise, so a Workers host (one
+  connection per request, Hyperdrive's transaction pooling) runs the same code without.
+- **A load's queries went one after another.** A product load (product, options,
+  values, variants, media), a market, a location and an inventory item now select their
+  children through the root's filter (a join) instead of waiting for its IDs, and send
+  them together (`try_join`), pipelined in one round trip; a read-only snapshot ends by
+  dropping its transaction (a queued ROLLBACK) instead of waiting for a COMMIT. Fewer
+  round trips matter little on one server and a lot through Hyperdrive.
+- **The market was read twice** for a priced product, and once per market again by
+  search sync (`load_pricing_for` takes the market already loaded). **The publishable
+  key** was looked up on every storefront request; it's cached for 30 seconds
+  (`key_cache.rs`), and revoking a key clears the cache.
+- **The jobs polled every 2 seconds**, which keeps a serverless database (Neon) awake
+  around the clock. An idle job now doubles its wait up to `jobs.idle_interval` (a
+  minute), a successful write wakes the dispatcher, and a dispatch step that did work
+  wakes search sync, so changes still apply at once.
+- **The admin asked per item**: the home page's checklist read six lists plus two reads
+  per sampled product, and the product editor read each variant's stock.
+  `GET /admin/setup/checklist` and `GET /admin/products/{id}/inventory` answer each in one
+  call. The admin's cache already makes a repeated page cost one call (`/admin/me`).
+- **The storefront's dynamic pages rendered their skeletons every time.** A route's
+  `loading.tsx` is rendered (server components and HTML) before its page even when the
+  page's data comes from cache at once; Astryx's `Skeleton` carries about fifteen atomic
+  classes per element, and the search skeleton has a hundred elements. They're now one
+  element with one class each (`.shop-bone`), the same look: a quarter less HTML, but
+  only 7% less CPU on the server (a laptop's numbers suggested half; measure on the
+  server, from inside the container, before believing a render optimisation).
+
+What's left, for the Workers host's note:
+
+- **Dynamic pages are rendered per request**: on the CX22, search costs ~31 ms of CPU
+  (about 38 a second on one core), the cart page ~16 ms (mostly the header and footer),
+  a cached product page ~4 ms. That's the framework rendering an Astryx tree twice
+  (server components, then HTML), with no single hotspot in the profile. Search and cart pages hold nothing about the
+  shopper (the cart comes in the browser), so their HTML could be cached by URL at the
+  edge for a minute; only checkout, order and account must stay private. On a VPS that
+  needs a cache in front of Caddy; on Workers it's the Workers Cache.
+- **Static pages** (product, category, home) cost under 1 ms from vinext's cache, which
+  is per process: on Workers they need the KV or Workers Cache adapters so every isolate
+  shares them and the webhook's revalidation reaches them all.
+- **Logging in costs Argon2id** (tens of milliseconds of CPU natively, more in wasm):
+  over the free plan's 10 ms per request, fine on the paid plan.
+- **Astryx's markup is heavy** (about 11 classes per element, a third of a page's HTML);
+  a leaner product card would cut the listing's render further, at the cost of the
+  storefront being built from Astryx components only.
+
+## 7. Later
 
 - Published images, so `npx @hypha/cli` works without the repository (H8).
 - `hypha backup` / `restore` (Postgres and the files), `hypha upgrade` with a rollback.
