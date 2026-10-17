@@ -27,19 +27,40 @@ const CATEGORY_PRODUCTS: &[&str] = &[
     "category.products_removed",
     "category.deleted",
 ];
-/// A moved category changes the ancestors of everything below it. Names, handles and
-/// visibility aren't in documents (a hidden category is refused at the route, CA4).
-const CATEGORY_MOVED: (&str, &str) = ("category.changed", "parent");
 const VARIANT_PRICES: &[&str] = &["price_list.prices_set", "price_list.prices_removed"];
 const STOCK: &[&str] = &["inventory_item.changed", "inventory_item.deleted"];
 /// Rare and wide: which products a market sells, at what price, from where.
-const EVERYTHING: &[&str] = &["market.changed", "catalog.changed", "price_list.changed"];
-/// Everything too, but only when the field named changed: a location's `markets` decide
-/// where its stock counts; the settings' `split_by` changes every listing key.
-const WHEN_FIELD: &[(&str, &str)] = &[
-    ("location.changed", "markets"),
-    ("search_settings.changed", "split_by"),
+const EVERYTHING: &[&str] = &["catalog.changed", "price_list.changed"];
+/// What to rebuild when one of the fields named changed (the event's `fields`):
+/// - a location's `markets` decide where its stock counts, the settings' `split_by`
+///   changes every listing key, and a market's countries, currency and tax rule decide
+///   every price there: everything;
+/// - a category's `parent` or `visible` change which categories the products below it
+///   are listed under (design note 0022, CA3, CA4): that subtree.
+///
+/// Names and the like aren't in documents and rebuild nothing.
+const WHEN_FIELD: &[(&str, &[&str], Rebuild)] = &[
+    ("location.changed", &["markets"], Rebuild::All),
+    ("search_settings.changed", &["split_by"], Rebuild::All),
+    (
+        "market.changed",
+        &["created", "countries", "currency", "prices_include_tax"],
+        Rebuild::All,
+    ),
+    (
+        "category.changed",
+        &["parent", "visible"],
+        Rebuild::Category,
+    ),
 ];
+
+/// What a `WHEN_FIELD` rule marks.
+#[derive(Clone, Copy)]
+enum Rebuild {
+    All,
+    /// The event's `category` and everything below it.
+    Category,
+}
 
 impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
     fn name(&self) -> &'static str {
@@ -58,8 +79,7 @@ impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
         ]
         .iter()
         .any(|types| types.contains(&event_type))
-            || event_type == CATEGORY_MOVED.0
-            || WHEN_FIELD.iter().any(|(t, _)| *t == event_type)
+            || WHEN_FIELD.iter().any(|(t, ..)| *t == event_type)
     }
 
     async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
@@ -107,26 +127,25 @@ pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
         parse("variants", |id| id.parse().ok().map(Target::Variant))
     } else if STOCK.contains(&t) {
         parse("variant", |id| id.parse().ok().map(Target::Variant))
-    } else if t == CATEGORY_MOVED.0 {
-        let fields = event.data["fields"]
-            .as_array()
-            .ok_or_else(|| bad("fields"))?;
-        if fields.iter().any(|f| f == CATEGORY_MOVED.1) {
-            parse("category", |id| id.parse().ok().map(Target::Category))
-        } else {
-            Ok(vec![])
-        }
     } else if EVERYTHING.contains(&t) {
         Ok(vec![Target::All])
-    } else if let Some((_, field)) = WHEN_FIELD.iter().find(|(w, _)| *w == t) {
-        let fields = event.data["fields"]
-            .as_array()
-            .ok_or_else(|| bad("fields"))?;
-        Ok(if fields.iter().any(|f| f == field) {
-            vec![Target::All]
-        } else {
-            vec![]
-        })
+    } else if let Some((_, wanted, rebuild)) = WHEN_FIELD.iter().find(|(w, ..)| *w == t) {
+        // Events written before `fields` existed (`market.changed`) rebuild as if every
+        // field changed: the safe guess.
+        let changed = match &event.data["fields"] {
+            serde_json::Value::Null => true,
+            serde_json::Value::Array(fields) => {
+                fields.iter().any(|f| wanted.iter().any(|w| f == *w))
+            }
+            _ => return Err(bad("fields")),
+        };
+        if !changed {
+            return Ok(vec![]);
+        }
+        match rebuild {
+            Rebuild::All => Ok(vec![Target::All]),
+            Rebuild::Category => parse("category", |id| id.parse().ok().map(Target::Category)),
+        }
     } else {
         Ok(vec![])
     }

@@ -624,15 +624,17 @@ pub(super) async fn list_fixed_prices_handler<S: Storage>(
         .map_err(|e| ApiError::from(e).not_found_if("price_list_not_found"))?;
     let variants: Vec<VariantId> = page.items.iter().map(|(v, _)| *v).collect();
     let products = products_of_variants(&ctx, ports.products(), &variants).await?;
+    // Each variant's product, looked up once per row rather than scanned for.
+    let owners: HashMap<VariantId, &hypha_products::Product> = products
+        .iter()
+        .flat_map(|p| p.variants().iter().map(move |v| (v.id(), p)))
+        .collect();
     let product_of = |variant: VariantId| {
-        products
-            .iter()
-            .find(|p| p.variants().iter().any(|v| v.id() == variant))
-            .map(|p| FixedPriceProduct {
-                id: p.id(),
-                title: p.title().to_string(),
-                variant_title: p.variant_title(variant),
-            })
+        owners.get(&variant).map(|p| FixedPriceProduct {
+            id: p.id(),
+            title: p.title().to_string(),
+            variant_title: p.variant_title(variant),
+        })
     };
     Ok(Json(PageResponse::new(
         page,

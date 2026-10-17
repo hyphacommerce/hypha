@@ -48,8 +48,9 @@ pub struct SearchDocument {
     /// The channels the product is published to, sorted (design note 0020): the same on
     /// every document of the product.
     pub channels: Vec<ChannelId>,
-    /// The product's categories and all their ancestors, sorted (design note 0022,
-    /// CA3): a filter on "Clothing" finds what's in "Shirts" too.
+    /// The product's shown categories and all their ancestors, sorted (design note
+    /// 0022, CA3, CA4): a filter on "Clothing" finds what's in "Shirts" too, and nothing
+    /// that's only in a hidden category.
     pub categories: Vec<CategoryId>,
     pub handle: String,
     pub title: String,

@@ -12,13 +12,24 @@ import { COUNTRY_COOKIE, pickCountry, routing } from "@/lib/routing";
 /** The store's countries, kept for a minute: they change rarely, and every page asks. */
 let cached: { codes: string[]; until: number } | undefined;
 
+/**
+ * The store's countries. Only an answer is kept: a failed call (the API restarting, a
+ * timeout) would otherwise leave every path without a country unroutable for a minute.
+ * It falls back to the last answer, if there was one.
+ */
 async function countryCodes(): Promise<string[]> {
   const now = Date.now();
   if (cached && cached.until > now) return cached.codes;
-  const { data } = await api().GET("/storefront/countries");
-  const codes = (data?.items ?? []).map((c) => c.country);
-  cached = { codes, until: now + 60_000 };
-  return codes;
+  try {
+    const { data } = await api().GET("/storefront/countries");
+    if (data) {
+      cached = { codes: data.items.map((c) => c.country), until: now + 60_000 };
+      return cached.codes;
+    }
+  } catch {
+    // Unreachable: as a failed answer, below.
+  }
+  return cached?.codes ?? [];
 }
 
 export async function proxy(request: NextRequest) {

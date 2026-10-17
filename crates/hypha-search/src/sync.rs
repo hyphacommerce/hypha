@@ -222,7 +222,9 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
     // Publications don't depend on the market either.
     let channels = ports.channels().channels_of(&writing).await?;
     let channels_of = |id: ProductId| channels.get(&id).map_or(&[][..], Vec::as_slice);
-    // Each product's categories with their ancestors (CA3), from one tree.
+    // Each product's categories with their ancestors (CA3), from one tree. Only the ones
+    // a storefront shows: a hidden category hides everything below it (CA4), so a
+    // product only in a hidden subcategory isn't listed under its visible ancestors.
     let tree = CategoryTree::new(ports.categories().list_all().await?);
     let categories: BTreeMap<ProductId, Vec<CategoryId>> = ports
         .categories()
@@ -232,6 +234,7 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
         .map(|(product, direct)| {
             let all: BTreeSet<CategoryId> = direct
                 .iter()
+                .filter(|c| tree.is_shown(**c))
                 .flat_map(|c| std::iter::once(*c).chain(tree.ancestors(*c)))
                 .collect();
             (product, all.into_iter().collect())

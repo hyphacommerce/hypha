@@ -813,3 +813,77 @@ fn a_malformed_payload_fails_the_delivery() {
     assert!(block_on(EventHandler::handle(&SearchIndexer, &w.ports, &bad)).is_err());
     assert!(w.ports.search_queue.targets().is_empty());
 }
+
+#[test]
+fn a_market_rebuilds_for_what_prices_depend_on_and_not_for_its_name() {
+    use hypha_search::handler::targets;
+    let market = hr_market().to_string();
+    let marks = |data| targets(&event("market.changed", data));
+    assert_eq!(
+        marks(serde_json::json!({"market": market, "fields": ["name"]})),
+        Ok(vec![])
+    );
+    assert_eq!(
+        marks(serde_json::json!({"market": market, "fields": ["name", "countries"]})),
+        Ok(vec![Target::All])
+    );
+    // Written before `fields` existed: rebuilt, to be safe.
+    assert_eq!(
+        marks(serde_json::json!({"market": market})),
+        Ok(vec![Target::All])
+    );
+}
+
+#[test]
+fn a_category_rebuilds_its_subtree_when_it_moves_or_hides() {
+    use hypha_search::handler::targets;
+    let category = hypha_core::CategoryId::from_uuid(Uuid::from_u128(77));
+    let marks = |fields: serde_json::Value| {
+        targets(&event(
+            "category.changed",
+            serde_json::json!({"category": category, "created": false, "fields": fields}),
+        ))
+    };
+    assert_eq!(
+        marks(serde_json::json!(["visible"])),
+        Ok(vec![Target::Category(category)])
+    );
+    assert_eq!(
+        marks(serde_json::json!(["parent", "position"])),
+        Ok(vec![Target::Category(category)])
+    );
+    assert_eq!(marks(serde_json::json!(["name", "position"])), Ok(vec![]));
+}
+
+#[test]
+fn a_product_only_in_a_hidden_subcategory_isnt_listed_under_its_parent() {
+    use hypha_categories::{CategoryRepo, NewCategory};
+    let w = World::new();
+    let cid = |n| hypha_core::CategoryId::from_uuid(Uuid::from_u128(n));
+    let category = |n, parent: Option<u128>, visible| {
+        let mut c = hypha_categories::Category::new(NewCategory {
+            id: cid(n),
+            name: format!("C{n}"),
+            handle: hypha_core::Handle::new(&format!("c{n}")).unwrap(),
+            description: None,
+            parent: parent.map(cid),
+            position: 0,
+            visible,
+        })
+        .unwrap();
+        block_on(w.ports.categories.insert(&mut c)).unwrap();
+    };
+    category(900, None, true); // Clothing
+    category(901, Some(900), false); // Secret sale, hidden
+    block_on(w.ports.categories.add_products(cid(901), &[shirt()])).unwrap();
+    block_on(w.ports.categories.add_products(cid(900), &[mug()])).unwrap();
+    w.settle();
+    for doc in w.documents(hr_market()) {
+        let expected = if doc.product == mug() {
+            vec![cid(900)]
+        } else {
+            vec![]
+        };
+        assert_eq!(doc.categories, expected, "{}", doc.title);
+    }
+}

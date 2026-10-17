@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use hypha_core::{
-    CountryCode, Currency, MarketId, PendingEvent, Recorded, Recorder, Stamped, Stamps, Subject,
-    Version, Versioned, required_text,
+    CountryCode, Currency, MarketId, PendingEvent, Recorded, Stamped, Stamps, Subject, Version,
+    Versioned, required_text,
 };
 
 use crate::{
@@ -20,12 +20,37 @@ pub struct Market {
     countries: Vec<CountryCode>,
     currency: Currency,
     prices_include_tax: bool,
-    events: Recorder,
+    changes: Changes,
 }
+
+/// The fields changed since the market was loaded (`created` for a new one), coalesced
+/// into one `market.changed` per write: search rebuilds only for the fields documents
+/// depend on. Compares as always equal, so it never makes two markets unequal.
+#[derive(Debug, Clone, Default)]
+struct Changes(BTreeSet<&'static str>);
+
+impl PartialEq for Changes {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Changes {}
 
 impl Recorded for Market {
     fn take_events(&mut self) -> Vec<PendingEvent> {
-        self.events.take()
+        let fields = std::mem::take(&mut self.changes.0);
+        if fields.is_empty() {
+            return Vec::new();
+        }
+        let event = MarketChanged {
+            market: self.id,
+            fields: fields.into_iter().collect(),
+        };
+        vec![PendingEvent::new(
+            Subject::new(MARKET, self.id.as_uuid()),
+            &event,
+        )]
     }
 }
 
@@ -75,16 +100,14 @@ impl Market {
             countries,
             currency,
             prices_include_tax: false,
-            events: Recorder::default(),
+            changes: Changes::default(),
         };
-        market.changed();
+        market.changed("created");
         Ok(market)
     }
 
-    fn changed(&mut self) {
-        let event = MarketChanged { market: self.id };
-        self.events
-            .record_once(Subject::new(MARKET, self.id.as_uuid()), &event);
+    fn changed(&mut self, field: &'static str) {
+        self.changes.0.insert(field);
     }
 
     /// The shared text rule: trimmed, 1 to 255 characters.
@@ -92,7 +115,7 @@ impl Market {
         let name = required_text("name", name)?;
         if self.name != name {
             self.name = name;
-            self.changed();
+            self.changed("name");
         }
         Ok(())
     }
@@ -100,7 +123,7 @@ impl Market {
     pub fn set_prices_include_tax(&mut self, include: bool) {
         if self.prices_include_tax != include {
             self.prices_include_tax = include;
-            self.changed();
+            self.changed("prices_include_tax");
         }
     }
 
@@ -114,7 +137,7 @@ impl Market {
         }
 
         self.countries.push(country);
-        self.changed();
+        self.changed("countries");
         Ok(())
     }
 
@@ -128,7 +151,7 @@ impl Market {
         }
 
         self.countries.retain(|c| *c != country);
-        self.changed();
+        self.changed("countries");
         Ok(())
     }
 
@@ -185,7 +208,7 @@ impl Market {
         market.version = s.version;
         market.stamps = s.stamps;
         // Built through `new`, which records a change that didn't happen.
-        market.events = Recorder::default();
+        market.changes = Changes::default();
         Ok(market)
     }
 }

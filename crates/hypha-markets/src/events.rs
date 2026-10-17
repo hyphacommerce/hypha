@@ -9,10 +9,13 @@ pub const MARKET: &str = "market";
 pub const CATALOG: &str = "catalog";
 pub const PRICE_LIST: &str = "price_list";
 
-/// `market.changed`: created, renamed, its countries or tax setting changed.
+/// `market.changed`: what changed, among `created`, `name`, `countries` and
+/// `prices_include_tax` (design note 0021: search rebuilds only for what documents
+/// depend on, so a rename costs nothing).
 #[derive(Debug, Serialize)]
 pub struct MarketChanged {
     pub market: MarketId,
+    pub fields: Vec<&'static str>,
 }
 
 impl Event for MarketChanged {
