@@ -23,13 +23,13 @@ import {
   TableRow,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { PhotoIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState, useTransition } from "react";
 
 import { Pager } from "@/components/pager";
+import { RichTextField } from "@/components/rich-text-field";
 import { ProductStatusBadge } from "@/components/status";
 import { type CategoryNode, VISIBILITY, subtree } from "@/lib/categories";
 
@@ -100,11 +100,10 @@ export function CategoryForm({ category, tree }: { category: Category; tree: Cat
             onChange={(handle) => set({ handle })}
           />
         </HStack>
-        <TextArea
+        <RichTextField
           label="Description"
-          description="HTML, for the category page and search engines. Scripts and styles are removed when it's saved."
+          description="For the category page and search engines."
           isOptional
-          rows={6}
           value={form.description}
           onChange={(description) => set({ description })}
         />
