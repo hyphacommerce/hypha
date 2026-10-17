@@ -26,10 +26,11 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { PhotoIcon, TrashIcon } from "@heroicons/react/24/outline";
-import { useEffect, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useState, useTransition } from "react";
 
 import { Pager } from "@/components/pager";
 import { RichTextField } from "@/components/rich-text-field";
+import { SaveBar } from "@/components/save-bar";
 import { ProductStatusBadge } from "@/components/status";
 import { type CategoryNode, VISIBILITY, subtree } from "@/lib/categories";
 
@@ -50,7 +51,23 @@ type Media = AdminSchemas["ProductMediaResponse"];
 type Asset = AdminSchemas["AssetResponse"];
 
 /** Name, handle, description, parent and visibility: one Save sends what changed. */
-export function CategoryForm({ category, tree }: { category: Category; tree: CategoryNode[] }) {
+/**
+ * A category's page body (design note 0024, section 6): its details and products on the
+ * left, where it sits and its image on the right. The name, handle, description, parent
+ * and visibility are one draft saved by the bar at the top; the image and products save
+ * as they change (`main` and `side`).
+ */
+export function CategoryForm({
+  category,
+  tree,
+  main,
+  side,
+}: {
+  category: Category;
+  tree: CategoryNode[];
+  main: ReactNode;
+  side: ReactNode;
+}) {
   const saved = {
     name: category.name,
     handle: category.handle,
@@ -85,56 +102,71 @@ export function CategoryForm({ category, tree }: { category: Category; tree: Cat
     });
 
   return (
-    <Card>
-      <VStack gap={4}>
-        <Text type="display-3" as="h2">
-          Details
-        </Text>
-        {error && <Banner status="error" title={error} />}
-        {isSaved && !isDirty && <Banner status="success" title="Saved." />}
-        <HStack gap={4}>
-          <TextInput label="Name" value={form.name} onChange={(name) => set({ name })} />
-          <TextInput
-            label="Handle"
-            description="Its address in the storefront. Moving it keeps it."
-            value={form.handle}
-            onChange={(handle) => set({ handle })}
-          />
-        </HStack>
-        <RichTextField
-          label="Description"
-          description="For the category page and search engines."
-          isOptional
-          value={form.description}
-          onChange={(description) => set({ description })}
-        />
-        <HStack gap={4}>
-          <ParentSelector
-            tree={tree}
-            value={form.parent}
-            onChange={(parent) => set({ parent })}
-            exclude={subtree(tree, category.id)}
-          />
-          <Selector
-            label="Visibility"
-            description="Hiding it hides everything below it too."
-            options={[...VISIBILITY]}
-            value={form.visibility}
-            onChange={(visibility) => set({ visibility })}
-          />
-        </HStack>
-        <HStack gap={2} hAlign="end">
-          {isDirty && <Button label="Discard" variant="ghost" onClick={() => setForm(saved)} />}
-          <Button
-            label="Save"
-            variant="primary"
-            isDisabled={!isDirty || form.name.trim() === "" || form.handle === ""}
-            isLoading={isPending}
-            onClick={save}
-          />
-        </HStack>
-      </VStack>
-    </Card>
+    <>
+      <SaveBar
+        isDirty={isDirty}
+        isPending={isPending}
+        error={error}
+        canSave={form.name.trim() !== "" && form.handle !== ""}
+        onSave={save}
+        onDiscard={() => {
+          setForm(saved);
+          setError(undefined);
+        }}
+      />
+      {isSaved && !isDirty && <Banner status="success" title="Saved." />}
+      <div className="detail-columns">
+        <div>
+          <Card>
+            <VStack gap={4}>
+              <Text type="display-3" as="h2">
+                Details
+              </Text>
+              <HStack gap={4}>
+                <TextInput label="Name" value={form.name} onChange={(name) => set({ name })} />
+                <TextInput
+                  label="Handle"
+                  description="Its address in the storefront. Moving it keeps it."
+                  value={form.handle}
+                  onChange={(handle) => set({ handle })}
+                />
+              </HStack>
+              <RichTextField
+                label="Description"
+                description="For the category page and search engines."
+                isOptional
+                value={form.description}
+                onChange={(description) => set({ description })}
+              />
+            </VStack>
+          </Card>
+          {main}
+        </div>
+        <div>
+          <Card>
+            <VStack gap={4}>
+              <Text type="display-3" as="h2">
+                Placement
+              </Text>
+              <ParentSelector
+                tree={tree}
+                value={form.parent}
+                onChange={(parent) => set({ parent })}
+                exclude={subtree(tree, category.id)}
+              />
+              <Selector
+                label="Visibility"
+                description="Hiding it hides everything below it too."
+                options={[...VISIBILITY]}
+                value={form.visibility}
+                onChange={(visibility) => set({ visibility })}
+              />
+            </VStack>
+          </Card>
+          {side}
+        </div>
+      </div>
+    </>
   );
 }
 

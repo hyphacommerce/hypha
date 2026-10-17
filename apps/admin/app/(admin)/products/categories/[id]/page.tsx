@@ -34,7 +34,7 @@ export default async function CategoryPage({
 
   return (
     <Section padding={6}>
-      <VStack gap={5} maxWidth={960}>
+      <VStack gap={5} maxWidth={1280}>
         <VStack gap={2}>
           <Breadcrumbs variant="supporting">
             <BreadcrumbItem href="/products">Products</BreadcrumbItem>
@@ -57,19 +57,26 @@ export default async function CategoryPage({
           </HStack>
         </VStack>
 
-        <CategoryForm key={category.updated_at} category={category} tree={tree.items} />
-        <ImageCard id={category.id} image={category.image ?? null} />
-        <ProductsCard id={category.id} page={products} isFirstPage={!cursor} />
-
-        <Card>
-          <MetadataList title="Identifiers">
-            <MetadataListItem label="Category ID">
-              <Text type="supporting" color="secondary">
-                {category.id}
-              </Text>
-            </MetadataListItem>
-          </MetadataList>
-        </Card>
+        <CategoryForm
+          key={category.updated_at}
+          category={category}
+          tree={tree.items}
+          main={<ProductsCard id={category.id} page={products} isFirstPage={!cursor} />}
+          side={
+            <>
+              <ImageCard id={category.id} image={category.image ?? null} />
+              <Card>
+                <MetadataList title="Identifiers">
+                  <MetadataListItem label="Category ID">
+                    <Text type="supporting" color="secondary">
+                      {category.id}
+                    </Text>
+                  </MetadataListItem>
+                </MetadataList>
+              </Card>
+            </>
+          }
+        />
       </VStack>
     </Section>
   );
