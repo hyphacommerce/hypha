@@ -413,7 +413,8 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
 
     /// One transaction, the writes in `Staged::cmp` order; idempotency records and
     /// inventory items (which sort last) are gathered and each written in one statement.
-    /// Any failure returns early and drops the transaction, which rolls it back.
+    /// Any failure stops the writes and rolls the transaction back (`end_transaction`,
+    /// awaited: never by dropping it).
     async fn commit(&self, mut batch: PgBatch) -> Result<(), RepoError> {
         if batch.staged.is_empty() {
             return Ok(());

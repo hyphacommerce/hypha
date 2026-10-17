@@ -386,9 +386,10 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
     // Creating or upgrading the bookkeeping table happens under the same lock as every
     // migration, so two hosts starting at once can't race on it (review plan B8).
     let tx = client.transaction().await?;
-    lock(&tx).await?;
-    tx.batch_execute(
-        "CREATE TABLE IF NOT EXISTS schema_migrations (
+    let prepared: Result<(), MigrateError> = async {
+        lock(&tx).await?;
+        tx.batch_execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
                 module     text        NOT NULL,
                 version    integer     NOT NULL,
                 name       text        NOT NULL,
@@ -409,29 +410,33 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
             END $$;
             -- Checksums came later; rows from before get theirs on the next run.
             ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum text;",
-    )
-    .await?;
-    for set in sets {
-        let known: Vec<i32> = set.migrations.iter().map(|m| m.version).collect();
-        let unknown = tx
-            .query_typed_opt(
-                "SELECT version FROM schema_migrations
+        )
+        .await?;
+        for set in sets {
+            let known: Vec<i32> = set.migrations.iter().map(|m| m.version).collect();
+            let unknown = tx
+                .query_typed_opt(
+                    "SELECT version FROM schema_migrations
                  WHERE module = $1 AND version <> ALL($2) ORDER BY version LIMIT 1",
-                &[(&set.module, Type::TEXT), (&known, Type::INT4_ARRAY)],
-            )
-            .await?;
-        if let Some(row) = unknown {
-            return Err(MigrateError::Unknown {
-                module: set.module.to_string(),
-                version: row.try_get("version")?,
-            });
+                    &[(&set.module, Type::TEXT), (&known, Type::INT4_ARRAY)],
+                )
+                .await?;
+            if let Some(row) = unknown {
+                return Err(MigrateError::Unknown {
+                    module: set.module.to_string(),
+                    version: row.try_get("version")?,
+                });
+            }
         }
+        Ok(())
     }
-    tx.commit().await?;
+    .await;
+    finish(tx, prepared).await?;
 
     for set in sets {
         for migration in set.migrations {
             let tx = client.transaction().await?;
+            let applied: Result<(), MigrateError> = async {
             lock(&tx).await?;
             let applied = tx
                 .query_typed_opt(
@@ -488,10 +493,29 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
                     .await?;
                 }
             }
-            tx.commit().await?;
+            Ok(())
+            }
+            .await;
+            finish(tx, applied).await?;
         }
     }
     Ok(())
+}
+
+/// Ends a migration's transaction explicitly: COMMIT after `result` succeeded, else an
+/// awaited ROLLBACK, never a drop (design note 0026, §8), as `end_transaction` does for
+/// the repositories.
+async fn finish(
+    tx: tokio_postgres::Transaction<'_>,
+    result: Result<(), MigrateError>,
+) -> Result<(), MigrateError> {
+    match result {
+        Ok(()) => Ok(tx.commit().await?),
+        Err(e) => {
+            let _ = tx.rollback().await;
+            Err(e)
+        }
+    }
 }
 
 #[cfg(test)]

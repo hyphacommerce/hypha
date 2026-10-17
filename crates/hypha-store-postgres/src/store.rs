@@ -346,8 +346,9 @@ pub(crate) async fn begin_consistent_read(
 /// Runs a repository write as a batch of one (design note 0016, EV2): `body` (which
 /// returns `Result<_, RepoError>`) gets `tx: &Transaction` and calls the same
 /// `insert_x` / `update_x` functions `PgBatch::commit` does, then the transaction
-/// commits. On an error the transaction is dropped, which rolls it back, so a write
-/// that fails half-way (a stale version after some child rows) leaves nothing behind.
+/// commits. On an error it's rolled back (`end_transaction`, awaited: never by dropping
+/// it), so a write that fails half-way (a stale version after some child rows) leaves
+/// nothing behind.
 /// A macro for the same reason as `consistent_read!`.
 ///
 /// `in_transaction!(store, |tx| body)`.

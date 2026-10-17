@@ -157,7 +157,8 @@ fn fail(e: impl std::fmt::Display) -> (StatusCode, String) {
 }
 
 /// Runs ever more of what the adapter does, logging each step, to find where a query
-/// through Hyperdrive stops.
+/// through Hyperdrive stops. Every transaction here ends explicitly; with one dropped
+/// instead (a ROLLBACK queued without waiting), the next query never answered (0026, §8).
 #[worker::send]
 async fn db_steps(State(env): State<Shared>) -> Result<String, (StatusCode, String)> {
     let hyperdrive = env.hyperdrive("HYPERDRIVE").map_err(fail)?;
@@ -217,7 +218,7 @@ async fn db_steps(State(env): State<Shared>) -> Result<String, (StatusCode, Stri
         step(&mut out, "second transaction rolled back (awaited)");
     }
     client.simple_query("SELECT 2").await.map_err(fail)?;
-    step(&mut out, "query after the dropped transaction ok");
+    step(&mut out, "query after an explicit rollback ok");
     Ok(out)
 }
 
