@@ -23,6 +23,15 @@ pub trait PgConnection {
         (self.client(), None)
     }
 
+    /// Whether a read-only snapshot that succeeded may end without waiting
+    /// (`consistent_read!`): its ROLLBACK is queued, and the next query on the
+    /// connection follows it, which saves a round trip per load. `false`, the default,
+    /// waits: through Hyperdrive a transaction ended without waiting stalled the next
+    /// query (design note 0026, §8). A host's direct connection says `true`.
+    fn ends_reads_unawaited(&self) -> bool {
+        false
+    }
+
     /// Queries on the client outside a transaction, through its statement cache.
     fn db(&mut self) -> Db<'_, Client> {
         let (client, statements) = self.parts();
@@ -321,12 +330,13 @@ accessors! {
 /// ("`AsyncFnOnce` is not general enough"), and hosts like axum need them `Send`.
 macro_rules! consistent_read {
     ($conn:expr, |$tx:ident| $body:expr) => {{
+        let unawaited = $crate::store::PgConnection::ends_reads_unawaited(&*$conn);
         let (client, statements) = $crate::store::PgConnection::parts(&mut *$conn);
         let read = $crate::store::begin_consistent_read(client).await?;
         let db = $crate::store::Db::new(&read, statements);
         let $tx = &db;
         let value: Result<_, hypha_core::RepoError> = async { $body }.await;
-        $crate::store::end_transaction(read, value).await
+        $crate::store::end_read(read, value, unawaited).await
     }};
 }
 pub(crate) use consistent_read;
@@ -367,6 +377,24 @@ macro_rules! in_transaction {
     }};
 }
 pub(crate) use in_transaction;
+
+/// Ends a read-only snapshot: like `end_transaction`, or, when the connection allows it
+/// (`PgConnection::ends_reads_unawaited`) and the read succeeded, by dropping it, which
+/// queues its ROLLBACK without waiting (nothing was written, so ending it either way is
+/// the same).
+pub(crate) async fn end_read<T>(
+    read: Transaction<'_>,
+    value: Result<T, RepoError>,
+    unawaited: bool,
+) -> Result<T, RepoError> {
+    match value {
+        Ok(value) if unawaited => {
+            drop(read);
+            Ok(value)
+        }
+        value => end_transaction(read, value).await,
+    }
+}
 
 /// Ends a transaction explicitly, waiting for it: COMMIT if `value` succeeded, else
 /// ROLLBACK (which a failed write needs anyway). Never by dropping it: tokio-postgres

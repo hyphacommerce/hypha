@@ -1,10 +1,10 @@
-//! The handlers the native host runs (`hypha_http::handlers`), checked against its storage.
+//! The handlers the native host runs (`handlers.rs`), checked against its storage.
 
 use std::collections::HashSet;
 
 use hypha_core::EventHandlers;
 
-use hypha_http::handlers::HANDLERS;
+use crate::handlers::HANDLERS;
 
 use crate::storage::PgStorage;
 

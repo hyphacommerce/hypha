@@ -11,7 +11,6 @@
 pub mod client_ip;
 pub mod error;
 pub mod extract;
-pub mod handlers;
 pub mod host;
 pub mod jobs;
 pub mod key_cache;

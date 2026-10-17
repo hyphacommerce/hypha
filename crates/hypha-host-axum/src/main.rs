@@ -15,6 +15,7 @@ use hypha_http::rate_limit::RateLimiter;
 use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, Storage};
 
 mod calls;
+mod handlers;
 #[cfg(test)]
 mod handlers_test;
 mod limiter;

@@ -12,9 +12,7 @@ use std::pin::pin;
 use futures_util::StreamExt;
 use futures_util::future::{Either, select};
 use hypha_core::{Clock, IdGenerator, Timestamp};
-use hypha_http::host::{
-    HostBackground, HostCalls, HostClock, HostHttp, HostIds, HostRandom, Offload,
-};
+use hypha_http::host::{HostCalls, HostClock, HostHttp, HostIds, HostRandom, Offload};
 use hypha_http::outbound::{CallError, MAX_ANSWER_BYTES, Method, OutboundCall};
 use hypha_http::state::Runtime;
 use hypha_store_s3::{HttpRequest, HttpResponse};
@@ -64,17 +62,6 @@ pub fn runtime() -> Runtime {
         random: HostRandom::new(fill_random),
         offload: Offload::inline(),
     }
-}
-
-/// Work after the response, kept alive by the event's `waitUntil` (`ctx` is the fetch
-/// event's context or the scheduled event's).
-pub fn background(
-    wait_until: impl Fn(hypha_http::host::BoxFuture<()>) + Send + Sync + 'static,
-) -> HostBackground {
-    HostBackground::new(move |work| {
-        wait_until(work);
-        true
-    })
 }
 
 /// Calls to merchant URLs through `fetch`. Literal private addresses are refused before
@@ -178,12 +165,37 @@ async fn read_body(
     Ok(body)
 }
 
-/// The media storage's HTTP (R2 or another S3 service) through `fetch`.
+/// How long one request to the media storage may take, as natively
+/// (`hypha_store_s3::ReqwestClient`).
+const MEDIA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The media storage's HTTP (R2 or another S3 service) through `fetch`, each request
+/// aborted after `MEDIA_TIMEOUT`.
 pub fn host_http() -> HostHttp {
-    HostHttp::new(|request| Box::pin(SendFuture::new(send_http(request))))
+    HostHttp::new(|request| {
+        Box::pin(SendFuture::new(async move {
+            let controller = AbortController::default();
+            let signal = controller.signal();
+            match select(
+                pin!(send_http(request, &signal)),
+                pin!(Delay::from(MEDIA_TIMEOUT)),
+            )
+            .await
+            {
+                Either::Left((result, _)) => result,
+                Either::Right(((), _)) => {
+                    controller.abort();
+                    Err(format!("no answer within {} s", MEDIA_TIMEOUT.as_secs()))
+                }
+            }
+        }))
+    })
 }
 
-async fn send_http(request: HttpRequest) -> Result<HttpResponse, String> {
+async fn send_http(
+    request: HttpRequest,
+    signal: &worker::AbortSignal,
+) -> Result<HttpResponse, String> {
     let headers = Headers::new();
     for (name, value) in &request.headers {
         headers
@@ -195,7 +207,7 @@ async fn send_http(request: HttpRequest) -> Result<HttpResponse, String> {
         .with_headers(headers);
     let mut response =
         Fetch::Request(Request::new_with_init(&request.url, &init).map_err(|e| e.to_string())?)
-            .send()
+            .send_with_signal(signal)
             .await
             .map_err(|e| e.to_string())?;
     let status = response.status_code();

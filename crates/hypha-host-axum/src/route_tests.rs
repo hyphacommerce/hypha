@@ -3571,6 +3571,34 @@ async fn a_subscribed_app_gets_a_signed_webhook() {
 }
 
 #[tokio::test]
+async fn a_webhook_that_could_outlast_the_deadline_is_left_for_later() {
+    use hypha_core::Clock;
+    let app = app().await;
+    let (url, seen) = webhook_receiver(StatusCode::NO_CONTENT).await;
+    create_app(
+        &app,
+        json!({"key": "app_erp", "name": "ERP", "subscriptions": ["product.created"],
+            "webhook": {"url": url}}),
+    )
+    .await;
+    create_product(&app, "mug").await;
+    // The default timeout (10 s) and the room to record don't fit in 8 s.
+    let deadline = app.state.clock.now().plus_secs(8);
+    hypha_http::jobs::dispatch_by(&app.state, deadline)
+        .await
+        .unwrap();
+    assert!(seen.lock().unwrap().is_empty(), "nothing sent");
+
+    let (_, page) = send(&app, "GET", "/admin/apps/app_erp/deliveries", None).await;
+    let delivery = &page["items"][0];
+    assert_eq!(
+        (&delivery["status"], &delivery["attempts"]),
+        (&json!("pending"), &json!(0)),
+        "fanned out, not attempted: {page}"
+    );
+}
+
+#[tokio::test]
 async fn a_failed_webhook_is_listed_and_retried() {
     let app = app().await;
     let (url, seen) = webhook_receiver(StatusCode::SERVICE_UNAVAILABLE).await;

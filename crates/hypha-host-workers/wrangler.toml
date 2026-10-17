@@ -8,15 +8,20 @@ compatibility_date = "2026-10-01"
 [build]
 command = "worker-build --release"
 
-# Postgres through Hyperdrive. The id is the deployment's (`wrangler hyperdrive create`).
+# Postgres through Hyperdrive. The id is the deployment's, created with its query cache
+# OFF: `wrangler hyperdrive create hypha --connection-string=… --caching-disabled`.
+# Hyperdrive caches reads outside a transaction for up to a minute by default, and the
+# API's are not cacheable: a revoked key or ended session would keep working, a session
+# that just passed MFA would read as pending (design note 0026, W4).
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "00000000000000000000000000000000"
 localConnectionString = "postgres://hypha:hypha@localhost:5432/hypha_workers"
 
-# Dispatch and search sync every minute; prune and the media sweep hourly (W6).
+# One tick a minute (W6): dispatch and search sync each time, prune and the media sweep
+# on the ticks that start their `jobs.<job>.interval` (hourly by default).
 [triggers]
-crons = ["* * * * *", "0 * * * *"]
+crons = ["* * * * *"]
 
 [observability]
 enabled = true

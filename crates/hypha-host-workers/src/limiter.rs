@@ -11,7 +11,10 @@ use hypha_config::RateLimits;
 use hypha_core::Timestamp;
 use hypha_http::rate_limit::{Decision, Rule};
 
-/// Keys tracked per rule before the ones back to fresh are dropped.
+/// Keys tracked per rule before the ones back to fresh are dropped. If too many are
+/// still counting (someone rotating addresses), the half nearest to fresh go too: their
+/// next tries are allowed sooner than they should be, but memory and the time a check
+/// takes stay bounded, and the busiest keys (an attacker's own) keep their counts.
 const PRUNE_ABOVE: usize = 10_000;
 
 /// GCRA (a smooth token bucket, as `governor` counts natively): per key, the time its
@@ -39,6 +42,11 @@ impl IsolateLimiter {
         let keys = &mut keys[rule as usize];
         if keys.len() > PRUNE_ABOVE {
             keys.retain(|_, empty_at| *empty_at > now);
+        }
+        if keys.len() > PRUNE_ABOVE {
+            let mut times: Vec<i64> = keys.values().copied().collect();
+            let (_, &mut keep_from, _) = times.select_nth_unstable(PRUNE_ABOVE / 2);
+            keys.retain(|_, empty_at| *empty_at > keep_from);
         }
         let empty_at = keys.get(key).copied().unwrap_or(now).max(now);
         let next = empty_at.saturating_add(every);
@@ -120,6 +128,24 @@ mod tests {
         }
         assert_eq!(limiter.check(Rule::LoginIp, "b", at(0)), Decision::Allowed);
         assert_eq!(limiter.check(Rule::MfaIp, "a", at(0)), Decision::Allowed);
+    }
+
+    #[test]
+    fn too_many_counting_keys_drop_the_half_nearest_to_fresh() {
+        let (limiter, burst, _) = limiter();
+        // One busy key, then many that each tried once.
+        for _ in 0..burst {
+            limiter.check(Rule::LoginIp, "busy", at(0));
+        }
+        for n in 0..PRUNE_ABOVE {
+            limiter.check(Rule::LoginIp, &n.to_string(), at(0));
+        }
+        limiter.check(Rule::LoginIp, "one more", at(0));
+        assert!(limiter.tracked(Rule::LoginIp) <= PRUNE_ABOVE / 2 + 1);
+        assert!(matches!(
+            limiter.check(Rule::LoginIp, "busy", at(0)),
+            Decision::Limited { .. }
+        ));
     }
 
     #[test]

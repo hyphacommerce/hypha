@@ -4,16 +4,15 @@
 //! host from Cron triggers and `waitUntil` (design note 0026, W6). The steps are the
 //! domain crates' plain functions (`hypha_dispatch::fan_out`, …), so both run the same.
 
-use hypha_core::{Outcome, Progress};
+use std::time::Duration;
+
+use hypha_core::{Clock, Outcome, Progress, Timestamp};
 use hypha_dispatch::{
     Prepared, fan_out, handle, has_time, lease_due, prepare, prune_events, prune_idempotency_keys,
     prune_sessions, record, send,
 };
 
-use crate::{
-    handlers::HANDLERS,
-    state::{AppState, Storage},
-};
+use crate::state::{AppState, Storage};
 
 /// What a step did: whether there's more to do right away, and whether it found
 /// anything at all (an idle step makes the job wait longer).
@@ -41,19 +40,47 @@ pub type Step = Result<Ran, String>;
 /// server (design note 0016, EV9). Deliveries the lease can't cover any more are left
 /// for the next lease (`has_time`).
 pub async fn dispatch<S: Storage>(state: &AppState<S>) -> Step {
+    dispatch_within(state, None).await
+}
+
+/// Room left at the end of a deadline for recording the outcomes.
+const RECORD_MARGIN: Duration = Duration::from_secs(5);
+
+/// `dispatch` for a host that cuts its work off at `deadline` (Workers' `waitUntil`,
+/// about 30 seconds after the response; design note 0026, W6): no delivery starts that
+/// couldn't finish, its webhook's own timeout included, and be recorded by then. The
+/// deliveries left keep their lease until it ends, then the next lease (a cron's) takes
+/// them; nothing is sent twice.
+pub async fn dispatch_by<S: Storage>(state: &AppState<S>, deadline: Timestamp) -> Step {
+    dispatch_within(state, Some(deadline)).await
+}
+
+async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Timestamp>) -> Step {
+    // Whether work taking `takes` can start now and still be recorded by the deadline.
+    let fits = |takes: Duration| {
+        deadline.is_none_or(|by| state.clock.now().plus(takes + RECORD_MARGIN) <= by)
+    };
     let no_connection = |_| "no connection".to_string();
     let (fanned, leased) = {
         let ports = state.public_ports().await.map_err(no_connection)?;
-        let fanned = fan_out(&ports, &state.clock, &state.config.dispatch, &HANDLERS)
-            .await
-            .map_err(|e| e.to_string())?;
+        let fanned = fan_out(
+            &ports,
+            &state.clock,
+            &state.config.dispatch,
+            state.storage.handlers(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         let leased = lease_due(&ports, &state.clock, &state.config.dispatch)
             .await
             .map_err(|e| e.to_string())?;
         (fanned, leased)
     };
     let mut outcomes = Vec::with_capacity(leased.len());
-    for delivery in leased.iter().take_while(|d| has_time(d, &state.clock)) {
+    for delivery in leased
+        .iter()
+        .take_while(|d| has_time(d, &state.clock) && fits(Duration::ZERO))
+    {
         let prepared = {
             let ports = state.public_ports().await.map_err(no_connection)?;
             match prepare(&ports, &state.clock, &state.config.dispatch, delivery).await {
@@ -62,7 +89,7 @@ pub async fn dispatch<S: Storage>(state: &AppState<S>) -> Step {
                         &ports,
                         &state.clock,
                         &state.config.dispatch,
-                        &HANDLERS,
+                        state.storage.handlers(),
                         delivery,
                     )
                     .await,
@@ -71,6 +98,7 @@ pub async fn dispatch<S: Storage>(state: &AppState<S>) -> Step {
             }
         };
         let outcome = match prepared {
+            Prepared::Webhook(app) if !fits(webhook_time(&app)) => break,
             Prepared::Webhook(app) => {
                 send(
                     &state.webhooks(),
@@ -102,6 +130,13 @@ pub async fn dispatch<S: Storage>(state: &AppState<S>) -> Step {
     Ok(Ran {
         more: fanned.more || leased.len() >= state.config.dispatch.batch as usize,
         idle,
+    })
+}
+
+/// The longest `app`'s webhook may take: its timeout.
+fn webhook_time(app: &hypha_apps::App) -> Duration {
+    app.webhook().map_or(Duration::ZERO, |w| {
+        Duration::from_millis(u64::from(w.timeout_ms))
     })
 }
 

@@ -446,6 +446,10 @@ pub trait Storage: Send + Sync + 'static {
     type Search<'p>: hypha_search_index::SearchIndex
     where
         Self: 'p;
+    /// The in-process event handlers this host runs (design note 0019, section 5.1): a
+    /// tuple the host lists in its `handlers.rs`, its composition root. The dispatcher
+    /// runs whatever is here (`jobs::dispatch`).
+    type Handlers: for<'a> hypha_core::EventHandlers<Self::Ports<'a>> + Send + Sync + 'static;
 
     /// Repositories that only see `store`'s data (design note 0006). With one store per
     /// deployment (model A) the database *is* the store, so implementations ignore it;
@@ -459,6 +463,9 @@ pub trait Storage: Send + Sync + 'static {
     /// built-in Postgres one). An external engine (Meilisearch, design note 0019 step 7)
     /// will be held by the storage and picked by configuration here.
     fn search<'p>(&'p self, ports: &'p Self::Ports<'_>) -> Self::Search<'p>;
+
+    /// The handlers (`Self::Handlers`); usually `&HANDLERS`, a `const`.
+    fn handlers(&self) -> &Self::Handlers;
 
     /// Runs a password reset request as background work (`AppState::background`), so the
     /// response doesn't wait for it (design note 0008, section 5); dropped and logged

@@ -164,6 +164,15 @@ the domains; `hypha deploy` then:
    and crons for every job. Rate limits count per isolate for now (W8 pending). The e2e
    script passes against `wrangler dev` (641 steps), on a database the native host set
    up (W9).
+   Reviewed (2026-10-18): Hyperdrive's query cache must be off (`--caching-disabled`;
+   it serves reads outside transactions, such as session and key lookups, up to a
+   minute old); the dispatch step after a write starts no delivery that couldn't end
+   and be recorded within `waitUntil`'s 30 seconds (`jobs::dispatch_by`); one state and
+   router per isolate, each event reaching them through a scope set while its future is
+   polled; one cron, each job on the ticks that start its configured interval; the event
+   handlers are the host's again (`Storage::Handlers`); and only the native pool ends
+   read-only snapshots without waiting for the ROLLBACK (`PgConnection::ends_reads_unawaited`),
+   so the VPS doesn't pay Hyperdrive's extra round trip.
 5. **Jobs** (W6, W7).
 6. **CLI**: `--target cloudflare` (§5).
 7. **Caching**: the storefront's and admin's adapters (0025, §6), and the e2e script

@@ -1,4 +1,4 @@
-//! The event handlers this host runs (design note 0019, section 5): the composition
+//! The event handlers the Worker runs (design note 0019, section 5): the composition
 //! root for in-process destinations. A crate or spore with a handler adds it to the
 //! tuple; the dispatcher runs whatever is here and knows none of them.
 

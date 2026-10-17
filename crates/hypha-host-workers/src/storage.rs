@@ -64,6 +64,7 @@ impl Storage for WorkersStorage {
     type Ports<'a> = PgStore<Client>;
     type Directory<'a> = PgStore<Client>;
     type Search<'p> = &'p PgStore<Client>;
+    type Handlers = crate::handlers::Handlers;
 
     async fn ports(&self, _store: StoreId) -> Result<PgStore<Client>, ApiError> {
         self.store().await
@@ -75,6 +76,10 @@ impl Storage for WorkersStorage {
 
     fn search<'p>(&'p self, ports: &'p PgStore<Client>) -> &'p PgStore<Client> {
         ports
+    }
+
+    fn handlers(&self) -> &crate::handlers::Handlers {
+        &crate::handlers::HANDLERS
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {

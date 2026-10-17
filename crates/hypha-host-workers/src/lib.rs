@@ -3,17 +3,21 @@
 //! `fetch`. The database is set up beforehand (W9: the native host's startup, later
 //! `hypha … setup` from the CLI): this Worker runs no migrations and creates no store.
 //!
-//! What an isolate keeps between requests (`Isolate`): the configuration, the secret
-//! key, the store, recently authenticated publishable keys, the rate limiter's counts
-//! and the routes. Each request gets its own `AppState` around them, since its work
-//! after the response is kept alive by its own event (`waitUntil`).
+//! An isolate builds its `AppState` and router once, on its first event (`Isolate`), and
+//! serves every request with them: the configuration, the store, recently authenticated
+//! publishable keys, the rate limiter's counts. What belongs to one event (its
+//! `waitUntil`, whether it wrote) reaches the shared state through `Scoped`, which makes
+//! the event current while its future is polled.
 //!
-//! The portable parts (`ids`, `limiter`) build natively, so their tests run with the
-//! workspace's; the rest is Workers only.
+//! The portable parts (`ids`, `limiter`, `schedule`) build natively, so their tests run
+//! with the workspace's; the rest is Workers only.
 
 pub mod ids;
 pub mod limiter;
+pub mod schedule;
 
+#[cfg(target_arch = "wasm32")]
+mod handlers;
 #[cfg(target_arch = "wasm32")]
 mod log;
 #[cfg(target_arch = "wasm32")]
@@ -23,51 +27,97 @@ mod storage;
 
 #[cfg(target_arch = "wasm32")]
 mod worker_main {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
+    use std::pin::Pin;
     use std::rc::Rc;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context as TaskContext, Poll};
+    use std::time::Duration;
 
     use axum::Router;
     use axum::body::Body;
     use axum::http::{Response, StatusCode};
+    use futures_util::future::{FutureExt, LocalBoxFuture, Shared};
     use hypha_config::Config;
-    use hypha_core::StoreId;
-    use hypha_http::host::{AfterWrites, BoxFuture, HostLimiter};
+    use hypha_core::{Clock, Timestamp};
+    use hypha_http::host::{AfterWrites, BoxFuture, HostBackground, HostLimiter};
     use hypha_http::jobs::{self, Step};
-    use hypha_http::key_cache::KeyCache;
-    use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, SharedState, Storage};
+    use hypha_http::state::{AppState, HostEnv, HostParts, SharedState, Storage};
     use hypha_stores::StoreRepo;
     use tower_service::Service;
-    use worker::send::SendWrapper;
     use worker::{Context, Env, HttpRequest, ScheduleContext, ScheduledEvent, event};
 
     use crate::limiter::IsolateLimiter;
     use crate::platform;
+    use crate::schedule::due;
     use crate::storage::WorkersStorage;
 
-    /// The cron that also runs the hourly jobs (`prune`, `media_sweep`); every other
-    /// trigger runs dispatch and search sync (`wrangler.toml`).
-    const HOURLY: &str = "0 * * * *";
-
     /// The most steps one job takes in one run, so a backlog can't hold the event past
-    /// its limits; the next trigger goes on.
+    /// its limits; the next tick goes on.
     const MAX_STEPS: usize = 20;
 
-    /// What an isolate reads once and keeps.
+    /// How long after a response its jobs may run: `waitUntil` ends about 30 seconds
+    /// after the response, and dispatch starts nothing that couldn't finish by then
+    /// (`jobs::dispatch_by`).
+    const AFTER_RESPONSE: Duration = Duration::from_secs(25);
+
+    /// What an isolate builds once and keeps.
     struct Isolate {
-        config: Config,
-        secret_key: [u8; 32],
-        runtime: Runtime,
-        store: StoreId,
-        store_name: String,
-        publishable_keys: KeyCache,
-        limiter: Arc<IsolateLimiter>,
-        routes: Router<SharedState<WorkersStorage>>,
+        state: SharedState<WorkersStorage>,
+        app: Router,
     }
 
+    type Setup = Shared<LocalBoxFuture<'static, Result<Rc<Isolate>, String>>>;
+
     thread_local! {
-        static ISOLATE: RefCell<Option<Rc<Isolate>>> = const { RefCell::new(None) };
+        /// The isolate's setup: shared, so concurrent first events wait for one.
+        static ISOLATE: RefCell<Option<Setup>> = const { RefCell::new(None) };
+        /// The event whose future is being polled (`Scoped`).
+        static CURRENT: RefCell<Option<Rc<Event>>> = const { RefCell::new(None) };
+    }
+
+    /// What belongs to one event: its `waitUntil`, and whether it wrote.
+    struct Event {
+        wait_until: Box<dyn Fn(BoxFuture<()>)>,
+        wrote: Cell<bool>,
+    }
+
+    impl Event {
+        fn new(wait_until: impl Fn(BoxFuture<()>) + 'static) -> Rc<Self> {
+            Rc::new(Self {
+                wait_until: Box::new(wait_until),
+                wrote: Cell::new(false),
+            })
+        }
+    }
+
+    /// Polls `inner` with `event` current, so the shared state's background work and
+    /// after-writes hook reach this event. An isolate interleaves events at their
+    /// awaits; a poll is never interrupted, so each sees its own.
+    struct Scoped<F> {
+        event: Rc<Event>,
+        inner: Pin<Box<F>>,
+    }
+
+    impl<F> Scoped<F> {
+        fn new(event: &Rc<Event>, inner: F) -> Self {
+            Self {
+                event: Rc::clone(event),
+                inner: Box::pin(inner),
+            }
+        }
+    }
+
+    impl<F: Future> Future for Scoped<F> {
+        type Output = F::Output;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<F::Output> {
+            let this = self.get_mut();
+            let outer = CURRENT.replace(Some(Rc::clone(&this.event)));
+            let polled = this.inner.as_mut().poll(cx);
+            CURRENT.set(outer);
+            polled
+        }
     }
 
     /// A Worker variable or secret.
@@ -78,26 +128,38 @@ mod worker_main {
             .ok()
     }
 
-    /// The isolate's state, read on its first request (design note 0026, W11): the
-    /// configuration from `HYPHA_CONFIG` (the TOML itself) under the Worker's variables,
-    /// as `hypha-config` reads the environment natively.
+    /// The isolate, set up by its first event. A failed setup is tried again by the
+    /// next event.
     async fn isolate(env: &Env) -> Result<Rc<Isolate>, String> {
-        if let Some(isolate) = ISOLATE.with_borrow(Clone::clone) {
-            return Ok(isolate);
+        let setup = ISOLATE.with_borrow_mut(|slot| {
+            slot.get_or_insert_with(|| set_up(env.clone()).boxed_local().shared())
+                .clone()
+        });
+        let isolate = setup.await;
+        if isolate.is_err() {
+            ISOLATE.set(None);
         }
-        let level = env_string(env, "HYPHA_LOG")
+        isolate
+    }
+
+    /// Reads the configuration (design note 0026, W11: `HYPHA_CONFIG` holds the TOML
+    /// itself, under the Worker's variables, as `hypha-config` reads the environment
+    /// natively), finds the store and builds the state and the router.
+    async fn set_up(env: Env) -> Result<Rc<Isolate>, String> {
+        let level = env_string(&env, "HYPHA_LOG")
             .and_then(|l| l.parse().ok())
             .unwrap_or(tracing::Level::INFO);
         crate::log::init(level);
-        let text = env_string(env, "HYPHA_CONFIG").filter(|t| !t.trim().is_empty());
-        let config = Config::load(text.as_deref(), |name| env_string(env, name))
+        let text = env_string(&env, "HYPHA_CONFIG").filter(|t| !t.trim().is_empty());
+        let config = Config::load(text.as_deref(), |name| env_string(&env, name))
             .map_err(|e| format!("invalid configuration:\n{e}"))?;
-        let secret_key = env_string(env, "HYPHA_SECRET_KEY").ok_or(
+        let secret_key = env_string(&env, "HYPHA_SECRET_KEY").ok_or(
             "HYPHA_SECRET_KEY is required (`wrangler secret put HYPHA_SECRET_KEY`)".to_string(),
         )?;
         let secret_key = hypha_http::state::parse_secret_key(&secret_key)
             .map_err(|e| format!("HYPHA_SECRET_KEY: {e}"))?;
         let runtime = platform::runtime();
+        // An isolate's `env` is the same bindings for every event, so one is kept.
         let storage = WorkersStorage::new(env.clone(), runtime.clock.clone());
         // One store per deployment (design note 0006, model A), made by setup.
         let stores = storage
@@ -113,69 +175,66 @@ mod worker_main {
                 stores.len()
             ));
         };
-        let isolate = Rc::new(Isolate {
-            limiter: Arc::new(IsolateLimiter::new(&config.rate_limits)),
+        let media = hypha_http::media::Media::from_config(
+            &config.media,
+            |name| env_string(&env, name),
+            || Ok(platform::host_http()),
+            runtime.clock.clone(),
+        )?;
+        let limiter = Arc::new(IsolateLimiter::new(&config.rate_limits));
+        let clock = runtime.clock.clone();
+        let host = HostParts {
+            env: HostEnv::new(
+                secret_key,
+                config.server.admin_url.clone(),
+                config.auth,
+                runtime,
+            ),
+            // Kept alive by the current event; outside one (never, in practice) it's
+            // dropped and logged by the caller, like a full slot natively.
+            background: HostBackground::new(|work| {
+                CURRENT.with_borrow(|event| match event {
+                    Some(event) => {
+                        (event.wait_until)(work);
+                        true
+                    }
+                    None => false,
+                })
+            }),
+            limiter: HostLimiter::new(move |rule, key| {
+                let decision = limiter.check(rule, &key, clock.now());
+                Box::pin(async move { decision })
+            }),
+            after_writes: AfterWrites::new(|| {
+                CURRENT.with_borrow(|event| {
+                    if let Some(event) = event {
+                        event.wrote.set(true);
+                    }
+                })
+            }),
+            calls: platform::host_calls(),
+            media,
+            publishable_keys: Default::default(),
+        };
+        let state = Arc::new(AppState::new(
+            storage,
+            store.id(),
+            store.name().to_string(),
+            host,
             config,
-            secret_key,
-            runtime,
-            store: store.id(),
-            store_name: store.name().to_string(),
-            publishable_keys: KeyCache::default(),
-            routes: hypha_http::router!(WorkersStorage),
-        });
-        ISOLATE.set(Some(Rc::clone(&isolate)));
-        Ok(isolate)
-    }
-
-    impl Isolate {
-        /// A request's state: the isolate's parts, with `wait_until` for its work after
-        /// the response and `after_writes` called after a successful write.
-        fn state(
-            &self,
-            env: &Env,
-            wait_until: impl Fn(BoxFuture<()>) + Send + Sync + 'static,
-            after_writes: AfterWrites,
-        ) -> Result<AppState<WorkersStorage>, String> {
-            let media = hypha_http::media::Media::from_config(
-                &self.config.media,
-                |name| env_string(env, name),
-                || Ok(platform::host_http()),
-                self.runtime.clock.clone(),
-            )?;
-            let limiter = Arc::clone(&self.limiter);
-            let clock = self.runtime.clock.clone();
-            let host = HostParts {
-                env: HostEnv::new(
-                    self.secret_key,
-                    self.config.server.admin_url.clone(),
-                    self.config.auth,
-                    self.runtime.clone(),
-                ),
-                background: platform::background(wait_until),
-                limiter: HostLimiter::new(move |rule, key| {
-                    use hypha_core::Clock;
-                    let decision = limiter.check(rule, &key, clock.now());
-                    Box::pin(async move { decision })
-                }),
-                after_writes,
-                calls: platform::host_calls(),
-                media,
-                publishable_keys: self.publishable_keys.clone(),
-            };
-            Ok(AppState::new(
-                WorkersStorage::new(env.clone(), self.runtime.clock.clone()),
-                self.store,
-                self.store_name.clone(),
-                host,
-                self.config.clone(),
+        ));
+        let app = hypha_http::router!(WorkersStorage)
+            .layer(axum::middleware::from_fn_with_state(
+                state.after_writes.clone(),
+                hypha_http::writes::after_writes,
             ))
-        }
+            .with_state(Arc::clone(&state));
+        Ok(Rc::new(Isolate { state, app }))
     }
 
     /// The API's error shape (`{"code", "error", "details"}`) for a Worker that can't
     /// serve: its configuration or database isn't ready. The reason is logged.
     fn unavailable(reason: &str) -> Response<Body> {
-        tracing::error!("{reason}");
         worker::console_error!("{reason}");
         let body = r#"{"code":"unavailable","error":"the API isn't available; see its logs","details":null}"#;
         Response::builder()
@@ -191,16 +250,10 @@ mod worker_main {
             Ok(isolate) => isolate,
             Err(e) => return Ok(unavailable(&e)),
         };
-        let ctx = Arc::new(ctx);
-        let wrote = Arc::new(AtomicBool::new(false));
-        let after_writes = {
-            let wrote = Arc::clone(&wrote);
-            AfterWrites::new(move || wrote.store(true, Ordering::Relaxed))
-        };
-        let wait = Arc::clone(&ctx);
-        let state = match isolate.state(&env, move |work| wait.wait_until(work), after_writes) {
-            Ok(state) => Arc::new(state),
-            Err(e) => return Ok(unavailable(&e)),
+        let ctx = Rc::new(ctx);
+        let event = {
+            let ctx = Rc::clone(&ctx);
+            Event::new(move |work| ctx.wait_until(work))
         };
         // Cloudflare sets `CF-Connecting-IP` to the client's address; clients can't.
         if let Some(ip) = req
@@ -212,31 +265,35 @@ mod worker_main {
             req.extensions_mut()
                 .insert(hypha_http::client_ip::PeerAddr(ip));
         }
-        let mut app = isolate
-            .routes
-            .clone()
-            .layer(axum::middleware::from_fn_with_state(
-                state.after_writes.clone(),
-                hypha_http::writes::after_writes,
-            ))
-            .with_state(Arc::clone(&state));
-        let response = app.call(req).await?;
+        let mut app = isolate.app.clone();
+        let response = Scoped::new(&event, app.call(req)).await?;
         // A write's events go out after its response (W6), as the VPS's runner wakes.
-        if wrote.load(Ordering::Relaxed) {
-            ctx.wait_until(async move {
-                if state.config.jobs.dispatch.enabled {
-                    steps("dispatch", || jobs::dispatch(&state)).await;
+        if event.wrote.get() {
+            let state = Arc::clone(&isolate.state);
+            let deadline = state.clock.now().plus(AFTER_RESPONSE);
+            ctx.wait_until(Scoped::new(&event, async move {
+                let jobs = state.config.jobs;
+                if jobs.dispatch.enabled {
+                    steps("dispatch", &state, Some(deadline), || {
+                        jobs::dispatch_by(&state, deadline)
+                    })
+                    .await;
                 }
-                if state.config.jobs.search_sync.enabled {
-                    steps("search sync", || jobs::search_sync(&state)).await;
+                if jobs.search_sync.enabled {
+                    steps("search sync", &state, Some(deadline), || {
+                        jobs::search_sync(&state)
+                    })
+                    .await;
                 }
-            });
+            }));
         }
         Ok(response)
     }
 
+    /// The cron tick (every minute, `wrangler.toml`): dispatch and search sync each
+    /// time, the others on the ticks that start their interval (`schedule::due`).
     #[event(scheduled)]
-    async fn scheduled(event: ScheduledEvent, env: Env, ctx: ScheduleContext) {
+    async fn scheduled(tick: ScheduledEvent, env: Env, ctx: ScheduleContext) {
         let isolate = match isolate(&env).await {
             Ok(isolate) => isolate,
             Err(e) => {
@@ -244,38 +301,38 @@ mod worker_main {
                 return;
             }
         };
-        let ctx = Arc::new(SendWrapper::new(ctx));
-        let state = match isolate.state(
-            &env,
-            move |work| ctx.0.wait_until(work),
-            AfterWrites::none(),
-        ) {
-            Ok(state) => state,
-            Err(e) => {
-                worker::console_error!("{e}");
-                return;
+        let event = Event::new(move |work| ctx.wait_until(work));
+        let state = Arc::clone(&isolate.state);
+        let at = tick.schedule() as u64;
+        Scoped::new(&event, async move {
+            let jobs = state.config.jobs;
+            if jobs.dispatch.enabled {
+                steps("dispatch", &state, None, || jobs::dispatch(&state)).await;
             }
-        };
-        let jobs = state.config.jobs;
-        if event.cron() == HOURLY {
-            if jobs.prune.enabled {
-                steps("prune", || jobs::prune(&state)).await;
+            if jobs.search_sync.enabled {
+                steps("search sync", &state, None, || jobs::search_sync(&state)).await;
             }
-            if jobs.media_sweep.enabled && state.media.is_some() {
-                steps("media sweep", || jobs::media_sweep(&state)).await;
+            if jobs.prune.enabled && due(at, jobs.prune.interval) {
+                steps("prune", &state, None, || jobs::prune(&state)).await;
             }
-            return;
-        }
-        if jobs.dispatch.enabled {
-            steps("dispatch", || jobs::dispatch(&state)).await;
-        }
-        if jobs.search_sync.enabled {
-            steps("search sync", || jobs::search_sync(&state)).await;
-        }
+            if jobs.media_sweep.enabled
+                && state.media.is_some()
+                && due(at, jobs.media_sweep.interval)
+            {
+                steps("media sweep", &state, None, || jobs::media_sweep(&state)).await;
+            }
+        })
+        .await;
     }
 
-    /// Runs `step` while it says there's more, up to `MAX_STEPS`.
-    async fn steps<F: Future<Output = Step>>(job: &str, step: impl Fn() -> F) {
+    /// Runs `step` while it says there's more, up to `MAX_STEPS` and, with one, until
+    /// `deadline`.
+    async fn steps<F: Future<Output = Step>>(
+        job: &str,
+        state: &AppState<WorkersStorage>,
+        deadline: Option<Timestamp>,
+        step: impl Fn() -> F,
+    ) {
         for _ in 0..MAX_STEPS {
             match step().await {
                 Ok(ran) if ran.more => {}
@@ -283,6 +340,9 @@ mod worker_main {
                     report(job, result);
                     return;
                 }
+            }
+            if deadline.is_some_and(|by| state.clock.now() >= by) {
+                return;
             }
         }
     }

@@ -62,6 +62,11 @@ impl PgConnection for PooledClient {
         let conn = &mut *self.0;
         (&mut conn.client, conn.statements.as_ref())
     }
+
+    /// Straight to Postgres: a read's ROLLBACK can be queued (no Hyperdrive here).
+    fn ends_reads_unawaited(&self) -> bool {
+        true
+    }
 }
 
 /// TLS for Postgres, verified against the operating system's trust store (as reqwest's
@@ -145,6 +150,7 @@ impl Storage for PgStorage {
     type Ports<'a> = PgStore<PooledClient>;
     type Directory<'a> = PgStore<PooledClient>;
     type Search<'p> = &'p PgStore<PooledClient>;
+    type Handlers = crate::handlers::Handlers;
 
     async fn ports(&self, _store: StoreId) -> Result<PgStore<PooledClient>, ApiError> {
         self.store().await
@@ -156,6 +162,10 @@ impl Storage for PgStorage {
 
     fn search<'p>(&'p self, ports: &'p PgStore<PooledClient>) -> &'p PgStore<PooledClient> {
         ports
+    }
+
+    fn handlers(&self) -> &crate::handlers::Handlers {
+        &crate::handlers::HANDLERS
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {
