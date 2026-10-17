@@ -16,7 +16,7 @@ import { api, describe, loadCountries } from "@/lib/api";
 import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
-import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
+import { cartId, forgetCart, link, mode, orderTokenCookie, rememberCart } from "@/lib/site";
 
 /** What a refused action tells its form. */
 export type ActionResult = { error: string } | undefined;
@@ -174,21 +174,22 @@ export async function placeOrder(input: {
   attempt: string;
 }): Promise<ActionResult> {
   const id = await currentCart(input.country);
-  const { error } = await api().POST("/storefront/carts/{id}/checkout", {
+  const { data, error } = await api().POST("/storefront/carts/{id}/checkout", {
     params: { path: { id }, header: { "Idempotency-Key": input.attempt } },
     body: { expected_total: input.total },
   });
   if (error) return refused(error);
-  // The confirmation reads the order through the checked-out cart.
-  (await cookies()).set(`order_${input.country.toLowerCase()}`, id, {
+  // The confirmation reads the order with its access token, kept here for this buyer:
+  // the order's ID alone reads nothing (design note 0024, §7).
+  (await cookies()).set(orderTokenCookie(data.id), data.access_token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24,
+    maxAge: 60 * 60 * 24 * 30,
   });
   await forgetCart(input.country);
-  redirect(link(input.country, "/order"));
+  redirect(link(input.country, `/order/${data.id}/confirmed`));
 }
 
 /**

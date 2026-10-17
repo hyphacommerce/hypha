@@ -34,6 +34,11 @@ export async function rememberCart(country: string, id: string) {
   });
 }
 
+/** The cookie holding an order's access token, for its confirmation page. */
+export function orderTokenCookie(order: string): string {
+  return `order_token_${order}`;
+}
+
 export async function forgetCart(country: string) {
   (await cookies()).delete(cartCookie(country));
 }
