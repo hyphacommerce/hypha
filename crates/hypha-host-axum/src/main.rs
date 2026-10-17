@@ -130,7 +130,7 @@ async fn main() {
     };
     let secret_key = match std::env::var("HYPHA_SECRET_KEY")
         .ok()
-        .map(|k| parse_key(&k))
+        .map(|k| hypha_http::state::parse_secret_key(&k))
     {
         Some(Ok(key)) => Some(key),
         Some(Err(e)) => {
@@ -173,19 +173,6 @@ async fn main() {
         runtime.clone(),
     );
     serve(storage, env, runtime, config).await;
-}
-
-/// A 32-byte key written as 64 hex characters.
-fn parse_key(hex: &str) -> Result<[u8; 32], String> {
-    let hex = hex.trim();
-    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("expected 64 hex characters (32 bytes)".to_string());
-    }
-    let mut key = [0u8; 32];
-    for (i, byte) in key.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|e| e.to_string())?;
-    }
-    Ok(key)
 }
 
 /// With no staff user yet, `HYPHA_OWNER_EMAIL` and `HYPHA_OWNER_PASSWORD` (and
@@ -354,6 +341,7 @@ async fn serve(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Confi
         after_writes: wake.after_writes(),
         calls: calls::host_calls(client),
         media,
+        publishable_keys: Default::default(),
     };
     let state = Arc::new(AppState::new(
         storage,
@@ -465,17 +453,4 @@ async fn shutdown_signal() {
         () = terminate => {},
     }
     tracing::info!("shutting down: finishing in-flight requests");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_key_is_64_hex_characters() {
-        let key = parse_key(&"0f".repeat(32)).unwrap();
-        assert_eq!(key, [0x0f; 32]);
-        assert!(parse_key(&"0f".repeat(31)).is_err());
-        assert!(parse_key(&format!("{}zz", "0f".repeat(31))).is_err());
-    }
 }

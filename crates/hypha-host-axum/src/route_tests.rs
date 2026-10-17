@@ -182,6 +182,7 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
         after_writes: AfterWrites::none(),
         calls: crate::calls::host_calls(client),
         media,
+        publishable_keys: Default::default(),
     };
     let state = Arc::new(AppState::new(
         storage,

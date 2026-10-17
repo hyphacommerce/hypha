@@ -9,16 +9,21 @@
 //! revoked publishable key stops at once; other instances stop within the TTL.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use hypha_core::{Ctx, Timestamp};
 use sha2::{Digest, Sha256};
 
-#[derive(Default)]
+/// Cheap to clone: clones share their entries (a Workers host builds its state per
+/// request and keeps one cache for the isolate).
+#[derive(Default, Clone)]
 pub struct KeyCache {
-    entries: Mutex<HashMap<[u8; 32], (Ctx, Timestamp)>>,
+    entries: Arc<Mutex<Entries>>,
 }
+
+/// Each key's SHA-256, with its caller and when it was looked up.
+type Entries = HashMap<[u8; 32], (Ctx, Timestamp)>;
 
 impl KeyCache {
     /// How long a lookup is reused.

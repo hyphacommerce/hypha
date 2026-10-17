@@ -16,6 +16,19 @@ use crate::host::{
     AfterWrites, HostBackground, HostCalls, HostClock, HostIds, HostLimiter, HostRandom, Offload,
 };
 
+/// `HYPHA_SECRET_KEY`: a 32-byte key written as 64 hex characters.
+pub fn parse_secret_key(hex: &str) -> Result<[u8; 32], String> {
+    let hex = hex.trim();
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("expected 64 hex characters (32 bytes)".to_string());
+    }
+    let mut key = [0u8; 32];
+    for (i, byte) in key.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|e| e.to_string())?;
+    }
+    Ok(key)
+}
+
 /// The prefix of an order's access token (`HostEnv::order_token`).
 const ORDER_TOKEN_PREFIX: &str = "hypha_ord_";
 
@@ -304,6 +317,9 @@ pub struct HostParts {
     pub after_writes: AfterWrites,
     pub calls: HostCalls,
     pub media: Option<crate::media::Media>,
+    /// Publishable keys authenticated recently (`key_cache.rs`): one for the process
+    /// natively, one per isolate on Workers.
+    pub publishable_keys: crate::key_cache::KeyCache,
 }
 
 impl<S> AppState<S> {
@@ -325,7 +341,7 @@ impl<S> AppState<S> {
             env: host.env,
             background: host.background,
             limiter: host.limiter,
-            publishable_keys: crate::key_cache::KeyCache::default(),
+            publishable_keys: host.publishable_keys,
             after_writes: host.after_writes,
             store,
             store_name,
@@ -457,6 +473,13 @@ pub trait Storage: Send + Sync + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_secret_key_is_64_hex_characters() {
+        assert_eq!(parse_secret_key(&"0f".repeat(32)), Ok([0x0f; 32]));
+        assert!(parse_secret_key(&"0f".repeat(31)).is_err());
+        assert!(parse_secret_key(&format!("{}zz", "0f".repeat(31))).is_err());
+    }
 
     /// A runtime that's enough for what `HostEnv` does without storage.
     fn runtime() -> Runtime {
