@@ -423,7 +423,7 @@ SF_AUTH=("${ONLINE_SF_AUTH[@]}")
 step "add 2 mugs" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "mug unit price is 900 (1000 - 10%)" '"unit_price":{"amount":900,"currency":"EUR"}'
-contains "mug line is named" '"product_title":"Mug","variant_title":null,"sku":null,"status":"priced"'
+contains "mug line is named, with its handle" '"product_title":"Mug","variant_title":null,"sku":null,"handle":"mug","image":null,"status":"priced"'
 step "add 3 cups" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":3}"
 contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
@@ -585,7 +585,7 @@ contains "and the shipping line" '"code":"standard","name":"Standard","provider"
 step "archive mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
 step "get cart" 200 - "$BASE/storefront/carts/$CART"
 contains "mug line is unavailable" '"status":"unavailable","reason_code":"product_not_active"'
-contains "unavailable mug keeps its name" '"product_title":"Mug","variant_title":null,"sku":null,"status":"unavailable"'
+contains "unavailable mug keeps its name" '"product_title":"Mug","variant_title":null,"sku":null,"handle":"mug","image":null,"status":"unavailable"'
 contains "total only counts the cup" '"total":{"amount":600,"currency":"EUR"},"fully_available":false'
 
 step "remove cup's fixed price" 204 - -X DELETE "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \

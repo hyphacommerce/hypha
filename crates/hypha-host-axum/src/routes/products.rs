@@ -139,7 +139,7 @@ impl ProductMediaResponse {
         self.asset_id
     }
 
-    async fn new(asset: &Asset, media: &Media) -> Result<Self, ApiError> {
+    pub(super) async fn new(asset: &Asset, media: &Media) -> Result<Self, ApiError> {
         Ok(Self {
             asset_id: asset.id(),
             kind: asset.kind().into(),

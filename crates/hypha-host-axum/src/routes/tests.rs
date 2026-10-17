@@ -1986,6 +1986,10 @@ async fn a_cart_sells_only_what_its_channel_publishes() {
     send(&app, "DELETE", &path, Some(&body)).await;
     // The line already in the cart is unavailable; adding it again is refused.
     assert_eq!(json["lines"][0]["status"], "priced", "{json}");
+    assert!(
+        json["lines"][0]["handle"].is_string(),
+        "links to the product"
+    );
     let cart_path = lines.trim_end_matches("/lines");
     let (_, json) = send_as(&app, &pk, "GET", cart_path, None).await;
     let line_now = &json["lines"][0];

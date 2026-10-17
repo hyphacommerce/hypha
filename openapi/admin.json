@@ -2907,6 +2907,24 @@
           },
           {
             "properties": {
+              "handle": {
+                "description": "The product's handle, to link to its page; `null` when the product is gone or the\ncart is checked out.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ProductMediaResponse",
+                    "description": "The variant's image, else the product's first media item; `null` without one,\nonce checked out, or where the deployment has no file storage."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "product": {
                 "$ref": "#/components/schemas/ProductId"
               },

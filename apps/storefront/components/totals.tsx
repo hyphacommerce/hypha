@@ -1,8 +1,10 @@
 import { Divider } from "@astryxdesign/core/Divider";
-import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 
 import { type Money, formatMoney } from "@/lib/money";
+
+import { LineImage } from "./cart-line";
 
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
@@ -50,20 +52,26 @@ export function SummaryLine({
   title,
   variant,
   total,
+  image,
 }: {
   quantity: number;
   title: string;
   variant?: string | null;
   total: string;
+  /** The line's thumbnail URL, if it has an image. */
+  image?: string | null;
 }) {
   return (
     <HStack gap={3} hAlign="between" vAlign="start">
-      <VStack gap={0.5}>
+      <LineImage image={image} size={48} />
+      <StackItem size="fill">
+        <VStack gap={0.5}>
         <Text type="body" weight="medium">
           {quantity} × {title}
         </Text>
         {variant && <Text type="supporting">{variant}</Text>}
-      </VStack>
+        </VStack>
+      </StackItem>
       <Text type="body" hasTabularNumbers>
         {total}
       </Text>

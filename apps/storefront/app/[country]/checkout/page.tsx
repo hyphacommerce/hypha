@@ -6,6 +6,7 @@ import { Text } from "@astryxdesign/core/Text";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { lineImage } from "@/components/cart-line";
 import { SummaryLine, Totals } from "@/components/totals";
 import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
@@ -116,6 +117,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
                   key={line.variant}
                   quantity={line.quantity}
                   title={line.product_title ?? "A product no longer sold"}
+                  image={lineImage(line.image)}
                   variant={line.variant_title}
                   total={line.status === "priced" ? formatMoney(line.total, digits) : "—"}
                 />

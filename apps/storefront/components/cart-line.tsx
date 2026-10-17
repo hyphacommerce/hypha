@@ -8,6 +8,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 
@@ -21,10 +22,16 @@ export function CartLine({
   quantity,
   total,
   problem,
+  image,
+  href,
 }: {
   country: string;
   variant: string;
   title: string;
+  /** The line's thumbnail URL, if it has an image. */
+  image?: string | null;
+  /** The product's page, while the product is still sold. */
+  href?: string | null;
   variantTitle?: string | null;
   quantity: number;
   /** The line's total, formatted; none for an unavailable line. */
@@ -52,10 +59,17 @@ export function CartLine({
   return (
     <VStack gap={3} paddingBlock={4}>
       <HStack gap={4} vAlign="start" wrap="wrap">
+        <LineImage image={image} />
         <StackItem size="fill">
           <VStack gap={1}>
             <Text type="body" weight="semibold">
-              {title}
+              {href ? (
+                <Link href={href} className="shop-link">
+                  {title}
+                </Link>
+              ) : (
+                title
+              )}
             </Text>
             {variantTitle && <Text type="supporting">{variantTitle}</Text>}
           </VStack>
@@ -92,4 +106,20 @@ export function CartLine({
       {error && <Banner status="error" title={error} />}
     </VStack>
   );
+}
+
+/** A line's square thumbnail, or an empty tile of the same size. */
+export function LineImage({ image, size = 64 }: { image?: string | null; size?: number }) {
+  return (
+    <div className="shop-rounded" style={{ width: size, height: size, flexShrink: 0 }}>
+      {image && <img className="shop-fill" src={image} alt="" />}
+    </div>
+  );
+}
+
+/** The thumbnail URL of a cart line's image, if it's a picture. */
+export function lineImage(
+  image: { kind: string; url: string; thumbnail_url?: string | null } | null | undefined,
+): string | null {
+  return image?.kind === "image" ? (image.thumbnail_url ?? image.url) : null;
 }

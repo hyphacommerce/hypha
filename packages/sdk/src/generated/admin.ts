@@ -2745,6 +2745,12 @@ export interface components {
             reserved: number;
         };
         LineResponse: components["schemas"]["LineState"] & {
+            /**
+             * @description The product's handle, to link to its page; `null` when the product is gone or the
+             *     cart is checked out.
+             */
+            handle?: string | null;
+            image?: components["schemas"]["ProductMediaResponse"] | null;
             product: components["schemas"]["ProductId"];
             /**
              * @description The product's title now; `null` only when the product or variant is gone, so an

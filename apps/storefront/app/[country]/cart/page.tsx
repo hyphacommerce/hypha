@@ -7,7 +7,7 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
-import { CartLine } from "@/components/cart-line";
+import { CartLine, lineImage } from "@/components/cart-line";
 import { Totals } from "@/components/totals";
 import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
@@ -55,6 +55,8 @@ export default async function CartPage({ params }: { params: Promise<{ country: 
                   country={code}
                   variant={line.variant}
                   title={line.product_title ?? "A product no longer sold"}
+                  image={lineImage(line.image)}
+                  href={line.handle ? link(code, `/p/${line.handle}`) : null}
                   variantTitle={line.variant_title}
                   quantity={line.quantity}
                   total={line.status === "priced" ? formatMoney(line.total, digits) : undefined}

@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    Address, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money, MoneyError,
-    OrderId, Price, ProductId, Quantity, VariantId,
+    Address, AssetId, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money,
+    MoneyError, OrderId, Price, ProductId, Quantity, VariantId,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, resolve_price};
@@ -56,6 +56,12 @@ pub struct LineDetails {
     /// The variant's option values (`"M / Blue"`); `None` for a simple product.
     pub variant_title: Option<String>,
     pub sku: Option<String>,
+    /// The product's handle, to link to its page; `None` for a cart already checked out,
+    /// whose lines are read from the order (which keeps no handle).
+    pub handle: Option<String>,
+    /// What to show for the line: the variant's image, else the product's first media
+    /// item (design note 0014); `None` without one, or once checked out.
+    pub image: Option<AssetId>,
 }
 
 /// A cart line with its current status. A read model: computed, never stored.
@@ -320,6 +326,8 @@ fn line_details(product: &Product, variant: VariantId) -> Option<LineDetails> {
         product_title: product.title().to_string(),
         variant_title: product.variant_title(variant),
         sku: found.sku().map(str::to_string),
+        handle: Some(product.handle().as_str().to_string()),
+        image: found.media().or_else(|| product.media().first().copied()),
     })
 }
 
@@ -661,8 +669,34 @@ mod tests {
                 product_title: "Shirt".to_string(),
                 variant_title: Some("M".to_string()),
                 sku: Some("SH-M".to_string()),
+                handle: Some("shirt".to_string()),
+                image: None,
             })
         );
+    }
+
+    #[test]
+    fn a_line_shows_its_variant_image_else_the_products_first() {
+        let asset = |n| AssetId::from_uuid(Uuid::from_u128(n));
+        let mut p = shirt();
+        p.set_media(vec![asset(1), asset(2)]).unwrap();
+        let image = |p: &Product| {
+            price_cart(
+                &cart(&[(5, 1)]),
+                std::slice::from_ref(p),
+                &pricing(&[5]),
+                &no_tax(),
+                &no_stock(),
+            )
+            .lines[0]
+                .details
+                .as_ref()
+                .and_then(|d| d.image)
+        };
+        assert_eq!(image(&p), Some(asset(1)));
+        let variant = p.variants()[0].id();
+        p.set_variant_media(variant, Some(asset(2))).unwrap();
+        assert_eq!(image(&p), Some(asset(2)));
     }
 
     #[test]
@@ -683,6 +717,8 @@ mod tests {
                 product_title: "Product 1".to_string(),
                 variant_title: None,
                 sku: None,
+                handle: Some("p1".to_string()),
+                image: None,
             })
         );
     }

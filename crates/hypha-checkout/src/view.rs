@@ -57,6 +57,8 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
                 product_title: line.product_title.clone(),
                 variant_title: line.variant_title.clone(),
                 sku: line.sku.clone(),
+                handle: None,
+                image: None,
             }),
             status: LineStatus::Priced {
                 unit_price: line.unit_price,

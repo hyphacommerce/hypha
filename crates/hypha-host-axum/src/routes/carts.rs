@@ -5,15 +5,17 @@ use hypha_cart::{
     set_line_quantity, set_shipping_address, shipping_offers,
 };
 use hypha_core::{
-    CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, OrderId,
+    AssetId, CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, OrderId,
     ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
+use hypha_media::{AssetRepo, HasAssets};
 use hypha_shipping::OfferOutcome;
 use hypha_tax::TaxLine;
 use serde::{Deserialize, Serialize};
 
 use super::{
     address::{PostalAddressRequest, PostalAddressResponse},
+    products::ProductMediaResponse,
     rfc3339,
     shipping::DeliveryEstimateDto,
 };
@@ -21,6 +23,7 @@ use crate::{
     client_ip::ClientIp,
     error::{ApiError, ApiErrorBody},
     extract::{Caller, JsonBody, KeyedJson, PathId, Storefront, idempotent_response},
+    media::Media,
     rate_limit::{self, Rule},
     state::{SharedState, Storage},
 };
@@ -183,6 +186,12 @@ pub(super) struct LineResponse {
     /// The variant's option values ("M / Blue"); `null` for a product without options.
     variant_title: Option<String>,
     sku: Option<String>,
+    /// The product's handle, to link to its page; `null` when the product is gone or the
+    /// cart is checked out.
+    handle: Option<String>,
+    /// The variant's image, else the product's first media item; `null` without one,
+    /// once checked out, or where the deployment has no file storage.
+    image: Option<ProductMediaResponse>,
     #[serde(flatten)]
     state: LineState,
 }
@@ -219,6 +228,8 @@ impl From<&PricedCart> for CartResponse {
                     product_title: l.details.as_ref().map(|d| d.product_title.clone()),
                     variant_title: l.details.as_ref().and_then(|d| d.variant_title.clone()),
                     sku: l.details.as_ref().and_then(|d| d.sku.clone()),
+                    handle: l.details.as_ref().and_then(|d| d.handle.clone()),
+                    image: None,
                     state: match &l.status {
                         LineStatus::Priced {
                             unit_price,
@@ -238,6 +249,28 @@ impl From<&PricedCart> for CartResponse {
                 .collect(),
         }
     }
+}
+
+/// The response for `cart` with its lines' images: the assets loaded in one query and
+/// their URLs made. Without file storage the lines show none.
+pub(super) async fn cart_response<P: HasAssets>(
+    cart: &PricedCart,
+    ports: &P,
+    media: Option<&Media>,
+) -> Result<CartResponse, ApiError> {
+    let mut response = CartResponse::from(cart);
+    let image = |l: &hypha_cart::PricedLine| l.details.as_ref().and_then(|d| d.image);
+    let ids: Vec<AssetId> = cart.lines.iter().filter_map(image).collect();
+    let Some(media) = media.filter(|_| !ids.is_empty()) else {
+        return Ok(response);
+    };
+    let assets = ports.assets().get_many(&ids).await?;
+    for (line, priced) in response.lines.iter_mut().zip(&cart.lines) {
+        if let Some(asset) = image(priced).and_then(|id| assets.iter().find(|a| a.id() == id)) {
+            line.image = Some(ProductMediaResponse::new(asset, media).await?);
+        }
+    }
+    Ok(response)
 }
 
 /// Takes an `Idempotency-Key` header: a retry returns the cart the first request made.
@@ -265,7 +298,7 @@ pub(super) async fn create<S: Storage>(
     let created = create_cart(&ctx, &ports, &state.ids, &state.clock, input).await?;
     Ok(idempotent_response(
         StatusCode::CREATED,
-        CartResponse::from(&created.value),
+        cart_response(&created.value, &ports, state.media.as_ref()).await?,
         created.replayed,
     ))
 }
@@ -285,7 +318,9 @@ pub(super) async fn fetch<S: Storage>(
 ) -> Result<Json<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let priced = hypha_checkout::view_cart(&ctx, &ports, id).await?;
-    Ok(Json(CartResponse::from(&priced)))
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_ref()).await?,
+    ))
 }
 
 /// Takes an `Idempotency-Key` header: a retry returns the cart without adding again.
@@ -314,7 +349,7 @@ pub(super) async fn add<S: Storage>(
     let added = add_line(&ctx, &ports, &state.clock, input).await?;
     Ok(idempotent_response(
         StatusCode::OK,
-        CartResponse::from(&added.value),
+        cart_response(&added.value, &ports, state.media.as_ref()).await?,
         added.replayed,
     ))
 }
@@ -337,7 +372,9 @@ pub(super) async fn set_email<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = set_cart_email(&ctx, &ports, id, req.email).await?;
-    Ok(Json(CartResponse::from(&priced)))
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_ref()).await?,
+    ))
 }
 
 /// Links a cart to a customer, or unlinks it with `null`.
@@ -358,7 +395,9 @@ pub(super) async fn set_customer<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
-    Ok(Json(CartResponse::from(&priced)))
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_ref()).await?,
+    ))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -393,7 +432,9 @@ pub(super) async fn set_quantity<S: Storage>(
     let priced = set_line_quantity(&ctx, &ports, input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
-    Ok(Json(CartResponse::from(&priced)))
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_ref()).await?,
+    ))
 }
 
 /// Removes a line.
@@ -413,7 +454,9 @@ pub(super) async fn remove_line<S: Storage>(
     let priced = remove_cart_line(&ctx, &ports, id, variant)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
-    Ok(Json(CartResponse::from(&priced)))
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_ref()).await?,
+    ))
 }
 
 // ---------- shipping (design note 0015) ----------
@@ -443,7 +486,9 @@ pub(super) async fn set_address<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = set_shipping_address(&ctx, &ports, id, req.address.map(Into::into)).await?;
-    Ok(Json(CartResponse::from(&priced)))
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_ref()).await?,
+    ))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -564,5 +609,7 @@ pub(super) async fn select<S: Storage>(
     let req = body.parse()?;
     let rates = state.rates(&ports);
     let priced = select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;
-    Ok(Json(CartResponse::from(&priced)))
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_ref()).await?,
+    ))
 }

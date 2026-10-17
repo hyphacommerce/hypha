@@ -61,6 +61,15 @@ body {
   display: block;
 }
 
+/* A product name that links to its page: the text's colour, underlined on hover. */
+.shop-link {
+  color: inherit;
+  text-decoration: none;
+}
+.shop-link:hover {
+  text-decoration: underline;
+}
+
 .shop-rounded {
   border-radius: var(--radius-container);
   overflow: hidden;
