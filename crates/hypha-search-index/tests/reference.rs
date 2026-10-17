@@ -22,6 +22,7 @@ fn query() -> SearchQuery {
     SearchQuery {
         market: MarketId::from_uuid(Uuid::from_u128(1)),
         channel: None,
+        category: None,
         terms: vec![],
         filters: vec![],
         price: PriceBounds::default(),

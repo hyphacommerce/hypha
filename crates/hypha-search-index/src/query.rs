@@ -2,7 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
-use hypha_core::{ChannelId, MarketId, Money};
+use hypha_core::{CategoryId, ChannelId, MarketId, Money};
 
 use crate::SearchDocument;
 
@@ -95,6 +95,8 @@ pub struct SearchQuery {
     /// Only documents published to this channel (a storefront's); `None` searches them
     /// all (staff).
     pub channel: Option<ChannelId>,
+    /// Only documents in this category or one below it (design note 0022, CA3).
+    pub category: Option<CategoryId>,
     /// From `terms::terms`; empty lists everything.
     pub terms: Vec<String>,
     pub filters: Vec<Filter>,

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AssetId, Money, ProductId, VariantId};
+use hypha_core::{AssetId, CategoryId, Money, ProductId, VariantId};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_search::{SearchInput, search};
 use hypha_search_index::{
@@ -94,6 +94,10 @@ pub(super) struct SearchParams {
     price_max: Option<i64>,
     /// Only what can (`true`) or can't (`false`) be sold now.
     available: Option<bool>,
+    /// Only products in this category or one below it (design note 0022); a hidden
+    /// category is `404 category_not_found`.
+    #[param(value_type = Option<CategoryId>)]
+    category: Option<CategoryId>,
     #[param(inline)]
     sort: Option<SortDto>,
     /// What one result stands for. Default `listing`.
@@ -202,6 +206,7 @@ pub(super) async fn storefront_search<S: Storage>(
         price_min: params.price_min,
         price_max: params.price_max,
         available: params.available,
+        category: params.category,
         sort: params.sort.unwrap_or_default().into(),
         group: params.group.unwrap_or_default().into(),
         offset,

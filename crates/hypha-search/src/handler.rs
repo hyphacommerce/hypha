@@ -20,6 +20,16 @@ const PRODUCT_EVENTS: &[&str] = &[
 const CATALOG_PRODUCTS: &[&str] = &["catalog.products_added", "catalog.products_removed"];
 /// Which channels sell a product (design note 0020); a channel's name isn't in documents.
 const PUBLICATIONS: &[&str] = &["channel.products_published", "channel.products_unpublished"];
+/// Which categories a product is in (design note 0022); a deleted category names its
+/// products too.
+const CATEGORY_PRODUCTS: &[&str] = &[
+    "category.products_added",
+    "category.products_removed",
+    "category.deleted",
+];
+/// A moved category changes the ancestors of everything below it. Names, handles and
+/// visibility aren't in documents (a hidden category is refused at the route, CA4).
+const CATEGORY_MOVED: (&str, &str) = ("category.changed", "parent");
 const VARIANT_PRICES: &[&str] = &["price_list.prices_set", "price_list.prices_removed"];
 const STOCK: &[&str] = &["inventory_item.changed", "inventory_item.deleted"];
 /// Rare and wide: which products a market sells, at what price, from where.
@@ -41,12 +51,14 @@ impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
             PRODUCT_EVENTS,
             CATALOG_PRODUCTS,
             PUBLICATIONS,
+            CATEGORY_PRODUCTS,
             VARIANT_PRICES,
             STOCK,
             EVERYTHING,
         ]
         .iter()
         .any(|types| types.contains(&event_type))
+            || event_type == CATEGORY_MOVED.0
             || WHEN_FIELD.iter().any(|(t, _)| *t == event_type)
     }
 
@@ -86,12 +98,24 @@ pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
 
     if PRODUCT_EVENTS.contains(&t) {
         parse("product", |id| id.parse().ok().map(Target::Product))
-    } else if CATALOG_PRODUCTS.contains(&t) || PUBLICATIONS.contains(&t) {
+    } else if CATALOG_PRODUCTS.contains(&t)
+        || PUBLICATIONS.contains(&t)
+        || CATEGORY_PRODUCTS.contains(&t)
+    {
         parse("products", |id| id.parse().ok().map(Target::Product))
     } else if VARIANT_PRICES.contains(&t) {
         parse("variants", |id| id.parse().ok().map(Target::Variant))
     } else if STOCK.contains(&t) {
         parse("variant", |id| id.parse().ok().map(Target::Variant))
+    } else if t == CATEGORY_MOVED.0 {
+        let fields = event.data["fields"]
+            .as_array()
+            .ok_or_else(|| bad("fields"))?;
+        if fields.iter().any(|f| f == CATEGORY_MOVED.1) {
+            parse("category", |id| id.parse().ok().map(Target::Category))
+        } else {
+            Ok(vec![])
+        }
     } else if EVERYTHING.contains(&t) {
         Ok(vec![Target::All])
     } else if let Some((_, field)) = WHEN_FIELD.iter().find(|(w, _)| *w == t) {

@@ -1,9 +1,10 @@
 //! Attaching media to products (design note 0014, section 5) and reading products with
 //! their media.
 
+use hypha_categories::{Category, CategoryRepo, HasCategories, StageCategories};
 use hypha_core::{
-    AssetId, AuthError, Ctx, ErrorCode, HasBatch, Page, PageRequest, ProductId, RepoError, Scope,
-    VariantId, retry_on_conflict,
+    AssetId, AuthError, CategoryId, Ctx, ErrorCode, HasBatch, Page, PageRequest, ProductId,
+    RepoError, Scope, VariantId, retry_on_conflict,
 };
 use hypha_media::{
     Asset, AssetKind, AssetRepo, AssetStatus, HasAssets, StageAssetUsages, UsageOwner, UsageRole,
@@ -29,6 +30,8 @@ pub enum CommandError {
     /// No product has this handle (or it isn't a handle at all, so none can).
     #[error("no product has the handle {0:?}")]
     HandleNotFound(String),
+    #[error("category {0} not found")]
+    CategoryNotFound(CategoryId),
     #[error("asset {0} not found")]
     AssetNotFound(AssetId),
     /// Only assets whose upload completed can be attached.
@@ -51,6 +54,7 @@ impl ErrorCode for CommandError {
             CommandError::ProductNotFound(_) | CommandError::HandleNotFound(_) => {
                 "product_not_found"
             }
+            CommandError::CategoryNotFound(_) => "category_not_found",
             CommandError::AssetNotFound(_) => "asset_not_found",
             CommandError::AssetNotReady(_) => "asset_not_ready",
             CommandError::AssetNotPublic(_) => "asset_not_public",
@@ -138,6 +142,57 @@ pub async fn set_product_media<S: MerchandisingPorts>(
     .await
 }
 
+/// Sets a category's image, or clears it with `None` (design note 0022, CA9, Q5): the
+/// category and its asset usage in one batch, so an image in use can't be deleted from
+/// the library. The asset must exist, be ready and public, and be an image. Retried on a
+/// lost race like product media: the image replaces whatever was there.
+pub async fn set_category_image<S>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CategoryId,
+    image: Option<AssetId>,
+) -> Result<Category, CommandError>
+where
+    S: HasCategories + HasAssets + HasBatch<Batch: StageCategories + StageAssetUsages>,
+{
+    ctx.require(Scope::ProductsWrite)?;
+    retry_on_conflict(
+        move || async move {
+            let mut category = ports
+                .categories()
+                .get(id)
+                .await?
+                .ok_or(CommandError::CategoryNotFound(id))?;
+            if let Some(asset) = image {
+                let found = ports
+                    .assets()
+                    .get(asset)
+                    .await?
+                    .ok_or(CommandError::AssetNotFound(asset))?;
+                check_attachable(&found, &[AssetKind::Image])?;
+            }
+            category.set_image(image);
+            let usages: Vec<(AssetId, UsageRole)> =
+                image.map(|a| (a, UsageRole::image())).into_iter().collect();
+            let mut batch = ports.batch();
+            batch.update_category(&mut category);
+            batch.replace_asset_usages(&UsageOwner::category(id), &usages);
+            match ports.commit(batch).await {
+                Ok(()) => Ok(category),
+                // Deleted since it was loaded: as if it was never there.
+                Err(RepoError::Reference(key)) if key == media_keys::USAGE_ASSET => Err(image
+                    .map_or(
+                        RepoError::Reference(key).into(),
+                        CommandError::AssetNotFound,
+                    )),
+                Err(e) => Err(e.into()),
+            }
+        },
+        |e| matches!(e, CommandError::Repo(RepoError::StaleVersion)),
+    )
+    .await
+}
+
 /// Which item of its product's media list a variant shows, or none. The item must be an
 /// image. Usages don't change: the asset is in the list, which already records them.
 pub async fn set_variant_media<S: HasProducts + HasAssets>(
@@ -197,6 +252,20 @@ pub async fn get_product_view_by_handle<S: HasProducts + HasAssets>(
         .await?
         .ok_or_else(not_found)?;
     Ok(ProductView::load(ports.assets(), product).await?)
+}
+
+/// A category's image asset, for showing it (`None` without one, or if the asset is
+/// gone). Products scopes, like the category itself (design note 0022, CA8).
+pub async fn category_image<S: HasAssets>(
+    ctx: &Ctx,
+    ports: &S,
+    category: &Category,
+) -> Result<Option<Asset>, CommandError> {
+    ctx.require(Scope::ProductsRead)?;
+    match category.image() {
+        Some(id) => Ok(ports.assets().get(id).await?),
+        None => Ok(None),
+    }
 }
 
 /// A page of product summaries (`hypha_products::list_products`) with their featured

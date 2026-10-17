@@ -165,6 +165,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The categories a storefront shows, as a tree (navigation menus). */
+        get: operations["storefront.categories.list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/categories/by-handle/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A category page (design note 0022, section 4): the category by handle, with its
+         *     ancestors and shown children. Its products come through
+         *     `/storefront/search?category=…`. A hidden category (or one under a hidden one) is
+         *     `404 category_not_found`.
+         */
+        get: operations["storefront.categories.fetch_by_handle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/countries": {
         parameters: {
             query?: never;
@@ -322,6 +361,17 @@ export interface components {
             taxes_included: boolean;
             /** @description What the buyer pays. */
             total: components["schemas"]["Money"];
+        };
+        /**
+         * @description A CategoryId: `pcat_` and 32 hex digits.
+         * @example pcat_0190f1a2b3c47d8e9f00112233445566
+         */
+        CategoryId: string;
+        /** @description A category next to it in the tree: an ancestor or a child. */
+        CategoryRef: {
+            handle: string;
+            id: components["schemas"]["CategoryId"];
+            name: string;
         };
         /**
          * @description A ChannelId: `chan_` and 32 hex digits.
@@ -765,6 +815,33 @@ export interface components {
         ShippingOptionId: string;
         ShippingOptionsResponse: {
             groups: components["schemas"]["GroupOffersResponse"][];
+        };
+        /** @description A category in the storefront's tree, with its shown children. */
+        StorefrontCategoryNode: {
+            children: components["schemas"]["StorefrontCategoryNode"][];
+            handle: string;
+            id: components["schemas"]["CategoryId"];
+            name: string;
+        };
+        /** @description A category page's category: no admin fields, only shown children. */
+        StorefrontCategoryResponse: {
+            /** @description Nearest first: a breadcrumb, reversed. */
+            ancestors: components["schemas"]["CategoryRef"][];
+            /** @description Its shown children, in order. */
+            children: components["schemas"]["CategoryRef"][];
+            /** @description Sanitised HTML, safe to render. */
+            description?: string | null;
+            handle: string;
+            id: components["schemas"]["CategoryId"];
+            image?: components["schemas"]["ProductMediaResponse"] | null;
+            name: string;
+        };
+        StorefrontCategoryTreeResponse: {
+            /**
+             * @description The shown top-level categories, each with its shown children, in order. A hidden
+             *     category is left out with everything under it.
+             */
+            items: components["schemas"]["StorefrontCategoryNode"][];
         };
         StorefrontCountryListResponse: {
             /** @description Sorted by country code: every country some market sells to. */
@@ -1885,6 +1962,124 @@ export interface operations {
             };
         };
     };
+    "storefront.categories.list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorefrontCategoryTreeResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.categories.fetch_by_handle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description The category's handle.
+                 * @example shirts
+                 */
+                handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorefrontCategoryResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "storefront.markets.storefront_countries": {
         parameters: {
             query?: never;
@@ -2109,6 +2304,11 @@ export interface operations {
                 price_max?: number;
                 /** @description Only what can (`true`) or can't (`false`) be sold now. */
                 available?: boolean;
+                /**
+                 * @description Only products in this category or one below it (design note 0022); a hidden
+                 *     category is `404 category_not_found`.
+                 */
+                category?: components["schemas"]["CategoryId"];
                 sort?: "relevance" | "newest" | "price_asc" | "price_desc" | "title";
                 /** @description What one result stands for. Default `listing`. */
                 group?: "listing" | "product" | "variant";

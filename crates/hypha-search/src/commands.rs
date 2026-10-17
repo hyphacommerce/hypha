@@ -3,8 +3,10 @@
 
 use std::collections::BTreeMap;
 
+use hypha_categories::{CategoryRepo, CategoryTree, HasCategories};
 use hypha_core::{
-    AuthError, CountryCode, CountryError, Ctx, ErrorCode, RepoError, Scope, optional_text,
+    AuthError, CategoryId, CountryCode, CountryError, Ctx, ErrorCode, RepoError, Scope,
+    optional_text,
 };
 use hypha_markets::{HasMarkets, Market, MarketRepo};
 use hypha_search_index::{
@@ -23,6 +25,9 @@ pub enum CommandError {
     Country(#[from] CountryError),
     #[error("no market sells to {0}")]
     NoMarketForCountry(CountryCode),
+    /// No such category, or (for a storefront) one hidden itself or under a hidden one.
+    #[error("category {0} not found")]
+    CategoryNotFound(CategoryId),
     #[error(transparent)]
     Repo(#[from] RepoError),
     #[error(transparent)]
@@ -36,6 +41,7 @@ impl ErrorCode for CommandError {
             CommandError::Search(e) => e.code(),
             CommandError::Country(e) => e.code(),
             CommandError::NoMarketForCountry(_) => "no_market_for_country",
+            CommandError::CategoryNotFound(_) => "category_not_found",
             CommandError::Repo(e) => e.code(),
             CommandError::Index(e) => e.code(),
         }
@@ -56,6 +62,8 @@ pub struct SearchInput {
     pub price_min: Option<i64>,
     pub price_max: Option<i64>,
     pub available: Option<bool>,
+    /// Only products in this category or below it (design note 0022, CA3).
+    pub category: Option<CategoryId>,
     pub sort: Sort,
     pub group: Group,
     pub offset: u32,
@@ -77,7 +85,7 @@ pub const DEFAULT_OPTION_FACETS: usize = 5;
 /// Searches the market serving `input.country` (design note 0019, SE6). The facets
 /// counted are the merchant's (`SearchSettings::facets`), else product type, vendor,
 /// the market's most used options and tags.
-pub async fn search<S: HasMarkets + HasSearchSettings, I: SearchIndex>(
+pub async fn search<S: HasMarkets + HasSearchSettings + HasCategories, I: SearchIndex>(
     ctx: &Ctx,
     ports: &S,
     index: &I,
@@ -134,9 +142,23 @@ pub async fn search<S: HasMarkets + HasSearchSettings, I: SearchIndex>(
         (facets, labels)
     };
 
+    // A storefront (a caller with a channel) sees only shown categories (CA4); staff
+    // may filter by any.
+    if let Some(category) = input.category {
+        let tree = CategoryTree::new(ports.categories().list_all().await?);
+        let usable = match ctx.channel() {
+            Some(_) => tree.is_shown(category),
+            None => tree.contains(category),
+        };
+        if !usable {
+            return Err(CommandError::CategoryNotFound(category));
+        }
+    }
+
     let query = SearchQuery {
         market: market.id(),
         channel: ctx.channel(),
+        category: input.category,
         terms,
         filters,
         price: PriceBounds {

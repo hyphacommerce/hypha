@@ -403,6 +403,8 @@ impl From<hypha_merchandising::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::Product(p) => product_status(p),
             E::ProductNotFound(_) | E::HandleNotFound(_) => StatusCode::NOT_FOUND,
+            // In the URL (`/admin/categories/{id}/image`).
+            E::CategoryNotFound(_) => StatusCode::NOT_FOUND,
             // Assets arrive in the body.
             E::AssetNotFound(_)
             | E::AssetNotReady(_)
@@ -463,6 +465,28 @@ impl From<hypha_stores::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_categories::CommandError> for ApiError {
+    fn from(e: hypha_categories::CommandError) -> Self {
+        use hypha_categories::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // In a body (a product's categories, a parent) unless a route says it's its
+            // URL's; a cycle or a tree too deep is the placement asked for.
+            E::Category(_) | E::CategoryNotFound(_) | E::ParentNotFound(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            // A storefront's category by handle: always the URL's.
+            E::HandleNotFound(_) => StatusCode::NOT_FOUND,
+            E::HandleTaken(_) | E::HasChildren(_) => StatusCode::CONFLICT,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 impl From<hypha_channels::CommandError> for ApiError {
     fn from(e: hypha_channels::CommandError) -> Self {
         use hypha_channels::CommandError as E;
@@ -504,6 +528,8 @@ impl From<hypha_search::CommandError> for ApiError {
             E::Search(_) | E::Country(_) | E::NoMarketForCountry(_) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
+            // A hidden category reads as missing (design note 0022, CA4).
+            E::CategoryNotFound(_) => StatusCode::NOT_FOUND,
             E::Index(error) => return Self::search_unavailable(error),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(

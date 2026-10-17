@@ -22,6 +22,7 @@ pub struct UsageOwner {
 
 impl UsageOwner {
     pub const PRODUCT: &str = "product";
+    pub const CATEGORY: &str = "category";
 
     /// `kind` is lowercase ASCII letters, digits and `_`, starting with a letter; `id`
     /// is any text without whitespace or `:`.
@@ -42,6 +43,14 @@ impl UsageOwner {
     pub fn product(id: ProductId) -> Self {
         Self {
             kind: Self::PRODUCT.to_string(),
+            id: id.to_string(),
+        }
+    }
+
+    /// A category's image (design note 0022, CA9).
+    pub fn category(id: hypha_core::CategoryId) -> Self {
+        Self {
+            kind: Self::CATEGORY.to_string(),
             id: id.to_string(),
         }
     }
@@ -81,6 +90,8 @@ pub struct UsageRole(String);
 impl UsageRole {
     pub const FEATURED: &str = "featured";
     pub const GALLERY: &str = "gallery";
+    /// A category's image.
+    pub const IMAGE: &str = "image";
 
     pub fn new(role: &str) -> Result<Self, MediaError> {
         if !is_name(role) {
@@ -95,6 +106,10 @@ impl UsageRole {
 
     pub fn gallery() -> Self {
         Self(Self::GALLERY.to_string())
+    }
+
+    pub fn image() -> Self {
+        Self(Self::IMAGE.to_string())
     }
 
     pub fn as_str(&self) -> &str {

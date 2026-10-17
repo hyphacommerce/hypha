@@ -1,7 +1,7 @@
 //! Search's ports (design note 0019, sections 4 to 6): the engine, the queue of what
 //! to rebuild, and the merchant's settings.
 
-use hypha_core::{ChannelId, MarketId, ProductId, RepoError, Timestamp, VariantId};
+use hypha_core::{CategoryId, ChannelId, MarketId, ProductId, RepoError, Timestamp, VariantId};
 
 use crate::{IndexError, SearchDocument, SearchQuery, SearchResults, SearchSettings};
 
@@ -76,6 +76,9 @@ pub enum Target {
     Product(ProductId),
     /// The product of this variant (resolved when the mark is worked).
     Variant(VariantId),
+    /// The products in this category or below it, whose ancestor lists changed when it
+    /// moved (design note 0022, section 3; resolved when the mark is worked).
+    Category(CategoryId),
     /// Every product.
     All,
 }

@@ -46,6 +46,7 @@ fn query(market_n: u128) -> SearchQuery {
     SearchQuery {
         market: market(market_n),
         channel: None,
+        category: None,
         terms: vec![],
         filters: vec![],
         price: PriceBounds::default(),
@@ -193,6 +194,15 @@ async fn battery<I: SearchIndex>(index: &I) {
     base(&|q| q.channel = channel(1));
     base(&|q| q.channel = channel(2));
     base(&|q| q.channel = channel(9));
+    // A category finds what's in it and below it (design note 0022, CA3).
+    let category = |n: u128| Some(hypha_core::CategoryId::from_uuid(Uuid::from_u128(n)));
+    base(&|q| q.category = category(1));
+    base(&|q| q.category = category(2));
+    base(&|q| q.category = category(9));
+    base(&|q| {
+        q.category = category(1);
+        q.channel = channel(2);
+    });
     base(&|q| {
         q.channel = channel(2);
         q.terms = terms_("shirt");

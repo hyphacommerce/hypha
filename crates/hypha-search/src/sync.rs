@@ -11,9 +11,10 @@
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
 
+use hypha_categories::{CategoryRepo, CategoryTree, HasCategories};
 use hypha_channels::{ChannelRepo, HasChannels};
 use hypha_core::{
-    Clock, ErrorCode, PageLimit, PageRequest, ProductId, Progress, RepoError, VariantId,
+    CategoryId, Clock, ErrorCode, PageLimit, PageRequest, ProductId, Progress, RepoError, VariantId,
 };
 use hypha_inventory::{
     HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo, StockContext,
@@ -36,6 +37,7 @@ pub trait SyncPorts:
     + HasSearchSettings
     + HasProducts
     + HasChannels
+    + HasCategories
     + HasMarkets
     + HasCatalogs
     + HasPriceLists
@@ -49,6 +51,7 @@ impl<T> SyncPorts for T where
         + HasSearchSettings
         + HasProducts
         + HasChannels
+        + HasCategories
         + HasMarkets
         + HasCatalogs
         + HasPriceLists
@@ -127,6 +130,7 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
     let mut finished: Vec<Mark> = Vec::new();
     let mut products: BTreeSet<ProductId> = BTreeSet::new();
     let mut variants: Vec<VariantId> = Vec::new();
+    let mut categories: Vec<CategoryId> = Vec::new();
     for mark in &marks {
         match mark.target {
             Target::All => {
@@ -139,7 +143,17 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
                 products.insert(id);
             }
             Target::Variant(id) => variants.push(id),
+            Target::Category(id) => categories.push(id),
         }
+    }
+    // A moved category's products, and those of every category below it.
+    if !categories.is_empty() {
+        let tree = CategoryTree::new(ports.categories().list_all().await?);
+        let subtree: Vec<CategoryId> = categories
+            .iter()
+            .flat_map(|c| std::iter::once(*c).chain(tree.descendants(*c)))
+            .collect();
+        products.extend(ports.categories().products_in(&subtree).await?);
     }
     // A variant that's gone was removed from its product, whose own event rebuilds it.
     let owners = ports.products().ids_of_variants(&variants).await?;
@@ -154,7 +168,7 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
         let done = match mark.target {
             Target::All => false, // finished above
             Target::Product(id) => !failed_ids.contains(&id),
-            Target::Variant(_) => failed_ids.is_empty(),
+            Target::Variant(_) | Target::Category(_) => failed_ids.is_empty(),
         };
         if done {
             finished.push(*mark);
@@ -208,6 +222,22 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
     // Publications don't depend on the market either.
     let channels = ports.channels().channels_of(&writing).await?;
     let channels_of = |id: ProductId| channels.get(&id).map_or(&[][..], Vec::as_slice);
+    // Each product's categories with their ancestors (CA3), from one tree.
+    let tree = CategoryTree::new(ports.categories().list_all().await?);
+    let categories: BTreeMap<ProductId, Vec<CategoryId>> = ports
+        .categories()
+        .categories_of(&writing)
+        .await?
+        .into_iter()
+        .map(|(product, direct)| {
+            let all: BTreeSet<CategoryId> = direct
+                .iter()
+                .flat_map(|c| std::iter::once(*c).chain(tree.ancestors(*c)))
+                .collect();
+            (product, all.into_iter().collect())
+        })
+        .collect();
+    let categories_of = |id: ProductId| categories.get(&id).map_or(&[][..], Vec::as_slice);
 
     for market in ports.markets().list_all().await? {
         let pricing = load_pricing(ports, market.id(), &writing, &variants).await?;
@@ -217,7 +247,14 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
                 .iter()
                 .filter_map(|id| loaded.get(id))
                 .flat_map(|p| {
-                    build_documents(p, pricing, &stock, &search_settings, channels_of(p.id()))
+                    build_documents(
+                        p,
+                        pricing,
+                        &stock,
+                        &search_settings,
+                        channels_of(p.id()),
+                        categories_of(p.id()),
+                    )
                 })
                 .collect(),
             // The market went while we loaded.

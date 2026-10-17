@@ -9,6 +9,7 @@ mod auth;
 
 pub(crate) use auth::password_reset_in_background;
 mod carts;
+mod categories;
 mod channels;
 mod customers;
 mod fulfillments;
@@ -208,6 +209,18 @@ macro_rules! route_table {
             [admin, POST, "/admin/inventory-items/{id}/levels/{location_id}/adjustments", inventory::adjust_level],
             [admin, GET, "/admin/variants/{id}/inventory", inventory::fetch_variant_inventory],
 
+            // categories (design note 0022)
+            [admin, GET, "/admin/categories", categories::list],
+            [admin, POST, "/admin/categories", categories::create],
+            [admin, GET, "/admin/categories/{id}", categories::fetch],
+            [admin, PATCH, "/admin/categories/{id}", categories::update],
+            [admin, DELETE, "/admin/categories/{id}", categories::delete],
+            [admin, GET, "/admin/categories/{id}/products", categories::list_products],
+            [admin, POST, "/admin/categories/{id}/products", categories::add_products],
+            [admin, DELETE, "/admin/categories/{id}/products", categories::remove_products],
+            [admin, PUT, "/admin/categories/{id}/image", categories::set_image],
+            [admin, PUT, "/admin/products/{id}/categories", categories::set_for_product],
+
             [admin, GET, "/admin/channels", channels::list],
             [admin, POST, "/admin/channels", channels::create],
             [admin, GET, "/admin/channels/{id}", channels::fetch],
@@ -225,6 +238,8 @@ macro_rules! route_table {
             [storefront, GET, "/storefront/products/{id}", products::fetch_storefront],
             [storefront, GET, "/storefront/products/by-handle/{handle}", products::fetch_by_handle_storefront],
             [storefront, GET, "/storefront/countries", markets::storefront_countries],
+            [storefront, GET, "/storefront/categories", categories::list_storefront],
+            [storefront, GET, "/storefront/categories/by-handle/{handle}", categories::fetch_by_handle_storefront],
             [storefront, GET, "/storefront/search", search::storefront_search],
             [storefront, POST, "/storefront/carts", carts::create],
             [storefront, GET, "/storefront/carts/{id}", carts::fetch],

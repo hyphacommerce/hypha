@@ -3,10 +3,12 @@ use hypha_core::Stamped;
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_cart::{ProductOffer, price_product};
+use hypha_categories::categories_of_products;
 use hypha_channels::HasChannels;
 use hypha_channels::{channels_of_products, product_channels};
 use hypha_core::{
-    AssetId, ChannelId, Ctx, Currency, Money, OptionId, OptionValueId, ProductId, VariantId, Weight,
+    AssetId, CategoryId, ChannelId, Ctx, Currency, Money, OptionId, OptionValueId, ProductId,
+    VariantId, Weight,
 };
 use hypha_inventory::{HasInventoryItems, HasLocations};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
@@ -102,6 +104,8 @@ pub(super) struct ProductResponse {
     /// The sales channels it is published to, sorted (design note 0020); a new product
     /// is in none.
     channels: Vec<ChannelId>,
+    /// The categories it's directly in, sorted (design note 0022).
+    categories: Vec<CategoryId>,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -221,6 +225,7 @@ impl ProductResponse {
     async fn new(
         view: &ProductView,
         channels: Vec<ChannelId>,
+        categories: Vec<CategoryId>,
         media: Option<&Media>,
     ) -> Result<Self, ApiError> {
         let p = &view.product;
@@ -253,6 +258,7 @@ impl ProductResponse {
                 .collect(),
             media: media_items(&view.media, media).await?,
             channels,
+            categories,
         })
     }
 }
@@ -275,9 +281,14 @@ async fn respond_view<S: Storage>(
     ctx: &Ctx,
     view: &ProductView,
 ) -> Result<Json<ProductResponse>, ApiError> {
-    let channels = product_channels(ctx, ports, view.product.id()).await?;
+    let id = view.product.id();
+    let channels = product_channels(ctx, ports, id).await?;
+    let categories = categories_of_products(ctx, ports, &[id])
+        .await?
+        .remove(&id)
+        .unwrap_or_default();
     Ok(Json(
-        ProductResponse::new(view, channels, state.media.as_ref()).await?,
+        ProductResponse::new(view, channels, categories, state.media.as_ref()).await?,
     ))
 }
 
@@ -311,6 +322,8 @@ pub(super) struct ProductSummaryResponse {
     featured_media: Option<ProductMediaResponse>,
     /// The sales channels it is published to, sorted (design note 0020).
     channels: Vec<ChannelId>,
+    /// The categories it's directly in, sorted (design note 0022).
+    categories: Vec<CategoryId>,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -328,6 +341,7 @@ impl ProductSummaryResponse {
     async fn new(
         view: &ProductSummaryView,
         channels: Vec<ChannelId>,
+        categories: Vec<CategoryId>,
         media: Option<&Media>,
     ) -> Result<Self, ApiError> {
         let featured_media = match &view.featured_media {
@@ -356,6 +370,7 @@ impl ProductSummaryResponse {
                 .collect(),
             featured_media,
             channels,
+            categories,
         })
     }
 }
@@ -385,10 +400,15 @@ pub(super) async fn list<S: Storage>(
     let page = list_product_views(&ctx, &ports, input, page).await?;
     let ids: Vec<ProductId> = page.items.iter().map(|v| v.summary.id).collect();
     let mut channels = channels_of_products(&ctx, &ports, &ids).await?;
+    let mut categories = categories_of_products(&ctx, &ports, &ids).await?;
     let mut items = Vec::with_capacity(page.items.len());
     for view in &page.items {
-        let of = channels.remove(&view.summary.id).unwrap_or_default();
-        items.push(ProductSummaryResponse::new(view, of, state.media.as_ref()).await?);
+        let id = view.summary.id;
+        let of = channels.remove(&id).unwrap_or_default();
+        let in_categories = categories.remove(&id).unwrap_or_default();
+        items.push(
+            ProductSummaryResponse::new(view, of, in_categories, state.media.as_ref()).await?,
+        );
     }
     Ok(Json(PageResponse::with_items(
         &page,

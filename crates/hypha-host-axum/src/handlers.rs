@@ -3,12 +3,13 @@
 //! tuple; the dispatcher runs whatever is here and knows none of them.
 
 use hypha_dispatch::VariantCleanup;
+use hypha_merchandising::CategoryImageCleanup;
 use hypha_search::SearchIndexer;
 
 /// Every handler, in no particular order (names must be unique; a test checks).
-pub(crate) type Handlers = (VariantCleanup, SearchIndexer);
+pub(crate) type Handlers = (VariantCleanup, SearchIndexer, CategoryImageCleanup);
 
-pub(crate) const HANDLERS: Handlers = (VariantCleanup, SearchIndexer);
+pub(crate) const HANDLERS: Handlers = (VariantCleanup, SearchIndexer, CategoryImageCleanup);
 
 #[cfg(test)]
 mod tests {

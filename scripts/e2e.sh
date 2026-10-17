@@ -784,6 +784,44 @@ step "back to one listing per product" 200 - -X PATCH "$BASE/admin/search/settin
 step "rebuild everything" 202 - -X POST "$BASE/admin/search/reindex"
 wait_for "the rebuild finishes" "$BASE/admin/search/status" '"queued":0'
 
+echo "## categories (design note 0022)"
+step "a top-level category" 201 - -X POST "$BASE/admin/categories" -H "$JSON" \
+    -d '{"name":"Home","handle":"home","visible":true,"description":"<p>For the home</p><script>x()</script>"}'
+HOME_CAT=$(id)
+contains "its description sanitised" '"description":"<p>For the home</p>"'
+step "a subcategory" 201 - -X POST "$BASE/admin/categories" -H "$JSON" \
+    -d "{\"name\":\"Lighting\",\"handle\":\"lighting\",\"parent\":\"$HOME_CAT\",\"visible\":true}"
+LIGHTING=$(id)
+contains "with its breadcrumb" "\"ancestors\":[{\"id\":\"$HOME_CAT\""
+step "a hidden one" 201 - -X POST "$BASE/admin/categories" -H "$JSON" \
+    -d '{"name":"Clearance","handle":"clearance","visible":false}'
+CLEARANCE=$(id)
+step "visible is required" 422 invalid_body -X POST "$BASE/admin/categories" -H "$JSON" -d '{"name":"X","handle":"x"}'
+step "a taken handle" 409 category_handle_taken -X POST "$BASE/admin/categories" -H "$JSON" \
+    -d '{"name":"Again","handle":"home","visible":true}'
+step "under its own child" 422 category_cycle -X PATCH "$BASE/admin/categories/$HOME_CAT" -H "$JSON" \
+    -d "{\"parent\":\"$LIGHTING\"}"
+step "the tree" 200 - "$BASE/admin/categories"
+contains "nested" "\"children\":[{\"id\":\"$LIGHTING\""
+step "the lamp is lighting, and on clearance" 200 - -X PUT "$BASE/admin/products/$LAMP/categories" -H "$JSON" \
+    -d "{\"categories\":[\"$LIGHTING\",\"$CLEARANCE\"]}"
+step "the lamp names its categories" 200 - "$BASE/admin/products/$LAMP"
+contains "both" '"categories":['
+step "the cup is in Home" 204 - -X POST "$BASE/admin/categories/$HOME_CAT/products" -H "$JSON" \
+    -d "{\"products\":[\"$CUP\"]}"
+step "Home's own products" 200 - "$BASE/admin/categories/$HOME_CAT/products"
+contains "the cup" '"handle":"cup"'
+step "a parent can't be deleted" 409 category_has_children -X DELETE "$BASE/admin/categories/$HOME_CAT"
+step "the storefront's tree" 200 - "$BASE/storefront/categories"
+contains "without the hidden one" '"handle":"home"'
+step "a category page" 200 - "$BASE/storefront/categories/by-handle/lighting"
+contains "with its breadcrumb" '"ancestors":[{'
+step "a hidden category page" 404 category_not_found "$BASE/storefront/categories/by-handle/clearance"
+wait_for "Home lists the lamp from Lighting" "$BASE/storefront/search?country=HR&category=$HOME_CAT" '"handle":"lamp"'
+step "a hidden category isn't searchable" 404 category_not_found "$BASE/storefront/search?country=HR&category=$CLEARANCE"
+step "delete the hidden one" 204 - -X DELETE "$BASE/admin/categories/$CLEARANCE"
+step "it's gone" 404 category_not_found "$BASE/admin/categories/$CLEARANCE"
+
 echo "## fulfilment (design note 0018)"
 # The shop order: 2 lamps, reserved at the warehouse (4 on hand, 4 reserved with the
 # second order's), and a book.

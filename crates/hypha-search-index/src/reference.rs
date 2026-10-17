@@ -84,6 +84,7 @@ pub fn search(documents: &[SearchDocument], query: &SearchQuery) -> SearchResult
         .iter()
         .filter(|d| d.market == query.market)
         .filter(|d| query.channel.is_none_or(|c| d.channels.contains(&c)))
+        .filter(|d| query.category.is_none_or(|c| d.categories.contains(&c)))
         .filter(|d| query.terms.is_empty() || terms::matches_all(&query.terms, &d.terms().all()))
         .filter(|d| query.available.is_none_or(|a| d.available == a))
         .collect();

@@ -879,6 +879,7 @@ async fn a_listed_product_is_a_summary() {
             }],
             "featured_media": null,
             "channels": [],
+            "categories": [],
         })
     );
 }
@@ -4245,4 +4246,207 @@ async fn a_products_whole_variant_list_is_set_in_one_put() {
         2,
         "a refused list changes nothing"
     );
+}
+
+// ---------- categories (design note 0022) ----------
+
+#[tokio::test]
+async fn categories_form_a_tree_storefronts_see_shown_and_search_filters_by() {
+    let app = app().await;
+    let ids = shop_selling(&app, &["shirt", "trousers", "lamp"]).await;
+    let create = |body: Value| {
+        let app = &app;
+        async move {
+            let (status, json) =
+                send(app, "POST", "/admin/categories", Some(&body.to_string())).await;
+            assert_eq!(status, StatusCode::CREATED, "{json}");
+            json["id"].as_str().unwrap().to_string()
+        }
+    };
+    let clothing = create(json!({"name": "Clothing", "handle": "clothing", "visible": true, "description": "<p>Wear</p><script>x()</script>"})).await;
+    let shirts =
+        create(json!({"name": "Shirts", "handle": "shirts", "parent": clothing, "visible": true}))
+            .await;
+    let sale = create(json!({"name": "Sale", "handle": "sale", "visible": false})).await;
+
+    // `visible` is required (CA10); handles are unique; a parent must exist.
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/categories",
+        Some(r#"{"name":"X","handle":"x"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body")
+    );
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/categories",
+        Some(r#"{"name":"S","handle":"shirts","visible":true}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "category_handle_taken")
+    );
+    let missing = "pcat_00000000000000000000000000000063";
+    let body = json!({"name": "Y", "handle": "y", "visible": true, "parent": missing}).to_string();
+    let (status, body) = send(&app, "POST", "/admin/categories", Some(&body)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "category_parent_not_found"
+        )
+    );
+
+    // The tree, nested; a category with its breadcrumb; a cycle refused.
+    let (_, tree) = send(&app, "GET", "/admin/categories", None).await;
+    assert_eq!(tree["items"][0]["children"][0]["handle"], json!("shirts"));
+    let (_, page) = send(&app, "GET", &format!("/admin/categories/{shirts}"), None).await;
+    assert_eq!(page["ancestors"][0]["handle"], json!("clothing"));
+    let (_, page) = send(&app, "GET", &format!("/admin/categories/{clothing}"), None).await;
+    assert_eq!(page["description"], json!("<p>Wear</p>"));
+    let body = json!({"parent": shirts}).to_string();
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/categories/{clothing}"),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "category_cycle")
+    );
+    let (status, body) = send(&app, "GET", &format!("/admin/categories/{missing}"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "category_not_found")
+    );
+
+    // Membership: shirt in Shirts and Sale, trousers in Clothing.
+    let body = json!({"categories": [shirts, sale]}).to_string();
+    let (status, set) = send(
+        &app,
+        "PUT",
+        &format!("/admin/products/{}/categories", ids[0]),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    let body = json!({"products": [ids[1]]}).to_string();
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/admin/categories/{clothing}/products"),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, product) = send(&app, "GET", &format!("/admin/products/{}", ids[1]), None).await;
+    assert_eq!(product["categories"], json!([clothing]));
+    let (_, members) = send(
+        &app,
+        "GET",
+        &format!("/admin/categories/{clothing}/products"),
+        None,
+    )
+    .await;
+    assert_eq!(members["items"][0]["handle"], json!("trousers"));
+    let body = json!({"categories": [missing]}).to_string();
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &format!("/admin/products/{}/categories", ids[0]),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "category_not_found")
+    );
+
+    // A parent with children can't go.
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("/admin/categories/{clothing}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "category_has_children")
+    );
+
+    // The storefront: hidden Sale is gone; Clothing lists its subcategory's products.
+    let pk = publishable(&app).await;
+    let (_, shown) = send_as(&app, &pk, "GET", "/storefront/categories", None).await;
+    let top: Vec<&Value> = shown["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| &c["handle"])
+        .collect();
+    assert_eq!(top, [&json!("clothing")]);
+    let (status, body) = send_as(
+        &app,
+        &pk,
+        "GET",
+        "/storefront/categories/by-handle/sale",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "category_not_found")
+    );
+    let (_, shirts_page) = send_as(
+        &app,
+        &pk,
+        "GET",
+        "/storefront/categories/by-handle/shirts",
+        None,
+    )
+    .await;
+    assert_eq!(shirts_page["ancestors"][0]["name"], json!("Clothing"));
+
+    settle_search(&app).await;
+    let titles = |found: &Value| -> Vec<String> {
+        found["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| h["title"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let url = format!("/storefront/search?country=HR&sort=title&category={clothing}");
+    let (status, found) = send_as(&app, &pk, "GET", &url, None).await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(titles(&found), ["shirt", "trousers"]);
+    let url = format!("/storefront/search?country=HR&category={sale}");
+    let (status, body) = send_as(&app, &pk, "GET", &url, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "category_not_found")
+    );
+
+    // Moving Shirts to the top level takes the shirt out of Clothing's listing.
+    let body = json!({"parent": null}).to_string();
+    let (status, moved) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/categories/{shirts}"),
+        Some(&body),
+    )
+    .await;
+    assert_eq!((status, &moved["parent"]), (StatusCode::OK, &Value::Null));
+    settle_search(&app).await;
+    let url = format!("/storefront/search?country=HR&sort=title&category={clothing}");
+    let (_, found) = send_as(&app, &pk, "GET", &url, None).await;
+    assert_eq!(titles(&found), ["trousers"]);
 }

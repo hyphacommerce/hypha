@@ -20,8 +20,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use hypha_core::{
-    AssetId, ChannelId, MarketId, Money, ProductId, RepoError, Timestamp, VariantId, Version,
-    Versioned, stamp_insert, stamp_update,
+    AssetId, CategoryId, ChannelId, MarketId, Money, ProductId, RepoError, Timestamp, VariantId,
+    Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_search_index::{
     FacetCounts, FacetKey, FacetValue, Group, Hit, IndexError, MAX_FACET_VALUES, Mark, PriceRange,
@@ -56,11 +56,11 @@ const INSERT_ROWS: usize = 1000;
 
 /// The columns a document is written with, in order (one placeholder each, but `tsv`).
 const COLUMNS: &str =
-    "market_id, product_id, variant_id, listing, channels, handle, title, title_sort,
+    "market_id, product_id, variant_id, listing, channels, categories, handle, title, title_sort,
     variant_title, description, vendor, product_type, tags, sku, option_names, option_values,
     currency, price, product_min, product_max, listing_min, listing_max, available, image_id,
     created_us, position, terms_a, terms_b, terms_d, tsv, facets";
-const PER_ROW: usize = 31;
+const PER_ROW: usize = 32;
 
 // ---------- the engine ----------
 
@@ -297,6 +297,13 @@ async fn insert_documents(
                     .collect::<Vec<Uuid>>(),
                 Type::UUID_ARRAY,
             ),
+            params.add(
+                d.categories
+                    .iter()
+                    .map(|c| c.as_uuid())
+                    .collect::<Vec<Uuid>>(),
+                Type::UUID_ARRAY,
+            ),
             params.add(d.handle.clone(), Type::TEXT),
             params.add(d.title.clone(), Type::TEXT),
             params.add(d.title.to_lowercase(), Type::TEXT),
@@ -392,6 +399,13 @@ fn conditions(q: &SearchQuery, params: &mut Params, except: Except<'_>) -> Strin
         sql.push(format!(
             "d.channels @> ARRAY[{}]::uuid[]",
             params.add(channel.as_uuid(), Type::UUID)
+        ));
+    }
+    if let Some(category) = q.category {
+        // GIN-indexed like channels: a document carries its categories' ancestors too.
+        sql.push(format!(
+            "d.categories @> ARRAY[{}]::uuid[]",
+            params.add(category.as_uuid(), Type::UUID)
         ));
     }
     if let Some(available) = q.available {
@@ -687,6 +701,10 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
             .into_iter()
             .map(ChannelId::from_uuid)
             .collect(),
+        categories: col::<Vec<Uuid>>(row, "categories")?
+            .into_iter()
+            .map(CategoryId::from_uuid)
+            .collect(),
         handle: col(row, "handle")?,
         title: col(row, "title")?,
         variant_title: col(row, "variant_title")?,
@@ -718,6 +736,7 @@ fn target_to_db(target: Target) -> String {
     match target {
         Target::Product(id) => format!("product:{}", id.as_uuid()),
         Target::Variant(id) => format!("variant:{}", id.as_uuid()),
+        Target::Category(id) => format!("category:{}", id.as_uuid()),
         Target::All => "all".to_string(),
     }
 }
@@ -730,6 +749,9 @@ fn target_from_db(text: &str) -> Result<Target, RepoError> {
             id.parse().map_err(|_| bad())?,
         ))),
         Some(("variant", id)) => Ok(Target::Variant(VariantId::from_uuid(
+            id.parse().map_err(|_| bad())?,
+        ))),
+        Some(("category", id)) => Ok(Target::Category(CategoryId::from_uuid(
             id.parse().map_err(|_| bad())?,
         ))),
         _ => Err(bad()),

@@ -163,6 +163,34 @@
         ],
         "type": "object"
       },
+      "CategoryId": {
+        "description": "A CategoryId: `pcat_` and 32 hex digits.",
+        "examples": [
+          "pcat_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^pcat_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "CategoryRef": {
+        "description": "A category next to it in the tree: an ancestor or a child.",
+        "properties": {
+          "handle": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/CategoryId"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "handle"
+        ],
+        "type": "object"
+      },
       "ChannelId": {
         "description": "A ChannelId: `chan_` and 32 hex digits.",
         "examples": [
@@ -1452,6 +1480,101 @@
         },
         "required": [
           "groups"
+        ],
+        "type": "object"
+      },
+      "StorefrontCategoryNode": {
+        "description": "A category in the storefront's tree, with its shown children.",
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/StorefrontCategoryNode"
+            },
+            "type": "array"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/CategoryId"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "handle",
+          "children"
+        ],
+        "type": "object"
+      },
+      "StorefrontCategoryResponse": {
+        "description": "A category page's category: no admin fields, only shown children.",
+        "properties": {
+          "ancestors": {
+            "description": "Nearest first: a breadcrumb, reversed.",
+            "items": {
+              "$ref": "#/components/schemas/CategoryRef"
+            },
+            "type": "array"
+          },
+          "children": {
+            "description": "Its shown children, in order.",
+            "items": {
+              "$ref": "#/components/schemas/CategoryRef"
+            },
+            "type": "array"
+          },
+          "description": {
+            "description": "Sanitised HTML, safe to render.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "handle": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/CategoryId"
+          },
+          "image": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductMediaResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "handle",
+          "ancestors",
+          "children"
+        ],
+        "type": "object"
+      },
+      "StorefrontCategoryTreeResponse": {
+        "properties": {
+          "items": {
+            "description": "The shown top-level categories, each with its shown children, in order. A hidden\ncategory is left out with everything under it.",
+            "items": {
+              "$ref": "#/components/schemas/StorefrontCategoryNode"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -3135,6 +3258,156 @@
         ]
       }
     },
+    "/storefront/categories": {
+      "get": {
+        "operationId": "storefront.categories.list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorefrontCategoryTreeResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "The categories a storefront shows, as a tree (navigation menus).",
+        "tags": [
+          "categories"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      }
+    },
+    "/storefront/categories/by-handle/{handle}": {
+      "get": {
+        "operationId": "storefront.categories.fetch_by_handle",
+        "parameters": [
+          {
+            "description": "The category's handle.",
+            "example": "shirts",
+            "in": "path",
+            "name": "handle",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorefrontCategoryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "A category page (design note 0022, section 4): the category by handle, with its\nancestors and shown children. Its products come through\n`/storefront/search?category=…`. A hidden category (or one under a hidden one) is\n`404 category_not_found`.",
+        "tags": [
+          "categories"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      }
+    },
     "/storefront/countries": {
       "get": {
         "operationId": "storefront.markets.storefront_countries",
@@ -3473,6 +3746,15 @@
             "required": false,
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Only products in this category or one below it (design note 0022); a hidden\ncategory is `404 category_not_found`.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CategoryId"
             }
           },
           {

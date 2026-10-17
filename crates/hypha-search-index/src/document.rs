@@ -2,7 +2,9 @@
 //! its product's fields, priced and stocked as a shopper in that market sees it. Built
 //! by `hypha_search::build_documents`; engines store them as they like.
 
-use hypha_core::{AssetId, ChannelId, MarketId, Money, ProductId, Timestamp, VariantId};
+use hypha_core::{
+    AssetId, CategoryId, ChannelId, MarketId, Money, ProductId, Timestamp, VariantId,
+};
 
 use crate::terms;
 
@@ -46,6 +48,9 @@ pub struct SearchDocument {
     /// The channels the product is published to, sorted (design note 0020): the same on
     /// every document of the product.
     pub channels: Vec<ChannelId>,
+    /// The product's categories and all their ancestors, sorted (design note 0022,
+    /// CA3): a filter on "Clothing" finds what's in "Shirts" too.
+    pub categories: Vec<CategoryId>,
     pub handle: String,
     pub title: String,
     /// "M / Blue"; `None` for a product without options.

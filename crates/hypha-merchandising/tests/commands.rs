@@ -409,3 +409,97 @@ fn a_list_carries_each_products_featured_asset() {
         .collect();
     assert_eq!(featured, vec![(pid(2), None), (pid(1), Some(aid(3)))]);
 }
+
+// ---------- a category's image (design note 0022, CA9) ----------
+
+fn category(ports: &InMemoryPorts) -> hypha_core::CategoryId {
+    use hypha_categories::{CategoryRepo, NewCategory};
+    let id = hypha_core::CategoryId::from_uuid(Uuid::from_u128(500));
+    let mut category = hypha_categories::Category::new(NewCategory {
+        id,
+        name: "Shirts".to_string(),
+        handle: Handle::new("shirts").unwrap(),
+        description: None,
+        parent: None,
+        position: 0,
+        visible: true,
+    })
+    .unwrap();
+    block_on(ports.categories.insert(&mut category)).unwrap();
+    id
+}
+
+#[test]
+fn a_category_image_is_an_asset_in_use_until_it_changes() {
+    let ports = world();
+    let id = category(&ports);
+    let ctx = Ctx::system();
+    let set = |image| {
+        block_on(hypha_merchandising::set_category_image(
+            &ctx, &ports, id, image,
+        ))
+    };
+    assert_eq!(set(Some(aid(1))).unwrap().image(), Some(aid(1)));
+    assert_eq!(
+        usages(&ports, 1),
+        [AssetUsage {
+            asset: aid(1),
+            owner: UsageOwner::category(id),
+            role: UsageRole::image(),
+        }]
+    );
+    set(Some(aid(2))).unwrap();
+    assert_eq!(usages(&ports, 1), []);
+    assert_eq!(set(None).unwrap().image(), None);
+    assert_eq!(usages(&ports, 2), []);
+}
+
+#[test]
+fn a_category_image_is_a_ready_public_image() {
+    let ports = world();
+    let id = category(&ports);
+    let ctx = Ctx::system();
+    let set = |image| {
+        block_on(hypha_merchandising::set_category_image(
+            &ctx, &ports, id, image,
+        ))
+    };
+    assert!(matches!(
+        set(Some(aid(4))),
+        Err(CommandError::AssetKindNotAllowed { .. })
+    ));
+    assert_eq!(set(Some(aid(6))), Err(CommandError::AssetNotPublic(aid(6))));
+    assert_eq!(set(Some(aid(7))), Err(CommandError::AssetNotReady(aid(7))));
+    assert_eq!(
+        set(Some(aid(99))),
+        Err(CommandError::AssetNotFound(aid(99)))
+    );
+    let missing = hypha_core::CategoryId::from_uuid(Uuid::from_u128(999));
+    assert_eq!(
+        block_on(hypha_merchandising::set_category_image(
+            &ctx, &ports, missing, None
+        )),
+        Err(CommandError::CategoryNotFound(missing))
+    );
+}
+
+#[test]
+fn a_deleted_categorys_image_is_released() {
+    use hypha_core::EventHandler;
+    let ports = world();
+    let id = category(&ports);
+    let ctx = Ctx::system();
+    block_on(hypha_merchandising::set_category_image(
+        &ctx,
+        &ports,
+        id,
+        Some(aid(1)),
+    ))
+    .unwrap();
+    block_on(hypha_categories::delete_category(&ctx, &ports, id)).unwrap();
+    let deleted = ports.outbox.events().pop().unwrap();
+    let cleanup = hypha_merchandising::CategoryImageCleanup;
+    block_on(cleanup.handle(&ports, &deleted)).unwrap();
+    block_on(cleanup.handle(&ports, &deleted)).unwrap();
+    assert_eq!(usages(&ports, 1), []);
+}

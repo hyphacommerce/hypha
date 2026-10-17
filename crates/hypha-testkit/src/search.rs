@@ -344,6 +344,13 @@ pub fn search_fixture() -> Vec<SearchDocument> {
             4 => vec![channel(2)],
             _ => vec![channel(1)],
         };
+        // Categories with their ancestors: 1 Clothing › 2 Shirts, 3 Kitchen.
+        let category = |n: u128| hypha_core::CategoryId::from_uuid(Uuid::from_u128(n));
+        let categories = match p.n {
+            1 | 2 => vec![category(1), category(2)],
+            3 => vec![category(3)],
+            _ => vec![],
+        };
         let prices: Vec<i64> = p.variants.iter().map(|v| v.price).collect();
         let range = |prices: &[i64]| PriceRange {
             min: eur(*prices.iter().min().unwrap_or(&0)),
@@ -377,6 +384,7 @@ pub fn search_fixture() -> Vec<SearchDocument> {
                 variant: VariantId::from_uuid(Uuid::from_u128(variant.n)),
                 listing: listing(variant),
                 channels: channels.clone(),
+                categories: categories.clone(),
                 handle: p.title.to_lowercase().replace(' ', "-"),
                 title: p.title.to_string(),
                 variant_title: (!options.is_empty()).then(|| {
