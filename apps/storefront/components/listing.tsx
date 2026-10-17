@@ -12,7 +12,7 @@ import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { Suspense, useEffect, useState, useTransition } from "react";
 
 import { listingPage } from "@/app/[country]/actions";
 import { changed, listingHref, nextPage, previousPage, sortOf } from "@/lib/listing";
@@ -27,6 +27,18 @@ function listingQuery(params: URLSearchParams): string {
   const kept = new URLSearchParams();
   for (const key of keys) for (const value of params.getAll(key)) kept.append(key, value);
   return kept.toString();
+}
+
+/**
+ * Reports the URL's listing query, rendering nothing. Reading the query on a static page
+ * makes everything up to the nearest Suspense boundary render in the browser only, so
+ * only this does, inside its own boundary with no fallback: the listing itself is in the
+ * page's static HTML from the start, with the server's first page.
+ */
+function QueryWatch({ onQuery }: { onQuery: (query: string) => void }) {
+  const query = listingQuery(useSearchParams());
+  useEffect(() => onQuery(query), [query, onQuery]);
+  return null;
 }
 
 export function Listing({
@@ -51,7 +63,14 @@ export function Listing({
   initial: ListingPage;
   initialQuery: string;
 }) {
-  const query = listingQuery(useSearchParams());
+  // The page the server rendered is for `initialQuery`; the URL's own comes once the
+  // page is in the browser (`QueryWatch`).
+  const [query, setQuery] = useState(initialQuery);
+  const watch = (
+    <Suspense fallback={null}>
+      <QueryWatch onQuery={setQuery} />
+    </Suspense>
+  );
   // Facets beside the results on wide screens; on phones the toolbar's Filters button
   // opens them in a bottom sheet.
   const isWide = useMediaQuery("(min-width: 900px)", true);
@@ -77,12 +96,15 @@ export function Listing({
   const { state } = page;
   if (page.error) {
     return (
-      <Banner
-        status="warning"
-        title="This listing couldn't be shown"
-        description={page.error}
-        endContent={<Button label="Start again" href={base} size="sm" />}
-      />
+      <>
+        {watch}
+        <Banner
+          status="warning"
+          title="This listing couldn't be shown"
+          description={page.error}
+          endContent={<Button label="Start again" href={base} size="sm" />}
+        />
+      </>
     );
   }
   const controls = { base, state, facets: page.facets, currency, priceHint: page.priceHint };
@@ -91,6 +113,7 @@ export function Listing({
 
   return (
     <HStack gap={8} vAlign="start">
+      {watch}
       {isWide && (
         <VStack width={240} gap={4}>
           <FacetPanel {...controls} />

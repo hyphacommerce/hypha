@@ -1,7 +1,6 @@
 import { Heading } from "@astryxdesign/core/Heading";
 import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
-import { Suspense } from "react";
 
 import { Listing } from "@/components/listing";
 import { countryOf } from "@/lib/api";
@@ -44,17 +43,15 @@ export default async function SearchPage({
       <Heading level={1} type="display-2">
         {page.state.q ? `Results for “${page.state.q}”` : "All products"}
       </Heading>
-      <Suspense>
-        <Listing
-          country={code}
-          digits={country.minor_units}
-          currency={country.currency}
-          base={link(code, "/search")}
-          productBase={link(code, "/p")}
-          initial={page}
-          initialQuery={queryOf(query)}
-        />
-      </Suspense>
+      <Listing
+        country={code}
+        digits={country.minor_units}
+        currency={country.currency}
+        base={link(code, "/search")}
+        productBase={link(code, "/p")}
+        initial={page}
+        initialQuery={queryOf(query)}
+      />
     </VStack>
   );
 }

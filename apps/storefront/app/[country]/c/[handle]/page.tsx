@@ -4,10 +4,8 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
 
 import { Listing } from "@/components/listing";
-import { ProductGrid } from "@/components/product-grid";
 import { countryOf, loadCategory } from "@/lib/api";
 import { readListingPage } from "@/lib/listing-data";
 import { link } from "@/lib/site";
@@ -87,21 +85,16 @@ export default async function CategoryPage({ params }: Props) {
           </HStack>
         )}
       </VStack>
-      {/* The URL's query is only known in the browser on a static page. */}
-      <Suspense
-        fallback={<ProductGrid hits={first.items} digits={country.minor_units} productBase={productBase} />}
-      >
-        <Listing
-          country={code}
-          digits={country.minor_units}
-          currency={country.currency}
-          base={link(code, `/c/${handle}`)}
-          productBase={productBase}
-          category={category.id}
-          initial={first}
-          initialQuery=""
-        />
-      </Suspense>
+      <Listing
+        country={code}
+        digits={country.minor_units}
+        currency={country.currency}
+        base={link(code, `/c/${handle}`)}
+        productBase={productBase}
+        category={category.id}
+        initial={first}
+        initialQuery=""
+      />
     </VStack>
   );
 }

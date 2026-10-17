@@ -1,6 +1,7 @@
-// Loading states shaped like the pages they stand in for (design note 0024, §7): each
-// route's `loading.tsx` shows one while its page renders, and a listing shows the grid
-// while it reads another page of results. Header and footer stay; only the page waits.
+// Loading states shaped like the pages they stand in for (design note 0024, §7), for the
+// dynamic routes only (search, cart): their `loading.tsx` shows one while the page
+// renders. Static pages have none: their HTML is the page, and a fallback there would be
+// cached with it and flash before every visit (design note 0025, §6).
 
 import { AspectRatio } from "@astryxdesign/core/AspectRatio";
 import { Card } from "@astryxdesign/core/Card";
@@ -103,73 +104,6 @@ export function ListingPageSkeleton() {
           </VStack>
         </StackItem>
       </HStack>
-    </VStack>
-  );
-}
-
-/** A product page: the gallery beside the title, price, options and Add to cart. */
-export function ProductPageSkeleton() {
-  return (
-    <VStack gap={5}>
-      <Skeleton height={14} width={160} />
-      <Grid columns={{ minWidth: 340, repeat: "fit" }} gap={8}>
-        <VStack gap={3}>
-          <AspectRatio ratio={4 / 5}>
-            <Skeleton radius={3} />
-          </AspectRatio>
-          <HStack gap={2}>
-            {[0, 1, 2, 3].map((i) => (
-              <Skeleton key={i} index={i} height={64} width={64} />
-            ))}
-          </HStack>
-        </VStack>
-        <VStack gap={5}>
-          <TitleSkeleton width={320} />
-          <Skeleton height={22} width={100} />
-          <VStack gap={2}>
-            <Skeleton height={14} width={60} />
-            <HStack gap={2}>
-              {[0, 1, 2, 3].map((i) => (
-                <Skeleton key={i} index={i} height={40} width={64} />
-              ))}
-            </HStack>
-          </VStack>
-          <Skeleton height={44} />
-          <VStack gap={2}>
-            <Skeleton height={14} />
-            <Skeleton height={14} width="90%" />
-            <Skeleton height={14} width="70%" />
-          </VStack>
-        </VStack>
-      </Grid>
-    </VStack>
-  );
-}
-
-/** Home: the hero, the category tiles, a shelf of products. */
-export function HomePageSkeleton() {
-  return (
-    <VStack gap={10}>
-      <VStack gap={4} hAlign="center" paddingBlock={6}>
-        <Skeleton height={56} width={360} />
-        <Skeleton height={18} width={480} />
-        <HStack gap={3}>
-          <Skeleton height={44} width={170} />
-          <Skeleton height={44} width={150} />
-        </HStack>
-      </VStack>
-      <AspectRatio ratio={3 / 1}>
-        <Skeleton radius={3} />
-      </AspectRatio>
-      <Grid columns={{ minWidth: 200, repeat: "fill" }} gap={3}>
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} index={i} height={96} />
-        ))}
-      </Grid>
-      <VStack gap={4}>
-        <Skeleton height={28} width={200} />
-        <ProductGridSkeleton count={4} minWidth={200} />
-      </VStack>
     </VStack>
   );
 }
