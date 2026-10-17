@@ -1,3 +1,7 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
+import { Heading } from "@astryxdesign/core/Heading";
+import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
 import { api, countryOf, loaded } from "@/lib/api";
@@ -7,7 +11,6 @@ import { ProductForm } from "./product-form";
 
 type Props = {
   params: Promise<{ country: string; handle: string }>;
-  searchParams: Promise<{ error?: string }>;
 };
 
 async function load(handle: string, country: string) {
@@ -29,31 +32,32 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  * shopper's country. One the country's market doesn't sell is shown as such (0021, Q2);
  * a draft or unpublished one is a 404.
  */
-export default async function ProductPage({ params, searchParams }: Props) {
+export default async function ProductPage({ params }: Props) {
   const { country: folder, handle } = await params;
   const country = await countryOf(folder);
   const code = country.country;
   const product = await load(handle, code);
-  const { error } = await searchParams;
-  const here = link(code, `/p/${handle}`);
 
   return (
-    <>
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <a href={link(code, "/")}>Home</a> / {product.title}
-      </nav>
-      {error && <p className="error">{error}</p>}
+    <VStack gap={5}>
+      <Breadcrumbs variant="supporting">
+        <BreadcrumbItem href={link(code, "/")}>Home</BreadcrumbItem>
+        <BreadcrumbItem isCurrent>{product.title}</BreadcrumbItem>
+      </Breadcrumbs>
       {product.sold_in_country === false ? (
-        <div className="stack" style={{ marginTop: 32 }}>
-          <h1>{product.title}</h1>
-          <p className="error">
-            Not available in {country.name}. Pick another country above to see where it's
-            sold.
-          </p>
-        </div>
+        <VStack gap={4} maxWidth={640}>
+          <Heading level={1} type="display-2">
+            {product.title}
+          </Heading>
+          <Banner
+            status="warning"
+            title={`Not sold in ${country.name}`}
+            description="Pick another country at the top to see where it's sold."
+          />
+        </VStack>
       ) : (
-        <ProductForm product={product} country={code} digits={country.minor_units} from={here} />
+        <ProductForm product={product} country={code} digits={country.minor_units} />
       )}
-    </>
+    </VStack>
   );
 }

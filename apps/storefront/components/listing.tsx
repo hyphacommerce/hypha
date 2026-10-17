@@ -1,30 +1,31 @@
-// A product listing through search (design note 0023, SF7): a category page and the
-// search page are both this, with `category` or `q`. Facets filter, sorting and paging
-// keep to the URL, so every state can be linked to.
+// A product listing through search (design notes 0023, SF7, and 0024, §7): a category
+// page and the search page are both this, with `category` or `q`. Facets and the price
+// range narrow it, the sort orders it, Previous and Next page through it, all in the URL.
 
-import { api } from "@/lib/api";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
+
 import type { Country } from "@/lib/api";
+import { api } from "@/lib/api";
+import {
+  type ListingParams,
+  changed,
+  listingHref,
+  nextPage,
+  previousPage,
+  readListing,
+  sortOf,
+  toMinor,
+} from "@/lib/listing";
 
+import { FacetPanel, ListingToolbar } from "./listing-controls";
 import { ProductGrid } from "./product-grid";
 
-export type ListingParams = Record<string, string | string[] | undefined>;
-
-const SORTS = [
-  { value: "relevance", label: "Best match" },
-  { value: "newest", label: "Newest" },
-  { value: "price_asc", label: "Price: low to high" },
-  { value: "price_desc", label: "Price: high to low" },
-  { value: "title", label: "Name" },
-] as const;
-
-type Sort = (typeof SORTS)[number]["value"];
-
-function list(value: string | string[] | undefined): string[] {
-  return value === undefined ? [] : Array.isArray(value) ? value : [value];
-}
-
-function one(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
+/** Minor units as major ones for the range fields' hints ("1050" → "10.5"). */
+function major(amount: number, digits: number): string {
+  return String(amount / 10 ** digits);
 }
 
 export async function Listing({
@@ -41,25 +42,21 @@ export async function Listing({
   category?: string;
   productHref: (handle: string) => string;
 }) {
-  const q = one(params.q)?.trim() || undefined;
-  const filters = list(params.filter);
-  const sortParam = one(params.sort);
-  const sort: Sort = SORTS.some((s) => s.value === sortParam)
-    ? (sortParam as Sort)
-    : q
-      ? "relevance"
-      : "newest";
-  const cursor = one(params.cursor);
+  const state = readListing(params);
+  const digits = country.minor_units;
+  const sort = sortOf(state);
 
   const { data, error } = await api().GET("/storefront/search", {
     params: {
       query: {
         country: country.country,
-        q,
-        filter: filters,
+        q: state.q,
+        filter: state.filters,
+        price_min: toMinor(state.min, digits),
+        price_max: toMinor(state.max, digits),
         category,
         sort,
-        cursor,
+        cursor: state.cursor,
         limit: 24,
       },
     },
@@ -67,110 +64,73 @@ export async function Listing({
   if (error) {
     // A stale cursor or filter in a hand-edited URL: start the listing again.
     return (
-      <p className="error">
-        This listing couldn't be shown ({error.error}). <a href={base}>Start again</a>
-      </p>
+      <Banner
+        status="warning"
+        title="This listing couldn't be shown"
+        description={error.error}
+        endContent={<Button label="Start again" href={base} size="sm" />}
+      />
     );
   }
 
-  /** This listing's URL with `change` applied (and the page reset). */
-  const url = (change: { filter?: string[]; sort?: string; cursor?: string }) => {
-    const query = new URLSearchParams();
-    if (q) query.set("q", q);
-    for (const f of change.filter ?? filters) query.append("filter", f);
-    const s = change.sort ?? sortParam;
-    if (s) query.set("sort", s);
-    if (change.cursor) query.set("cursor", change.cursor);
-    const text = query.toString();
-    return text ? `${base}?${text}` : base;
-  };
-  const toggle = (value: string) =>
-    url({
-      filter: filters.includes(value) ? filters.filter((f) => f !== value) : [...filters, value],
-    });
-
   const facets = data.facets.filter((f) => f.values.length > 0);
+  const controls = {
+    base,
+    state,
+    facets,
+    currency: country.currency,
+    priceHint: data.price
+      ? { min: major(data.price.min.amount, digits), max: major(data.price.max.amount, digits) }
+      : undefined,
+  };
+  const previous = previousPage(state);
+  const narrowed = state.filters.length > 0 || state.min !== undefined || state.max !== undefined;
+
   return (
-    <div className="listing">
-      <aside>
-        {facets.map((facet) => (
-          <div key={facet.key} className="facet">
-            <h3>{facet.label ?? facetName(facet.key)}</h3>
-            <ul>
-              {facet.values.slice(0, 12).map((v) => {
-                const value = `${facet.key}:${v.value}`;
-                const on = filters.includes(value);
-                return (
-                  <li key={v.value}>
-                    <a href={toggle(value)} aria-current={on}>
-                      {on ? "✓ " : ""}
-                      {v.value} <span className="muted">({v.count})</span>
-                    </a>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
+    <div className="shop-split" data-variant="sidebar">
+      <aside className="shop-wide-only" aria-label="Filters">
+        <FacetPanel {...controls} />
       </aside>
-      <section>
-        <div className="toolbar">
-          <span className="muted">
-            {data.total} {data.total === 1 ? "product" : "products"}
-          </span>
-          <form method="get" action={base}>
-            {q && <input type="hidden" name="q" value={q} />}
-            {filters.map((f) => (
-              <input key={f} type="hidden" name="filter" value={f} />
-            ))}
-            <label>
-              <span className="muted" style={{ marginRight: 6 }}>
-                Sort
-              </span>
-              <select name="sort" defaultValue={sort}>
-                {SORTS.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>{" "}
-            <button className="button button-quiet" type="submit">
-              Apply
-            </button>
-          </form>
-        </div>
+      <VStack gap={5}>
+        <ListingToolbar {...controls} total={data.total} sort={sort} />
         {data.items.length === 0 ? (
-          <p className="muted">Nothing here yet.</p>
+          <EmptyState
+            title="No products here"
+            description={
+              narrowed ? "Nothing matches these filters." : "Nothing is for sale here yet."
+            }
+            actions={
+              narrowed ? (
+                <Button
+                  label="Clear filters"
+                  href={listingHref(base, changed(state, { filters: [], min: undefined, max: undefined }))}
+                />
+              ) : undefined
+            }
+          />
         ) : (
           <ProductGrid
             hits={data.items}
-            digits={country.minor_units}
+            digits={digits}
             hrefOf={(hit) => productHref(hit.handle)}
+            minWidth={150}
           />
         )}
-        <div className="pager">
-          {cursor && (
-            <a className="button button-quiet" href={url({})}>
-              First page
-            </a>
-          )}
-          {data.next_cursor && (
-            <a className="button button-quiet" href={url({ cursor: data.next_cursor })}>
-              Next page
-            </a>
-          )}
-        </div>
-      </section>
+        {(previous || data.next_cursor) && (
+          <HStack gap={2} hAlign="center">
+            <Button
+              label="Previous"
+              href={previous ? listingHref(base, previous) : undefined}
+              isDisabled={!previous}
+            />
+            <Button
+              label="Next"
+              href={data.next_cursor ? listingHref(base, nextPage(state, data.next_cursor)) : undefined}
+              isDisabled={!data.next_cursor}
+            />
+          </HStack>
+        )}
+      </VStack>
     </div>
   );
-}
-
-/** `option.color` → "Color", `product_type` → "Type". */
-function facetName(key: string): string {
-  if (key.startsWith("option.")) {
-    const name = key.slice("option.".length);
-    return name.charAt(0).toUpperCase() + name.slice(1);
-  }
-  return { vendor: "Brand", product_type: "Type", tag: "Tag" }[key] ?? key;
 }

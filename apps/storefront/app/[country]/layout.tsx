@@ -1,4 +1,8 @@
-import { CountryPicker } from "@/components/country-picker";
+import { Link } from "@astryxdesign/core/Link";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { Text } from "@astryxdesign/core/Text";
+
+import { SiteHeader } from "@/components/site-header";
 import { api, countryOf, loadCategories, loadCountries, loadStore } from "@/lib/api";
 import { cartId, link } from "@/lib/site";
 
@@ -11,7 +15,8 @@ function localName(code: string, english: string, language: string): string {
   }
 }
 
-/** Every page of a country: header with navigation and the cart, footer (0023, §3). */
+/** Every page of a country: header with search, the country and the cart; footer
+ * (design note 0023, §3). */
 export default async function CountryLayout({
   children,
   params,
@@ -38,46 +43,49 @@ export default async function CountryLayout({
 
   return (
     <>
-      <header className="header">
-        <div className="page">
-          <div className="header-row">
-            <a className="brand" href={link(code, "/")}>
-              {store.name}
-            </a>
-            <form className="search-box" action={link(code, "/search")} method="get">
-              <input type="search" name="q" placeholder="Search" aria-label="Search" />
-            </form>
-            <CountryPicker
-              current={code}
-              countries={countries.map((c) => ({
-                code: c.country,
-                name: localName(c.country, c.name, store.default_language),
-                currency: c.currency,
-              }))}
-            />
-            <a href={link(code, "/cart")}>Cart{items > 0 ? ` (${items})` : ""}</a>
-          </div>
-          {categories.length > 0 && (
-            <nav className="nav" aria-label="Categories">
-              {categories.map((c) => (
-                <a key={c.id} href={link(code, `/c/${c.handle}`)}>
-                  {c.name}
-                </a>
-              ))}
-            </nav>
-          )}
-        </div>
-      </header>
-      <main className="page">{children}</main>
-      <footer className="footer">
-        <div className="page">
-          <p>{store.name}</p>
-          {store.description && <p>{store.description}</p>}
-          {store.contact_email && (
-            <p>
-              <a href={`mailto:${store.contact_email}`}>{store.contact_email}</a>
-            </p>
-          )}
+      <SiteHeader
+        storeName={store.name}
+        country={code}
+        homeHref={link(code, "/")}
+        searchHref={link(code, "/search")}
+        cartHref={link(code, "/cart")}
+        cartCount={items}
+        countries={countries.map((c) => ({
+          code: c.country,
+          name: localName(c.country, c.name, store.default_language),
+          currency: c.currency,
+        }))}
+        categories={categories.map((c) => ({
+          id: c.id,
+          name: c.name,
+          href: link(code, `/c/${c.handle}`),
+        }))}
+      />
+      <main className="shop-page shop-main">{children}</main>
+      <footer className="shop-footer">
+        <div className="shop-page">
+          <HStack gap={8} wrap="wrap" vAlign="start" hAlign="between">
+            <VStack gap={2} maxWidth={420}>
+              <Text type="large" weight="semibold">
+                {store.name}
+              </Text>
+              {store.description && <Text color="secondary">{store.description}</Text>}
+            </VStack>
+            <VStack gap={2}>
+              <Text type="label">Shop</Text>
+              <Link href={link(code, "/search")} color="secondary">
+                All products
+              </Link>
+              <Link href={link(code, "/cart")} color="secondary">
+                Cart
+              </Link>
+              {store.contact_email && (
+                <Link href={`mailto:${store.contact_email}`} color="secondary">
+                  {store.contact_email}
+                </Link>
+              )}
+            </VStack>
+          </HStack>
         </div>
       </footer>
     </>

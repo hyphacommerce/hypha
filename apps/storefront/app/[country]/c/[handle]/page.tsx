@@ -1,7 +1,12 @@
+import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
+import { Button } from "@astryxdesign/core/Button";
+import { Heading } from "@astryxdesign/core/Heading";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
-import { Listing, type ListingParams } from "@/components/listing";
+import { Listing } from "@/components/listing";
 import { api, countryOf, loaded } from "@/lib/api";
+import type { ListingParams } from "@/lib/listing";
 import { link } from "@/lib/site";
 
 type Props = {
@@ -32,36 +37,39 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   const country = await countryOf(folder);
   const code = country.country;
   const category = await load(handle);
-  const breadcrumb = [...category.ancestors].reverse();
+  const ancestors = [...category.ancestors].reverse();
 
   return (
-    <>
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <a href={link(code, "/")}>Home</a>
-        {breadcrumb.map((a) => (
-          <span key={a.id}>
-            {" / "}
-            <a href={link(code, `/c/${a.handle}`)}>{a.name}</a>
-          </span>
-        ))}
-      </nav>
-      <h1>{category.name}</h1>
-      {category.description && (
-        <div
-          className="description"
-          // Sanitised by the API (scripts, styles and event attributes removed).
-          dangerouslySetInnerHTML={{ __html: category.description }}
-        />
-      )}
-      {category.children.length > 0 && (
-        <div className="chips" style={{ margin: "16px 0 24px" }}>
-          {category.children.map((c) => (
-            <a key={c.id} className="chip" href={link(code, `/c/${c.handle}`)}>
-              {c.name}
-            </a>
+    <VStack gap={6}>
+      <VStack gap={3}>
+        <Breadcrumbs variant="supporting">
+          <BreadcrumbItem href={link(code, "/")}>Home</BreadcrumbItem>
+          {ancestors.map((a) => (
+            <BreadcrumbItem key={a.id} href={link(code, `/c/${a.handle}`)}>
+              {a.name}
+            </BreadcrumbItem>
           ))}
-        </div>
-      )}
+          <BreadcrumbItem isCurrent>{category.name}</BreadcrumbItem>
+        </Breadcrumbs>
+        <Heading level={1} type="display-2">
+          {category.name}
+        </Heading>
+        {category.description && (
+          <div
+            className="shop-prose"
+            style={{ maxWidth: 720 }}
+            // Sanitised by the API (scripts, styles and event attributes removed).
+            dangerouslySetInnerHTML={{ __html: category.description }}
+          />
+        )}
+        {category.children.length > 0 && (
+          <HStack gap={2} wrap="wrap">
+            {category.children.map((c) => (
+              <Button key={c.id} label={c.name} href={link(code, `/c/${c.handle}`)} size="sm" />
+            ))}
+          </HStack>
+        )}
+      </VStack>
       <Listing
         country={country}
         params={await searchParams}
@@ -69,6 +77,6 @@ export default async function CategoryPage({ params, searchParams }: Props) {
         category={category.id}
         productHref={(h) => link(code, `/p/${h}`)}
       />
-    </>
+    </VStack>
   );
 }

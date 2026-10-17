@@ -1,11 +1,15 @@
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+
 export default function NotFound() {
   return (
-    <main className="page">
-      <h1>Not found</h1>
-      <p className="muted">There's nothing here. It may have moved, or isn't sold here.</p>
-      <p>
-        <a href="/">Back to the shop</a>
-      </p>
+    <main className="shop-page shop-main">
+      <EmptyState
+        headingLevel={1}
+        title="Not found"
+        description="There's nothing here. It may have moved, or isn't sold here."
+        actions={<Button label="Back to the shop" href="/" variant="primary" />}
+      />
     </main>
   );
 }

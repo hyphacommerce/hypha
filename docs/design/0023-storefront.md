@@ -28,7 +28,7 @@
 | SF5 | **The cart ID in an httpOnly cookie**, one per country (a cart's country decides its market and currency). Every change is a server action, and the page re-renders from the API's answer. *Decided* |
 | SF6 | **Money with the country's minor units.** `/storefront/countries` gives each country's currency and minor units; amounts are never assumed to have two decimals. *Decided* |
 | SF7 | **Listings are searches.** Home's new products, a category page and the search page all read `/storefront/search` (0019), with `category` for a category (0022), so facets, sorting and paging work the same everywhere. *Decided* |
-| SF8 | **Plain CSS, no component library.** A shopper-facing site is mostly layout and type; CSS modules keep it small and easy to restyle. *Decided* |
+| SF8 | ~~**Plain CSS, no component library.**~~ *Replaced by 0024, AU12:* Astryx components with the shop's own theme (`theme/shopTheme.ts`). |
 
 ## 1. Configuration
 

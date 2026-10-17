@@ -1,7 +1,10 @@
+import { Heading } from "@astryxdesign/core/Heading";
+import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
-import { Listing, type ListingParams } from "@/components/listing";
+import { Listing } from "@/components/listing";
 import { countryOf } from "@/lib/api";
+import { type ListingParams, readListing } from "@/lib/listing";
 import { link } from "@/lib/site";
 
 export const metadata: Metadata = { title: "Search" };
@@ -17,17 +20,19 @@ export default async function SearchPage({
   const country = await countryOf((await params).country);
   const code = country.country;
   const query = await searchParams;
-  const q = typeof query.q === "string" ? query.q.trim() : "";
+  const { q } = readListing(query);
 
   return (
-    <>
-      <h1>{q ? `Results for “${q}”` : "All products"}</h1>
+    <VStack gap={6}>
+      <Heading level={1} type="display-2">
+        {q ? `Results for “${q}”` : "All products"}
+      </Heading>
       <Listing
         country={country}
         params={query}
         base={link(code, "/search")}
         productHref={(h) => link(code, `/p/${h}`)}
       />
-    </>
+    </VStack>
   );
 }

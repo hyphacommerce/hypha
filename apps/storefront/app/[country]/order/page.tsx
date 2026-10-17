@@ -1,7 +1,14 @@
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { Divider } from "@astryxdesign/core/Divider";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { VStack } from "@astryxdesign/core/Stack";
+import { Text } from "@astryxdesign/core/Text";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 
-import { Totals } from "@/components/totals";
+import { SummaryLine, Totals } from "@/components/totals";
 import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { link } from "@/lib/site";
@@ -23,51 +30,55 @@ export default async function OrderPage({ params }: { params: Promise<{ country:
 
   if (!cart?.order) {
     return (
-      <>
-        <h1>No recent order</h1>
-        <p className="muted">
-          <a href={link(code, "/")}>Back to the shop</a>
-        </p>
-      </>
+      <EmptyState
+        headingLevel={1}
+        title="No recent order"
+        actions={<Button label="Back to the shop" href={link(code, "/")} variant="primary" />}
+      />
     );
   }
 
+  const to = cart.shipping_address;
   return (
-    <div className="stack" style={{ maxWidth: 640 }}>
-      <h1>Thank you</h1>
-      <p>
-        Your order is placed. We'll write to <strong>{cart.email}</strong> about it.
-      </p>
-      <div className="panel stack">
-        {cart.lines.map((line) => (
-          <div key={line.variant} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>
-              {line.quantity} × {line.product_title}
-              {line.variant_title && <span className="muted"> ({line.variant_title})</span>}
-            </span>
-            <span>{line.status === "priced" ? formatMoney(line.total, digits) : "—"}</span>
-          </div>
-        ))}
-        <Totals
-          subtotal={cart.subtotal}
-          shipping={cart.shipping_total}
-          tax={cart.tax_total}
-          total={cart.total}
-          taxesIncluded={cart.taxes_included}
-          digits={digits}
-        />
-      </div>
-      {cart.shipping_address && (
-        <p className="muted">
-          Ships to {cart.shipping_address.first_name} {cart.shipping_address.last_name},{" "}
-          {cart.shipping_address.line1}, {cart.shipping_address.city}.
-        </p>
+    <VStack gap={6} maxWidth={640}>
+      <VStack gap={2}>
+        <Heading level={1} type="display-2">
+          Thank you
+        </Heading>
+        <Text type="large" color="secondary">
+          Your order is placed. We'll write to {cart.email} about it.
+        </Text>
+      </VStack>
+      <Card padding={5}>
+        <VStack gap={4}>
+          {cart.lines.map((line) => (
+            <SummaryLine
+              key={line.variant}
+              quantity={line.quantity}
+              title={line.product_title ?? "A product no longer sold"}
+              variant={line.variant_title}
+              total={line.status === "priced" ? formatMoney(line.total, digits) : "—"}
+            />
+          ))}
+          <Divider />
+          <Totals
+            subtotal={cart.subtotal}
+            shipping={cart.shipping_total}
+            tax={cart.tax_total}
+            total={cart.total}
+            taxesIncluded={cart.taxes_included}
+            digits={digits}
+          />
+        </VStack>
+      </Card>
+      {to && (
+        <Text color="secondary">
+          Ships to {[to.first_name, to.last_name].filter(Boolean).join(" ")}, {to.line1}, {to.city}.
+        </Text>
       )}
-      <p>
-        <a className="button button-quiet" href={link(code, "/")}>
-          Keep shopping
-        </a>
-      </p>
-    </div>
+      <div>
+        <Button label="Keep shopping" href={link(code, "/")} />
+      </div>
+    </VStack>
   );
 }
