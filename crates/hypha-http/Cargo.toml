@@ -48,6 +48,8 @@ hmac = "0.13"
 jiff = "0.2"
 base64 = "0.22"
 serde_html_form = "0.4.1"
+# The WHATWG URL parser (as reqwest uses): an IP literal is read as the address it connects to.
+url = "2.5"
 
 [dev-dependencies]
 pollster = "0.4"

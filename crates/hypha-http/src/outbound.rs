@@ -82,7 +82,7 @@ pub struct OutboundCall {
 /// Signs `call` and checks its URL: an IP literal that isn't public under `policy` is
 /// refused here (names are the host's to check, when it resolves them).
 pub fn prepare(policy: OutboundPolicy, call: SignedCall<'_>) -> Result<OutboundCall, CallError> {
-    let literal = url_host(call.url).and_then(|host| host.parse::<IpAddr>().ok());
+    let literal = literal_ip(call.url)?;
     if literal.is_some_and(|ip| !policy.allows(ip)) {
         return Err(CallError::Failed(
             "the URL is not a public address".to_string(),
@@ -110,17 +110,19 @@ pub fn prepare(policy: OutboundPolicy, call: SignedCall<'_>) -> Result<OutboundC
     })
 }
 
-/// The host of an `http(s)://` URL, brackets removed from an IPv6 literal.
-fn url_host(url: &str) -> Option<&str> {
-    let rest = url.split_once("://")?.1;
-    let authority = rest.split(['/', '?', '#']).next()?;
-    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-    let host = if let Some(v6) = host_port.strip_prefix('[') {
-        v6.split(']').next()?
-    } else {
-        host_port.split(':').next()?
-    };
-    (!host.is_empty()).then_some(host)
+/// The IP a URL names directly, if it names one: read with the WHATWG URL parser that
+/// the native host's client uses too, so every way of writing an address (`127.1`,
+/// `2130706433`, `0x7f.0.0.1`, a trailing dot, percent-encoding, `\@`) comes out as the
+/// address it will connect to. `Ok(None)` for a name (the host's resolver checks those);
+/// a URL that doesn't parse is refused rather than passed on.
+fn literal_ip(raw: &str) -> Result<Option<IpAddr>, CallError> {
+    let parsed = url::Url::parse(raw)
+        .map_err(|_| CallError::Failed("the URL can't be parsed".to_string()))?;
+    Ok(match parsed.host() {
+        Some(url::Host::Ipv4(ip)) => Some(IpAddr::V4(ip)),
+        Some(url::Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),
+        Some(url::Host::Domain(_)) | None => None,
+    })
 }
 
 /// `t=<at>,v1=<hex HMAC-SHA256 of "<at>.<body>">`.
@@ -231,15 +233,55 @@ mod tests {
     }
 
     #[test]
-    fn a_urls_host_is_read_without_port_path_or_brackets() {
+    fn a_literal_is_read_as_the_address_it_connects_to() {
+        let ip = |raw: &str| literal_ip(raw).unwrap();
+        let localhost = Some(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        let metadata = Some(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)));
+        assert_eq!(ip("https://127.0.0.1:8443/hook"), localhost);
+        assert_eq!(ip("https://2130706433/"), localhost);
+        assert_eq!(ip("https://127.1/"), localhost);
+        assert_eq!(ip("https://0x7f.0.0.1/"), localhost);
+        assert_eq!(ip("https://127.0.0.1./"), localhost);
+        assert_eq!(ip("https://%31%32%37.0.0.1/"), localhost);
+        assert_eq!(ip("https://169.254.169.254\\@x/"), metadata);
         assert_eq!(
-            url_host("https://rates.example.com:8443/quote?x=1"),
-            Some("rates.example.com")
+            ip("http://user:pw@10.0.0.1/hook"),
+            Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))
         );
-        assert_eq!(url_host("http://user:pw@10.0.0.1/hook"), Some("10.0.0.1"));
-        assert_eq!(url_host("https://[::1]:3000/hook"), Some("::1"));
-        assert_eq!(url_host("not a url"), None);
-        assert_eq!(url_host("https:///nohost"), None);
+        assert_eq!(
+            ip("https://[::1]:3000/hook"),
+            Some(IpAddr::V6(Ipv6Addr::LOCALHOST))
+        );
+        assert_eq!(ip("https://rates.example.com/quote"), None);
+    }
+
+    #[test]
+    fn a_url_that_does_not_parse_is_refused() {
+        assert_eq!(
+            literal_ip("not a url"),
+            Err(CallError::Failed("the URL can't be parsed".to_string()))
+        );
+    }
+
+    #[test]
+    fn every_way_of_writing_a_private_literal_is_refused() {
+        for url in [
+            "https://2130706433/",
+            "https://127.1/",
+            "https://0x7f.0.0.1/",
+            "https://127.0.0.1./",
+            "https://%31%32%37.0.0.1/",
+            "https://169.254.169.254\\@x/",
+            "https://[::ffff:127.0.0.1]/",
+        ] {
+            assert_eq!(
+                prepare(OutboundPolicy::default(), call(url, &[])),
+                Err(CallError::Failed(
+                    "the URL is not a public address".to_string()
+                )),
+                "{url}"
+            );
+        }
     }
 
     fn call<'a>(url: &'a str, headers: &'a [(&'static str, String)]) -> SignedCall<'a> {
