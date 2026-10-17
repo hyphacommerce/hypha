@@ -71,7 +71,8 @@ export type SaveResult = {
 /**
  * Saves the product editor's draft (design note 0021, section 8): the product's PATCH,
  * then its options, then its whole variant list (`PUT …/variants`), then its categories
- * (`PUT …/categories`, design note 0022), each only when its part changed. Values created by the options step are found by option name and label
+ * (`PUT …/categories`, design note 0022), then its channels (`PUT …/channels`, design
+ * note 0020), each only when its part changed. Values created by the options step are found by option name and label
  * for the variants that select them. Stops at the first failure: what came before it
  * stays saved.
  */
@@ -115,7 +116,16 @@ export async function saveProduct(id: string, plan: SavePlan): Promise<SaveResul
         body: { categories: plan.categories },
       });
       if (error) return { error: describe(error), options };
-      // The product as it is now, its categories included.
+    }
+    if (plan.channels) {
+      const { error } = await client.PUT("/admin/products/{id}/channels", {
+        params: { path: { id } },
+        body: { channels: plan.channels },
+      });
+      if (error) return { error: describe(error), options };
+    }
+    if (plan.categories || plan.channels) {
+      // The product as it is now, its categories and channels included.
       const { data } = await client.GET("/admin/products/{id}", { params: { path: { id } } });
       product = data;
     }
@@ -186,18 +196,6 @@ export async function libraryPage(
     if (items.length > 0 || !next) return { items, next };
   }
   return { items: [], next };
-}
-
-/** The channels the product is sold in (design note 0020): `channels` becomes the whole set. */
-export async function setProductChannels(id: string, channels: string[]): Promise<EditResult> {
-  const client = await sessionClient();
-  const { error } = await client.PUT("/admin/products/{id}/channels", {
-    params: { path: { id } },
-    body: { channels },
-  });
-  if (error) return failed(error);
-  refresh(id);
-  return {};
 }
 
 /** A variant's stock (design note 0004): `id` is `null` while it isn't tracked. */

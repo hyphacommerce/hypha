@@ -1,31 +1,29 @@
 "use client";
 
-import { Banner } from "@astryxdesign/core/Banner";
 import { Card } from "@astryxdesign/core/Card";
 import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList";
 import { VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
-import { useState } from "react";
 
-import { setProductChannels } from "../actions";
+import type { Draft } from "./draft";
 
-/** The channels a product is sold in (design note 0020): each tick saves at once. */
+/**
+ * The channels a product is sold in (design note 0020): part of the editor's draft, saved
+ * with the bar like its categories.
+ */
 export function PublishingCard({
-  id,
-  published,
   channels,
+  draft,
   isActive,
+  onChange,
 }: {
-  id: string;
-  published: string[];
   channels: AdminSchemas["ChannelResponse"][];
+  draft: Draft;
   isActive: boolean;
+  onChange: (change: Partial<Draft>) => void;
 }) {
-  const [value, setValue] = useState(published);
-  const [error, setError] = useState<string>();
-
   return (
     <Card>
       <VStack gap={3}>
@@ -40,16 +38,11 @@ export function PublishingCard({
             <Link href="/settings/channels">Manage channels</Link>
           </Text>
         </VStack>
-        {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
         <CheckboxList
           label="Sales channels"
           isLabelHidden
-          value={value}
-          changeAction={async (next) => {
-            const result = await setProductChannels(id, next);
-            setError(result.error);
-            if (!result.error) setValue(next);
-          }}
+          value={draft.channels}
+          onChange={(next) => onChange({ channels: [...next].sort() })}
         >
           {channels.map((channel) => (
             <CheckboxListItem key={channel.id} value={channel.id} label={channel.name} />

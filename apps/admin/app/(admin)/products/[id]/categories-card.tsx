@@ -13,7 +13,7 @@ import type { Draft } from "./draft";
 
 /**
  * The categories the product is in (design note 0022, section 5): part of the editor's
- * draft, saved with the bar like its details, unlike publishing, which acts at once.
+ * draft, saved with the bar like its details and publishing.
  */
 export function CategoriesCard({
   tree,

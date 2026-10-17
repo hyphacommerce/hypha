@@ -47,6 +47,8 @@ export type Draft = {
   variants: VariantDraft[];
   /** The categories it's directly in (design note 0022), sorted. */
   categories: string[];
+  /** The sales channels it's published to (design note 0020), sorted. */
+  channels: string[];
 };
 
 let nextKey = 0;
@@ -79,6 +81,7 @@ export function fromProduct(product: Product, currencies: Currencies): Draft {
       ),
     })),
     categories: [...product.categories].sort(),
+    channels: [...product.channels].sort(),
   };
 }
 
@@ -158,6 +161,8 @@ export type SavePlan = {
   variants?: VariantPlan[];
   /** The product's whole set of categories (`PUT …/categories`). */
   categories?: string[];
+  /** The channels it's published to, as a whole set (`PUT …/channels`). */
+  channels?: string[];
 };
 
 function details(d: Draft) {
@@ -193,6 +198,7 @@ export function changes(draft: Draft, saved: Draft, currency: string, currencies
       options ||
       !same(variantsKey(draft, currency, currencies), variantsKey(saved, currency, currencies)),
     categories: !same([...draft.categories].sort(), [...saved.categories].sort()),
+    channels: !same([...draft.channels].sort(), [...saved.channels].sort()),
   };
 }
 
@@ -266,6 +272,7 @@ export function plan(
     result.variants = planned;
   }
   if (changed.categories) result.categories = [...draft.categories].sort();
+  if (changed.channels) result.channels = [...draft.channels].sort();
   return { plan: result };
 }
 

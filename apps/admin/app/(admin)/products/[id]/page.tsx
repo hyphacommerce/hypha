@@ -14,7 +14,6 @@ import { loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
 import type { Stock } from "../actions";
 import { MediaSection } from "./media-section";
 import { ProductEditor } from "./product-editor";
-import { PublishingCard } from "./publishing-card";
 import { StatusActions } from "./status-actions";
 
 type Product = AdminSchemas["ProductResponse"];
@@ -23,8 +22,8 @@ type Product = AdminSchemas["ProductResponse"];
 const STOCK_PRELOAD = 100;
 
 /**
- * A product. Details, content, options and variants are one draft saved with a bar
- * (design note 0021, section 8); status, publishing, stock and media act at once. The
+ * A product. Details, content, publishing, categories, options and variants are one draft
+ * saved with a bar (design note 0021, section 8); status, stock and media act at once. The
  * media section, which has uploads running, takes each new list while staying mounted.
  */
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
@@ -54,17 +53,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         <ProductEditor
           product={product}
           summary={<SummaryCard product={product} currencies={currencies} />}
-          publishing={
-            channels.data && (
-              <PublishingCard
-                key={product.channels.join()}
-                id={product.id}
-                published={product.channels}
-                channels={channels.data.items}
-                isActive={product.status === "active"}
-              />
-            )
-          }
+          channels={channels.data?.items}
           media={<MediaSection id={product.id} media={product.media} />}
           identifiers={
             <Card>

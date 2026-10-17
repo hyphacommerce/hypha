@@ -13,25 +13,26 @@ import { DetailsForm } from "./details-form";
 import { type Draft, changes, fromProduct, plan, rebaseOptions } from "./draft";
 import { OptionsEditor } from "./options-editor";
 import { OrganisationCard } from "./organisation-card";
+import { PublishingCard } from "./publishing-card";
 import { VariantsSection } from "./variants-section";
 
 type Product = AdminSchemas["ProductResponse"];
 
 /**
- * The product's details, content, categories, options and variants as one draft (design
- * notes 0021, section 8, and 0022, section 5): edits change only the draft, and a bar at
- * the top saves or discards them together. Media, publishing and stock act at once, as
- * before: an upload can't wait for Save, and publishing is its own decision. Two columns
+ * The product's details, content, publishing, categories, options and variants as one
+ * draft (design notes 0021, section 8, and 0022, section 5): edits change only the draft,
+ * and a bar at the top saves or discards them together. Media and stock act at once, as
+ * before: an upload can't wait for Save. Two columns
  * (design note 0024, section 6): what the product is on the left, how it's sold and
  * organised on the right.
  *
- * When the saved product changes under the editor (after a save, an upload, publishing),
+ * When the saved product changes under the editor (after a save, an upload, a status change),
  * the draft follows it unless it has unsaved changes of its own.
  */
 export function ProductEditor({
   product,
   summary,
-  publishing,
+  channels,
   media,
   identifiers,
   categoryTree,
@@ -41,7 +42,8 @@ export function ProductEditor({
   product: Product;
   /** Cards for the side column, around the draft's own. */
   summary: ReactNode;
-  publishing: ReactNode;
+  /** Every sales channel; `undefined` without `channels:read`: no Publishing card then. */
+  channels?: AdminSchemas["ChannelResponse"][];
   media: ReactNode;
   identifiers: ReactNode;
   /** `undefined` when the tree couldn't be read: no Categories card then. */
@@ -59,7 +61,7 @@ export function ProductEditor({
 
   const saved = fromProduct(base, currencies);
   const changed = changes(draft, saved, currency, currencies);
-  const isDirty = changed.product || changed.options || changed.variants || changed.categories;
+  const isDirty = changed.product || changed.options || changed.variants || changed.categories || changed.channels;
 
   // A new saved product (React's "adjust state while rendering"): take it in, and reset
   // the draft to it unless the draft holds unsaved edits.
@@ -145,7 +147,14 @@ export function ProductEditor({
         </div>
         <div>
           {summary}
-          {publishing}
+          {channels && (
+            <PublishingCard
+              channels={channels}
+              draft={draft}
+              isActive={base.status === "active"}
+              onChange={edit}
+            />
+          )}
           {categoryTree && <CategoriesCard tree={categoryTree} draft={draft} onChange={edit} />}
           <OrganisationCard draft={draft} onChange={edit} />
           {identifiers}
