@@ -1262,6 +1262,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/products/{id}/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A product's stock, every variant at once: what the product editor shows, in one
+         *     call instead of one per variant (design note 0025, §6).
+         */
+        get: operations["admin.inventory.fetch_product_inventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/products/{id}/media": {
         parameters: {
             query?: never;
@@ -1465,6 +1485,23 @@ export interface paths {
         };
         /** How far behind the index is. */
         get: operations["admin.search.status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/setup/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The setup checklist, in one call. */
+        get: operations["admin.setup.checklist"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3091,6 +3128,11 @@ export interface components {
          * @example prod_0190f1a2b3c47d8e9f00112233445566
          */
         ProductId: string;
+        /** @description Every variant's stock in a product, in the product's order. */
+        ProductInventoryResponse: {
+            /** @description One per variant, as `GET /admin/variants/{id}/inventory` answers it. */
+            items: components["schemas"]["InventoryResponse"][];
+        };
         /**
          * @description One item of a product's media list (design note 0014, section 7): what a page needs
          *     to render it. The asset's own route has the rest.
@@ -3368,6 +3410,30 @@ export interface components {
              *     1 to 2,048; options are never expanded into variants here.
              */
             variants: components["schemas"]["SetVariantRequest"][];
+        };
+        /**
+         * @description Each first step, done or not. A step the caller's scopes can't read counts as not
+         *     done, so the checklist answers whoever asks.
+         */
+        SetupChecklistResponse: {
+            /** @description A publishable key that isn't revoked exists (`api_keys:read`). */
+            key: boolean;
+            /** @description A market exists (`markets:read`). */
+            market: boolean;
+            /** @description A product is active (`products:read`). */
+            product: boolean;
+            /** @description An active product is published to a channel (`products:read`). */
+            publish: boolean;
+            /** @description A shipping zone has an option (`shipping:read`). */
+            shipping: boolean;
+            /**
+             * @description A location exists, and one of the first active products can be sold: its first
+             *     variant's stock isn't tracked, or some is available (`products:read`,
+             *     `inventory:read`).
+             */
+            stock: boolean;
+            /** @description The store has a contact email shoppers can write to (`stores:read`). */
+            store: boolean;
         };
         SetupProgressResponse: {
             /**
@@ -12571,6 +12637,73 @@ export interface operations {
             };
         };
     };
+    "admin.inventory.fetch_product_inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductInventoryResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.products.set_media": {
         parameters: {
             query?: never;
@@ -13931,6 +14064,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchStatusResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.setup.checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupChecklistResponse"];
                 };
             };
             /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */

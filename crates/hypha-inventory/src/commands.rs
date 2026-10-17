@@ -246,6 +246,17 @@ pub async fn get_variant_inventory<R: InventoryItemRepo>(
     Ok(items.get_by_variant(variant).await?)
 }
 
+/// The items of these variants, in one read; a variant without one is left out
+/// (untracked, as for `get_variant_inventory`).
+pub async fn get_variants_inventory<R: InventoryItemRepo>(
+    ctx: &Ctx,
+    items: &R,
+    variants: &[VariantId],
+) -> Result<Vec<InventoryItem>, CommandError> {
+    ctx.require(Scope::InventoryRead)?;
+    Ok(items.for_variants(variants).await?)
+}
+
 /// Changes only the fields that are `Some`.
 #[derive(Default)]
 pub struct UpdateInventoryItem {

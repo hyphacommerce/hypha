@@ -4,13 +4,15 @@ use hypha_core::Stamped;
 
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{InventoryItemId, LocationId, MarketId, VariantId};
+use hypha_core::{InventoryItemId, LocationId, MarketId, ProductId, VariantId};
 use hypha_inventory::{
     AdjustOnHand, CreateInventoryItem, CreateLocation, HasInventoryItems, HasLocations,
     InventoryItem, Location, SetOnHand, UpdateInventoryItem, UpdateLocation, adjust_on_hand,
     create_inventory_item, create_location, get_inventory_item, get_location,
-    get_variant_inventory, list_locations, set_on_hand, update_inventory_item, update_location,
+    get_variant_inventory, get_variants_inventory, list_locations, set_on_hand,
+    update_inventory_item, update_location,
 };
+use hypha_products::{HasProducts, get_product};
 use serde::{Deserialize, Serialize};
 
 use super::address::{PostalAddressRequest, PostalAddressResponse};
@@ -436,4 +438,44 @@ pub(super) async fn fetch_variant_inventory<S: Storage>(
         None => InventoryResponse::untracked(variant),
     };
     Ok(Json(response))
+}
+
+/// Every variant's stock in a product, in the product's order.
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct ProductInventoryResponse {
+    /// One per variant, as `GET /admin/variants/{id}/inventory` answers it.
+    items: Vec<InventoryResponse>,
+}
+
+/// A product's stock, every variant at once: what the product editor shows, in one
+/// call instead of one per variant (design note 0025, §6).
+#[utoipa::path(
+    get,
+    path = "/admin/products/{id}/inventory",
+    params(("id" = ProductId, Path)),
+    responses((status = 200, description = "OK", body = ProductInventoryResponse)),
+    extensions(("x-hypha-scopes" = json!(["products:read", "inventory:read"]))),
+)]
+pub(super) async fn fetch_product_inventory<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<ProductId>,
+) -> Result<Json<ProductInventoryResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let product = get_product(&ctx, ports.products(), id).await?;
+    let variants: Vec<VariantId> = product.variants().iter().map(|v| v.id()).collect();
+    let mut found: std::collections::HashMap<VariantId, InventoryItem> =
+        get_variants_inventory(&ctx, ports.inventory_items(), &variants)
+            .await?
+            .into_iter()
+            .map(|item| (item.variant(), item))
+            .collect();
+    let items = variants
+        .into_iter()
+        .map(|variant| match found.remove(&variant) {
+            Some(item) => InventoryResponse::new(&item),
+            None => Ok(InventoryResponse::untracked(variant)),
+        })
+        .collect::<Result<_, ApiError>>()?;
+    Ok(Json(ProductInventoryResponse { items }))
 }

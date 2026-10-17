@@ -5,8 +5,8 @@ use hypha_inventory::{
     AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, DEFAULT_LOCATION_NAME,
     InventoryError, InventoryItem, InventoryItemRepo, Location, LocationRepo, SetOnHand,
     UpdateInventoryItem, UpdateLocation, adjust_on_hand, create_inventory_item, create_location,
-    ensure_default_location, get_inventory_item, get_variant_inventory, list_locations,
-    set_on_hand, update_inventory_item, update_location,
+    ensure_default_location, get_inventory_item, get_variant_inventory, get_variants_inventory,
+    list_locations, set_on_hand, update_inventory_item, update_location,
 };
 use hypha_testkit::{InMemoryInventoryItemRepo, InMemoryLocationRepo, SequentialIds};
 use pollster::block_on;
@@ -292,6 +292,33 @@ fn a_variant_without_an_item_has_no_inventory() {
         block_on(get_variant_inventory(&reader(), &world.items, vid(1)))
             .unwrap()
             .is_some()
+    );
+}
+
+#[test]
+fn several_variants_inventory_is_one_read_leaving_out_variants_without_an_item() {
+    let world = World::new();
+    let first = world.create_item(vid(1)).unwrap();
+    let third = world.create_item(vid(3)).unwrap();
+    let mut found = block_on(get_variants_inventory(
+        &reader(),
+        &world.items,
+        &[vid(1), vid(2), vid(3)],
+    ))
+    .unwrap();
+    found.sort_by_key(|i| i.variant());
+    assert_eq!(found, vec![first, third]);
+}
+
+#[test]
+fn several_variants_inventory_needs_the_read_scope() {
+    let world = World::new();
+    let nobody = Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(2))), vec![]);
+    assert_eq!(
+        block_on(get_variants_inventory(&nobody, &world.items, &[vid(1)])),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::InventoryRead
+        )))
     );
 }
 

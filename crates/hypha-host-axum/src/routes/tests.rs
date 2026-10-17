@@ -718,6 +718,102 @@ async fn create_product(app: &TestApp, handle: &str) -> String {
     created["id"].as_str().unwrap().to_string()
 }
 
+#[tokio::test]
+async fn a_products_inventory_is_one_call_in_variant_order() {
+    let app = app().await;
+    let product = format!("/admin/products/{}", create_product(&app, "shirt").await);
+    let body = r#"{"options":[{"name":"Size","values":[{"label":"S"},{"label":"M"}]}]}"#;
+    let (_, sized) = send(&app, "PUT", &format!("{product}/options"), Some(body)).await;
+    let first = sized["variants"][0]["id"].as_str().unwrap().to_string();
+    let m = &sized["options"][0]["values"][1]["id"];
+    let body = json!({ "price": { "amount": 1200, "currency": "EUR" }, "selections": [m] });
+    let (_, added) = send(
+        &app,
+        "POST",
+        &format!("{product}/variants"),
+        Some(&body.to_string()),
+    )
+    .await;
+    let second = added["variants"][1]["id"].as_str().unwrap().to_string();
+    // Only the second variant's stock is set up.
+    let (_, item) = send(
+        &app,
+        "POST",
+        "/admin/inventory-items",
+        Some(&json!({ "variant": second }).to_string()),
+    )
+    .await;
+
+    let (status, stock) = send(&app, "GET", &format!("{product}/inventory"), None).await;
+    assert_eq!(status, StatusCode::OK, "{stock}");
+    let items = stock["items"].as_array().unwrap();
+    assert_eq!(
+        (
+            items.len(),
+            &items[0]["variant"],
+            &items[0]["id"],
+            &items[0]["tracked"]
+        ),
+        (2, &json!(first), &Value::Null, &json!(false))
+    );
+    assert_eq!(
+        (&items[1]["variant"], &items[1]["id"], &items[1]["tracked"]),
+        (&json!(second), &item["id"], &json!(true))
+    );
+
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/admin/products/prod_00000000000000000000000000000000/inventory",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "product_not_found")
+    );
+}
+
+#[tokio::test]
+async fn the_setup_checklist_says_which_steps_are_done() {
+    let app = app().await;
+    let (status, fresh) = send(&app, "GET", "/admin/setup/checklist", None).await;
+    assert_eq!(status, StatusCode::OK, "{fresh}");
+    assert_eq!(
+        fresh,
+        json!({
+            "store": false, "market": false, "shipping": false, "product": false,
+            "stock": false, "publish": false, "key": false,
+        })
+    );
+
+    // A market selling an active, published mug (its stock untracked, at the default
+    // location), and a storefront key.
+    market_selling_a_mug(&app).await;
+    publishable(&app).await;
+    let (_, now) = send(&app, "GET", "/admin/setup/checklist", None).await;
+    assert_eq!(
+        now,
+        json!({
+            "store": false, "market": true, "shipping": false, "product": true,
+            "stock": true, "publish": true, "key": true,
+        })
+    );
+
+    // A key without the scopes reads every step as not done.
+    let body = r#"{"kind":"secret","name":"Narrow","scopes":["orders:read"]}"#;
+    let narrow = key(&app, serde_json::from_str(body).unwrap()).await;
+    let (status, narrowed) = send_as(&app, &narrow, "GET", "/admin/setup/checklist", None).await;
+    assert_eq!(status, StatusCode::OK, "{narrowed}");
+    assert!(
+        narrowed
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|done| done == false)
+    );
+}
+
 /// Every event the app's outbox holds, oldest first.
 async fn outbox_events(app: &TestApp) -> Vec<hypha_core::StoredEvent> {
     use hypha_core::{HasOutbox, OutboxRepo};

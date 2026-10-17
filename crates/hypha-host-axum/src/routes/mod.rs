@@ -22,6 +22,7 @@ mod page;
 mod products;
 mod reference;
 mod search;
+mod setup;
 mod shipping;
 mod staff;
 mod stores;
@@ -212,6 +213,8 @@ macro_rules! route_table {
             [admin, PUT, "/admin/inventory-items/{id}/levels/{location_id}", inventory::set_level],
             [admin, POST, "/admin/inventory-items/{id}/levels/{location_id}/adjustments", inventory::adjust_level],
             [admin, GET, "/admin/variants/{id}/inventory", inventory::fetch_variant_inventory],
+            [admin, GET, "/admin/products/{id}/inventory", inventory::fetch_product_inventory],
+            [admin, GET, "/admin/setup/checklist", setup::checklist],
 
             // categories (design note 0022)
             [admin, GET, "/admin/categories", categories::list],

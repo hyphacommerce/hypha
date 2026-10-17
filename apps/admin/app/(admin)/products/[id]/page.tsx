@@ -18,8 +18,9 @@ import { StatusActions } from "./status-actions";
 
 type Product = AdminSchemas["ProductResponse"];
 
-/** Products with more variants read each one's stock when it's opened instead. */
-const STOCK_PRELOAD = 100;
+/** Products with more variants read each one's stock when it's opened instead: the
+ * page's one read stays small. */
+const STOCK_PRELOAD = 500;
 
 /**
  * A product. Details, content, publishing, categories, options and variants are one draft
@@ -81,20 +82,16 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   );
 }
 
-/** The variants' stock by variant ID, read together for products with few enough. */
+/** The variants' stock by variant ID, in one read, for products with few enough. */
 async function loadStock(
   client: Awaited<ReturnType<typeof sessionClient>>,
   product: Product,
 ): Promise<Record<string, Stock>> {
   if (product.variants.length > STOCK_PRELOAD) return {};
-  const read = await Promise.all(
-    product.variants.map((v) =>
-      client.GET("/admin/variants/{id}/inventory", { params: { path: { id: v.id } } }),
-    ),
-  );
-  return Object.fromEntries(
-    read.flatMap((result, i) => (result.data ? [[product.variants[i].id, result.data]] : [])),
-  );
+  const { data } = await client.GET("/admin/products/{id}/inventory", {
+    params: { path: { id: product.id } },
+  });
+  return Object.fromEntries((data?.items ?? []).map((stock) => [stock.variant, stock]));
 }
 
 /** At a glance: what status means for shoppers, how many variants, what they cost. */

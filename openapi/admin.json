@@ -4070,6 +4070,22 @@
         "pattern": "^prod_[0-9a-f]{32}$",
         "type": "string"
       },
+      "ProductInventoryResponse": {
+        "description": "Every variant's stock in a product, in the product's order.",
+        "properties": {
+          "items": {
+            "description": "One per variant, as `GET /admin/variants/{id}/inventory` answers it.",
+            "items": {
+              "$ref": "#/components/schemas/InventoryResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ProductMediaResponse": {
         "description": "One item of a product's media list (design note 0014, section 7): what a page needs\nto render it. The asset's own route has the rest.",
         "properties": {
@@ -4904,6 +4920,49 @@
         },
         "required": [
           "variants"
+        ],
+        "type": "object"
+      },
+      "SetupChecklistResponse": {
+        "description": "Each first step, done or not. A step the caller's scopes can't read counts as not\ndone, so the checklist answers whoever asks.",
+        "properties": {
+          "key": {
+            "description": "A publishable key that isn't revoked exists (`api_keys:read`).",
+            "type": "boolean"
+          },
+          "market": {
+            "description": "A market exists (`markets:read`).",
+            "type": "boolean"
+          },
+          "product": {
+            "description": "A product is active (`products:read`).",
+            "type": "boolean"
+          },
+          "publish": {
+            "description": "An active product is published to a channel (`products:read`).",
+            "type": "boolean"
+          },
+          "shipping": {
+            "description": "A shipping zone has an option (`shipping:read`).",
+            "type": "boolean"
+          },
+          "stock": {
+            "description": "A location exists, and one of the first active products can be sold: its first\nvariant's stock isn't tracked, or some is available (`products:read`,\n`inventory:read`).",
+            "type": "boolean"
+          },
+          "store": {
+            "description": "The store has a contact email shoppers can write to (`stores:read`).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "store",
+          "market",
+          "shipping",
+          "product",
+          "stock",
+          "publish",
+          "key"
         ],
         "type": "object"
       },
@@ -17581,6 +17640,96 @@
         ]
       }
     },
+    "/admin/products/{id}/inventory": {
+      "get": {
+        "operationId": "admin.inventory.fetch_product_inventory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductInventoryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A product's stock, every variant at once: what the product editor shows, in one\ncall instead of one per variant (design note 0025, §6).",
+        "tags": [
+          "inventory"
+        ],
+        "x-hypha-scopes": [
+          "products:read",
+          "inventory:read"
+        ]
+      }
+    },
     "/admin/products/{id}/media": {
       "put": {
         "operationId": "admin.products.set_media",
@@ -19378,6 +19527,63 @@
         "x-hypha-scopes": [
           "products:read"
         ]
+      }
+    },
+    "/admin/setup/checklist": {
+      "get": {
+        "operationId": "admin.setup.checklist",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupChecklistResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The setup checklist, in one call.",
+        "tags": [
+          "setup"
+        ],
+        "x-hypha-scopes": []
       }
     },
     "/admin/shipping-providers": {

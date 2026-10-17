@@ -427,7 +427,7 @@ SF_AUTH=("${ONLINE_SF_AUTH[@]}")
 step "add 2 mugs" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 contains "mug unit price is 900 (1000 - 10%)" '"unit_price":{"amount":900,"currency":"EUR"}'
-contains "mug line is named, with its handle" '"product_title":"Mug","variant_title":null,"sku":null,"handle":"mug","image":null,"status":"priced"'
+contains "mug line is named, with its handle" '"product_title":"Mug","variant_title":null,"sku":null,"handle":"mug","image":null,"available_quantity":null,"status":"priced"'
 step "add 3 cups" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":3}"
 contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
@@ -661,6 +661,10 @@ step "publish lamp" 204 - -X POST "$BASE/admin/channels/$ONLINE_STORE/products" 
 step "lamp has no stock set up" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
 contains "so it is untracked" '"id":null,'
 contains "reported as tracked: false" '"tracked":false'
+step "the lamp's stock, every variant at once" 200 - "$BASE/admin/products/$LAMP/inventory"
+contains "one untracked variant" "\"items\":[{\"id\":null,\"variant\":\"$LAMP_VAR\",\"tracked\":false"
+step "the setup checklist" 200 - "$BASE/admin/setup/checklist"
+contains "a market exists by now" '"market":true'
 step "create warehouse for the market" 201 - -X POST "$BASE/admin/locations" -H "$JSON" \
     -d "{\"name\":\"Zagreb\",\"markets\":[\"$MARKET\"]}"
 WAREHOUSE=$(id)
