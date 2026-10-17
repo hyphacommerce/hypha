@@ -27,6 +27,8 @@ import {
   listingHref,
 } from "@/lib/listing";
 
+import { CloseOnNavigate } from "./close-on-navigate";
+
 export type Facet = {
   key: string;
   label?: string | null;
@@ -202,6 +204,9 @@ export function ListingToolbar(props: Props & { total: number; sort: Sort }) {
             icon={<Icon icon={AdjustmentsHorizontalIcon} />}
             clickAction={() => setSheet(true)}
           />
+          {/* Leaving the listing (a product, another category) closes it; filtering here,
+              which changes only the query, doesn't. */}
+          <CloseOnNavigate pathOnly onNavigate={() => setSheet(false)} />
           <BottomSheet label="Filters" isOpen={sheet} onOpenChange={setSheet} height="tall">
             <FacetPanel {...props} onDone={() => setSheet(false)} />
           </BottomSheet>

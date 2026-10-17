@@ -19,8 +19,10 @@ import {
 } from "@astryxdesign/core/TopNav";
 import { MagnifyingGlassIcon, ShoppingBagIcon, UserIcon } from "@heroicons/react/24/outline";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 import { useCart } from "./cart/cart-provider";
+import { CloseOnNavigate } from "./close-on-navigate";
 import { type CountryOption, CurrencySwitcher } from "./currency-switcher";
 import { SearchBox } from "./search-box";
 
@@ -44,14 +46,20 @@ export type HeaderProps = {
 export function SiteHeader(props: HeaderProps) {
   const pathname = usePathname();
   const { count, open } = useCart();
+  const [isSearching, setIsSearching] = useState(false);
   return (
-    <TopNav
+    <>
+      {/* A suggestion or "Search for…" goes to another page: the popover closes. */}
+      <CloseOnNavigate onNavigate={() => setIsSearching(false)} />
+      <TopNav
       label="Store"
       heading={<TopNavHeading heading={props.storeName} headingHref={props.homeHref} />}
       startContent={props.categories.map((c) =>
         c.children.length > 0 ? (
           <TopNavMegaMenu
-            key={c.id}
+            // Keyed by the page too: a mega menu takes no open state, so a new page
+            // remounts it closed.
+            key={`${c.id}:${pathname}`}
             label={c.name}
             items={[c, ...c.children].map((item) => (
               <TopNavMegaMenuItem
@@ -73,6 +81,8 @@ export function SiteHeader(props: HeaderProps) {
       endContent={
         <HStack gap={1} vAlign="center">
           <Popover
+            isOpen={isSearching}
+            onOpenChange={setIsSearching}
             label="Search"
             placement="below"
             alignment="end"
@@ -104,5 +114,6 @@ export function SiteHeader(props: HeaderProps) {
         </HStack>
       }
     />
+    </>
   );
 }

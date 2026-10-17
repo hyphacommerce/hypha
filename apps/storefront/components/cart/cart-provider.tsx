@@ -17,6 +17,7 @@ import {
 } from "react";
 
 import { type Cart, addToCart, loadCart, setQuantity } from "@/app/[country]/actions";
+import { CloseOnNavigate } from "@/components/close-on-navigate";
 
 type CartContext = {
   country: string;
@@ -114,7 +115,13 @@ export function CartProvider({
     [country, digits, base, cart, isLoading, isPending, error, isOpen, add, change],
   );
 
-  return <Context value={value}>{children}</Context>;
+  return (
+    <Context value={value}>
+      {/* Following a link in the drawer (a product, the cart, checkout) closes it. */}
+      <CloseOnNavigate onNavigate={() => setIsOpen(false)} />
+      {children}
+    </Context>
+  );
 }
 
 /** The cart; only inside a country's layout, which provides it. */
