@@ -41,18 +41,10 @@ const SORTS: Record<string, SortDef> = {
   uploaded: { asc: "oldest", desc: "newest" },
 };
 
+// Kinds are views (below), so the only filter is the search; `kind=` in a URL still
+// picks its view.
 const FILTERS: FilterDef[] = [
   { kind: "search", param: "q", label: "Search", placeholder: "Search names, alt text, titles" },
-  {
-    kind: "select",
-    param: "kind",
-    label: "Kind",
-    options: [
-      { value: "image", label: "Images" },
-      { value: "video", label: "Videos" },
-      { value: "file", label: "Files" },
-    ],
-  },
 ];
 
 const VIEWS: View[] = [

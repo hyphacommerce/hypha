@@ -6,7 +6,6 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -125,65 +124,59 @@ export function Staff({
   ];
 
   return (
-    <VStack gap={5}>
-      <Card>
-        <VStack gap={4}>
-          <HStack hAlign="between" vAlign="start" gap={3}>
-            <Heading title="Staff" description="Everyone who can sign in to this admin." />
-            {canInvite && (
-              <Button label="Invite staff" variant="primary" onClick={() => setInviting({ email: "" })} />
-            )}
-          </HStack>
-          <ClientResourceTable<User>
-            rows={users}
-            columns={userColumns}
-            idKey="id"
-            searchText={(u) => `${u.name} ${u.email}`}
-            searchLabel="Search staff"
-            compare={{
-              name: byText((u: User) => u.name),
-              email: byText((u: User) => u.email),
-              created_at: byText((u: User) => u.created_at),
-            }}
-            empty={{ icon: <UsersIcon width={32} />, title: "No staff yet" }}
-          />
-        </VStack>
-      </Card>
+    <VStack gap={8}>
+      <VStack gap={4}>
+        <HStack hAlign="between" vAlign="start" gap={3}>
+          <Heading title="Staff" description="Everyone who can sign in to this admin." />
+          {canInvite && (
+            <Button label="Invite staff" variant="primary" onClick={() => setInviting({ email: "" })} />
+          )}
+        </HStack>
+        <ClientResourceTable<User>
+          rows={users}
+          columns={userColumns}
+          idKey="id"
+          searchText={(u) => `${u.name} ${u.email}`}
+          searchLabel="Search staff"
+          compare={{
+            name: byText((u: User) => u.name),
+            email: byText((u: User) => u.email),
+            created_at: byText((u: User) => u.created_at),
+          }}
+          empty={{ icon: <UsersIcon width={32} />, title: "No staff yet" }}
+        />
+      </VStack>
 
-      <Card>
-        <VStack gap={4}>
-          <Heading
-            title="Pending invites"
-            description="An invite lasts a few days; resending it makes a new link and ends the old one."
-          />
-          <ClientResourceTable<Invite>
-            rows={invites}
-            columns={inviteColumns}
-            idKey="id"
-            compare={{
-              email: byText((i: Invite) => i.email),
-              expires_at: byText((i: Invite) => i.expires_at),
-            }}
-            empty={{ icon: <EnvelopeIcon width={32} />, title: "No pending invites" }}
-          />
-        </VStack>
-      </Card>
+      <VStack gap={4}>
+        <Heading
+          title="Pending invites"
+          description="An invite lasts a few days; resending it makes a new link and ends the old one."
+        />
+        <ClientResourceTable<Invite>
+          rows={invites}
+          columns={inviteColumns}
+          idKey="id"
+          compare={{
+            email: byText((i: Invite) => i.email),
+            expires_at: byText((i: Invite) => i.expires_at),
+          }}
+          empty={{ icon: <EnvelopeIcon width={32} />, title: "No pending invites" }}
+        />
+      </VStack>
 
-      <Card>
-        <VStack gap={4}>
-          <Heading
-            title="Roles"
-            description="What each role may do. Nobody grants a scope they don't hold themselves."
-          />
-          <ClientResourceTable<Role>
-            rows={roles}
-            columns={roleColumns}
-            idKey="id"
-            compare={{ name: byText((r: Role) => r.name) }}
-            empty={{ icon: <ShieldCheckIcon width={32} />, title: "No roles" }}
-          />
-        </VStack>
-      </Card>
+      <VStack gap={4}>
+        <Heading
+          title="Roles"
+          description="What each role may do. Nobody grants a scope they don't hold themselves."
+        />
+        <ClientResourceTable<Role>
+          rows={roles}
+          columns={roleColumns}
+          idKey="id"
+          compare={{ name: byText((r: Role) => r.name) }}
+          empty={{ icon: <ShieldCheckIcon width={32} />, title: "No roles" }}
+        />
+      </VStack>
 
       {inviting && (
         <InviteDialog
