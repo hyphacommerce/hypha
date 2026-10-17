@@ -5,7 +5,7 @@
 //!
 //! An isolate builds its `AppState` and router once, on its first event (`Isolate`), and
 //! serves every request with them: the configuration, the store, recently authenticated
-//! publishable keys, the rate limiter's counts. What belongs to one event (its
+//! publishable keys, the rate limiter's counts and its bindings. What belongs to one event (its
 //! `waitUntil`, whether it wrote) reaches the shared state through `Scoped`, which makes
 //! the event current while its future is polled.
 //!
@@ -46,10 +46,13 @@ mod worker_main {
     use hypha_core::{Clock, Timestamp};
     use hypha_http::host::{AfterWrites, BoxFuture, HostBackground, HostLimiter};
     use hypha_http::jobs::{self, Step};
+    use hypha_http::rate_limit::{Decision, Rule};
     use hypha_http::state::{AppState, HostEnv, HostParts, SharedState, Storage};
     use hypha_stores::StoreRepo;
     use tower_service::Service;
-    use worker::{Context, Env, HttpRequest, KvStore, ScheduleContext, ScheduledEvent, event};
+    use worker::{
+        Context, Env, HttpRequest, KvStore, RateLimiter, ScheduleContext, ScheduledEvent, event,
+    };
 
     use crate::limiter::IsolateLimiter;
     use crate::marks::{self, After, Marks, Run};
@@ -194,6 +197,7 @@ mod worker_main {
             runtime.clock.clone(),
         )?;
         let limiter = Arc::new(IsolateLimiter::new(&config.rate_limits));
+        let bindings = Arc::new(rate_limit_bindings(&env));
         let clock = runtime.clock.clone();
         let host = HostParts {
             env: HostEnv::new(
@@ -215,7 +219,15 @@ mod worker_main {
             }),
             limiter: HostLimiter::new(move |rule, key| {
                 let decision = limiter.check(rule, &key, clock.now());
-                Box::pin(async move { decision })
+                let bindings = Arc::clone(&bindings);
+                Box::pin(async move {
+                    match &bindings[rule as usize] {
+                        Some(binding) if decision == Decision::Allowed => {
+                            across_isolates(binding, rule, key).await
+                        }
+                        _ => decision,
+                    }
+                })
             }),
             after_writes: AfterWrites::new(|| {
                 CURRENT.with_borrow(|event| {
@@ -242,6 +254,39 @@ mod worker_main {
             ))
             .with_state(Arc::clone(&state));
         Ok(Rc::new(Isolate { state, app }))
+    }
+
+    /// The Rate Limiting bindings (W8), at `rule as usize`; a rule without one counts
+    /// in the isolate only, with a warning.
+    fn rate_limit_bindings(env: &Env) -> [Option<RateLimiter>; Rule::ALL.len()] {
+        Rule::ALL.map(|rule| {
+            let name = crate::limiter::binding(rule);
+            let binding = env.rate_limiter(name).ok();
+            if binding.is_none() {
+                tracing::warn!(
+                    binding = name,
+                    "rate limits: no binding, counting per isolate only"
+                );
+            }
+            binding
+        })
+    }
+
+    /// Asks `rule`'s binding, which counts every isolate's attempts in fixed windows.
+    /// Over it, the client waits for the window to pass; a binding that fails lets the
+    /// attempt through (the isolate's count has allowed it).
+    async fn across_isolates(binding: &RateLimiter, rule: Rule, key: String) -> Decision {
+        match binding.limit(key).await {
+            Ok(outcome) if outcome.success => Decision::Allowed,
+            Ok(_) => Decision::Limited {
+                retry_after: crate::limiter::WINDOW,
+            },
+            Err(e) => {
+                let name = crate::limiter::binding(rule);
+                tracing::warn!(binding = name, error = %e, "rate limits: the binding failed");
+                Decision::Allowed
+            }
+        }
     }
 
     /// The API's error shape (`{"code", "error", "details"}`) for a Worker that can't

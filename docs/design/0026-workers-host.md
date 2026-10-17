@@ -37,7 +37,7 @@ and cut most of it; this note carries that host to Workers.
 | W5 | **Workers Paid ($5/month) is the baseline.** The free plan's 10 ms of CPU per request can't fit a staff login (Argon2id at OWASP's 19 MiB, 2 passes, natively tens of milliseconds, more in wasm), nor a dynamic page render (0025: ~13–30 ms). Free stays possible for a storefront that serves cached pages, never for the admin. Lowering Argon2's cost to fit is not an option. *Accepted* |
 | W6 | **Jobs are Cron Triggers, woken by writes.** `#[event(scheduled)]` runs the same steps the VPS runner does (`dispatch`, `search_sync`, `prune`, `media_sweep`); a successful write also runs one dispatch step in `ctx.wait_until` (the Workers form of 0025's `wake_after_writes`). Cron's floor is a minute. *Proposed* |
 | W7 | **A quiet store doesn't touch the database.** A cron tick that queried Postgres every minute would keep a serverless database (Neon) awake for good. Writes set a `dirty` marker in KV (and retries record when they're next due); a tick reads KV first and runs the steps only when there's work or a retry is due. *Proposed* |
-| W8 | **Rate limits on Cloudflare's Rate Limiting binding** (`RateLimiter`) behind 0009's `RateLimiter` port: per location and approximate, which suits brute-force limits on login and password reset. A Durable Object would be exact; not worth it for these routes. *Proposed* |
+| W8 | **Rate limits on Cloudflare's Rate Limiting binding** (`RateLimiter`) behind 0009's `RateLimiter` port: per location and approximate, which suits brute-force limits on login and password reset. A Durable Object would be exact; not worth it for these routes. The binding offers only fixed windows (10 or 60 s) set per binding in `wrangler.toml`, so each check counts twice: in the isolate (GCRA, the quota's exact shape and its `Retry-After`) and on the rule's binding (`RL_<RULE>`, a 60 s window whose limit is the most the quota allows in any minute: the burst plus one per period that fits), which never refuses what the quota allows and caps every isolate together. Rules slower than a minute (`login_email`, `reset_email_from_ip`) are exact only per isolate. `hypha deploy` writes the bindings from the deployment's `[rate_limits]`. *Accepted (2026-10-18)* |
 | W9 | **Migrations and first-start setup run from the CLI, not the Worker.** There's no startup hook, and advisory locks don't survive transaction pooling. `hypha deploy` runs the host binary's `setup` (migrations, the owner, the default location, the search index) against the database's direct URL before deploying the Worker. *Proposed* |
 | W10 | **Files on R2 through the S3 adapter we have.** `hypha-store-s3` already takes its HTTP through an `HttpClient` port; the Workers host implements it with `worker::Fetch`. Public files are served from the bucket's custom domain, thumbnails by Cloudflare's image transformations (`media.transforms = "cloudflare"`, 0013). *Proposed* |
 | W12 | **The API Worker runs next to the database** (`placement.region`, e.g. `aws:eu-central-1` for a Neon database in Frankfurt), not wherever the request arrives: a read is a dozen sequential queries, and each one crossing Europe cost 20–25 ms (§8). `hypha init` sets it from the database's region. *Proposed* |
@@ -52,7 +52,7 @@ and cut most of it; this note carries that host to Workers.
 | `route_table!` per concrete storage | The same macro for the Workers storage | Proves `Send` the same way |
 | `jobs.rs` runner, `wake_after_writes` | `#[event(scheduled)]` + `ctx.wait_until` + KV marker | W6, W7 |
 | `Background` (`tokio::spawn`) | `ctx.wait_until` | Password-reset mail, webhooks after commit |
-| `MemoryRateLimiter` (`governor`, `Instant`) | `RateLimiter` binding | W8; `Instant::now` panics on this target |
+| `MemoryRateLimiter` (`governor`, `Instant`) | GCRA per isolate, then a `RateLimiter` binding per rule | W8; `Instant::now` panics on this target |
 | `SystemClock` (`SystemTime::now`) | `Date.now()` (`worker::Date`) | Panics on `wasm32-unknown-unknown` |
 | `UuidV7Ids` | UUIDv7 from `Date.now()` + `getrandom` (`wasm_js`) | Same IDs, ordered |
 | `HostEnv` randomness | `getrandom` → `crypto.getRandomValues` | |
@@ -161,7 +161,8 @@ the domains; `hypha deploy` then:
    Hyperdrive storage (a connection per `ports()`), configuration from `HYPHA_CONFIG`
    and the Worker's variables (W11), `fetch` for app calls and the S3 client, `waitUntil`
    for background work, dispatch and search sync after each write (W6's first half),
-   and crons for every job. Rate limits count per isolate for now (W8 pending). The e2e
+   and crons for every job. Rate limits counted per isolate at first; W8 (2026-10-18)
+   added the bindings. The e2e
    script passes against `wrangler dev` (641 steps), on a database the native host set
    up (W9: `hypha-host-axum setup`, since 2026-10-18, does a start's preparation and
    exits).
