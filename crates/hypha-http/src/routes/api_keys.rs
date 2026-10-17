@@ -21,14 +21,14 @@ use crate::{
 
 #[derive(Deserialize, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum KindRequest {
+pub enum KindRequest {
     Secret,
     Publishable,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateApiKeyRequest {
+pub struct CreateApiKeyRequest {
     kind: KindRequest,
     name: String,
     /// Required for a secret key; a publishable key always has the storefront scopes.
@@ -39,7 +39,7 @@ pub(super) struct CreateApiKeyRequest {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ApiKeyResponse {
+pub struct ApiKeyResponse {
     id: ApiKeyId,
     kind: &'static str,
     name: String,
@@ -68,7 +68,7 @@ impl ApiKeyResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CreatedApiKeyResponse {
+pub struct CreatedApiKeyResponse {
     #[serde(flatten)]
     key: ApiKeyResponse,
     /// The key itself, shown only in this response.
@@ -83,7 +83,7 @@ pub(super) struct CreatedApiKeyResponse {
     responses((status = 201, description = "Created", body = CreatedApiKeyResponse)),
     extensions(("x-hypha-scopes" = json!(["api_keys:write"]))),
 )]
-pub(super) async fn create<S: Storage>(
+pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateApiKeyRequest>,
@@ -115,7 +115,7 @@ pub(super) async fn create<S: Storage>(
     responses((status = 200, description = "OK", body = ApiKeyResponse)),
     extensions(("x-hypha-scopes" = json!(["api_keys:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ApiKeyId>,
@@ -133,7 +133,7 @@ pub(super) async fn fetch<S: Storage>(
     responses((status = 200, description = "OK", body = ApiKeyResponse)),
     extensions(("x-hypha-scopes" = json!(["api_keys:write"]))),
 )]
-pub(super) async fn revoke<S: Storage>(
+pub async fn revoke<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ApiKeyId>,
@@ -155,7 +155,7 @@ type ApiKeyPage = PageResponse<ApiKeyResponse>;
     responses((status = 200, description = "OK", body = ApiKeyPage)),
     extensions(("x-hypha-scopes" = json!(["api_keys:read"]))),
 )]
-pub(super) async fn list<S: Storage>(
+pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     query: ListQuery,

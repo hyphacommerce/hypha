@@ -15,9 +15,10 @@ use uuid::Uuid;
 
 use crate::{
     error::ApiError,
-    outbound::{CallError, OutboundPolicy, SignedCall, send_signed},
+    host::{HostCalls, HostClock},
+    outbound::{CallError, Method, OutboundPolicy, SignedCall, prepare},
     routes::rfc3339,
-    state::{HostEnv, SystemClock},
+    state::HostEnv,
 };
 
 /// The event's ID (`evt_…`), the same in every delivery and retry of it.
@@ -30,7 +31,7 @@ pub const DELIVERY_ID_HEADER: &str = "Hypha-Delivery-Id";
 /// An event as apps receive it (design note 0016, EV5), and as
 /// `GET /admin/events/{id}` shows it.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(crate) struct EventEnvelope {
+pub struct EventEnvelope {
     pub id: EventId,
     /// Dotted: `product.variant_removed`.
     #[serde(rename = "type")]
@@ -48,7 +49,7 @@ pub(crate) struct EventEnvelope {
 
 /// What an event is about.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(crate) struct EventSubject {
+pub struct EventSubject {
     /// `product`, `order`, …
     #[serde(rename = "type")]
     pub kind: String,
@@ -61,7 +62,7 @@ pub(crate) struct EventSubject {
 
 /// Who caused an event.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(crate) struct EventActor {
+pub struct EventActor {
     /// `user`, `agent`, `api_key` or `system`.
     #[serde(rename = "type")]
     pub kind: &'static str,
@@ -116,13 +117,13 @@ fn actor(actor: Actor) -> EventActor {
     EventActor { kind, id }
 }
 
-/// Sends webhooks for the dispatcher: the shared HTTP client, the host's key to open
-/// apps' secrets, and its clock for the signature's time.
+/// Sends webhooks for the dispatcher: the host's calls, its key to open apps' secrets,
+/// and its clock for the signature's time.
 pub struct HostWebhooks<'a> {
-    pub http: &'a reqwest::Client,
+    pub calls: &'a HostCalls,
     pub outbound: OutboundPolicy,
     pub env: &'a HostEnv,
-    pub clock: &'a SystemClock,
+    pub clock: &'a HostClock,
 }
 
 impl WebhookSender for HostWebhooks<'_> {
@@ -149,7 +150,7 @@ impl WebhookSender for HostWebhooks<'_> {
             ),
         ];
         let call = SignedCall {
-            method: reqwest::Method::POST,
+            method: Method::Post,
             url: webhook.url.as_str(),
             timeout: Duration::from_millis(u64::from(webhook.timeout_ms)),
             secret: &secret,
@@ -158,13 +159,14 @@ impl WebhookSender for HostWebhooks<'_> {
             body,
             discard_answer: true,
         };
-        send_signed(self.http, self.outbound, call)
-            .await
-            .map(|_| ())
-            .map_err(|e| match e {
-                CallError::Timeout => format!("no answer within {} ms", webhook.timeout_ms),
-                CallError::Failed(reason) => reason,
-            })
+        let sent = match prepare(self.outbound, call) {
+            Ok(call) => self.calls.send(call).await,
+            Err(e) => Err(e),
+        };
+        sent.map(|_| ()).map_err(|e| match e {
+            CallError::Timeout => format!("no answer within {} ms", webhook.timeout_ms),
+            CallError::Failed(reason) => reason,
+        })
     }
 }
 

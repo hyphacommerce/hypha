@@ -14,7 +14,6 @@ hypha-cart = { path = "../hypha-cart" }
 hypha-tax = { path = "../hypha-tax" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-customers = { path = "../hypha-customers" }
-hypha-store-postgres = { path = "../hypha-store-postgres" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-orders = { path = "../hypha-orders" }
 hypha-checkout = { path = "../hypha-checkout" }
@@ -33,37 +32,25 @@ hypha-shipping = { path = "../hypha-shipping" }
 hypha-apps = { path = "../hypha-apps" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-config = { path = "../hypha-config" }
-getrandom = "0.4"
-governor = "0.10"
 utoipa = "6"
 pastey = "0.2"
 ipnet = "2"
-deadpool-postgres = "0.14.2"
-# Its pool, under our manager (`state.rs`): each connection keeps its prepared statements.
-deadpool = { version = "0.13.1", default-features = false, features = ["managed", "rt_tokio_1"] }
-tokio-postgres = "0.7.18"
-axum = { version = "0.8", features = ["macros"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
+# No Tokio: the hosts serve (design note 0026, W2).
+axum = { version = "0.8", default-features = false, features = ["json", "query", "form", "matched-path", "original-uri", "macros"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded = "0.7"
 thiserror.workspace = true
-uuid = { workspace = true, features = ["v7"] }
+uuid = { workspace = true }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.11"
 hmac = "0.13"
-# Rate callbacks to external apps (design note 0015, section 5).
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 jiff = "0.2"
-tower-http = { version = "0.6", features = ["trace"] }
-tokio-postgres-rustls = "0.14"
-rustls-platform-verifier = "0.7"
-rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 base64 = "0.22"
 serde_html_form = "0.4.1"
 
 [dev-dependencies]
+pollster = "0.4"
 tower = { version = "0.5.3", features = ["util"] }
 
 [lints]

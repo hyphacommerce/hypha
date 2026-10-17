@@ -23,7 +23,7 @@ use crate::{
 
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct WebhookDto {
+pub struct WebhookDto {
     /// Where Hypha POSTs events: `https://`, or `http://localhost` for development.
     url: String,
     /// 1000 to 30000 milliseconds; defaults to 10000.
@@ -42,7 +42,7 @@ impl From<WebhookDto> for WebhookInput {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AppResponse {
+pub struct AppResponse {
     /// `app_<name>`.
     key: String,
     name: String,
@@ -80,7 +80,7 @@ impl AppResponse {
 
 /// An app with its signing secret: returned once, when created or rotated.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AppSecretResponse {
+pub struct AppSecretResponse {
     app: AppResponse,
     /// Verify `Hypha-Signature` on webhooks and rate requests with it. Shown only now.
     secret: String,
@@ -88,7 +88,7 @@ pub(super) struct AppSecretResponse {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateAppRequest {
+pub struct CreateAppRequest {
     /// `app_<name>`: lowercase letters, digits and `_`, at most 64 characters.
     key: String,
     name: String,
@@ -107,7 +107,7 @@ pub(super) struct CreateAppRequest {
     responses((status = 201, description = "Created", body = AppSecretResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
 )]
-pub(super) async fn create<S: Storage>(
+pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateAppRequest>,
@@ -131,7 +131,7 @@ pub(super) async fn create<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AppList {
+pub struct AppList {
     /// By key.
     items: Vec<AppResponse>,
 }
@@ -143,7 +143,7 @@ pub(super) struct AppList {
     responses((status = 200, description = "OK", body = AppList)),
     extensions(("x-hypha-scopes" = json!(["apps:read"]))),
 )]
-pub(super) async fn list<S: Storage>(
+pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<AppList>, ApiError> {
@@ -165,7 +165,7 @@ pub(super) async fn list<S: Storage>(
     responses((status = 200, description = "OK", body = AppResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
@@ -179,7 +179,7 @@ pub(super) async fn fetch<S: Storage>(
 /// the webhook; the others take no `null`).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateAppRequest {
+pub struct UpdateAppRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     name: Option<String>,
@@ -203,7 +203,7 @@ pub(super) struct UpdateAppRequest {
     responses((status = 200, description = "OK", body = AppResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
 )]
-pub(super) async fn update<S: Storage>(
+pub async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
@@ -229,7 +229,7 @@ pub(super) async fn update<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
 )]
-pub(super) async fn delete<S: Storage>(
+pub async fn delete<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
@@ -248,7 +248,7 @@ pub(super) async fn delete<S: Storage>(
     responses((status = 200, description = "OK", body = AppSecretResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
 )]
-pub(super) async fn rotate_secret<S: Storage>(
+pub async fn rotate_secret<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
@@ -267,7 +267,7 @@ pub(super) async fn rotate_secret<S: Storage>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = DeliveryStatus)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum DeliveryStatusDto {
+pub enum DeliveryStatusDto {
     /// Waiting for its next attempt.
     Pending,
     Succeeded,
@@ -297,7 +297,7 @@ impl From<DeliveryStatus> for DeliveryStatusDto {
 
 /// One event on its way to an app.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct DeliveryResponse {
+pub struct DeliveryResponse {
     /// Sent as `Hypha-Delivery-Id`, the same on every attempt.
     id: DeliveryId,
     /// `GET /admin/events/{id}` has the event as sent.
@@ -331,7 +331,7 @@ impl DeliveryResponse {
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
-pub(super) struct DeliveryFilters {
+pub struct DeliveryFilters {
     /// Only deliveries in this status.
     status: Option<DeliveryStatusDto>,
 }
@@ -352,7 +352,7 @@ type DeliveryPage = PageResponse<DeliveryResponse>;
     responses((status = 200, description = "OK", body = DeliveryPage)),
     extensions(("x-hypha-scopes" = json!(["apps:read"]))),
 )]
-pub(super) async fn deliveries<S: Storage>(
+pub async fn deliveries<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
@@ -383,7 +383,7 @@ pub(super) async fn deliveries<S: Storage>(
     responses((status = 200, description = "OK", body = DeliveryResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
 )]
-pub(super) async fn retry<S: Storage>(
+pub async fn retry<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((key, id)): PathId<(String, DeliveryId)>,
@@ -401,7 +401,7 @@ pub(super) async fn retry<S: Storage>(
     responses((status = 200, description = "OK", body = EventEnvelope)),
     extensions(("x-hypha-scopes" = json!(["apps:read"]))),
 )]
-pub(super) async fn event<S: Storage>(
+pub async fn event<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<EventId>,

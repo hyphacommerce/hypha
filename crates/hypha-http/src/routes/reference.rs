@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CurrencyResponse {
+pub struct CurrencyResponse {
     code: Currency,
     /// The English name ("Japanese Yen"). UIs show their own language's name
     /// (`Intl.DisplayNames`) and fall back to this.
@@ -24,7 +24,7 @@ pub(super) struct CurrencyResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CurrencyListResponse {
+pub struct CurrencyListResponse {
     /// Sorted by code. A fixed list of about 150, so it comes in one response.
     items: Vec<CurrencyResponse>,
 }
@@ -36,7 +36,7 @@ pub(super) struct CurrencyListResponse {
     responses((status = 200, description = "OK", body = CurrencyListResponse)),
     extensions(("x-hypha-scopes" = json!([]))),
 )]
-pub(super) async fn currencies<S: Storage>(
+pub async fn currencies<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<CurrencyListResponse>, ApiError> {
@@ -53,7 +53,7 @@ pub(super) async fn currencies<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CountryResponse {
+pub struct CountryResponse {
     code: CountryCode,
     /// The English name ("South Korea"). UIs show their own language's name
     /// (`Intl.DisplayNames`) and fall back to this.
@@ -61,7 +61,7 @@ pub(super) struct CountryResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CountryListResponse {
+pub struct CountryListResponse {
     /// Sorted by code: the assigned ISO 3166-1 codes, so it comes in one response.
     items: Vec<CountryResponse>,
 }
@@ -73,7 +73,7 @@ pub(super) struct CountryListResponse {
     responses((status = 200, description = "OK", body = CountryListResponse)),
     extensions(("x-hypha-scopes" = json!([]))),
 )]
-pub(super) async fn countries<S: Storage>(
+pub async fn countries<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<CountryListResponse>, ApiError> {

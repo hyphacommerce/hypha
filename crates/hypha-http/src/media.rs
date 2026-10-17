@@ -4,16 +4,21 @@
 
 use hypha_core::{Clock, Timestamp};
 use hypha_media::{Asset, AssetKind, AssetStatus, BlobStore, MediaSettings, Visibility};
-use hypha_store_s3::{ReqwestClient, S3BlobStore, S3Config};
+use hypha_store_s3::{S3BlobStore, S3Config};
 
-use crate::{error::ApiError, state::SystemClock};
+use crate::{
+    error::ApiError,
+    host::{HostClock, HostHttp},
+};
 
-pub type HostBlobs = S3BlobStore<ReqwestClient, SystemClock>;
+pub type HostBlobs = S3BlobStore<HostHttp, HostClock>;
 
 /// The file store and the URL rules; `None` in `AppState` without `media.s3.endpoint`,
 /// and then the asset routes answer `503 media_not_configured`.
 pub struct Media {
     pub blobs: HostBlobs,
+    /// For signed URLs' expiry.
+    clock: HostClock,
     pub urls: MediaUrls,
     /// URL lifetimes and the sweep's age (`[media]`, design note 0017).
     pub settings: MediaSettings,
@@ -60,14 +65,20 @@ fn split_origin(url: &str) -> (&str, &str) {
 }
 
 impl Media {
-    /// From `[media]`, with the S3 keys from the environment (secrets have no key in
-    /// the file). `Ok(None)` without an S3 endpoint.
-    pub fn from_config(config: &hypha_config::MediaConfig) -> Result<Option<Media>, String> {
+    /// From `[media]`, with the S3 keys from `secret` (the environment natively, the
+    /// Worker's secrets on Workers: secrets have no key in the file), sending through the
+    /// host's `http`. `Ok(None)` without an S3 endpoint.
+    pub fn from_config(
+        config: &hypha_config::MediaConfig,
+        secret: impl Fn(&str) -> Option<String>,
+        http: HostHttp,
+        clock: HostClock,
+    ) -> Result<Option<Media>, String> {
         let Some(s3) = &config.s3 else {
             return Ok(None);
         };
         let key = |name: &str| {
-            std::env::var(name).map_err(|_| format!("{name} is required with an S3 endpoint"))
+            secret(name).ok_or_else(|| format!("{name} is required with an S3 endpoint"))
         };
         let s3 = S3Config {
             endpoint: s3.endpoint.clone(),
@@ -77,7 +88,8 @@ impl Media {
             secret_access_key: key("HYPHA_S3_SECRET_ACCESS_KEY")?,
         };
         Ok(Some(Media {
-            blobs: S3BlobStore::new(s3, ReqwestClient::new()?, SystemClock),
+            blobs: S3BlobStore::new(s3, http, clock.clone()),
+            clock,
             urls: MediaUrls {
                 public_base: config.public_url.clone(),
                 transforms: config.transforms,
@@ -120,7 +132,7 @@ impl Media {
                 Ok(Some(self.urls.public(base, asset.key().as_str(), options)))
             }
             _ => {
-                let now: Timestamp = SystemClock.now();
+                let now: Timestamp = self.clock.now();
                 let url = self
                     .blobs
                     .presign_download(

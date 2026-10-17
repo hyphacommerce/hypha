@@ -37,7 +37,7 @@ use crate::{
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CheckoutRequest {
+pub struct CheckoutRequest {
     /// The total the buyer saw; if the cart now costs something else, checkout fails
     /// with `total_changed` (409) instead of placing a different order.
     #[serde(default)]
@@ -48,7 +48,7 @@ pub(super) struct CheckoutRequest {
 /// serde and renaming a variant can't silently change the API.
 #[derive(Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum FinancialStatusDto {
+pub enum FinancialStatusDto {
     Pending,
     Paid,
 }
@@ -65,7 +65,7 @@ impl From<FinancialStatus> for FinancialStatusDto {
 /// `FulfillmentStatus` on the wire.
 #[derive(Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum FulfillmentStatusDto {
+pub enum FulfillmentStatusDto {
     Unfulfilled,
     PartiallyFulfilled,
     Fulfilled,
@@ -84,7 +84,7 @@ impl From<FulfillmentStatus> for FulfillmentStatusDto {
 /// `CancelReason` on the wire (design note 0018).
 #[derive(Serialize, Deserialize, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum CancelReasonDto {
+pub enum CancelReasonDto {
     /// The buyer asked.
     Customer,
     /// The goods ran out or can't be shipped.
@@ -123,7 +123,7 @@ impl From<CancelReasonDto> for CancelReason {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct OrderResponse {
+pub struct OrderResponse {
     id: OrderId,
     /// The human number, shown as "#1001".
     number: i64,
@@ -160,7 +160,7 @@ pub(super) struct OrderResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct OrderShippingLineResponse {
+pub struct OrderShippingLineResponse {
     group: ShippingGroupId,
     /// The order lines this ships.
     lines: Vec<OrderLineId>,
@@ -180,7 +180,7 @@ pub(super) struct OrderShippingLineResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct OrderLineResponse {
+pub struct OrderLineResponse {
     id: OrderLineId,
     product: ProductId,
     variant: VariantId,
@@ -202,7 +202,7 @@ pub(super) struct OrderLineResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct OrderTaxResponse {
+pub struct OrderTaxResponse {
     /// Parts per million: 250000 = 25%.
     rate_ppm: TaxRate,
     amount: Money,
@@ -340,7 +340,7 @@ async fn line_images<P: HasProducts + HasAssets>(
 /// A storefront's view of an order it placed: the order with its access token, the key
 /// to reading it again (`GET /storefront/orders/{id}?token=`; design note 0024, §7).
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct PlacedOrderResponse {
+pub struct PlacedOrderResponse {
     #[serde(flatten)]
     order: OrderResponse,
     /// Lets whoever holds it read this order: keep it with the buyer (a cookie, the
@@ -358,7 +358,7 @@ pub(super) struct PlacedOrderResponse {
     responses((status = 201, description = "Created", body = PlacedOrderResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
-pub(super) async fn checkout_handler<S: Storage>(
+pub async fn checkout_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(cart): PathId<CartId>,
@@ -389,7 +389,7 @@ pub(super) async fn checkout_handler<S: Storage>(
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
-pub(super) struct OrderTokenQuery {
+pub struct OrderTokenQuery {
     /// The order's `access_token`, from checkout's answer.
     token: String,
 }
@@ -404,7 +404,7 @@ pub(super) struct OrderTokenQuery {
     responses((status = 200, description = "OK", body = PlacedOrderResponse)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
-pub(super) async fn fetch_placed<S: Storage>(
+pub async fn fetch_placed<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<OrderId>,
@@ -424,7 +424,7 @@ pub(super) async fn fetch_placed<S: Storage>(
 
 /// An order in a list: what a table of orders shows, without lines.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct OrderSummaryResponse {
+pub struct OrderSummaryResponse {
     id: OrderId,
     /// The human number, shown as "#1001".
     number: i64,
@@ -488,7 +488,7 @@ impl From<FulfillmentStatusDto> for FulfillmentStatus {
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
-pub(super) struct OrderFilters {
+pub struct OrderFilters {
     /// The order's number (`1001` or `#1001`), or text its email contains, ignoring case.
     /// Up to 255 characters; blank filters nothing.
     q: Option<String>,
@@ -520,7 +520,7 @@ pub(super) struct OrderFilters {
 /// order, in the same direction.
 #[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum OrderSortDto {
+pub enum OrderSortDto {
     Newest,
     Oldest,
     TotalDesc,
@@ -582,7 +582,7 @@ impl SortedFilters for OrderFilters {
     responses((status = 200, description = "OK", body = OrderPage)),
     extensions(("x-hypha-scopes" = json!(["orders:read"]))),
 )]
-pub(super) async fn list<S: Storage>(
+pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     query: ListQuery<OrderFilters>,
@@ -614,7 +614,7 @@ pub(super) async fn list<S: Storage>(
 
 /// Units of a line still to ship, and where they wait (design note 0018, FU4).
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct UnfulfilledDto {
+pub struct UnfulfilledDto {
     line: OrderLineId,
     /// The location holding them for the line; `null` for units held nowhere (an
     /// untracked item): any location.
@@ -626,7 +626,7 @@ pub(super) struct UnfulfilledDto {
 /// location. A storefront's `OrderResponse` has neither: why staff cancelled an order
 /// (`fraud`) is theirs to know.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AdminOrderResponse {
+pub struct AdminOrderResponse {
     #[serde(flatten)]
     order: OrderResponse,
     /// When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.
@@ -667,7 +667,7 @@ impl AdminOrderResponse {
     responses((status = 200, description = "OK", body = AdminOrderResponse)),
     extensions(("x-hypha-scopes" = json!(["orders:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<OrderId>,
@@ -680,7 +680,7 @@ pub(super) async fn fetch<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CancelOrderRequest {
+pub struct CancelOrderRequest {
     reason: CancelReasonDto,
     /// Email the buyer that the order is cancelled (`false` if absent).
     #[serde(default)]
@@ -699,7 +699,7 @@ pub(super) struct CancelOrderRequest {
     responses((status = 200, description = "OK", body = AdminOrderResponse)),
     extensions(("x-hypha-scopes" = json!(["orders:write"]))),
 )]
-pub(super) async fn cancel<S: Storage>(
+pub async fn cancel<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<OrderId>,
@@ -737,7 +737,7 @@ pub(super) async fn cancel<S: Storage>(
     responses((status = 200, description = "OK", body = OrderResponse)),
     extensions(("x-hypha-scopes" = json!(["orders:write"]))),
 )]
-pub(super) async fn mark_paid<S: Storage>(
+pub async fn mark_paid<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<OrderId>,

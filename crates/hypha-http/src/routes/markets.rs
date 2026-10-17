@@ -32,7 +32,7 @@ use crate::{
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateMarketRequest {
+pub struct CreateMarketRequest {
     name: String,
     countries: Vec<String>,
     currency: Currency,
@@ -42,7 +42,7 @@ pub(super) struct CreateMarketRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateMarketRequest {
+pub struct UpdateMarketRequest {
     /// 1 to 255 characters, trimmed.
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
@@ -54,7 +54,7 @@ pub(super) struct UpdateMarketRequest {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct MarketResponse {
+pub struct MarketResponse {
     id: MarketId,
     name: String,
     countries: Vec<CountryCode>,
@@ -95,7 +95,7 @@ async fn changed_market<S: HasMarkets + HasCatalogs>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct MarketListResponse {
+pub struct MarketListResponse {
     /// Oldest first. A store has a handful, so they come in one list.
     items: Vec<MarketResponse>,
 }
@@ -107,7 +107,7 @@ pub(super) struct MarketListResponse {
     responses((status = 200, description = "OK", body = MarketListResponse)),
     extensions(("x-hypha-scopes" = json!(["markets:read"]))),
 )]
-pub(super) async fn list_markets_handler<S: Storage>(
+pub async fn list_markets_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<MarketListResponse>, ApiError> {
@@ -126,7 +126,7 @@ pub(super) async fn list_markets_handler<S: Storage>(
     responses((status = 200, description = "OK", body = MarketResponse)),
     extensions(("x-hypha-scopes" = json!(["markets:read"]))),
 )]
-pub(super) async fn fetch_market<S: Storage>(
+pub async fn fetch_market<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<MarketId>,
@@ -146,7 +146,7 @@ pub(super) async fn fetch_market<S: Storage>(
     responses((status = 201, description = "Created", body = MarketResponse)),
     extensions(("x-hypha-scopes" = json!(["markets:write"]))),
 )]
-pub(super) async fn create_market_handler<S: Storage>(
+pub async fn create_market_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateMarketRequest>,
@@ -176,7 +176,7 @@ pub(super) async fn create_market_handler<S: Storage>(
     responses((status = 200, description = "OK", body = MarketResponse)),
     extensions(("x-hypha-scopes" = json!(["markets:write"]))),
 )]
-pub(super) async fn update_market_handler<S: Storage>(
+pub async fn update_market_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<MarketId>,
@@ -196,7 +196,7 @@ pub(super) async fn update_market_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AddCountryRequest {
+pub struct AddCountryRequest {
     country: String,
 }
 
@@ -209,7 +209,7 @@ pub(super) struct AddCountryRequest {
     responses((status = 200, description = "OK", body = MarketResponse)),
     extensions(("x-hypha-scopes" = json!(["markets:write"]))),
 )]
-pub(super) async fn add_country_handler<S: Storage>(
+pub async fn add_country_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<MarketId>,
@@ -231,7 +231,7 @@ pub(super) async fn add_country_handler<S: Storage>(
     responses((status = 200, description = "OK", body = MarketResponse)),
     extensions(("x-hypha-scopes" = json!(["markets:write"]))),
 )]
-pub(super) async fn remove_country_handler<S: Storage>(
+pub async fn remove_country_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, country)): PathId<(MarketId, String)>,
@@ -251,7 +251,7 @@ pub(super) async fn remove_country_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreatePriceListRequest {
+pub struct CreatePriceListRequest {
     currency: Currency,
     /// Basis points: -1000 = 10% off. Defaults to 0.
     #[serde(default)]
@@ -259,7 +259,7 @@ pub(super) struct CreatePriceListRequest {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct PriceListResponse {
+pub struct PriceListResponse {
     id: PriceListId,
     currency: Currency,
     adjustment_bps: i32,
@@ -277,20 +277,20 @@ impl From<&PriceList> for PriceListResponse {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetFixedPricesRequest {
+pub struct SetFixedPricesRequest {
     fixed_prices: Vec<FixedPriceDto>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct FixedPriceDto {
+pub struct FixedPriceDto {
     variant: VariantId,
     price: Money,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RemoveFixedPricesRequest {
+pub struct RemoveFixedPricesRequest {
     variants: Vec<VariantId>,
 }
 
@@ -302,7 +302,7 @@ pub(super) struct RemoveFixedPricesRequest {
     responses((status = 201, description = "Created", body = PriceListResponse)),
     extensions(("x-hypha-scopes" = json!(["pricing:write"]))),
 )]
-pub(super) async fn create_price_list_handler<S: Storage>(
+pub async fn create_price_list_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreatePriceListRequest>,
@@ -326,7 +326,7 @@ pub(super) async fn create_price_list_handler<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["pricing:write"]))),
 )]
-pub(super) async fn set_fixed_prices_handler<S: Storage>(
+pub async fn set_fixed_prices_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<PriceListId>,
@@ -357,7 +357,7 @@ pub(super) async fn set_fixed_prices_handler<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["pricing:write"]))),
 )]
-pub(super) async fn remove_fixed_prices_handler<S: Storage>(
+pub async fn remove_fixed_prices_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<PriceListId>,
@@ -375,25 +375,25 @@ pub(super) async fn remove_fixed_prices_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateCatalogRequest {
+pub struct CreateCatalogRequest {
     market: MarketId,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CatalogProductsRequest {
+pub struct CatalogProductsRequest {
     products: Vec<ProductId>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AssignPriceListRequest {
+pub struct AssignPriceListRequest {
     /// `null` detaches the current price list.
     price_list: Option<PriceListId>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CatalogResponse {
+pub struct CatalogResponse {
     id: CatalogId,
     market: MarketId,
     price_list: Option<PriceListId>,
@@ -419,7 +419,7 @@ impl From<&Catalog> for CatalogResponse {
     responses((status = 201, description = "Created", body = CatalogResponse)),
     extensions(("x-hypha-scopes" = json!(["markets:write"]))),
 )]
-pub(super) async fn create_catalog_handler<S: Storage>(
+pub async fn create_catalog_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateCatalogRequest>,
@@ -441,7 +441,7 @@ pub(super) async fn create_catalog_handler<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["markets:write"]))),
 )]
-pub(super) async fn add_products_handler<S: Storage>(
+pub async fn add_products_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CatalogId>,
@@ -462,7 +462,7 @@ pub(super) async fn add_products_handler<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["markets:write"]))),
 )]
-pub(super) async fn remove_products_handler<S: Storage>(
+pub async fn remove_products_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CatalogId>,
@@ -483,7 +483,7 @@ pub(super) async fn remove_products_handler<S: Storage>(
     responses((status = 200, description = "OK", body = CatalogResponse)),
     extensions(("x-hypha-scopes" = json!(["pricing:write"]))),
 )]
-pub(super) async fn assign_price_list_handler<S: Storage>(
+pub async fn assign_price_list_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CatalogId>,
@@ -506,7 +506,7 @@ pub(super) async fn assign_price_list_handler<S: Storage>(
 // ---------- reads (design note 0021, SU3) ----------
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct PriceListListResponse {
+pub struct PriceListListResponse {
     /// Oldest first. A store has a handful, so they come in one list.
     items: Vec<PriceListResponse>,
 }
@@ -518,7 +518,7 @@ pub(super) struct PriceListListResponse {
     responses((status = 200, description = "OK", body = PriceListListResponse)),
     extensions(("x-hypha-scopes" = json!(["pricing:read"]))),
 )]
-pub(super) async fn list_price_lists_handler<S: Storage>(
+pub async fn list_price_lists_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<PriceListListResponse>, ApiError> {
@@ -537,7 +537,7 @@ pub(super) async fn list_price_lists_handler<S: Storage>(
     responses((status = 200, description = "OK", body = PriceListResponse)),
     extensions(("x-hypha-scopes" = json!(["pricing:read"]))),
 )]
-pub(super) async fn fetch_price_list<S: Storage>(
+pub async fn fetch_price_list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<PriceListId>,
@@ -550,7 +550,7 @@ pub(super) async fn fetch_price_list<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct FixedPriceResponse {
+pub struct FixedPriceResponse {
     variant: VariantId,
     price: Money,
     /// The variant's product; `null` when the variant no longer exists (fixed prices
@@ -559,7 +559,7 @@ pub(super) struct FixedPriceResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct FixedPriceProduct {
+pub struct FixedPriceProduct {
     id: ProductId,
     title: String,
     /// The variant's option values ("M / Blue"); `null` for a product without options.
@@ -568,7 +568,7 @@ pub(super) struct FixedPriceProduct {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdatePriceListRequest {
+pub struct UpdatePriceListRequest {
     /// Basis points: -1000 = 10% off.
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = i32, required = false)]
@@ -584,7 +584,7 @@ pub(super) struct UpdatePriceListRequest {
     responses((status = 200, description = "OK", body = PriceListResponse)),
     extensions(("x-hypha-scopes" = json!(["pricing:write"]))),
 )]
-pub(super) async fn update_price_list_handler<S: Storage>(
+pub async fn update_price_list_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<PriceListId>,
@@ -611,7 +611,7 @@ type FixedPricePage = PageResponse<FixedPriceResponse>;
     responses((status = 200, description = "OK", body = FixedPricePage)),
     extensions(("x-hypha-scopes" = json!(["pricing:read", "products:read"]))),
 )]
-pub(super) async fn list_fixed_prices_handler<S: Storage>(
+pub async fn list_fixed_prices_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<PriceListId>,
@@ -658,7 +658,7 @@ pub(super) async fn list_fixed_prices_handler<S: Storage>(
     responses((status = 200, description = "OK", body = CatalogResponse)),
     extensions(("x-hypha-scopes" = json!(["markets:read"]))),
 )]
-pub(super) async fn fetch_catalog<S: Storage>(
+pub async fn fetch_catalog<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CatalogId>,
@@ -673,7 +673,7 @@ pub(super) async fn fetch_catalog<S: Storage>(
 /// A product in a catalog. Catalogs store product IDs as given, so the product's fields
 /// are `null` for an ID that names no product.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CatalogProductResponse {
+pub struct CatalogProductResponse {
     id: ProductId,
     title: Option<String>,
     handle: Option<String>,
@@ -690,7 +690,7 @@ type CatalogProductPage = PageResponse<CatalogProductResponse>;
     responses((status = 200, description = "OK", body = CatalogProductPage)),
     extensions(("x-hypha-scopes" = json!(["markets:read", "products:read"]))),
 )]
-pub(super) async fn list_catalog_products_handler<S: Storage>(
+pub async fn list_catalog_products_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CatalogId>,
@@ -726,7 +726,7 @@ pub(super) async fn list_catalog_products_handler<S: Storage>(
 
 /// A country a market sells to, with what a storefront needs to show prices there.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct StorefrontCountryResponse {
+pub struct StorefrontCountryResponse {
     country: CountryCode,
     /// The English name; UIs show local names (`Intl.DisplayNames`).
     name: &'static str,
@@ -739,7 +739,7 @@ pub(super) struct StorefrontCountryResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct StorefrontCountryListResponse {
+pub struct StorefrontCountryListResponse {
     /// Sorted by country code: every country some market sells to.
     items: Vec<StorefrontCountryResponse>,
 }
@@ -752,7 +752,7 @@ pub(super) struct StorefrontCountryListResponse {
     responses((status = 200, description = "OK", body = StorefrontCountryListResponse)),
     extensions(("x-hypha-scopes" = json!(["markets:read"]))),
 )]
-pub(super) async fn storefront_countries<S: Storage>(
+pub async fn storefront_countries<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
 ) -> Result<Json<StorefrontCountryListResponse>, ApiError> {

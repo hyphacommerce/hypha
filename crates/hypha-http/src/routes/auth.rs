@@ -30,14 +30,14 @@ fn limit_email(raw: &str) -> Option<Email> {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct LoginRequest {
+pub struct LoginRequest {
     email: String,
     password: String,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct FinishLoginRequest {
+pub struct FinishLoginRequest {
     /// The challenge token from the first step.
     challenge: String,
     /// A 6-digit code from the authenticator app, or a recovery code.
@@ -45,7 +45,7 @@ pub(super) struct FinishLoginRequest {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SessionResponse {
+pub struct SessionResponse {
     /// Send as `Authorization: Bearer <token>`. Shown only now.
     token: String,
     expires_at: String,
@@ -61,7 +61,7 @@ impl SessionResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ChallengeResponse {
+pub struct ChallengeResponse {
     /// Send back to `POST /admin/auth/login/mfa` with a code.
     token: String,
     methods: Vec<&'static str>,
@@ -72,7 +72,7 @@ pub(super) struct ChallengeResponse {
 /// "challenge": …}`: a tagged enum, so a client switches on `status`.
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub(super) enum LoginResponse {
+pub enum LoginResponse {
     Authenticated { session: SessionResponse },
     MfaRequired { challenge: ChallengeResponse },
 }
@@ -86,7 +86,7 @@ pub(super) enum LoginResponse {
     responses((status = 200, description = "OK", body = LoginResponse), (status = 401, description = "Wrong email or password, or a disabled account: one answer for all (`invalid_credentials`).", body = ApiErrorBody), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     security(()),
 )]
-pub(super) async fn login_handler<S: Storage>(
+pub async fn login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
     body: JsonBody<LoginRequest>,
@@ -132,7 +132,7 @@ pub(super) async fn login_handler<S: Storage>(
     responses((status = 200, description = "OK", body = LoginResponse), (status = 401, description = "A wrong or used code (`invalid_mfa_code`), or an unknown, expired or ended challenge (`invalid_token`).", body = ApiErrorBody), (status = 429, description = "Over a rate limit (`rate_limited`, see `Retry-After`), or second-factor checks locked after five wrong codes (`mfa_locked`, see `details.locked_until`).", body = ApiErrorBody)),
     security(()),
 )]
-pub(super) async fn finish_login_handler<S: Storage>(
+pub async fn finish_login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
     body: JsonBody<FinishLoginRequest>,
@@ -153,7 +153,7 @@ pub(super) async fn finish_login_handler<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-staff-session" = json!(true))),
 )]
-pub(super) async fn logout_handler<S: Storage>(
+pub async fn logout_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
 ) -> Result<StatusCode, ApiError> {
@@ -164,7 +164,7 @@ pub(super) async fn logout_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct PasswordResetRequest {
+pub struct PasswordResetRequest {
     email: String,
 }
 
@@ -180,7 +180,7 @@ pub(super) struct PasswordResetRequest {
     responses((status = 202, description = "Accepted"), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     security(()),
 )]
-pub(super) async fn request_reset_handler<S: Storage>(
+pub async fn request_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
     body: JsonBody<PasswordResetRequest>,
@@ -200,7 +200,7 @@ pub(super) async fn request_reset_handler<S: Storage>(
 }
 
 /// The work behind `request_reset_handler`; failures can only be logged.
-pub(crate) async fn password_reset_in_background<S: Storage>(state: SharedState<S>, email: String) {
+pub async fn password_reset_in_background<S: Storage>(state: SharedState<S>, email: String) {
     let result = match state.public_ports().await {
         Ok(ports) => request_password_reset(&ports, &state.env, &email)
             .await
@@ -214,7 +214,7 @@ pub(crate) async fn password_reset_in_background<S: Storage>(state: SharedState<
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ConfirmResetRequest {
+pub struct ConfirmResetRequest {
     token: String,
     password: String,
 }
@@ -227,7 +227,7 @@ pub(super) struct ConfirmResetRequest {
     responses((status = 204, description = "No content"), (status = 401, description = "An unknown, expired or used reset token (`invalid_token`).", body = ApiErrorBody), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     security(()),
 )]
-pub(super) async fn confirm_reset_handler<S: Storage>(
+pub async fn confirm_reset_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
     body: JsonBody<ConfirmResetRequest>,
@@ -241,14 +241,14 @@ pub(super) async fn confirm_reset_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AcceptInviteRequest {
+pub struct AcceptInviteRequest {
     token: String,
     name: String,
     password: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AcceptedResponse {
+pub struct AcceptedResponse {
     user: UserResponse,
     session: SessionResponse,
 }
@@ -261,7 +261,7 @@ pub(super) struct AcceptedResponse {
     responses((status = 201, description = "Created", body = AcceptedResponse), (status = 401, description = "An unknown, expired or accepted invite token (`invalid_token`).", body = ApiErrorBody), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     security(()),
 )]
-pub(super) async fn accept_invite_handler<S: Storage>(
+pub async fn accept_invite_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
     body: JsonBody<AcceptInviteRequest>,

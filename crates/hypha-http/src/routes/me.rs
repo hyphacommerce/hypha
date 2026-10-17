@@ -17,7 +17,7 @@ use crate::{
 };
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct MeResponse {
+pub struct MeResponse {
     user: UserResponse,
     role: MeRole,
     /// What the session may do: the role's scopes, spelled out for the owner.
@@ -26,7 +26,7 @@ pub(super) struct MeResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct MeRole {
+pub struct MeRole {
     id: RoleId,
     name: String,
 }
@@ -38,7 +38,7 @@ pub(super) struct MeRole {
     responses((status = 200, description = "OK", body = MeResponse)),
     extensions(("x-hypha-staff-session" = json!(true))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
 ) -> Result<Json<MeResponse>, ApiError> {
@@ -62,7 +62,7 @@ pub(super) async fn fetch<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ChangePasswordRequest {
+pub struct ChangePasswordRequest {
     current_password: String,
     new_password: String,
 }
@@ -75,7 +75,7 @@ pub(super) struct ChangePasswordRequest {
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-staff-session" = json!(true))),
 )]
-pub(super) async fn change_password_handler<S: Storage>(
+pub async fn change_password_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
     body: JsonBody<ChangePasswordRequest>,
@@ -94,7 +94,7 @@ pub(super) async fn change_password_handler<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct TotpSetupResponse {
+pub struct TotpSetupResponse {
     /// Base32, for typing into the app.
     secret: String,
     /// `otpauth://…`, for a QR code.
@@ -103,7 +103,7 @@ pub(super) struct TotpSetupResponse {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct StartTotpRequest {
+pub struct StartTotpRequest {
     /// The current password: a stolen session alone can't put an authenticator on the
     /// account.
     password: String,
@@ -117,7 +117,7 @@ pub(super) struct StartTotpRequest {
     responses((status = 201, description = "Created", body = TotpSetupResponse)),
     extensions(("x-hypha-staff-session" = json!(true))),
 )]
-pub(super) async fn start_totp_handler<S: Storage>(
+pub async fn start_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
     body: JsonBody<StartTotpRequest>,
@@ -145,13 +145,13 @@ pub(super) async fn start_totp_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CodeRequest {
+pub struct CodeRequest {
     /// From the authenticator app, or (to disable or regenerate) a recovery code.
     code: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct RecoveryCodesResponse {
+pub struct RecoveryCodesResponse {
     /// Shown only now: each works once if the authenticator is lost.
     recovery_codes: Vec<String>,
 }
@@ -170,7 +170,7 @@ fn code_error(e: hypha_auth::CommandError) -> ApiError {
     responses((status = 200, description = "OK", body = RecoveryCodesResponse)),
     extensions(("x-hypha-staff-session" = json!(true))),
 )]
-pub(super) async fn confirm_totp_handler<S: Storage>(
+pub async fn confirm_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
     body: JsonBody<CodeRequest>,
@@ -198,7 +198,7 @@ pub(super) async fn confirm_totp_handler<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-staff-session" = json!(true))),
 )]
-pub(super) async fn disable_totp_handler<S: Storage>(
+pub async fn disable_totp_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
     body: JsonBody<CodeRequest>,
@@ -224,7 +224,7 @@ pub(super) async fn disable_totp_handler<S: Storage>(
     responses((status = 200, description = "OK", body = RecoveryCodesResponse)),
     extensions(("x-hypha-staff-session" = json!(true))),
 )]
-pub(super) async fn recovery_codes_handler<S: Storage>(
+pub async fn recovery_codes_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     staff: StaffCaller,
     body: JsonBody<CodeRequest>,

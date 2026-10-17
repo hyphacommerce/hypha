@@ -27,7 +27,7 @@ use crate::{
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateLocationRequest {
+pub struct CreateLocationRequest {
     name: String,
     /// The markets whose buyers this location's stock is sold to.
     #[serde(default)]
@@ -40,7 +40,7 @@ pub(super) struct CreateLocationRequest {
 /// Every field optional: only the ones sent change.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateLocationRequest {
+pub struct UpdateLocationRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = String, required = false)]
@@ -60,7 +60,7 @@ pub(super) struct UpdateLocationRequest {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct LocationResponse {
+pub struct LocationResponse {
     id: LocationId,
     name: String,
     markets: Vec<MarketId>,
@@ -89,7 +89,7 @@ impl From<&Location> for LocationResponse {
     responses((status = 201, description = "Created", body = LocationResponse)),
     extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
 )]
-pub(super) async fn create_location_handler<S: Storage>(
+pub async fn create_location_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateLocationRequest>,
@@ -106,7 +106,7 @@ pub(super) async fn create_location_handler<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct LocationList {
+pub struct LocationList {
     /// By priority, then ID.
     items: Vec<LocationResponse>,
 }
@@ -118,7 +118,7 @@ pub(super) struct LocationList {
     responses((status = 200, description = "OK", body = LocationList)),
     extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
 )]
-pub(super) async fn list_locations_handler<S: Storage>(
+pub async fn list_locations_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<LocationList>, ApiError> {
@@ -137,7 +137,7 @@ pub(super) async fn list_locations_handler<S: Storage>(
     responses((status = 200, description = "OK", body = LocationResponse)),
     extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
 )]
-pub(super) async fn fetch_location<S: Storage>(
+pub async fn fetch_location<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<LocationId>,
@@ -158,7 +158,7 @@ pub(super) async fn fetch_location<S: Storage>(
     responses((status = 200, description = "OK", body = LocationResponse)),
     extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
 )]
-pub(super) async fn update_location_handler<S: Storage>(
+pub async fn update_location_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<LocationId>,
@@ -182,7 +182,7 @@ pub(super) async fn update_location_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateInventoryItemRequest {
+pub struct CreateInventoryItemRequest {
     variant: VariantId,
     /// Defaults to true: creating an item is how stock tracking starts.
     #[serde(default = "yes")]
@@ -199,7 +199,7 @@ fn yes() -> bool {
 /// Every field optional: only the ones sent change.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateInventoryItemRequest {
+pub struct UpdateInventoryItemRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = bool, required = false)]
@@ -212,7 +212,7 @@ pub(super) struct UpdateInventoryItemRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetOnHandRequest {
+pub struct SetOnHandRequest {
     on_hand: i64,
     /// The count last seen. If it moved since (a sale, another count), the request
     /// fails with `on_hand_changed` instead of overwriting it.
@@ -221,7 +221,7 @@ pub(super) struct SetOnHandRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AdjustOnHandRequest {
+pub struct AdjustOnHandRequest {
     /// Negative to remove stock.
     delta: i64,
 }
@@ -229,7 +229,7 @@ pub(super) struct AdjustOnHandRequest {
 /// A variant's stock. `id` is `null` when stock was never set up for the variant,
 /// which means untracked (always sellable).
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct InventoryResponse {
+pub struct InventoryResponse {
     id: Option<InventoryItemId>,
     variant: VariantId,
     tracked: bool,
@@ -242,7 +242,7 @@ pub(super) struct InventoryResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct LevelResponse {
+pub struct LevelResponse {
     location: LocationId,
     on_hand: i64,
     /// Set aside for orders, not yet shipped.
@@ -303,7 +303,7 @@ impl InventoryResponse {
     responses((status = 201, description = "Created", body = InventoryResponse)),
     extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
 )]
-pub(super) async fn create_item<S: Storage>(
+pub async fn create_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateInventoryItemRequest>,
@@ -327,7 +327,7 @@ pub(super) async fn create_item<S: Storage>(
     responses((status = 200, description = "OK", body = InventoryResponse)),
     extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
 )]
-pub(super) async fn fetch_item<S: Storage>(
+pub async fn fetch_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<InventoryItemId>,
@@ -346,7 +346,7 @@ pub(super) async fn fetch_item<S: Storage>(
     responses((status = 200, description = "OK", body = InventoryResponse)),
     extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
 )]
-pub(super) async fn update_item<S: Storage>(
+pub async fn update_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<InventoryItemId>,
@@ -371,7 +371,7 @@ pub(super) async fn update_item<S: Storage>(
     responses((status = 200, description = "OK", body = InventoryResponse)),
     extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
 )]
-pub(super) async fn set_level<S: Storage>(
+pub async fn set_level<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((item, location)): PathId<(InventoryItemId, LocationId)>,
@@ -400,7 +400,7 @@ pub(super) async fn set_level<S: Storage>(
     responses((status = 200, description = "OK", body = InventoryResponse)),
     extensions(("x-hypha-scopes" = json!(["inventory:write"]))),
 )]
-pub(super) async fn adjust_level<S: Storage>(
+pub async fn adjust_level<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((item, location)): PathId<(InventoryItemId, LocationId)>,
@@ -427,7 +427,7 @@ pub(super) async fn adjust_level<S: Storage>(
     responses((status = 200, description = "OK", body = InventoryResponse)),
     extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
 )]
-pub(super) async fn fetch_variant_inventory<S: Storage>(
+pub async fn fetch_variant_inventory<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(variant): PathId<VariantId>,
@@ -442,7 +442,7 @@ pub(super) async fn fetch_variant_inventory<S: Storage>(
 
 /// Every variant's stock in a product, in the product's order.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ProductInventoryResponse {
+pub struct ProductInventoryResponse {
     /// One per variant, as `GET /admin/variants/{id}/inventory` answers it.
     items: Vec<InventoryResponse>,
 }
@@ -456,7 +456,7 @@ pub(super) struct ProductInventoryResponse {
     responses((status = 200, description = "OK", body = ProductInventoryResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read", "inventory:read"]))),
 )]
-pub(super) async fn fetch_product_inventory<S: Storage>(
+pub async fn fetch_product_inventory<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,

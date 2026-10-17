@@ -7,10 +7,7 @@
 //! `outbound.allow_private` (`HYPHA_ALLOW_PRIVATE_CALLBACKS=true`) lifts it, for
 //! development and tests that run an app on localhost.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
-
-use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// Whether calls may reach private, loopback and other non-public addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -26,21 +23,6 @@ impl OutboundPolicy {
     }
 }
 
-/// The HTTP client for merchant-configured URLs: no redirects (a public URL could
-/// redirect to a private one), a short connect timeout, and, unless the policy allows
-/// private addresses, a resolver that drops every non-public address.
-pub fn client(policy: OutboundPolicy) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(3))
-        .redirect(reqwest::redirect::Policy::none());
-    if !policy.allow_private {
-        builder = builder.dns_resolver(Arc::new(PublicOnly));
-    }
-    builder
-        .build()
-        .map_err(|e| format!("cannot build the HTTP client: {e}"))
-}
-
 /// The header carrying a signed call's signature: `t=<unix seconds>,v1=<hex
 /// HMAC-SHA256 of "<t>.<body>" under the app's secret>` (Stripe's scheme), for rate
 /// callbacks and webhooks alike.
@@ -49,9 +31,16 @@ pub const SIGNATURE_HEADER: &str = "Hypha-Signature";
 /// answer counts as a failure rather than filling memory.
 pub const MAX_ANSWER_BYTES: usize = 256 * 1024;
 
+/// The methods merchant URLs are called with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    Get,
+    Post,
+}
+
 /// A signed call to a merchant-configured URL.
 pub struct SignedCall<'a> {
-    pub method: reqwest::Method,
+    pub method: Method,
     pub url: &'a str,
     pub timeout: std::time::Duration,
     /// The app's secret, in plain text.
@@ -75,73 +64,63 @@ pub enum CallError {
     Failed(String),
 }
 
-/// Sends `call` and returns the body of a 2xx answer, read up to `MAX_ANSWER_BYTES`
-/// (empty when `discard_answer`).
-/// Refuses an IP literal that isn't public under `policy` (names are checked by the
-/// client's resolver, `client`), and doesn't follow redirects.
-pub async fn send_signed(
-    client: &reqwest::Client,
-    policy: OutboundPolicy,
-    call: SignedCall<'_>,
-) -> Result<Vec<u8>, CallError> {
-    let literal = reqwest::Url::parse(call.url).ok().and_then(|u| {
-        let host = u.host_str()?.trim_start_matches('[').trim_end_matches(']');
-        host.parse::<IpAddr>().ok()
-    });
+/// A call ready to send: signed, its URL checked, every header set. What the host's
+/// `HostCalls` takes; it adds the transport (a connect timeout, no redirects, natively
+/// a resolver that keeps only public addresses).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboundCall {
+    pub method: Method,
+    pub url: String,
+    pub timeout: std::time::Duration,
+    /// Every header, the signature and content type included.
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+    /// The answer's body isn't read: a 2xx is success.
+    pub discard_answer: bool,
+}
+
+/// Signs `call` and checks its URL: an IP literal that isn't public under `policy` is
+/// refused here (names are the host's to check, when it resolves them).
+pub fn prepare(policy: OutboundPolicy, call: SignedCall<'_>) -> Result<OutboundCall, CallError> {
+    let literal = url_host(call.url).and_then(|host| host.parse::<IpAddr>().ok());
     if literal.is_some_and(|ip| !policy.allows(ip)) {
         return Err(CallError::Failed(
             "the URL is not a public address".to_string(),
         ));
     }
-    let mut request = client
-        .request(call.method, call.url)
-        .timeout(call.timeout)
-        .header("content-type", "application/json")
-        .header(SIGNATURE_HEADER, sign(call.secret, call.at, &call.body));
-    for (name, value) in call.headers {
-        request = request.header(*name, value);
-    }
-    let response = request.body(call.body).send().await.map_err(|e| {
-        if e.is_timeout() {
-            CallError::Timeout
-        } else {
-            tracing::warn!(url = call.url, error = %e, "outbound call: unreachable");
-            CallError::Failed("unreachable".to_string())
-        }
-    })?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(CallError::Failed(format!(
-            "answered HTTP {}",
-            status.as_u16()
-        )));
-    }
-    if call.discard_answer {
-        return Ok(Vec::new());
-    }
-    // Read chunk by chunk so an endless answer stops at the cap, not at the timeout.
-    let too_big = || CallError::Failed(format!("answered more than {MAX_ANSWER_BYTES} bytes"));
-    if response
-        .content_length()
-        .is_some_and(|len| len > MAX_ANSWER_BYTES as u64)
-    {
-        return Err(too_big());
-    }
-    let mut response = response;
-    let mut answer = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|e| {
-        if e.is_timeout() {
-            CallError::Timeout
-        } else {
-            CallError::Failed("the answer broke off".to_string())
-        }
-    })? {
-        if answer.len() + chunk.len() > MAX_ANSWER_BYTES {
-            return Err(too_big());
-        }
-        answer.extend_from_slice(&chunk);
-    }
-    Ok(answer)
+    let mut headers = vec![
+        ("content-type".to_string(), "application/json".to_string()),
+        (
+            SIGNATURE_HEADER.to_string(),
+            sign(call.secret, call.at, &call.body),
+        ),
+    ];
+    headers.extend(
+        call.headers
+            .iter()
+            .map(|(n, v)| ((*n).to_string(), v.clone())),
+    );
+    Ok(OutboundCall {
+        method: call.method,
+        url: call.url.to_string(),
+        timeout: call.timeout,
+        headers,
+        body: call.body,
+        discard_answer: call.discard_answer,
+    })
+}
+
+/// The host of an `http(s)://` URL, brackets removed from an IPv6 literal.
+fn url_host(url: &str) -> Option<&str> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = if let Some(v6) = host_port.strip_prefix('[') {
+        v6.split(']').next()?
+    } else {
+        host_port.split(':').next()?
+    };
+    (!host.is_empty()).then_some(host)
 }
 
 /// `t=<at>,v1=<hex HMAC-SHA256 of "<at>.<body>">`.
@@ -156,27 +135,6 @@ pub fn sign(secret: &str, at: i64, body: &[u8]) -> String {
     let digest = mac.finalize().into_bytes();
     let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
     format!("t={at},v1={hex}")
-}
-
-/// Resolves with the system resolver and keeps only public addresses; a name with none
-/// fails to resolve.
-struct PublicOnly;
-
-impl Resolve for PublicOnly {
-    fn resolve(&self, name: Name) -> Resolving {
-        let host = name.as_str().to_string();
-        Box::pin(async move {
-            let found: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
-                .await?
-                .filter(|a| is_public(a.ip()))
-                .collect();
-            if found.is_empty() {
-                return Err(format!("{host} has no public address").into());
-            }
-            let addrs: Addrs = Box::new(found.into_iter());
-            Ok(addrs)
-        })
-    }
 }
 
 /// Whether `ip` is a globally routable unicast address: not loopback, private,
@@ -270,6 +228,70 @@ mod tests {
         ] {
             assert!(public(ip), "{ip} counted as private");
         }
+    }
+
+    #[test]
+    fn a_urls_host_is_read_without_port_path_or_brackets() {
+        assert_eq!(
+            url_host("https://rates.example.com:8443/quote?x=1"),
+            Some("rates.example.com")
+        );
+        assert_eq!(url_host("http://user:pw@10.0.0.1/hook"), Some("10.0.0.1"));
+        assert_eq!(url_host("https://[::1]:3000/hook"), Some("::1"));
+        assert_eq!(url_host("not a url"), None);
+        assert_eq!(url_host("https:///nohost"), None);
+    }
+
+    fn call<'a>(url: &'a str, headers: &'a [(&'static str, String)]) -> SignedCall<'a> {
+        SignedCall {
+            method: Method::Post,
+            url,
+            timeout: std::time::Duration::from_secs(5),
+            secret: "s3cret",
+            at: 1_700_000_000,
+            headers,
+            body: b"{}".to_vec(),
+            discard_answer: false,
+        }
+    }
+
+    #[test]
+    fn a_prepared_call_carries_its_signature_and_headers() {
+        let headers = [("Hypha-Request-Id", String::from("rreq_1"))];
+        let prepared = prepare(
+            OutboundPolicy::default(),
+            call("https://rates.example.com/q", &headers),
+        )
+        .unwrap();
+        assert_eq!(
+            prepared.headers,
+            vec![
+                ("content-type".to_string(), "application/json".to_string()),
+                (
+                    SIGNATURE_HEADER.to_string(),
+                    sign("s3cret", 1_700_000_000, b"{}")
+                ),
+                ("Hypha-Request-Id".to_string(), "rreq_1".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_private_literal_is_refused_before_any_call() {
+        let refused = prepare(
+            OutboundPolicy::default(),
+            call("http://169.254.169.254/latest", &[]),
+        );
+        assert_eq!(
+            refused,
+            Err(CallError::Failed(
+                "the URL is not a public address".to_string()
+            ))
+        );
+        let allowed = OutboundPolicy {
+            allow_private: true,
+        };
+        assert!(prepare(allowed, call("http://127.0.0.1:9000/hook", &[])).is_ok());
     }
 
     #[test]

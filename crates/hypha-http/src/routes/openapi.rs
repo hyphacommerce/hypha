@@ -92,7 +92,7 @@ impl Doc {
 }
 
 /// One route of a document, as the route table and the handler's annotation give it.
-pub(crate) struct Row {
+pub struct Row {
     pub doc: Doc,
     pub method: &'static str,
     pub path: &'static str,
@@ -147,8 +147,8 @@ fn operation_id(surface: &str, module: &str, func: &str) -> String {
     format!("{surface}.{module}.{name}")
 }
 
-pub(crate) fn rows() -> Vec<Row> {
-    route_table!(openapi_rows!())
+pub fn rows() -> Vec<Row> {
+    crate::route_table!([openapi_rows]())
 }
 
 fn http_method(method: &str) -> HttpMethod {
@@ -418,12 +418,12 @@ fn serve(doc: Doc) -> impl IntoResponse {
 }
 
 /// `GET /admin/openapi.json`.
-pub(super) async fn admin_document<S>(State(_): State<SharedState<S>>) -> impl IntoResponse {
+pub async fn admin_document<S>(State(_): State<SharedState<S>>) -> impl IntoResponse {
     serve(Doc::Admin)
 }
 
 /// `GET /storefront/openapi.json`.
-pub(super) async fn storefront_document<S>(State(_): State<SharedState<S>>) -> impl IntoResponse {
+pub async fn storefront_document<S>(State(_): State<SharedState<S>>) -> impl IntoResponse {
     serve(Doc::Storefront)
 }
 

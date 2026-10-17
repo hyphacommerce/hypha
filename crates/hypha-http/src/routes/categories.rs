@@ -30,7 +30,7 @@ use crate::{
 
 /// A category in the admin's tree: what a list of categories shows, with its children.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CategoryNode {
+pub struct CategoryNode {
     id: CategoryId,
     name: String,
     handle: String,
@@ -56,7 +56,7 @@ fn nodes(tree: &CategoryTree, parent: Option<CategoryId>) -> Vec<CategoryNode> {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CategoryTreeResponse {
+pub struct CategoryTreeResponse {
     /// The top-level categories, each with its children, in order. A store has tens or
     /// hundreds, so the whole tree comes in one response.
     items: Vec<CategoryNode>,
@@ -69,7 +69,7 @@ pub(super) struct CategoryTreeResponse {
     responses((status = 200, description = "OK", body = CategoryTreeResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn list<S: Storage>(
+pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<CategoryTreeResponse>, ApiError> {
@@ -82,7 +82,7 @@ pub(super) async fn list<S: Storage>(
 
 /// A category next to it in the tree: an ancestor or a child.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CategoryRef {
+pub struct CategoryRef {
     id: CategoryId,
     name: String,
     handle: String,
@@ -99,7 +99,7 @@ impl From<&Category> for CategoryRef {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CategoryResponse {
+pub struct CategoryResponse {
     id: CategoryId,
     name: String,
     handle: String,
@@ -169,7 +169,7 @@ async fn respond<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateCategoryRequest {
+pub struct CreateCategoryRequest {
     /// 1 to 255 characters, trimmed.
     name: String,
     /// Lowercase letters, digits and single dashes; unique across categories.
@@ -195,7 +195,7 @@ pub(super) struct CreateCategoryRequest {
     responses((status = 201, description = "Created", body = CategoryResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn create<S: Storage>(
+pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateCategoryRequest>,
@@ -226,7 +226,7 @@ pub(super) async fn create<S: Storage>(
     responses((status = 200, description = "OK", body = CategoryResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CategoryId>,
@@ -239,7 +239,7 @@ pub(super) async fn fetch<S: Storage>(
 /// moves to the top level (the parent).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateCategoryRequest {
+pub struct UpdateCategoryRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     name: Option<String>,
@@ -272,7 +272,7 @@ pub(super) struct UpdateCategoryRequest {
     responses((status = 200, description = "OK", body = CategoryResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn update<S: Storage>(
+pub async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CategoryId>,
@@ -308,7 +308,7 @@ pub(super) async fn update<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn delete<S: Storage>(
+pub async fn delete<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CategoryId>,
@@ -322,7 +322,7 @@ pub(super) async fn delete<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CategoryProductsRequest {
+pub struct CategoryProductsRequest {
     /// Product IDs aren't checked: one that names no product is stored and never shows.
     products: Vec<ProductId>,
 }
@@ -336,7 +336,7 @@ pub(super) struct CategoryProductsRequest {
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn add_products<S: Storage>(
+pub async fn add_products<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CategoryId>,
@@ -359,7 +359,7 @@ pub(super) async fn add_products<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn remove_products<S: Storage>(
+pub async fn remove_products<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CategoryId>,
@@ -376,7 +376,7 @@ pub(super) async fn remove_products<S: Storage>(
 /// A product directly in a category. Product IDs are stored as given, so the product's
 /// fields are `null` for one that names no product.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CategoryProductResponse {
+pub struct CategoryProductResponse {
     id: ProductId,
     title: Option<String>,
     handle: Option<String>,
@@ -394,7 +394,7 @@ type CategoryProductPage = PageResponse<CategoryProductResponse>;
     responses((status = 200, description = "OK", body = CategoryProductPage)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn list_products<S: Storage>(
+pub async fn list_products<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CategoryId>,
@@ -428,7 +428,7 @@ pub(super) async fn list_products<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CategoryImageRequest {
+pub struct CategoryImageRequest {
     /// An image asset that's uploaded and public; `null` clears it.
     image: Option<AssetId>,
 }
@@ -443,7 +443,7 @@ pub(super) struct CategoryImageRequest {
     responses((status = 200, description = "OK", body = CategoryResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn set_image<S: Storage>(
+pub async fn set_image<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CategoryId>,
@@ -457,13 +457,13 @@ pub(super) async fn set_image<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ProductCategoriesRequest {
+pub struct ProductCategoriesRequest {
     /// Every category the product should be in; it leaves the others.
     categories: Vec<CategoryId>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ProductCategoriesResponse {
+pub struct ProductCategoriesResponse {
     /// Sorted.
     categories: Vec<CategoryId>,
 }
@@ -477,7 +477,7 @@ pub(super) struct ProductCategoriesResponse {
     responses((status = 200, description = "OK", body = ProductCategoriesResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn set_for_product<S: Storage>(
+pub async fn set_for_product<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
@@ -495,7 +495,7 @@ pub(super) async fn set_for_product<S: Storage>(
 
 /// A category in the storefront's tree, with its shown children.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct StorefrontCategoryNode {
+pub struct StorefrontCategoryNode {
     id: CategoryId,
     name: String,
     handle: String,
@@ -519,7 +519,7 @@ fn storefront_nodes(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct StorefrontCategoryTreeResponse {
+pub struct StorefrontCategoryTreeResponse {
     /// The shown top-level categories, each with its shown children, in order. A hidden
     /// category is left out with everything under it.
     items: Vec<StorefrontCategoryNode>,
@@ -532,7 +532,7 @@ pub(super) struct StorefrontCategoryTreeResponse {
     responses((status = 200, description = "OK", body = StorefrontCategoryTreeResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn list_storefront<S: Storage>(
+pub async fn list_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
 ) -> Result<Json<StorefrontCategoryTreeResponse>, ApiError> {
@@ -545,7 +545,7 @@ pub(super) async fn list_storefront<S: Storage>(
 
 /// A category page's category: no admin fields, only shown children.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct StorefrontCategoryResponse {
+pub struct StorefrontCategoryResponse {
     id: CategoryId,
     name: String,
     handle: String,
@@ -569,7 +569,7 @@ pub(super) struct StorefrontCategoryResponse {
     responses((status = 200, description = "OK", body = StorefrontCategoryResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn fetch_by_handle_storefront<S: Storage>(
+pub async fn fetch_by_handle_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(handle): PathId<String>,

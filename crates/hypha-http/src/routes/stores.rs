@@ -15,7 +15,7 @@ use crate::{
 };
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct StoreResponse {
+pub struct StoreResponse {
     id: StoreId,
     name: String,
     /// Where shoppers and agents can write to the store.
@@ -35,7 +35,7 @@ pub(super) struct StoreResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SetupProgressResponse {
+pub struct SetupProgressResponse {
     /// The step the merchant was last on, as the admin named it; `null` before they
     /// started.
     step: Option<String>,
@@ -82,7 +82,7 @@ impl From<&Store> for StoreResponse {
     responses((status = 200, description = "OK", body = StoreResponse)),
     extensions(("x-hypha-scopes" = json!(["stores:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<StoreResponse>, ApiError> {
@@ -97,7 +97,7 @@ pub(super) async fn fetch<S: Storage>(
 /// A JSON Merge Patch of the store: absent fields stay as they are.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateStoreRequest {
+pub struct UpdateStoreRequest {
     /// 1 to 100 characters, trimmed.
     #[serde(default, deserialize_with = "patch::non_null")]
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
@@ -147,7 +147,7 @@ pub(super) struct UpdateStoreRequest {
     responses((status = 200, description = "OK", body = StoreResponse)),
     extensions(("x-hypha-scopes" = json!(["stores:write"]))),
 )]
-pub(super) async fn update<S: Storage>(
+pub async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<UpdateStoreRequest>,
@@ -174,7 +174,7 @@ pub(super) async fn update<S: Storage>(
 /// What a storefront sees of the store (design note 0021, SU4): what a header, footer
 /// or contact page shows. Legal details stay in the admin until a storefront needs them.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct StorefrontStoreResponse {
+pub struct StorefrontStoreResponse {
     name: String,
     /// Plain text, at most 500 characters.
     description: Option<String>,
@@ -190,7 +190,7 @@ pub(super) struct StorefrontStoreResponse {
     responses((status = 200, description = "OK", body = StorefrontStoreResponse)),
     extensions(("x-hypha-scopes" = json!(["stores:read"]))),
 )]
-pub(super) async fn fetch_storefront<S: Storage>(
+pub async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
 ) -> Result<Json<StorefrontStoreResponse>, ApiError> {

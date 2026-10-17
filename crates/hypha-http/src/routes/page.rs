@@ -31,7 +31,7 @@ use crate::error::ApiError;
 /// with a type alias (`type ProductPage = PageResponse<ProductResponse>;`), since
 /// `#[utoipa::path]` treats a generic `body =` differently.
 #[derive(Serialize)]
-pub(crate) struct PageResponse<T> {
+pub struct PageResponse<T> {
     items: Vec<T>,
     /// Whether there are more after these.
     has_more: bool,
@@ -77,7 +77,7 @@ impl<T> PageResponse<T> {
 
 /// What a request's filters were, so the next page's cursor only continues this list.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct ListScope {
+pub struct ListScope {
     /// The filter parameters, sorted, so their order in the URL doesn't matter.
     filters: Vec<(String, String)>,
 }
@@ -184,7 +184,7 @@ fn next_cursor<U, Id: Display>(
 
 /// The filters of a sorted list (design note 0024): whether a cursor's sort key is the
 /// kind the requested sort uses, so a cursor can't be replayed under another sort.
-pub(crate) trait SortedFilters {
+pub trait SortedFilters {
     fn fits(&self, key: &SortKey) -> bool;
 }
 
@@ -237,7 +237,7 @@ impl<T: ToSchema> ToSchema for PageResponse<T> {
 /// like `JsonBody`. `cursor` and `limit` are the page; every other parameter goes to
 /// `F`, the list's filters, which refuses unknown ones (`#[serde(deny_unknown_fields)]`),
 /// the same as unknown body fields.
-pub(crate) struct ListQuery<F = NoFilters> {
+pub struct ListQuery<F = NoFilters> {
     query: Option<String>,
     _filters: PhantomData<fn() -> F>,
 }
@@ -245,7 +245,7 @@ pub(crate) struct ListQuery<F = NoFilters> {
 /// The filters of a list that has none: any parameter besides the page's is refused.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct NoFilters {}
+pub struct NoFilters {}
 
 impl<S: Send + Sync, F> FromRequestParts<S> for ListQuery<F> {
     type Rejection = std::convert::Infallible;
@@ -346,7 +346,7 @@ impl<F: DeserializeOwned> ListQuery<F> {
 /// `cursor` and `limit` in the OpenAPI documents: list it in a list route's
 /// `params(...)`, next to its filters. The documents give a route with these exact
 /// parameters the paging errors (`invalid_cursor`, `invalid_limit`).
-pub(crate) struct PageParams;
+pub struct PageParams;
 
 impl utoipa::IntoParams for PageParams {
     fn into_params(_: impl Fn() -> Option<ParameterIn>) -> Vec<Parameter> {

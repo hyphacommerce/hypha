@@ -228,7 +228,7 @@ impl ApiError {
         )
     }
 
-    pub(crate) fn internal(error: impl std::fmt::Display) -> Self {
+    pub fn internal(error: impl std::fmt::Display) -> Self {
         tracing::error!(%error, "internal error");
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,

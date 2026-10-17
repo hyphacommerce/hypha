@@ -25,7 +25,7 @@ use crate::{
 /// `AssetKind` on the wire.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum AssetKindDto {
+pub enum AssetKindDto {
     Image,
     Video,
     File,
@@ -54,7 +54,7 @@ impl From<AssetKindDto> for AssetKind {
 /// `AssetStatus` on the wire.
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum AssetStatusDto {
+pub enum AssetStatusDto {
     Pending,
     Ready,
     Failed,
@@ -73,7 +73,7 @@ impl From<AssetStatus> for AssetStatusDto {
 /// `Visibility` on the wire.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum VisibilityDto {
+pub enum VisibilityDto {
     /// Served from the public media URL (a CDN).
     #[default]
     Public,
@@ -100,7 +100,7 @@ impl From<VisibilityDto> for Visibility {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AssetResponse {
+pub struct AssetResponse {
     id: AssetId,
     /// Only `ready` assets are listed and can be attached.
     status: AssetStatusDto,
@@ -153,7 +153,7 @@ impl AssetResponse {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateAssetRequest {
+pub struct CreateAssetRequest {
     /// The file's name, kept for people; up to 255 characters.
     filename: String,
     /// One of `image/jpeg`, `image/png`, `image/webp`, `image/avif`, `image/gif`,
@@ -171,7 +171,7 @@ pub(super) struct CreateAssetRequest {
 
 /// A request for the client to send itself, with the file as its body.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct UploadRequestResponse {
+pub struct UploadRequestResponse {
     /// `PUT`.
     method: &'static str,
     url: String,
@@ -182,13 +182,13 @@ pub(super) struct UploadRequestResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct HeaderResponse {
+pub struct HeaderResponse {
     name: String,
     value: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CreateAssetResponse {
+pub struct CreateAssetResponse {
     asset: AssetResponse,
     upload: UploadRequestResponse,
 }
@@ -210,7 +210,7 @@ fn media<S>(state: &SharedState<S>) -> Result<&Media, ApiError> {
     responses((status = 201, description = "Created", body = CreateAssetResponse)),
     extensions(("x-hypha-scopes" = json!(["media:write"]))),
 )]
-pub(super) async fn create<S: Storage>(
+pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateAssetRequest>,
@@ -261,7 +261,7 @@ pub(super) async fn create<S: Storage>(
     responses((status = 200, description = "OK", body = AssetResponse)),
     extensions(("x-hypha-scopes" = json!(["media:write"]))),
 )]
-pub(super) async fn complete<S: Storage>(
+pub async fn complete<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<AssetId>,
@@ -275,7 +275,7 @@ pub(super) async fn complete<S: Storage>(
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
-pub(super) struct AssetFilters {
+pub struct AssetFilters {
     /// Only assets of this kind.
     kind: Option<AssetKindDto>,
     /// Only assets whose file name, alt text or title contains this text, ignoring case.
@@ -289,7 +289,7 @@ pub(super) struct AssetFilters {
 /// lowercased, character by character; ties go by upload, in the same direction.
 #[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum AssetSortDto {
+pub enum AssetSortDto {
     Newest,
     Oldest,
     NameAsc,
@@ -325,7 +325,7 @@ type AssetPage = PageResponse<AssetResponse>;
     responses((status = 200, description = "OK", body = AssetPage)),
     extensions(("x-hypha-scopes" = json!(["media:read"]))),
 )]
-pub(super) async fn list<S: Storage>(
+pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     query: ListQuery<AssetFilters>,
@@ -359,7 +359,7 @@ pub(super) async fn list<S: Storage>(
     responses((status = 200, description = "OK", body = AssetResponse)),
     extensions(("x-hypha-scopes" = json!(["media:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<AssetId>,
@@ -373,7 +373,7 @@ pub(super) async fn fetch<S: Storage>(
 /// A JSON Merge Patch of an asset's metadata: absent fields stay, `null` clears.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateAssetRequest {
+pub struct UpdateAssetRequest {
     /// Describes the image for screen readers and search engines; up to 255 characters.
     #[serde(default, deserialize_with = "patch::nullable")]
     alt: Option<Option<String>>,
@@ -391,7 +391,7 @@ pub(super) struct UpdateAssetRequest {
     responses((status = 200, description = "OK", body = AssetResponse)),
     extensions(("x-hypha-scopes" = json!(["media:write"]))),
 )]
-pub(super) async fn update<S: Storage>(
+pub async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<AssetId>,
@@ -419,7 +419,7 @@ pub(super) async fn update<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["media:write"]))),
 )]
-pub(super) async fn remove<S: Storage>(
+pub async fn remove<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<AssetId>,
@@ -432,7 +432,7 @@ pub(super) async fn remove<S: Storage>(
 
 /// Something that uses an asset.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct UsageOwnerResponse {
+pub struct UsageOwnerResponse {
     /// `product`, or a spore's own kind of owner.
     kind: String,
     /// The owner's ID, e.g. `prod_…` for a product.
@@ -440,7 +440,7 @@ pub(super) struct UsageOwnerResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AssetUsageResponse {
+pub struct AssetUsageResponse {
     owner: UsageOwnerResponse,
     /// How the owner uses it: for a product, `featured` (its first item) or `gallery`.
     role: String,
@@ -469,7 +469,7 @@ type AssetUsagePage = PageResponse<AssetUsageResponse>;
     responses((status = 200, description = "OK", body = AssetUsagePage)),
     extensions(("x-hypha-scopes" = json!(["media:read"]))),
 )]
-pub(super) async fn usages<S: Storage>(
+pub async fn usages<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<AssetId>,

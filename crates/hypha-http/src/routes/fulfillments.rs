@@ -22,7 +22,7 @@ use crate::{
 /// A tracking number, with the carrier and a URL to follow it when known.
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct TrackingDto {
+pub struct TrackingDto {
     /// "DHL Express"; free text.
     #[serde(default)]
     carrier: Option<String>,
@@ -47,7 +47,7 @@ impl TrackingDto {
 
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct FulfillmentLineDto {
+pub struct FulfillmentLineDto {
     /// An order line of the order in the URL.
     line: OrderLineId,
     quantity: u32,
@@ -55,7 +55,7 @@ pub(super) struct FulfillmentLineDto {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateFulfillmentRequest {
+pub struct CreateFulfillmentRequest {
     /// Where the units leave from. Another location than the one holding them is fine:
     /// its stock goes down, and the reservation elsewhere is released.
     location: LocationId,
@@ -72,7 +72,7 @@ pub(super) struct CreateFulfillmentRequest {
 /// `FulfillmentState` on the wire.
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum FulfillmentStateDto {
+pub enum FulfillmentStateDto {
     /// It left, and counts on the order.
     Shipped,
     /// Taken back: its units are in stock again.
@@ -80,7 +80,7 @@ pub(super) enum FulfillmentStateDto {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct FulfillmentResponse {
+pub struct FulfillmentResponse {
     id: FulfillmentId,
     order: OrderId,
     location: LocationId,
@@ -134,7 +134,7 @@ impl FulfillmentResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct FulfillmentList {
+pub struct FulfillmentList {
     /// Newest first, cancelled ones too.
     items: Vec<FulfillmentResponse>,
 }
@@ -164,7 +164,7 @@ pub(super) fn notify_buyer<S: Storage>(state: &SharedState<S>, email: BuyerEmail
     responses((status = 201, description = "Created", body = FulfillmentResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`.")))),
     extensions(("x-hypha-scopes" = json!(["fulfillments:write"]))),
 )]
-pub(super) async fn create<S: Storage>(
+pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(order): PathId<OrderId>,
@@ -210,7 +210,7 @@ pub(super) async fn create<S: Storage>(
     responses((status = 200, description = "OK", body = FulfillmentList)),
     extensions(("x-hypha-scopes" = json!(["fulfillments:read"]))),
 )]
-pub(super) async fn list<S: Storage>(
+pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(order): PathId<OrderId>,
@@ -240,7 +240,7 @@ pub(super) async fn list<S: Storage>(
     responses((status = 200, description = "OK", body = FulfillmentResponse)),
     extensions(("x-hypha-scopes" = json!(["fulfillments:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<FulfillmentId>,
@@ -253,7 +253,7 @@ pub(super) async fn fetch<S: Storage>(
 /// A JSON Merge Patch of a fulfilment: absent fields stay as they are.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateFulfillmentRequest {
+pub struct UpdateFulfillmentRequest {
     /// Replaces every tracking number (at most 10; `[]` removes them).
     #[serde(default, deserialize_with = "patch::non_null")]
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
@@ -274,7 +274,7 @@ pub(super) struct UpdateFulfillmentRequest {
     responses((status = 200, description = "OK", body = FulfillmentResponse)),
     extensions(("x-hypha-scopes" = json!(["fulfillments:write"]))),
 )]
-pub(super) async fn update<S: Storage>(
+pub async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<FulfillmentId>,
@@ -311,7 +311,7 @@ pub(super) async fn update<S: Storage>(
     responses((status = 200, description = "OK", body = FulfillmentResponse)),
     extensions(("x-hypha-scopes" = json!(["fulfillments:write"]))),
 )]
-pub(super) async fn cancel<S: Storage>(
+pub async fn cancel<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<FulfillmentId>,

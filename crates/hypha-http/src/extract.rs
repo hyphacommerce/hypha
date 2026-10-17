@@ -7,7 +7,6 @@
 //! parsed or fingerprinted, and learns nothing about what a valid body looks like.
 
 use std::marker::PhantomData;
-use std::time::Instant;
 
 use axum::{
     Json,
@@ -204,7 +203,7 @@ impl Credential {
                 authenticate_api_key(ports.api_keys(), token).await?,
             )),
             Some(TokenKind::PublishableKey) => {
-                let now = Instant::now();
+                let now = clock.now();
                 if let Some(ctx) = publishable_keys.get(token, now) {
                     return Ok(Authenticated::Key(ctx));
                 }
@@ -413,7 +412,7 @@ pub fn idempotent_response(status: StatusCode, body: impl Serialize, replayed: b
 /// like `JsonBody`, so strangers get a 401 first. `F` refuses unknown parameters
 /// (`#[serde(deny_unknown_fields)]`); anything malformed is `400 invalid_query`. Lists
 /// use `ListQuery`, which adds the page.
-pub(crate) struct Query<F> {
+pub struct Query<F> {
     query: Option<String>,
     _params: PhantomData<fn() -> F>,
 }

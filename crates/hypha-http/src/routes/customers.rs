@@ -22,7 +22,7 @@ use crate::{
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateCustomerRequest {
+pub struct CreateCustomerRequest {
     email: String,
     first_name: Option<String>,
     last_name: Option<String>,
@@ -33,7 +33,7 @@ pub(super) struct CreateCustomerRequest {
 /// phone. The email can be changed but not cleared.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateCustomerRequest {
+pub struct UpdateCustomerRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = String, required = false)]
@@ -50,7 +50,7 @@ pub(super) struct UpdateCustomerRequest {
 /// including whether it is a default.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AddressRequest {
+pub struct AddressRequest {
     first_name: Option<String>,
     last_name: String,
     company: Option<String>,
@@ -89,7 +89,7 @@ impl From<AddressRequest> for SaveAddress {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CustomerResponse {
+pub struct CustomerResponse {
     id: CustomerId,
     email: Email,
     first_name: Option<String>,
@@ -105,7 +105,7 @@ pub(super) struct CustomerResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AddressResponse {
+pub struct AddressResponse {
     id: AddressId,
     first_name: Option<String>,
     last_name: String,
@@ -158,7 +158,7 @@ impl CustomerResponse {
 
 /// A customer in a list: without the address book (design note 0024).
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CustomerSummaryResponse {
+pub struct CustomerSummaryResponse {
     id: CustomerId,
     email: Email,
     first_name: Option<String>,
@@ -194,7 +194,7 @@ type CustomerSummaryPage = PageResponse<CustomerSummaryResponse>;
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
-pub(super) struct CustomerFilters {
+pub struct CustomerFilters {
     /// Only customers whose email, first or last name or phone contains this text,
     /// ignoring case. Up to 255 characters; blank filters nothing.
     q: Option<String>,
@@ -207,7 +207,7 @@ pub(super) struct CustomerFilters {
 /// character; ties go by creation, in the same direction.
 #[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum CustomerSortDto {
+pub enum CustomerSortDto {
     Newest,
     Oldest,
     EmailAsc,
@@ -243,7 +243,7 @@ impl SortedFilters for CustomerFilters {
     responses((status = 200, description = "OK", body = CustomerSummaryPage)),
     extensions(("x-hypha-scopes" = json!(["customers:read"]))),
 )]
-pub(super) async fn list<S: Storage>(
+pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     query: ListQuery<CustomerFilters>,
@@ -277,7 +277,7 @@ pub(super) async fn list<S: Storage>(
     responses((status = 201, description = "Created", body = CustomerResponse)),
     extensions(("x-hypha-scopes" = json!(["customers:write"]))),
 )]
-pub(super) async fn create<S: Storage>(
+pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateCustomerRequest>,
@@ -302,7 +302,7 @@ pub(super) async fn create<S: Storage>(
     responses((status = 200, description = "OK", body = CustomerResponse)),
     extensions(("x-hypha-scopes" = json!(["customers:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CustomerId>,
@@ -321,7 +321,7 @@ pub(super) async fn fetch<S: Storage>(
     responses((status = 200, description = "OK", body = CustomerResponse)),
     extensions(("x-hypha-scopes" = json!(["customers:write"]))),
 )]
-pub(super) async fn update<S: Storage>(
+pub async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CustomerId>,
@@ -348,7 +348,7 @@ pub(super) async fn update<S: Storage>(
     responses((status = 201, description = "Created", body = CustomerResponse)),
     extensions(("x-hypha-scopes" = json!(["customers:write"]))),
 )]
-pub(super) async fn add_address_handler<S: Storage>(
+pub async fn add_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CustomerId>,
@@ -369,7 +369,7 @@ pub(super) async fn add_address_handler<S: Storage>(
     responses((status = 200, description = "OK", body = CustomerResponse)),
     extensions(("x-hypha-scopes" = json!(["customers:write"]))),
 )]
-pub(super) async fn update_address_handler<S: Storage>(
+pub async fn update_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, address)): PathId<(CustomerId, AddressId)>,
@@ -389,7 +389,7 @@ pub(super) async fn update_address_handler<S: Storage>(
     responses((status = 200, description = "OK", body = CustomerResponse)),
     extensions(("x-hypha-scopes" = json!(["customers:write"]))),
 )]
-pub(super) async fn remove_address_handler<S: Storage>(
+pub async fn remove_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, address)): PathId<(CustomerId, AddressId)>,

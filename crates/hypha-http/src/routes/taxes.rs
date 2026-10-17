@@ -20,12 +20,12 @@ use crate::{
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateTaxClassRequest {
+pub struct CreateTaxClassRequest {
     name: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct TaxClassResponse {
+pub struct TaxClassResponse {
     id: TaxClassId,
     name: String,
 }
@@ -41,7 +41,7 @@ impl From<&TaxClass> for TaxClassResponse {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AssignTaxClassRequest {
+pub struct AssignTaxClassRequest {
     products: Vec<ProductId>,
     /// `null` puts the products back on each country's default rate.
     tax_class: Option<TaxClassId>,
@@ -55,7 +55,7 @@ pub(super) struct AssignTaxClassRequest {
     responses((status = 201, description = "Created", body = TaxClassResponse)),
     extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
 )]
-pub(super) async fn create_class<S: Storage>(
+pub async fn create_class<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateTaxClassRequest>,
@@ -75,7 +75,7 @@ pub(super) async fn create_class<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
 )]
-pub(super) async fn assign_class<S: Storage>(
+pub async fn assign_class<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<AssignTaxClassRequest>,
@@ -94,7 +94,7 @@ pub(super) async fn assign_class<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateTaxRegionRequest {
+pub struct CreateTaxRegionRequest {
     country: String,
     /// Parts per million: 250000 = 25%.
     default_rate_ppm: u32,
@@ -102,7 +102,7 @@ pub(super) struct CreateTaxRegionRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateTaxRegionRequest {
+pub struct UpdateTaxRegionRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = u32, required = false)]
@@ -111,12 +111,12 @@ pub(super) struct UpdateTaxRegionRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetClassRateRequest {
+pub struct SetClassRateRequest {
     rate_ppm: u32,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct TaxRegionResponse {
+pub struct TaxRegionResponse {
     id: TaxRegionId,
     country: CountryCode,
     default_rate_ppm: TaxRate,
@@ -124,7 +124,7 @@ pub(super) struct TaxRegionResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ClassRateResponse {
+pub struct ClassRateResponse {
     tax_class: TaxClassId,
     rate_ppm: TaxRate,
 }
@@ -155,7 +155,7 @@ impl From<&TaxRegion> for TaxRegionResponse {
     responses((status = 201, description = "Created", body = TaxRegionResponse)),
     extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
 )]
-pub(super) async fn create_region<S: Storage>(
+pub async fn create_region<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateTaxRegionRequest>,
@@ -178,7 +178,7 @@ pub(super) async fn create_region<S: Storage>(
     responses((status = 200, description = "OK", body = TaxRegionResponse)),
     extensions(("x-hypha-scopes" = json!(["taxes:read"]))),
 )]
-pub(super) async fn fetch_region<S: Storage>(
+pub async fn fetch_region<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<TaxRegionId>,
@@ -197,7 +197,7 @@ pub(super) async fn fetch_region<S: Storage>(
     responses((status = 200, description = "OK", body = TaxRegionResponse)),
     extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
 )]
-pub(super) async fn update_region<S: Storage>(
+pub async fn update_region<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<TaxRegionId>,
@@ -221,7 +221,7 @@ pub(super) async fn update_region<S: Storage>(
     responses((status = 200, description = "OK", body = TaxRegionResponse)),
     extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
 )]
-pub(super) async fn set_region_class_rate<S: Storage>(
+pub async fn set_region_class_rate<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, class)): PathId<(TaxRegionId, TaxClassId)>,
@@ -250,7 +250,7 @@ pub(super) async fn set_region_class_rate<S: Storage>(
     responses((status = 200, description = "OK", body = TaxRegionResponse)),
     extensions(("x-hypha-scopes" = json!(["taxes:write"]))),
 )]
-pub(super) async fn remove_region_class_rate<S: Storage>(
+pub async fn remove_region_class_rate<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, class)): PathId<(TaxRegionId, TaxClassId)>,
@@ -261,7 +261,7 @@ pub(super) async fn remove_region_class_rate<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct TaxClassListResponse {
+pub struct TaxClassListResponse {
     /// Oldest first. A store has a handful, so they come in one list.
     items: Vec<TaxClassResponse>,
 }
@@ -273,7 +273,7 @@ pub(super) struct TaxClassListResponse {
     responses((status = 200, description = "OK", body = TaxClassListResponse)),
     extensions(("x-hypha-scopes" = json!(["taxes:read"]))),
 )]
-pub(super) async fn list_classes<S: Storage>(
+pub async fn list_classes<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<TaxClassListResponse>, ApiError> {
@@ -285,7 +285,7 @@ pub(super) async fn list_classes<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct TaxRegionListResponse {
+pub struct TaxRegionListResponse {
     /// Oldest first, at most one per country, so they come in one list.
     items: Vec<TaxRegionResponse>,
 }
@@ -297,7 +297,7 @@ pub(super) struct TaxRegionListResponse {
     responses((status = 200, description = "OK", body = TaxRegionListResponse)),
     extensions(("x-hypha-scopes" = json!(["taxes:read"]))),
 )]
-pub(super) async fn list_regions<S: Storage>(
+pub async fn list_regions<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<TaxRegionListResponse>, ApiError> {

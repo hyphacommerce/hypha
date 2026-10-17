@@ -10,14 +10,14 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use hypha_core::Ctx;
+use hypha_core::{Ctx, Timestamp};
 use sha2::{Digest, Sha256};
 
 #[derive(Default)]
 pub struct KeyCache {
-    entries: Mutex<HashMap<[u8; 32], (Ctx, Instant)>>,
+    entries: Mutex<HashMap<[u8; 32], (Ctx, Timestamp)>>,
 }
 
 impl KeyCache {
@@ -28,13 +28,14 @@ impl KeyCache {
     const CAPACITY: usize = 256;
 
     /// The `Ctx` `token` authenticated as, if that was less than [`Self::TTL`] ago.
-    pub fn get(&self, token: &str, now: Instant) -> Option<Ctx> {
+    pub fn get(&self, token: &str, now: Timestamp) -> Option<Ctx> {
         let entries = self.lock();
         let (ctx, at) = entries.get(&digest(token))?;
-        (now.saturating_duration_since(*at) < Self::TTL).then(|| ctx.clone())
+        let age = now.unix_micros().saturating_sub(at.unix_micros());
+        (age < Self::TTL.as_micros() as i64).then(|| ctx.clone())
     }
 
-    pub fn put(&self, token: &str, ctx: &Ctx, now: Instant) {
+    pub fn put(&self, token: &str, ctx: &Ctx, now: Timestamp) {
         let mut entries = self.lock();
         if entries.len() >= Self::CAPACITY {
             entries.clear();
@@ -47,7 +48,7 @@ impl KeyCache {
         self.lock().clear();
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<[u8; 32], (Ctx, Instant)>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<[u8; 32], (Ctx, Timestamp)>> {
         // A poisoned lock still holds whole entries; a panic elsewhere can't tear one.
         self.entries
             .lock()
@@ -75,10 +76,10 @@ mod tests {
     #[test]
     fn a_key_is_reused_within_the_ttl() {
         let cache = KeyCache::default();
-        let start = Instant::now();
+        let start = Timestamp::from_unix_micros(1_000_000);
         cache.put("hypha_pk_a", &ctx(), start);
         assert_eq!(
-            cache.get("hypha_pk_a", start + Duration::from_secs(29)),
+            cache.get("hypha_pk_a", start.plus(Duration::from_secs(29))),
             Some(ctx())
         );
     }
@@ -86,15 +87,15 @@ mod tests {
     #[test]
     fn a_key_is_looked_up_again_after_the_ttl() {
         let cache = KeyCache::default();
-        let start = Instant::now();
+        let start = Timestamp::from_unix_micros(1_000_000);
         cache.put("hypha_pk_a", &ctx(), start);
-        assert_eq!(cache.get("hypha_pk_a", start + KeyCache::TTL), None);
+        assert_eq!(cache.get("hypha_pk_a", start.plus(KeyCache::TTL)), None);
     }
 
     #[test]
     fn another_key_isnt_found() {
         let cache = KeyCache::default();
-        let start = Instant::now();
+        let start = Timestamp::from_unix_micros(1_000_000);
         cache.put("hypha_pk_a", &ctx(), start);
         assert_eq!(cache.get("hypha_pk_b", start), None);
     }
@@ -102,7 +103,7 @@ mod tests {
     #[test]
     fn clearing_forgets_every_key() {
         let cache = KeyCache::default();
-        let start = Instant::now();
+        let start = Timestamp::from_unix_micros(1_000_000);
         cache.put("hypha_pk_a", &ctx(), start);
         cache.clear();
         assert_eq!(cache.get("hypha_pk_a", start), None);

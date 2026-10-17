@@ -28,7 +28,7 @@ use crate::{
 /// How an option's price is found: one of a provider's services, or a built-in rate.
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub(super) enum RateDto {
+pub enum RateDto {
     /// Computed by Hypha: a table of tiers per currency over a basis. Flat is one open
     /// tier; free over a subtotal is two subtotal tiers, the second costing 0.
     Builtin {
@@ -41,7 +41,7 @@ pub(super) enum RateDto {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum BasisDto {
+pub enum BasisDto {
     Flat,
     /// The group's subtotal, in minor units.
     Subtotal,
@@ -51,7 +51,7 @@ pub(super) enum BasisDto {
 
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RateTableDto {
+pub struct RateTableDto {
     currency: Currency,
     /// Ascending; the last has no `up_to`.
     tiers: Vec<TierDto>,
@@ -59,7 +59,7 @@ pub(super) struct RateTableDto {
 
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct TierDto {
+pub struct TierDto {
     /// The tier applies while the basis is below this (exclusive); `null` on the last.
     #[serde(default)]
     up_to: Option<u64>,
@@ -70,7 +70,7 @@ pub(super) struct TierDto {
 /// Delivery in days, from `min_days` to `max_days`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct DeliveryEstimateDto {
+pub struct DeliveryEstimateDto {
     pub(super) min_days: u16,
     pub(super) max_days: u16,
 }
@@ -158,7 +158,7 @@ fn estimate(dto: DeliveryEstimateDto) -> Result<DeliveryEstimate, ApiError> {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ShippingZoneResponse {
+pub struct ShippingZoneResponse {
     id: ShippingZoneId,
     name: String,
     /// A country is in at most one zone.
@@ -172,7 +172,7 @@ pub(super) struct ShippingZoneResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ShippingOptionResponse {
+pub struct ShippingOptionResponse {
     id: ShippingOptionId,
     name: String,
     /// Stable, for apps and analytics; unique within the zone.
@@ -220,7 +220,7 @@ impl ShippingZoneResponse {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateZoneRequest {
+pub struct CreateZoneRequest {
     name: String,
     /// ISO 3166-1 alpha-2 codes, each in no other zone.
     countries: Vec<String>,
@@ -234,7 +234,7 @@ pub(super) struct CreateZoneRequest {
     responses((status = 201, description = "Created", body = ShippingZoneResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn create_zone_handler<S: Storage>(
+pub async fn create_zone_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateZoneRequest>,
@@ -250,7 +250,7 @@ pub(super) async fn create_zone_handler<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ShippingZoneList {
+pub struct ShippingZoneList {
     /// By name. A store has a handful, so there are no pages.
     items: Vec<ShippingZoneResponse>,
 }
@@ -262,7 +262,7 @@ pub(super) struct ShippingZoneList {
     responses((status = 200, description = "OK", body = ShippingZoneList)),
     extensions(("x-hypha-scopes" = json!(["shipping:read"]))),
 )]
-pub(super) async fn list_zones_handler<S: Storage>(
+pub async fn list_zones_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<ShippingZoneList>, ApiError> {
@@ -284,7 +284,7 @@ pub(super) async fn list_zones_handler<S: Storage>(
     responses((status = 200, description = "OK", body = ShippingZoneResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:read"]))),
 )]
-pub(super) async fn fetch_zone<S: Storage>(
+pub async fn fetch_zone<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ShippingZoneId>,
@@ -297,7 +297,7 @@ pub(super) async fn fetch_zone<S: Storage>(
 /// Name and countries (JSON Merge Patch; neither can be `null`).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateZoneRequest {
+pub struct UpdateZoneRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     name: Option<String>,
@@ -316,7 +316,7 @@ pub(super) struct UpdateZoneRequest {
     responses((status = 200, description = "OK", body = ShippingZoneResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn update_zone_handler<S: Storage>(
+pub async fn update_zone_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ShippingZoneId>,
@@ -340,7 +340,7 @@ pub(super) async fn update_zone_handler<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn delete_zone_handler<S: Storage>(
+pub async fn delete_zone_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ShippingZoneId>,
@@ -354,7 +354,7 @@ pub(super) async fn delete_zone_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AddOptionRequest {
+pub struct AddOptionRequest {
     name: String,
     code: String,
     rate: RateDto,
@@ -382,7 +382,7 @@ fn enabled_by_default() -> bool {
     responses((status = 201, description = "Created", body = ShippingZoneResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn add_option_handler<S: Storage>(
+pub async fn add_option_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ShippingZoneId>,
@@ -406,7 +406,7 @@ pub(super) async fn add_option_handler<S: Storage>(
 /// An option's fields (JSON Merge Patch; `estimate` and `tax_class` take `null`).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateOptionRequest {
+pub struct UpdateOptionRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     name: Option<String>,
@@ -439,7 +439,7 @@ pub(super) struct UpdateOptionRequest {
     responses((status = 200, description = "OK", body = ShippingZoneResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn update_option_handler<S: Storage>(
+pub async fn update_option_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, option)): PathId<(ShippingZoneId, ShippingOptionId)>,
@@ -473,7 +473,7 @@ pub(super) async fn update_option_handler<S: Storage>(
     responses((status = 200, description = "OK", body = ShippingZoneResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn remove_option_handler<S: Storage>(
+pub async fn remove_option_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, option)): PathId<(ShippingZoneId, ShippingOptionId)>,
@@ -487,7 +487,7 @@ pub(super) async fn remove_option_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ReorderOptionsRequest {
+pub struct ReorderOptionsRequest {
     /// Every option of the zone, once, in the new order.
     options: Vec<ShippingOptionId>,
 }
@@ -501,7 +501,7 @@ pub(super) struct ReorderOptionsRequest {
     responses((status = 200, description = "OK", body = ShippingZoneResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn reorder_options_handler<S: Storage>(
+pub async fn reorder_options_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ShippingZoneId>,
@@ -517,13 +517,13 @@ pub(super) async fn reorder_options_handler<S: Storage>(
 
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ServiceDto {
+pub struct ServiceDto {
     code: String,
     name: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AppProviderResponse {
+pub struct AppProviderResponse {
     /// `app_<name>`: what options name it by, and the app (`/admin/apps/{key}`) whose
     /// name, switch and secret apply.
     key: String,
@@ -554,7 +554,7 @@ impl From<&AppProvider> for AppProviderResponse {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateAppProviderRequest {
+pub struct CreateAppProviderRequest {
     /// An existing app's key (`app_<name>`).
     key: String,
     /// `https://`, or `http://localhost` for development.
@@ -584,7 +584,7 @@ fn services(dtos: Vec<ServiceDto>) -> Vec<ServiceInfo> {
     responses((status = 201, description = "Created", body = AppProviderResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn create_provider_handler<S: Storage>(
+pub async fn create_provider_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateAppProviderRequest>,
@@ -602,7 +602,7 @@ pub(super) async fn create_provider_handler<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct AppProviderList {
+pub struct AppProviderList {
     /// By key.
     items: Vec<AppProviderResponse>,
 }
@@ -614,7 +614,7 @@ pub(super) struct AppProviderList {
     responses((status = 200, description = "OK", body = AppProviderList)),
     extensions(("x-hypha-scopes" = json!(["shipping:read"]))),
 )]
-pub(super) async fn list_providers_handler<S: Storage>(
+pub async fn list_providers_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<AppProviderList>, ApiError> {
@@ -633,7 +633,7 @@ pub(super) async fn list_providers_handler<S: Storage>(
     responses((status = 200, description = "OK", body = AppProviderResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:read"]))),
 )]
-pub(super) async fn fetch_provider<S: Storage>(
+pub async fn fetch_provider<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
@@ -646,7 +646,7 @@ pub(super) async fn fetch_provider<S: Storage>(
 /// Callback, timeout, services (JSON Merge Patch; none take `null`).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateAppProviderRequest {
+pub struct UpdateAppProviderRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     callback_url: Option<String>,
@@ -667,7 +667,7 @@ pub(super) struct UpdateAppProviderRequest {
     responses((status = 200, description = "OK", body = AppProviderResponse)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn update_provider_handler<S: Storage>(
+pub async fn update_provider_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
@@ -693,7 +693,7 @@ pub(super) async fn update_provider_handler<S: Storage>(
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn delete_provider_handler<S: Storage>(
+pub async fn delete_provider_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
@@ -704,7 +704,7 @@ pub(super) async fn delete_provider_handler<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ServiceList {
+pub struct ServiceList {
     items: Vec<ServiceDto>,
 }
 
@@ -716,7 +716,7 @@ pub(super) struct ServiceList {
     responses((status = 200, description = "OK", body = ServiceList)),
     extensions(("x-hypha-scopes" = json!(["shipping:write"]))),
 )]
-pub(super) async fn provider_services_handler<S: Storage>(
+pub async fn provider_services_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,

@@ -2,9 +2,8 @@
 //! apps over a signed HTTP callback, `spore_*` keys to the spores this host was built
 //! with. Static dispatch, a branch per kind, so futures stay provably `Send`.
 //!
-//! The callback protocol (JSON shapes, signature) lives here for now; when a second
-//! host (Workers) needs it, it moves into an adapter crate behind the `HttpClient` port,
-//! like `hypha-store-s3`.
+//! The callback protocol (JSON shapes, signature) lives here, shared by the hosts; each
+//! sends the calls through its `HostCalls` (design note 0026).
 
 use std::time::Duration;
 
@@ -17,9 +16,10 @@ use hypha_shipping::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    outbound::{CallError, OutboundPolicy, SignedCall, send_signed},
+    host::{HostCalls, HostClock, HostIds},
+    outbound::{CallError, Method, OutboundPolicy, SignedCall, prepare},
     routes::{address::PostalAddressResponse, rfc3339},
-    state::{HostEnv, SystemClock},
+    state::HostEnv,
 };
 
 /// The ID of one rate request (`rreq_…`, the body's `id` too), for the app's logs and
@@ -30,10 +30,12 @@ pub const REQUEST_ID_HEADER: &str = "Hypha-Request-Id";
 /// HTTP client, and the host's key to open the apps' secrets.
 pub struct HostRates<'a, P: HasAppProviders + HasApps> {
     pub ports: &'a P,
-    pub http: &'a reqwest::Client,
+    pub calls: &'a HostCalls,
     pub outbound: OutboundPolicy,
     pub env: &'a HostEnv,
-    pub clock: &'a SystemClock,
+    pub clock: &'a HostClock,
+    /// For rate request IDs (`rreq_…`).
+    pub ids: &'a HostIds,
 }
 
 impl<P: HasAppProviders + HasApps> RateProvider for HostRates<'_, P> {
@@ -52,9 +54,9 @@ impl<P: HasAppProviders + HasApps> RateProvider for HostRates<'_, P> {
                     .call(
                         &provider,
                         &app,
-                        reqwest::Method::GET,
+                        Method::Get,
                         &url,
-                        &request_id(),
+                        &request_id(self.ids),
                         Vec::new(),
                     )
                     .await?;
@@ -82,7 +84,7 @@ impl<P: HasAppProviders + HasApps> RateProvider for HostRates<'_, P> {
         match key.kind() {
             ProviderKind::App => {
                 let (provider, app) = self.app(key).await?;
-                let id = request_id();
+                let id = request_id(self.ids);
                 let payload = CallbackRequest {
                     id: id.clone(),
                     sent_at: rfc3339(self.clock.now()).map_err(|_| failed(key, "bad clock"))?,
@@ -93,7 +95,7 @@ impl<P: HasAppProviders + HasApps> RateProvider for HostRates<'_, P> {
                     .call(
                         &provider,
                         &app,
-                        reqwest::Method::POST,
+                        Method::Post,
                         provider.callback_url().as_str(),
                         &id,
                         body,
@@ -137,7 +139,7 @@ impl<P: HasAppProviders + HasApps> HostRates<'_, P> {
         &self,
         provider: &AppProvider,
         app: &App,
-        method: reqwest::Method,
+        method: Method,
         url: &str,
         id: &str,
         body: Vec<u8>,
@@ -154,18 +156,21 @@ impl<P: HasAppProviders + HasApps> HostRates<'_, P> {
             body,
             discard_answer: false,
         };
-        send_signed(self.http, self.outbound, call)
-            .await
-            .map_err(|e| match e {
-                CallError::Timeout => ProviderError::Timeout(key.clone()),
-                CallError::Failed(reason) => failed(key, reason),
-            })
+        let sent = match prepare(self.outbound, call) {
+            Ok(call) => self.calls.send(call).await,
+            Err(e) => Err(e),
+        };
+        sent.map_err(|e| match e {
+            CallError::Timeout => ProviderError::Timeout(key.clone()),
+            CallError::Failed(reason) => failed(key, reason),
+        })
     }
 }
 
 /// A new rate request ID: `rreq_` and a UUIDv7, in the header and the body alike.
-fn request_id() -> String {
-    format!("rreq_{}", uuid::Uuid::now_v7().simple())
+fn request_id(ids: &HostIds) -> String {
+    use hypha_core::IdGenerator;
+    format!("rreq_{}", ids.new_uuid().simple())
 }
 
 fn failed(key: &ProviderKey, reason: impl Into<String>) -> ProviderError {

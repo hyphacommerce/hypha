@@ -21,7 +21,7 @@ use crate::{
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateRoleRequest {
+pub struct CreateRoleRequest {
     name: String,
     scopes: Vec<Scope>,
 }
@@ -29,7 +29,7 @@ pub(super) struct CreateRoleRequest {
 /// JSON Merge Patch: only the fields sent change.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateRoleRequest {
+pub struct UpdateRoleRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = String, required = false)]
@@ -41,7 +41,7 @@ pub(super) struct UpdateRoleRequest {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct RoleResponse {
+pub struct RoleResponse {
     id: RoleId,
     name: String,
     /// The owner role has every scope, including future ones.
@@ -61,7 +61,7 @@ impl From<&Role> for RoleResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct RoleListResponse {
+pub struct RoleListResponse {
     /// Oldest first. A store has a handful, so they come in one list (design note 0024,
     /// AU6).
     items: Vec<RoleResponse>,
@@ -74,7 +74,7 @@ pub(super) struct RoleListResponse {
     responses((status = 200, description = "OK", body = RoleListResponse)),
     extensions(("x-hypha-scopes" = json!(["users:read"]))),
 )]
-pub(super) async fn list_roles_handler<S: Storage>(
+pub async fn list_roles_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<RoleListResponse>, ApiError> {
@@ -93,7 +93,7 @@ pub(super) async fn list_roles_handler<S: Storage>(
     responses((status = 201, description = "Created", body = RoleResponse)),
     extensions(("x-hypha-scopes" = json!(["users:write"]))),
 )]
-pub(super) async fn create_role_handler<S: Storage>(
+pub async fn create_role_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateRoleRequest>,
@@ -112,7 +112,7 @@ pub(super) async fn create_role_handler<S: Storage>(
     responses((status = 200, description = "OK", body = RoleResponse)),
     extensions(("x-hypha-scopes" = json!(["users:read"]))),
 )]
-pub(super) async fn fetch_role<S: Storage>(
+pub async fn fetch_role<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<RoleId>,
@@ -133,7 +133,7 @@ pub(super) async fn fetch_role<S: Storage>(
     responses((status = 200, description = "OK", body = RoleResponse)),
     extensions(("x-hypha-scopes" = json!(["users:write"]))),
 )]
-pub(super) async fn update_role_handler<S: Storage>(
+pub async fn update_role_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<RoleId>,
@@ -154,7 +154,7 @@ pub(super) async fn update_role_handler<S: Storage>(
 // ---------- users ----------
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct UserResponse {
+pub struct UserResponse {
     id: UserId,
     email: Email,
     name: String,
@@ -179,7 +179,7 @@ impl UserResponse {
 /// JSON Merge Patch: only the fields sent change.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateUserRequest {
+pub struct UpdateUserRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = String, required = false)]
@@ -196,13 +196,13 @@ pub(super) struct UpdateUserRequest {
 
 #[derive(Deserialize, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum StatusRequest {
+pub enum StatusRequest {
     Active,
     Disabled,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct UserListResponse {
+pub struct UserListResponse {
     /// Oldest first. A store's staff is a short list, so it comes whole (design note
     /// 0024, AU6).
     items: Vec<UserResponse>,
@@ -215,7 +215,7 @@ pub(super) struct UserListResponse {
     responses((status = 200, description = "OK", body = UserListResponse)),
     extensions(("x-hypha-scopes" = json!(["users:read"]))),
 )]
-pub(super) async fn list_users_handler<S: Storage>(
+pub async fn list_users_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<UserListResponse>, ApiError> {
@@ -237,7 +237,7 @@ pub(super) async fn list_users_handler<S: Storage>(
     responses((status = 200, description = "OK", body = UserResponse)),
     extensions(("x-hypha-scopes" = json!(["users:read"]))),
 )]
-pub(super) async fn fetch_user<S: Storage>(
+pub async fn fetch_user<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<UserId>,
@@ -256,7 +256,7 @@ pub(super) async fn fetch_user<S: Storage>(
     responses((status = 200, description = "OK", body = UserResponse)),
     extensions(("x-hypha-scopes" = json!(["users:write"]))),
 )]
-pub(super) async fn update_user_handler<S: Storage>(
+pub async fn update_user_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<UserId>,
@@ -280,13 +280,13 @@ pub(super) async fn update_user_handler<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct InviteRequest {
+pub struct InviteRequest {
     email: String,
     role: RoleId,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct InviteResponse {
+pub struct InviteResponse {
     id: InviteId,
     email: Email,
     role: RoleId,
@@ -305,7 +305,7 @@ impl InviteResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct InviteListResponse {
+pub struct InviteListResponse {
     /// Oldest first.
     items: Vec<InviteResponse>,
 }
@@ -318,7 +318,7 @@ pub(super) struct InviteListResponse {
     responses((status = 200, description = "OK", body = InviteListResponse)),
     extensions(("x-hypha-scopes" = json!(["users:read"]))),
 )]
-pub(super) async fn list_invites_handler<S: Storage>(
+pub async fn list_invites_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<InviteListResponse>, ApiError> {
@@ -340,7 +340,7 @@ pub(super) async fn list_invites_handler<S: Storage>(
     responses((status = 201, description = "Created", body = InviteResponse)),
     extensions(("x-hypha-scopes" = json!(["users:write"]))),
 )]
-pub(super) async fn invite_handler<S: Storage>(
+pub async fn invite_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<InviteRequest>,

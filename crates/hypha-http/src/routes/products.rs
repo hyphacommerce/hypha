@@ -40,7 +40,7 @@ use crate::{
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateProductRequest {
+pub struct CreateProductRequest {
     handle: String,
     title: String,
     price: Money,
@@ -48,7 +48,7 @@ pub(super) struct CreateProductRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetStatusRequest {
+pub struct SetStatusRequest {
     status: StatusDto,
 }
 
@@ -57,7 +57,7 @@ pub(super) struct SetStatusRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = ProductStatus)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum StatusDto {
+pub enum StatusDto {
     Draft,
     Active,
     Archived,
@@ -84,7 +84,7 @@ impl From<ProductStatus> for StatusDto {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ProductResponse {
+pub struct ProductResponse {
     id: ProductId,
     handle: String,
     title: String,
@@ -115,7 +115,7 @@ pub(super) struct ProductResponse {
 /// One item of a product's media list (design note 0014, section 7): what a page needs
 /// to render it. The asset's own route has the rest.
 #[derive(Clone, Serialize, utoipa::ToSchema)]
-pub(super) struct ProductMediaResponse {
+pub struct ProductMediaResponse {
     asset_id: AssetId,
     /// `image` or `video` today. More kinds (3D models) will come: show the ones you
     /// know and skip the others.
@@ -139,7 +139,7 @@ impl ProductMediaResponse {
         self.asset_id
     }
 
-    pub(super) async fn new(asset: &Asset, media: &Media) -> Result<Self, ApiError> {
+    pub async fn new(asset: &Asset, media: &Media) -> Result<Self, ApiError> {
         Ok(Self {
             asset_id: asset.id(),
             kind: asset.kind().into(),
@@ -158,7 +158,7 @@ impl ProductMediaResponse {
 
 /// The items for `assets`, in order. A deployment without file storage can still serve
 /// products without media; one with media needs it (`503 media_not_configured`).
-pub(super) async fn media_items(
+pub async fn media_items(
     assets: &[Asset],
     media: Option<&Media>,
 ) -> Result<Vec<ProductMediaResponse>, ApiError> {
@@ -174,14 +174,14 @@ pub(super) async fn media_items(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct OptionResponse {
+pub struct OptionResponse {
     id: OptionId,
     name: String,
     values: Vec<OptionValueResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct OptionValueResponse {
+pub struct OptionValueResponse {
     id: OptionValueId,
     label: String,
 }
@@ -204,7 +204,7 @@ impl From<&ProductOption> for OptionResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct VariantResponse {
+pub struct VariantResponse {
     id: VariantId,
     /// The base price, before markets and price lists.
     price: Money,
@@ -295,7 +295,7 @@ async fn respond_view<S: Storage>(
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
-pub(super) struct ProductFilters {
+pub struct ProductFilters {
     /// Only products in this status; repeat for any of several (`status=draft&status=active`).
     #[serde(default)]
     status: Vec<StatusDto>,
@@ -326,7 +326,7 @@ pub(super) struct ProductFilters {
 /// creation, in the same direction.
 #[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum ProductSortDto {
+pub enum ProductSortDto {
     Newest,
     Oldest,
     TitleAsc,
@@ -363,7 +363,7 @@ impl SortedFilters for ProductFilters {
 /// A product in a list: what a table of products shows, without options or variants
 /// (design note 0012, L7). `GET /admin/products/{id}` has the rest.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ProductSummaryResponse {
+pub struct ProductSummaryResponse {
     id: ProductId,
     handle: String,
     title: String,
@@ -387,7 +387,7 @@ pub(super) struct ProductSummaryResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct PriceRangeResponse {
+pub struct PriceRangeResponse {
     min: Money,
     /// Equal to `min` when every variant in this currency costs the same.
     max: Money,
@@ -443,7 +443,7 @@ type ProductSummaryPage = PageResponse<ProductSummaryResponse>;
     responses((status = 200, description = "OK", body = ProductSummaryPage)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn list<S: Storage>(
+pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     query: ListQuery<ProductFilters>,
@@ -495,7 +495,7 @@ pub(super) async fn list<S: Storage>(
     responses((status = 201, description = "Created", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn create<S: Storage>(
+pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateProductRequest>,
@@ -522,7 +522,7 @@ pub(super) async fn create<S: Storage>(
     responses((status = 200, description = "OK", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
@@ -541,7 +541,7 @@ pub(super) async fn fetch<S: Storage>(
 /// priced as a cart prices it. Without `country`, there are none: a product's base price
 /// isn't what any shopper pays.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct StorefrontProductResponse {
+pub struct StorefrontProductResponse {
     id: ProductId,
     handle: String,
     title: String,
@@ -566,7 +566,7 @@ pub(super) struct StorefrontProductResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct StorefrontVariantResponse {
+pub struct StorefrontVariantResponse {
     id: VariantId,
     /// Its option values ("M / Blue"); `null` for a product without options.
     title: Option<String>,
@@ -635,7 +635,7 @@ impl StorefrontProductResponse {
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
-pub(super) struct ProductCountryParams {
+pub struct ProductCountryParams {
     /// Where the shopper is (ISO 3166-1 alpha-2): its market prices and stocks the
     /// variants. Without it, the product comes without prices.
     country: Option<String>,
@@ -679,7 +679,7 @@ where
     responses((status = 200, description = "OK", body = StorefrontProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn fetch_storefront<S: Storage>(
+pub async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<ProductId>,
@@ -703,7 +703,7 @@ pub(super) async fn fetch_storefront<S: Storage>(
     responses((status = 200, description = "OK", body = StorefrontProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn fetch_by_handle_storefront<S: Storage>(
+pub async fn fetch_by_handle_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(handle): PathId<String>,
@@ -724,7 +724,7 @@ pub(super) async fn fetch_by_handle_storefront<S: Storage>(
     responses((status = 200, description = "OK", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn set_status<S: Storage>(
+pub async fn set_status<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
@@ -739,7 +739,7 @@ pub(super) async fn set_status<S: Storage>(
 /// Title and handle (JSON Merge Patch; neither can be `null`).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateProductRequest {
+pub struct UpdateProductRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     title: Option<String>,
@@ -776,7 +776,7 @@ pub(super) struct UpdateProductRequest {
     responses((status = 200, description = "OK", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn update<S: Storage>(
+pub async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
@@ -798,7 +798,7 @@ pub(super) async fn update<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetOptionsRequest {
+pub struct SetOptionsRequest {
     /// Every option, in order: they replace the product's.
     options: Vec<OptionRequest>,
     /// Variants to remove in the same write: the ones that use a value this request
@@ -809,7 +809,7 @@ pub(super) struct SetOptionsRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct OptionRequest {
+pub struct OptionRequest {
     /// An existing option, kept (and renamed or moved); omitted for a new one.
     #[serde(default)]
     id: Option<OptionId>,
@@ -820,7 +820,7 @@ pub(super) struct OptionRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct OptionValueRequest {
+pub struct OptionValueRequest {
     /// An existing value of this option; omitted for a new one.
     #[serde(default)]
     id: Option<OptionValueId>,
@@ -842,7 +842,7 @@ pub(super) struct OptionValueRequest {
     responses((status = 200, description = "OK", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn set_options<S: Storage>(
+pub async fn set_options<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
@@ -875,7 +875,7 @@ pub(super) async fn set_options<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AddVariantRequest {
+pub struct AddVariantRequest {
     /// Unique across the store when set.
     #[serde(default)]
     sku: Option<String>,
@@ -905,7 +905,7 @@ fn shipped() -> bool {
     responses((status = 201, description = "Created", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn add_variant<S: Storage>(
+pub async fn add_variant<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
@@ -931,7 +931,7 @@ pub(super) async fn add_variant<S: Storage>(
 /// replaces the list, so a missing key would silently clear what's stored.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetVariantRequest {
+pub struct SetVariantRequest {
     /// The variant to keep; `null` adds one.
     #[serde(deserialize_with = "Option::deserialize")]
     #[schema(required = true)]
@@ -954,7 +954,7 @@ pub(super) struct SetVariantRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetVariantsRequest {
+pub struct SetVariantsRequest {
     /// The product's variants after the change, in order: listed variants with an `id`
     /// are updated, those without are added, and stored ones left out are removed.
     /// 1 to 2,048; options are never expanded into variants here.
@@ -971,7 +971,7 @@ pub(super) struct SetVariantsRequest {
     responses((status = 200, description = "OK", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn set_variants<S: Storage>(
+pub async fn set_variants<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
@@ -998,7 +998,7 @@ pub(super) async fn set_variants<S: Storage>(
 /// A variant's SKU, price and option values (JSON Merge Patch).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateVariantRequest {
+pub struct UpdateVariantRequest {
     /// `null` clears it.
     #[serde(default, deserialize_with = "patch::nullable")]
     #[schema(value_type = Option<String>, required = false)]
@@ -1028,7 +1028,7 @@ pub(super) struct UpdateVariantRequest {
     responses((status = 200, description = "OK", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn update_variant<S: Storage>(
+pub async fn update_variant<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, variant)): PathId<(ProductId, VariantId)>,
@@ -1056,7 +1056,7 @@ pub(super) async fn update_variant<S: Storage>(
     responses((status = 200, description = "OK", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn remove_variant<S: Storage>(
+pub async fn remove_variant<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, variant)): PathId<(ProductId, VariantId)>,
@@ -1068,7 +1068,7 @@ pub(super) async fn remove_variant<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetMediaRequest {
+pub struct SetMediaRequest {
     /// Every item, in order (the first is featured): ready, public images and videos,
     /// each at most once, up to 250.
     assets: Vec<AssetId>,
@@ -1084,7 +1084,7 @@ pub(super) struct SetMediaRequest {
     responses((status = 200, description = "OK", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn set_media<S: Storage>(
+pub async fn set_media<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
@@ -1098,7 +1098,7 @@ pub(super) async fn set_media<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetVariantMediaRequest {
+pub struct SetVariantMediaRequest {
     /// An image of the product's media list, or `null` for none.
     asset: Option<AssetId>,
 }
@@ -1112,7 +1112,7 @@ pub(super) struct SetVariantMediaRequest {
     responses((status = 200, description = "OK", body = ProductResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn set_variant_media_handler<S: Storage>(
+pub async fn set_variant_media_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, variant)): PathId<(ProductId, VariantId)>,

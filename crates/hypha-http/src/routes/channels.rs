@@ -22,7 +22,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = ChannelKind)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum KindDto {
+pub enum KindDto {
     OnlineStore,
     Agentic,
     Custom,
@@ -49,7 +49,7 @@ impl From<ChannelKind> for KindDto {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ChannelResponse {
+pub struct ChannelResponse {
     id: ChannelId,
     name: String,
     kind: KindDto,
@@ -73,7 +73,7 @@ impl ChannelResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ChannelListResponse {
+pub struct ChannelListResponse {
     /// Oldest first. A store has a handful, so they come in one list.
     items: Vec<ChannelResponse>,
 }
@@ -85,7 +85,7 @@ pub(super) struct ChannelListResponse {
     responses((status = 200, description = "OK", body = ChannelListResponse)),
     extensions(("x-hypha-scopes" = json!(["channels:read"]))),
 )]
-pub(super) async fn list<S: Storage>(
+pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<ChannelListResponse>, ApiError> {
@@ -101,7 +101,7 @@ pub(super) async fn list<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateChannelRequest {
+pub struct CreateChannelRequest {
     /// Up to 255 characters, unique ignoring case.
     name: String,
     kind: KindDto,
@@ -115,7 +115,7 @@ pub(super) struct CreateChannelRequest {
     responses((status = 201, description = "Created", body = ChannelResponse)),
     extensions(("x-hypha-scopes" = json!(["channels:write"]))),
 )]
-pub(super) async fn create<S: Storage>(
+pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateChannelRequest>,
@@ -138,7 +138,7 @@ pub(super) async fn create<S: Storage>(
     responses((status = 200, description = "OK", body = ChannelResponse)),
     extensions(("x-hypha-scopes" = json!(["channels:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ChannelId>,
@@ -153,7 +153,7 @@ pub(super) async fn fetch<S: Storage>(
 /// A JSON Merge Patch of a channel.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateChannelRequest {
+pub struct UpdateChannelRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     name: Option<String>,
@@ -168,7 +168,7 @@ pub(super) struct UpdateChannelRequest {
     responses((status = 200, description = "OK", body = ChannelResponse)),
     extensions(("x-hypha-scopes" = json!(["channels:write"]))),
 )]
-pub(super) async fn update<S: Storage>(
+pub async fn update<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ChannelId>,
@@ -184,7 +184,7 @@ pub(super) async fn update<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ChannelProductsRequest {
+pub struct ChannelProductsRequest {
     /// Product IDs. They aren't checked: an unknown one is stored and never matches.
     products: Vec<ProductId>,
 }
@@ -198,7 +198,7 @@ pub(super) struct ChannelProductsRequest {
     responses((status = 204, description = "Published")),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn publish<S: Storage>(
+pub async fn publish<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ChannelId>,
@@ -221,7 +221,7 @@ pub(super) async fn publish<S: Storage>(
     responses((status = 204, description = "Unpublished")),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn unpublish<S: Storage>(
+pub async fn unpublish<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ChannelId>,
@@ -237,13 +237,13 @@ pub(super) async fn unpublish<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ProductChannelsRequest {
+pub struct ProductChannelsRequest {
     /// Every channel the product is sold through; the others stop selling it.
     channels: Vec<ChannelId>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ProductChannelsResponse {
+pub struct ProductChannelsResponse {
     /// Sorted.
     channels: Vec<ChannelId>,
 }
@@ -257,7 +257,7 @@ pub(super) struct ProductChannelsResponse {
     responses((status = 200, description = "OK", body = ProductChannelsResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn set_for_product<S: Storage>(
+pub async fn set_for_product<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,

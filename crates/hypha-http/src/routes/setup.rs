@@ -28,7 +28,7 @@ const STOCK_SAMPLE: usize = 5;
 /// Each first step, done or not. A step the caller's scopes can't read counts as not
 /// done, so the checklist answers whoever asks.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SetupChecklistResponse {
+pub struct SetupChecklistResponse {
     /// The store has a contact email shoppers can write to (`stores:read`).
     store: bool,
     /// A market exists (`markets:read`).
@@ -54,7 +54,7 @@ pub(super) struct SetupChecklistResponse {
     responses((status = 200, description = "OK", body = SetupChecklistResponse)),
     extensions(("x-hypha-scopes" = json!([]))),
 )]
-pub(super) async fn checklist<S: Storage>(
+pub async fn checklist<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<SetupChecklistResponse>, ApiError> {

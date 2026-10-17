@@ -30,34 +30,34 @@ use crate::{
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateCartRequest {
+pub struct CreateCartRequest {
     /// Where the cart ships to; picks the market and the tax rates.
     country: String,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AddLineRequest {
+pub struct AddLineRequest {
     variant: VariantId,
     quantity: u32,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetEmailRequest {
+pub struct SetEmailRequest {
     /// `null` clears it.
     email: Option<String>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetCustomerRequest {
+pub struct SetCustomerRequest {
     /// `null` unlinks the customer (the cart keeps their email).
     customer: Option<CustomerId>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct CartResponse {
+pub struct CartResponse {
     id: CartId,
     /// Picked from the country when the cart was created; it sets the currency.
     market: MarketId,
@@ -93,7 +93,7 @@ pub(super) struct CartResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ShippingGroupResponse {
+pub struct ShippingGroupResponse {
     /// Stable for the cart: what `PUT …/shipping/{group_id}` names.
     id: ShippingGroupId,
     /// The available lines that ship in this group.
@@ -107,7 +107,7 @@ pub(super) struct ShippingGroupResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SelectedShippingResponse {
+pub struct SelectedShippingResponse {
     option: ShippingOptionId,
     code: String,
     name: String,
@@ -142,7 +142,7 @@ impl From<&PricedShippingGroup> for ShippingGroupResponse {
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub(super) enum LineState {
+pub enum LineState {
     Priced {
         unit_price: Money,
         total: Money,
@@ -157,7 +157,7 @@ pub(super) enum LineState {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct TaxLineResponse {
+pub struct TaxLineResponse {
     /// Parts per million: 250000 = 25%.
     rate_ppm: TaxRate,
     amount: Money,
@@ -176,7 +176,7 @@ impl From<&TaxLine> for TaxLineResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct LineResponse {
+pub struct LineResponse {
     product: ProductId,
     variant: VariantId,
     quantity: u32,
@@ -257,7 +257,7 @@ impl From<&PricedCart> for CartResponse {
 
 /// The response for `cart` with its lines' images: the assets loaded in one query and
 /// their URLs made. Without file storage the lines show none.
-pub(super) async fn cart_response<P: HasAssets>(
+pub async fn cart_response<P: HasAssets>(
     cart: &PricedCart,
     ports: &P,
     media: Option<&Media>,
@@ -286,7 +286,7 @@ pub(super) async fn cart_response<P: HasAssets>(
     responses((status = 201, description = "Created", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for new carts per client address (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
-pub(super) async fn create<S: Storage>(
+pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
     caller: Caller<Storefront>,
@@ -315,7 +315,7 @@ pub(super) async fn create<S: Storage>(
     responses((status = 200, description = "OK", body = CartResponse)),
     extensions(("x-hypha-scopes" = json!(["carts:read"]))),
 )]
-pub(super) async fn fetch<S: Storage>(
+pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
@@ -336,7 +336,7 @@ pub(super) async fn fetch<S: Storage>(
     responses((status = 200, description = "OK", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
-pub(super) async fn add<S: Storage>(
+pub async fn add<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
@@ -367,7 +367,7 @@ pub(super) async fn add<S: Storage>(
     responses((status = 200, description = "OK", body = CartResponse)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
-pub(super) async fn set_email<S: Storage>(
+pub async fn set_email<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
@@ -390,7 +390,7 @@ pub(super) async fn set_email<S: Storage>(
     responses((status = 200, description = "OK", body = CartResponse)),
     extensions(("x-hypha-scopes" = json!(["carts:write", "customers:read"]))),
 )]
-pub(super) async fn set_customer<S: Storage>(
+pub async fn set_customer<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CartId>,
@@ -406,7 +406,7 @@ pub(super) async fn set_customer<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetQuantityRequest {
+pub struct SetQuantityRequest {
     /// At least 1; `DELETE` the line to take it out.
     quantity: u32,
 }
@@ -420,7 +420,7 @@ pub(super) struct SetQuantityRequest {
     responses((status = 200, description = "OK", body = CartResponse)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
-pub(super) async fn set_quantity<S: Storage>(
+pub async fn set_quantity<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
@@ -449,7 +449,7 @@ pub(super) async fn set_quantity<S: Storage>(
     responses((status = 200, description = "OK", body = CartResponse)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
-pub(super) async fn remove_line<S: Storage>(
+pub async fn remove_line<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
@@ -467,7 +467,7 @@ pub(super) async fn remove_line<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SetShippingAddressRequest {
+pub struct SetShippingAddressRequest {
     /// In the cart's country; `null` clears it. A new address drops the chosen shipping.
     address: Option<PostalAddressRequest>,
 }
@@ -481,7 +481,7 @@ pub(super) struct SetShippingAddressRequest {
     responses((status = 200, description = "OK", body = CartResponse)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
-pub(super) async fn set_address<S: Storage>(
+pub async fn set_address<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
@@ -496,12 +496,12 @@ pub(super) async fn set_address<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct ShippingOptionsResponse {
+pub struct ShippingOptionsResponse {
     groups: Vec<GroupOffersResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct GroupOffersResponse {
+pub struct GroupOffersResponse {
     group: ShippingGroupId,
     /// What the buyer can pick, in the store's order, priced now.
     offers: Vec<OfferResponse>,
@@ -511,7 +511,7 @@ pub(super) struct GroupOffersResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct OfferResponse {
+pub struct OfferResponse {
     option: ShippingOptionId,
     code: String,
     name: String,
@@ -521,7 +521,7 @@ pub(super) struct OfferResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct UnavailableOptionResponse {
+pub struct UnavailableOptionResponse {
     option: ShippingOptionId,
     name: String,
     /// `no_price_in_currency`, `weight_unknown`, `provider_failed`, `service_not_quoted`,
@@ -570,7 +570,7 @@ impl From<&GroupOffers> for GroupOffersResponse {
     responses((status = 200, description = "OK", body = ShippingOptionsResponse), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:read"]))),
 )]
-pub(super) async fn shipping_options<S: Storage>(
+pub async fn shipping_options<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
@@ -587,7 +587,7 @@ pub(super) async fn shipping_options<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct SelectShippingRequest {
+pub struct SelectShippingRequest {
     /// One of the group's offers.
     option: ShippingOptionId,
 }
@@ -602,7 +602,7 @@ pub(super) struct SelectShippingRequest {
     responses((status = 200, description = "OK", body = CartResponse), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
-pub(super) async fn select<S: Storage>(
+pub async fn select<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId((id, group)): PathId<(CartId, ShippingGroupId)>,

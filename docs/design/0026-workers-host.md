@@ -148,10 +148,15 @@ the domains; `hypha deploy` then:
 ## 6. Order of work
 
 1. **Spike (§8)**: go or no-go, and the numbers for this note.
-2. **Move**: `hypha-http` out of `hypha-host-axum` (W3), no behaviour change; the VPS
-   host keeps passing its tests and e2e.
-3. **Host ports**: clock, IDs, randomness, Argon2, `WebhookSender`, the S3 `HttpClient`,
-   the rate limiter, background work: each a trait the two hosts implement.
+2. **Move** (done, 2026-10-17): `hypha-http` out of `hypha-host-axum` (W3), no
+   behaviour change; the VPS host kept passing its tests and e2e.
+3. **Host ports** (done, 2026-10-17): clock, IDs, randomness, Argon2 (`Offload`),
+   outbound calls, the S3 `HttpClient`, the rate limiter, background work, the
+   after-writes hook and the peer address are `hypha-http`'s `host.rs` capabilities
+   (shared functions with boxed `Send` futures, so `AppState` and `Media` stay concrete);
+   the Tokio implementations, `PgStorage`, the job runner and the route tests live in
+   `hypha-host-axum`; `hypha-http` builds for `wasm32-unknown-unknown` (on CI's wasm
+   list). The router is `hypha_http::router!(Storage)`, expanded in the host's crate.
 4. **`hypha-host-workers`**: fetch, the Hyperdrive storage, configuration; the route
    tests' scenarios run against it in `wrangler dev`.
 5. **Jobs** (W6, W7).

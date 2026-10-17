@@ -1027,24 +1027,6 @@ name = "hypha-host-axum"
 version = "0.1.0"
 dependencies = [
  "axum",
- "hypha-config",
- "hypha-core",
- "hypha-http",
- "hypha-inventory",
- "hypha-search-index",
- "hypha-stores",
- "hypha-users",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "hypha-http"
-version = "0.1.0"
-dependencies = [
- "axum",
  "base64 0.22.1",
  "deadpool",
  "deadpool-postgres",
@@ -1062,6 +1044,7 @@ dependencies = [
  "hypha-customers",
  "hypha-dispatch",
  "hypha-fulfillment",
+ "hypha-http",
  "hypha-inventory",
  "hypha-markets",
  "hypha-media",
@@ -1096,6 +1079,54 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-http"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "hmac",
+ "hypha-apps",
+ "hypha-auth",
+ "hypha-cart",
+ "hypha-categories",
+ "hypha-channels",
+ "hypha-checkout",
+ "hypha-config",
+ "hypha-core",
+ "hypha-customers",
+ "hypha-dispatch",
+ "hypha-fulfillment",
+ "hypha-inventory",
+ "hypha-markets",
+ "hypha-media",
+ "hypha-merchandising",
+ "hypha-order-actions",
+ "hypha-orders",
+ "hypha-products",
+ "hypha-search",
+ "hypha-search-index",
+ "hypha-shipping",
+ "hypha-store-s3",
+ "hypha-stores",
+ "hypha-tax",
+ "hypha-users",
+ "ipnet",
+ "jiff",
+ "pastey",
+ "pollster",
+ "serde",
+ "serde_html_form",
+ "serde_json",
+ "serde_urlencoded",
+ "sha2",
+ "thiserror",
+ "tower",
+ "tracing",
  "utoipa",
  "uuid",
 ]

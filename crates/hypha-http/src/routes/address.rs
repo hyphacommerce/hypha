@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// trimmed, at most 255 characters per field).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct PostalAddressRequest {
+pub struct PostalAddressRequest {
     #[serde(default)]
     first_name: Option<String>,
     last_name: String,
@@ -47,7 +47,7 @@ impl From<PostalAddressRequest> for AddressParts {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(crate) struct PostalAddressResponse {
+pub struct PostalAddressResponse {
     first_name: Option<String>,
     last_name: String,
     company: Option<String>,

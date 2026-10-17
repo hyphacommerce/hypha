@@ -2,43 +2,37 @@
 //! separate from domain types) and thin handlers that call one domain command.
 
 pub(crate) mod address;
-mod api_keys;
-mod apps;
-mod assets;
-mod auth;
+// Handlers and their request and response types are `pub` so a host's router (`router!`,
+// expanded in its crate) can name them; the types' fields stay private.
+pub mod api_keys;
+pub mod apps;
+pub mod assets;
+pub mod auth;
 
-pub(crate) use auth::password_reset_in_background;
-mod carts;
-mod categories;
-mod channels;
-mod customers;
-mod fulfillments;
-mod health;
-mod inventory;
-mod markets;
-mod me;
-mod orders;
-mod page;
-mod products;
-mod reference;
-mod search;
-mod setup;
-mod shipping;
-mod staff;
-mod stores;
-mod taxes;
-
-use axum::{
-    Router,
-    routing::{MethodFilter, on},
-};
+pub use auth::password_reset_in_background;
+pub mod carts;
+pub mod categories;
+pub mod channels;
+pub mod customers;
+pub mod fulfillments;
+pub mod health;
+pub mod inventory;
+pub mod markets;
+pub mod me;
+pub mod orders;
+pub mod page;
+pub mod products;
+pub mod reference;
+pub mod search;
+pub mod setup;
+pub mod shipping;
+pub mod staff;
+pub mod stores;
+pub mod taxes;
 
 use hypha_core::{Stamps, Timestamp};
 
-use crate::{
-    error::ApiError,
-    state::{PgStorage, SharedState},
-};
+use crate::error::ApiError;
 
 /// A `Timestamp` as RFC 3339 in UTC, e.g. "2026-10-14T09:30:00.123456Z".
 pub(crate) fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
@@ -63,9 +57,11 @@ pub(crate) fn stamp_times(stamps: Option<Stamps>) -> Result<(String, String), Ap
 /// Surfaces: `admin` (`/admin/*`, staff and secret keys), `storefront`
 /// (`/storefront/*`, publishable keys), `hidden` (health and the documents themselves,
 /// in no document).
+#[doc(hidden)]
+#[macro_export]
 macro_rules! route_table {
-    ($callback:ident ! ( $($args:tt)* )) => {
-        $callback! { $($args)*
+    ([$($callback:tt)*] ( $($args:tt)* )) => {
+        $($callback)*! { $($args)*
             [hidden, GET, "/health", health::check],
             [hidden, GET, "/admin/openapi.json", openapi::admin_document],
             [hidden, GET, "/storefront/openapi.json", openapi::storefront_document],
@@ -266,22 +262,37 @@ macro_rules! route_table {
 // After `route_table!`: a `macro_rules!` macro is only visible below its definition.
 pub mod openapi;
 
-/// Builds the router for one concrete storage from the route table. A macro rather than
-/// a generic function: handlers are generic over the storage, but axum must prove each
-/// handler's future is `Send`, and with our `Send`-free repo traits the compiler can
-/// only do that for a concrete storage type.
+/// The table's rows as a router for one concrete storage (`router!`'s callback).
+#[doc(hidden)]
+#[macro_export]
 macro_rules! build_router {
     ($storage:ty $(, [$surface:ident, $method:ident, $path:literal, $module:ident::$func:ident])* $(,)?) => {
-        Router::new()
-            $(.route($path, on(MethodFilter::$method, $module::$func::<$storage>)))*
-            .fallback(|| async { ApiError::route_not_found() })
-            .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
+        $crate::routes::Router::new()
+            $(.route(
+                $path,
+                $crate::routes::on(
+                    $crate::routes::MethodFilter::$method,
+                    $crate::routes::$module::$func::<$storage>,
+                ),
+            ))*
+            .fallback(|| async { $crate::error::ApiError::route_not_found() })
+            .method_not_allowed_fallback(|| async { $crate::error::ApiError::method_not_allowed() })
     };
 }
 
-pub fn postgres_router() -> Router<SharedState<PgStorage>> {
-    route_table!(build_router!(PgStorage,))
+/// The router for one concrete storage: `hypha_http::router!(PgStorage)` in a host. A
+/// macro rather than a generic function: handlers are generic over the storage, but axum
+/// must prove each handler's future is `Send`, and with our `Send`-free repo traits the
+/// compiler can only do that for a concrete storage type.
+#[macro_export]
+macro_rules! router {
+    ($storage:ty) => {
+        $crate::route_table!([$crate::build_router]($storage,))
+    };
 }
 
-#[cfg(test)]
-mod tests;
+#[doc(hidden)]
+pub use axum::{
+    Router,
+    routing::{MethodFilter, on},
+};

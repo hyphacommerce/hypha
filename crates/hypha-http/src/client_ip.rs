@@ -5,10 +5,10 @@
 //! address that isn't a trusted proxy. Without trusted proxies the header is ignored:
 //! anyone can send one, and a limit keyed by it would be a limit the attacker picks.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 
 use axum::{
-    extract::{ConnectInfo, FromRequestParts},
+    extract::FromRequestParts,
     http::{HeaderMap, request::Parts},
 };
 use ipnet::IpNet;
@@ -85,8 +85,13 @@ pub fn limit_key(ip: IpAddr) -> String {
     }
 }
 
-/// The calling client's rate-limit key (`limit_key` of its address). Needs the server
-/// to record peer addresses (`into_make_service_with_connect_info`), as `main` does.
+/// The address a request came from, as the host saw it: the socket's peer natively,
+/// `CF-Connecting-IP` on Workers. The host puts it in the request's extensions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerAddr(pub IpAddr);
+
+/// The calling client's rate-limit key (`limit_key` of its address). Needs the host to
+/// record each request's `PeerAddr`.
 pub struct ClientIp(pub String);
 
 impl<S: Storage> FromRequestParts<SharedState<S>> for ClientIp {
@@ -96,13 +101,12 @@ impl<S: Storage> FromRequestParts<SharedState<S>> for ClientIp {
         parts: &mut Parts,
         state: &SharedState<S>,
     ) -> Result<Self, ApiError> {
-        // Through axum's extractor, which also takes the address tests set with
-        // `MockConnectInfo`.
-        let ConnectInfo(peer) = ConnectInfo::<SocketAddr>::from_request_parts(parts, state)
-            .await
-            .map_err(|_| ApiError::internal("the server records no peer addresses"))?;
-        let ip = TrustedProxies::new(&state.config.server.trusted_proxies)
-            .client(peer.ip(), &parts.headers);
+        let PeerAddr(peer) = *parts
+            .extensions
+            .get::<PeerAddr>()
+            .ok_or_else(|| ApiError::internal("the host records no peer addresses"))?;
+        let ip =
+            TrustedProxies::new(&state.config.server.trusted_proxies).client(peer, &parts.headers);
         Ok(ClientIp(limit_key(ip)))
     }
 }

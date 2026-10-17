@@ -29,9 +29,12 @@ use std::net::SocketAddr;
 
 use axum::extract::connect_info::MockConnectInfo;
 
-use super::postgres_router;
-use crate::media::Media;
-use crate::state::{AppState, HostEnv, PgStorage, Storage, SystemClock, UuidV7Ids};
+use hypha_http::host::{AfterWrites, HostHttp};
+use hypha_http::media::Media;
+use hypha_http::state::{AppState, HostEnv, Storage};
+
+use crate::platform::{Background, UuidV7Ids};
+use crate::storage::PgStorage;
 
 const OWNER_EMAIL: &str = "owner@example.com";
 const OWNER_PASSWORD: &str = "owner password";
@@ -42,7 +45,7 @@ struct TestApp {
     router: Router,
     admin_key: String,
     /// The app's state, for checks the API doesn't expose (the outbox).
-    state: crate::state::SharedState<PgStorage>,
+    state: hypha_http::state::SharedState<PgStorage>,
 }
 
 /// The app without file storage: most routes don't need it, so their tests don't need
@@ -117,9 +120,19 @@ async fn fresh_schema() -> String {
 
 /// File storage under `config` (the compose server), bucket created.
 async fn test_media(config: &Config) -> Media {
-    let media = Media::from_config(&config.media)
-        .expect("HYPHA_S3_* (see .cargo/config.toml)")
-        .expect("HYPHA_S3_ENDPOINT (see .cargo/config.toml)");
+    let client = hypha_store_s3::ReqwestClient::new().expect("the S3 client");
+    let http = HostHttp::new(move |request| {
+        let client = client.clone();
+        Box::pin(async move { hypha_store_s3::HttpClient::send(&client, request).await })
+    });
+    let media = Media::from_config(
+        &config.media,
+        |name| std::env::var(name).ok(),
+        http,
+        crate::platform::runtime().clock,
+    )
+    .expect("HYPHA_S3_* (see .cargo/config.toml)")
+    .expect("HYPHA_S3_ENDPOINT (see .cargo/config.toml)");
     media
         .blobs
         .ensure_bucket()
@@ -143,9 +156,14 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
         true => Some(test_media(&config).await),
         false => None,
     };
-    let storage = PgStorage::connect(&fresh_schema().await, &config.database)
-        .await
-        .unwrap();
+    let runtime = crate::platform::runtime();
+    let storage = PgStorage::connect(
+        &fresh_schema().await,
+        &config.database,
+        runtime.clock.clone(),
+    )
+    .await
+    .unwrap();
     let store = ensure_single_store(
         &Ctx::system(),
         &storage.directory().await.unwrap(),
@@ -154,23 +172,27 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
     )
     .await
     .unwrap();
-    let env = HostEnv::new([7; 32], None, config.auth).with_hasher(Argon2id::new(8, 1, 1));
+    let env = HostEnv::new([7; 32], None, config.auth, runtime.clone())
+        .with_hasher(Argon2id::new(8, 1, 1));
+    let client = crate::calls::client(hypha_http::outbound::OutboundPolicy {
+        allow_private: config.allow_private_callbacks,
+    })
+    .unwrap();
     let state = Arc::new(AppState {
         storage,
-        ids: UuidV7Ids,
-        clock: SystemClock,
+        ids: runtime.ids.clone(),
+        clock: runtime.clock.clone(),
         env,
-        background: Default::default(),
-        limiter: crate::rate_limit::MemoryRateLimiter::new(&config.rate_limits),
+        background: Background::default().host(),
+        limiter: crate::host_limiter(Arc::new(crate::limiter::MemoryRateLimiter::new(
+            &config.rate_limits,
+        ))),
         publishable_keys: Default::default(),
-        wake: Default::default(),
+        after_writes: AfterWrites::none(),
         store: store.id(),
         store_name: store.name().to_string(),
         media,
-        http: crate::outbound::client(crate::outbound::OutboundPolicy {
-            allow_private: config.allow_private_callbacks,
-        })
-        .unwrap(),
+        calls: crate::calls::host_calls(client),
         config,
     });
     let ports = state.public_ports().await.unwrap();
@@ -200,7 +222,8 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
         .await
         .unwrap();
     TestApp {
-        router: postgres_router()
+        router: hypha_http::router!(PgStorage)
+            .layer(axum::middleware::from_fn(crate::record_peer))
             .with_state(state.clone())
             .layer(MockConnectInfo(SocketAddr::from(PEER))),
         admin_key: token.expose().to_string(),
@@ -903,7 +926,7 @@ async fn the_dispatcher_cleans_up_after_a_removed_variant() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
-    crate::jobs::dispatch(&app.state).await.unwrap();
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
 
     let ports = app.state.public_ports().await.unwrap();
     let left = ports
@@ -1295,8 +1318,13 @@ async fn a_storefront_reads_its_order_with_the_access_token_only() {
     let app = app().await;
     let (order, _, _) = placed_order_for_three_mugs(&app).await;
     let pk = publishable(&app).await;
-    let token = crate::state::HostEnv::new([7; 32], None, hypha_auth::AuthSettings::default())
-        .order_token(order.parse().unwrap());
+    let token = hypha_http::state::HostEnv::new(
+        [7; 32],
+        None,
+        hypha_auth::AuthSettings::default(),
+        crate::platform::runtime(),
+    )
+    .order_token(order.parse().unwrap());
     let uri = format!("/storefront/orders/{order}?token={token}");
     let (status, read) = send_as(&app, &pk, "GET", &uri, None).await;
     assert_eq!(status, StatusCode::OK, "{read}");
@@ -2313,7 +2341,7 @@ async fn nobody_creates_a_key_beyond_their_scopes() {
 /// The current TOTP code for a base32 `secret`.
 fn totp_code(secret: &str) -> String {
     let secret = totp::from_base32(secret).unwrap();
-    let now: Timestamp = hypha_core::Clock::now(&SystemClock);
+    let now: Timestamp = hypha_core::Clock::now(&crate::platform::SystemClock);
     format!("{:06}", totp::code_at(&secret, totp::step_at(now)))
 }
 
@@ -2558,7 +2586,7 @@ fn login_body(email: &str) -> String {
 #[tokio::test]
 async fn too_many_logins_from_one_address_get_429_with_retry_after() {
     let app = app().await;
-    let (burst, every) = crate::rate_limit::Rule::LoginIp.quota(&Default::default());
+    let (burst, every) = hypha_http::rate_limit::Rule::LoginIp.quota(&Default::default());
     for n in 0..burst {
         // Different emails, so only the per-address limit can trip.
         let body = login_body(&format!("user{n}@example.com"));
@@ -2587,7 +2615,7 @@ async fn too_many_logins_from_one_address_get_429_with_retry_after() {
 async fn one_email_is_limited_however_many_addresses_try_it() {
     // Behind a trusted proxy (the test peer), each request names another client.
     let app = app_behind_proxy().await;
-    let (burst, _) = crate::rate_limit::Rule::LoginEmail.quota(&Default::default());
+    let (burst, _) = hypha_http::rate_limit::Rule::LoginEmail.quota(&Default::default());
     let body = login_body(OWNER_EMAIL);
     for n in 0..burst {
         let client = format!("203.0.{}.{}", n / 250, n % 250);
@@ -2610,7 +2638,7 @@ async fn one_email_is_limited_however_many_addresses_try_it() {
 #[tokio::test]
 async fn hammering_an_email_from_one_address_does_not_lock_its_owner_out() {
     let app = app_behind_proxy().await;
-    let (burst, _) = crate::rate_limit::Rule::LoginEmailFromIp.quota(&Default::default());
+    let (burst, _) = hypha_http::rate_limit::Rule::LoginEmailFromIp.quota(&Default::default());
     let attacker = [("x-forwarded-for", "203.0.113.66")];
     let wrong = login_body(OWNER_EMAIL);
     for _ in 0..burst {
@@ -2645,7 +2673,7 @@ async fn something_that_is_not_an_email_still_gets_its_answer() {
 #[tokio::test]
 async fn asking_for_reset_links_does_not_block_using_one() {
     let app = app().await;
-    let (burst, _) = crate::rate_limit::Rule::ResetIp.quota(&Default::default());
+    let (burst, _) = hypha_http::rate_limit::Rule::ResetIp.quota(&Default::default());
     for n in 0..burst {
         let body = json!({ "email": format!("user{n}@example.com") }).to_string();
         send_with(&app, &[], "POST", "/admin/auth/password-reset", Some(&body)).await;
@@ -2669,7 +2697,7 @@ async fn asking_for_reset_links_does_not_block_using_one() {
 async fn a_forged_forwarded_for_does_not_escape_the_limit() {
     // No trusted proxies: the header is ignored, so all of these are the same client.
     let app = app().await;
-    let (burst, _) = crate::rate_limit::Rule::LoginIp.quota(&Default::default());
+    let (burst, _) = hypha_http::rate_limit::Rule::LoginIp.quota(&Default::default());
     let mut last = StatusCode::OK;
     for n in 0..=burst {
         let client = format!("203.0.113.{n}");
@@ -2685,7 +2713,7 @@ async fn a_forged_forwarded_for_does_not_escape_the_limit() {
 #[tokio::test]
 async fn reset_requests_for_one_email_are_limited_per_address() {
     let app = app_behind_proxy().await;
-    let (burst, _) = crate::rate_limit::Rule::ResetEmailFromIp.quota(&Default::default());
+    let (burst, _) = hypha_http::rate_limit::Rule::ResetEmailFromIp.quota(&Default::default());
     let body = json!({ "email": OWNER_EMAIL }).to_string();
     let here = [("x-forwarded-for", "203.0.113.1")];
     for _ in 0..burst {
@@ -2727,7 +2755,7 @@ async fn reset_requests_for_one_email_are_limited_per_address() {
 #[tokio::test]
 async fn the_address_limit_comes_before_the_body_is_parsed() {
     let app = app().await;
-    let (burst, _) = crate::rate_limit::Rule::InviteIp.quota(&Default::default());
+    let (burst, _) = hypha_http::rate_limit::Rule::InviteIp.quota(&Default::default());
     for _ in 0..burst {
         send_with(&app, &[], "POST", "/admin/invites/accept", Some("{")).await;
     }
@@ -2907,8 +2935,8 @@ async fn rate_app(answer: String) -> (String, Seen) {
                         .to_string()
                 };
                 log.lock().unwrap().push((
-                    header(crate::outbound::SIGNATURE_HEADER),
-                    header(crate::shipping::REQUEST_ID_HEADER),
+                    header(hypha_http::outbound::SIGNATURE_HEADER),
+                    header(hypha_http::shipping::REQUEST_ID_HEADER),
                     body.to_vec(),
                 ));
                 ([(CONTENT_TYPE, "application/json")], answer)
@@ -3096,7 +3124,7 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
             .and_then(|s| s.split(',').next())
             .and_then(|t| t.parse().ok())
             .unwrap();
-        assert_eq!(*signature, crate::outbound::sign(&secret, at, body));
+        assert_eq!(*signature, hypha_http::outbound::sign(&secret, at, body));
         let sent: Value = serde_json::from_slice(body).unwrap();
         assert_eq!(sent["request"]["destination"]["city"], "Zagreb");
         assert_eq!(sent["request"]["items"][0]["quantity"], 2);
@@ -3483,10 +3511,10 @@ async fn webhook_receiver(status: StatusCode) -> (String, Hooks) {
                         .to_string()
                 };
                 log.lock().unwrap().push((
-                    header(crate::outbound::SIGNATURE_HEADER),
-                    header(crate::webhooks::EVENT_ID_HEADER),
-                    header(crate::webhooks::EVENT_TYPE_HEADER),
-                    header(crate::webhooks::DELIVERY_ID_HEADER),
+                    header(hypha_http::outbound::SIGNATURE_HEADER),
+                    header(hypha_http::webhooks::EVENT_ID_HEADER),
+                    header(hypha_http::webhooks::EVENT_TYPE_HEADER),
+                    header(hypha_http::webhooks::DELIVERY_ID_HEADER),
                     body.to_vec(),
                 ));
                 status
@@ -3510,7 +3538,7 @@ async fn a_subscribed_app_gets_a_signed_webhook() {
     )
     .await;
     let product = create_product(&app, "mug").await;
-    crate::jobs::dispatch(&app.state).await.unwrap();
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
 
     let (signature, event_id, event_type, delivery_id, body) = {
         let seen = seen.lock().unwrap();
@@ -3522,7 +3550,7 @@ async fn a_subscribed_app_gets_a_signed_webhook() {
         .and_then(|s| s.split(',').next())
         .and_then(|t| t.parse().ok())
         .unwrap();
-    assert_eq!(signature, crate::outbound::sign(&secret, at, &body));
+    assert_eq!(signature, hypha_http::outbound::sign(&secret, at, &body));
     let sent: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(event_type, "product.created");
     assert_eq!(sent["id"], event_id.as_str());
@@ -3557,7 +3585,7 @@ async fn a_failed_webhook_is_listed_and_retried() {
     )
     .await;
     create_product(&app, "mug").await;
-    crate::jobs::dispatch(&app.state).await.unwrap();
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
     assert_eq!(seen.lock().unwrap().len(), 1);
 
     let (_, page) = send(
@@ -3586,7 +3614,7 @@ async fn a_failed_webhook_is_listed_and_retried() {
     let (status, retried) = send(&app, "POST", &retry, None).await;
     assert_eq!(status, StatusCode::OK, "{retried}");
     assert_eq!(retried["status"], "pending");
-    crate::jobs::dispatch(&app.state).await.unwrap();
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
     assert_eq!(seen.lock().unwrap().len(), 2);
 
     let unknown = format!(
@@ -3613,7 +3641,7 @@ async fn a_failed_webhook_is_listed_and_retried() {
 
 #[test]
 fn every_documented_route_is_listed_once_under_its_surface() {
-    use super::openapi::{Doc, rows};
+    use hypha_http::routes::openapi::{Doc, rows};
     let mut seen = std::collections::HashSet::new();
     for row in rows() {
         assert!(
@@ -3652,7 +3680,7 @@ fn example_for(doc: &Value, param: &Value) -> String {
 async fn every_route_refuses_the_other_surfaces_credentials() {
     // The table's surface and the handler's `Caller<A>` must agree; this catches a
     // storefront route taking admin credentials or the reverse, for every route.
-    use super::openapi::{Doc, document};
+    use hypha_http::routes::openapi::{Doc, document};
     let app = app().await;
     let publishable = publishable(&app).await;
     for which in Doc::ALL {
@@ -4055,8 +4083,8 @@ async fn a_storefront_never_sees_why_an_order_was_cancelled() {
 /// Delivers events and rebuilds search until both are done, as the jobs would.
 async fn settle_search(app: &TestApp) {
     for _ in 0..20 {
-        let dispatched = crate::jobs::dispatch(&app.state).await.unwrap();
-        let synced = crate::jobs::search_sync(&app.state).await.unwrap();
+        let dispatched = hypha_http::jobs::dispatch(&app.state).await.unwrap();
+        let synced = hypha_http::jobs::search_sync(&app.state).await.unwrap();
         let (_, status) = send(app, "GET", "/admin/search/status", None).await;
         if !dispatched.more && !synced.more && status["queued"] == 0 {
             return;

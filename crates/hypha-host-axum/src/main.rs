@@ -10,10 +10,23 @@ use hypha_inventory::{HasLocations, ensure_default_location};
 use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
-use hypha_http::rate_limit::MemoryRateLimiter;
-use hypha_http::state::{
-    AppState, HostEnv, PgStorage, SharedState, Storage, SystemClock, UuidV7Ids,
-};
+use hypha_http::host::{HostHttp, HostLimiter};
+use hypha_http::rate_limit::RateLimiter;
+use hypha_http::state::{AppState, HostEnv, Runtime, Storage};
+
+mod calls;
+#[cfg(test)]
+mod handlers_test;
+mod limiter;
+mod platform;
+#[cfg(test)]
+mod route_tests;
+mod runner;
+mod storage;
+
+use limiter::MemoryRateLimiter;
+use platform::Background;
+use storage::PgStorage;
 
 /// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
 /// `openapi`) and exits (design note 0010, S6). Run it after changing routes or DTOs;
@@ -144,7 +157,8 @@ async fn main() {
         );
         std::process::exit(1);
     };
-    let storage = match PgStorage::connect(&url, &config.database).await {
+    let runtime = platform::runtime();
+    let storage = match PgStorage::connect(&url, &config.database, runtime.clock.clone()).await {
         Ok(storage) => storage,
         Err(e) => {
             tracing::error!("{e}");
@@ -152,8 +166,13 @@ async fn main() {
         }
     };
     tracing::info!("storage: Postgres (migrations applied)");
-    let env = HostEnv::new(secret_key, config.server.admin_url.clone(), config.auth);
-    serve(hypha_http::routes::postgres_router(), storage, env, config).await;
+    let env = HostEnv::new(
+        secret_key,
+        config.server.admin_url.clone(),
+        config.auth,
+        runtime.clone(),
+    );
+    serve(storage, env, runtime, config).await;
 }
 
 /// A 32-byte key written as 64 hex characters.
@@ -244,13 +263,8 @@ async fn ensure_search_index<S: Storage>(state: &AppState<S>) -> Result<(), Stri
     Ok(())
 }
 
-async fn serve<S: Storage>(
-    router: Router<SharedState<S>>,
-    storage: S,
-    env: HostEnv,
-    config: Config,
-) {
-    let ids = UuidV7Ids;
+async fn serve(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Config) {
+    let ids = runtime.ids.clone();
     let trusted_proxies = &config.server.trusted_proxies;
     // The one setting that silently goes wrong behind a proxy (design note 0009, §8).
     if trusted_proxies.is_empty() {
@@ -281,7 +295,23 @@ async fn serve<S: Storage>(
     };
     tracing::info!(store = %store.id(), name = store.name(), "serving store");
 
-    let media = match hypha_http::media::Media::from_config(&config.media) {
+    let blob_http = match hypha_store_s3::ReqwestClient::new() {
+        Ok(client) => client,
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let blob_http = HostHttp::new(move |request| {
+        let client = blob_http.clone();
+        Box::pin(async move { hypha_store_s3::HttpClient::send(&client, request).await })
+    });
+    let media = match hypha_http::media::Media::from_config(
+        &config.media,
+        |name| std::env::var(name).ok(),
+        blob_http,
+        runtime.clock.clone(),
+    ) {
         Ok(media) => media,
         Err(e) => {
             tracing::error!("{e}");
@@ -318,25 +348,29 @@ async fn serve<S: Storage>(
     }
     let grace = config.server.shutdown_grace;
     let addr = config.server.bind.clone();
+    let background = Background::default();
+    let limiter = Arc::new(MemoryRateLimiter::new(&config.rate_limits));
+    let wake = runner::Wake::default();
+    let client = match calls::client(outbound) {
+        Ok(client) => client,
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+    };
     let state = Arc::new(AppState {
         storage,
         ids,
-        clock: SystemClock,
+        clock: runtime.clock.clone(),
         env,
-        background: Default::default(),
-        limiter: MemoryRateLimiter::new(&config.rate_limits),
+        background: background.host(),
+        limiter: host_limiter(Arc::clone(&limiter)),
         publishable_keys: Default::default(),
-        wake: Default::default(),
+        after_writes: wake.after_writes(),
         store: store.id(),
         store_name: store.name().to_string(),
         media,
-        http: match hypha_http::outbound::client(outbound) {
-            Ok(client) => client,
-            Err(e) => {
-                tracing::error!("{e}");
-                std::process::exit(1);
-            }
-        },
+        calls: calls::host_calls(client),
         config,
     });
     if let Err(e) = ensure_owner(&state).await {
@@ -352,10 +386,12 @@ async fn serve<S: Storage>(
         std::process::exit(1);
     }
     tracing::warn!("emails (invites, password resets) are logged, not sent: development only");
+    let router: Router<_> = hypha_http::router!(PgStorage);
     let app = router
+        .layer(axum::middleware::from_fn(record_peer))
         .layer(axum::middleware::from_fn_with_state(
-            Arc::clone(&state.wake.dispatch),
-            hypha_http::jobs::wake_after_writes,
+            state.after_writes.clone(),
+            hypha_http::writes::after_writes,
         ))
         .layer(TraceLayer::new_for_http())
         .with_state(Arc::clone(&state));
@@ -368,7 +404,7 @@ async fn serve<S: Storage>(
         }
     };
     tracing::info!("Hypha listening on http://{addr}");
-    let jobs = S::start_jobs(Arc::clone(&state));
+    let jobs = runner::start(Arc::clone(&state), wake, limiter);
     // `with_connect_info` records each connection's peer address for `ClientIp`.
     let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     if let Err(e) = axum::serve(listener, app)
@@ -383,10 +419,31 @@ async fn serve<S: Storage>(
     if !jobs.stop(grace).await {
         tracing::warn!("stopping with background jobs unfinished");
     }
-    if !state.background.drain(grace).await {
+    if !background.drain(grace).await {
         tracing::warn!("stopping with background work unfinished");
     }
     tracing::info!("stopped");
+}
+
+/// Records each request's peer address (`hypha_http::client_ip::PeerAddr`) from the
+/// socket (`into_make_service_with_connect_info`; tests set it with `MockConnectInfo`).
+async fn record_peer(
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    request
+        .extensions_mut()
+        .insert(hypha_http::client_ip::PeerAddr(peer.ip()));
+    next.run(request).await
+}
+
+/// The in-memory limiter as `AppState`'s `HostLimiter`.
+fn host_limiter(limiter: Arc<MemoryRateLimiter>) -> HostLimiter {
+    HostLimiter::new(move |rule, key| {
+        let limiter = Arc::clone(&limiter);
+        Box::pin(async move { limiter.check(rule, &key).await })
+    })
 }
 
 /// Resolves on Ctrl+C or (on Unix) SIGTERM, which is how orchestrators stop a

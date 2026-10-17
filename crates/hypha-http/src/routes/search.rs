@@ -29,7 +29,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, Default, Deserialize, utoipa::ToSchema)]
 #[schema(as = SearchSort)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum SortDto {
+pub enum SortDto {
     /// Best match first; without `q`, newest.
     #[default]
     Relevance,
@@ -54,7 +54,7 @@ impl From<SortDto> for Sort {
 #[derive(Debug, Clone, Copy, Default, Deserialize, utoipa::ToSchema)]
 #[schema(as = SearchGroup)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum GroupDto {
+pub enum GroupDto {
     /// A product, or a product split by the options the merchant chose
     /// (`split_by` in the search settings).
     #[default]
@@ -77,7 +77,7 @@ impl From<GroupDto> for Group {
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
-pub(super) struct SearchParams {
+pub struct SearchParams {
     /// Where the shopper is (ISO 3166-1 alpha-2): the market selling there prices and
     /// stocks the results.
     country: String,
@@ -106,14 +106,14 @@ pub(super) struct SearchParams {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SearchPriceRange {
+pub struct SearchPriceRange {
     min: Money,
     /// Equal to `min` when every price is the same.
     max: Money,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SearchOption {
+pub struct SearchOption {
     name: String,
     value: String,
 }
@@ -121,7 +121,7 @@ pub(super) struct SearchOption {
 /// One result: a listing, a product or a variant (the request's `group`), shown by
 /// its best match.
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SearchHitResponse {
+pub struct SearchHitResponse {
     product: ProductId,
     /// The variant shown: the best match of its group.
     variant: VariantId,
@@ -150,14 +150,14 @@ pub(super) struct SearchHitResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct FacetValueResponse {
+pub struct FacetValueResponse {
     value: String,
     /// Results (as grouped) with this value, ignoring this facet's own filter.
     count: u64,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct FacetResponse {
+pub struct FacetResponse {
     /// As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`.
     key: String,
     /// The merchant's label, if they set one.
@@ -167,7 +167,7 @@ pub(super) struct FacetResponse {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SearchResponse {
+pub struct SearchResponse {
     items: Vec<SearchHitResponse>,
     /// Results over every page.
     total: u64,
@@ -190,7 +190,7 @@ pub(super) struct SearchResponse {
     responses((status = 200, description = "OK", body = SearchResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn storefront_search<S: Storage>(
+pub async fn storefront_search<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     query: ListQuery<SearchParams>,
@@ -299,14 +299,14 @@ pub(super) async fn storefront_search<S: Storage>(
 // ---------- admin ----------
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct FacetSettingResponse {
+pub struct FacetSettingResponse {
     /// `option.<name>`, `vendor`, `product_type` or `tag`.
     key: String,
     label: Option<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SearchSettingsResponse {
+pub struct SearchSettingsResponse {
     /// Option names whose values split listings, in order ("show each Color
     /// separately"). Empty: one listing per product.
     split_by: Vec<String>,
@@ -338,7 +338,7 @@ impl From<&hypha_search_index::SearchSettings> for SearchSettingsResponse {
     responses((status = 200, description = "OK", body = SearchSettingsResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn fetch_settings<S: Storage>(
+pub async fn fetch_settings<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<SearchSettingsResponse>, ApiError> {
@@ -349,7 +349,7 @@ pub(super) async fn fetch_settings<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct FacetSettingRequest {
+pub struct FacetSettingRequest {
     /// `option.<name>`, `vendor`, `product_type` or `tag`.
     key: String,
     /// Up to 255 characters; absent or `null` lets the storefront label it.
@@ -360,7 +360,7 @@ pub(super) struct FacetSettingRequest {
 /// A JSON Merge Patch of the settings.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateSearchSettingsRequest {
+pub struct UpdateSearchSettingsRequest {
     /// At most 3 option names, unique ignoring case. Changing them rebuilds every
     /// search document in the background.
     #[serde(default, deserialize_with = "patch::non_null")]
@@ -380,7 +380,7 @@ pub(super) struct UpdateSearchSettingsRequest {
     responses((status = 200, description = "OK", body = SearchSettingsResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn update_settings<S: Storage>(
+pub async fn update_settings<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<UpdateSearchSettingsRequest>,
@@ -398,7 +398,7 @@ pub(super) async fn update_settings<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub(super) struct SearchStatusResponse {
+pub struct SearchStatusResponse {
     /// Products (or everything) waiting to be rebuilt. 0 when the index is up to date.
     queued: u64,
     /// Documents in the index: one per variant per market it's sold in.
@@ -412,7 +412,7 @@ pub(super) struct SearchStatusResponse {
     responses((status = 200, description = "OK", body = SearchStatusResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
-pub(super) async fn status<S: Storage>(
+pub async fn status<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<SearchStatusResponse>, ApiError> {
@@ -432,7 +432,7 @@ pub(super) async fn status<S: Storage>(
     responses((status = 202, description = "Queued", body = SearchStatusResponse)),
     extensions(("x-hypha-scopes" = json!(["products:write"]))),
 )]
-pub(super) async fn start_reindex<S: Storage>(
+pub async fn start_reindex<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<(StatusCode, Json<SearchStatusResponse>), ApiError> {
