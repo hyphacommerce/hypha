@@ -7,6 +7,7 @@ import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 
+import { sessionFetch } from "./api-cache";
 import type { Currencies } from "./format";
 import type { Country } from "./regions";
 
@@ -58,7 +59,7 @@ export async function publicClient() {
 export async function sessionClient() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) redirect("/login");
-  const client = createAdminClient(apiUrl(), token);
+  const client = createAdminClient(apiUrl(), token, {}, sessionFetch(token));
   client.use({
     async onResponse({ response }) {
       if (response.status === 401) await sessionExpired();

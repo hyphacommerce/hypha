@@ -14,15 +14,18 @@ export type ApiError = components["schemas"]["Error"];
  * reset, invite acceptance).
  *
  * Only for server code: a staff session must never reach the browser (design note 0011,
- * P4). `headers` is for extras such as `X-Forwarded-For`.
+ * P4). `headers` is for extras such as `X-Forwarded-For`; `fetch` replaces the global one
+ * (the admin passes one that caches reads per session).
  */
 export function createAdminClient(
   baseUrl: string,
   token?: string,
   headers: Record<string, string> = {},
+  fetch?: typeof globalThis.fetch,
 ) {
   return createClient<paths>({
     baseUrl,
+    ...(fetch ? { fetch } : {}),
     headers: {
       ...headers,
       ...(token ? { authorization: `Bearer ${token}` } : {}),
