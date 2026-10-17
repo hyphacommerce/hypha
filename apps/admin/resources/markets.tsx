@@ -21,7 +21,7 @@ export function MarketsTable({ markets }: { markets: MarketRow[] }) {
       key: "name",
       header: "Market",
       renderCell: (m) => (
-        <Link href={`/markets/${m.id}`} weight="medium">
+        <Link href={`/markets/${m.id}`} weight="semibold" color="primary">
           {m.name}
         </Link>
       ),

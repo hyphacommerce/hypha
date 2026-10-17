@@ -16,6 +16,7 @@ import {
   ResourceTable,
   type SortDef,
   type SortOption,
+  type View,
 } from "@/components/resource-table/resource-table";
 import { ProductStatusBadge } from "@/components/status";
 import { type Currencies, formatMoney } from "@/lib/format";
@@ -40,6 +41,13 @@ const STATUSES = [
   { value: "active", label: "Active" },
   { value: "draft", label: "Draft" },
   { value: "archived", label: "Archived" },
+];
+
+const VIEWS: View[] = [
+  { label: "All", params: {} },
+  { label: "Active", params: { status: ["active"] } },
+  { label: "Draft", params: { status: ["draft"] } },
+  { label: "Archived", params: { status: ["archived"] } },
 ];
 
 /** "€9.50", "€9.50 – €14.00" for several prices, one range per currency. */
@@ -105,7 +113,7 @@ export function ProductsTable({
     Object.entries(categories).map(([id, path]) => [id, path.split(" › ").at(-1) ?? path]),
   );
   const filters: FilterDef[] = [
-    { kind: "search", param: "q", label: "Search", placeholder: "Search by title, handle or SKU" },
+    { kind: "search", param: "q", label: "Search", placeholder: "Search products by title, handle or SKU" },
     { kind: "multi", param: "status", label: "Status", options: STATUSES },
     {
       kind: "select",
@@ -134,7 +142,7 @@ export function ProductsTable({
         <HStack gap={3} vAlign="center">
           <FeaturedImage media={product.featured_media} />
           <VStack gap={0.5}>
-            <Link href={`/products/${product.id}`} weight="medium">
+            <Link href={`/products/${product.id}`} weight="semibold" color="primary">
               {product.title}
             </Link>
             <Text type="supporting" color="secondary">
@@ -155,7 +163,7 @@ export function ProductsTable({
       header: "Channels",
       renderCell: (product) =>
         product.channels.length === 0 ? (
-          <Text color="secondary">None</Text>
+          <Text color="secondary">—</Text>
         ) : (
           names(product.channels, channels)
         ),
@@ -165,7 +173,7 @@ export function ProductsTable({
       header: "Categories",
       renderCell: (product) =>
         product.categories.length === 0 ? (
-          <Text color="secondary">None</Text>
+          <Text color="secondary">—</Text>
         ) : (
           names(product.categories, shortName)
         ),
@@ -191,6 +199,7 @@ export function ProductsTable({
       idKey="id"
       rowHref={(p) => `/products/${p.id}`}
       filters={filters}
+      views={VIEWS}
       sorts={SORTS}
       sortOptions={SORT_OPTIONS}
       defaultSort="newest"

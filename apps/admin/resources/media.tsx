@@ -23,6 +23,7 @@ import {
   ResourceTable,
   type SortDef,
   type SortOption,
+  type View,
 } from "@/components/resource-table/resource-table";
 import { formatBytes } from "@/lib/format";
 
@@ -52,6 +53,13 @@ const FILTERS: FilterDef[] = [
       { value: "file", label: "Files" },
     ],
   },
+];
+
+const VIEWS: View[] = [
+  { label: "All", params: {} },
+  { label: "Images", params: { kind: ["image"] } },
+  { label: "Videos", params: { kind: ["video"] } },
+  { label: "Files", params: { kind: ["file"] } },
 ];
 
 // Keyed by string: the API may add kinds (design note 0016 §9); those show as files.
@@ -160,7 +168,7 @@ export function MediaLibrary({
         <HStack gap={3} vAlign="center">
           <Preview asset={asset} size={40} />
           <VStack gap={0.5}>
-            <Link href={`/media/${asset.id}`} weight="medium">
+            <Link href={`/media/${asset.id}`} weight="semibold" color="primary">
               {asset.title ?? asset.filename}
             </Link>
             {asset.title && (
@@ -194,6 +202,7 @@ export function MediaLibrary({
       idKey="id"
       rowHref={(a) => `/media/${a.id}`}
       filters={FILTERS}
+      views={VIEWS}
       sorts={SORTS}
       sortOptions={SORT_OPTIONS}
       defaultSort="newest"

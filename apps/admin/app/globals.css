@@ -111,3 +111,109 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* The list card (components/resource-table, design note 0024, section 6): one bordered
+   card with the toolbar, filters, the table and its pages, Shopify-style. */
+.rt {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+  background: var(--color-background-card);
+  overflow: hidden;
+}
+
+.rt[data-pending] .rt-body {
+  opacity: 0.55;
+  transition: opacity 120ms;
+}
+
+.rt-toolbar,
+.rt-filters,
+.rt-chips,
+.rt-selection,
+.rt-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.rt-toolbar {
+  min-height: 52px;
+}
+
+.rt-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.rt-divider {
+  width: 1px;
+  align-self: stretch;
+  margin-block: 6px;
+  background: var(--color-border);
+}
+
+.rt-filters,
+.rt-chips {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--color-border);
+}
+
+.rt-selection {
+  border-top: 1px solid var(--color-border);
+  background: var(--color-accent-muted);
+}
+
+.rt-banner {
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.rt-body {
+  border-top: 1px solid var(--color-border);
+}
+
+.rt-grid,
+.rt-empty {
+  padding: 16px 12px;
+}
+
+.rt-footer {
+  justify-content: space-between;
+  border-top: 1px solid var(--color-border);
+}
+
+/* The header row shaded, the rows divided, nothing doubling the card's own border. */
+.rt .astryx-table-header {
+  background: var(--color-background-muted);
+}
+
+.rt .astryx-table-header-cell {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.rt .astryx-table-header-cell:first-child,
+.rt .astryx-table-cell:first-child {
+  padding-inline-start: 12px;
+}
+
+.rt .astryx-table-header-cell:last-child,
+.rt .astryx-table-cell:last-child {
+  padding-inline-end: 12px;
+}
+
+.rt .astryx-table-body .astryx-table-row:last-child .astryx-table-cell {
+  border-bottom: none;
+}
+
+.rt .astryx-table-cell {
+  height: 52px;
+}
+
+/* Astryx's table bleeds into a padded card's gutter; this card has none. */
+.rt .astryx-table-scroll-wrapper {
+  margin: 0;
+  padding-inline: 0;
+  width: 100%;
+}

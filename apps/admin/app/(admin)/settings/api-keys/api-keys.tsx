@@ -103,6 +103,7 @@ export function ApiKeys({
         nextCursor={page.next_cursor}
         columns={columns}
         idKey="id"
+        isSelectable={false}
         error={page.error}
         empty={{
           icon: <KeyIcon width={32} />,

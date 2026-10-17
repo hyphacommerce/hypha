@@ -1,33 +1,36 @@
 "use client";
 
-// One table for every list in the admin (design note 0024, AU7): Astryx's Table with its
-// sort, pagination and selection plugins, driven by the URL. The server page reads the
-// URL into an API query and passes the page here; this component changes the URL when
-// a header, a filter or a page changes, and the page renders again on the server.
+// One table for every list in the admin (design note 0024, AU7, section 6): one bordered
+// card holding a toolbar (saved views, one search box, sort, and a filters button that
+// opens the other filters in a row below it), the active filters as removable chips, the
+// table with a shaded header and row checkboxes, and the pages in its footer. Driven by
+// the URL: the server page reads it into an API query and passes the page here; this
+// component changes the URL when a view, header, filter or page changes, and the page
+// renders again on the server.
 //
 // Lists the API returns whole (markets, roles: AU6) use `ClientResourceTable`, which
-// sorts and filters the rows it has.
+// sorts and searches the rows it has, in the same card.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { type DateRange, DateRangeInput } from "@astryxdesign/core/DateRangeInput";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { HStack } from "@astryxdesign/core/Layout";
 import { MultiSelector } from "@astryxdesign/core/MultiSelector";
 import { Selector } from "@astryxdesign/core/Selector";
 import {
   Table,
   type TableColumn,
   type TablePlugin,
-  TableSelectionToolbar,
   type TableSortState,
-  useTablePagination,
   useTableSelection,
   useTableSelectionState,
   useTableSortable,
 } from "@astryxdesign/core/Table";
+import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { Token } from "@astryxdesign/core/Token";
+import { AdjustmentsHorizontalIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState, useTransition } from "react";
 
@@ -35,7 +38,7 @@ import { CURSOR, PREV, encodePrevious, href, previous, withChanges } from "./par
 
 export type Row = Record<string, unknown>;
 
-/** A filter above the table, and the query parameter it sets. */
+/** A filter, and the query parameter it sets. The `search` one sits in the toolbar. */
 export type FilterDef =
   /** Free text, applied as the user stops typing. */
   | { kind: "search" | "text"; param: string; label: string; placeholder?: string; width?: number }
@@ -45,6 +48,12 @@ export type FilterDef =
   | { kind: "multi"; param: string; label: string; options: { value: string; label: string }[] }
   /** Days, as `start..end` (the server turns them into instants). */
   | { kind: "dates"; param: string; label: string };
+
+/**
+ * A saved view: a name for a set of filter values ("Unfulfilled"). Choosing it clears
+ * the other filters; the first view is the unfiltered list ("All", no params).
+ */
+export type View = { label: string; params: Record<string, string[]> };
 
 /** A sortable column and the API sort for each direction. */
 export type SortDef = { asc: string; desc: string };
@@ -65,6 +74,8 @@ type Props<T extends Row> = {
   /** Where a row leads; the whole row is then a link (its first link cell for keyboards). */
   rowHref?: (row: T) => string;
   filters?: FilterDef[];
+  /** Saved views for the selector at the start of the toolbar; absent hides it. */
+  views?: View[];
   /** Sortable columns by key: header clicks set `sort`. */
   sorts?: Record<string, SortDef>;
   /** Every order the list offers, for the Sort menu; absent hides it. */
@@ -79,11 +90,13 @@ type Props<T extends Row> = {
   empty: EmptyText & { icon?: ReactNode };
   /** No rows with filters; a Clear filters button is added. */
   noResults?: EmptyText;
-  /** Bulk actions for the selected rows; absent means no checkboxes. */
+  /** Bulk actions for the selected rows, beside the count. */
   bulkActions?: (selected: T[], clear: () => void) => ReactNode;
+  /** Row checkboxes; on by default. */
+  isSelectable?: boolean;
   /** Names a row for screen readers ("Select Mug"). */
   rowLabel?: (row: T) => string;
-  /** Rendered beside the filters (a view toggle, say). */
+  /** Rendered at the end of the toolbar (a view toggle, say). */
   toolbarEnd?: ReactNode;
   /** Renders the rows some other way (a grid of media) instead of the table. */
   renderRows?: (rows: T[]) => ReactNode;
@@ -123,10 +136,13 @@ function TextFilter({
   filter,
   value,
   apply,
+  isWide = false,
 }: {
   filter: Extract<FilterDef, { kind: "search" | "text" }>;
   value: string;
   apply: (value: string) => void;
+  /** The toolbar's search box, filling the row. */
+  isWide?: boolean;
 }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
@@ -140,14 +156,44 @@ function TextFilter({
       label={filter.label}
       isLabelHidden
       placeholder={filter.placeholder ?? filter.label}
-      startIcon={filter.kind === "search" ? MagnifyingGlassIcon : undefined}
+      startIcon={isWide ? MagnifyingGlassIcon : undefined}
       hasClear
       size="sm"
-      width={filter.width ?? (filter.kind === "search" ? 280 : 130)}
+      width={isWide ? "100%" : (filter.width ?? 160)}
       value={text}
       onChange={setText}
       onEnter={() => apply(text.trim())}
     />
+  );
+}
+
+/** "1 Oct – 17 Oct" from `2026-10-01..2026-10-17`. */
+function rangeLabel(raw: string): string {
+  const [start, end] = raw.split("..");
+  const day = (d?: string) =>
+    d
+      ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(
+          new Date(`${d}T00:00:00Z`),
+        )
+      : "";
+  return `${day(start)} – ${day(end)}`;
+}
+
+/**
+ * The view the URL shows: the one whose values it has exactly, among the parameters
+ * views set (other filters narrow a view further, as chips).
+ */
+function activeView(views: View[], params: URLSearchParams): number {
+  const keys = [...new Set(views.flatMap((v) => Object.keys(v.params)))];
+  return views.findIndex((view) =>
+    keys.every((p) => {
+      const want = [...(view.params[p] ?? [])].sort();
+      const have = params
+        .getAll(p)
+        .filter((v) => v.trim() !== "")
+        .sort();
+      return want.length === have.length && want.every((v, i) => v === have[i]);
+    }),
   );
 }
 
@@ -159,6 +205,7 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
     idKey,
     rowHref,
     filters = [],
+    views,
     sorts = {},
     sortOptions,
     defaultSort,
@@ -167,6 +214,7 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
     empty,
     noResults,
     bulkActions,
+    isSelectable = true,
     rowLabel,
     toolbarEnd,
     renderRows,
@@ -227,15 +275,6 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
       go({ [CURSOR]: cursor, [PREV]: encodePrevious(back > 0 ? stack.slice(0, back) : []) }, true);
     }
   };
-  const pagination = useTablePagination<T>({
-    page: pageNumber,
-    onPageChange: toPage,
-    hasMore: Boolean(nextCursor),
-    pageSize: Math.max(rows.length, 1),
-    variant: "compact",
-    align: "end",
-    position: pageNumber === 1 && !nextCursor ? "none" : "below",
-  });
 
   // ---------- selection ----------
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -253,17 +292,26 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
 
   const plugins: Record<string, TablePlugin<T>> = {
     sort: sortPlugin,
-    pagination,
     links,
-    ...(bulkActions ? { selection: selectionPlugin } : {}),
+    ...(isSelectable || bulkActions ? { selection: selectionPlugin } : {}),
   };
 
   // ---------- filters ----------
+  const search = filters.find((f) => f.kind === "search");
+  const others = filters.filter((f) => f !== search);
   const filterParams = filters.map((f) => f.param);
-  const isFiltered = filterParams.some((p) => params.getAll(p).some((v) => v.trim() !== ""));
+  const valuesOf = (param: string) => params.getAll(param).filter((v) => v.trim() !== "");
+  const isFiltered = filterParams.some((p) => valuesOf(p).length > 0);
   const clearFilters = () => go(Object.fromEntries(filterParams.map((p) => [p, undefined])));
+  const viewIndex = views ? activeView(views, params) : -1;
+  const shownView = views?.[viewIndex];
+  // Filters beyond what the shown view stands for.
+  const activeCount = others.filter(
+    (f) => valuesOf(f.param).length > 0 && !shownView?.params[f.param],
+  ).length;
+  const [isFilterRowOpen, setFilterRowOpen] = useState(false);
 
-  const controls = filters.map((filter) => {
+  const control = (filter: FilterDef) => {
     switch (filter.kind) {
       case "search":
       case "text":
@@ -305,7 +353,7 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
               items.length === 0
                 ? filter.label
                 : items.length <= 2
-                  ? items.map((i) => i.label).join(", ")
+                  ? `${filter.label}: ${items.map((i) => i.label).join(", ")}`
                   : `${filter.label}: ${items.length}`
             }
             options={filter.options}
@@ -333,6 +381,27 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
         );
       }
     }
+  };
+
+  // The active filters as chips, but not the ones the shown view stands for.
+  const chips = others.flatMap((filter) => {
+    const values = valuesOf(filter.param);
+    if (values.length === 0) return [];
+    if (shownView?.params[filter.param]) return [];
+    const label = (v: string) =>
+      filter.kind === "select" || filter.kind === "multi"
+        ? (filter.options.find((o) => o.value === v)?.label ?? v)
+        : filter.kind === "dates"
+          ? rangeLabel(v)
+          : v;
+    return [
+      <Token
+        key={filter.param}
+        size="sm"
+        label={`${filter.label}: ${values.map(label).join(", ")}`}
+        onRemove={() => go({ [filter.param]: undefined })}
+      />,
+    ];
   });
 
   const sortMenu = sortOptions && (
@@ -376,42 +445,109 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
       />
     );
 
+  const selected = rows.filter((r) => selectedKeys.has(String(r[idKey])));
+  const hasToolbar = Boolean(views || search || sortMenu || others.length > 0 || toolbarEnd);
+
   return (
-    <VStack gap={3}>
-      {(controls.length > 0 || sortMenu || toolbarEnd) && (
-        <HStack gap={2} wrap="wrap" vAlign="center">
-          {controls}
-          {isFiltered && <Button label="Clear filters" variant="ghost" size="sm" onClick={clearFilters} />}
-          <div style={{ flex: 1 }} />
-          {sortMenu}
-          {toolbarEnd}
-        </HStack>
-      )}
-      {error && <Banner status="error" title="These filters can't be used" description={error} />}
-      {bulkActions && selectionState.hasSelection && (
-        <TableSelectionToolbar
-          selection={selectionState}
-          startContent={bulkActions(
-            rows.filter((r) => selectedKeys.has(String(r[idKey]))),
-            selectionState.clearSelection,
+    <div className="rt" aria-busy={isPending} data-pending={isPending || undefined}>
+      {hasToolbar && (
+        <div className="rt-toolbar">
+          {views && (
+            <>
+              <Selector
+                label="View"
+                isLabelHidden
+                variant="ghost"
+                size="sm"
+                options={[
+                  ...views.map((v, i) => ({ value: String(i), label: v.label })),
+                  ...(viewIndex < 0 ? [{ value: "custom", label: "Custom" }] : []),
+                ]}
+                value={viewIndex < 0 ? "custom" : String(viewIndex)}
+                onChange={(value: string) => {
+                  const view = views[Number(value)];
+                  if (!view) return;
+                  // A view replaces the filters, but keeps what's being searched for.
+                  go({
+                    ...Object.fromEntries(
+                      filterParams.filter((p) => p !== search?.param).map((p) => [p, undefined]),
+                    ),
+                    ...view.params,
+                  });
+                }}
+              />
+              <span className="rt-divider" aria-hidden />
+            </>
           )}
-        />
+          <div className="rt-search">
+            {search && search.kind === "search" ? (
+              <TextFilter
+                filter={search}
+                isWide
+                value={params.get(search.param) ?? ""}
+                apply={(value) => go({ [search.param]: value || undefined })}
+              />
+            ) : null}
+          </div>
+          {sortMenu}
+          {others.length > 0 && (
+            <Button
+              label={activeCount ? `Filters (${activeCount})` : "Filters"}
+              variant={isFilterRowOpen || activeCount ? "secondary" : "ghost"}
+              size="sm"
+              icon={<AdjustmentsHorizontalIcon width={16} aria-hidden />}
+              isIconOnly={!activeCount}
+              tooltip="Filters"
+              onClick={() => setFilterRowOpen(!isFilterRowOpen)}
+            />
+          )}
+          {toolbarEnd}
+        </div>
       )}
-      <div aria-busy={isPending} style={{ opacity: isPending ? 0.55 : 1, transition: "opacity 120ms" }}>
+
+      {isFilterRowOpen && others.length > 0 && (
+        <div className="rt-filters">
+          {others.map(control)}
+          {isFiltered && (
+            <Button label="Clear all" variant="ghost" size="sm" onClick={clearFilters} />
+          )}
+        </div>
+      )}
+      {!isFilterRowOpen && chips.length > 0 && (
+        <div className="rt-chips">
+          {chips}
+          <Button label="Clear all" variant="ghost" size="sm" onClick={clearFilters} />
+        </div>
+      )}
+
+      {error && (
+        <div className="rt-banner">
+          <Banner status="error" title="These filters can't be used" description={error} />
+        </div>
+      )}
+
+      {selectionState.hasSelection && (
+        <div className="rt-selection">
+          <Text weight="medium">{selected.length} selected</Text>
+          {bulkActions?.(selected, selectionState.clearSelection)}
+          <div style={{ flex: 1 }} />
+          <Button label="Clear" variant="ghost" size="sm" onClick={selectionState.clearSelection} />
+        </div>
+      )}
+
+      <div className="rt-body">
         {renderRows ? (
           rows.length === 0 ? (
-            emptyState
+            <div className="rt-empty">{emptyState}</div>
           ) : (
-            <VStack gap={3}>
-              {renderRows(rows)}
-              <Pages page={pageNumber} hasMore={Boolean(nextCursor)} toPage={toPage} />
-            </VStack>
+            <div className="rt-grid">{renderRows(rows)}</div>
           )
         ) : (
           <Table<T>
             data={rows}
             columns={sortable}
             idKey={idKey}
+            density="compact"
             hasHover={Boolean(rowHref)}
             textOverflow="truncate"
             plugins={plugins}
@@ -419,18 +555,47 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
           />
         )}
       </div>
-    </VStack>
+
+      <Pages page={pageNumber} count={rows.length} hasMore={Boolean(nextCursor)} toPage={toPage} />
+    </div>
   );
 }
 
-/** Previous and Next for lists that don't render a table. */
-function Pages({ page, hasMore, toPage }: { page: number; hasMore: boolean; toPage: (p: number) => void }) {
+/** The card's footer: where in the list this page is, Previous and Next. */
+function Pages({
+  page,
+  count,
+  hasMore,
+  toPage,
+}: {
+  page: number;
+  count: number;
+  hasMore: boolean;
+  toPage: (p: number) => void;
+}) {
   if (page === 1 && !hasMore) return null;
   return (
-    <HStack gap={2} hAlign="end">
-      {page > 1 && <Button label="Previous" variant="ghost" onClick={() => toPage(page - 1)} />}
-      {hasMore && <Button label="Next" onClick={() => toPage(page + 1)} />}
-    </HStack>
+    <div className="rt-footer">
+      <Text type="supporting" color="secondary">
+        Page {page} · {count} shown
+      </Text>
+      <HStack gap={2}>
+        <Button
+          label="Previous"
+          variant="secondary"
+          size="sm"
+          isDisabled={page === 1}
+          onClick={() => toPage(page - 1)}
+        />
+        <Button
+          label="Next"
+          variant="secondary"
+          size="sm"
+          isDisabled={!hasMore}
+          onClick={() => toPage(page + 1)}
+        />
+      </HStack>
+    </div>
   );
 }
 
@@ -457,7 +622,7 @@ type ClientProps<T extends Row> = {
 
 /**
  * A table of a whole list (design note 0024, AU6): small lists the API returns at once
- * sort and filter here, in the browser, with the same look as the paged ones.
+ * sort and filter here, in the browser, in the same card as the paged ones.
  */
 export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
   const { rows, columns, idKey, rowHref, searchText, searchLabel, compare = {}, empty, toolbarEnd } =
@@ -483,41 +648,45 @@ export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
   }, [rows, q, sort, searchText, compare]);
 
   return (
-    <VStack gap={3}>
+    <div className="rt">
       {(searchText || toolbarEnd) && (
-        <HStack gap={2} vAlign="center">
-          {searchText && (
-            <TextInput
-              label={searchLabel ?? "Search"}
-              isLabelHidden
-              placeholder={searchLabel ?? "Search"}
-              startIcon={MagnifyingGlassIcon}
-              hasClear
-              size="sm"
-              width={280}
-              value={q}
-              onChange={setQ}
-            />
-          )}
-          <div style={{ flex: 1 }} />
+        <div className="rt-toolbar">
+          <div className="rt-search">
+            {searchText && (
+              <TextInput
+                label={searchLabel ?? "Search"}
+                isLabelHidden
+                placeholder={searchLabel ?? "Search"}
+                startIcon={MagnifyingGlassIcon}
+                hasClear
+                size="sm"
+                width="100%"
+                value={q}
+                onChange={setQ}
+              />
+            )}
+          </div>
           {toolbarEnd}
-        </HStack>
+        </div>
       )}
-      <Table<T>
-        data={shown}
-        columns={columns.map((c) => (compare[c.key] ? { ...c, sortable: true } : c))}
-        idKey={idKey}
-        hasHover={Boolean(rowHref)}
-        textOverflow="truncate"
-        plugins={{ sort: sortPlugin, links }}
-        emptyState={
-          q ? (
-            <EmptyState title={`Nothing matches “${q}”`} actions={<Button label="Clear search" onClick={() => setQ("")} />} />
-          ) : (
-            <EmptyState icon={empty.icon} title={empty.title} description={empty.description} actions={empty.action} />
-          )
-        }
-      />
-    </VStack>
+      <div className="rt-body">
+        <Table<T>
+          data={shown}
+          columns={columns.map((c) => (compare[c.key] ? { ...c, sortable: true } : c))}
+          idKey={idKey}
+          density="compact"
+          hasHover={Boolean(rowHref)}
+          textOverflow="truncate"
+          plugins={{ sort: sortPlugin, links }}
+          emptyState={
+            q ? (
+              <EmptyState title={`Nothing matches “${q}”`} actions={<Button label="Clear search" onClick={() => setQ("")} />} />
+            ) : (
+              <EmptyState icon={empty.icon} title={empty.title} description={empty.description} actions={empty.action} />
+            )
+          }
+        />
+      </div>
+    </div>
   );
 }

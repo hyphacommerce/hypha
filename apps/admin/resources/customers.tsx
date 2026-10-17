@@ -18,7 +18,6 @@ import {
   type SortOption,
 } from "@/components/resource-table/resource-table";
 
-
 type Customer = AdminSchemas["CustomerSummaryResponse"];
 
 const SORT_OPTIONS: SortOption[] = [
@@ -37,7 +36,7 @@ const SORTS: Record<string, SortDef> = {
 };
 
 const FILTERS: FilterDef[] = [
-  { kind: "search", param: "q", label: "Search", placeholder: "Search email, name or phone" },
+  { kind: "search", param: "q", label: "Search", placeholder: "Search customers by email, name or phone" },
 ];
 
 /** "Ana Horvat", or nothing for a customer known only by email. */
@@ -49,11 +48,11 @@ export function CustomersTable({
   const columns: TableColumn<Customer>[] = [
     {
       key: "name",
-      header: "Name",
+      header: "Customer",
       width: proportional(2, { minWidth: 200 }),
       renderCell: (c) => (
         <VStack gap={0.5}>
-          <Link href={`/customers/${c.id}`} weight="medium">
+          <Link href={`/customers/${c.id}`} weight="semibold" color="primary">
             {customerName(c) || c.email}
           </Link>
           {customerName(c) && (
@@ -64,7 +63,6 @@ export function CustomersTable({
         </VStack>
       ),
     },
-    { key: "email", header: "Email", width: proportional(2) },
     {
       key: "phone",
       header: "Phone",

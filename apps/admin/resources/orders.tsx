@@ -2,9 +2,10 @@
 
 // The order list's table (design note 0024, §3).
 
-import { HStack } from "@astryxdesign/core/Layout";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
-import { type TableColumn, pixel } from "@astryxdesign/core/Table";
+import { type TableColumn, pixel, proportional } from "@astryxdesign/core/Table";
+import { Text } from "@astryxdesign/core/Text";
 import { ShoppingBagIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
@@ -14,6 +15,7 @@ import {
   ResourceTable,
   type SortDef,
   type SortOption,
+  type View,
 } from "@/components/resource-table/resource-table";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { type Currencies, formatMoney } from "@/lib/format";
@@ -25,6 +27,13 @@ const SORT_OPTIONS: SortOption[] = [
   { value: "oldest", label: "Oldest" },
   { value: "total_desc", label: "Highest total", unavailable: "pick a currency" },
   { value: "total_asc", label: "Lowest total", unavailable: "pick a currency" },
+];
+
+const VIEWS: View[] = [
+  { label: "All", params: {} },
+  { label: "Unfulfilled", params: { fulfillment_status: ["unfulfilled", "partially_fulfilled"], cancelled: ["false"] } },
+  { label: "Unpaid", params: { financial_status: ["pending"], cancelled: ["false"] } },
+  { label: "Cancelled", params: { cancelled: ["true"] } },
 ];
 
 const SORTS: Record<string, SortDef> = {
@@ -49,7 +58,7 @@ export function OrdersTable({
   orderCurrencies: string[];
 }) {
   const filters: FilterDef[] = [
-    { kind: "search", param: "q", label: "Search", placeholder: "Order number or email" },
+    { kind: "search", param: "q", label: "Search", placeholder: "Search orders by number or email" },
     {
       kind: "multi",
       param: "financial_status",
@@ -97,48 +106,69 @@ export function OrdersTable({
     {
       key: "number",
       header: "Order",
-      width: pixel(110),
+      width: pixel(130),
       renderCell: (order) => (
-        <Link href={`/orders/${order.id}`} weight="medium">
-          #{order.number}
-        </Link>
+        <VStack gap={0.5} hAlign="start">
+          <Link href={`/orders/${order.id}`} weight="semibold" color="primary">
+            #{order.number}
+          </Link>
+          {order.cancelled_at ? (
+            <CancelledBadge />
+          ) : (
+            <Text type="supporting" color="secondary">
+              {order.item_count} {order.item_count === 1 ? "item" : "items"}
+            </Text>
+          )}
+        </VStack>
       ),
     },
     {
       key: "placed",
-      header: "Placed",
-      width: pixel(190),
-      renderCell: (order) => <DateTime value={order.placed_at} short />,
-    },
-    { key: "email", header: "Customer" },
-    {
-      key: "channel",
-      header: "Channel",
-      renderCell: (order) => channels[order.channel] ?? order.channel,
-    },
-    {
-      key: "status",
-      header: "Status",
+      header: "Date",
+      width: pixel(150),
       renderCell: (order) => (
-        <HStack gap={1} wrap="wrap">
-          {order.cancelled_at ? (
-            <CancelledBadge />
-          ) : (
-            <>
-              <PaymentBadge status={order.financial_status} />
-              <FulfillmentBadge status={order.fulfillment_status} />
-            </>
-          )}
-        </HStack>
+        <Text color="secondary">
+          <DateTime value={order.placed_at} short />
+        </Text>
       ),
     },
-    { key: "item_count", header: "Items", width: pixel(80), align: "end" },
+    {
+      key: "email",
+      header: "Customer",
+      width: proportional(2, { minWidth: 180 }),
+      renderCell: (order) => (
+        <VStack gap={0.5}>
+          <Text weight="medium">{order.email}</Text>
+          <Text type="supporting" color="secondary">
+            {[order.country, channels[order.channel] ?? order.channel].join(" · ")}
+          </Text>
+        </VStack>
+      ),
+    },
+    {
+      key: "payment",
+      header: "Payment",
+      width: pixel(130),
+      renderCell: (order) =>
+        order.cancelled_at ? <Text color="secondary">—</Text> : <PaymentBadge status={order.financial_status} />,
+    },
+    {
+      key: "fulfilment",
+      header: "Fulfilment",
+      width: pixel(150),
+      renderCell: (order) =>
+        order.cancelled_at ? (
+          <Text color="secondary">—</Text>
+        ) : (
+          <FulfillmentBadge status={order.fulfillment_status} />
+        ),
+    },
     {
       key: "total",
       header: "Total",
       width: pixel(130),
       align: "end",
-      renderCell: (order) => formatMoney(order.total, currencies),
+      renderCell: (order) => <Text weight="medium">{formatMoney(order.total, currencies)}</Text>,
     },
   ];
   return (
@@ -149,6 +179,7 @@ export function OrdersTable({
       idKey="id"
       rowHref={(o) => `/orders/${o.id}`}
       filters={filters}
+      views={VIEWS}
       sorts={SORTS}
       sortOptions={SORT_OPTIONS}
       defaultSort="newest"
