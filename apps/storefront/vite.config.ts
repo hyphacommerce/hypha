@@ -9,6 +9,8 @@ export default defineConfig({
   plugins: [
     vinext(),
     cloudflare({
+      // The admin's worker debugger takes the default, 9229, so both can run (`pnpm dev`).
+      inspectorPort: 9230,
       viteEnvironment: {
         name: "rsc",
         childEnvironments: ["ssr"],

@@ -40,6 +40,7 @@ Extend the wasm build list when a domain crate or storage adapter is added.
 
 The repo is also a pnpm workspace (`pnpm-workspace.yaml`): `apps/admin` (the admin panel: Next.js App Router run with vinext on Vite, Astryx components) and `packages/sdk` (`@hypha/sdk`: types generated from `openapi/*.json` with `openapi-typescript`, clients on `openapi-fetch`).
 
+- `pnpm dev` (`scripts/dev.sh`) starts the compose services, the API on :3917 (on the `hypha_preview` database unless `DATABASE_URL` is set; its `HYPHA_SECRET_KEY` kept in the ignored `.dev-secret-key`), the admin and the storefront, with labelled output; Ctrl+C stops all three.
 - `pnpm install`, `pnpm admin:dev` (http://localhost:3001; copy `apps/admin/.env.example` to `apps/admin/.dev.vars` first, and run the API on the URL it names), `pnpm admin:build`, `pnpm typecheck`.
 - After the OpenAPI documents change: `pnpm sdk:generate` (committed; `pnpm sdk:check` fails while stale).
 - The admin is a backend for its own frontend: only its server code (`apps/admin/lib/hypha.ts`) calls the API, and the staff session stays in an httpOnly cookie. Standard Next.js APIs only (no vinext-specific ones), so `pnpm exec next build` keeps working too.

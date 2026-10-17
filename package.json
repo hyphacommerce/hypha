@@ -9,6 +9,7 @@
   "scripts": {
     "sdk:generate": "pnpm --filter @hypha/sdk generate",
     "sdk:check": "pnpm --filter @hypha/sdk check",
+    "dev": "bash scripts/dev.sh",
     "admin:dev": "pnpm --filter admin dev",
     "admin:build": "pnpm --filter admin build",
     "storefront:dev": "pnpm --filter storefront dev",

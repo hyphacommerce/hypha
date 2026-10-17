@@ -21,6 +21,16 @@ unsafe_code = "forbid"
 all = "warn"
 # Password hashing is slow on purpose, and unoptimized it is many times slower still,
 # which would make logins in dev builds and tests crawl. Optimize just these crates.
+# Debug info is most of what a build writes (on macOS it stays in an object file per
+# codegen unit beside each test binary, and Cargo never deletes old ones). Line tables
+# keep file:line in backtraces and panics; dependencies get none. Set `debug = true`
+# locally to step through variables in a debugger.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.dev.package.argon2]
 opt-level = 3
 

@@ -1,4 +1,6 @@
 /target
+# The API key `pnpm dev` makes (scripts/dev.sh).
+/.dev-secret-key
 # TypeScript apps and packages (design note 0011)
 node_modules/
 dist/
