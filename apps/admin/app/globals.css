@@ -1,9 +1,10 @@
 /* Astryx's pre-built CSS (design note 0011, P3): reset, components, then the Hypha
-   theme (theme/hyphaTheme.ts, built to theme/hypha.css). The order maps to Astryx's
-   cascade layers, so keep it. */
+   theme (theme/hyphaTheme.ts, built to theme/hypha.css), then the rich text editor's
+   (design note 0024, AU9). The order maps to Astryx's cascade layers, so keep it. */
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
 @import "../theme/hypha.css";
+@import "@astryxdesign/richtext/richtext.css";
 
 /* The brand's typefaces, self-hosted from npm (SIL OFL): Geist and Geist Mono. */
 @import "@fontsource-variable/geist";
