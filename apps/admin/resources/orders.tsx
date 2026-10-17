@@ -8,6 +8,7 @@ import { type TableColumn, pixel, proportional } from "@astryxdesign/core/Table"
 import { Text } from "@astryxdesign/core/Text";
 import { ShoppingBagIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
+import { useState } from "react";
 
 import { DateTime } from "@/components/date-time";
 import {
@@ -19,6 +20,8 @@ import {
 } from "@/components/resource-table/resource-table";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { type Currencies, formatMoney } from "@/lib/format";
+
+import { type BulkOutcome, BulkOutcomeBanner, OrderBulkActions } from "./bulk";
 
 type Order = AdminSchemas["OrderSummaryResponse"];
 
@@ -57,6 +60,7 @@ export function OrdersTable({
   /** The currencies markets sell in. */
   orderCurrencies: string[];
 }) {
+  const [outcome, setOutcome] = useState<BulkOutcome>();
   const filters: FilterDef[] = [
     { kind: "search", param: "q", label: "Search", placeholder: "Search orders by number or email" },
     {
@@ -172,28 +176,37 @@ export function OrdersTable({
     },
   ];
   return (
-    <ResourceTable<Order>
-      rows={page.items}
-      nextCursor={page.next_cursor}
-      columns={columns}
-      idKey="id"
-      rowHref={(o) => `/orders/${o.id}`}
-      filters={filters}
-      views={VIEWS}
-      sorts={SORTS}
-      sortOptions={SORT_OPTIONS}
-      defaultSort="newest"
-      sortRequires={{ total_asc: "currency", total_desc: "currency" }}
-      error={page.error}
-      empty={{
-        icon: <ShoppingBagIcon width={32} />,
-        title: "No orders yet",
-        description: "Orders placed through checkout show up here, newest first.",
-      }}
-      noResults={{
-        title: "No orders match these filters",
-        description: "Search finds an order by its number (1001 or #1001) or by text in its email.",
-      }}
-    />
+    <VStack gap={3}>
+      {outcome && (
+        <BulkOutcomeBanner outcome={outcome} noun="order" onClose={() => setOutcome(undefined)} />
+      )}
+      <ResourceTable<Order>
+        bulkActions={(selected, clear) => (
+          <OrderBulkActions selected={selected} clear={clear} onDone={setOutcome} />
+        )}
+        rowLabel={(o) => `Order #${o.number}`}
+        rows={page.items}
+        nextCursor={page.next_cursor}
+        columns={columns}
+        idKey="id"
+        rowHref={(o) => `/orders/${o.id}`}
+        filters={filters}
+        views={VIEWS}
+        sorts={SORTS}
+        sortOptions={SORT_OPTIONS}
+        defaultSort="newest"
+        sortRequires={{ total_asc: "currency", total_desc: "currency" }}
+        error={page.error}
+        empty={{
+          icon: <ShoppingBagIcon width={32} />,
+          title: "No orders yet",
+          description: "Orders placed through checkout show up here, newest first.",
+        }}
+        noResults={{
+          title: "No orders match these filters",
+          description: "Search finds an order by its number (1001 or #1001) or by text in its email.",
+        }}
+      />
+    </VStack>
   );
 }

@@ -9,6 +9,7 @@ import { type TableColumn, pixel, proportional } from "@astryxdesign/core/Table"
 import { Text } from "@astryxdesign/core/Text";
 import { CubeIcon, PhotoIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
+import { useState } from "react";
 
 import { DateTime } from "@/components/date-time";
 import {
@@ -20,6 +21,8 @@ import {
 } from "@/components/resource-table/resource-table";
 import { ProductStatusBadge } from "@/components/status";
 import { type Currencies, formatMoney } from "@/lib/format";
+
+import { type BulkOutcome, BulkOutcomeBanner, ProductBulkActions } from "./bulk";
 
 type Product = AdminSchemas["ProductSummaryResponse"];
 
@@ -109,6 +112,7 @@ export function ProductsTable({
   /** Category paths by ID ("Clothing › Shirts"). */
   categories: Record<string, string>;
 }) {
+  const [outcome, setOutcome] = useState<BulkOutcome>();
   const shortName = Object.fromEntries(
     Object.entries(categories).map(([id, path]) => [id, path.split(" › ").at(-1) ?? path]),
   );
@@ -192,28 +196,43 @@ export function ProductsTable({
     },
   ];
   return (
-    <ResourceTable<Product>
-      rows={page.items}
-      nextCursor={page.next_cursor}
-      columns={columns}
-      idKey="id"
-      rowHref={(p) => `/products/${p.id}`}
-      filters={filters}
-      views={VIEWS}
-      sorts={SORTS}
-      sortOptions={SORT_OPTIONS}
-      defaultSort="newest"
-      error={page.error}
-      empty={{
-        icon: <CubeIcon width={32} />,
-        title: "No products yet",
-        description: "Products you add show up here, newest first.",
-        action: <Button label="Add product" href="/products/new" />,
-      }}
-      noResults={{
-        title: "No products match these filters",
-        description: "Search looks at titles, handles and SKUs; vendor, type and tag match whole.",
-      }}
-    />
+    <VStack gap={3}>
+      {outcome && (
+        <BulkOutcomeBanner outcome={outcome} noun="product" onClose={() => setOutcome(undefined)} />
+      )}
+      <ResourceTable<Product>
+        bulkActions={(selected, clear) => (
+          <ProductBulkActions
+            selected={selected}
+            clear={clear}
+            channels={channels}
+            categories={categories}
+            onDone={setOutcome}
+          />
+        )}
+        rowLabel={(p) => p.title}
+        rows={page.items}
+        nextCursor={page.next_cursor}
+        columns={columns}
+        idKey="id"
+        rowHref={(p) => `/products/${p.id}`}
+        filters={filters}
+        views={VIEWS}
+        sorts={SORTS}
+        sortOptions={SORT_OPTIONS}
+        defaultSort="newest"
+        error={page.error}
+        empty={{
+          icon: <CubeIcon width={32} />,
+          title: "No products yet",
+          description: "Products you add show up here, newest first.",
+          action: <Button label="Add product" href="/products/new" />,
+        }}
+        noResults={{
+          title: "No products match these filters",
+          description: "Search looks at titles, handles and SKUs; vendor, type and tag match whole.",
+        }}
+      />
+    </VStack>
   );
 }
