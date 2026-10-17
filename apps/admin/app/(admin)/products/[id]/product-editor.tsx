@@ -1,13 +1,10 @@
 "use client";
 
-import { Banner } from "@astryxdesign/core/Banner";
-import { Button } from "@astryxdesign/core/Button";
-import { HStack } from "@astryxdesign/core/Layout";
-import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { type ReactNode, useEffect, useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
+import { SaveBar } from "@/components/save-bar";
 import type { CategoryNode } from "@/lib/categories";
 
 import { type Stock, saveProduct } from "../actions";
@@ -119,37 +116,13 @@ export function ProductEditor({
 
   return (
     <>
-      {(isDirty || error) && (
-        <div
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 10,
-            padding: "12px 16px",
-            borderRadius: 8,
-            background: "var(--color-background-muted)",
-          }}
-        >
-          <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
-            <Text weight="medium">{isDirty ? "Unsaved changes" : "Not saved"}</Text>
-            <HStack gap={2}>
-              <Button label="Discard" variant="ghost" isDisabled={isPending} onClick={discard} />
-              <Button
-                label="Save"
-                variant="primary"
-                isLoading={isPending}
-                isDisabled={!isDirty}
-                onClick={save}
-              />
-            </HStack>
-          </HStack>
-          {error && (
-            <div style={{ marginTop: 12 }}>
-              <Banner status="error" title={error} />
-            </div>
-          )}
-        </div>
-      )}
+      <SaveBar
+        isDirty={isDirty}
+        isPending={isPending}
+        error={error}
+        onSave={save}
+        onDiscard={discard}
+      />
 
       <div className="product-editor-columns">
         <div>

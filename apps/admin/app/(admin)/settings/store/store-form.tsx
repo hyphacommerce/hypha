@@ -1,9 +1,8 @@
 "use client";
 
 import { Banner } from "@astryxdesign/core/Banner";
-import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
@@ -11,6 +10,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { startTransition, useActionState, useState } from "react";
 
+import { SaveBar } from "@/components/save-bar";
 import { type Country, countryOptions } from "@/lib/regions";
 
 import { type StorePatch, updateStore } from "./actions";
@@ -114,11 +114,27 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
     if (!isChanged || !name.trim()) return;
     startTransition(() => save(patch));
   };
+  const discard = () => {
+    setName(store.name);
+    setEmail(store.contact_email ?? "");
+    setDescription(store.description ?? "");
+    setLegalName(store.legal_name ?? "");
+    setAddress(addressDraft(store.legal_address));
+    setTimezone(store.timezone ?? "");
+    setLanguage(store.default_language);
+  };
   const field = (key: keyof AddressDraft) => (value: string) => setAddress({ ...address, [key]: value });
 
   return (
     <VStack gap={4}>
-      {state.error && <Banner status="error" title={state.error} />}
+      <SaveBar
+        isDirty={isChanged}
+        isPending={isPending}
+        error={isChanged ? state.error : undefined}
+        canSave={name.trim() !== ""}
+        onSave={submit}
+        onDiscard={discard}
+      />
       {state.saved && !isChanged && <Banner status="success" title="Saved." />}
       <Card>
         <VStack gap={4}>
@@ -204,15 +220,6 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
           />
         </VStack>
       </Card>
-      <HStack gap={2} hAlign="end">
-        <Button
-          label="Save"
-          variant="primary"
-          isLoading={isPending}
-          isDisabled={!isChanged || !name.trim()}
-          onClick={submit}
-        />
-      </HStack>
     </VStack>
   );
 }

@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
 
 import { CatalogCard } from "./catalog-card";
-import { CountriesCard, DetailsCard } from "./details-cards";
+import { MarketEditor } from "./market-editor";
 import { PriceListCard } from "./price-list-card";
 
 /**
@@ -59,29 +59,36 @@ export default async function MarketPage({
 
   return (
     <Section padding={6}>
-      <VStack gap={5} maxWidth={960}>
+      <VStack gap={5} maxWidth={1280}>
         <PageHeader title={market.name} back={{ label: "Markets", href: "/markets" }} />
-        <DetailsCard market={market} />
-        <CountriesCard market={market} countries={countries} />
-        <CatalogCard
+        <MarketEditor
+          key={[market.name, market.prices_include_tax, ...market.countries].join("|")}
           market={market}
-          catalog={catalog}
-          page={products?.data}
-          isFirstPage={!productsCursor}
-          pricesCursor={pricesCursor}
+          countries={countries}
+          main={
+            <>
+              <CatalogCard
+                market={market}
+                catalog={catalog}
+                page={products?.data}
+                isFirstPage={!productsCursor}
+                pricesCursor={pricesCursor}
+              />
+              {catalog && (
+                <PriceListCard
+                  market={market}
+                  catalog={catalog}
+                  canRead={lists.data !== undefined}
+                  lists={(lists.data?.items ?? []).filter((l) => l.currency === market.currency)}
+                  list={list?.data}
+                  page={prices?.data}
+                  isFirstPage={!pricesCursor}
+                  productsCursor={productsCursor}
+                />
+              )}
+            </>
+          }
         />
-        {catalog && (
-          <PriceListCard
-            market={market}
-            catalog={catalog}
-            canRead={lists.data !== undefined}
-            lists={(lists.data?.items ?? []).filter((l) => l.currency === market.currency)}
-            list={list?.data}
-            page={prices?.data}
-            isFirstPage={!pricesCursor}
-            productsCursor={productsCursor}
-          />
-        )}
       </VStack>
     </Section>
   );

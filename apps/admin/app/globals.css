@@ -38,8 +38,9 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   display: block;
 }
 
-/* The product editor (design note 0024, section 6): content on the left, settings on
-   the right; one column on narrow screens, settings after the content. */
+/* Detail pages (design note 0024, section 6): the thing itself on the left, its
+   settings and facts on the right; one column on narrow screens, the side after. */
+.detail-columns,
 .product-editor-columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
@@ -47,6 +48,7 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   align-items: start;
 }
 
+.detail-columns > *,
 .product-editor-columns > * {
   display: flex;
   flex-direction: column;
@@ -55,9 +57,20 @@ html[data-theme="dark"] .hypha-wordmark-dark {
 }
 
 @media (max-width: 1100px) {
+  .detail-columns,
   .product-editor-columns {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* The save bar (components/save-bar.tsx): sticky above the page's sections. */
+.save-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--color-background-muted);
 }
 
 /* Small thumbnails in the variants table, so its inputs keep their room. */
