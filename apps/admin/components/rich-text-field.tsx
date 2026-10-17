@@ -3,7 +3,15 @@
 import { RichTextEditor, RichTextEditorToolbar } from "@astryxdesign/richtext";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $getRoot, $insertNodes, type LexicalEditor } from "lexical";
+import {
+  $createParagraphNode,
+  $getRoot,
+  $isDecoratorNode,
+  $isElementNode,
+  $setSelection,
+  type ElementNode,
+  type LexicalEditor,
+} from "lexical";
 import { useEffect, useRef } from "react";
 
 /** The update tag of loading a value in, which isn't an edit. */
@@ -76,15 +84,36 @@ function HtmlValuePlugin({ value, onChange }: { value: string; onChange: (html: 
   return null;
 }
 
+/**
+ * Loads `html` into the editor without selecting anything: a selection set in an update
+ * moves the browser's focus into the editor, so loading the page would focus the
+ * description. Top-level inline nodes (bare text) go into paragraphs, as the root holds
+ * only blocks.
+ */
 function load(editor: LexicalEditor, html: string) {
   editor.update(
     () => {
       const root = $getRoot();
       root.clear();
-      if (html.trim() === "") return;
-      const dom = new DOMParser().parseFromString(html, "text/html");
-      root.select();
-      $insertNodes($generateNodesFromDOM(editor, dom));
+      if (html.trim() !== "") {
+        const dom = new DOMParser().parseFromString(html, "text/html");
+        let paragraph: ElementNode | null = null;
+        for (const node of $generateNodesFromDOM(editor, dom)) {
+          const isBlock =
+            ($isElementNode(node) || $isDecoratorNode(node)) && !node.isInline();
+          if (isBlock) {
+            paragraph = null;
+            root.append(node);
+          } else {
+            if (!paragraph) {
+              paragraph = $createParagraphNode();
+              root.append(paragraph);
+            }
+            paragraph.append(node);
+          }
+        }
+      }
+      $setSelection(null);
     },
     // Not an edit, and not something to undo back past.
     { tag: [LOAD, "history-merge"] },

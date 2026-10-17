@@ -39,3 +39,36 @@ export function countryOptions(countries: Country[]): { value: string; label: st
     .map((c) => ({ value: c.code, label: countryLabel(c.code, countries) }))
     .sort((a, b) => countryName(a.value, countries).localeCompare(countryName(b.value, countries)));
 }
+
+/** The countries `markets` sell to, each with its market's name, leaving out `except`. */
+export function takenCountries(
+  markets: { id: string; name: string; countries: string[] }[],
+  except?: string,
+): Record<string, string> {
+  return Object.fromEntries(
+    markets.filter((m) => m.id !== except).flatMap((m) => m.countries.map((c) => [c, m.name])),
+  );
+}
+
+/** Groups of countries for picking many at once (design note 0024, section 6). */
+export const REGIONS: { key: string; label: string; codes: string[] }[] = [
+  {
+    key: "eu",
+    label: "European Union",
+    codes: [
+      "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE",
+      "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+    ],
+  },
+  {
+    key: "europe",
+    label: "Europe",
+    codes: [
+      "AL", "AD", "AT", "BY", "BE", "BA", "BG", "HR", "CY", "CZ", "DK", "EE", "FO", "FI",
+      "FR", "DE", "GI", "GR", "GG", "HU", "IS", "IE", "IM", "IT", "JE", "LV", "LI", "LT",
+      "LU", "MT", "MD", "MC", "ME", "NL", "MK", "NO", "PL", "PT", "RO", "SM", "RS", "SK",
+      "SI", "ES", "SE", "CH", "UA", "GB", "VA",
+    ],
+  },
+  { key: "north-america", label: "North America", codes: ["US", "CA", "MX"] },
+];

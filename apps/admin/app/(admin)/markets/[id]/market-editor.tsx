@@ -3,15 +3,15 @@
 import { Card } from "@astryxdesign/core/Card";
 import { VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
-import { MultiSelector } from "@astryxdesign/core/MultiSelector";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { type ReactNode, useState, useTransition } from "react";
 
+import { CountryPicker } from "@/components/country-picker";
 import { SaveBar } from "@/components/save-bar";
-import { type Country, countryOptions } from "@/lib/regions";
+import type { Country } from "@/lib/regions";
 
 import { setMarketCountries, updateMarket } from "../actions";
 
@@ -26,10 +26,13 @@ type Market = AdminSchemas["MarketResponse"];
 export function MarketEditor({
   market,
   countries,
+  taken,
   main,
 }: {
   market: Market;
   countries: Country[];
+  /** Countries other markets have (`takenCountries`). */
+  taken: Record<string, string>;
   main: ReactNode;
 }) {
   const [name, setName] = useState(market.name);
@@ -124,15 +127,12 @@ export function MarketEditor({
                   market.
                 </Text>
               </VStack>
-              <MultiSelector
-                label="Countries"
-                isLabelHidden
-                options={countryOptions(countries)}
+              <CountryPicker
+                countries={countries}
+                taken={taken}
                 value={chosen}
                 onChange={setChosen}
-                hasSearch
-                triggerDisplay="badges"
-                maxBadges={8}
+                description="Pick or search; the quick picks add only countries no other market has."
                 status={
                   chosen.length === 0
                     ? { type: "error", message: "A market needs at least one country." }

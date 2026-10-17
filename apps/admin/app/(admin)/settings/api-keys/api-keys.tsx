@@ -166,7 +166,13 @@ function CreateKeyDialog({
         {error && <Banner status="error" title={error} />}
         {token ? (
           <>
-            <CodeBlock code={token} />
+            <CodeBlock code={token} title={kind === "secret" ? "Secret key" : "Publishable key"} isWrapped />
+            {kind === "publishable" && (
+              <Text type="supporting" color="secondary">
+                For a storefront, it goes in its STOREFRONT_KEY setting (apps/storefront/.dev.vars
+                when you run it locally).
+              </Text>
+            )}
             {kind === "secret" && (
               <Banner
                 status="warning"

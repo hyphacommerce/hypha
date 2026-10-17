@@ -6,7 +6,6 @@ import { Card } from "@astryxdesign/core/Card";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { List, ListItem } from "@astryxdesign/core/List";
-import { MultiSelector } from "@astryxdesign/core/MultiSelector";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Step, Stepper } from "@astryxdesign/core/Stepper";
 import { Switch } from "@astryxdesign/core/Switch";
@@ -17,9 +16,10 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useRouter } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useState, useTransition } from "react";
 
+import { CountryPicker } from "@/components/country-picker";
 import { useCurrencies } from "@/components/currencies";
 import { currencyCodes } from "@/lib/format";
-import { type Country, countryLabel, countryOptions, currencyOptions } from "@/lib/regions";
+import { type Country, countryLabel, currencyOptions, takenCountries } from "@/lib/regions";
 
 import type { SetupKey } from "../setup-checklist";
 import {
@@ -404,17 +404,19 @@ function MarketStep({ data, onSaved }: { data: WizardData; onSaved: () => void }
   const [currency, setCurrency] = useState<string>();
   const [pricesIncludeTax, setPricesIncludeTax] = useState(true);
   const { error, isPending, run } = useSave(onSaved);
-  const taken = new Set(data.markets.flatMap((m) => m.countries));
+  const taken = takenCountries(data.markets);
   const canSave = name.trim() !== "" && chosen.length > 0 && Boolean(currency);
+  // A market selling everywhere lists its count, not two hundred names.
+  const where = (codes: string[]) =>
+    codes.length > 6
+      ? `${codes.length} countries`
+      : codes.map((c) => countryLabel(c, data.countries)).join(", ");
 
   return (
     <VStack gap={4}>
       <Existing
         title="Your markets"
-        lines={data.markets.map(
-          (m) =>
-            `${m.name}: ${m.countries.map((c) => countryLabel(c, data.countries)).join(", ")} · ${m.currency}`,
-        )}
+        lines={data.markets.map((m) => `${m.name}: ${where(m.countries)} · ${m.currency}`)}
         addLabel="Add another market"
         isAdding={isAdding}
         onAdd={() => setIsAdding(true)}
@@ -430,16 +432,12 @@ function MarketStep({ data, onSaved }: { data: WizardData; onSaved: () => void }
               value={name}
               onChange={setName}
             />
-            <MultiSelector
-              label="Countries"
-              description="A country belongs to one market at most."
-              options={countryOptions(data.countries.filter((c) => !taken.has(c.code)))}
+            <CountryPicker
+              countries={data.countries}
+              taken={taken}
               value={chosen}
               onChange={setChosen}
-              hasSearch
-              triggerDisplay="badges"
-              maxBadges={6}
-              placeholder="Choose countries"
+              description="A country belongs to one market at most. Selling everywhere? Pick all available."
             />
             <Selector
               label="Currency"
@@ -520,7 +518,7 @@ function ShippingStep({
         title="Your shipping zones"
         lines={data.zones.map(
           (z) =>
-            `${z.name}: ${z.countries.join(", ")} · ${z.options.length} ${z.options.length === 1 ? "option" : "options"}`,
+            `${z.name}: ${z.countries.length > 6 ? `${z.countries.length} countries` : z.countries.join(", ")} · ${z.options.length} ${z.options.length === 1 ? "option" : "options"}`,
         )}
         addLabel="Add another zone"
         isAdding={isAdding}
@@ -531,18 +529,12 @@ function ShippingStep({
           <VStack gap={4}>
             {error && <Banner status="error" title={error} />}
             <TextInput label="Zone name" value={name} onChange={setName} />
-            <MultiSelector
-              label="Countries"
-              description="A country is in one zone at most."
-              options={countryOptions(
-                data.countries.filter((c) => !zoned.has(c.code)),
-              )}
+            <CountryPicker
+              countries={data.countries}
+              taken={takenCountries(data.zones)}
               value={chosen}
               onChange={setChosen}
-              hasSearch
-              triggerDisplay="badges"
-              maxBadges={6}
-              placeholder="Choose countries"
+              description="A country is in one zone at most."
             />
             <TextInput
               label="Option name"
@@ -593,13 +585,15 @@ function ProductStep({
   const [title, setTitle] = useState("");
   const [price, setPrice] = useState("");
   const [market, setMarket] = useState(data.markets[0]?.id);
+  const [track, setTrack] = useState(true);
   const [stock, setStock] = useState("10");
   const [location, setLocation] = useState(data.locations[0]?.id);
   const { error, isPending, run } = useSave(onSaved);
   if (data.markets.length === 0) return <NeedsMarket goTo={goTo} />;
 
   const currency = data.markets.find((m) => m.id === market)?.currency;
-  const canSave = title.trim() !== "" && price.trim() !== "" && Boolean(market);
+  const canSave =
+    title.trim() !== "" && price.trim() !== "" && Boolean(market) && (!track || stock.trim() !== "");
   const shown = data.products.slice(0, 5);
 
   return (
@@ -634,9 +628,11 @@ function ProductStep({
               value={title}
               onChange={setTitle}
             />
-            <HStack gap={3}>
+            {/* Each pair has a description on both fields, so the inputs line up. */}
+            <div className="form-grid">
               <TextInput
                 label={currency ? `Price (${currency})` : "Price"}
+                description="In the market's currency."
                 placeholder="18.50"
                 value={price}
                 onChange={setPrice}
@@ -648,23 +644,36 @@ function ProductStep({
                 value={market}
                 onChange={setMarket}
               />
-            </HStack>
-            <HStack gap={3}>
-              <TextInput
-                label="Stock"
-                description="Blank for untracked: always sellable."
-                value={stock}
-                onChange={setStock}
-              />
-              {data.locations.length > 0 && (
-                <Selector
-                  label="At"
-                  options={data.locations.map((l) => ({ value: l.id, label: l.name }))}
-                  value={location}
-                  onChange={setLocation}
+            </div>
+            <Switch
+              label="Track stock"
+              description={
+                track
+                  ? "Counted at a warehouse; it can't be sold once it runs out."
+                  : "Not counted: it can always be sold, as for made-to-order or digital goods."
+              }
+              value={track}
+              onChange={setTrack}
+            />
+            {track && (
+              <div className="form-grid">
+                <TextInput
+                  label="On hand"
+                  description="How many you have now."
+                  value={stock}
+                  onChange={setStock}
                 />
-              )}
-            </HStack>
+                {data.locations.length > 0 && (
+                  <Selector
+                    label="Warehouse"
+                    description="Where they are."
+                    options={data.locations.map((l) => ({ value: l.id, label: l.name }))}
+                    value={location}
+                    onChange={setLocation}
+                  />
+                )}
+              </div>
+            )}
             <HStack hAlign="end">
               <Button
                 label="Add product"
@@ -674,7 +683,7 @@ function ProductStep({
                 onClick={() =>
                   market &&
                   run(() =>
-                    addProduct({ title, price, market, stock, location: location ?? null }),
+                    addProduct({ title, price, market, track, stock, location: location ?? null }),
                   )
                 }
               />
@@ -764,9 +773,13 @@ function SellStep({
               <Banner
                 status="warning"
                 title="Copy it now"
-                description="The key is shown only once. Put this line in apps/storefront/.dev.vars:"
+                description="The key is shown only once."
               />
-              <CodeBlock code={`STOREFRONT_KEY=${token}`} />
+              <CodeBlock code={token} title="Publishable key" isWrapped />
+              <Text type="supporting" color="secondary">
+                It goes in the storefront&apos;s STOREFRONT_KEY setting (apps/storefront/.dev.vars
+                when you run it locally).
+              </Text>
             </VStack>
           ) : (
             <>

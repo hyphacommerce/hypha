@@ -4,19 +4,26 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { MultiSelector } from "@astryxdesign/core/MultiSelector";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState, useTransition } from "react";
 
+import { CountryPicker } from "@/components/country-picker";
 import { useCurrencies } from "@/components/currencies";
 import { currencyCodes } from "@/lib/format";
-import { type Country, countryOptions, currencyOptions } from "@/lib/regions";
+import { type Country, currencyOptions } from "@/lib/regions";
 
 import { createMarket } from "../actions";
 
-export function NewMarketForm({ countries }: { countries: Country[] }) {
+export function NewMarketForm({
+  countries,
+  taken,
+}: {
+  countries: Country[];
+  /** Countries other markets have (`takenCountries`). */
+  taken: Record<string, string>;
+}) {
   const currencies = useCurrencies();
   const [name, setName] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -47,17 +54,7 @@ export function NewMarketForm({ countries }: { countries: Country[] }) {
           onEnter={submit}
           hasAutoFocus
         />
-        <MultiSelector
-          label="Countries"
-          description="A country belongs to one market at most."
-          options={countryOptions(countries)}
-          value={chosen}
-          onChange={setChosen}
-          hasSearch
-          triggerDisplay="badges"
-          maxBadges={6}
-          placeholder="Choose countries"
-        />
+        <CountryPicker countries={countries} taken={taken} value={chosen} onChange={setChosen} />
         <Selector
           label="Currency"
           description="What the market's prices are in. It can't change later: price lists depend on it."

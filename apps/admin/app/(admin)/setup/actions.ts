@@ -119,6 +119,8 @@ export async function addProduct(input: {
   title: string;
   price: string;
   market: string;
+  /** Whether to count its stock; untracked, it can always be sold. */
+  track: boolean;
   stock: string;
   location: string | null;
 }): Promise<Result> {
@@ -129,9 +131,9 @@ export async function addProduct(input: {
   if (marketError) return { error: describe(marketError) };
   const amount = parseMoney(input.price, market.currency, await loadCurrencies());
   if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
-  const count = input.stock.trim() === "" ? null : Number(input.stock);
+  const count = input.track ? Number(input.stock.trim() || Number.NaN) : null;
   if (count !== null && (!Number.isInteger(count) || count < 0)) {
-    return { error: "Enter the stock as a whole number, or leave it blank to not track it." };
+    return { error: "Enter the stock on hand as a whole number, or turn off tracking." };
   }
 
   const { data: product, error } = await client.POST("/admin/products", {

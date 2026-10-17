@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
 import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
+import { takenCountries } from "@/lib/regions";
 
 import { CatalogCard } from "./catalog-card";
 import { MarketEditor } from "./market-editor";
@@ -27,9 +28,10 @@ export default async function MarketPage({
   const pricesCursor = typeof query.prices === "string" ? query.prices : undefined;
 
   const client = await sessionClient();
-  const [market, countries] = await Promise.all([
+  const [market, countries, markets] = await Promise.all([
     client.GET("/admin/markets/{id}", { params: { path: { id } } }).then(loaded),
     loadCountries(),
+    client.GET("/admin/markets").then(loaded),
   ]);
 
   const catalogId = market.catalog;
@@ -65,6 +67,7 @@ export default async function MarketPage({
           key={[market.name, market.prices_include_tax, ...market.countries].join("|")}
           market={market}
           countries={countries}
+          taken={takenCountries(markets.items, market.id)}
           main={
             <>
               <CatalogCard

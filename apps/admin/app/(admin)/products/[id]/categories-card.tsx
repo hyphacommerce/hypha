@@ -2,9 +2,10 @@
 
 import { Card } from "@astryxdesign/core/Card";
 import { Link } from "@astryxdesign/core/Link";
-import { VStack } from "@astryxdesign/core/Layout";
+import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { MultiSelector } from "@astryxdesign/core/MultiSelector";
 import { Text } from "@astryxdesign/core/Text";
+import { Token } from "@astryxdesign/core/Token";
 
 import { type CategoryNode, flatten } from "@/lib/categories";
 
@@ -43,17 +44,38 @@ export function CategoriesCard({
         {options.length === 0 ? (
           <Text color="secondary">No categories yet.</Text>
         ) : (
-          <MultiSelector
-            label="Categories"
-            isLabelHidden
-            placeholder="None"
-            options={options}
-            value={draft.categories}
-            onChange={(categories) => onChange({ categories: [...categories].sort() })}
-            hasSearch
-            triggerDisplay="badges"
-            maxBadges={6}
-          />
+          <VStack gap={2}>
+            {/* The picker shows a count, the chips below the choice: badges inside the
+                trigger overflowed the card with a few long paths. */}
+            <MultiSelector
+              label="Categories"
+              isLabelHidden
+              placeholder="Add to categories"
+              options={options}
+              value={draft.categories}
+              onChange={(categories) => onChange({ categories: [...categories].sort() })}
+              hasSearch
+              triggerDisplay="count"
+              formatValue={(items) =>
+                items.length === 1 ? "1 category" : `${items.length} categories`
+              }
+              width="100%"
+            />
+            {draft.categories.length > 0 && (
+              <HStack gap={1} wrap="wrap">
+                {draft.categories.map((id) => (
+                  <Token
+                    key={id}
+                    size="sm"
+                    label={options.find((o) => o.value === id)?.label ?? id}
+                    onRemove={() =>
+                      onChange({ categories: draft.categories.filter((c) => c !== id) })
+                    }
+                  />
+                ))}
+              </HStack>
+            )}
+          </VStack>
         )}
       </VStack>
     </Card>
