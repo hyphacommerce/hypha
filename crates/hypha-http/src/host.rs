@@ -18,7 +18,7 @@ use hypha_core::{Clock, IdGenerator, Random, Timestamp};
 use hypha_store_s3::{HttpClient, HttpRequest, HttpResponse};
 use uuid::Uuid;
 
-use crate::outbound::{CallError, OutboundCall};
+use crate::outbound::{CallError, OutboundCall, OutboundPolicy, SignedCall, prepare};
 use crate::rate_limit::{Decision, RateLimiter, Rule};
 
 /// A boxed future that can move between threads, which a host's capability returns.
@@ -87,6 +87,27 @@ pub type Job = Box<dyn FnOnce() + Send + 'static>;
 /// How a host runs a `Job`.
 type RunJob = dyn Fn(Job) -> BoxFuture<Result<(), String>> + Send + Sync;
 
+/// Why offloaded work gave no result.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum OffloadError {
+    /// The host couldn't run it (natively: its blocking thread panicked or was
+    /// cancelled); the host's own words.
+    #[error("the host couldn't run the work: {0}")]
+    Host(String),
+    /// The host returned without running it.
+    #[error("the work didn't finish")]
+    Unfinished,
+}
+
+impl hypha_core::ErrorCode for OffloadError {
+    fn code(&self) -> &'static str {
+        match self {
+            OffloadError::Host(_) => "offload_failed",
+            OffloadError::Unfinished => "offload_unfinished",
+        }
+    }
+}
+
 /// Where CPU-heavy work runs (hashing a password takes tens of milliseconds): Tokio's
 /// blocking threads natively, so it doesn't stall the requests on that worker; inline
 /// on Workers, where each request has its own isolate.
@@ -108,23 +129,24 @@ impl Offload {
         })
     }
 
-    /// Runs `work` and gives back its result; `Err` when the host couldn't run it.
+    /// Runs `work` and gives back its result.
     pub async fn run<T: Send + 'static>(
         &self,
         work: impl FnOnce() -> T + Send + 'static,
-    ) -> Result<T, String> {
+    ) -> Result<T, OffloadError> {
         let slot: Arc<Mutex<Option<T>>> = Arc::new(Mutex::new(None));
         let out = Arc::clone(&slot);
         (self.0)(Box::new(move || {
             let value = work();
             *out.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(value);
         }))
-        .await?;
+        .await
+        .map_err(OffloadError::Host)?;
         let value = slot
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take();
-        value.ok_or_else(|| "the work didn't finish".to_string())
+        value.ok_or(OffloadError::Unfinished)
     }
 }
 
@@ -185,6 +207,16 @@ impl HostCalls {
     pub async fn send(&self, call: OutboundCall) -> Result<Vec<u8>, CallError> {
         (self.0)(call).await
     }
+
+    /// Signs `call` and checks its URL under `policy` (`outbound::prepare`), then sends
+    /// it: how rate requests and webhooks go out.
+    pub async fn send_signed(
+        &self,
+        policy: OutboundPolicy,
+        call: SignedCall<'_>,
+    ) -> Result<Vec<u8>, CallError> {
+        self.send(prepare(policy, call)?).await
+    }
 }
 
 /// The HTTP the media storage's S3 client sends with (`hypha_store_s3::HttpClient`).
@@ -244,7 +276,7 @@ mod tests {
         let refusing = Offload::new(|_job| Box::pin(async { Err("no threads".to_string()) }));
         assert_eq!(
             pollster::block_on(refusing.run(|| 1)),
-            Err("no threads".to_string())
+            Err(OffloadError::Host("no threads".to_string()))
         );
     }
 
@@ -253,7 +285,7 @@ mod tests {
         let dropping = Offload::new(|_job| Box::pin(async { Ok(()) }));
         assert_eq!(
             pollster::block_on(dropping.run(|| 1)),
-            Err("the work didn't finish".to_string())
+            Err(OffloadError::Unfinished)
         );
     }
 }

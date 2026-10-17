@@ -29,9 +29,9 @@ use std::net::SocketAddr;
 
 use axum::extract::connect_info::MockConnectInfo;
 
-use hypha_http::host::{AfterWrites, HostHttp};
+use hypha_http::host::AfterWrites;
 use hypha_http::media::Media;
-use hypha_http::state::{AppState, HostEnv, Storage};
+use hypha_http::state::{AppState, HostEnv, HostParts, Storage};
 
 use crate::platform::{Background, UuidV7Ids};
 use crate::storage::PgStorage;
@@ -120,15 +120,10 @@ async fn fresh_schema() -> String {
 
 /// File storage under `config` (the compose server), bucket created.
 async fn test_media(config: &Config) -> Media {
-    let client = hypha_store_s3::ReqwestClient::new().expect("the S3 client");
-    let http = HostHttp::new(move |request| {
-        let client = client.clone();
-        Box::pin(async move { hypha_store_s3::HttpClient::send(&client, request).await })
-    });
     let media = Media::from_config(
         &config.media,
         |name| std::env::var(name).ok(),
-        http,
+        crate::platform::host_http,
         crate::platform::runtime().clock,
     )
     .expect("HYPHA_S3_* (see .cargo/config.toml)")
@@ -178,23 +173,23 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
         allow_private: config.allow_private_callbacks,
     })
     .unwrap();
-    let state = Arc::new(AppState {
-        storage,
-        ids: runtime.ids.clone(),
-        clock: runtime.clock.clone(),
+    let host = HostParts {
         env,
         background: Background::default().host(),
         limiter: crate::host_limiter(Arc::new(crate::limiter::MemoryRateLimiter::new(
             &config.rate_limits,
         ))),
-        publishable_keys: Default::default(),
         after_writes: AfterWrites::none(),
-        store: store.id(),
-        store_name: store.name().to_string(),
-        media,
         calls: crate::calls::host_calls(client),
+        media,
+    };
+    let state = Arc::new(AppState::new(
+        storage,
+        store.id(),
+        store.name().to_string(),
+        host,
         config,
-    });
+    ));
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {
         email: OWNER_EMAIL.to_string(),

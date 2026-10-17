@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hypha_core::{Clock, IdGenerator, Timestamp};
-use hypha_http::host::{HostBackground, HostClock, HostIds, HostRandom, Offload};
+use hypha_http::host::{HostBackground, HostClock, HostHttp, HostIds, HostRandom, Offload};
 use hypha_http::state::Runtime;
 use uuid::Uuid;
 
@@ -58,6 +58,15 @@ pub fn runtime() -> Runtime {
             })
         }),
     }
+}
+
+/// The media storage's HTTP: `reqwest`, through the S3 adapter's client.
+pub fn host_http() -> Result<HostHttp, String> {
+    let client = hypha_store_s3::ReqwestClient::new()?;
+    Ok(HostHttp::new(move |request| {
+        let client = client.clone();
+        Box::pin(async move { hypha_store_s3::HttpClient::send(&client, request).await })
+    }))
 }
 
 /// Work that runs after its response went out (password reset requests, buyers'

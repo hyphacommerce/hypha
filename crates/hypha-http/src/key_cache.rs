@@ -31,8 +31,12 @@ impl KeyCache {
     pub fn get(&self, token: &str, now: Timestamp) -> Option<Ctx> {
         let entries = self.lock();
         let (ctx, at) = entries.get(&digest(token))?;
+        // The host's clock is the wall clock: one set back makes the age negative, and
+        // that entry counts as expired rather than as fresh for as long as it's behind.
         let age = now.unix_micros().saturating_sub(at.unix_micros());
-        (age < Self::TTL.as_micros() as i64).then(|| ctx.clone())
+        (0..Self::TTL.as_micros() as i64)
+            .contains(&age)
+            .then(|| ctx.clone())
     }
 
     pub fn put(&self, token: &str, ctx: &Ctx, now: Timestamp) {
@@ -90,6 +94,17 @@ mod tests {
         let start = Timestamp::from_unix_micros(1_000_000);
         cache.put("hypha_pk_a", &ctx(), start);
         assert_eq!(cache.get("hypha_pk_a", start.plus(KeyCache::TTL)), None);
+    }
+
+    #[test]
+    fn a_clock_set_back_expires_the_key() {
+        let cache = KeyCache::default();
+        let start = Timestamp::from_unix_micros(3_600_000_000);
+        cache.put("hypha_pk_a", &ctx(), start);
+        assert_eq!(
+            cache.get("hypha_pk_a", Timestamp::from_unix_micros(1_000_000)),
+            None
+        );
     }
 
     #[test]

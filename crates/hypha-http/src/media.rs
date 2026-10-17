@@ -67,11 +67,12 @@ fn split_origin(url: &str) -> (&str, &str) {
 impl Media {
     /// From `[media]`, with the S3 keys from `secret` (the environment natively, the
     /// Worker's secrets on Workers: secrets have no key in the file), sending through the
-    /// host's `http`. `Ok(None)` without an S3 endpoint.
+    /// host's HTTP, which `http` builds only when there's an S3 endpoint. `Ok(None)`
+    /// without one.
     pub fn from_config(
         config: &hypha_config::MediaConfig,
         secret: impl Fn(&str) -> Option<String>,
-        http: HostHttp,
+        http: impl FnOnce() -> Result<HostHttp, String>,
         clock: HostClock,
     ) -> Result<Option<Media>, String> {
         let Some(s3) = &config.s3 else {
@@ -88,7 +89,7 @@ impl Media {
             secret_access_key: key("HYPHA_S3_SECRET_ACCESS_KEY")?,
         };
         Ok(Some(Media {
-            blobs: S3BlobStore::new(s3, http, clock.clone()),
+            blobs: S3BlobStore::new(s3, http()?, clock.clone()),
             clock,
             urls: MediaUrls {
                 public_base: config.public_url.clone(),

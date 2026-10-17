@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::{
     error::ApiError,
     host::{HostCalls, HostClock},
-    outbound::{CallError, Method, OutboundPolicy, SignedCall, prepare},
+    outbound::{CallError, Method, OutboundPolicy, SignedCall},
     routes::rfc3339,
     state::HostEnv,
 };
@@ -159,10 +159,7 @@ impl WebhookSender for HostWebhooks<'_> {
             body,
             discard_answer: true,
         };
-        let sent = match prepare(self.outbound, call) {
-            Ok(call) => self.calls.send(call).await,
-            Err(e) => Err(e),
-        };
+        let sent = self.calls.send_signed(self.outbound, call).await;
         sent.map(|_| ()).map_err(|e| match e {
             CallError::Timeout => format!("no answer within {} ms", webhook.timeout_ms),
             CallError::Failed(reason) => reason,

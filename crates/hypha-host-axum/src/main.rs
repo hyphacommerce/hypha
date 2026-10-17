@@ -10,9 +10,9 @@ use hypha_inventory::{HasLocations, ensure_default_location};
 use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
-use hypha_http::host::{HostHttp, HostLimiter};
+use hypha_http::host::HostLimiter;
 use hypha_http::rate_limit::RateLimiter;
-use hypha_http::state::{AppState, HostEnv, Runtime, Storage};
+use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, Storage};
 
 mod calls;
 #[cfg(test)]
@@ -295,21 +295,10 @@ async fn serve(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Confi
     };
     tracing::info!(store = %store.id(), name = store.name(), "serving store");
 
-    let blob_http = match hypha_store_s3::ReqwestClient::new() {
-        Ok(client) => client,
-        Err(e) => {
-            tracing::error!("{e}");
-            std::process::exit(1);
-        }
-    };
-    let blob_http = HostHttp::new(move |request| {
-        let client = blob_http.clone();
-        Box::pin(async move { hypha_store_s3::HttpClient::send(&client, request).await })
-    });
     let media = match hypha_http::media::Media::from_config(
         &config.media,
         |name| std::env::var(name).ok(),
-        blob_http,
+        platform::host_http,
         runtime.clock.clone(),
     ) {
         Ok(media) => media,
@@ -358,21 +347,21 @@ async fn serve(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Confi
             std::process::exit(1);
         }
     };
-    let state = Arc::new(AppState {
-        storage,
-        ids,
-        clock: runtime.clock.clone(),
+    let host = HostParts {
         env,
         background: background.host(),
         limiter: host_limiter(Arc::clone(&limiter)),
-        publishable_keys: Default::default(),
         after_writes: wake.after_writes(),
-        store: store.id(),
-        store_name: store.name().to_string(),
-        media,
         calls: calls::host_calls(client),
+        media,
+    };
+    let state = Arc::new(AppState::new(
+        storage,
+        store.id(),
+        store.name().to_string(),
+        host,
         config,
-    });
+    ));
     if let Err(e) = ensure_owner(&state).await {
         tracing::error!("owner setup failed: {e}");
         std::process::exit(1);

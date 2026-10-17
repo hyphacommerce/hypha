@@ -71,6 +71,11 @@ impl HostEnv {
         }
     }
 
+    /// The host's runtime: its clock, IDs, randomness and where CPU-heavy work runs.
+    pub fn runtime(&self) -> &Runtime {
+        &self.runtime
+    }
+
     /// Other Argon2 parameters (tests use cheap ones).
     pub fn with_hasher(mut self, hasher: Argon2id) -> Self {
         self.hasher = hasher;
@@ -166,7 +171,7 @@ impl PasswordHasher for HostEnv {
             .offload
             .run(move || hasher.hash_now(&password, salt))
             .await
-            .map_err(HashError)?
+            .map_err(|e| HashError(e.to_string()))?
     }
 
     async fn verify_password(
@@ -179,7 +184,7 @@ impl PasswordHasher for HostEnv {
             .offload
             .run(move || hasher.verify_now(&password, &hash))
             .await
-            .map_err(HashError)?
+            .map_err(|e| HashError(e.to_string()))?
     }
 }
 
@@ -290,7 +295,46 @@ pub struct AppState<S> {
     pub config: hypha_config::Config,
 }
 
+/// What a host gives `AppState::new` besides its storage, its store and its settings
+/// (`host.rs`; design note 0026).
+pub struct HostParts {
+    pub env: HostEnv,
+    pub background: HostBackground,
+    pub limiter: HostLimiter,
+    pub after_writes: AfterWrites,
+    pub calls: HostCalls,
+    pub media: Option<crate::media::Media>,
+}
+
 impl<S> AppState<S> {
+    /// The state for the store `store` named `store_name`. Its clock and IDs are the
+    /// `HostEnv`'s runtime's, so the state and the auth commands can't read different
+    /// ones.
+    pub fn new(
+        storage: S,
+        store: StoreId,
+        store_name: String,
+        host: HostParts,
+        config: hypha_config::Config,
+    ) -> Self {
+        let runtime = host.env.runtime().clone();
+        Self {
+            storage,
+            ids: runtime.ids,
+            clock: runtime.clock,
+            env: host.env,
+            background: host.background,
+            limiter: host.limiter,
+            publishable_keys: crate::key_cache::KeyCache::default(),
+            after_writes: host.after_writes,
+            store,
+            store_name,
+            media: host.media,
+            calls: host.calls,
+            config,
+        }
+    }
+
     /// Whether calls to apps may reach private addresses (`outbound.allow_private`).
     pub fn outbound(&self) -> crate::outbound::OutboundPolicy {
         crate::outbound::OutboundPolicy {

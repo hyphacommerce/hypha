@@ -175,6 +175,17 @@ the domains; `hypha deploy` then:
   a migration of old ones).
 - **workers-rs churn**: 0.x, with the axum example marked untested; versions pinned
   exactly, as with Astryx.
+- **A cancelled request still drops its transaction** (code review, 2026-10-17):
+  `end_transaction` ends a transaction explicitly on success and error, but a future
+  dropped mid-transaction (the client went away) still drops it, which queues the
+  ROLLBACK that stalls Hyperdrive (§8). The Workers storage needs a connection-level
+  answer: a connection whose transaction was dropped is discarded, not reused. One
+  connection per request makes that simple on Workers; natively, the pool's recycle
+  check could do the same.
+- **The awaited COMMIT costs a round trip natively** (the §8 fix): every multi-query
+  read waits for its COMMIT before the next query goes out. The intended answer is the
+  one in §8, sending a load's BEGIN and COMMIT in the same pipeline as its queries,
+  which saves a round trip on both hosts rather than only restoring the native one.
 
 ## 8. Spike: results (2026-10-17)
 

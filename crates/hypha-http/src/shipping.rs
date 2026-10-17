@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     host::{HostCalls, HostClock, HostIds},
-    outbound::{CallError, Method, OutboundPolicy, SignedCall, prepare},
+    outbound::{CallError, Method, OutboundPolicy, SignedCall},
     routes::{address::PostalAddressResponse, rfc3339},
     state::HostEnv,
 };
@@ -156,10 +156,7 @@ impl<P: HasAppProviders + HasApps> HostRates<'_, P> {
             body,
             discard_answer: false,
         };
-        let sent = match prepare(self.outbound, call) {
-            Ok(call) => self.calls.send(call).await,
-            Err(e) => Err(e),
-        };
+        let sent = self.calls.send_signed(self.outbound, call).await;
         sent.map_err(|e| match e {
             CallError::Timeout => ProviderError::Timeout(key.clone()),
             CallError::Failed(reason) => failed(key, reason),
