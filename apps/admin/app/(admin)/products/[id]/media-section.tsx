@@ -25,6 +25,7 @@ import {
 import { type DragEvent, useEffect, useRef, useState, useTransition } from "react";
 
 import { ACCEPT_PRODUCT_MEDIA, MAX_BYTES, uploadFile } from "../../media/upload";
+import { LibrarySearch } from "@/components/library-search";
 import { libraryPage, setProductMedia } from "../actions";
 
 type Item = AdminSchemas["ProductMediaResponse"];
@@ -285,9 +286,10 @@ function LibraryPicker({
   const [isLoading, startLoading] = useTransition();
   const [isAdding, startAdding] = useTransition();
 
-  const load = (cursor?: string) =>
+  const [query, setQuery] = useState("");
+  const load = (cursor?: string, q = query) =>
     startLoading(async () => {
-      const page = await libraryPage(cursor);
+      const page = await libraryPage(cursor, q);
       if ("error" in page) {
         setError(page.error);
         return;
@@ -311,6 +313,14 @@ function LibraryPicker({
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       {/* The library scrolls; the buttons stay in view (see the shipping option dialog). */}
+      <VStack padding={4} gap={0}>
+        <LibrarySearch
+          onSearch={(q) => {
+            setQuery(q);
+            load(undefined, q);
+          }}
+        />
+      </VStack>
       <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
       <VStack gap={4} padding={4}>
         {assets === undefined ? (
@@ -320,8 +330,12 @@ function LibraryPicker({
         ) : assets.length === 0 ? (
           <EmptyState
             icon={<PhotoIcon width={32} />}
-            title="The library is empty"
-            description="Upload files on the Media page, or drop them on this product."
+            title={query ? `Nothing matches “${query}”` : "The library is empty"}
+            description={
+              query
+                ? "Search looks at file names, alt text and titles."
+                : "Upload files on the Media page, or drop them on this product."
+            }
           />
         ) : (
           <Grid columns={{ minWidth: 130 }} gap={2}>

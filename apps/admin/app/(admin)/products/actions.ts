@@ -172,12 +172,13 @@ export async function setVariantMedia(
  */
 export async function libraryPage(
   cursor?: string,
+  q?: string,
 ): Promise<{ items: AdminSchemas["AssetResponse"][]; next?: string } | { error: string }> {
   const client = await sessionClient();
   let next = cursor;
   for (let read = 0; read < 5; read++) {
     const { data, error } = await client.GET("/admin/assets", {
-      params: { query: { cursor: next, limit: 60 } },
+      params: { query: { cursor: next, limit: 60, q: q?.trim() || undefined } },
     });
     if (error) return { error: describe(error) };
     const items = data.items.filter((a) => a.kind !== "file");

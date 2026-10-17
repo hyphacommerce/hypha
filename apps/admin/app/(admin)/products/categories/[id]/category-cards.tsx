@@ -33,6 +33,7 @@ import { RichTextField } from "@/components/rich-text-field";
 import { ProductStatusBadge } from "@/components/status";
 import { type CategoryNode, VISIBILITY, subtree } from "@/lib/categories";
 
+import { LibrarySearch } from "@/components/library-search";
 import { libraryPage } from "../../actions";
 import {
   addCategoryProducts,
@@ -209,9 +210,10 @@ function ImagePicker({
   const [picked, setPicked] = useState<string>();
   const [isLoading, startLoading] = useTransition();
 
-  const load = (cursor?: string) =>
+  const [query, setQuery] = useState("");
+  const load = (cursor?: string, q = query) =>
     startLoading(async () => {
-      const page = await libraryPage(cursor);
+      const page = await libraryPage(cursor, q);
       if ("error" in page) {
         setError(page.error);
         return;
@@ -231,6 +233,14 @@ function ImagePicker({
         subtitle="Images from the library, newest first."
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
+      <VStack padding={4} gap={0}>
+        <LibrarySearch
+          onSearch={(q) => {
+            setQuery(q);
+            load(undefined, q);
+          }}
+        />
+      </VStack>
       <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
         <VStack gap={4} padding={4}>
           {assets === undefined ? (
@@ -240,8 +250,12 @@ function ImagePicker({
           ) : assets.length === 0 ? (
             <EmptyState
               icon={<PhotoIcon width={32} />}
-              title="No images yet"
-              description="Upload images on the Media page."
+              title={query ? `No images match “${query}”` : "No images yet"}
+              description={
+                query
+                  ? "Search looks at file names, alt text and titles."
+                  : "Upload images on the Media page."
+              }
             />
           ) : (
             <Grid columns={{ minWidth: 130 }} gap={2}>
