@@ -108,12 +108,8 @@ export function safeNext(path: string | null | undefined): string {
 export async function landing(token: string, next: string): Promise<string> {
   if (next !== "/") return next;
   const client = createAdminClient(apiUrl(), token);
-  const [markets, products] = await Promise.all([
-    client.GET("/admin/markets"),
-    client.GET("/admin/products", { params: { query: { limit: 1 } } }),
-  ]);
-  const isEmpty = markets.data?.items.length === 0 && products.data?.items.length === 0;
-  return isEmpty ? "/setup" : next;
+  const { data } = await client.GET("/admin/store");
+  return data && !data.setup.finished_at ? "/setup" : next;
 }
 
 /** Remembers where to go after the next login, for a few minutes. */
@@ -383,6 +379,20 @@ export const loadTimeZone = cache(async (): Promise<string> => {
   const { data } = await client.GET("/admin/store");
   return data?.timezone ?? "UTC";
 });
+
+/**
+ * How far the setup guide got (design note 0024, AU11), once per request: the guide, its
+ * nav item and the home page's checklist show only until it's finished. `null` when the
+ * staff member can't read the store: then nothing about the guide shows.
+ */
+export const loadSetup = cache(
+  async (): Promise<{ step: string | null; isFinished: boolean } | null> => {
+    const client = await sessionClient();
+    const { data } = await client.GET("/admin/store");
+    if (!data) return null;
+    return { step: data.setup.step ?? null, isFinished: Boolean(data.setup.finished_at) };
+  },
+);
 
 /**
  * Every country an address or market can name (`GET /admin/countries`), once per

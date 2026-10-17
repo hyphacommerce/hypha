@@ -4,9 +4,9 @@ import { Suspense } from "react";
 import { CurrenciesProvider } from "@/components/currencies";
 import { TimeZoneProvider } from "@/components/date-time";
 import { DetailPageSkeleton } from "@/components/skeletons";
-import { loadCurrencies, loadTimeZone, requireStaff } from "@/lib/hypha";
+import { loadCurrencies, loadSetup, loadTimeZone, requireStaff } from "@/lib/hypha";
 
-import { AdminShell, UserMenu } from "./admin-shell";
+import { AdminShell, SetupNavItem, UserMenu } from "./admin-shell";
 
 /**
  * Every page in here needs a signed-in staff member (design note 0011, P4). The frame
@@ -22,6 +22,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <SignedIn />
         </Suspense>
       }
+      setupItem={
+        <Suspense fallback={null}>
+          <SetupItem />
+        </Suspense>
+      }
     >
       <Suspense fallback={<DetailPageSkeleton />}>
         <Providers>{children}</Providers>
@@ -33,6 +38,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 async function SignedIn() {
   const me = await requireStaff();
   return <UserMenu name={me.user.name} email={me.user.email} />;
+}
+
+/** The setup guide's nav item, while the guide isn't finished (design note 0024, AU11). */
+async function SetupItem() {
+  const setup = await loadSetup();
+  return setup && !setup.isFinished ? <SetupNavItem /> : null;
 }
 
 /** What client components read from context: the currency table and the time zone. */

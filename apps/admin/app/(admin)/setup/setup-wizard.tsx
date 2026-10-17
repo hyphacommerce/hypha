@@ -15,14 +15,23 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { CheckIcon } from "@heroicons/react/24/solid";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useRouter } from "next/navigation";
-import { Fragment, type ReactNode, useState, useTransition } from "react";
+import { Fragment, type ReactNode, useEffect, useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
 import { currencyCodes } from "@/lib/format";
 import { type Country, countryLabel, countryOptions, currencyOptions } from "@/lib/regions";
 
 import type { SetupKey } from "../setup-checklist";
-import { addMarket, addProduct, addShipping, createKey, publish, saveStore } from "./actions";
+import {
+  addMarket,
+  addProduct,
+  addShipping,
+  createKey,
+  finishSetup,
+  publish,
+  rememberStep,
+  saveStore,
+} from "./actions";
 
 type Market = AdminSchemas["MarketResponse"];
 type Zone = AdminSchemas["ShippingZoneResponse"];
@@ -42,6 +51,8 @@ export type WizardData = {
 };
 
 type StepDef = {
+  /** What the store remembers it by (`setup.step`). */
+  key: string;
   label: string;
   description: string;
   isDone: (done: WizardData["done"]) => boolean;
@@ -51,6 +62,7 @@ type StepDef = {
 
 const STEPS: StepDef[] = [
   {
+    key: "store",
     label: "Store",
     description: "Name and contact email",
     isDone: (d) => d.store,
@@ -61,6 +73,7 @@ const STEPS: StepDef[] = [
     ],
   },
   {
+    key: "market",
     label: "Market",
     description: "Where you sell, in which currency",
     isDone: (d) => d.market,
@@ -71,6 +84,7 @@ const STEPS: StepDef[] = [
     ],
   },
   {
+    key: "shipping",
     label: "Shipping",
     description: "A zone and a flat rate",
     isDone: (d) => d.shipping,
@@ -80,6 +94,7 @@ const STEPS: StepDef[] = [
     ],
   },
   {
+    key: "product",
     label: "First product",
     description: "Priced, stocked and active",
     isDone: (d) => d.product && d.stock,
@@ -90,6 +105,7 @@ const STEPS: StepDef[] = [
     ],
   },
   {
+    key: "sell",
     label: "Start selling",
     description: "Publish it and connect a storefront",
     isDone: (d) => d.publish && d.key,
@@ -100,20 +116,44 @@ const STEPS: StepDef[] = [
   },
 ];
 
-export function SetupWizard({ data, initialStep }: { data: WizardData; initialStep?: number }) {
+export function SetupWizard({
+  data,
+  initialStep,
+  savedStep,
+}: {
+  data: WizardData;
+  initialStep?: number;
+  /** The step the store remembers the merchant on (`setup.step`). */
+  savedStep?: string | null;
+}) {
   const router = useRouter();
   const firstOpen = STEPS.findIndex((s) => !s.isDone(data.done));
+  const saved = STEPS.findIndex((s) => s.key === savedStep);
   const [active, setActive] = useState(() =>
     initialStep !== undefined && initialStep >= 0 && initialStep < STEPS.length
       ? initialStep
-      : Math.max(firstOpen, 0),
+      : saved >= 0
+        ? saved
+        : Math.max(firstOpen, 0),
   );
+  const [finishError, setFinishError] = useState<string>();
+  const [isFinishing, startFinishing] = useTransition();
+  // The store remembers the step, so leaving and coming back opens it again.
+  useEffect(() => {
+    void rememberStep(STEPS[active].key);
+  }, [active]);
+  const finish = () =>
+    startFinishing(async () => {
+      const result = await finishSetup();
+      if (result.error) return setFinishError(result.error);
+      router.push("/");
+    });
   const allDone = firstOpen === -1;
   const step = STEPS[active];
   const isLast = active === STEPS.length - 1;
 
   /** After a save: re-read the data (the checklist moves on) and go to the next step. */
-  const saved = () => {
+  const onSaved = () => {
     router.refresh();
     if (!isLast) setActive(active + 1);
   };
@@ -121,16 +161,16 @@ export function SetupWizard({ data, initialStep }: { data: WizardData; initialSt
   let form: ReactNode;
   switch (active) {
     case 0:
-      form = <StoreStep store={data.store} onSaved={saved} />;
+      form = <StoreStep store={data.store} onSaved={onSaved} />;
       break;
     case 1:
-      form = <MarketStep data={data} onSaved={saved} />;
+      form = <MarketStep data={data} onSaved={onSaved} />;
       break;
     case 2:
-      form = <ShippingStep data={data} onSaved={saved} goTo={setActive} />;
+      form = <ShippingStep data={data} onSaved={onSaved} goTo={setActive} />;
       break;
     case 3:
-      form = <ProductStep data={data} onSaved={saved} goTo={setActive} />;
+      form = <ProductStep data={data} onSaved={onSaved} goTo={setActive} />;
       break;
     default:
       form = <SellStep data={data} onSaved={() => router.refresh()} goTo={setActive} />;
@@ -138,21 +178,32 @@ export function SetupWizard({ data, initialStep }: { data: WizardData; initialSt
 
   return (
     <VStack gap={5}>
-      <VStack gap={1}>
-        <Text type="display-1" as="h1">
-          Set up your store
-        </Text>
-        <Text color="secondary">
-          Five steps to a storefront that can take orders. Each saves as you go; skip one
-          and it stays on the home page's checklist.
-        </Text>
-      </VStack>
+      <HStack gap={4} hAlign="between" vAlign="start" wrap="wrap">
+        <VStack gap={1}>
+          <Text type="display-1" as="h1">
+            Set up your store
+          </Text>
+          <Text color="secondary">
+            Five steps to a storefront that can take orders. Each saves as you go; leave and
+            come back, and it opens where you were.
+          </Text>
+        </VStack>
+        <Button
+          label="Hide the setup guide"
+          variant="ghost"
+          isLoading={isFinishing}
+          onClick={finish}
+        />
+      </HStack>
+      {finishError && <Banner status="error" title={finishError} />}
       {allDone && (
         <Banner
           status="success"
           title="Your store is ready to sell"
-          description="Every step is done. You can still revisit them, or go back home."
-          endContent={<Button label="Home" variant="secondary" href="/" />}
+          description="Every step is done. Finish to put the guide away; Settings → Store can show it again."
+          endContent={
+            <Button label="Finish" variant="primary" isLoading={isFinishing} onClick={finish} />
+          }
         />
       )}
       <HStack gap={5} vAlign="start" wrap="wrap">
@@ -198,7 +249,7 @@ export function SetupWizard({ data, initialStep }: { data: WizardData; initialSt
               onClick={() => setActive(active - 1)}
             />
             {isLast ? (
-              <Button label="Finish" variant="secondary" href="/" />
+              <Button label="Finish" variant="primary" isLoading={isFinishing} onClick={finish} />
             ) : (
               <Button
                 label={step.isDone(data.done) ? "Next" : "Skip for now"}

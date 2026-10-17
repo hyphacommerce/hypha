@@ -211,3 +211,25 @@ export async function createKey(channel: string, name: string): Promise<KeyResul
   refresh();
   return { token: data.token };
 }
+
+/** Remembers the step the merchant is on, so the guide reopens there. */
+export async function rememberStep(step: string): Promise<void> {
+  const client = await sessionClient();
+  await client.PATCH("/admin/store", { body: { setup_step: step } });
+}
+
+/** Puts the guide away (finished or skipped): it no longer shows anywhere. */
+export async function finishSetup(): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.PATCH("/admin/store", { body: { setup_finished: true } });
+  refresh();
+  return { error: error ? describe(error) : undefined };
+}
+
+/** Shows the guide again, from the step it was left on. */
+export async function reopenSetup(): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.PATCH("/admin/store", { body: { setup_finished: false } });
+  refresh();
+  return { error: error ? describe(error) : undefined };
+}

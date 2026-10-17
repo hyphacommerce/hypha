@@ -10,13 +10,13 @@ import { Text } from "@astryxdesign/core/Text";
 import { CheckCircleIcon as CheckCircleOutline } from "@heroicons/react/24/outline";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
 
-import { requireStaff } from "@/lib/hypha";
+import { loadSetup, requireStaff } from "@/lib/hypha";
 
 import { type SetupStep, setupSteps } from "./setup-checklist";
 
 /** The signed-in home: what's left to set up, who you are and what you may do. */
 export default async function HomePage() {
-  const [me, steps] = await Promise.all([requireStaff(), setupSteps()]);
+  const [me, steps, setup] = await Promise.all([requireStaff(), setupSteps(), loadSetup()]);
 
   return (
     <Section padding={6}>
@@ -38,7 +38,7 @@ export default async function HomePage() {
           />
         )}
 
-        {steps.some((step) => !step.isDone) && <SetupChecklist steps={steps} />}
+        {setup && !setup.isFinished && <SetupChecklist steps={steps} />}
 
         <MetadataList title="Your account">
           <MetadataListItem label="Email">{me.user.email}</MetadataListItem>
@@ -78,7 +78,7 @@ function SetupChecklist({ steps }: { steps: SetupStep[] }) {
               {done} of {steps.length} done. Each step opens the screen it's done on.
             </Text>
           </VStack>
-          <Button label="Set up your store" variant="primary" href="/setup" />
+          <Button label="Continue the setup guide" variant="primary" href="/setup" />
         </HStack>
         <VStack gap={3}>
           {steps.map((step) => (

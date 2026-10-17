@@ -7,6 +7,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { PageHeader } from "@/components/page-header";
 import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
 
+import { SetupGuideCard } from "./setup-guide-card";
 import { StoreForm } from "./store-form";
 
 /** Settings → Store (design note 0021, SU4): the store's name and details. */
@@ -22,6 +23,7 @@ export default async function StoreSettingsPage() {
       <VStack gap={5} maxWidth={640}>
         <PageHeader title="Store" description="The store this deployment serves." />
         <StoreForm store={store} countries={countries} />
+        {store.setup.finished_at && <SetupGuideCard />}
         <Card>
           <MetadataList title="Details">
             <MetadataListItem label="ID">

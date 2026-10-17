@@ -64,7 +64,6 @@ const NAV: { title: string; items: NavItem[] }[] = [
   {
     title: "Settings",
     items: [
-      { label: "Setup guide", href: "/setup", icon: RocketLaunchIcon },
       { label: "Store", href: "/settings/store", icon: BuildingStorefrontIcon },
       { label: "Channels", href: "/settings/channels", icon: Squares2X2Icon },
       { label: "Shipping", href: "/settings/shipping", icon: TruckIcon },
@@ -93,6 +92,19 @@ function currentHref(pathname: string): string | undefined {
   return ALL_HREFS.filter((href) => covers(pathname, href)).sort((a, b) => b.length - a.length)[0];
 }
 
+/** The setup guide's nav item; the layout streams it in while the guide isn't finished. */
+export function SetupNavItem() {
+  const pathname = usePathname();
+  return (
+    <SideNavItem
+      label="Setup guide"
+      href="/setup"
+      icon={RocketLaunchIcon}
+      isSelected={pathname === "/setup"}
+    />
+  );
+}
+
 /** The signed-in staff member's menu, streamed in by the layout. */
 export function UserMenu({ name, email }: { name: string; email: string }) {
   return (
@@ -107,7 +119,16 @@ export function UserMenu({ name, email }: { name: string; email: string }) {
   );
 }
 
-export function AdminShell({ userMenu, children }: { userMenu: ReactNode; children: ReactNode }) {
+export function AdminShell({
+  userMenu,
+  setupItem,
+  children,
+}: {
+  userMenu: ReactNode;
+  /** The setup guide's item, first under Settings while the guide shows. */
+  setupItem?: ReactNode;
+  children: ReactNode;
+}) {
   const pathname = usePathname();
   const current = currentHref(pathname);
 
@@ -119,6 +140,7 @@ export function AdminShell({ userMenu, children }: { userMenu: ReactNode; childr
         <SideNav resizable={{ defaultWidth: 240, minWidth: 180, maxWidth: 360 }}>
           {NAV.map((section) => (
             <SideNavSection key={section.title} title={section.title}>
+              {section.title === "Settings" && setupItem}
               {section.items.map((item) => {
                 const inSection = [item, ...(item.children ?? [])].some((i) => i.href === current);
                 return (

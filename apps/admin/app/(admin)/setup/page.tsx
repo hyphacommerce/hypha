@@ -7,8 +7,8 @@ import { type WizardData, SetupWizard } from "./setup-wizard";
 
 /**
  * The setup wizard (design note 0024, AU11): the home page's checklist as one guided
- * flow. Nothing about it is stored; each step is done when the data says so, and opens
- * on the first one that isn't (or `?step=`).
+ * flow. Each step is done when the data says so; the store remembers the step the
+ * merchant is on and opens there (or on `?step=`, or the first one that isn't done).
  */
 export default async function SetupPage({
   searchParams,
@@ -43,7 +43,11 @@ export default async function SetupPage({
 
   return (
     <Section padding={6}>
-      <SetupWizard data={data} initialStep={Number.isInteger(step) ? step : undefined} />
+      <SetupWizard
+        data={data}
+        initialStep={Number.isInteger(step) ? step : undefined}
+        savedStep={store.setup.step}
+      />
     </Section>
   );
 }
