@@ -73,6 +73,18 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   border-radius: 12px;
 }
 
+/* A short list of records in a card (a customer's orders): number, date, status, amount. */
+.list-row {
+  display: grid;
+  grid-template-columns: 80px 120px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+}
+.list-row-divided {
+  border-top: var(--border-width, 1px) solid var(--color-border);
+}
+
 /* The save bar (components/save-bar.tsx): sticky above the page's sections. */
 .save-bar {
   position: sticky;
