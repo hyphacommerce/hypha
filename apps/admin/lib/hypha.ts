@@ -160,15 +160,16 @@ export async function heldChallenge(): Promise<string | undefined> {
 }
 
 /**
- * The signed-in staff member, for pages behind the login. A session the API no longer
- * accepts goes to `/session-expired` (`sessionClient`).
+ * The signed-in staff member, for pages behind the login, once per request (the layout's
+ * user menu and providers and the page share it). A session the API no longer accepts
+ * goes to `/session-expired` (`sessionClient`).
  */
-export async function requireStaff(): Promise<AdminSchemas["MeResponse"]> {
+export const requireStaff = cache(async (): Promise<AdminSchemas["MeResponse"]> => {
   const client = await sessionClient();
   const { data, response } = await client.GET("/admin/me");
   if (data) return data;
   throw new Error(`GET /admin/me failed with ${response.status}`);
-}
+});
 
 /**
  * The data of an API call a page needs. A missing resource goes to the 404 page (a

@@ -63,6 +63,16 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   }
 }
 
+/* A table's loading skeleton, in the same bordered box as the table. */
+.table-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border: var(--border-width, 1px) solid var(--color-border);
+  border-radius: 12px;
+}
+
 /* The save bar (components/save-bar.tsx): sticky above the page's sections. */
 .save-bar {
   position: sticky;
