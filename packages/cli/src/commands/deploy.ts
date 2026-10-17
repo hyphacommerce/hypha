@@ -95,7 +95,7 @@ async function preflight(d: Deployment, machine: Machine, yes: boolean, building
     const bytes = Number((await machine.sh("docker info --format '{{.MemTotal}}'", { capture: true })).trim());
     if (building && bytes < BUILD_MEMORY_MB * 1024 * 1024) {
       throw new Error(
-        `Docker has ${(bytes / 2 ** 30).toFixed(1)} GiB of memory; compiling the API needs about 4: ` +
+        `Docker has ${(bytes / 2 ** 30).toFixed(1)} GiB of memory; compiling the API needs about 5: ` +
           "raise it in Docker Desktop (Settings → Resources → Memory), then deploy again",
       );
     }
@@ -145,8 +145,9 @@ async function preflight(d: Deployment, machine: Machine, yes: boolean, building
   }
 }
 
-/** Memory and swap the API's compile needs (its last crate peaks near 3 GB). */
-const BUILD_MEMORY_MB = 3800;
+/** Memory and swap the API's compile needs: its last crate peaks near 3 GB, on top of
+ * Docker and the system. A "4 GB" server reports about 3.8, so it gets swap. */
+const BUILD_MEMORY_MB = 5120;
 
 /** On a server with less memory than compiling needs, offers a swap file (slower, but
  * it finishes) or building here instead. */
