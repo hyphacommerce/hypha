@@ -54,6 +54,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Pages only: not Next's own files, nor anything with an extension (favicons, images).
-  matcher: ["/((?!_next/|.*\\..*).*)"],
+  // Pages only: not Next's own files, the API routes (the webhook), nor anything with an
+  // extension (favicons, images).
+  matcher: ["/((?!_next/|api/|.*\\..*).*)"],
 };

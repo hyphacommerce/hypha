@@ -11,19 +11,20 @@ import { ArrowRightIcon } from "@heroicons/react/20/solid";
 import type { StorefrontSchemas } from "@hypha/sdk/storefront";
 
 import { ProductGrid } from "@/components/product-grid";
-import { api, countryOf, loadCategories, loadStore } from "@/lib/api";
+import { countryOf, loadCategories, loadStore } from "@/lib/api";
+import { search } from "@/lib/listing-data";
 import { link } from "@/lib/site";
 
 type Hit = StorefrontSchemas["SearchHitResponse"];
 
 /** Static, refreshed at most every five minutes (the country layout's `revalidate`). */
-async function search(query: {
+async function shelf(query: {
   country: string;
   sort: "newest" | "price_asc";
   limit: number;
   category?: string;
 }): Promise<Hit[]> {
-  const { data } = await api().GET("/storefront/search", { params: { query } });
+  const { data } = await search(query);
   return data?.items ?? [];
 }
 
@@ -76,12 +77,12 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
   const [store, categories, newest, value] = await Promise.all([
     loadStore(),
     loadCategories(),
-    search({ country: code, sort: "newest", limit: 8 }),
-    search({ country: code, sort: "price_asc", limit: 4 }),
+    shelf({ country: code, sort: "newest", limit: 8 }),
+    shelf({ country: code, sort: "price_asc", limit: 4 }),
   ]);
   const featured = categories.slice(0, 3);
   const shelves = await Promise.all(
-    featured.map((c) => search({ country: code, sort: "newest", limit: 4, category: c.id })),
+    featured.map((c) => shelf({ country: code, sort: "newest", limit: 4, category: c.id })),
   );
   const hero = newest.find((hit) => hit.image?.kind === "image")?.image;
 

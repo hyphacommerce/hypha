@@ -4,8 +4,11 @@
 // "use client" file.
 
 import { type StorefrontSchemas, createStorefrontClient } from "@hypha/sdk/storefront";
+import { unstable_cache } from "next/cache";
 import { notFound } from "next/navigation";
 import { cache } from "react";
+
+import { FRESH_SECONDS, TAGS } from "./cache-tags";
 
 export type Country = StorefrontSchemas["StorefrontCountryResponse"];
 
@@ -30,13 +33,22 @@ export function loaded<T>(result: { data?: T; response: Response }): T {
   throw new Error(`${result.response.url} failed with ${result.response.status}`);
 }
 
-/** The store's public details, once per request. */
-export const loadStore = cache(async () => loaded(await api().GET("/storefront/store")));
+/** The store's public details, once per request (and cached, tagged `store`). */
+export const loadStore = cache(
+  unstable_cache(async () => loaded(await api().GET("/storefront/store")), ["store"], {
+    tags: [TAGS.store],
+    revalidate: FRESH_SECONDS,
+  }),
+);
 
 /** Every country a market sells to, with its currency and minor units (SF6). */
-export const loadCountries = cache(async (): Promise<Country[]> => {
-  return loaded(await api().GET("/storefront/countries")).items;
-});
+export const loadCountries = cache(
+  unstable_cache(
+    async (): Promise<Country[]> => loaded(await api().GET("/storefront/countries")).items,
+    ["countries"],
+    { tags: [TAGS.store, TAGS.prices], revalidate: FRESH_SECONDS },
+  ),
+);
 
 /** The country of a URL folder (`hr`), or 404 when no market sells there. */
 export async function countryOf(folder: string): Promise<Country> {
@@ -46,10 +58,47 @@ export async function countryOf(folder: string): Promise<Country> {
   return country;
 }
 
-/** The shown category tree, once per request. */
+/** The shown category tree, once per request (and cached, tagged `categories`). */
 export const loadCategories = cache(
-  async () => loaded(await api().GET("/storefront/categories")).items,
+  unstable_cache(async () => loaded(await api().GET("/storefront/categories")).items, ["categories"], {
+    tags: [TAGS.categories],
+    revalidate: FRESH_SECONDS,
+  }),
 );
+
+/**
+ * A category page's category, cached and tagged with its handle. A missing or hidden one
+ * is `null` (the page 404s), not cached as an error.
+ */
+export function loadCategory(handle: string) {
+  return unstable_cache(
+    async () => {
+      const { data } = await api().GET("/storefront/categories/by-handle/{handle}", {
+        params: { path: { handle } },
+      });
+      return data ?? null;
+    },
+    ["category", handle],
+    { tags: [TAGS.categories, TAGS.category(handle)], revalidate: FRESH_SECONDS },
+  )();
+}
+
+/**
+ * A product page's product, priced and stocked in `country`, cached and tagged with its
+ * handle (the webhook expires it). A missing one is `null`.
+ */
+export function loadProduct(handle: string, country: string) {
+  return unstable_cache(
+    async () => {
+      const { data } = await api().GET("/storefront/products/by-handle/{handle}", {
+        params: { path: { handle }, query: { country } },
+      });
+      return data ?? null;
+    },
+    ["product", handle, country],
+    { tags: [TAGS.products, TAGS.product(handle), TAGS.prices], revalidate: FRESH_SECONDS },
+  )();
+}
 
 /** A message for the shopper, by the API's stable error code. */
 export function describe(error: { code: string; error: string }): string {

@@ -3,8 +3,9 @@ import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
 import { Heading } from "@astryxdesign/core/Heading";
 import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 
-import { api, countryOf, loaded } from "@/lib/api";
+import { countryOf, loadProduct } from "@/lib/api";
 import { link } from "@/lib/site";
 
 import { ProductForm } from "./product-form";
@@ -21,11 +22,9 @@ type Props = {
 };
 
 async function load(handle: string, country: string) {
-  return loaded(
-    await api().GET("/storefront/products/by-handle/{handle}", {
-      params: { path: { handle }, query: { country } },
-    }),
-  );
+  const product = await loadProduct(handle, country);
+  if (!product) notFound();
+  return product;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {

@@ -3,11 +3,12 @@ import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
 import { Listing } from "@/components/listing";
 import { ProductGrid } from "@/components/product-grid";
-import { api, countryOf, loaded } from "@/lib/api";
+import { countryOf, loadCategory } from "@/lib/api";
 import { readListingPage } from "@/lib/listing-data";
 import { link } from "@/lib/site";
 
@@ -25,11 +26,9 @@ type Props = {
 };
 
 async function load(handle: string) {
-  return loaded(
-    await api().GET("/storefront/categories/by-handle/{handle}", {
-      params: { path: { handle } },
-    }),
-  );
+  const category = await loadCategory(handle);
+  if (!category) notFound();
+  return category;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
