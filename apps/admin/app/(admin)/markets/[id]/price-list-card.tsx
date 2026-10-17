@@ -24,14 +24,14 @@ import { useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
 import { Pager } from "@/components/pager";
+import { type PickerProduct, ProductPicker } from "@/components/product-picker";
+import { type PickerVariant, pickerVariants } from "@/components/product-picker-actions";
 import { formatMoney } from "@/lib/format";
 
 import {
-  type ProductChoice,
   attachPriceList,
   detachPriceList,
   removeFixedPrice,
-  searchProducts,
   setAdjustment,
   setFixedPrice,
 } from "../actions";
@@ -292,7 +292,10 @@ function AdjustmentForm({ market, list }: { market: Market; list: PriceList }) {
   );
 }
 
-/** Find a product, pick its variant, type the price. */
+/**
+ * Pick a product (the shared picker), then its variant and the price. A product with one
+ * variant skips straight to the price.
+ */
 function FixedPriceDialog({
   currency,
   onSave,
@@ -303,14 +306,32 @@ function FixedPriceDialog({
   onClose: () => void;
 }) {
   const currencies = useCurrencies();
-  const [q, setQ] = useState("");
-  const [found, setFound] = useState<ProductChoice[]>();
+  const [product, setProduct] = useState<PickerProduct>();
+  const [variants, setVariants] = useState<PickerVariant[]>();
   const [variant, setVariant] = useState<string>();
   const [price, setPrice] = useState("");
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
 
-  const search = () => startTransition(async () => setFound(await searchProducts(q)));
+  if (!product) {
+    return (
+      <ProductPicker
+        title="Add fixed price"
+        description="First the product, then its variant and the price."
+        mode="single"
+        confirmLabel={() => "Next"}
+        onConfirm={async ([picked]) => {
+          if (!picked) return;
+          const found = await pickerVariants(picked.id);
+          setVariants(found);
+          setVariant(found.length === 1 ? found[0]?.id : undefined);
+          setProduct(picked);
+        }}
+        onClose={onClose}
+      />
+    );
+  }
+
   const save = () =>
     variant &&
     startTransition(async () => {
@@ -318,44 +339,37 @@ function FixedPriceDialog({
       if (result.error) setError(result.error);
       else onClose();
     });
-  const options = (found ?? []).flatMap((p) =>
-    p.variants.map((v) => ({
-      value: v.id,
-      label: v.title ? `${p.title} · ${v.title}` : p.title,
-      description: `Base price ${formatMoney(v.price, currencies)}`,
-    })),
-  );
+  const options = (variants ?? []).map((v) => ({
+    value: v.id,
+    label: v.title ?? product.title,
+    description: [v.sku && `SKU ${v.sku}`, `Base price ${formatMoney(v.price, currencies)}`]
+      .filter(Boolean)
+      .join(" · "),
+  }));
 
   return (
-    <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
+    <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={520} purpose="form">
       <DialogHeader
-        title="Add fixed price"
+        title={`Fixed price for ${product.title}`}
         subtitle="The variant costs exactly this in the market, whatever the adjustment."
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <HStack gap={2} vAlign="end">
-          <TextInput
-            label="Product"
-            placeholder="Title, handle or SKU"
-            value={q}
-            onChange={setQ}
-            onEnter={search}
-            hasAutoFocus
-          />
-          <Button label="Search" onClick={search} isLoading={isPending && !found} />
-        </HStack>
-        {found && (
+        {options.length > 1 && (
           <Selector
             label="Variant"
             options={options}
             value={variant}
             onChange={setVariant}
             hasSearch
-            placeholder={options.length ? "Choose a variant" : "No products match"}
-            isDisabled={options.length === 0}
+            placeholder="Choose a variant"
           />
+        )}
+        {options.length === 1 && (
+          <Text type="supporting" color="secondary">
+            {options[0]?.description}
+          </Text>
         )}
         <TextInput
           label={`Price, ${currency}`}
@@ -363,16 +377,20 @@ function FixedPriceDialog({
           value={price}
           onChange={setPrice}
           onEnter={save}
+          hasAutoFocus
         />
-        <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button
-            label="Save"
-            variant="primary"
-            isDisabled={!variant || !price.trim()}
-            isLoading={isPending && found !== undefined}
-            onClick={save}
-          />
+        <HStack gap={2} hAlign="between">
+          <Button label="Back" variant="ghost" onClick={() => setProduct(undefined)} />
+          <HStack gap={2}>
+            <Button label="Cancel" variant="ghost" onClick={onClose} />
+            <Button
+              label="Save"
+              variant="primary"
+              isDisabled={!variant || !price.trim()}
+              isLoading={isPending}
+              onClick={save}
+            />
+          </HStack>
         </HStack>
       </VStack>
     </Dialog>

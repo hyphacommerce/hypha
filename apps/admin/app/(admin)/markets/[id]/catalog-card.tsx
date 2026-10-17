@@ -3,8 +3,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
-import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
-import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
@@ -17,21 +15,15 @@ import {
   TableRow,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { TrashIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
 import { Pager } from "@/components/pager";
+import { ProductPicker } from "@/components/product-picker";
 import { ProductStatusBadge } from "@/components/status";
 
-import {
-  type ProductChoice,
-  addCatalogProducts,
-  createCatalog,
-  removeCatalogProduct,
-  searchProducts,
-} from "../actions";
+import { addCatalogProducts, createCatalog, removeCatalogProduct } from "../actions";
 
 type Market = AdminSchemas["MarketResponse"];
 type Catalog = AdminSchemas["CatalogResponse"];
@@ -54,6 +46,9 @@ export function CatalogCard({
 }) {
   const [error, setError] = useState<string>();
   const [isAdding, setIsAdding] = useState(false);
+  // The catalog's products on this page: the picker marks them. (Products on other pages
+  // can be picked again; adding one twice is harmless.)
+  const listed = new Set((page?.items ?? []).map((p) => p.id));
   const [isPending, startTransition] = useTransition();
   const run = (action: () => Promise<{ error?: string }>) =>
     startTransition(async () => setError((await action()).error));
@@ -151,76 +146,23 @@ export function CatalogCard({
         )}
       </VStack>
       {isAdding && catalog && (
-        <AddProductsDialog
-          onAdd={(ids) => addCatalogProducts(market.id, catalog.id, ids)}
+        <ProductPicker
+          title="Add products"
+          description={`Shoppers in ${market.name} can buy them once they're active and published.`}
+          isAlreadyIn={(product) => listed.has(product.id)}
+          alreadyInLabel="Already in this catalog"
+          onConfirm={async (products) => {
+            const result = await addCatalogProducts(
+              market.id,
+              catalog.id,
+              products.map((p) => p.id),
+            );
+            if (result.error) return result;
+            setIsAdding(false);
+          }}
           onClose={() => setIsAdding(false)}
         />
       )}
     </Card>
-  );
-}
-
-/** Search products by title, handle or SKU, tick some, add them. */
-function AddProductsDialog({
-  onAdd,
-  onClose,
-}: {
-  onAdd: (ids: string[]) => Promise<{ error?: string }>;
-  onClose: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const [found, setFound] = useState<ProductChoice[]>();
-  const [picked, setPicked] = useState<string[]>([]);
-  const [error, setError] = useState<string>();
-  const [isPending, startTransition] = useTransition();
-
-  const search = () => startTransition(async () => setFound(await searchProducts(q)));
-  const add = () =>
-    startTransition(async () => {
-      const result = await onAdd(picked);
-      if (result.error) setError(result.error);
-      else onClose();
-    });
-
-  return (
-    <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
-      <DialogHeader title="Add products" onOpenChange={(isOpen) => !isOpen && onClose()} />
-      <VStack gap={4} padding={4}>
-        {error && <Banner status="error" title={error} />}
-        <HStack gap={2} vAlign="end">
-          <TextInput
-            label="Search"
-            placeholder="Title, handle or SKU"
-            value={q}
-            onChange={setQ}
-            onEnter={search}
-            hasAutoFocus
-          />
-          <Button label="Search" onClick={search} isLoading={isPending && !found} />
-        </HStack>
-        {found && found.length === 0 && <Text color="secondary">No products match.</Text>}
-        {found?.map((product) => (
-          <CheckboxInput
-            key={product.id}
-            label={product.title}
-            description={`/${product.handle}`}
-            value={picked.includes(product.id)}
-            onChange={(checked) =>
-              setPicked(checked ? [...picked, product.id] : picked.filter((id) => id !== product.id))
-            }
-          />
-        ))}
-        <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button
-            label={picked.length > 1 ? `Add ${picked.length} products` : "Add product"}
-            variant="primary"
-            isDisabled={picked.length === 0}
-            isLoading={isPending && found !== undefined}
-            onClick={add}
-          />
-        </HStack>
-      </VStack>
-    </Dialog>
   );
 }

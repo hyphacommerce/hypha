@@ -4,7 +4,6 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
-import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
@@ -29,6 +28,7 @@ import { PhotoIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { type ReactNode, useEffect, useState, useTransition } from "react";
 
 import { Pager } from "@/components/pager";
+import { ProductPicker } from "@/components/product-picker";
 import { RichTextField } from "@/components/rich-text-field";
 import { SaveBar } from "@/components/save-bar";
 import { ProductStatusBadge } from "@/components/status";
@@ -39,7 +39,6 @@ import { libraryPage } from "../../actions";
 import {
   addCategoryProducts,
   deleteCategory,
-  findProducts,
   removeCategoryProduct,
   setCategoryImage,
   updateCategory,
@@ -122,15 +121,20 @@ export function CategoryForm({
               <Text type="display-3" as="h2">
                 Details
               </Text>
-              <HStack gap={4}>
-                <TextInput label="Name" value={form.name} onChange={(name) => set({ name })} />
+              <div className="form-grid">
+                <TextInput
+                  label="Name"
+                  description="Shown to shoppers in menus and on its page."
+                  value={form.name}
+                  onChange={(name) => set({ name })}
+                />
                 <TextInput
                   label="Handle"
                   description="Its address in the storefront. Moving it keeps it."
                   value={form.handle}
                   onChange={(handle) => set({ handle })}
                 />
-              </HStack>
+              </div>
               <RichTextField
                 label="Description"
                 description="For the category page and search engines."
@@ -429,67 +433,24 @@ export function ProductsCard({
           nextCursor={page.next_cursor}
         />
       </VStack>
-      {isAdding && <AddProductsDialog id={id} onClose={() => setIsAdding(false)} />}
+      {isAdding && (
+        <ProductPicker
+          title="Add products"
+          description="They're listed directly in this category."
+          isAlreadyIn={(product) => product.categories.includes(id)}
+          alreadyInLabel="Already in this category"
+          onConfirm={async (products) => {
+            const result = await addCategoryProducts(
+              id,
+              products.map((p) => p.id),
+            );
+            if (result.error) return result;
+            setIsAdding(false);
+          }}
+          onClose={() => setIsAdding(false)}
+        />
+      )}
     </Card>
-  );
-}
-
-/** Search products by title, handle or SKU, tick some, add them. */
-function AddProductsDialog({ id, onClose }: { id: string; onClose: () => void }) {
-  const [q, setQ] = useState("");
-  const [found, setFound] = useState<{ id: string; title: string; handle: string }[]>();
-  const [picked, setPicked] = useState<string[]>([]);
-  const [error, setError] = useState<string>();
-  const [isPending, startTransition] = useTransition();
-
-  const search = () => startTransition(async () => setFound(await findProducts(q)));
-  const add = () =>
-    startTransition(async () => {
-      const result = await addCategoryProducts(id, picked);
-      if (result.error) setError(result.error);
-      else onClose();
-    });
-
-  return (
-    <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
-      <DialogHeader title="Add products" onOpenChange={(isOpen) => !isOpen && onClose()} />
-      <VStack gap={4} padding={4}>
-        {error && <Banner status="error" title={error} />}
-        <HStack gap={2} vAlign="end">
-          <TextInput
-            label="Search"
-            placeholder="Title, handle or SKU"
-            value={q}
-            onChange={setQ}
-            onEnter={search}
-            hasAutoFocus
-          />
-          <Button label="Search" onClick={search} isLoading={isPending && !found} />
-        </HStack>
-        {found && found.length === 0 && <Text color="secondary">No products match.</Text>}
-        {found?.map((product) => (
-          <CheckboxInput
-            key={product.id}
-            label={product.title}
-            description={`/${product.handle}`}
-            value={picked.includes(product.id)}
-            onChange={(checked) =>
-              setPicked(checked ? [...picked, product.id] : picked.filter((p) => p !== product.id))
-            }
-          />
-        ))}
-        <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button
-            label={picked.length > 1 ? `Add ${picked.length} products` : "Add product"}
-            variant="primary"
-            isDisabled={picked.length === 0}
-            isLoading={isPending && found !== undefined}
-            onClick={add}
-          />
-        </HStack>
-      </VStack>
-    </Dialog>
   );
 }
 

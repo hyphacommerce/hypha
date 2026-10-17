@@ -88,14 +88,3 @@ export async function setCategoryImage(id: string, image: string | null): Promis
   revalidatePath("/media");
   return {};
 }
-
-/** Products matching `q` (title, handle or SKU), for picking. */
-export async function findProducts(
-  q: string,
-): Promise<{ id: string; title: string; handle: string }[]> {
-  const client = await sessionClient();
-  const { data } = await client.GET("/admin/products", {
-    params: { query: { q: q.trim() || undefined, limit: 20 } },
-  });
-  return (data?.items ?? []).map(({ id, title, handle }) => ({ id, title, handle }));
-}

@@ -1,6 +1,5 @@
 "use server";
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -9,14 +8,6 @@ import { describe, loadCurrencies, sessionClient } from "@/lib/hypha";
 
 /** The outcome of an edit: a message to show, if it failed. */
 export type Result = { error?: string };
-
-/** A product as the pickers list it: what to recognise it by, and its variants. */
-export type ProductChoice = {
-  id: string;
-  title: string;
-  handle: string;
-  variants: { id: string; title: string | null; price: AdminSchemas["Money"] }[];
-};
 
 function refresh(market?: string) {
   revalidatePath("/markets");
@@ -133,31 +124,6 @@ export async function removeCatalogProduct(
   if (error) return { error: describe(error) };
   refresh(market);
   return {};
-}
-
-/** Products matching `q`, with their variants, for the pickers. */
-export async function searchProducts(q: string): Promise<ProductChoice[]> {
-  const client = await sessionClient();
-  const { data } = await client.GET("/admin/products", {
-    params: { query: { q: q.trim() || undefined, limit: 10 } },
-  });
-  const found = await Promise.all(
-    (data?.items ?? []).map((p) =>
-      client.GET("/admin/products/{id}", { params: { path: { id: p.id } } }),
-    ),
-  );
-  return found.flatMap(({ data: p }) =>
-    p
-      ? [
-          {
-            id: p.id,
-            title: p.title,
-            handle: p.handle,
-            variants: p.variants.map((v) => ({ id: v.id, title: v.title ?? null, price: v.price })),
-          },
-        ]
-      : [],
-  );
 }
 
 /**
