@@ -410,6 +410,63 @@ async fn the_store_can_be_renamed() {
 }
 
 #[tokio::test]
+async fn the_store_remembers_the_setup_guide() {
+    let app = app().await;
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(store["setup"], json!({"step": null, "finished_at": null}));
+    let (status, store) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"setup_step":"market"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, &store["setup"]["step"]),
+        (StatusCode::OK, &json!("market"))
+    );
+    let (_, store) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"setup_finished":true}"#),
+    )
+    .await;
+    assert!(store["setup"]["finished_at"].is_string(), "{store}");
+    let (_, store) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"setup_finished":false}"#),
+    )
+    .await;
+    assert_eq!(
+        store["setup"],
+        json!({"step": "market", "finished_at": null})
+    );
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"setup_step":"No!"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_setup_step")
+    );
+    let (_, public) = send_as(
+        &app,
+        &publishable(&app).await,
+        "GET",
+        "/storefront/store",
+        None,
+    )
+    .await;
+    assert!(public.get("setup").is_none(), "storefronts don't see it");
+}
+
+#[tokio::test]
 async fn the_store_details_are_set_cleared_and_partly_public() {
     let app = app().await;
     let (_, store) = send(&app, "GET", "/admin/store", None).await;

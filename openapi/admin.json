@@ -4887,6 +4887,25 @@
         ],
         "type": "object"
       },
+      "SetupProgressResponse": {
+        "properties": {
+          "finished_at": {
+            "description": "When they finished the guide or put it away, RFC 3339; `null` while it should\nstill show.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "step": {
+            "description": "The step the merchant was last on, as the admin named it; `null` before they\nstarted.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ShippingGroupId": {
         "description": "A ShippingGroupId: `shgrp_` and 32 hex digits.",
         "examples": [
@@ -5134,6 +5153,10 @@
           "name": {
             "type": "string"
           },
+          "setup": {
+            "$ref": "#/components/schemas/SetupProgressResponse",
+            "description": "How far the admin's setup guide got (design note 0024, AU11)."
+          },
           "timezone": {
             "oneOf": [
               {
@@ -5149,7 +5172,8 @@
         "required": [
           "id",
           "name",
-          "default_language"
+          "default_language",
+          "setup"
         ],
         "type": "object"
       },
@@ -5776,6 +5800,17 @@
           "name": {
             "description": "1 to 100 characters, trimmed.",
             "type": "string"
+          },
+          "setup_finished": {
+            "description": "`true` marks the guide done (the first time sets `finished_at`); `false` shows it\nagain from its step.",
+            "type": "boolean"
+          },
+          "setup_step": {
+            "description": "The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-`\nor `_`, named by the admin (design note 0024, AU11). `null` clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "timezone": {
             "description": "An IANA name such as `Europe/Belgrade`; `null` clears it.",

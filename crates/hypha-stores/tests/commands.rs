@@ -6,9 +6,13 @@ use hypha_stores::{
     CommandError, Store, StoreError, StoreRepo, UpdateStore, create_store, ensure_single_store,
     get_store, update_store,
 };
-use hypha_testkit::{InMemoryStoreRepo, SequentialIds};
+use hypha_testkit::{FixedClock, InMemoryStoreRepo, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
+
+fn clock() -> FixedClock {
+    FixedClock::default()
+}
 
 fn user(scopes: Vec<Scope>) -> Ctx {
     Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(1))), scopes)
@@ -81,7 +85,14 @@ fn update_store_stores_the_new_name() {
         name: Some("Acme EU".to_string()),
         ..UpdateStore::default()
     };
-    block_on(update_store(&Ctx::system(), &repo, store.id(), input)).unwrap();
+    block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        input,
+    ))
+    .unwrap();
 
     let loaded = block_on(get_store(&Ctx::system(), &repo, store.id())).unwrap();
     assert_eq!(loaded.name(), "Acme EU");
@@ -96,6 +107,7 @@ fn update_store_with_nothing_to_change_writes_nothing() {
     let same = block_on(update_store(
         &Ctx::system(),
         &repo,
+        &clock(),
         store.id(),
         UpdateStore::default(),
     ));
@@ -127,6 +139,7 @@ fn scopes_are_required() {
         block_on(update_store(
             &user(vec![Scope::StoresRead]),
             &repo,
+            &clock(),
             store.id(),
             UpdateStore {
                 name: Some("X".to_string()),
@@ -142,6 +155,7 @@ fn scopes_are_required() {
         block_on(update_store(
             &user(vec![Scope::StoresRead]),
             &repo,
+            &clock(),
             store.id(),
             UpdateStore::default()
         )),
@@ -180,7 +194,14 @@ fn update_store_sets_and_clears_the_details() {
         default_language: Some("HR".to_string()),
         ..UpdateStore::default()
     };
-    block_on(update_store(&Ctx::system(), &repo, store.id(), input)).unwrap();
+    block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        input,
+    ))
+    .unwrap();
     let loaded = block_on(get_store(&Ctx::system(), &repo, store.id())).unwrap();
     assert_eq!(
         loaded.contact_email().map(|e| e.as_str()),
@@ -202,7 +223,14 @@ fn update_store_sets_and_clears_the_details() {
         timezone: Some(None),
         ..UpdateStore::default()
     };
-    let cleared = block_on(update_store(&Ctx::system(), &repo, store.id(), clear)).unwrap();
+    let cleared = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        clear,
+    ))
+    .unwrap();
     assert!(cleared.contact_email().is_none() && cleared.legal_address().is_none());
     assert_eq!(
         (
@@ -220,8 +248,15 @@ fn update_store_rejects_bad_details_and_changes_nothing() {
     let repo = InMemoryStoreRepo::default();
     let ids = SequentialIds::default();
     let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
-    let update =
-        |input: UpdateStore| block_on(update_store(&Ctx::system(), &repo, store.id(), input));
+    let update = |input: UpdateStore| {
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            input,
+        ))
+    };
     assert_eq!(
         update(UpdateStore {
             contact_email: Some(Some("nope".to_string())),
@@ -268,5 +303,79 @@ fn update_store_rejects_bad_details_and_changes_nothing() {
     assert_eq!(
         block_on(get_store(&Ctx::system(), &repo, store.id())),
         Ok(store)
+    );
+}
+
+#[test]
+fn update_store_tracks_the_setup_guide() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+    let step = UpdateStore {
+        setup_step: Some(Some("shipping".to_string())),
+        ..UpdateStore::default()
+    };
+    let on = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        step,
+    ))
+    .unwrap();
+    assert_eq!(
+        on.setup().step.as_ref().map(|s| s.as_str()),
+        Some("shipping")
+    );
+    assert_eq!(on.setup().finished_at, None);
+
+    let finish = UpdateStore {
+        setup_finished: Some(true),
+        ..UpdateStore::default()
+    };
+    let done = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        finish,
+    ))
+    .unwrap();
+    assert_eq!(done.setup().finished_at, Some(FixedClock::DEFAULT));
+    assert_eq!(
+        done.setup().step.as_ref().map(|s| s.as_str()),
+        Some("shipping"),
+        "kept"
+    );
+
+    let reopen = UpdateStore {
+        setup_finished: Some(false),
+        ..UpdateStore::default()
+    };
+    let open = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        reopen,
+    ))
+    .unwrap();
+    assert_eq!(open.setup().finished_at, None);
+
+    let bad = UpdateStore {
+        setup_step: Some(Some("Shipping!".to_string())),
+        ..UpdateStore::default()
+    };
+    assert_eq!(
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            bad
+        )),
+        Err(CommandError::Store(StoreError::InvalidSetupStep(
+            "Shipping!".to_string()
+        )))
     );
 }

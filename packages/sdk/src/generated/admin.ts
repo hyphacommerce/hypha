@@ -3362,6 +3362,18 @@ export interface components {
              */
             variants: components["schemas"]["SetVariantRequest"][];
         };
+        SetupProgressResponse: {
+            /**
+             * @description When they finished the guide or put it away, RFC 3339; `null` while it should
+             *     still show.
+             */
+            finished_at?: string | null;
+            /**
+             * @description The step the merchant was last on, as the admin named it; `null` before they
+             *     started.
+             */
+            step?: string | null;
+        };
         /**
          * @description A ShippingGroupId: `shgrp_` and 32 hex digits.
          * @example shgrp_0190f1a2b3c47d8e9f00112233445566
@@ -3446,6 +3458,8 @@ export interface components {
             /** @description The registered business name, for invoices and legal pages. */
             legal_name?: string | null;
             name: string;
+            /** @description How far the admin's setup guide got (design note 0024, AU11). */
+            setup: components["schemas"]["SetupProgressResponse"];
             timezone?: components["schemas"]["Timezone"] | null;
         };
         /**
@@ -3669,6 +3683,16 @@ export interface components {
             legal_name?: string | null;
             /** @description 1 to 100 characters, trimmed. */
             name?: string;
+            /**
+             * @description `true` marks the guide done (the first time sets `finished_at`); `false` shows it
+             *     again from its step.
+             */
+            setup_finished?: boolean;
+            /**
+             * @description The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-`
+             *     or `_`, named by the admin (design note 0024, AU11). `null` clears it.
+             */
+            setup_step?: string | null;
             /** @description An IANA name such as `Europe/Belgrade`; `null` clears it. */
             timezone?: string | null;
         };

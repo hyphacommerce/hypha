@@ -12,6 +12,8 @@ pub enum StoreError {
     Text(#[from] TextError),
     #[error(transparent)]
     Address(#[from] AddressError),
+    #[error("a setup step is 1 to 40 lowercase letters, digits, - or _, not {0:?}")]
+    InvalidSetupStep(String),
 }
 
 impl ErrorCode for StoreError {
@@ -22,6 +24,7 @@ impl ErrorCode for StoreError {
             StoreError::DescriptionTooLong { .. } => "store_description_too_long",
             StoreError::Text(e) => e.code(),
             StoreError::Address(e) => e.code(),
+            StoreError::InvalidSetupStep(_) => "invalid_setup_step",
         }
     }
 }

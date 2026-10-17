@@ -1,6 +1,6 @@
 use hypha_core::{
-    Address, AddressParts, Email, Language, Stamped, Stamps, StoreId, Timezone, Version, Versioned,
-    optional_text,
+    Address, AddressParts, Email, Language, Stamped, Stamps, StoreId, Timestamp, Timezone, Version,
+    Versioned, optional_text,
 };
 
 use crate::error::StoreError;
@@ -20,6 +20,42 @@ pub struct Store {
     legal_address: Option<Address>,
     timezone: Option<Timezone>,
     default_language: Language,
+    setup: SetupProgress,
+}
+
+/// How far the merchant got through the admin's setup guide (design note 0024, AU11):
+/// the step they were last on, and when they finished it or put it away. The admin
+/// shows the guide until then, and reopens it on the step they left.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SetupProgress {
+    pub step: Option<SetupStep>,
+    pub finished_at: Option<Timestamp>,
+}
+
+/// A step of the setup guide, named by the admin that draws it (`market`, `shipping`):
+/// 1 to 40 lowercase ASCII letters, digits, `-` or `_`. The API stores it, it doesn't
+/// know the steps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetupStep(String);
+
+impl SetupStep {
+    pub const MAX_CHARS: usize = 40;
+
+    pub fn new(step: &str) -> Result<Self, StoreError> {
+        let valid = !step.is_empty()
+            && step.len() <= Self::MAX_CHARS
+            && step
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+        if !valid {
+            return Err(StoreError::InvalidSetupStep(step.to_string()));
+        }
+        Ok(Self(step.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl Store {
@@ -42,6 +78,7 @@ impl Store {
             legal_address: None,
             timezone: None,
             default_language: english(),
+            setup: SetupProgress::default(),
         })
     }
 
@@ -79,6 +116,25 @@ impl Store {
     /// written in.
     pub fn set_default_language(&mut self, language: Language) {
         self.default_language = language;
+    }
+
+    /// The setup guide step the merchant is on; `None` clears it.
+    pub fn set_setup_step(&mut self, step: Option<SetupStep>) {
+        self.setup.step = step;
+    }
+
+    /// The guide is done (or put away) as of `at`; finishing again keeps the first time.
+    pub fn finish_setup(&mut self, at: Timestamp) {
+        self.setup.finished_at.get_or_insert(at);
+    }
+
+    /// Shows the guide again, from the step it was left on.
+    pub fn reopen_setup(&mut self) {
+        self.setup.finished_at = None;
+    }
+
+    pub fn setup(&self) -> &SetupProgress {
+        &self.setup
     }
 
     pub fn id(&self) -> StoreId {
@@ -125,6 +181,8 @@ impl Store {
             legal_address: self.legal_address.as_ref().map(|a| a.parts().clone()),
             timezone: self.timezone,
             default_language: self.default_language.clone(),
+            setup_step: self.setup.step.as_ref().map(|s| s.as_str().to_string()),
+            setup_finished_at: self.setup.finished_at,
         }
     }
 
@@ -139,6 +197,10 @@ impl Store {
         store.legal_address = s.legal_address.map(Address::new).transpose()?;
         store.timezone = s.timezone;
         store.default_language = s.default_language;
+        store.setup = SetupProgress {
+            step: s.setup_step.as_deref().map(SetupStep::new).transpose()?,
+            finished_at: s.setup_finished_at,
+        };
         Ok(store)
     }
 }
@@ -184,6 +246,8 @@ pub struct StoreSnapshot {
     pub legal_address: Option<AddressParts>,
     pub timezone: Option<Timezone>,
     pub default_language: Language,
+    pub setup_step: Option<String>,
+    pub setup_finished_at: Option<Timestamp>,
 }
 
 fn valid_name(name: &str) -> Result<String, StoreError> {
@@ -219,6 +283,37 @@ mod tests {
 
     fn sid() -> StoreId {
         StoreId::from_uuid(Uuid::from_u128(1))
+    }
+
+    #[test]
+    fn a_setup_step_is_a_short_lowercase_token() {
+        assert_eq!(
+            SetupStep::new("market").map(|s| s.as_str().to_string()),
+            Ok("market".to_string())
+        );
+        assert!(SetupStep::new("step-2_b").is_ok());
+        assert!(SetupStep::new(&"x".repeat(40)).is_ok());
+        for bad in ["", "Market", "a b", &"x".repeat(41)] {
+            assert_eq!(
+                SetupStep::new(bad),
+                Err(StoreError::InvalidSetupStep(bad.to_string())),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn finishing_setup_keeps_the_first_time_and_reopening_clears_it() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        assert_eq!(store.setup(), &SetupProgress::default());
+        store.finish_setup(Timestamp::from_unix_micros(5));
+        store.finish_setup(Timestamp::from_unix_micros(9));
+        assert_eq!(
+            store.setup().finished_at,
+            Some(Timestamp::from_unix_micros(5))
+        );
+        store.reopen_setup();
+        assert_eq!(store.setup().finished_at, None);
     }
 
     #[test]

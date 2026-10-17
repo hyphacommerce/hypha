@@ -10,8 +10,8 @@ use tokio_postgres::{
 use crate::{
     columns::{
         ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
-        id_and_address, stamp_columns, stamps_from_row, version_from_db, version_to_db,
-        write_stamps,
+        id_and_address, micros, opt_micros, opt_ts, stamp_columns, stamps_from_row,
+        version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     store::{PgConnection, PgStore, in_transaction},
@@ -21,7 +21,8 @@ use crate::{
 fn store_columns() -> String {
     format!(
         "id, version, name, contact_email, description, legal_name, timezone, \
-         default_language, {}, {}",
+         default_language, setup_step, {}, {}, {}",
+        micros("setup_finished_at"),
         address_columns("legal_address_"),
         stamp_columns(""),
     )
@@ -52,6 +53,8 @@ fn store_from_row(row: &Row) -> Result<Store, RepoError> {
             .transpose()
             .map_err(|e| bad(&e))?,
         default_language: Language::new(&language).map_err(|e| bad(&e))?,
+        setup_step: col(row, "setup_step")?,
+        setup_finished_at: opt_ts(col(row, "setup_finished_at")?),
     })
     .map_err(|e| bad(&e))
 }
@@ -63,20 +66,24 @@ async fn write_details(tx: &impl GenericClient, s: &StoreSnapshot) -> Result<(),
     let email = s.contact_email.as_ref().map(|e| e.as_str());
     let timezone = s.timezone.map(|t| t.as_str());
     let language = s.default_language.as_str();
+    let finished = opt_micros(s.setup_finished_at);
     let mut params = id_and_address(&id, &address);
-    let details: [(&(dyn ToSql + Sync), Type); 5] = [
+    let details: [(&(dyn ToSql + Sync), Type); 7] = [
         (&email, Type::TEXT),
         (&s.description, Type::TEXT),
         (&s.legal_name, Type::TEXT),
         (&timezone, Type::TEXT),
         (&language, Type::TEXT),
+        (&s.setup_step, Type::TEXT),
+        (&finished, Type::INT8),
     ];
     params.extend(details);
     let first = 2 + ADDRESS_LEN;
     tx.query_typed(
         &format!(
             "UPDATE stores SET {}, contact_email = ${}, description = ${}, legal_name = ${},
-                 timezone = ${}, default_language = ${}
+                 timezone = ${}, default_language = ${}, setup_step = ${},
+                 setup_finished_at = 'epoch'::timestamptz + ${}::bigint * interval '1 microsecond'
              WHERE id = $1",
             address_assignments("legal_address_", 2),
             first,
@@ -84,6 +91,8 @@ async fn write_details(tx: &impl GenericClient, s: &StoreSnapshot) -> Result<(),
             first + 2,
             first + 3,
             first + 4,
+            first + 5,
+            first + 6,
         ),
         &params,
     )

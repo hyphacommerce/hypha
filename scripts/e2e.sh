@@ -173,6 +173,10 @@ contains "store has its new name" '"name":"E2E Shop"'
 step "a blank store name" 422 store_name_empty -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"name":" "}'
 step "a new store writes in English" 200 - "$BASE/admin/store"
 contains "default language en" '"default_language":"en"'
+contains "the setup guide hasn't started" '"setup":{"step":null,"finished_at":null}'
+step "remember the setup guide's step (design note 0024)" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"setup_step":"market"}'
+contains "the step is kept" '"step":"market"'
+step "a setup step that isn't one" 422 invalid_setup_step -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"setup_step":"Market!"}'
 step "store details" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" \
     -d '{"contact_email":"Hello@E2E.example","description":"Mugs and cups.","timezone":"Europe/Zagreb","legal_address":{"last_name":"E2E","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
 contains "the email is lowercased" '"contact_email":"hello@e2e.example"'

@@ -3,7 +3,10 @@ use hypha_core::{Email, Language, StoreId, Timezone};
 use hypha_stores::{Store, UpdateStore, get_store, update_store};
 use serde::{Deserialize, Serialize};
 
-use super::address::{PostalAddressRequest, PostalAddressResponse};
+use super::{
+    address::{PostalAddressRequest, PostalAddressResponse},
+    rfc3339,
+};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, Storefront},
@@ -27,6 +30,26 @@ pub(super) struct StoreResponse {
     /// The language the store's content (titles, descriptions, option labels) is written
     /// in (design note 0021, SU5).
     default_language: Language,
+    /// How far the admin's setup guide got (design note 0024, AU11).
+    setup: SetupProgressResponse,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(super) struct SetupProgressResponse {
+    /// The step the merchant was last on, as the admin named it; `null` before they
+    /// started.
+    step: Option<String>,
+    /// When they finished the guide or put it away, RFC 3339; `null` while it should
+    /// still show.
+    finished_at: Option<String>,
+}
+
+impl StoreResponse {
+    fn new(s: &Store) -> Result<Self, ApiError> {
+        let mut response = Self::from(s);
+        response.setup.finished_at = s.setup().finished_at.map(rfc3339).transpose()?;
+        Ok(response)
+    }
 }
 
 impl From<&Store> for StoreResponse {
@@ -40,6 +63,14 @@ impl From<&Store> for StoreResponse {
             legal_address: s.legal_address().map(PostalAddressResponse::from),
             timezone: s.timezone(),
             default_language: s.default_language().clone(),
+            setup: SetupProgressResponse {
+                step: s
+                    .setup()
+                    .step
+                    .as_ref()
+                    .map(|step| step.as_str().to_string()),
+                finished_at: None,
+            },
         }
     }
 }
@@ -60,7 +91,7 @@ pub(super) async fn fetch<S: Storage>(
     let (_, ctx) = caller.authenticate(&state).await?;
     let directory = state.storage.directory().await?;
     let store = get_store(&ctx, &directory, state.store).await?;
-    Ok(Json(StoreResponse::from(&store)))
+    Ok(Json(StoreResponse::new(&store)?))
 }
 
 /// A JSON Merge Patch of the store: absent fields stay as they are.
@@ -96,6 +127,16 @@ pub(super) struct UpdateStoreRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     default_language: Option<String>,
+    /// The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-`
+    /// or `_`, named by the admin (design note 0024, AU11). `null` clears it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>, required = false)]
+    setup_step: Option<Option<String>>,
+    /// `true` marks the guide done (the first time sets `finished_at`); `false` shows it
+    /// again from its step.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = bool, required = false)]
+    setup_finished: Option<bool>,
 }
 
 /// Changes the store's details.
@@ -123,9 +164,11 @@ pub(super) async fn update<S: Storage>(
         legal_address: req.legal_address.map(|a| a.map(Into::into)),
         timezone: req.timezone,
         default_language: req.default_language,
+        setup_step: req.setup_step,
+        setup_finished: req.setup_finished,
     };
-    let store = update_store(&ctx, &directory, state.store, input).await?;
-    Ok(Json(StoreResponse::from(&store)))
+    let store = update_store(&ctx, &directory, &state.clock, state.store, input).await?;
+    Ok(Json(StoreResponse::new(&store)?))
 }
 
 /// What a storefront sees of the store (design note 0021, SU4): what a header, footer

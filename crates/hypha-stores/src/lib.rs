@@ -13,4 +13,4 @@ pub use commands::{
 };
 pub use error::StoreError;
 pub use repo::StoreRepo;
-pub use store::{Store, StoreSnapshot};
+pub use store::{SetupProgress, SetupStep, Store, StoreSnapshot};

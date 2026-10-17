@@ -1,10 +1,10 @@
 use hypha_core::{
-    Address, AddressError, AddressParts, AuthError, Ctx, Email, EmailError, ErrorCode, IdGenerator,
-    Language, LanguageError, RepoError, Scope, StoreId, Timezone, TimezoneError,
+    Address, AddressError, AddressParts, AuthError, Clock, Ctx, Email, EmailError, ErrorCode,
+    IdGenerator, Language, LanguageError, RepoError, Scope, StoreId, Timezone, TimezoneError,
 };
 use thiserror::Error;
 
-use crate::{Store, StoreError, StoreRepo};
+use crate::{SetupStep, Store, StoreError, StoreRepo};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -79,6 +79,10 @@ pub struct UpdateStore {
     pub timezone: Option<Option<String>>,
     /// A BCP 47 tag (`en`, `sr-Latn`).
     pub default_language: Option<String>,
+    /// The setup guide's step the merchant is on (design note 0024, AU11).
+    pub setup_step: Option<Option<String>>,
+    /// `true` marks the guide done (now, the first time); `false` shows it again.
+    pub setup_finished: Option<bool>,
 }
 
 impl UpdateStore {
@@ -93,6 +97,7 @@ impl UpdateStore {
 pub async fn update_store<R: StoreRepo>(
     ctx: &Ctx,
     repo: &R,
+    clock: &impl Clock,
     id: StoreId,
     input: UpdateStore,
 ) -> Result<Store, CommandError> {
@@ -121,6 +126,14 @@ pub async fn update_store<R: StoreRepo>(
     }
     if let Some(language) = &input.default_language {
         store.set_default_language(Language::new(language)?);
+    }
+    if let Some(step) = &input.setup_step {
+        store.set_setup_step(step.as_deref().map(SetupStep::new).transpose()?);
+    }
+    match input.setup_finished {
+        Some(true) => store.finish_setup(clock.now()),
+        Some(false) => store.reopen_setup(),
+        None => {}
     }
     repo.update(&mut store).await?;
     Ok(store)
