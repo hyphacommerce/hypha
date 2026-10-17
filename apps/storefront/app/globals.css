@@ -13,6 +13,12 @@
    merchant's HTML descriptions. Everything else, the page's frame included, is
    components (design note 0024, §7). */
 
+/* The theme's tokens apply from <html> (`data-astryx-theme` is set by the server), so
+   the page and the overscroll area have the shop's background from the first paint. */
+html {
+  background: var(--color-background-body);
+}
+
 body {
   min-height: 100vh;
   display: flex;

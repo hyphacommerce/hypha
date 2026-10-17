@@ -31,7 +31,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // The language the store's content is written in (design note 0021, SU5).
   const store = await storeOrDefaults();
   return (
-    <html lang={store.default_language}>
+    // `data-astryx-theme` on <html> from the server: the theme's tokens are scoped to it,
+    // and Astryx's Theme only sets it there once hydrated, so until then the body showed
+    // the default theme's background.
+    <html lang={store.default_language} data-astryx-theme="shop">
       <body>
         <Providers>{children}</Providers>
       </body>

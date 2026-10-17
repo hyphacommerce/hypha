@@ -20,6 +20,7 @@ import type { ListingPage } from "@/lib/listing-data";
 
 import { FacetPanel, ListingToolbar } from "./listing-controls";
 import { ProductGrid } from "./product-grid";
+import { ProductGridSkeleton } from "./skeletons";
 
 /** The URL's listing parameters, in a stable order, to tell one listing from another. */
 function listingQuery(params: URLSearchParams): string {
@@ -57,6 +58,8 @@ export function Listing({
   const isWide = useMediaQuery("(min-width: 900px)", true);
   const [shown, setShown] = useState({ query: initialQuery, page: initial });
   const [isLoading, startLoading] = useTransition();
+  // From the URL changing until its results are here: skeleton cards, not the old ones.
+  const isBusy = isLoading || query !== shown.query;
 
   useEffect(() => {
     if (query === shown.query) return;
@@ -96,7 +99,9 @@ export function Listing({
       <StackItem size="fill">
         <VStack gap={5}>
           <ListingToolbar {...controls} total={page.total} sort={sortOf(state)} />
-          {page.items.length === 0 ? (
+          {isBusy ? (
+            <ProductGridSkeleton count={Math.max(3, Math.min(page.items.length, 12))} />
+          ) : page.items.length === 0 ? (
             <EmptyState
               title="No products here"
               description={narrowed ? "Nothing matches these filters." : "Nothing is for sale here yet."}
@@ -110,9 +115,7 @@ export function Listing({
               }
             />
           ) : (
-            <div style={{ opacity: isLoading ? 0.5 : 1, transition: "opacity 120ms" }}>
-              <ProductGrid hits={page.items} digits={digits} productBase={productBase} minWidth={180} />
-            </div>
+            <ProductGrid hits={page.items} digits={digits} productBase={productBase} minWidth={180} />
           )}
           {(previous || page.nextCursor) && (
             <HStack gap={2} hAlign="center">
