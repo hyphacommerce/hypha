@@ -1,0 +1,16 @@
+# Only the TypeScript workspace goes into the apps' build, without local secrets.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!packages/
+**/node_modules
+**/dist
+**/.cloudflare
+**/.wrangler
+**/.vinext
+**/.next
+**/*.tsbuildinfo
+**/.dev.vars
+**/.env*.local

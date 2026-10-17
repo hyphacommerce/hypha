@@ -11,6 +11,7 @@
     "sdk:check": "pnpm --filter @hypha/sdk check",
     "dev": "bash scripts/dev.sh",
     "prod": "bash scripts/prod.sh",
+    "hypha": "node packages/cli/src/main.ts",
     "seed": "node scripts/seed.mjs",
     "admin:dev": "pnpm --filter admin dev",
     "admin:build": "pnpm --filter admin build",

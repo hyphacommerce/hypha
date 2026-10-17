@@ -1,0 +1,126 @@
+# Hypha on one server (design note 0025), written by `hypha init` and run by
+# `hypha deploy`. Everything it needs to know is in `.env` next to it (secrets
+# included: keep this folder private). Caddy is the only thing reachable from outside:
+# it gets the certificates and sends each domain to its service.
+#
+#   docker compose ps               # what's running
+#   docker compose logs -f api      # one service's logs
+#   docker compose up -d            # apply changes to this file or .env
+
+name: hypha-deploy
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hypha
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: hypha
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hypha -d hypha"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [hypha]
+
+  # File storage over the S3 API: SeaweedFS, as in development. Browsers upload to it
+  # and read public files from it through Caddy at the media domain, so the API knows it
+  # by that address too (upload links are signed for the host they name).
+  s3:
+    image: chrislusf/seaweedfs:4.48
+    restart: unless-stopped
+    command: >-
+      server -dir=/data -ip=127.0.0.1 -ip.bind=0.0.0.0
+      -s3 -s3.port=8333 -s3.config=/config/s3.json
+    volumes:
+      - s3-data:/data
+      - ./seaweedfs/s3.json:/config/s3.json:ro
+    networks: [hypha]
+
+  api:
+    image: ${HYPHA_API_IMAGE:-hypha-api:current}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://hypha:${POSTGRES_PASSWORD}@postgres:5432/hypha
+      HYPHA_SECRET_KEY: ${HYPHA_SECRET_KEY:?}
+      HYPHA_OWNER_EMAIL: ${HYPHA_OWNER_EMAIL:-}
+      HYPHA_OWNER_PASSWORD: ${HYPHA_OWNER_PASSWORD:-}
+      HYPHA_STORE_NAME: ${HYPHA_STORE_NAME:-My store}
+      HYPHA_ADMIN_URL: ${ADMIN_URL:-}
+      # Caddy, the admin and the storefront reach the API from this network; what they
+      # put in X-Forwarded-For is believed from these addresses only.
+      HYPHA_TRUSTED_PROXIES: ${HYPHA_NETWORK:-172.30.250.0/24}
+      HYPHA_ALLOW_PRIVATE_CALLBACKS: ${HYPHA_ALLOW_PRIVATE_CALLBACKS:-false}
+      HYPHA_S3_ENDPOINT: ${MEDIA_URL:?}
+      HYPHA_S3_REGION: us-east-1
+      HYPHA_S3_BUCKET: hypha-media
+      HYPHA_S3_CREATE_BUCKET: "true"
+      HYPHA_S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY:?}
+      HYPHA_S3_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:?}
+      HYPHA_MEDIA_URL: ${MEDIA_URL}/hypha-media
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - ./hypha.config.toml:/etc/hypha/hypha.config.toml:ro
+    networks: [hypha]
+
+  admin:
+    image: ${HYPHA_ADMIN_IMAGE:-hypha-admin:current}
+    restart: unless-stopped
+    profiles: [admin]
+    depends_on: [api]
+    environment:
+      HYPHA_API_URL: http://api:3000
+      # Caddy appends the browser's address to X-Forwarded-For; the admin passes it on
+      # for the API's login limits.
+      ADMIN_TRUST_X_FORWARDED_FOR: "true"
+    networks: [hypha]
+
+  storefront:
+    image: ${HYPHA_STOREFRONT_IMAGE:-hypha-storefront:current}
+    restart: unless-stopped
+    profiles: [storefront]
+    depends_on: [api]
+    environment:
+      HYPHA_API_URL: http://api:3000
+      STOREFRONT_KEY: ${STOREFRONT_KEY:-}
+      HYPHA_WEBHOOK_SECRET: ${HYPHA_WEBHOOK_SECRET:-}
+      STOREFRONT_ROUTING: ${STOREFRONT_ROUTING:-folders}
+    networks: [hypha]
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      hypha:
+        # The API reaches the file storage by its public address; inside this network
+        # that name leads straight to Caddy.
+        aliases:
+          - ${MEDIA_HOST:?}
+
+networks:
+  hypha:
+    ipam:
+      config:
+        - subnet: ${HYPHA_NETWORK:-172.30.250.0/24}
+
+volumes:
+  postgres-data:
+  s3-data:
+  caddy-data:
+  caddy-config:

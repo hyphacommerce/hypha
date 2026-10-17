@@ -1,0 +1,5 @@
+# Only the Rust workspace goes into the API's build.
+*
+!Cargo.toml
+!Cargo.lock
+!crates/
