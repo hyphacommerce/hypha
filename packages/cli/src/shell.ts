@@ -93,7 +93,8 @@ export function server(ssh: string, dir: string): Machine {
     label: ssh,
     ssh,
     sh(command, { capture, input } = {}) {
-      return run("ssh", [...options, ssh, `mkdir -p ${quote(dir)} && cd ${quote(dir)} && ${command}`], {
+      // C.UTF-8 exists everywhere; macOS's `LC_CTYPE=UTF-8`, which ssh passes on, doesn't.
+      return run("ssh", [...options, ssh, `export LC_ALL=C.UTF-8; mkdir -p ${quote(dir)} && cd ${quote(dir)} && ${command}`], {
         capture,
         input,
       });
