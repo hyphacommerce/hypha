@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use futures_util::future::{try_join, try_join3};
 use hypha_core::{
     InventoryItemId, LocationId, MarketId, PendingEvent, Quantity, Recorded, RepoError, VariantId,
     Version, Versioned, stamp_insert, stamp_update,
@@ -8,7 +9,10 @@ use hypha_inventory::{
     InventoryItem, InventoryItemRepo, InventoryItemSnapshot, Level, Location, LocationRepo,
     LocationSnapshot, Reservation, ReservationRef,
 };
-use tokio_postgres::{GenericClient, types::Type};
+use tokio_postgres::{
+    GenericClient,
+    types::{ToSql, Type},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -29,39 +33,21 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
         let mut conn = self.conn().await;
         let ids = [id.as_uuid()];
         consistent_read!(conn.client(), |tx| {
-            Ok(load_locations(tx, &ids).await?.pop())
+            Ok(load_locations(tx, Locations::Ids(&ids)).await?.pop())
         })
     }
 
     async fn serving(&self, market: MarketId) -> Result<Vec<Location>, RepoError> {
         let mut conn = self.conn().await;
+        let market = market.as_uuid();
         consistent_read!(conn.client(), |tx| {
-            let ids: Vec<Uuid> = tx
-                .query_typed(
-                    "SELECT location_id FROM location_markets WHERE market_id = $1",
-                    &[(&market.as_uuid(), Type::UUID)],
-                )
-                .await
-                .map_err(repo_error)?
-                .iter()
-                .map(|r| col(r, "location_id"))
-                .collect::<Result<_, RepoError>>()?;
-            load_locations(tx, &ids).await
+            load_locations(tx, Locations::Serving(market)).await
         })
     }
 
     async fn list(&self) -> Result<Vec<Location>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
-            let ids: Vec<Uuid> = tx
-                .query_typed("SELECT id FROM locations", &[])
-                .await
-                .map_err(repo_error)?
-                .iter()
-                .map(|r| col(r, "id"))
-                .collect::<Result<_, RepoError>>()?;
-            load_locations(tx, &ids).await
-        })
+        consistent_read!(conn.client(), |tx| load_locations(tx, Locations::All).await)
     }
 
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError> {
@@ -188,43 +174,46 @@ async fn write_location_address(
 }
 
 /// The locations with these IDs and their markets, by priority then ID, in 2 queries.
+/// Which locations a load is for: the filter on `locations l` both of its queries
+/// share, so they go out together (pipelined) and read the same snapshot.
+enum Locations<'a> {
+    Ids(&'a [Uuid]),
+    Serving(Uuid),
+    All,
+}
+
 async fn load_locations(
     client: &impl GenericClient,
-    ids: &[Uuid],
+    which: Locations<'_>,
 ) -> Result<Vec<Location>, RepoError> {
-    if ids.is_empty() {
-        return Ok(vec![]);
-    }
-    let rows = client
-        .query_typed(
-            &format!(
-                "SELECT id, version, name, priority, {}, {}
-                 FROM locations WHERE id = ANY($1)
-                 ORDER BY priority, id",
-                address_columns("address_"),
-                stamp_columns(""),
-            ),
-            &[(&ids, Type::UUID_ARRAY)],
-        )
-        .await
-        .map_err(repo_error)?;
-    if rows.is_empty() {
-        return Ok(vec![]);
-    }
-    let found: Vec<Uuid> = rows
-        .iter()
-        .map(|r| col(r, "id"))
-        .collect::<Result<_, RepoError>>()?;
+    let (filter, param): (&str, [(&(dyn ToSql + Sync), Type); 1]) = match &which {
+        Locations::Ids(ids) => ("l.id = ANY($1)", [(ids, Type::UUID_ARRAY)]),
+        Locations::Serving(market) => (
+            "l.id IN (SELECT location_id FROM location_markets WHERE market_id = $1)",
+            [(market, Type::UUID)],
+        ),
+        Locations::All => ("$1::uuid IS NULL", [(&None::<Uuid>, Type::UUID)]),
+    };
+    let locations_sql = format!(
+        "SELECT l.id, l.version, l.name, l.priority, {}, {}
+         FROM locations l WHERE {filter}
+         ORDER BY l.priority, l.id",
+        address_columns("l.address_"),
+        stamp_columns("l."),
+    );
+    let markets_sql = format!(
+        "SELECT lm.location_id, lm.market_id FROM location_markets lm
+         JOIN locations l ON l.id = lm.location_id
+         WHERE {filter} ORDER BY lm.location_id, lm.position"
+    );
+    let (rows, market_rows) = try_join(
+        client.query_typed(&locations_sql, &param),
+        client.query_typed(&markets_sql, &param),
+    )
+    .await
+    .map_err(repo_error)?;
     let mut markets: HashMap<Uuid, Vec<MarketId>> = HashMap::new();
-    for r in client
-        .query_typed(
-            "SELECT location_id, market_id FROM location_markets
-             WHERE location_id = ANY($1) ORDER BY location_id, position",
-            &[(&found, Type::UUID_ARRAY)],
-        )
-        .await
-        .map_err(repo_error)?
-    {
+    for r in market_rows {
         markets
             .entry(col(&r, "location_id")?)
             .or_default()
@@ -584,6 +573,9 @@ async fn write_children(
 
 /// The items whose `column` (`id` or `variant_id`) is in `values`, with their levels
 /// and reservations, in 3 queries.
+/// Loads the inventory items whose `column` is one of `values`, in three queries sent at
+/// once: the levels and reservations select their rows through the same filter (a join),
+/// so they don't wait for the items' IDs, and all three read the same snapshot.
 async fn load_items(
     client: &impl GenericClient,
     column: &'static str,
@@ -592,35 +584,35 @@ async fn load_items(
     if values.is_empty() {
         return Ok(vec![]);
     }
-    let rows = client
-        .query_typed(
-            &format!(
-                "SELECT id, version, variant_id, tracked, continue_selling, retired, {}
-                 FROM inventory_items WHERE {column} = ANY($1) ORDER BY id",
-                stamp_columns(""),
-            ),
-            &[(&values, Type::UUID_ARRAY)],
-        )
-        .await
-        .map_err(repo_error)?;
+    let param: [(&(dyn ToSql + Sync), Type); 1] = [(&values, Type::UUID_ARRAY)];
+    let items_sql = format!(
+        "SELECT i.id, i.version, i.variant_id, i.tracked, i.continue_selling, i.retired, {}
+         FROM inventory_items i WHERE i.{column} = ANY($1) ORDER BY i.id",
+        stamp_columns("i."),
+    );
+    let levels_sql = format!(
+        "SELECT l.item_id, l.location_id, l.on_hand FROM inventory_levels l
+         JOIN inventory_items i ON i.id = l.item_id
+         WHERE i.{column} = ANY($1) ORDER BY l.item_id, l.position"
+    );
+    let reservations_sql = format!(
+        "SELECT r.item_id, r.reference, r.location_id, r.quantity FROM inventory_reservations r
+         JOIN inventory_items i ON i.id = r.item_id
+         WHERE i.{column} = ANY($1) ORDER BY r.item_id, r.position"
+    );
+    let (rows, level_rows, reservation_rows) = try_join3(
+        client.query_typed(&items_sql, &param),
+        client.query_typed(&levels_sql, &param),
+        client.query_typed(&reservations_sql, &param),
+    )
+    .await
+    .map_err(repo_error)?;
     if rows.is_empty() {
         return Ok(vec![]);
     }
-    let ids: Vec<Uuid> = rows
-        .iter()
-        .map(|r| col(r, "id"))
-        .collect::<Result<_, RepoError>>()?;
 
     let mut levels: HashMap<Uuid, Vec<Level>> = HashMap::new();
-    for r in client
-        .query_typed(
-            "SELECT item_id, location_id, on_hand FROM inventory_levels
-             WHERE item_id = ANY($1) ORDER BY item_id, position",
-            &[(&ids, Type::UUID_ARRAY)],
-        )
-        .await
-        .map_err(repo_error)?
-    {
+    for r in level_rows {
         levels.entry(col(&r, "item_id")?).or_default().push(Level {
             location: LocationId::from_uuid(col(&r, "location_id")?),
             on_hand: col(&r, "on_hand")?,
@@ -628,15 +620,7 @@ async fn load_items(
     }
 
     let mut reservations: HashMap<Uuid, Vec<Reservation>> = HashMap::new();
-    for r in client
-        .query_typed(
-            "SELECT item_id, reference, location_id, quantity FROM inventory_reservations
-             WHERE item_id = ANY($1) ORDER BY item_id, position",
-            &[(&ids, Type::UUID_ARRAY)],
-        )
-        .await
-        .map_err(repo_error)?
-    {
+    for r in reservation_rows {
         let reference: String = col(&r, "reference")?;
         let quantity: i64 = col(&r, "quantity")?;
         reservations

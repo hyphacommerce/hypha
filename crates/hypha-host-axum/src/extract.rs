@@ -7,6 +7,7 @@
 //! parsed or fingerprinted, and learns nothing about what a valid body looks like.
 
 use std::marker::PhantomData;
+use std::time::Instant;
 
 use axum::{
     Json,
@@ -28,6 +29,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     error::ApiError,
+    key_cache::KeyCache,
     state::{AppState, SharedState, Storage},
 };
 
@@ -190,6 +192,7 @@ impl Credential {
         &self,
         ports: &P,
         clock: &impl Clock,
+        publishable_keys: &KeyCache,
     ) -> Result<Authenticated, ApiError> {
         let token = self.token.as_str();
         match TokenKind::of(token) {
@@ -200,9 +203,15 @@ impl Credential {
             Some(TokenKind::SecretKey) if !self.publishable_header => Ok(Authenticated::Key(
                 authenticate_api_key(ports.api_keys(), token).await?,
             )),
-            Some(TokenKind::PublishableKey) => Ok(Authenticated::Key(
-                authenticate_api_key(ports.api_keys(), token).await?,
-            )),
+            Some(TokenKind::PublishableKey) => {
+                let now = Instant::now();
+                if let Some(ctx) = publishable_keys.get(token, now) {
+                    return Ok(Authenticated::Key(ctx));
+                }
+                let ctx = authenticate_api_key(ports.api_keys(), token).await?;
+                publishable_keys.put(token, &ctx, now);
+                Ok(Authenticated::Key(ctx))
+            }
             _ => Err(hypha_auth::CommandError::InvalidToken.into()),
         }
     }
@@ -218,7 +227,11 @@ impl<A: Surface> Caller<A> {
     ) -> Result<(S::Ports<'_>, Ctx), ApiError> {
         A::admit(TokenKind::of(&self.0.token), self.0.publishable_header)?;
         let ports = state.public_ports().await?;
-        let ctx = match self.0.authenticate(&ports, &state.clock).await? {
+        let ctx = match self
+            .0
+            .authenticate(&ports, &state.clock, &state.publishable_keys)
+            .await?
+        {
             Authenticated::Staff(staff) => staff.ctx,
             Authenticated::Key(ctx) => ctx,
         };
@@ -237,7 +250,11 @@ impl StaffCaller {
     ) -> Result<(S::Ports<'_>, StaffSession), ApiError> {
         Admin::admit(TokenKind::of(&self.0.token), self.0.publishable_header)?;
         let ports = state.public_ports().await?;
-        match self.0.authenticate(&ports, &state.clock).await? {
+        match self
+            .0
+            .authenticate(&ports, &state.clock, &state.publishable_keys)
+            .await?
+        {
             Authenticated::Staff(staff) => {
                 ports.act_as(staff.ctx.actor());
                 Ok((ports, *staff))

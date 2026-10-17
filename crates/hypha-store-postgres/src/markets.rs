@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use futures_util::future::try_join;
 use hypha_core::{
     BasisPoints, CatalogId, CountryCode, MarketId, Page, PageRequest, Price, PriceListId,
     ProductId, Recorded, RepoError, VariantId, Version, Versioned, stamp_insert, stamp_update,
@@ -8,7 +9,10 @@ use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, Market, MarketRepo, MarketSnapshot,
     PriceList, PriceListRepo, PriceListSnapshot,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{
+    GenericClient, Row,
+    types::{ToSql, Type},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -27,29 +31,21 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
     async fn get(&self, id: MarketId) -> Result<Option<Market>, RepoError> {
         let mut conn = self.conn().await;
         consistent_read!(conn.client(), |tx| {
-            Ok(load_markets(tx, Some(id.as_uuid())).await?.pop())
+            Ok(load_markets(tx, Markets::Id(id.as_uuid())).await?.pop())
         })
     }
 
     async fn list_all(&self) -> Result<Vec<Market>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| load_markets(tx, None).await)
+        consistent_read!(conn.client(), |tx| load_markets(tx, Markets::All).await)
     }
 
     async fn get_by_country(&self, country: CountryCode) -> Result<Option<Market>, RepoError> {
         let mut conn = self.conn().await;
         consistent_read!(conn.client(), |tx| {
-            let row = tx
-                .query_typed_opt(
-                    "SELECT market_id FROM market_countries WHERE country = $1",
-                    &[(&country.as_str(), Type::TEXT)],
-                )
-                .await
-                .map_err(repo_error)?;
-            match row {
-                Some(row) => Ok(load_markets(tx, Some(col(&row, "market_id")?)).await?.pop()),
-                None => Ok(None),
-            }
+            Ok(load_markets(tx, Markets::Country(country.as_str()))
+                .await?
+                .pop())
         })
     }
 
@@ -152,35 +148,44 @@ async fn write_countries(tx: &impl GenericClient, s: &MarketSnapshot) -> Result<
 }
 
 /// One market (`Some(id)`) or all of them, in 2 queries.
+/// Which markets a load is for: the filter on `markets m` both of its queries share,
+/// so they go out together (pipelined) and read the same snapshot.
+enum Markets<'a> {
+    All,
+    Id(Uuid),
+    Country(&'a str),
+}
+
 async fn load_markets(
     client: &impl GenericClient,
-    id: Option<Uuid>,
+    which: Markets<'_>,
 ) -> Result<Vec<Market>, RepoError> {
-    let filter = [(
-        &id as &(dyn tokio_postgres::types::ToSql + Sync),
-        Type::UUID,
-    )];
-    let rows = client
-        .query_typed(
-            &format!(
-                "SELECT id, version, name, currency, prices_include_tax, {} FROM markets
-                 WHERE $1::uuid IS NULL OR id = $1 ORDER BY id",
-                stamp_columns(""),
-            ),
-            &filter,
-        )
-        .await
-        .map_err(repo_error)?;
+    let (filter, param): (&str, [(&(dyn ToSql + Sync), Type); 1]) = match &which {
+        Markets::All => ("$1::uuid IS NULL", [(&None::<Uuid>, Type::UUID)]),
+        Markets::Id(id) => ("m.id = $1", [(id, Type::UUID)]),
+        Markets::Country(country) => (
+            "m.id = (SELECT market_id FROM market_countries WHERE country = $1)",
+            [(country, Type::TEXT)],
+        ),
+    };
+    let markets_sql = format!(
+        "SELECT m.id, m.version, m.name, m.currency, m.prices_include_tax, {} FROM markets m
+         WHERE {filter} ORDER BY m.id",
+        stamp_columns("m."),
+    );
+    let countries_sql = format!(
+        "SELECT c.market_id, c.country FROM market_countries c
+         JOIN markets m ON m.id = c.market_id
+         WHERE {filter} ORDER BY c.market_id, c.position"
+    );
+    let (rows, country_rows) = try_join(
+        client.query_typed(&markets_sql, &param),
+        client.query_typed(&countries_sql, &param),
+    )
+    .await
+    .map_err(repo_error)?;
     let mut countries: HashMap<Uuid, Vec<CountryCode>> = HashMap::new();
-    for row in client
-        .query_typed(
-            "SELECT market_id, country FROM market_countries
-             WHERE $1::uuid IS NULL OR market_id = $1 ORDER BY market_id, position",
-            &filter,
-        )
-        .await
-        .map_err(repo_error)?
-    {
+    for row in country_rows {
         let code: String = col(&row, "country")?;
         let country = CountryCode::new(&code).map_err(corrupt)?;
         countries

@@ -136,7 +136,8 @@ macro_rules! consistent_read {
         let read = $crate::store::begin_consistent_read($client).await?;
         let $tx = &read;
         let value: Result<_, hypha_core::RepoError> = async { $body }.await;
-        $crate::store::end_transaction(read, value).await
+        $crate::store::end_read(read);
+        value
     }};
 }
 pub(crate) use consistent_read;
@@ -176,7 +177,16 @@ macro_rules! in_transaction {
 }
 pub(crate) use in_transaction;
 
-/// Commits a read or write if it succeeded; on error the transaction is dropped, which
+/// Ends a read-only snapshot without waiting for it: dropping the transaction queues
+/// its ROLLBACK on the connection (tokio-postgres's `Drop`), which goes out with the
+/// next query instead of costing a round trip of its own. Nothing was written, so
+/// rolling back reads the same as committing; the connection is back to normal before
+/// anything after it runs.
+pub(crate) fn end_read(read: Transaction<'_>) {
+    drop(read);
+}
+
+/// Commits a write if it succeeded; on error the transaction is dropped, which
 /// rolls it back.
 pub(crate) async fn end_transaction<T>(
     tx: Transaction<'_>,

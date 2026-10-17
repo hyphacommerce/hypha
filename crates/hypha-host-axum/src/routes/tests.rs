@@ -162,6 +162,7 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
         env,
         background: Default::default(),
         limiter: crate::rate_limit::MemoryRateLimiter::new(&config.rate_limits),
+        publishable_keys: Default::default(),
         store: store.id(),
         store_name: store.name().to_string(),
         media,
@@ -2133,6 +2134,36 @@ async fn linking_a_cart_to_a_customer_is_admin_only() {
     assert_eq!(
         (status, code(&json)),
         (StatusCode::NOT_FOUND, "route_not_found")
+    );
+}
+
+#[tokio::test]
+async fn a_revoked_publishable_key_stops_at_once_though_it_was_cached() {
+    let app = app().await;
+    let token = publishable(&app).await;
+    // Used once: its lookup is now cached (key_cache.rs).
+    assert_eq!(
+        send_as(&app, &token, "GET", "/storefront/store", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let (_, keys) = send(&app, "GET", "/admin/api-keys", None).await;
+    let id = keys["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["kind"] == "publishable")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, _) = send(&app, "POST", &format!("/admin/api-keys/{id}/revoke"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = send_as(&app, &token, "GET", "/storefront/store", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNAUTHORIZED, "invalid_token")
     );
 }
 

@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_core::{MarketId, ProductId, RepoError, VariantId};
 use hypha_markets::{
-    CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, MarketRepo, PriceListRepo,
+    CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo,
+    PriceListRepo,
 };
 
 use crate::PricingContext;
@@ -27,6 +28,19 @@ pub async fn load_pricing<S: HasMarkets + HasCatalogs + HasPriceLists>(
     let Some(market) = ports.markets().get(market).await? else {
         return Ok(None);
     };
+    load_pricing_for(ports, market, products, variants)
+        .await
+        .map(Some)
+}
+
+/// [`load_pricing`] for a market already loaded (by country, say), without reading it
+/// again.
+pub async fn load_pricing_for<S: HasCatalogs + HasPriceLists>(
+    ports: &S,
+    market: Market,
+    products: &[ProductId],
+    variants: &[VariantId],
+) -> Result<PricingContext, RepoError> {
     let catalog = ports
         .catalogs()
         .get_by_context(CatalogContext::Market(market.id()))
@@ -47,11 +61,11 @@ pub async fn load_pricing<S: HasMarkets + HasCatalogs + HasPriceLists>(
         }
         _ => HashMap::new(),
     };
-    Ok(Some(PricingContext {
+    Ok(PricingContext {
         market,
         catalog,
         price_list,
         included_products,
         fixed_prices,
-    }))
+    })
 }

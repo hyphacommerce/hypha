@@ -6,7 +6,7 @@
 use hypha_core::{CountryCode, Ctx, Price, Quantity, Scope, VariantId};
 use hypha_inventory::{Availability, HasInventoryItems, HasLocations, StockContext};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo};
-use hypha_pricing::load_pricing;
+use hypha_pricing::load_pricing_for;
 use hypha_products::Product;
 
 use crate::{CommandError, price_line};
@@ -74,11 +74,9 @@ where
         return Ok(unpriced(None));
     };
     let variants: Vec<VariantId> = product.variants().iter().map(|v| v.id()).collect();
-    let Some(pricing) = load_pricing(ports, market.id(), &[product.id()], &variants).await? else {
-        // The market went away between the two reads.
-        return Ok(unpriced(None));
-    };
     let stock = StockContext::load(ports, market.id(), &variants).await?;
+    // The market as found by country, not read again.
+    let pricing = load_pricing_for(ports, market.clone(), &[product.id()], &variants).await?;
     let variants = variants
         .into_iter()
         .map(|variant| {

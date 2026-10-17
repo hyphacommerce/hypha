@@ -319,6 +319,8 @@ pub struct AppState<S> {
     pub background: Background,
     /// Limits on the public routes (design note 0009). In memory: one instance's counts.
     pub limiter: crate::rate_limit::MemoryRateLimiter,
+    /// Publishable keys authenticated in the last half minute (`key_cache.rs`).
+    pub publishable_keys: crate::key_cache::KeyCache,
     /// The one store this deployment serves (design note 0006, model A), set at startup.
     pub store: StoreId,
     /// Its name at startup, for labels that shouldn't cost a query (the entry in an

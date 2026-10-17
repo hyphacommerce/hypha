@@ -140,6 +140,8 @@ pub(super) async fn revoke<S: Storage>(
 ) -> Result<Json<ApiKeyResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let key = revoke_api_key(&ctx, ports.api_keys(), &state.clock, id).await?;
+    // A cached publishable key must stop now, not when its entry runs out.
+    state.publishable_keys.clear();
     Ok(Json(ApiKeyResponse::new(&key)?))
 }
 

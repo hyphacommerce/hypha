@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use futures_util::future::try_join5;
 use hypha_core::{
     AssetId, Direction, Keyset, Money, OptionId, OptionValueId, Page, PageRequest, Price,
     ProductId, Recorded, RepoError, SortKey, VariantId, Version, Versioned, Weight, stamp_insert,
@@ -9,7 +10,10 @@ use hypha_products::{
     Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductFilter, ProductRepo,
     ProductSnapshot, ProductSort, ProductSummary, VariantSnapshot,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{
+    GenericClient, Row,
+    types::{ToSql, Type},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -25,8 +29,9 @@ use crate::{
 impl<C: PgConnection> ProductRepo for PgStore<C> {
     async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
+        let ids = [id.as_uuid()];
         consistent_read!(conn.client(), |tx| {
-            Ok(load(tx, &[id.as_uuid()]).await?.pop())
+            Ok(load(tx, Products::Ids(&ids)).await?.pop())
         })
     }
 
@@ -36,7 +41,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         }
         let mut conn = self.conn().await;
         let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
-        consistent_read!(conn.client(), |tx| load(tx, &ids).await)
+        consistent_read!(conn.client(), |tx| load(tx, Products::Ids(&ids)).await)
     }
 
     /// One query whatever the page holds: each product's variant count and price ranges
@@ -172,51 +177,22 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
         consistent_read!(conn.client(), |tx| {
-            let row = tx
-                .query_typed_opt(
-                    "SELECT id FROM products WHERE handle = $1",
-                    &[(&handle.as_str(), Type::TEXT)],
-                )
-                .await
-                .map_err(repo_error)?;
-            match row {
-                Some(row) => Ok(load(tx, &[col(&row, "id")?]).await?.pop()),
-                None => Ok(None),
-            }
+            Ok(load(tx, Products::Handle(handle.as_str())).await?.pop())
         })
     }
 
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
+        let id = variant.as_uuid();
         consistent_read!(conn.client(), |tx| {
-            let row = tx
-                .query_typed_opt(
-                    "SELECT product_id FROM variants WHERE id = $1",
-                    &[(&variant.as_uuid(), Type::UUID)],
-                )
-                .await
-                .map_err(repo_error)?;
-            match row {
-                Some(row) => Ok(load(tx, &[col(&row, "product_id")?]).await?.pop()),
-                None => Ok(None),
-            }
+            Ok(load(tx, Products::OfVariant(id)).await?.pop())
         })
     }
 
     async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
         consistent_read!(conn.client(), |tx| {
-            let row = tx
-                .query_typed_opt(
-                    "SELECT product_id FROM variants WHERE sku = $1",
-                    &[(&sku, Type::TEXT)],
-                )
-                .await
-                .map_err(repo_error)?;
-            match row {
-                Some(row) => Ok(load(tx, &[col(&row, "product_id")?]).await?.pop()),
-                None => Ok(None),
-            }
+            Ok(load(tx, Products::OfSku(sku)).await?.pop())
         })
     }
 
@@ -455,44 +431,81 @@ async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<
     Ok(())
 }
 
-/// Loads the products with these IDs (missing ones are skipped), in 5 queries.
-async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>, RepoError> {
-    if ids.is_empty() {
-        return Ok(vec![]);
-    }
-    let ids = ids.to_vec();
-    let param = [(
-        &ids as &(dyn tokio_postgres::types::ToSql + Sync),
-        Type::UUID_ARRAY,
-    )];
+/// Which products a load is for: the filter on `products p` that all of its queries
+/// share. A child query selects its rows through it (a join) instead of waiting for the
+/// products' IDs, so the five go out together, pipelined in one round trip, and read
+/// the same snapshot.
+enum Products<'a> {
+    Ids(&'a [Uuid]),
+    Handle(&'a str),
+    OfVariant(Uuid),
+    OfSku(&'a str),
+}
 
-    let products = client
-        .query_typed(
-            &format!(
-                "SELECT id, version, handle, title, status, description, vendor, product_type,
-                        tags, {}
-                 FROM products WHERE id = ANY($1)",
-                stamp_columns(""),
-            ),
-            &param,
-        )
-        .await
-        .map_err(repo_error)?;
+impl Products<'_> {
+    fn filter(&self) -> &'static str {
+        match self {
+            Products::Ids(_) => "p.id = ANY($1)",
+            Products::Handle(_) => "p.handle = $1",
+            Products::OfVariant(_) => "p.id = (SELECT product_id FROM variants WHERE id = $1)",
+            Products::OfSku(_) => "p.id = (SELECT product_id FROM variants WHERE sku = $1)",
+        }
+    }
+}
+
+/// Loads the products `which` selects (none found is an empty list), in five queries
+/// sent at once.
+async fn load(client: &impl GenericClient, which: Products<'_>) -> Result<Vec<Product>, RepoError> {
+    let param: [(&(dyn ToSql + Sync), Type); 1] = match &which {
+        Products::Ids(ids) => [(ids, Type::UUID_ARRAY)],
+        Products::Handle(handle) => [(handle, Type::TEXT)],
+        Products::OfVariant(id) => [(id, Type::UUID)],
+        Products::OfSku(sku) => [(sku, Type::TEXT)],
+    };
+    let f = which.filter();
+    let products_sql = format!(
+        "SELECT p.id, p.version, p.handle, p.title, p.status, p.description, p.vendor,
+                p.product_type, p.tags, {}
+         FROM products p WHERE {f}",
+        stamp_columns("p."),
+    );
+    let values_sql = format!(
+        "SELECT v.option_id, v.id, v.label FROM product_option_values v
+         JOIN product_options o ON o.id = v.option_id
+         JOIN products p ON p.id = o.product_id
+         WHERE {f} ORDER BY v.option_id, v.position"
+    );
+    let options_sql = format!(
+        "SELECT o.product_id, o.id, o.name FROM product_options o
+         JOIN products p ON p.id = o.product_id
+         WHERE {f} ORDER BY o.product_id, o.position"
+    );
+    let variants_sql = format!(
+        "SELECT v.product_id, v.id, v.sku, v.price_amount, v.price_currency, v.selections,
+                v.media_asset_id, v.weight_grams, v.requires_shipping
+         FROM variants v JOIN products p ON p.id = v.product_id
+         WHERE {f} ORDER BY v.product_id, v.position"
+    );
+    let media_sql = format!(
+        "SELECT m.product_id, m.asset_id FROM product_media m
+         JOIN products p ON p.id = m.product_id
+         WHERE {f} ORDER BY m.product_id, m.position"
+    );
+    let (products, value_rows, option_rows, variant_rows, media_rows) = try_join5(
+        client.query_typed(&products_sql, &param),
+        client.query_typed(&values_sql, &param),
+        client.query_typed(&options_sql, &param),
+        client.query_typed(&variants_sql, &param),
+        client.query_typed(&media_sql, &param),
+    )
+    .await
+    .map_err(repo_error)?;
     if products.is_empty() {
         return Ok(vec![]);
     }
 
     let mut values: HashMap<Uuid, Vec<OptionValueSnapshot>> = HashMap::new();
-    for row in client
-        .query_typed(
-            "SELECT v.option_id, v.id, v.label FROM product_option_values v
-             JOIN product_options o ON o.id = v.option_id
-             WHERE o.product_id = ANY($1) ORDER BY v.option_id, v.position",
-            &param,
-        )
-        .await
-        .map_err(repo_error)?
-    {
+    for row in value_rows {
         values
             .entry(col(&row, "option_id")?)
             .or_default()
@@ -503,15 +516,7 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
     }
 
     let mut options: HashMap<Uuid, Vec<OptionSnapshot>> = HashMap::new();
-    for row in client
-        .query_typed(
-            "SELECT product_id, id, name FROM product_options
-             WHERE product_id = ANY($1) ORDER BY product_id, position",
-            &param,
-        )
-        .await
-        .map_err(repo_error)?
-    {
+    for row in option_rows {
         let option_id: Uuid = col(&row, "id")?;
         options
             .entry(col(&row, "product_id")?)
@@ -524,16 +529,7 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
     }
 
     let mut variants: HashMap<Uuid, Vec<VariantSnapshot>> = HashMap::new();
-    for row in client
-        .query_typed(
-            "SELECT product_id, id, sku, price_amount, price_currency, selections, media_asset_id,
-                    weight_grams, requires_shipping
-             FROM variants WHERE product_id = ANY($1) ORDER BY product_id, position",
-            &param,
-        )
-        .await
-        .map_err(repo_error)?
-    {
+    for row in variant_rows {
         let currency = currency_from_db(col(&row, "price_currency")?)?;
         let base_price = Money::new(col(&row, "price_amount")?, currency).map_err(corrupt)?;
         let selections: Vec<Uuid> = col(&row, "selections")?;
@@ -558,15 +554,7 @@ async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Product>,
     }
 
     let mut media: HashMap<Uuid, Vec<AssetId>> = HashMap::new();
-    for row in client
-        .query_typed(
-            "SELECT product_id, asset_id FROM product_media
-             WHERE product_id = ANY($1) ORDER BY product_id, position",
-            &param,
-        )
-        .await
-        .map_err(repo_error)?
-    {
+    for row in media_rows {
         media
             .entry(col(&row, "product_id")?)
             .or_default()

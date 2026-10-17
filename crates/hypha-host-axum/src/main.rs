@@ -3,6 +3,7 @@ mod error;
 mod extract;
 mod handlers;
 mod jobs;
+mod key_cache;
 mod media;
 mod outbound;
 mod patch;
@@ -337,6 +338,7 @@ async fn serve<S: Storage>(
         env,
         background: Default::default(),
         limiter: MemoryRateLimiter::new(&config.rate_limits),
+        publishable_keys: Default::default(),
         store: store.id(),
         store_name: store.name().to_string(),
         media,

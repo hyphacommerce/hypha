@@ -21,7 +21,7 @@ use hypha_inventory::{
     HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo, StockContext,
 };
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, MarketRepo};
-use hypha_pricing::load_pricing;
+use hypha_pricing::load_pricing_for;
 use hypha_products::{HasProducts, Product, ProductFilter, ProductRepo, ProductSort};
 use hypha_search_index::{
     HasSearchQueue, HasSearchSettings, IndexError, Mark, SearchDocument, SearchIndex, SearchQueue,
@@ -244,27 +244,25 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
     let categories_of = |id: ProductId| categories.get(&id).map_or(&[][..], Vec::as_slice);
 
     for market in ports.markets().list_all().await? {
-        let pricing = load_pricing(ports, market.id(), &writing, &variants).await?;
-        stock.locations = ports.locations().serving(market.id()).await?;
-        let documents: Vec<SearchDocument> = match &pricing {
-            Some(pricing) => writing
-                .iter()
-                .filter_map(|id| loaded.get(id))
-                .flat_map(|p| {
-                    build_documents(
-                        p,
-                        pricing,
-                        &stock,
-                        &search_settings,
-                        channels_of(p.id()),
-                        categories_of(p.id()),
-                    )
-                })
-                .collect(),
-            // The market went while we loaded.
-            None => Vec::new(),
-        };
-        if let Err(batch_error) = index.replace(market.id(), &writing, &documents).await {
+        let market_id = market.id();
+        // The market as just listed, not read again per market.
+        let pricing = load_pricing_for(ports, market, &writing, &variants).await?;
+        stock.locations = ports.locations().serving(market_id).await?;
+        let documents: Vec<SearchDocument> = writing
+            .iter()
+            .filter_map(|id| loaded.get(id))
+            .flat_map(|p| {
+                build_documents(
+                    p,
+                    &pricing,
+                    &stock,
+                    &search_settings,
+                    channels_of(p.id()),
+                    categories_of(p.id()),
+                )
+            })
+            .collect();
+        if let Err(batch_error) = index.replace(market_id, &writing, &documents).await {
             // Find which product the engine refuses: one at a time.
             let mut any_failed = false;
             for id in &writing {
@@ -273,7 +271,7 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
                     .filter(|d| d.product == *id)
                     .cloned()
                     .collect();
-                if let Err(e) = index.replace(market.id(), &[*id], &own).await {
+                if let Err(e) = index.replace(market_id, &[*id], &own).await {
                     any_failed = true;
                     if !failed.iter().any(|(f, _)| f == id) {
                         failed.push((*id, e.into()));
