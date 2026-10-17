@@ -186,7 +186,21 @@ the domains; `hypha deploy` then:
    set no mark. What a lost mark could hide (two runs racing to write `due`, a run killed
    before it marked, a search rebuild that failed) waits for the safety net: every hour's
    first tick runs the jobs regardless.
-6. **CLI**: `--target cloudflare` (§5).
+6. **CLI**: `--target cloudflare` (§5; the API, 2026-10-18). `hypha init` asks for the
+   database's direct URL (any provider: nothing reads a provider off the hostname), the
+   domains, a name for the resources, and optionally the media domain's zone and an R2
+   API token's keys (wrangler can't make S3 keys; without them media is off).
+   `hypha deploy` runs `setup` (W9), creates what's missing and keeps its IDs in
+   `hypha.json` (Hyperdrive always with its cache off, updated on each deploy; the KV
+   namespace; the bucket, its CORS rule for the admin's uploads and its domain), writes
+   `wrangler.toml` each time (W12 as `placement = { mode = "targeted", host = … }`: Cloudflare
+   measures the database's host, which needs no region table; `--region` overrides; the
+   rate limiters from the deployment's quotas, W8, in a random block of `namespace_id`s
+   so deployments on one account don't share counts), deploys with `--secrets-file`, marks
+   the jobs as waiting (W7) and waits for `/health`. `wrangler deploy --dry-run` accepts
+   the file; the Worker is 13.4 MB raw, 3.7 MB gzipped (Paid allows 10). Left: the admin
+   and storefront Workers with Service Bindings (§5, step 4) and connecting the
+   storefront (step 5).
 7. **Caching**: the storefront's and admin's adapters (0025, §6), and the e2e script
    against a deployed Worker.
 

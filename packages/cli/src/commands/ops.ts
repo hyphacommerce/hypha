@@ -4,8 +4,9 @@ import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 
 import { healthy } from "../api.ts";
-import { url } from "../deployment.ts";
-import { quote } from "../shell.ts";
+import { workerName } from "../cloudflare.ts";
+import { loadDeployment, url } from "../deployment.ts";
+import { quote, run } from "../shell.ts";
 import { dirArg, guarded, open } from "./shared.ts";
 
 export const status = defineCommand({
@@ -13,6 +14,14 @@ export const status = defineCommand({
   args: { dir: dirArg },
   run: ({ args }) =>
     guarded(async () => {
+      const deployment = await loadDeployment(args.dir);
+      if (deployment.target === "cloudflare") {
+        p.intro(`hypha status → Cloudflare (${workerName(deployment)})`);
+        const ok = await healthy(deployment);
+        p.outro(`${url(deployment, deployment.domains.api)}/health ${ok ? "answers" : "doesn't answer"}`);
+        if (!ok) process.exitCode = 1;
+        return;
+      }
       const { d, machine } = await open(args.dir);
       p.intro(`hypha status → ${machine.label}`);
       await machine.sh("docker compose ps --format 'table {{.Service}}\\t{{.Status}}'");
@@ -32,6 +41,15 @@ export const logs = defineCommand({
   },
   run: ({ args }) =>
     guarded(async () => {
+      const deployment = await loadDeployment(args.dir);
+      if (deployment.target === "cloudflare") {
+        // The Worker's live logs (Workers Logs keeps the past ones, in the dashboard).
+        const env: Record<string, string> = deployment.cloudflare?.accountId
+          ? { CLOUDFLARE_ACCOUNT_ID: deployment.cloudflare.accountId }
+          : {};
+        await run("wrangler", ["tail", workerName(deployment), "--format", "pretty"], { env });
+        return;
+      }
       const { machine } = await open(args.dir);
       const service = args.service ? ` ${quote(args.service)}` : "";
       await machine.sh(`docker compose logs --tail ${quote(args.tail)}${args.follow ? " -f" : ""}${service}`);

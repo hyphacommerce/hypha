@@ -67,6 +67,23 @@ impl Rule {
         Rule::CartCreateIp,
     ];
 
+    /// The rule's key under `[rate_limits]` (`login_ip`): a contract with operators,
+    /// never renamed.
+    pub fn config_key(self) -> &'static str {
+        match self {
+            Rule::LoginIp => "login_ip",
+            Rule::LoginEmailFromIp => "login_email_from_ip",
+            Rule::LoginEmail => "login_email",
+            Rule::MfaIp => "mfa_ip",
+            Rule::ResetIp => "reset_ip",
+            Rule::ResetEmailFromIp => "reset_email_from_ip",
+            Rule::ResetConfirmIp => "reset_confirm_ip",
+            Rule::InviteIp => "invite_ip",
+            Rule::ShippingQuotesCart => "shipping_quotes_cart",
+            Rule::CartCreateIp => "cart_create_ip",
+        }
+    }
+
     /// `(burst, one more every)` under `limits` (`[rate_limits]`, design note 0017; the
     /// defaults are 0009's, section 3).
     pub fn quota(self, limits: &RateLimits) -> (u32, Duration) {
@@ -120,4 +137,25 @@ pub async fn enforce(
 #[allow(async_fn_in_trait)]
 pub trait RateLimiter {
     async fn check(&self, rule: Rule, key: &str) -> Decision;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_rules_key_is_its_field_under_rate_limits() {
+        let fields = serde_json::to_value(RateLimits::default()).unwrap();
+        let fields: Vec<&str> = fields
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut keys: Vec<&str> = Rule::ALL.iter().map(|r| r.config_key()).collect();
+        keys.sort_unstable();
+        let mut fields = fields;
+        fields.sort_unstable();
+        assert_eq!(keys, fields);
+    }
 }

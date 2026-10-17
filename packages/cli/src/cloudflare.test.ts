@@ -1,0 +1,227 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+
+import {
+  bindingLimit,
+  bindingName,
+  checkDatabaseUrl,
+  databaseHost,
+  deployCloudflare,
+  hyperdriveOrigin,
+  type Quota,
+  type Tools,
+  wranglerToml,
+} from "./cloudflare.ts";
+import { type Deployment, EnvFile, loadDeployment, saveDeployment } from "./deployment.ts";
+import { REPO } from "./templates.ts";
+
+const DB = "postgres://hypha:secret@ep-quiet-sky.eu-central-1.aws.neon.tech/hypha?sslmode=require";
+const PLAIN = "postgres://hypha:secret@ep-quiet-sky.eu-central-1.aws.neon.tech/hypha";
+
+function deployment(): Deployment {
+  return {
+    version: 1,
+    target: "cloudflare",
+    remoteDir: "",
+    buildOn: "here",
+    scheme: "https",
+    domains: { api: "api.example.com", media: "media.example.com", admin: "admin.example.com" },
+    cloudflare: { name: "hypha", rateLimitBase: 5000 },
+  };
+}
+
+const QUOTAS: Record<string, Quota> = {
+  login_ip: { burst: 10, per_ms: 30_000 },
+  shipping_quotes_cart: { burst: 10, per_ms: 2_000 },
+  login_email: { burst: 50, per_ms: 72_000 },
+};
+
+test("a binding allows the most its quota allows in a minute, as the Worker computes it", () => {
+  assert.equal(bindingLimit({ burst: 10, per_ms: 30_000 }), 12);
+  assert.equal(bindingLimit({ burst: 10, per_ms: 2_000 }), 40);
+  assert.equal(bindingLimit({ burst: 50, per_ms: 72_000 }), 50);
+  assert.equal(bindingLimit({ burst: 3, per_ms: 60_000 }), 4);
+  assert.equal(bindingName("login_email_from_ip"), "RL_LOGIN_EMAIL_FROM_IP");
+});
+
+test("the Worker is placed next to the database's host, whoever runs it", () => {
+  assert.equal(databaseHost(DB), "ep-quiet-sky.eu-central-1.aws.neon.tech:5432");
+  assert.equal(databaseHost("postgres://u:p@db.example.com:6543/x"), "db.example.com:6543");
+  assert.equal(databaseHost("postgres://u:p@[2001:db8::1]:5432/x"), "2001:db8::1:5432");
+});
+
+test("a database Cloudflare can't reach, or without credentials, is refused", () => {
+  assert.equal(checkDatabaseUrl(DB), undefined);
+  assert.match(checkDatabaseUrl("postgres://u:p@localhost:5432/x") ?? "", /Cloudflare can reach/);
+  assert.match(checkDatabaseUrl("postgres://u:p@192.168.1.4/x") ?? "", /Cloudflare can reach/);
+  assert.match(checkDatabaseUrl("postgres://db.example.com/x") ?? "", /user and password/);
+  assert.match(checkDatabaseUrl("mysql://u:p@db.example.com/x") ?? "", /postgres/);
+  assert.match(checkDatabaseUrl("not a url") ?? "", /Postgres URL/);
+});
+
+function toml(d: Deployment, media = true) {
+  return wranglerToml(d, {
+    dir: join(REPO, "hypha-deploy"),
+    accountId: "a".repeat(32),
+    databaseUrl: DB,
+    hyperdriveId: "h".repeat(32),
+    kvId: "k".repeat(32),
+    config: '[rate_limits.login_ip]\nburst = 20\nper = "30s"\n',
+    quotas: QUOTAS,
+    compatibilityDate: "2026-10-01",
+    media,
+  });
+}
+
+test("wrangler.toml binds Hyperdrive, KV and a rate limiter per rule, and is placed by the database", () => {
+  const file = toml(deployment());
+  assert.match(file, /^name = "hypha-api"$/m);
+  assert.match(file, /^routes = \[\{ pattern = "api\.example\.com", custom_domain = true \}\]$/m);
+  assert.match(file, /\[placement\]\nmode = "targeted"\nhost = "ep-quiet-sky\.eu-central-1\.aws\.neon\.tech:5432"/);
+  assert.match(file, /\[\[hyperdrive\]\]\nbinding = "HYPERDRIVE"\nid = "h{32}"/);
+  assert.match(file, /\[\[kv_namespaces\]\]\nbinding = "JOBS"\nid = "k{32}"/);
+  assert.match(file, /name = "RL_LOGIN_EMAIL"\nnamespace_id = "5000"\nsimple = \{ limit = 50, period = 60 \}/);
+  assert.match(file, /name = "RL_LOGIN_IP"\nnamespace_id = "5001"\nsimple = \{ limit = 12, period = 60 \}/);
+  assert.match(file, /name = "RL_SHIPPING_QUOTES_CART"\nnamespace_id = "5002"\nsimple = \{ limit = 40, period = 60 \}/);
+  assert.match(file, /^HYPHA_CONFIG = "\[rate_limits\.login_ip\]\\nburst = 20\\nper = \\"30s\\"\\n"$/m);
+  assert.match(file, /^HYPHA_ADMIN_URL = "https:\/\/admin\.example\.com"$/m);
+  assert.match(file, /^main = "\.\.\/crates\/hypha-host-workers\/build\/worker\/shim\.mjs"$/m);
+});
+
+test("a region replaces measuring the host", () => {
+  const d = deployment();
+  d.cloudflare!.region = "aws:eu-central-1";
+  assert.match(toml(d), /\[placement\]\nmode = "targeted"\nregion = "aws:eu-central-1"\n/);
+});
+
+test("media is R2's S3 endpoint, public files from the bucket's domain only with its zone", () => {
+  const d = deployment();
+  assert.doesNotMatch(toml(d, false), /HYPHA_S3_/);
+  const signed = toml(d);
+  assert.match(signed, /^HYPHA_S3_ENDPOINT = "https:\/\/a{32}\.r2\.cloudflarestorage\.com"$/m);
+  assert.match(signed, /^HYPHA_S3_BUCKET = "hypha-media"$/m);
+  assert.doesNotMatch(signed, /HYPHA_MEDIA_URL/);
+  d.cloudflare!.zoneId = "z".repeat(32);
+  assert.match(toml(d), /^HYPHA_MEDIA_URL = "https:\/\/media\.example\.com"$/m);
+});
+
+/** Tools that record what they're asked and answer as wrangler would. */
+function fakeTools(): { tools: Tools; calls: string[]; secrets: string[] } {
+  const calls: string[] = [];
+  const secrets: string[] = [];
+  const tools: Tools = {
+    async wrangler(args) {
+      calls.push(`wrangler ${args.join(" ")}`);
+      const command = args.slice(0, 3).join(" ");
+      if (args[0] === "whoami") return JSON.stringify({ accounts: [{ id: "a".repeat(32), name: "Shop" }] });
+      if (command.startsWith("hyperdrive create")) return `Created\n{ "id": "${"1".repeat(32)}" }`;
+      if (command === "kv namespace list") return "[]";
+      if (command === "kv namespace create") return `id = "${"2".repeat(32)}"`;
+      if (args[0] === "deploy") {
+        const file = args[args.indexOf("--secrets-file") + 1];
+        secrets.push(await readFile(file, "utf8"));
+      }
+      return "";
+    },
+    async buildHost() {
+      calls.push("build host");
+      return "/bin/hypha-host-axum";
+    },
+    async host(_binary, args, env) {
+      calls.push(`host ${args.join(" ")} DATABASE_URL=${env.DATABASE_URL}`);
+      return args[0] === "config" ? JSON.stringify(QUOTAS) : "";
+    },
+    async checkToolchain() {},
+    now: () => 1_800_000_000_000,
+    answers: async () => true,
+  };
+  return { tools, calls, secrets };
+}
+
+async function folder(d: Deployment, r2 = true): Promise<{ dir: string; env: EnvFile }> {
+  const dir = await mkdtemp(join(tmpdir(), "hypha-cf-"));
+  await saveDeployment(dir, d);
+  await writeFile(join(dir, "hypha.config.toml"), "# defaults\n");
+  const env = new EnvFile()
+    .set("HYPHA_SECRET_KEY", "f".repeat(64))
+    .set("DATABASE_URL", DB)
+    .set("R2_ACCESS_KEY_ID", r2 ? "key" : "")
+    .set("R2_SECRET_ACCESS_KEY", r2 ? "shh" : "")
+    .set("HYPHA_OWNER_EMAIL", "owner@example.com")
+    .set("HYPHA_OWNER_PASSWORD", "pw");
+  return { dir, env };
+}
+
+test("a first deploy sets the database up, creates the resources with Hyperdrive's cache off, and deploys", async () => {
+  const d = deployment();
+  const { dir, env } = await folder(d);
+  const { tools, calls, secrets } = fakeTools();
+  await deployCloudflare(dir, d, env, tools);
+  assert.deepEqual(calls, [
+    "wrangler whoami --json",
+    "build host",
+    `host setup DATABASE_URL=${DB}`,
+    `host config rate-limits DATABASE_URL=${DB}`,
+    `wrangler hyperdrive create hypha --connection-string ${PLAIN} --sslmode require --caching-disabled`,
+    "wrangler kv namespace list",
+    "wrangler kv namespace create hypha-jobs",
+    "wrangler r2 bucket create hypha-media",
+    `wrangler r2 bucket cors set hypha-media --file ${join(dir, ".cors.json")} --force`,
+    `wrangler deploy --config ${join(dir, "wrangler.toml")} --secrets-file ${join(dir, ".secrets.json")}`,
+    `wrangler kv key put jobs:written 1800000000000 --namespace-id ${"2".repeat(32)} --remote`,
+  ]);
+  assert.deepEqual(JSON.parse(secrets[0]), {
+    HYPHA_SECRET_KEY: "f".repeat(64),
+    HYPHA_S3_ACCESS_KEY_ID: "key",
+    HYPHA_S3_SECRET_ACCESS_KEY: "shh",
+  });
+  // The secrets don't stay on disk; what was created is remembered.
+  assert.deepEqual((await readdir(dir)).sort(), ["hypha.config.toml", "hypha.json", "wrangler.toml"]);
+  const saved = await loadDeployment(dir);
+  assert.equal(saved.cloudflare?.accountId, "a".repeat(32));
+  assert.equal(saved.cloudflare?.hyperdriveId, "1".repeat(32));
+  assert.equal(saved.cloudflare?.kvId, "2".repeat(32));
+});
+
+test("a later deploy updates Hyperdrive (cache still off) and creates nothing again", async () => {
+  const d = deployment();
+  Object.assign(d.cloudflare!, { accountId: "a".repeat(32), hyperdriveId: "1".repeat(32), kvId: "2".repeat(32), zoneId: "z1" });
+  const { dir, env } = await folder(d, false);
+  const { tools, calls, secrets } = fakeTools();
+  await deployCloudflare(dir, d, env, tools);
+  assert.ok(
+    calls.includes(`wrangler hyperdrive update ${"1".repeat(32)} --connection-string ${PLAIN} --sslmode require --caching-disabled`),
+  );
+  assert.ok(!calls.some((c) => / create /.test(c) || c.includes("kv namespace list")));
+  // No R2 keys: no bucket, no media secrets.
+  assert.ok(!calls.some((c) => c.includes(" r2 ")));
+  assert.deepEqual(JSON.parse(secrets[0]), { HYPHA_SECRET_KEY: "f".repeat(64) });
+});
+
+test("Hyperdrive gets the URL without its query, TLS as --sslmode, and never a cache", () => {
+  assert.deepEqual(hyperdriveOrigin(DB), ["--connection-string", PLAIN, "--sslmode", "require", "--caching-disabled"]);
+  assert.deepEqual(hyperdriveOrigin("postgres://u:p@db.example.com:6543/x?sslmode=prefer&application_name=a"), [
+    "--connection-string",
+    "postgres://u:p@db.example.com:6543/x",
+    "--caching-disabled",
+  ]);
+});
+
+test("a failed Hyperdrive call doesn't print the database's password", async () => {
+  const d = deployment();
+  const { dir, env } = await folder(d, false);
+  const { tools } = fakeTools();
+  const wrangler = tools.wrangler;
+  tools.wrangler = async (args, options) => {
+    if (args[0] === "hyperdrive") throw new Error(`\`wrangler ${args.join(" ")}\` failed (exit 1)`);
+    return wrangler(args, options);
+  };
+  await assert.rejects(deployCloudflare(dir, d, env, tools), (e: Error) => {
+    assert.doesNotMatch(e.message, /secret/);
+    assert.match(e.message, /hypha:\*\*\*@/);
+    return true;
+  });
+});

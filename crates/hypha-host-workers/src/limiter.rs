@@ -124,6 +124,15 @@ mod tests {
         (IsolateLimiter::new(&limits), burst, every)
     }
 
+    /// `hypha deploy` names the bindings the same way, from the configuration keys.
+    #[test]
+    fn a_binding_is_its_rules_key_in_capitals() {
+        for rule in Rule::ALL {
+            let key = rule.config_key().to_uppercase();
+            assert_eq!(binding(rule), format!("RL_{key}"));
+        }
+    }
+
     #[test]
     fn a_bindings_limit_is_the_most_a_quota_allows_in_a_minute() {
         assert_eq!(binding_limit(10, Duration::from_secs(30)), 12);

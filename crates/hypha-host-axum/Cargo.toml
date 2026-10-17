@@ -38,6 +38,8 @@ tokio-postgres = "0.7.18"
 tokio-postgres-rustls = "0.14"
 rustls-platform-verifier = "0.7"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+# `config rate-limits` prints JSON.
+serde_json.workspace = true
 
 [dev-dependencies]
 # The route tests (`route_tests.rs`).
@@ -45,7 +47,6 @@ hypha-auth = { path = "../hypha-auth" }
 hypha-apps = { path = "../hypha-apps" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-products = { path = "../hypha-products" }
-serde_json.workspace = true
 jiff = "0.2"
 tower = { version = "0.5.3", features = ["util"] }
 

@@ -1,6 +1,6 @@
 # The API on Cloudflare Workers (design note 0026). `wrangler dev` runs it against the
 # compose Postgres (`localConnectionString`), on a database `hypha-host-axum setup`
-# prepared first (W9); `hypha deploy` (later) writes the deployment's own values.
+# prepared first (W9); `hypha deploy --target cloudflare` writes a deployment's own file.
 name = "hypha-api"
 main = "build/worker/shim.mjs"
 compatibility_date = "2026-10-01"
@@ -88,7 +88,9 @@ crons = ["* * * * *"]
 [observability]
 enabled = true
 
-# Run next to the database: its round trips are most of a request (§8). Set to the
-# database's region, e.g. "aws:eu-central-1" for Neon in Frankfurt.
+# Run next to the database: its round trips are most of a request (§8, W12). `hypha
+# deploy` sets it to the database's host (Cloudflare measures it), or `region` with
+# `hypha init --region`.
 # [placement]
-# region = "aws:eu-central-1"
+# mode = "targeted"
+# host = "db.example.com:5432"

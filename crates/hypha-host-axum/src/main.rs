@@ -11,7 +11,7 @@ use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
 use hypha_http::host::HostLimiter;
-use hypha_http::rate_limit::RateLimiter;
+use hypha_http::rate_limit::{RateLimiter, Rule};
 use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, SharedState, Storage};
 
 mod calls;
@@ -68,8 +68,24 @@ fn load_config() -> Result<(Config, Option<String>), String> {
 
 /// `hypha-host-axum config` prints the settings in effect; `config schema [PATH]` writes
 /// the file's JSON Schema to `PATH` (default `hypha.config.schema.json`; a test fails
-/// while the committed one is stale).
+/// while the committed one is stale); `config rate-limits` prints each rule's quota in
+/// effect as JSON (`{"login_ip": {"burst": 10, "per_ms": 30000}, …}`), for `hypha deploy`
+/// to size a Worker's Rate Limiting bindings (design note 0026, W8).
 fn config_command(args: &[String]) -> Result<(), String> {
+    if args.first().map(String::as_str) == Some("rate-limits") {
+        let (config, _) = load_config()?;
+        let quotas: serde_json::Map<String, serde_json::Value> = Rule::ALL
+            .into_iter()
+            .map(|rule| {
+                let (burst, per) = rule.quota(&config.rate_limits);
+                let per_ms = u64::try_from(per.as_millis()).unwrap_or(u64::MAX);
+                let quota = serde_json::json!({ "burst": burst, "per_ms": per_ms });
+                (rule.config_key().to_string(), quota)
+            })
+            .collect();
+        println!("{}", serde_json::Value::Object(quotas));
+        return Ok(());
+    }
     if args.first().map(String::as_str) == Some("schema") {
         let path = args
             .get(1)

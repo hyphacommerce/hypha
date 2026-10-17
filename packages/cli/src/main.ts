@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Hypha's CLI (design note 0025): hosting it. `hypha init` writes a deployment (a
 // folder of settings and secrets), `hypha deploy` runs it on a server over SSH (or on
-// this machine), `hypha status` and `hypha logs` look at it. In this repository:
+// this machine, or the API on Cloudflare Workers), `hypha status` and `hypha logs` look at it. In this repository:
 // `pnpm hypha <command>`.
 
 import { defineCommand, runMain } from "citty";

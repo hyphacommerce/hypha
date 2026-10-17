@@ -9,13 +9,32 @@ import { join } from "node:path";
 export const STATE_FILE = "hypha.json";
 export const ENV_FILE = ".env";
 
-/** Where the stack runs: a server reached over SSH, or this machine (to try it out). */
-export type Target = "vps" | "local";
+/** Where the stack runs: a server reached over SSH, this machine (to try it out), or
+ * Cloudflare's Workers (the API over Hyperdrive to any Postgres; design note 0026). */
+export type Target = "vps" | "local" | "cloudflare";
 
 /** Where the images are built: on the server itself, or here and then copied to it. */
 export type BuildOn = "server" | "here";
 
 export type App = "admin" | "storefront";
+
+/** A Cloudflare deployment's account and what `hypha deploy` made there. */
+export interface Cloudflare {
+  /** Names its resources: the Worker `<name>-api`, the bucket `<name>-media`, the KV
+   * namespace `<name>-jobs`, Hyperdrive `<name>`. Fixed once deployed. */
+  name: string;
+  /** The account (from `wrangler whoami` when it reaches only one). */
+  accountId?: string;
+  /** The media domain's zone, for the bucket's custom domain; without it, signed URLs. */
+  zoneId?: string;
+  /** A placement region (`aws:eu-central-1`) instead of measuring the database's host. */
+  region?: string;
+  /** The first rate limiter's `namespace_id`; the rules take the next ones. Unique per
+   * account, so two deployments on one account don't share counts. */
+  rateLimitBase: number;
+  hyperdriveId?: string;
+  kvId?: string;
+}
 
 export interface Deployment {
   version: 1;
@@ -33,6 +52,8 @@ export interface Deployment {
     admin?: string;
     storefront?: string;
   };
+  /** With `target: "cloudflare"`. */
+  cloudflare?: Cloudflare;
 }
 
 export function apps(d: Deployment): App[] {

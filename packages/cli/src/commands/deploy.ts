@@ -5,12 +5,14 @@
 
 import { resolve4, resolve6 } from "node:dns/promises";
 import { isIP } from "node:net";
+import { resolve } from "node:path";
 
 import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 
 import { Staff, waitForHealth } from "../api.ts";
-import { apps, type Deployment, ENV_FILE, loadEnv, saveEnv, url } from "../deployment.ts";
+import { deployCloudflare, hereTools } from "../cloudflare.ts";
+import { apps, type Deployment, ENV_FILE, loadDeployment, loadEnv, saveEnv, url } from "../deployment.ts";
 import { build, images } from "../images.ts";
 import { CommandFailed, type Machine } from "../shell.ts";
 import { connectStorefront, syncWebhook } from "../storefront.ts";
@@ -29,6 +31,18 @@ export const deploy = defineCommand({
   run: ({ args }) =>
     guarded(async () => {
       const dir = args.dir;
+      const deployment = await loadDeployment(dir);
+      if (deployment.target === "cloudflare") {
+        p.intro("hypha deploy → Cloudflare");
+        const env = await loadEnv(dir);
+        await deployCloudflare(resolve(dir), deployment, env, hereTools(deployment));
+        const password = env.get("HYPHA_OWNER_PASSWORD");
+        const lines = [`API        ${url(deployment, deployment.domains.api)}`];
+        if (password) lines.push("", `Log in as ${env.get("HYPHA_OWNER_EMAIL")} with ${password}`, "(then change it)");
+        p.note(lines.join("\n"), "Deployed");
+        p.outro("Done.");
+        return;
+      }
       const { d, machine } = await open(dir);
       p.intro(`hypha deploy → ${machine.label}`);
 

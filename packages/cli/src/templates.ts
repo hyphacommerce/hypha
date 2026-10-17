@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { apps, type Deployment, EnvFile, url } from "./deployment.ts";
+import { apps, type Deployment, EnvFile, type Target, url } from "./deployment.ts";
 
 const TEMPLATES = join(import.meta.dirname, "..", "templates");
 /** The repository the CLI is part of: the images are built from it. */
@@ -78,12 +78,23 @@ export function seaweedConfig(accessKey: string, secretKey: string): string {
 
 /** The API's settings file, mostly empty: every key has a default, and the environment
  * in compose.yaml sets the deployment's own. */
-export function configToml(): string {
+export function configToml(target: Target = "vps"): string {
+  const header =
+    target === "cloudflare"
+      ? [
+          "# The API's settings (design note 0017). Every key has a default; the Worker reads",
+          "# this file as its HYPHA_CONFIG variable, under the addresses and storage that",
+          "# `hypha deploy` sets. After a change: `hypha deploy` (it also resizes the rate",
+          "# limiters to [rate_limits]).",
+        ]
+      : [
+          "# The API's settings (design note 0017). Every key has a default; `compose.yaml`",
+          "# sets the addresses, storage and proxies through the environment, which wins.",
+          "# After a change: `hypha deploy` (or `docker compose up -d api` on the server).",
+        ];
   return [
     "#:schema ./hypha.config.schema.json",
-    "# The API's settings (design note 0017). Every key has a default; `compose.yaml`",
-    "# sets the addresses, storage and proxies through the environment, which wins.",
-    "# After a change: `hypha deploy` (or `docker compose up -d api` on the server).",
+    ...header,
     "",
     "# [rate_limits]",
     "# [dispatch]",
@@ -134,4 +145,28 @@ export function newEnv(d: Deployment, owner: Owner): EnvFile {
       .set("HYPHA_WEBHOOK_SECRET", "");
   }
   return env;
+}
+
+/** A Cloudflare deployment's `.env` (design note 0026): kept here, never uploaded as a
+ * file. `hypha deploy` passes the database URL to setup and Hyperdrive, and the secret
+ * key and R2 keys to the Worker as secrets. */
+export function newCloudflareEnv(owner: Owner, databaseUrl: string, r2: { id: string; secret: string }): EnvFile {
+  return new EnvFile()
+    .comment(
+      "Written by `hypha init --target cloudflare` (design note 0026). Secrets: keep this file\n" +
+        "private, and keep it (HYPHA_SECRET_KEY seals two-factor secrets; losing it locks staff out).",
+    )
+    .set("HYPHA_SECRET_KEY", secret())
+    .comment("")
+    .comment("The database's direct URL: `hypha deploy` sets it up and points Hyperdrive at it.")
+    .set("DATABASE_URL", databaseUrl)
+    .comment("")
+    .comment("An R2 API token's keys (R2 → Manage API tokens, Object Read & Write); empty: media off.")
+    .set("R2_ACCESS_KEY_ID", r2.id)
+    .set("R2_SECRET_ACCESS_KEY", r2.secret)
+    .comment("")
+    .comment("The first owner, created by the first deploy (change the password after logging in).")
+    .set("HYPHA_OWNER_EMAIL", owner.email)
+    .set("HYPHA_OWNER_PASSWORD", password())
+    .set("HYPHA_STORE_NAME", owner.storeName);
 }

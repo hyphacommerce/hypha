@@ -25,16 +25,19 @@ export type RunOptions = {
   input?: string;
   cwd?: string;
   env?: Record<string, string>;
+  /** `env` alone (with `PATH` and `HOME`), not added to this process's environment. */
+  bareEnv?: boolean;
 };
 
 /** Runs `program` and resolves with its output when `capture` is set; rejects on a
  * non-zero exit with the output's last lines. */
 export function run(program: string, args: string[], options: RunOptions = {}): Promise<string> {
-  const { capture = false, input, cwd, env } = options;
+  const { capture = false, input, cwd, env, bareEnv = false } = options;
+  const base = bareEnv ? { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" } : process.env;
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, {
       cwd,
-      env: env ? { ...process.env, ...env } : process.env,
+      env: env ? { ...base, ...env } : base,
       stdio: [input === undefined ? "inherit" : "pipe", capture ? "pipe" : "inherit", capture ? "pipe" : "inherit"],
     });
     let out = "";
