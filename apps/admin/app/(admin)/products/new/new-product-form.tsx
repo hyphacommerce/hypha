@@ -61,7 +61,7 @@ export function NewProductForm() {
           onChange={(value) => setHandle(value === "" ? undefined : value)}
           onEnter={submit}
         />
-        <HStack gap={2} vAlign="end">
+        <div className="form-grid">
           <TextInput
             label="Price"
             placeholder="18.00"
@@ -76,7 +76,7 @@ export function NewProductForm() {
             value={currency}
             onChange={(value) => setCurrency(value as Currency)}
           />
-        </HStack>
+        </div>
         <HStack gap={2} hAlign="end">
           <Button label="Cancel" variant="ghost" href="/products" />
           <Button

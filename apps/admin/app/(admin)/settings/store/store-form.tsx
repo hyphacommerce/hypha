@@ -174,20 +174,22 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
               Translations come later; the language says what your content is written in now.
             </Text>
           </VStack>
-          <TextInput
-            label="Content language"
-            description="A BCP 47 tag: en, en-GB, sr-Latn…"
-            value={language}
-            onChange={setLanguage}
-          />
-          <Selector
-            label="Time zone"
-            description="Times are stored in UTC; this is how your store's clients show them."
-            options={timezoneOptions(store.timezone)}
-            value={timezone}
-            onChange={setTimezone}
-            hasSearch
-          />
+          <div className="form-grid">
+            <TextInput
+              label="Content language"
+              description="A BCP 47 tag: en, en-GB, sr-Latn…"
+              value={language}
+              onChange={setLanguage}
+            />
+            <Selector
+              label="Time zone"
+              description="Times are stored in UTC; this is how your store's clients show them."
+              options={timezoneOptions(store.timezone)}
+              value={timezone}
+              onChange={setTimezone}
+              hasSearch
+            />
+          </div>
         </VStack>
       </Card>
       <Card>
@@ -201,15 +203,17 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
             </Text>
           </VStack>
           <TextInput label="Legal name" placeholder="Acme d.o.o." value={legalName} onChange={setLegalName} />
-          {ADDRESS_FIELDS.map((f) => (
-            <TextInput
-              key={f.key}
-              label={f.label}
-              isOptional={!f.isRequired}
-              value={address[f.key]}
-              onChange={field(f.key)}
-            />
-          ))}
+          <div className="form-grid">
+            {ADDRESS_FIELDS.map((f) => (
+              <TextInput
+                key={f.key}
+                label={f.label}
+                isOptional={!f.isRequired}
+                value={address[f.key]}
+                onChange={field(f.key)}
+              />
+            ))}
+          </div>
           <Selector
             label="Country"
             options={countryOptions(countries)}
