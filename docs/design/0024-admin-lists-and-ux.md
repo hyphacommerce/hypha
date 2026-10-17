@@ -1,6 +1,6 @@
 # 0024: Admin tables, rich text, onboarding, and the storefront on Astryx
 
-- **Status:** Proposed (2026-10-17). Danilo's answers: descriptions stay HTML, tables
+- **Status:** Accepted (2026-10-17). Danilo's answers: descriptions stay HTML, tables
   sort and filter on the server, a setup wizard beside the checklist, the storefront
   moves to Astryx with its own theme (this replaces 0023's SF8).
 - **Scope:**
@@ -112,6 +112,11 @@ header with the primary action, inline validation from the API's error `details`
 confirmations for deletes (`AlertDialog`), toasts for saved, loading skeletons, and
 empty states that say what to do next. Known gaps to close on the way:
 
+- **The product editor first** (Danilo: creating options and variants is the biggest
+  pain): two columns, the content (title, description, media, options, variants) on
+  the left and the settings (status, channels, categories, organisation) on the right,
+  and options and variants that are quick to add, rename, reorder and remove. Errors
+  after deleting variants and adding new ones: to look into after the redo.
 - Customers, Staff and API keys have no pages (the nav shows them as not ready).
 - Orders: no filters; the order page needs the `detail-page` layout (header with status
   and actions, lines, totals, a timeline from the order's events).
