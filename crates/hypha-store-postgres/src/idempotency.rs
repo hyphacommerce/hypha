@@ -1,10 +1,11 @@
 use hypha_core::{Actor, IdempotencyKey, IdempotencyRecord, IdempotencyRepo, RepoError, Timestamp};
-use tokio_postgres::{GenericClient, types::Type};
+use tokio_postgres::types::Type;
 use uuid::Uuid;
 
 use crate::{
     columns::{actor_to_db, col, micros, ts},
     error::{corrupt, repo_error},
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -18,7 +19,7 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
         let mut conn = self.conn().await;
         // One query, but inside a transaction anyway: a cached answer here (Hyperdrive's
         // query cache) would miss a key committed seconds ago and run the command twice.
-        let row = consistent_read!(conn.client(), |tx| tx
+        let row = consistent_read!(conn, |tx| tx
             .query_typed_opt(
                 &format!(
                     "SELECT operation, fingerprint, result, {}
@@ -73,7 +74,7 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
 /// Inserts `records` in one statement (inside `PgBatch`'s transaction). A key the
 /// actor already used fails on the `idempotency_key` constraint.
 pub(crate) async fn insert_records(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     records: &[IdempotencyRecord],
 ) -> Result<(), RepoError> {
     if records.is_empty() {

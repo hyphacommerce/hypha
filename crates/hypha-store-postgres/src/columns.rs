@@ -226,7 +226,7 @@ pub(crate) fn address_from_row(row: &Row, prefix: &str) -> Result<Option<Address
 /// WHERE key = id`. Adapters stamp every aggregate before taking its snapshot, so `None`
 /// means a caller skipped that, and writes nothing.
 pub(crate) async fn write_stamps(
-    tx: &impl tokio_postgres::GenericClient,
+    tx: &impl crate::store::Queries,
     table: &str,
     key: &str,
     id: &(dyn ToSql + Sync),

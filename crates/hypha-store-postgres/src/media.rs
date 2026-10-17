@@ -6,12 +6,13 @@ use hypha_media::{
     Asset, AssetFilter, AssetRepo, AssetSnapshot, AssetSort, AssetUsage, AssetUsageRepo, BlobKey,
     Checksum, MimeType, UsageOwner, UsageRole,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{col, micros, ts, version_from_db, version_to_db},
     error::{corrupt, repo_error},
+    store::Queries,
     store::{PgConnection, PgStore, in_transaction},
 };
 
@@ -30,7 +31,7 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
     async fn get(&self, id: AssetId) -> Result<Option<Asset>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!("SELECT {} FROM assets WHERE id = $1", columns()),
                 &[(&id.as_uuid(), Type::UUID)],
@@ -47,7 +48,7 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!("SELECT {} FROM assets WHERE id = ANY($1)", columns()),
                 &[(&ids, Type::UUID_ARRAY)],
@@ -100,7 +101,7 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT {} FROM assets
@@ -135,7 +136,7 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         let limit = i64::from(limit);
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT {} FROM assets
@@ -172,10 +173,7 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
 }
 
 /// `AssetRepo::insert` inside the caller's transaction.
-pub(crate) async fn insert_asset(
-    tx: &impl GenericClient,
-    s: &AssetSnapshot,
-) -> Result<(), RepoError> {
+pub(crate) async fn insert_asset(tx: &impl Queries, s: &AssetSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         &format!(
             "INSERT INTO assets (id, version, status, kind, filename, blob_key,
@@ -195,7 +193,7 @@ pub(crate) async fn insert_asset(
 
 /// `AssetRepo::update` inside the caller's transaction; the new version.
 pub(crate) async fn update_asset(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &AssetSnapshot,
 ) -> Result<Version, RepoError> {
     let expected = version_to_db(s.version)?;
@@ -223,7 +221,7 @@ pub(crate) async fn update_asset(
 
 /// `AssetRepo::delete` inside the caller's transaction. An asset in use is refused by
 /// the usage reference (`RepoError::Reference`).
-pub(crate) async fn delete_asset(tx: &impl GenericClient, id: AssetId) -> Result<(), RepoError> {
+pub(crate) async fn delete_asset(tx: &impl Queries, id: AssetId) -> Result<(), RepoError> {
     tx.query_typed(
         "DELETE FROM assets WHERE id = $1",
         &[(&id.as_uuid(), Type::UUID)],
@@ -246,7 +244,7 @@ impl<C: PgConnection> AssetUsageRepo for PgStore<C> {
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT owner_kind, owner_id, role FROM asset_usages
                  WHERE asset_id = $1 AND ($2::text IS NULL OR (owner_kind, owner_id) < ($2, $3))
@@ -275,7 +273,7 @@ impl<C: PgConnection> AssetUsageRepo for PgStore<C> {
 
 /// `StageAssetUsages::replace_asset_usages` inside a batch's transaction.
 pub(crate) async fn replace_usages(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     owner: &UsageOwner,
     usages: &[(AssetId, UsageRole)],
 ) -> Result<(), RepoError> {

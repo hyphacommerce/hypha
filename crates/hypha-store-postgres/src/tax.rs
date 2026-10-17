@@ -8,7 +8,7 @@ use hypha_tax::{
     ClassRate, TaxClass, TaxClassRepo, TaxClassSnapshot, TaxRegion, TaxRegionRepo,
     TaxRegionSnapshot,
 };
-use tokio_postgres::{GenericClient, types::Type};
+use tokio_postgres::types::Type;
 use uuid::Uuid;
 
 use crate::{
@@ -18,6 +18,7 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -27,7 +28,7 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
     async fn get(&self, id: TaxClassId) -> Result<Option<TaxClass>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!(
                     "SELECT version, name, {} FROM tax_classes WHERE id = $1",
@@ -51,7 +52,7 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
     async fn list_all(&self) -> Result<Vec<TaxClass>, RepoError> {
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT id, version, name, {} FROM tax_classes ORDER BY id",
@@ -106,7 +107,7 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
         let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT product_id, tax_class_id FROM product_tax_classes
                  WHERE product_id = ANY($1)",
@@ -127,7 +128,7 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
 
 /// `TaxClassRepo::insert` inside the caller's transaction.
 pub(crate) async fn insert_tax_class(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &TaxClassSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -151,7 +152,7 @@ pub(crate) async fn insert_tax_class(
 
 /// `TaxClassRepo::assign` inside the caller's transaction: one statement either way.
 pub(crate) async fn assign_tax_class(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     products: &[ProductId],
     class: Option<TaxClassId>,
 ) -> Result<(), RepoError> {
@@ -182,21 +183,21 @@ pub(crate) async fn assign_tax_class(
 impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
     async fn get(&self, id: TaxRegionId) -> Result<Option<TaxRegion>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             load_region(tx, "id = $1", id.as_uuid(), Type::UUID).await
         })
     }
 
     async fn get_by_country(&self, country: CountryCode) -> Result<Option<TaxRegion>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             load_region(tx, "country = $1", country.as_str(), Type::TEXT).await
         })
     }
 
     async fn list_all(&self) -> Result<Vec<TaxRegion>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| load_regions(tx, "TRUE", &[]).await)
+        consistent_read!(conn, |tx| load_regions(tx, "TRUE", &[]).await)
     }
 
     async fn insert(&self, region: &mut TaxRegion) -> Result<(), RepoError> {
@@ -230,7 +231,7 @@ impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
 
 /// `TaxRegionRepo::insert` inside the caller's transaction: the row, then its rates.
 pub(crate) async fn insert_tax_region(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &TaxRegionSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -259,7 +260,7 @@ pub(crate) async fn insert_tax_region(
 /// `TaxRegionRepo::update` inside the caller's transaction; the new version. The
 /// version check comes first; the rates are only replaced if it passes.
 pub(crate) async fn update_tax_region(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &TaxRegionSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -298,7 +299,7 @@ pub(crate) async fn update_tax_region(
 
 /// All class rates in one statement; `WITH ORDINALITY` keeps their order.
 async fn write_class_rates(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     region: TaxRegionId,
     rates: &[ClassRate],
 ) -> Result<(), RepoError> {
@@ -324,7 +325,7 @@ async fn write_class_rates(
 
 /// One region found by `filter` (a condition on `$1`), with its class rates, in 2 queries.
 async fn load_region<T: tokio_postgres::types::ToSql + Sync>(
-    client: &impl GenericClient,
+    client: &impl Queries,
     filter: &'static str,
     value: T,
     value_type: Type,
@@ -337,7 +338,7 @@ async fn load_region<T: tokio_postgres::types::ToSql + Sync>(
 /// The regions `filter` keeps, oldest first, each with its class rates: two queries
 /// however many there are.
 async fn load_regions(
-    client: &impl GenericClient,
+    client: &impl Queries,
     filter: &'static str,
     params: &[(&(dyn tokio_postgres::types::ToSql + Sync), Type)],
 ) -> Result<Vec<TaxRegion>, RepoError> {

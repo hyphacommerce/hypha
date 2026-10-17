@@ -6,8 +6,10 @@
 //! connection per request; Hyperdrive pools).
 //!
 //! Rules, from the design note:
-//! - only `query_typed*` and `batch_execute`: no named prepared statements, which
-//!   Hyperdrive's transaction pooling may not support;
+//! - queries go through `Queries` (`store.rs`): unprepared (`query_typed*`) unless the
+//!   host's connection keeps a `StatementCache`, which only a host connected straight to
+//!   Postgres should (design note 0025, §6): named prepared statements don't survive
+//!   transaction pooling (Hyperdrive, older PgBouncer);
 //! - every write is one short transaction with no reads in it besides its own version
 //!   check, so it holds a pooled connection only briefly;
 //! - errors are mapped by SQLSTATE and constraint name (`error.rs`), never by message text.
@@ -41,4 +43,4 @@ mod users;
 pub use batch::PgBatch;
 pub use config::{DEFAULT_CONNECT_TIMEOUT, database_config};
 pub use migrate::{CORE, MigrateError, Migration, MigrationSet, migrate};
-pub use store::{PgConnection, PgStore};
+pub use store::{Db, PgConnection, PgStore, Queries, StatementCache};

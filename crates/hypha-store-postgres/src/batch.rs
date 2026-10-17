@@ -47,6 +47,7 @@ use crate::{
     orders::{insert_order, update_order},
     outbox::insert_events,
     products::update_product,
+    store::Db,
     store::{PgConnection, PgStore},
     tax::assign_tax_class,
     users::{insert_role, insert_user, update_invite, update_role, update_user},
@@ -423,81 +424,83 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         let mut records = Vec::new();
 
         let mut conn = self.conn().await;
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
+        let (client, statements) = conn.parts();
+        let tx = client.transaction().await.map_err(repo_error)?;
+        let db = Db::new(&tx, statements);
         for write in batch.staged {
             match write {
-                Staged::NewOrder(s) => insert_order(&tx, &s).await?,
+                Staged::NewOrder(s) => insert_order(&db, &s).await?,
                 Staged::Order(s) => {
-                    update_order(&tx, &s).await?;
+                    update_order(&db, &s).await?;
                 }
-                Staged::NewFulfillment(s) => insert_fulfillment(&tx, &s).await?,
+                Staged::NewFulfillment(s) => insert_fulfillment(&db, &s).await?,
                 Staged::Fulfillment(s) => {
-                    update_fulfillment(&tx, &s).await?;
+                    update_fulfillment(&db, &s).await?;
                 }
-                Staged::NewCart(s) => insert_cart(&tx, &s).await?,
+                Staged::NewCart(s) => insert_cart(&db, &s).await?,
                 Staged::Cart(s) => {
-                    update_cart(&tx, &s).await?;
+                    update_cart(&db, &s).await?;
                 }
                 Staged::Product(s) => {
-                    update_product(&tx, &s).await?;
+                    update_product(&db, &s).await?;
                 }
-                Staged::AssetUsages(owner, usages) => replace_usages(&tx, &owner, &usages).await?,
-                Staged::NewCustomer(s) => insert_customer(&tx, &s).await?,
+                Staged::AssetUsages(owner, usages) => replace_usages(&db, &owner, &usages).await?,
+                Staged::NewCustomer(s) => insert_customer(&db, &s).await?,
                 Staged::Idempotency(record) => records.push(record),
-                Staged::NewRole(s) => insert_role(&tx, &s).await?,
+                Staged::NewRole(s) => insert_role(&db, &s).await?,
                 Staged::Role(s) => {
-                    update_role(&tx, &s).await?;
+                    update_role(&db, &s).await?;
                 }
-                Staged::NewUser(s) => insert_user(&tx, &s).await?,
+                Staged::NewUser(s) => insert_user(&db, &s).await?,
                 Staged::User(s) => {
-                    update_user(&tx, &s).await?;
+                    update_user(&db, &s).await?;
                 }
                 Staged::Invite(s) => {
-                    update_invite(&tx, &s).await?;
+                    update_invite(&db, &s).await?;
                 }
-                Staged::NewIdentity(s) => insert_identity(&tx, &s).await?,
+                Staged::NewIdentity(s) => insert_identity(&db, &s).await?,
                 Staged::Identity(s) => {
-                    update_identity(&tx, &s).await?;
+                    update_identity(&db, &s).await?;
                 }
-                Staged::NewSession(s) => insert_session(&tx, &s).await?,
+                Staged::NewSession(s) => insert_session(&db, &s).await?,
                 Staged::Session(s) => {
-                    update_session(&tx, &s).await?;
+                    update_session(&db, &s).await?;
                 }
                 Staged::SessionRevocation(identity, keep, at) => {
-                    revoke_sessions(&tx, identity, keep, at).await?
+                    revoke_sessions(&db, identity, keep, at).await?
                 }
-                Staged::NewPasswordReset(s) => insert_password_reset(&tx, &s).await?,
-                Staged::PasswordReset(s) => update_password_reset(&tx, &s).await?,
+                Staged::NewPasswordReset(s) => insert_password_reset(&db, &s).await?,
+                Staged::PasswordReset(s) => update_password_reset(&db, &s).await?,
                 Staged::UsedUpResets(identity, at) => {
-                    use_up_password_resets(&tx, identity, at).await?
+                    use_up_password_resets(&db, identity, at).await?
                 }
                 Staged::InventoryItem(s) => items.push(s),
                 Staged::DeletedInventoryItem(s) => deleted.push(s),
                 Staged::TaxAssignment(products, class) => {
-                    assign_tax_class(&tx, &products, class).await?
+                    assign_tax_class(&db, &products, class).await?
                 }
                 Staged::CatalogProducts(catalog, products, true) => {
-                    add_catalog_products(&tx, catalog, &products).await?
+                    add_catalog_products(&db, catalog, &products).await?
                 }
                 Staged::CatalogProducts(catalog, products, false) => {
-                    remove_catalog_products(&tx, catalog, &products).await?
+                    remove_catalog_products(&db, catalog, &products).await?
                 }
                 Staged::Publications(channel, products, true) => {
-                    crate::channels::publish(&tx, channel, &products).await?
+                    crate::channels::publish(&db, channel, &products).await?
                 }
                 Staged::Publications(channel, products, false) => {
-                    crate::channels::unpublish(&tx, channel, &products).await?
+                    crate::channels::unpublish(&db, channel, &products).await?
                 }
-                Staged::NewCategory(s) => insert_category(&tx, &s).await?,
+                Staged::NewCategory(s) => insert_category(&db, &s).await?,
                 Staged::Category(s) => {
-                    update_category(&tx, &s).await?;
+                    update_category(&db, &s).await?;
                 }
-                Staged::DeletedCategory(id) => delete_category(&tx, id).await?,
+                Staged::DeletedCategory(id) => delete_category(&db, id).await?,
                 Staged::CategoryProducts(category, products, true) => {
-                    add_category_products(&tx, category, &products).await?
+                    add_category_products(&db, category, &products).await?
                 }
                 Staged::CategoryProducts(category, products, false) => {
-                    remove_category_products(&tx, category, &products).await?
+                    remove_category_products(&db, category, &products).await?
                 }
                 Staged::FixedPrices(list, changes) => {
                     let set: Vec<(VariantId, Price)> = changes
@@ -510,27 +513,27 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         .map(|(v, _)| *v)
                         .collect();
                     if !set.is_empty() {
-                        set_fixed_prices(&tx, list, &set).await?;
+                        set_fixed_prices(&db, list, &set).await?;
                     }
                     if !removed.is_empty() {
-                        remove_fixed_prices(&tx, list, &removed).await?;
+                        remove_fixed_prices(&db, list, &removed).await?;
                     }
                 }
                 Staged::Events(events, version) => {
-                    insert_events(&tx, &events, version, self.actor()).await?
+                    insert_events(&db, &events, version, self.actor()).await?
                 }
             }
         }
-        insert_records(&tx, &records).await?;
+        insert_records(&db, &records).await?;
         // Updated and deleted items locked together, in ID order (see `lock_items`).
         let ids: Vec<uuid::Uuid> = items
             .iter()
             .chain(&deleted)
             .map(|s| s.id.as_uuid())
             .collect();
-        lock_items(&tx, &ids).await?;
-        update_items(&tx, items).await?;
-        delete_items(&tx, &deleted).await?;
+        lock_items(&db, &ids).await?;
+        update_items(&db, items).await?;
+        delete_items(&db, &deleted).await?;
         tx.commit().await.map_err(repo_error)
     }
 }

@@ -163,6 +163,7 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
         background: Default::default(),
         limiter: crate::rate_limit::MemoryRateLimiter::new(&config.rate_limits),
         publishable_keys: Default::default(),
+        wake: Default::default(),
         store: store.id(),
         store_name: store.name().to_string(),
         media,
@@ -3961,7 +3962,7 @@ async fn settle_search(app: &TestApp) {
         let dispatched = crate::jobs::dispatch(&app.state).await.unwrap();
         let synced = crate::jobs::search_sync(&app.state).await.unwrap();
         let (_, status) = send(app, "GET", "/admin/search/status", None).await;
-        if !dispatched && !synced && status["queued"] == 0 {
+        if !dispatched.more && !synced.more && status["queued"] == 0 {
             return;
         }
     }

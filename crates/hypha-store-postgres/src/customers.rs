@@ -6,7 +6,7 @@ use hypha_customers::{
     Customer, CustomerFilter, CustomerRepo, CustomerSnapshot, CustomerSort, CustomerSummary,
     SavedAddress,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
@@ -16,20 +16,21 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> CustomerRepo for PgStore<C> {
     async fn get(&self, id: CustomerId) -> Result<Option<Customer>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             load(tx, "id = $1", &id.as_uuid(), Type::UUID).await
         })
     }
 
     async fn get_by_email(&self, email: &Email) -> Result<Option<Customer>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             load(tx, "email = $1", &email.as_str(), Type::TEXT).await
         })
     }
@@ -79,7 +80,7 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT c.id, c.email, c.first_name, c.last_name, c.phone, {stamps},
@@ -157,7 +158,7 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
 /// `CustomerRepo::update` inside the caller's transaction; the new version. The version
 /// check comes first; the addresses are only replaced if it passes.
 pub(crate) async fn update_customer(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &CustomerSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -194,7 +195,7 @@ pub(crate) async fn update_customer(
 
 /// `CustomerRepo::insert` inside the caller's transaction (also used by `PgBatch`).
 pub(crate) async fn insert_customer(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &CustomerSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -220,7 +221,7 @@ pub(crate) async fn insert_customer(
 
 /// All addresses in one statement; `WITH ORDINALITY` keeps their order.
 async fn write_addresses(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     customer: CustomerId,
     addresses: &[SavedAddress],
 ) -> Result<(), RepoError> {
@@ -267,7 +268,7 @@ async fn write_addresses(
 
 /// One customer found by `filter` (a condition on `$1`), with its addresses, in 2 queries.
 async fn load<T: tokio_postgres::types::ToSql + Sync>(
-    client: &impl GenericClient,
+    client: &impl Queries,
     filter: &'static str,
     value: &T,
     value_type: Type,

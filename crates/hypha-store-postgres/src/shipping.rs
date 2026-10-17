@@ -13,7 +13,7 @@ use hypha_shipping::{
     OptionRate, ProviderKey, RateBasis, RateTable, ServiceInfo, ShippingZone, ShippingZoneRepo,
     ShippingZoneSnapshot, Tier,
 };
-use tokio_postgres::{GenericClient, types::Type};
+use tokio_postgres::types::Type;
 use uuid::Uuid;
 
 use crate::{
@@ -23,6 +23,7 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -31,7 +32,7 @@ use crate::{
 impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
     async fn get(&self, id: ShippingZoneId) -> Result<Option<ShippingZone>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load_zones(tx, Some(&[id.as_uuid()])).await?.pop())
         })
     }
@@ -41,7 +42,7 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
         country: CountryCode,
     ) -> Result<Option<ShippingZone>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             let row = tx
                 .query_typed_opt(
                     "SELECT zone_id FROM shipping_zone_countries WHERE country = $1",
@@ -58,7 +59,7 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
 
     async fn list(&self) -> Result<Vec<ShippingZone>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| load_zones(tx, None).await)
+        consistent_read!(conn, |tx| load_zones(tx, None).await)
     }
 
     async fn insert(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
@@ -104,7 +105,7 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
 /// `ShippingZoneRepo::insert` inside the caller's transaction: the row, then its
 /// countries, options and tiers.
 pub(crate) async fn insert_zone(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &ShippingZoneSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -129,7 +130,7 @@ pub(crate) async fn insert_zone(
 /// `ShippingZoneRepo::update` inside the caller's transaction; the new version. The
 /// version check comes first; nothing else is touched if it fails.
 pub(crate) async fn update_zone(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &ShippingZoneSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -170,10 +171,7 @@ pub(crate) async fn update_zone(
 
 /// `ShippingZoneRepo::delete` inside the caller's transaction; its children go with it
 /// (CASCADE).
-pub(crate) async fn delete_zone(
-    tx: &impl GenericClient,
-    id: ShippingZoneId,
-) -> Result<(), RepoError> {
+pub(crate) async fn delete_zone(tx: &impl Queries, id: ShippingZoneId) -> Result<(), RepoError> {
     tx.query_typed(
         "DELETE FROM shipping_zones WHERE id = $1",
         &[(&id.as_uuid(), Type::UUID)],
@@ -184,10 +182,7 @@ pub(crate) async fn delete_zone(
 }
 
 /// Countries, options and tiers, a statement each however many there are.
-async fn write_zone_children(
-    tx: &impl GenericClient,
-    s: &ShippingZoneSnapshot,
-) -> Result<(), RepoError> {
+async fn write_zone_children(tx: &impl Queries, s: &ShippingZoneSnapshot) -> Result<(), RepoError> {
     let zone = s.id.as_uuid();
     let countries: Vec<&str> = s.countries.iter().map(|c| c.as_str()).collect();
     tx.query_typed(
@@ -298,7 +293,7 @@ async fn write_zone_children(
 
 /// The zones with these IDs (or all of them), by name then ID, in four queries.
 async fn load_zones(
-    client: &impl GenericClient,
+    client: &impl Queries,
     ids: Option<&[Uuid]>,
 ) -> Result<Vec<ShippingZone>, RepoError> {
     let ids: Option<Vec<Uuid>> = ids.map(<[Uuid]>::to_vec);
@@ -469,14 +464,14 @@ fn builtin_rate(
 impl<C: PgConnection> AppProviderRepo for PgStore<C> {
     async fn get(&self, key: &ProviderKey) -> Result<Option<AppProvider>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load_providers(tx, Some(key.as_str())).await?.pop())
         })
     }
 
     async fn list(&self) -> Result<Vec<AppProvider>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| load_providers(tx, None).await)
+        consistent_read!(conn, |tx| load_providers(tx, None).await)
     }
 
     async fn insert(&self, provider: &mut AppProvider) -> Result<(), RepoError> {
@@ -502,7 +497,7 @@ impl<C: PgConnection> AppProviderRepo for PgStore<C> {
 
 /// `AppProviderRepo::insert` inside the caller's transaction: the row, then its services.
 pub(crate) async fn insert_provider(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &AppProviderSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -531,7 +526,7 @@ pub(crate) async fn insert_provider(
 
 /// `AppProviderRepo::update` inside the caller's transaction; the new version.
 pub(crate) async fn update_provider(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &AppProviderSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -570,10 +565,7 @@ pub(crate) async fn update_provider(
 }
 
 /// `AppProviderRepo::delete` inside the caller's transaction.
-pub(crate) async fn delete_provider(
-    tx: &impl GenericClient,
-    key: &ProviderKey,
-) -> Result<(), RepoError> {
+pub(crate) async fn delete_provider(tx: &impl Queries, key: &ProviderKey) -> Result<(), RepoError> {
     tx.query_typed(
         "DELETE FROM shipping_app_providers WHERE key = $1",
         &[(&key.as_str(), Type::TEXT)],
@@ -587,7 +579,7 @@ fn timeout_to_db(ms: u32) -> Result<i32, RepoError> {
     i32::try_from(ms).map_err(corrupt)
 }
 
-async fn write_services(tx: &impl GenericClient, s: &AppProviderSnapshot) -> Result<(), RepoError> {
+async fn write_services(tx: &impl Queries, s: &AppProviderSnapshot) -> Result<(), RepoError> {
     let codes: Vec<&str> = s.services.iter().map(|x| x.code.as_str()).collect();
     let names: Vec<&str> = s.services.iter().map(|x| x.name.as_str()).collect();
     tx.query_typed(
@@ -607,7 +599,7 @@ async fn write_services(tx: &impl GenericClient, s: &AppProviderSnapshot) -> Res
 
 /// The provider with this key (or all of them), by key, in two queries.
 async fn load_providers(
-    client: &impl GenericClient,
+    client: &impl Queries,
     key: Option<&str>,
 ) -> Result<Vec<AppProvider>, RepoError> {
     let rows = client

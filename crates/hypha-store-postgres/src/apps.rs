@@ -2,11 +2,12 @@
 
 use hypha_apps::{App, AppKey, AppRepo, AppSnapshot};
 use hypha_core::{RepoError, Sealed, Version, Versioned, stamp_insert, stamp_update};
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 
 use crate::{
     columns::{col, stamp_columns, stamps_from_row, version_from_db, version_to_db, write_stamps},
     error::{corrupt, repo_error},
+    store::Queries,
     store::{PgConnection, PgStore, in_transaction},
 };
 
@@ -43,7 +44,7 @@ impl<C: PgConnection> AppRepo for PgStore<C> {
     async fn get(&self, key: &AppKey) -> Result<Option<App>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!("SELECT {} FROM apps WHERE key = $1", columns()),
                 &[(&key.as_str(), Type::TEXT)],
@@ -55,7 +56,7 @@ impl<C: PgConnection> AppRepo for PgStore<C> {
 
     async fn list(&self) -> Result<Vec<App>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(&format!("SELECT {} FROM apps ORDER BY key", columns()), &[])
             .await
             .map_err(repo_error)?
@@ -100,7 +101,7 @@ impl<C: PgConnection> AppRepo for PgStore<C> {
 }
 
 /// `AppRepo::insert` inside the caller's transaction.
-pub(crate) async fn insert_app(tx: &impl GenericClient, s: &AppSnapshot) -> Result<(), RepoError> {
+pub(crate) async fn insert_app(tx: &impl Queries, s: &AppSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO apps (key, version, name, enabled, secret, webhook_url,
              webhook_timeout_ms, subscriptions)
@@ -121,10 +122,7 @@ pub(crate) async fn insert_app(tx: &impl GenericClient, s: &AppSnapshot) -> Resu
 }
 
 /// `AppRepo::update` inside the caller's transaction; the new version.
-pub(crate) async fn update_app(
-    tx: &impl GenericClient,
-    s: &AppSnapshot,
-) -> Result<Version, RepoError> {
+pub(crate) async fn update_app(tx: &impl Queries, s: &AppSnapshot) -> Result<Version, RepoError> {
     let bumped = tx
         .query_typed_opt(
             "UPDATE apps SET version = version + 1, name = $3, enabled = $4, secret = $5,

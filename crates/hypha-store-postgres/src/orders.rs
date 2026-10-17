@@ -10,7 +10,7 @@ use hypha_orders::{
     Cancellation, Order, OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
     OrderSnapshot, OrderSort, OrderSummary, OrderTax, OrderTaxSource,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
@@ -22,15 +22,14 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> OrderRepo for PgStore<C> {
     async fn get(&self, id: OrderId) -> Result<Option<Order>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
-            Ok(load(tx, &[id.as_uuid()]).await?.pop())
-        })
+        consistent_read!(conn, |tx| Ok(load(tx, &[id.as_uuid()]).await?.pop()))
     }
 
     /// One query whatever the page holds: each order's item count is summed in SQL (per
@@ -94,7 +93,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         let us = |t: Option<Timestamp>| t.map(|t| t.unix_micros());
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT o.id, o.number, {placed},
@@ -147,7 +146,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
 
     async fn get_by_number(&self, number: OrderNumber) -> Result<Option<Order>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             let found = tx
                 .query_typed_opt(
                     "SELECT id FROM orders WHERE number = $1",
@@ -209,7 +208,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
 /// statuses), so the next field that becomes editable can't be dropped here while the
 /// in-memory repo keeps it. Lines are replaced after the version check.
 pub(crate) async fn update_order(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &OrderSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -270,10 +269,7 @@ pub(crate) async fn update_order(
 
 /// `OrderRepo::insert` inside the caller's transaction (also used by `PgBatch`): the
 /// order row, then every line in one statement.
-pub(crate) async fn insert_order(
-    tx: &impl GenericClient,
-    s: &OrderSnapshot,
-) -> Result<(), RepoError> {
+pub(crate) async fn insert_order(tx: &impl Queries, s: &OrderSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         &format!(
             "INSERT INTO orders (id, version, number, placed_at, cart_id, market_id, currency,
@@ -314,7 +310,7 @@ pub(crate) async fn insert_order(
 }
 
 /// The shipping address and total on the order's row, and its shipping lines.
-async fn write_shipping(tx: &impl GenericClient, s: &OrderSnapshot) -> Result<(), RepoError> {
+async fn write_shipping(tx: &impl Queries, s: &OrderSnapshot) -> Result<(), RepoError> {
     let id = s.id.as_uuid();
     let address = address_values(s.shipping_address.as_ref().map(|a| a.parts()));
     let total = s.shipping_total.amount();
@@ -383,7 +379,7 @@ async fn write_shipping(tx: &impl GenericClient, s: &OrderSnapshot) -> Result<()
 /// All lines in one statement: each column as an array, `unnest` turns them back into
 /// rows, `WITH ORDINALITY` numbers them, which is the position.
 async fn insert_lines(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     order: OrderId,
     lines: &[OrderLine],
 ) -> Result<(), RepoError> {
@@ -465,7 +461,7 @@ async fn insert_lines(
 
 /// The orders with these IDs (missing ones are skipped) and their lines, in 2 queries
 /// (run inside `consistent_read`).
-async fn load(client: &impl GenericClient, ids: &[Uuid]) -> Result<Vec<Order>, RepoError> {
+async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoError> {
     if ids.is_empty() {
         return Ok(vec![]);
     }

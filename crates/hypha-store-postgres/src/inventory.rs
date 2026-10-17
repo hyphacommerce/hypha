@@ -9,10 +9,7 @@ use hypha_inventory::{
     InventoryItem, InventoryItemRepo, InventoryItemSnapshot, Level, Location, LocationRepo,
     LocationSnapshot, Reservation, ReservationRef,
 };
-use tokio_postgres::{
-    GenericClient,
-    types::{ToSql, Type},
-};
+use tokio_postgres::types::{ToSql, Type};
 use uuid::Uuid;
 
 use crate::{
@@ -23,6 +20,7 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -32,7 +30,7 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
     async fn get(&self, id: LocationId) -> Result<Option<Location>, RepoError> {
         let mut conn = self.conn().await;
         let ids = [id.as_uuid()];
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load_locations(tx, Locations::Ids(&ids)).await?.pop())
         })
     }
@@ -40,14 +38,14 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
     async fn serving(&self, market: MarketId) -> Result<Vec<Location>, RepoError> {
         let mut conn = self.conn().await;
         let market = market.as_uuid();
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             load_locations(tx, Locations::Serving(market)).await
         })
     }
 
     async fn list(&self) -> Result<Vec<Location>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| load_locations(tx, Locations::All).await)
+        consistent_read!(conn, |tx| load_locations(tx, Locations::All).await)
     }
 
     async fn insert(&self, location: &mut Location) -> Result<(), RepoError> {
@@ -82,7 +80,7 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
 /// `LocationRepo::insert` inside the caller's transaction: the row, its markets and
 /// address.
 pub(crate) async fn insert_location(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &LocationSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -104,7 +102,7 @@ pub(crate) async fn insert_location(
 /// `LocationRepo::update` inside the caller's transaction; the new version. The version
 /// check comes first; the markets are only replaced if it passes.
 pub(crate) async fn update_location(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &LocationSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -136,7 +134,7 @@ pub(crate) async fn update_location(
 
 /// All of a location's markets in one statement; `WITH ORDINALITY` keeps their order.
 async fn write_location_markets(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     location: LocationId,
     markets: &[MarketId],
 ) -> Result<(), RepoError> {
@@ -155,10 +153,7 @@ async fn write_location_markets(
 }
 
 /// Sets the address columns to `s.address` (all NULL for none).
-async fn write_location_address(
-    tx: &impl GenericClient,
-    s: &LocationSnapshot,
-) -> Result<(), RepoError> {
+async fn write_location_address(tx: &impl Queries, s: &LocationSnapshot) -> Result<(), RepoError> {
     let id = s.id.as_uuid();
     let address = address_values(s.address.as_ref());
     tx.query_typed(
@@ -183,7 +178,7 @@ enum Locations<'a> {
 }
 
 async fn load_locations(
-    client: &impl GenericClient,
+    client: &impl Queries,
     which: Locations<'_>,
 ) -> Result<Vec<Location>, RepoError> {
     let (filter, param): (&str, [(&(dyn ToSql + Sync), Type); 1]) = match &which {
@@ -244,14 +239,14 @@ async fn load_locations(
 impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
     async fn get(&self, id: InventoryItemId) -> Result<Option<InventoryItem>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load_items(tx, "id", &[id.as_uuid()]).await?.pop())
         })
     }
 
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<InventoryItem>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load_items(tx, "variant_id", &[variant.as_uuid()])
                 .await?
                 .pop())
@@ -264,9 +259,7 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         }
         let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
-            load_items(tx, "variant_id", &ids).await
-        })
+        consistent_read!(conn, |tx| load_items(tx, "variant_id", &ids).await)
     }
 
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
@@ -338,7 +331,7 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
 /// `InventoryItemRepo::insert` inside the caller's transaction: the row, then its levels
 /// and reservations.
 pub(crate) async fn insert_item(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &InventoryItemSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -371,7 +364,7 @@ pub(crate) async fn insert_item(
 /// Locks the rows of `ids` in ID order (`FOR UPDATE`), so every writer of several items
 /// takes their locks in one order and queues instead of deadlocking. A batch that
 /// updates some items and deletes others locks them all at once, before either.
-pub(crate) async fn lock_items(tx: &impl GenericClient, ids: &[Uuid]) -> Result<(), RepoError> {
+pub(crate) async fn lock_items(tx: &impl Queries, ids: &[Uuid]) -> Result<(), RepoError> {
     if ids.is_empty() {
         return Ok(());
     }
@@ -391,7 +384,7 @@ pub(crate) async fn lock_items(tx: &impl GenericClient, ids: &[Uuid]) -> Result<
 /// `StaleVersion` and the caller drops the transaction. Levels and reservations go with
 /// them (ON DELETE CASCADE).
 pub(crate) async fn delete_items(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     snapshots: &[InventoryItemSnapshot],
 ) -> Result<(), RepoError> {
     if snapshots.is_empty() {
@@ -421,7 +414,7 @@ pub(crate) async fn delete_items(
 /// `PgBatch`): every item or none. Returns each item's new version; on `StaleVersion`
 /// the caller drops the transaction, rolling it back.
 pub(crate) async fn update_items(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     mut snapshots: Vec<InventoryItemSnapshot>,
 ) -> Result<HashMap<Uuid, Version>, RepoError> {
     if snapshots.is_empty() {
@@ -516,7 +509,7 @@ pub(crate) async fn update_items(
 /// The levels and reservations of `items`, one statement each. Positions are counted
 /// per item, so each item's order survives.
 async fn write_children(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     items: &[InventoryItemSnapshot],
 ) -> Result<(), RepoError> {
     let mut level_items = Vec::new();
@@ -577,7 +570,7 @@ async fn write_children(
 /// once: the levels and reservations select their rows through the same filter (a join),
 /// so they don't wait for the items' IDs, and all three read the same snapshot.
 async fn load_items(
-    client: &impl GenericClient,
+    client: &impl Queries,
     column: &'static str,
     values: &[Uuid],
 ) -> Result<Vec<InventoryItem>, RepoError> {

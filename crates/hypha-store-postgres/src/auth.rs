@@ -11,7 +11,7 @@ use hypha_core::{
     ApiKeyId, ChannelId, IdentityId, PasswordResetId, RepoError, SessionId, Timestamp, UserId,
     Version, Versioned,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
@@ -20,6 +20,7 @@ use crate::{
         token_hash_from_db, ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -41,13 +42,13 @@ fn principal_from_db(kind: &str, id: Uuid) -> Result<Principal, RepoError> {
 impl<C: PgConnection> IdentityRepo for PgStore<C> {
     async fn get(&self, id: IdentityId) -> Result<Option<Identity>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| load_identity(tx, id.as_uuid()).await)
+        consistent_read!(conn, |tx| load_identity(tx, id.as_uuid()).await)
     }
 
     async fn get_by_principal(&self, principal: Principal) -> Result<Option<Identity>, RepoError> {
         let (kind, pid) = principal_to_db(principal);
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             let row = tx
                 .query_typed_opt(
                     "SELECT id FROM identities WHERE principal_kind = $1 AND principal_id = $2",
@@ -69,7 +70,7 @@ impl<C: PgConnection> IdentityRepo for PgStore<C> {
         lookup: &str,
     ) -> Result<Option<Identity>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             let row = tx
                 .query_typed_opt(
                     "SELECT identity_id FROM credentials
@@ -104,7 +105,7 @@ impl<C: PgConnection> IdentityRepo for PgStore<C> {
     }
 }
 
-async fn load_identity(tx: &impl GenericClient, id: Uuid) -> Result<Option<Identity>, RepoError> {
+async fn load_identity(tx: &impl Queries, id: Uuid) -> Result<Option<Identity>, RepoError> {
     let Some(row) = tx
         .query_typed_opt(
             "SELECT version, principal_kind, principal_id FROM identities WHERE id = $1",
@@ -145,7 +146,7 @@ async fn load_identity(tx: &impl GenericClient, id: Uuid) -> Result<Option<Ident
 
 /// `IdentityRepo::insert` inside the caller's transaction (also used by `PgBatch`).
 pub(crate) async fn insert_identity(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &IdentitySnapshot,
 ) -> Result<(), RepoError> {
     let (kind, pid) = principal_to_db(s.principal);
@@ -165,7 +166,7 @@ pub(crate) async fn insert_identity(
 
 /// `IdentityRepo::update` inside the caller's transaction; returns the new version.
 pub(crate) async fn update_identity(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &IdentitySnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -192,7 +193,7 @@ pub(crate) async fn update_identity(
     version_from_db(col(&row, "version")?)
 }
 
-async fn write_credentials(tx: &impl GenericClient, s: &IdentitySnapshot) -> Result<(), RepoError> {
+async fn write_credentials(tx: &impl Queries, s: &IdentitySnapshot) -> Result<(), RepoError> {
     let (principal_kind, _) = principal_to_db(s.principal);
     let kinds: Vec<&str> = s.credentials.iter().map(|c| c.kind.as_str()).collect();
     let lookups: Vec<Option<&str>> = s.credentials.iter().map(|c| c.lookup.as_deref()).collect();
@@ -265,7 +266,7 @@ fn state_to_db(state: SessionState) -> (&'static str, i32, Option<i64>) {
 }
 
 async fn select_session(
-    client: &impl GenericClient,
+    client: &impl Queries,
     filter: &str,
     value: &(dyn tokio_postgres::types::ToSql + Sync),
     ty: Type,
@@ -284,7 +285,7 @@ async fn select_session(
 impl<C: PgConnection> SessionRepo for PgStore<C> {
     async fn get(&self, id: SessionId) -> Result<Option<Session>, RepoError> {
         let mut conn = self.conn().await;
-        select_session(conn.client(), "id = $1", &id.as_uuid(), Type::UUID).await
+        select_session(&conn.db(), "id = $1", &id.as_uuid(), Type::UUID).await
     }
 
     async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError> {
@@ -311,7 +312,7 @@ impl<C: PgConnection> SessionRepo for PgStore<C> {
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<Session>, RepoError> {
         let mut conn = self.conn().await;
         let bytes = hash.as_bytes().as_slice();
-        select_session(conn.client(), "token_hash = $1", &bytes, Type::BYTEA).await
+        select_session(&conn.db(), "token_hash = $1", &bytes, Type::BYTEA).await
     }
 
     async fn insert(&self, session: &mut Session) -> Result<(), RepoError> {
@@ -330,7 +331,7 @@ impl<C: PgConnection> SessionRepo for PgStore<C> {
 }
 
 pub(crate) async fn insert_session(
-    client: &impl GenericClient,
+    client: &impl Queries,
     s: &SessionSnapshot,
 ) -> Result<(), RepoError> {
     let (kind, pid) = principal_to_db(s.principal);
@@ -367,7 +368,7 @@ pub(crate) async fn insert_session(
 }
 
 pub(crate) async fn update_session(
-    client: &impl GenericClient,
+    client: &impl Queries,
     s: &SessionSnapshot,
 ) -> Result<Version, RepoError> {
     let (state, failed, mfa_at) = state_to_db(s.state);
@@ -402,7 +403,7 @@ pub(crate) async fn update_session(
 
 /// `StageSessions::revoke_sessions` inside the batch's transaction.
 pub(crate) async fn revoke_sessions(
-    client: &impl GenericClient,
+    client: &impl Queries,
     identity: IdentityId,
     keep: Option<SessionId>,
     at: Timestamp,
@@ -460,7 +461,7 @@ fn key_from_row(row: &Row) -> Result<ApiKey, RepoError> {
 impl<C: PgConnection> ApiKeyRepo for PgStore<C> {
     async fn get(&self, id: ApiKeyId) -> Result<Option<ApiKey>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed_opt(
                 &format!("SELECT {} FROM api_keys WHERE id = $1", key_columns()),
                 &[(&id.as_uuid(), Type::UUID)],
@@ -473,7 +474,7 @@ impl<C: PgConnection> ApiKeyRepo for PgStore<C> {
 
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<ApiKey>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed_opt(
                 &format!(
                     "SELECT {} FROM api_keys WHERE token_hash = $1",
@@ -495,7 +496,7 @@ impl<C: PgConnection> ApiKeyRepo for PgStore<C> {
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let keys = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT {} FROM api_keys WHERE ($1::uuid IS NULL OR id < $1)
@@ -528,10 +529,7 @@ impl<C: PgConnection> ApiKeyRepo for PgStore<C> {
 }
 
 /// `ApiKeyRepo::insert` inside the caller's transaction.
-pub(crate) async fn insert_api_key(
-    tx: &impl GenericClient,
-    s: &ApiKeySnapshot,
-) -> Result<(), RepoError> {
+pub(crate) async fn insert_api_key(tx: &impl Queries, s: &ApiKeySnapshot) -> Result<(), RepoError> {
     let (by_kind, by_id) = actor_to_db(s.created_by);
     tx.query_typed(
         &format!(
@@ -562,7 +560,7 @@ pub(crate) async fn insert_api_key(
 
 /// `ApiKeyRepo::update` inside the caller's transaction; the new version.
 pub(crate) async fn update_api_key(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &ApiKeySnapshot,
 ) -> Result<Version, RepoError> {
     let row = tx
@@ -613,7 +611,7 @@ fn reset_from_row(row: &Row) -> Result<PasswordReset, RepoError> {
 impl<C: PgConnection> PasswordResetRepo for PgStore<C> {
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<PasswordReset>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed_opt(
                 &format!(
                     "SELECT {} FROM password_resets WHERE token_hash = $1",
@@ -632,7 +630,7 @@ impl<C: PgConnection> PasswordResetRepo for PgStore<C> {
         identity: IdentityId,
     ) -> Result<Option<PasswordReset>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed_opt(
                 &format!(
                     "SELECT {} FROM password_resets WHERE identity_id = $1
@@ -657,7 +655,7 @@ impl<C: PgConnection> PasswordResetRepo for PgStore<C> {
 
 /// A reset's update, inside the batch's transaction (resets change only in batches).
 pub(crate) async fn update_password_reset(
-    client: &impl GenericClient,
+    client: &impl Queries,
     s: &PasswordResetSnapshot,
 ) -> Result<(), RepoError> {
     let row = client
@@ -680,7 +678,7 @@ pub(crate) async fn update_password_reset(
 
 /// `StagePasswordResets::use_up_password_resets` inside the batch's transaction.
 pub(crate) async fn use_up_password_resets(
-    client: &impl GenericClient,
+    client: &impl Queries,
     identity: IdentityId,
     at: Timestamp,
 ) -> Result<(), RepoError> {
@@ -703,7 +701,7 @@ pub(crate) async fn use_up_password_resets(
 
 /// `PasswordResetRepo::insert` inside the caller's transaction (also used by `PgBatch`).
 pub(crate) async fn insert_password_reset(
-    client: &impl GenericClient,
+    client: &impl Queries,
     s: &PasswordResetSnapshot,
 ) -> Result<(), RepoError> {
     client

@@ -80,6 +80,11 @@ pub struct Database {
     /// The most connections open at once. Unset: the pool's default, 4 per CPU.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_connections: Option<u32>,
+    /// Prepare each query once per connection and reuse it, instead of having Postgres
+    /// plan it on every call (most of its work for simple reads). Turn it off behind a
+    /// pooler in transaction mode that doesn't keep prepared statements (PgBouncer
+    /// before 1.21, or without `max_prepared_statements`).
+    pub statement_cache: bool,
 }
 
 impl Default for Database {
@@ -87,6 +92,7 @@ impl Default for Database {
         Self {
             pool_timeout: Dur(Duration::from_secs(5)),
             max_connections: None,
+            statement_cache: true,
         }
     }
 }
@@ -257,6 +263,11 @@ impl Default for Webhooks {
 pub struct Jobs {
     /// `false`: this instance runs no jobs, whatever the jobs below say.
     pub enabled: bool,
+    /// The longest a job with nothing to do waits before looking again. An idle job
+    /// doubles its wait from its `interval` up to this, and drops back as soon as it
+    /// finds work; writes wake the dispatcher (and it search) at once, so changes don't
+    /// wait for it. Long enough, a database that bills while busy can rest.
+    pub idle_interval: Dur,
     pub dispatch: DispatchJob,
     pub prune: PruneJob,
     pub media_sweep: Job,
@@ -268,6 +279,7 @@ impl Default for Jobs {
         let hour = Dur(Duration::from_secs(3600));
         Self {
             enabled: true,
+            idle_interval: Dur(Duration::from_secs(60)),
             dispatch: DispatchJob::default(),
             prune: PruneJob::default(),
             search_sync: SearchSyncJob::default(),

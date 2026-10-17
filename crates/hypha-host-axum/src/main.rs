@@ -339,6 +339,7 @@ async fn serve<S: Storage>(
         background: Default::default(),
         limiter: MemoryRateLimiter::new(&config.rate_limits),
         publishable_keys: Default::default(),
+        wake: Default::default(),
         store: store.id(),
         store_name: store.name().to_string(),
         media,
@@ -365,6 +366,10 @@ async fn serve<S: Storage>(
     }
     tracing::warn!("emails (invites, password resets) are logged, not sent: development only");
     let app = router
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state.wake.dispatch),
+            jobs::wake_after_writes,
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(Arc::clone(&state));
 

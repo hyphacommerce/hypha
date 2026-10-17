@@ -5,12 +5,13 @@ use hypha_core::{
     ActingAs, Actor, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, OutboxRepo,
     Outcome, Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{actor_from_db, actor_to_db, col, micros, ts, version_from_db, version_to_db},
     error::{corrupt, repo_error},
+    store::Queries,
     store::{PgConnection, PgStore, in_transaction},
 };
 
@@ -18,7 +19,7 @@ use crate::{
 /// `actor`. `subject_version` is the version the write gives the aggregate the events are
 /// about (`None` for events without one). ID and time come from the database.
 pub(crate) async fn insert_events(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     events: &[PendingEvent],
     subject_version: Option<Version>,
     actor: Actor,
@@ -127,7 +128,7 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
     async fn events_after(&self, after: i64, limit: u32) -> Result<Vec<StoredEvent>, RepoError> {
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT {} FROM outbox_events WHERE seq > $1 ORDER BY seq LIMIT $2",
@@ -381,7 +382,7 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
         // `event_delivery_destination` (event_seq, destination) is unique, so a
         // destination's deliveries are ordered by `event_seq` without ties.
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT {} FROM event_deliveries d

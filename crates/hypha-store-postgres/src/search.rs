@@ -29,7 +29,7 @@ use hypha_search_index::{
     SearchSettingsRepo, SearchSettingsSnapshot, Sort, Target, reference,
 };
 use tokio_postgres::{
-    GenericClient, Row,
+    Row,
     types::{ToSql, Type},
 };
 use uuid::Uuid;
@@ -41,6 +41,7 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -201,7 +202,7 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
 
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError> {
         let mut conn = self.conn().await;
-        let results = consistent_read!(conn.client(), |tx| {
+        let results = consistent_read!(conn, |tx| {
             tx.batch_execute(&format!("SET LOCAL work_mem = '{SEARCH_WORK_MEM}'"))
                 .await
                 .map_err(repo_error)?;
@@ -218,7 +219,7 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
         let mut conn = self.conn().await;
         let rows = match channel {
             None => {
-                conn.client()
+                conn.db()
                     .query_typed(
                         "SELECT key FROM search_option_counts WHERE market_id = $1
                          ORDER BY documents DESC, key COLLATE \"C\"",
@@ -227,7 +228,7 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
                     .await
             }
             Some(channel) => {
-                conn.client()
+                conn.db()
                     .query_typed(
                         "SELECT key FROM search_channel_option_counts
                          WHERE market_id = $1 AND channel_id = $2
@@ -256,7 +257,7 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
     async fn count(&self) -> Result<u64, IndexError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_one("SELECT count(*) AS n FROM search_documents", &[])
             .await
             .map_err(repo_error)?;
@@ -267,7 +268,7 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
 
 /// One `INSERT` for `documents` (at most `INSERT_ROWS`).
 async fn insert_documents(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     documents: &[SearchDocument],
 ) -> Result<(), RepoError> {
     if documents.is_empty() {
@@ -494,7 +495,7 @@ fn product_level(key: &FacetKey) -> bool {
     !matches!(key, FacetKey::Option(_))
 }
 
-async fn run_search(tx: &impl GenericClient, q: &SearchQuery) -> Result<SearchResults, RepoError> {
+async fn run_search(tx: &impl Queries, q: &SearchQuery) -> Result<SearchResults, RepoError> {
     let sort = reference::effective_sort(q);
     let group = group_expr(q.group);
     let mut params = Params::default();
@@ -771,7 +772,7 @@ impl<C: PgConnection> SearchQueue for PgStore<C> {
             return Ok(());
         }
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(
                 "INSERT INTO search_queue (target, generation)
                  SELECT t, 1 FROM unnest($1::text[]) WITH ORDINALITY AS m (t, n) ORDER BY n
@@ -791,7 +792,7 @@ impl<C: PgConnection> SearchQueue for PgStore<C> {
     ) -> Result<Vec<Mark>, RepoError> {
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "UPDATE search_queue q SET leased_until = {}
@@ -877,7 +878,7 @@ impl<C: PgConnection> SearchQueue for PgStore<C> {
     async fn queued(&self) -> Result<u64, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_one("SELECT count(*) AS n FROM search_queue", &[])
             .await
             .map_err(repo_error)?;
@@ -891,7 +892,7 @@ impl<C: PgConnection> SearchSettingsRepo for PgStore<C> {
     async fn get(&self) -> Result<Option<SearchSettings>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!(
                     "SELECT version, split_by, facet_keys, facet_labels, {}

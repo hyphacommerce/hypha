@@ -6,7 +6,7 @@ use hypha_users::{
     Invite, InviteRepo, InviteSnapshot, Role, RoleRepo, RoleScopes, RoleSnapshot, User, UserRepo,
     UserSnapshot, UserStatus,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 
 use crate::{
     columns::{
@@ -14,6 +14,7 @@ use crate::{
         ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
+    store::Queries,
     store::{PgConnection, PgStore, in_transaction},
 };
 
@@ -45,7 +46,7 @@ fn user_from_row(row: &Row) -> Result<User, RepoError> {
 impl<C: PgConnection> UserRepo for PgStore<C> {
     async fn get(&self, id: UserId) -> Result<Option<User>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed_opt(
                 &format!("SELECT {} FROM users WHERE id = $1", user_columns()),
                 &[(&id.as_uuid(), Type::UUID)],
@@ -58,7 +59,7 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
 
     async fn get_by_email(&self, email: &Email) -> Result<Option<User>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed_opt(
                 &format!("SELECT {} FROM users WHERE email = $1", user_columns()),
                 &[(&email.as_str(), Type::TEXT)],
@@ -71,7 +72,7 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
 
     async fn list_all(&self) -> Result<Vec<User>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(
                 &format!("SELECT {} FROM users ORDER BY id", user_columns()),
                 &[],
@@ -86,7 +87,7 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
     async fn any(&self) -> Result<bool, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_one("SELECT EXISTS (SELECT 1 FROM users) AS found", &[])
             .await
             .map_err(repo_error)?;
@@ -96,7 +97,7 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
     async fn count_active_with_role(&self, role: RoleId) -> Result<usize, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_one(
                 "SELECT count(*) AS count FROM users WHERE role_id = $1 AND status = 'active'",
                 &[(&role.as_uuid(), Type::UUID)],
@@ -123,7 +124,7 @@ impl<C: PgConnection> UserRepo for PgStore<C> {
 }
 
 pub(crate) async fn update_user(
-    client: &impl GenericClient,
+    client: &impl Queries,
     s: &UserSnapshot,
 ) -> Result<Version, RepoError> {
     let row = client
@@ -148,10 +149,7 @@ pub(crate) async fn update_user(
     version_from_db(col(&row, "version")?)
 }
 
-pub(crate) async fn insert_user(
-    client: &impl GenericClient,
-    s: &UserSnapshot,
-) -> Result<(), RepoError> {
+pub(crate) async fn insert_user(client: &impl Queries, s: &UserSnapshot) -> Result<(), RepoError> {
     client
         .query_typed(
             &format!(
@@ -202,7 +200,7 @@ fn role_scopes_to_db(scopes: &RoleScopes) -> (bool, Vec<&'static str>) {
 }
 
 async fn select_role(
-    client: &impl GenericClient,
+    client: &impl Queries,
     filter: &str,
     params: &[(&(dyn tokio_postgres::types::ToSql + Sync), Type)],
 ) -> Result<Option<Role>, RepoError> {
@@ -220,14 +218,14 @@ async fn select_role(
 impl<C: PgConnection> RoleRepo for PgStore<C> {
     async fn get(&self, id: RoleId) -> Result<Option<Role>, RepoError> {
         let mut conn = self.conn().await;
-        select_role(conn.client(), "id = $1", &[(&id.as_uuid(), Type::UUID)]).await
+        select_role(&conn.db(), "id = $1", &[(&id.as_uuid(), Type::UUID)]).await
     }
 
     async fn get_by_name(&self, name: &str) -> Result<Option<Role>, RepoError> {
         let mut conn = self.conn().await;
         let name = name.trim();
         select_role(
-            conn.client(),
+            &conn.db(),
             "lower(name) = lower($1)",
             &[(&name, Type::TEXT)],
         )
@@ -236,12 +234,12 @@ impl<C: PgConnection> RoleRepo for PgStore<C> {
 
     async fn owner(&self) -> Result<Option<Role>, RepoError> {
         let mut conn = self.conn().await;
-        select_role(conn.client(), "is_owner", &[]).await
+        select_role(&conn.db(), "is_owner", &[]).await
     }
 
     async fn list_all(&self) -> Result<Vec<Role>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(
                 &format!("SELECT {ROLE_COLUMNS} FROM roles ORDER BY id"),
                 &[],
@@ -269,7 +267,7 @@ impl<C: PgConnection> RoleRepo for PgStore<C> {
 }
 
 pub(crate) async fn update_role(
-    client: &impl GenericClient,
+    client: &impl Queries,
     s: &RoleSnapshot,
 ) -> Result<Version, RepoError> {
     let (is_owner, scopes) = role_scopes_to_db(&s.scopes);
@@ -293,10 +291,7 @@ pub(crate) async fn update_role(
     version_from_db(col(&row, "version")?)
 }
 
-pub(crate) async fn insert_role(
-    client: &impl GenericClient,
-    s: &RoleSnapshot,
-) -> Result<(), RepoError> {
+pub(crate) async fn insert_role(client: &impl Queries, s: &RoleSnapshot) -> Result<(), RepoError> {
     let (is_owner, scopes) = role_scopes_to_db(&s.scopes);
     client
         .query_typed(
@@ -342,7 +337,7 @@ fn invite_from_row(row: &Row) -> Result<Invite, RepoError> {
 }
 
 async fn select_invite(
-    client: &impl GenericClient,
+    client: &impl Queries,
     filter: &str,
     value: &(dyn tokio_postgres::types::ToSql + Sync),
     ty: Type,
@@ -361,18 +356,18 @@ async fn select_invite(
 impl<C: PgConnection> InviteRepo for PgStore<C> {
     async fn get_by_email(&self, email: &Email) -> Result<Option<Invite>, RepoError> {
         let mut conn = self.conn().await;
-        select_invite(conn.client(), "email = $1", &email.as_str(), Type::TEXT).await
+        select_invite(&conn.db(), "email = $1", &email.as_str(), Type::TEXT).await
     }
 
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<Invite>, RepoError> {
         let mut conn = self.conn().await;
         let bytes = hash.as_bytes().as_slice();
-        select_invite(conn.client(), "token_hash = $1", &bytes, Type::BYTEA).await
+        select_invite(&conn.db(), "token_hash = $1", &bytes, Type::BYTEA).await
     }
 
     async fn pending(&self) -> Result<Vec<Invite>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(
                 &format!(
                     "SELECT {} FROM invites WHERE accepted_at IS NULL ORDER BY id",
@@ -403,10 +398,7 @@ impl<C: PgConnection> InviteRepo for PgStore<C> {
 }
 
 /// `InviteRepo::insert` inside the caller's transaction.
-pub(crate) async fn insert_invite(
-    tx: &impl GenericClient,
-    s: &InviteSnapshot,
-) -> Result<(), RepoError> {
+pub(crate) async fn insert_invite(tx: &impl Queries, s: &InviteSnapshot) -> Result<(), RepoError> {
     let (by_kind, by_id) = actor_to_db(s.invited_by);
     tx.query_typed(
         &format!(
@@ -435,7 +427,7 @@ pub(crate) async fn insert_invite(
 }
 
 pub(crate) async fn update_invite(
-    client: &impl GenericClient,
+    client: &impl Queries,
     s: &InviteSnapshot,
 ) -> Result<Version, RepoError> {
     let (by_kind, by_id) = actor_to_db(s.invited_by);

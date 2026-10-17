@@ -24,7 +24,8 @@
     "database": {
       "$ref": "#/$defs/Database",
       "default": {
-        "pool_timeout": "5s"
+        "pool_timeout": "5s",
+        "statement_cache": true
       }
     },
     "jobs": {
@@ -37,6 +38,7 @@
           "lease": "2m"
         },
         "enabled": true,
+        "idle_interval": "1m",
         "media_sweep": {
           "enabled": true,
           "interval": "1h"
@@ -215,6 +217,11 @@
           "description": "How long a request waits for a pooled connection (or for a new one to open, or an\nold one to be checked) before it fails.",
           "$ref": "#/$defs/Duration",
           "default": "5s"
+        },
+        "statement_cache": {
+          "description": "Prepare each query once per connection and reuse it, instead of having Postgres\nplan it on every call (most of its work for simple reads). Turn it off behind a\npooler in transaction mode that doesn't keep prepared statements (PgBouncer\nbefore 1.21, or without `max_prepared_statements`).",
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false
@@ -289,6 +296,11 @@
           "description": "`false`: this instance runs no jobs, whatever the jobs below say.",
           "type": "boolean",
           "default": true
+        },
+        "idle_interval": {
+          "description": "The longest a job with nothing to do waits before looking again. An idle job\ndoubles its wait from its `interval` up to this, and drops back as soon as it\nfinds work; writes wake the dispatcher (and it search) at once, so changes don't\nwait for it. Long enough, a database that bills while busy can rest.",
+          "$ref": "#/$defs/Duration",
+          "default": "1m"
         },
         "media_sweep": {
           "$ref": "#/$defs/Job",

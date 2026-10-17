@@ -10,7 +10,7 @@ use hypha_markets::{
     PriceList, PriceListRepo, PriceListSnapshot,
 };
 use tokio_postgres::{
-    GenericClient, Row,
+    Row,
     types::{ToSql, Type},
 };
 use uuid::Uuid;
@@ -22,6 +22,7 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -30,19 +31,19 @@ use crate::{
 impl<C: PgConnection> MarketRepo for PgStore<C> {
     async fn get(&self, id: MarketId) -> Result<Option<Market>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load_markets(tx, Markets::Id(id.as_uuid())).await?.pop())
         })
     }
 
     async fn list_all(&self) -> Result<Vec<Market>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| load_markets(tx, Markets::All).await)
+        consistent_read!(conn, |tx| load_markets(tx, Markets::All).await)
     }
 
     async fn get_by_country(&self, country: CountryCode) -> Result<Option<Market>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load_markets(tx, Markets::Country(country.as_str()))
                 .await?
                 .pop())
@@ -79,10 +80,7 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
 }
 
 /// `MarketRepo::insert` inside the caller's transaction: the row, then its countries.
-pub(crate) async fn insert_market(
-    tx: &impl GenericClient,
-    s: &MarketSnapshot,
-) -> Result<(), RepoError> {
+pub(crate) async fn insert_market(tx: &impl Queries, s: &MarketSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO markets (id, version, name, currency, prices_include_tax)
          VALUES ($1, 1, $2, $3, $4)",
@@ -103,7 +101,7 @@ pub(crate) async fn insert_market(
 /// `MarketRepo::update` inside the caller's transaction; the new version. The version
 /// check comes first; the countries are only replaced if it passes.
 pub(crate) async fn update_market(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &MarketSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -134,7 +132,7 @@ pub(crate) async fn update_market(
     Ok(written)
 }
 
-async fn write_countries(tx: &impl GenericClient, s: &MarketSnapshot) -> Result<(), RepoError> {
+async fn write_countries(tx: &impl Queries, s: &MarketSnapshot) -> Result<(), RepoError> {
     let countries: Vec<&str> = s.countries.iter().map(|c| c.as_str()).collect();
     // One statement for all countries; `WITH ORDINALITY` keeps their order.
     tx.query_typed(
@@ -156,10 +154,7 @@ enum Markets<'a> {
     Country(&'a str),
 }
 
-async fn load_markets(
-    client: &impl GenericClient,
-    which: Markets<'_>,
-) -> Result<Vec<Market>, RepoError> {
+async fn load_markets(client: &impl Queries, which: Markets<'_>) -> Result<Vec<Market>, RepoError> {
     let (filter, param): (&str, [(&(dyn ToSql + Sync), Type); 1]) = match &which {
         Markets::All => ("$1::uuid IS NULL", [(&None::<Uuid>, Type::UUID)]),
         Markets::Id(id) => ("m.id = $1", [(id, Type::UUID)]),
@@ -246,7 +241,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
     async fn get(&self, id: CatalogId) -> Result<Option<Catalog>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!("SELECT {} FROM catalogs WHERE id = $1", catalog_columns()),
                 &[(&id.as_uuid(), Type::UUID)],
@@ -260,7 +255,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
         let (kind, context_id) = context_to_db(context);
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!(
                     "SELECT {} FROM catalogs WHERE context_kind = $1 AND context_id = $2",
@@ -276,7 +271,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
     async fn list_all(&self) -> Result<Vec<Catalog>, RepoError> {
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!("SELECT {} FROM catalogs ORDER BY id", catalog_columns()),
                 &[],
@@ -295,7 +290,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT product_id FROM catalog_products
                  WHERE catalog_id = $1 AND ($2::uuid IS NULL OR product_id < $2)
@@ -371,7 +366,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
         let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT product_id FROM catalog_products WHERE catalog_id = $1 AND product_id = ANY($2)",
                 &[(&catalog.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
@@ -386,7 +381,7 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
 
 /// `CatalogRepo::insert` inside the caller's transaction.
 pub(crate) async fn insert_catalog(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &CatalogSnapshot,
 ) -> Result<(), RepoError> {
     let (kind, context_id) = context_to_db(s.context);
@@ -410,7 +405,7 @@ pub(crate) async fn insert_catalog(
 /// `CatalogRepo::update` inside the caller's transaction; the new version. Membership
 /// rows are untouched.
 pub(crate) async fn update_catalog(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &CatalogSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -433,7 +428,7 @@ pub(crate) async fn update_catalog(
 
 /// `CatalogRepo::add_products` inside the caller's transaction.
 pub(crate) async fn add_catalog_products(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     catalog: CatalogId,
     products: &[ProductId],
 ) -> Result<(), RepoError> {
@@ -451,7 +446,7 @@ pub(crate) async fn add_catalog_products(
 
 /// `CatalogRepo::remove_products` inside the caller's transaction.
 pub(crate) async fn remove_catalog_products(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     catalog: CatalogId,
     products: &[ProductId],
 ) -> Result<(), RepoError> {
@@ -471,7 +466,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!(
                     "SELECT id, version, currency, adjustment, {} FROM price_lists WHERE id = $1",
@@ -487,7 +482,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
     async fn list_all(&self) -> Result<Vec<PriceList>, RepoError> {
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT id, version, currency, adjustment, {} FROM price_lists ORDER BY id",
@@ -509,7 +504,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT variant_id, amount, currency FROM price_list_prices
                  WHERE price_list_id = $1 AND ($2::uuid IS NULL OR variant_id < $2)
@@ -575,7 +570,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
 
     async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(
                 "SELECT DISTINCT price_list_id FROM price_list_prices WHERE variant_id = $1
                  ORDER BY price_list_id",
@@ -599,7 +594,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT variant_id, amount, currency FROM price_list_prices
                  WHERE price_list_id = $1 AND variant_id = ANY($2)",
@@ -613,7 +608,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
 
 /// `PriceListRepo::insert` inside the caller's transaction.
 pub(crate) async fn insert_price_list(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &PriceListSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -641,7 +636,7 @@ pub(crate) async fn insert_price_list(
 
 /// `PriceListRepo::update` inside the caller's transaction; the new version.
 pub(crate) async fn update_price_list(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &PriceListSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -673,7 +668,7 @@ pub(crate) async fn update_price_list(
 
 /// `PriceListRepo::set_fixed_prices` inside the caller's transaction.
 pub(crate) async fn set_fixed_prices(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     list: PriceListId,
     prices: &[(VariantId, Price)],
 ) -> Result<(), RepoError> {
@@ -702,7 +697,7 @@ pub(crate) async fn set_fixed_prices(
 
 /// `PriceListRepo::remove_fixed_prices` inside the caller's transaction.
 pub(crate) async fn remove_fixed_prices(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     list: PriceListId,
     variants: &[VariantId],
 ) -> Result<(), RepoError> {

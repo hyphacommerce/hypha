@@ -5,10 +5,7 @@ use hypha_core::{
     stamp_update,
 };
 use hypha_shipping::ProviderKey;
-use tokio_postgres::{
-    GenericClient,
-    types::{ToSql, Type},
-};
+use tokio_postgres::types::{ToSql, Type};
 use uuid::Uuid;
 
 use crate::{
@@ -18,13 +15,14 @@ use crate::{
         version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> CartRepo for PgStore<C> {
     async fn get(&self, id: CartId) -> Result<Option<Cart>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| load_cart(tx, id).await)
+        consistent_read!(conn, |tx| load_cart(tx, id).await)
     }
 
     async fn insert(&self, cart: &mut Cart) -> Result<(), RepoError> {
@@ -45,10 +43,7 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
 }
 
 /// `CartRepo::insert` inside the caller's transaction (also used by `PgBatch`).
-pub(crate) async fn insert_cart(
-    tx: &impl GenericClient,
-    s: &CartSnapshot,
-) -> Result<(), RepoError> {
+pub(crate) async fn insert_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO carts (id, version, market_id, country, email, customer_id, order_id,
              channel_id)
@@ -72,7 +67,7 @@ pub(crate) async fn insert_cart(
 }
 
 /// Sets the shipping columns to the snapshot's address and choice (NULL for none).
-async fn write_shipping(tx: &impl GenericClient, s: &CartSnapshot) -> Result<(), RepoError> {
+async fn write_shipping(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoError> {
     let choice = s.shipping.as_ref();
     let quote = choice.and_then(|c| c.quote.as_ref());
     let id = s.id.as_uuid();
@@ -119,10 +114,7 @@ async fn write_shipping(tx: &impl GenericClient, s: &CartSnapshot) -> Result<(),
 
 /// `CartRepo::update` inside the caller's transaction (also used by `PgBatch`). Returns
 /// the new version; on `StaleVersion` the caller drops the transaction, rolling it back.
-pub(crate) async fn update_cart(
-    tx: &impl GenericClient,
-    s: &CartSnapshot,
-) -> Result<Version, RepoError> {
+pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<Version, RepoError> {
     // The version check comes first; the lines are only replaced if it passes.
     let bumped = tx
         .query_typed_opt(
@@ -160,7 +152,7 @@ pub(crate) async fn update_cart(
 
 /// All lines in one statement; `WITH ORDINALITY` keeps their order.
 async fn write_lines(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     cart: CartId,
     lines: &[CartLineSnapshot],
 ) -> Result<(), RepoError> {
@@ -184,7 +176,7 @@ async fn write_lines(
 }
 
 /// A cart and its lines, in 2 queries (run inside `consistent_read`).
-async fn load_cart(client: &impl GenericClient, id: CartId) -> Result<Option<Cart>, RepoError> {
+async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, RepoError> {
     let Some(row) = client
         .query_typed_opt(
             &format!(

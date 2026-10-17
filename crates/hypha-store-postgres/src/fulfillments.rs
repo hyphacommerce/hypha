@@ -7,7 +7,7 @@ use hypha_core::{
 use hypha_fulfillment::{
     Fulfillment, FulfillmentLine, FulfillmentRepo, FulfillmentSnapshot, FulfillmentState, Tracking,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
@@ -17,20 +17,21 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> FulfillmentRepo for PgStore<C> {
     async fn get(&self, id: FulfillmentId) -> Result<Option<Fulfillment>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load(tx, "f.id = $1", id.as_uuid()).await?.pop())
         })
     }
 
     async fn list_for_order(&self, order: OrderId) -> Result<Vec<Fulfillment>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             load(tx, "f.order_id = $1", order.as_uuid()).await
         })
     }
@@ -74,7 +75,7 @@ fn cancelled_at(s: &FulfillmentSnapshot) -> Option<i64> {
 /// `FulfillmentRepo::insert` inside the caller's transaction (also used by `PgBatch`):
 /// the row, its lines and its tracking.
 pub(crate) async fn insert_fulfillment(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &FulfillmentSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -129,7 +130,7 @@ pub(crate) async fn insert_fulfillment(
 /// `FulfillmentRepo::update` inside the caller's transaction (also used by `PgBatch`);
 /// the new version. Lines never change after insert; tracking is replaced.
 pub(crate) async fn update_fulfillment(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &FulfillmentSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
@@ -170,10 +171,7 @@ pub(crate) async fn update_fulfillment(
     version_from_db(col(&row, "version")?)
 }
 
-async fn insert_tracking(
-    tx: &impl GenericClient,
-    s: &FulfillmentSnapshot,
-) -> Result<(), RepoError> {
+async fn insert_tracking(tx: &impl Queries, s: &FulfillmentSnapshot) -> Result<(), RepoError> {
     if s.tracking.is_empty() {
         return Ok(());
     }
@@ -201,7 +199,7 @@ async fn insert_tracking(
 /// newest first, with their lines and tracking, in 3 queries (run inside
 /// `consistent_read`).
 async fn load(
-    client: &impl GenericClient,
+    client: &impl Queries,
     filter: &str,
     param: Uuid,
 ) -> Result<Vec<Fulfillment>, RepoError> {

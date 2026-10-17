@@ -38,6 +38,8 @@ utoipa = "6"
 pastey = "0.2"
 ipnet = "2"
 deadpool-postgres = "0.14.2"
+# Its pool, under our manager (`state.rs`): each connection keeps its prepared statements.
+deadpool = { version = "0.13.1", default-features = false, features = ["managed", "rt_tokio_1"] }
 tokio-postgres = "0.7.18"
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }

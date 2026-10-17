@@ -7,13 +7,14 @@ use hypha_core::{
     AssetId, CategoryId, Page, PageRequest, ProductId, Recorded, RepoError, Version, Versioned,
     stamp_insert, stamp_update,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{col, stamp_columns, stamps_from_row, version_from_db, version_to_db, write_stamps},
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, in_transaction},
 };
 
@@ -53,7 +54,7 @@ fn position_to_db(s: &CategorySnapshot) -> Result<i32, RepoError> {
 
 /// `CategoryRepo::insert` inside the caller's transaction (also a batch's).
 pub(crate) async fn insert_category(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &CategorySnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -86,7 +87,7 @@ pub(crate) async fn insert_category(
 
 /// `CategoryRepo::update` inside the caller's transaction; the new version.
 pub(crate) async fn update_category(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &CategorySnapshot,
 ) -> Result<Version, RepoError> {
     let row = tx
@@ -125,7 +126,7 @@ pub(crate) async fn update_category(
 /// Deletes a category (its membership cascades). A child left behind fails the parent's
 /// foreign key when the transaction commits.
 pub(crate) async fn delete_category(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     category: CategoryId,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -139,7 +140,7 @@ pub(crate) async fn delete_category(
 
 /// Adds membership; a missing category fails on its foreign key.
 pub(crate) async fn add_category_products(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     category: CategoryId,
     products: &[ProductId],
 ) -> Result<(), RepoError> {
@@ -158,7 +159,7 @@ pub(crate) async fn add_category_products(
 }
 
 pub(crate) async fn remove_category_products(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     category: CategoryId,
     products: &[ProductId],
 ) -> Result<(), RepoError> {
@@ -178,7 +179,7 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
     async fn get(&self, id: CategoryId) -> Result<Option<Category>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!("SELECT {} FROM categories WHERE id = $1", columns()),
                 &[(&id.as_uuid(), Type::UUID)],
@@ -191,7 +192,7 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
     async fn get_by_handle(&self, handle: &str) -> Result<Option<Category>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!("SELECT {} FROM categories WHERE handle = $1", columns()),
                 &[(&handle, Type::TEXT)],
@@ -203,7 +204,7 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
 
     async fn list_all(&self) -> Result<Vec<Category>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(&format!("SELECT {} FROM categories", columns()), &[])
             .await
             .map_err(repo_error)?
@@ -246,7 +247,7 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
         products: &[ProductId],
     ) -> Result<(), RepoError> {
         let mut conn = self.conn().await;
-        add_category_products(conn.client(), category, products).await
+        add_category_products(&conn.db(), category, products).await
     }
 
     async fn product_page(
@@ -258,7 +259,7 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let ids = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT product_id FROM category_products
                  WHERE category_id = $1 AND ($2::uuid IS NULL OR product_id < $2)
@@ -283,7 +284,7 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
         }
         let ids: Vec<Uuid> = categories.iter().map(|c| c.as_uuid()).collect();
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(
                 "SELECT DISTINCT product_id FROM category_products WHERE category_id = ANY($1)
                  ORDER BY product_id",
@@ -305,7 +306,7 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
         }
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT product_id, category_id FROM category_products
                  WHERE product_id = ANY($1) ORDER BY product_id, category_id",

@@ -3,7 +3,7 @@ use hypha_core::{
 };
 use hypha_stores::{Store, StoreRepo, StoreSnapshot};
 use tokio_postgres::{
-    GenericClient, Row,
+    Row,
     types::{ToSql, Type},
 };
 
@@ -14,6 +14,7 @@ use crate::{
         version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
+    store::Queries,
     store::{PgConnection, PgStore, in_transaction},
 };
 
@@ -60,7 +61,7 @@ fn store_from_row(row: &Row) -> Result<Store, RepoError> {
 }
 
 /// Sets every detail column to `s`'s (inside the caller's transaction).
-async fn write_details(tx: &impl GenericClient, s: &StoreSnapshot) -> Result<(), RepoError> {
+async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoError> {
     let id = s.id.as_uuid();
     let address = address_values(s.legal_address.as_ref());
     let email = s.contact_email.as_ref().map(|e| e.as_str());
@@ -105,7 +106,7 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
     async fn get(&self, id: StoreId) -> Result<Option<Store>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!("SELECT {} FROM stores WHERE id = $1", store_columns()),
                 &[(&id.as_uuid(), Type::UUID)],
@@ -117,7 +118,7 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
 
     async fn list_all(&self) -> Result<Vec<Store>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(
                 &format!("SELECT {} FROM stores ORDER BY id", store_columns()),
                 &[],
@@ -147,10 +148,7 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
 }
 
 /// `StoreRepo::insert` inside the caller's transaction.
-pub(crate) async fn insert_store(
-    tx: &impl GenericClient,
-    s: &StoreSnapshot,
-) -> Result<(), RepoError> {
+pub(crate) async fn insert_store(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO stores (id, version, name) VALUES ($1, 1, $2)",
         &[(&s.id.as_uuid(), Type::UUID), (&s.name, Type::TEXT)],
@@ -164,7 +162,7 @@ pub(crate) async fn insert_store(
 
 /// `StoreRepo::update` inside the caller's transaction; the new version.
 pub(crate) async fn update_store(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &StoreSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx

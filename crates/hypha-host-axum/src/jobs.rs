@@ -3,17 +3,34 @@
 //! work and says whether there's more; the runner repeats it while there is, then waits
 //! its interval (`[jobs]`, design note 0017). Stopping waits for the steps in flight to finish (`Jobs::stop`).
 //!
+//! An idle job looks less and less often (design note 0025, §6): each step that finds
+//! nothing doubles the wait, up to `jobs.idle_interval`, and finding work brings it back
+//! to the interval. Work doesn't wait for that: a successful write request wakes the
+//! dispatcher (`wake_after_writes`), and a dispatch step that did something wakes
+//! search sync, whose marks the handlers it ran may have left. So a quiet store costs
+//! the database a query a minute, not several a second.
+//!
 //! The steps are the domain crates' plain functions (`hypha_dispatch::fan_out`, …), so
 //! a Workers host calls the same ones from a Cron trigger instead of this runner.
 
 use std::{future::Future, sync::Arc, time::Duration};
 
-use hypha_core::Outcome;
+use axum::{
+    extract::{Request, State},
+    http::Method,
+    middleware::Next,
+    response::Response,
+};
+
+use hypha_core::{Outcome, Progress};
 use hypha_dispatch::{
     Prepared, fan_out, handle, has_time, lease_due, prepare, prune_events, prune_idempotency_keys,
     prune_sessions, record, send,
 };
-use tokio::{sync::watch, task::JoinHandle};
+use tokio::{
+    sync::{Notify, watch},
+    task::JoinHandle,
+};
 
 use crate::{
     handlers::HANDLERS,
@@ -42,8 +59,50 @@ impl Jobs {
     }
 }
 
-/// A step's result: whether there's more to do right away.
-type Step = Result<bool, String>;
+/// What a step did: whether there's more to do right away, and whether it found
+/// anything at all (an idle step makes the job wait longer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Ran {
+    pub(crate) more: bool,
+    pub(crate) idle: bool,
+}
+
+impl Ran {
+    fn of(progress: Progress) -> Self {
+        Self {
+            more: progress.more,
+            idle: progress.done == 0,
+        }
+    }
+}
+
+type Step = Result<Ran, String>;
+
+/// What wakes the jobs before their timers.
+#[derive(Default)]
+pub struct Wake {
+    pub dispatch: Arc<Notify>,
+    pub search_sync: Arc<Notify>,
+}
+
+/// A layer: after a successful request that may have written (anything but GET, HEAD
+/// and OPTIONS), wakes the dispatcher to deliver the events it recorded. A wake while
+/// the dispatcher works isn't lost: `Notify` keeps it for its next wait.
+pub async fn wake_after_writes(
+    State(dispatch): State<Arc<Notify>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let writes = !matches!(
+        *request.method(),
+        Method::GET | Method::HEAD | Method::OPTIONS
+    );
+    let response = next.run(request).await;
+    if writes && response.status().is_success() {
+        dispatch.notify_one();
+    }
+    response
+}
 
 /// Starts the jobs for a Postgres host.
 pub fn start(state: SharedState<PgStorage>) -> Jobs {
@@ -51,14 +110,20 @@ pub fn start(state: SharedState<PgStorage>) -> Jobs {
     let mut tasks = Vec::new();
 
     let jobs = state.config.jobs;
+    let idle = jobs.idle_interval;
 
-    // Delivering events: fan out new ones and run what's due (every 2 seconds by default).
+    // Delivering events: fan out new ones and run what's due (every 2 seconds by default,
+    // less often while there's nothing, and at once after a write).
     if jobs.dispatch.enabled {
         let s = Arc::clone(&state);
         tasks.push(every(
             &stopped,
-            "dispatch",
-            jobs.dispatch.interval,
+            Timer {
+                name: "dispatch",
+                interval: jobs.dispatch.interval,
+                idle,
+                wake: Some(Arc::clone(&state.wake.dispatch)),
+            },
             move || {
                 let s = Arc::clone(&s);
                 async move { dispatch(&s).await }
@@ -69,19 +134,28 @@ pub fn start(state: SharedState<PgStorage>) -> Jobs {
     // Old events, idempotency keys and ended sessions (hourly by default).
     if jobs.prune.enabled {
         let s = Arc::clone(&state);
-        tasks.push(every(&stopped, "prune", jobs.prune.interval, move || {
-            let s = Arc::clone(&s);
-            async move { prune(&s).await }
-        }));
+        tasks.push(every(
+            &stopped,
+            Timer::fixed("prune", jobs.prune.interval),
+            move || {
+                let s = Arc::clone(&s);
+                async move { prune(&s).await }
+            },
+        ));
     }
 
-    // Rebuilding the search documents events marked (every 2 seconds by default).
+    // Rebuilding the search documents events marked (every 2 seconds by default, less
+    // often while there's nothing, and at once after the dispatcher ran handlers).
     if jobs.search_sync.enabled {
         let s = Arc::clone(&state);
         tasks.push(every(
             &stopped,
-            "search_sync",
-            jobs.search_sync.interval,
+            Timer {
+                name: "search_sync",
+                interval: jobs.search_sync.interval,
+                idle,
+                wake: Some(Arc::clone(&state.wake.search_sync)),
+            },
             move || {
                 let s = Arc::clone(&s);
                 async move { search_sync(&s).await }
@@ -93,8 +167,7 @@ pub fn start(state: SharedState<PgStorage>) -> Jobs {
         let s = Arc::clone(&state);
         tasks.push(every(
             &stopped,
-            "media_sweep",
-            jobs.media_sweep.interval,
+            Timer::fixed("media_sweep", jobs.media_sweep.interval),
             move || {
                 let s = Arc::clone(&s);
                 async move { media_sweep(&s).await }
@@ -107,13 +180,15 @@ pub fn start(state: SharedState<PgStorage>) -> Jobs {
     let s = Arc::clone(&state);
     tasks.push(every(
         &stopped,
-        "rate_limits",
-        Duration::from_secs(60),
+        Timer::fixed("rate_limits", Duration::from_secs(60)),
         move || {
             let s = Arc::clone(&s);
             async move {
                 s.limiter.forget_idle();
-                Ok(false)
+                Ok(Ran {
+                    more: false,
+                    idle: false,
+                })
             }
         },
     ));
@@ -121,35 +196,76 @@ pub fn start(state: SharedState<PgStorage>) -> Jobs {
     Jobs { stop, tasks }
 }
 
-/// Runs `step` every `interval` (repeating it at once while it reports more) until told
-/// to stop. A failing step is logged and tried again next interval.
-fn every<F, Fut>(
-    stopped: &watch::Receiver<bool>,
+/// When a job runs: every `interval`, stretching to `idle` while it finds nothing, and
+/// at once when `wake` is notified.
+struct Timer {
     name: &'static str,
     interval: Duration,
-    step: F,
-) -> JoinHandle<()>
+    idle: Duration,
+    wake: Option<Arc<Notify>>,
+}
+
+impl Timer {
+    /// Every `interval`, idle or not (the hourly jobs, housekeeping).
+    fn fixed(name: &'static str, interval: Duration) -> Self {
+        Self {
+            name,
+            interval,
+            idle: interval,
+            wake: None,
+        }
+    }
+
+    /// The wait after a round: back to the interval after work, else twice the last,
+    /// at most `idle` (and never under the interval).
+    fn next_wait(&self, last: Duration, worked: bool) -> Duration {
+        if worked {
+            self.interval
+        } else {
+            last.saturating_mul(2).min(self.idle).max(self.interval)
+        }
+    }
+}
+
+/// Runs `step` on `timer` (repeating it at once while it reports more) until told to
+/// stop. A failing step is logged and tried again next round.
+fn every<F, Fut>(stopped: &watch::Receiver<bool>, timer: Timer, step: F) -> JoinHandle<()>
 where
     F: Fn() -> Fut + Send + 'static,
     Fut: Future<Output = Step> + Send,
 {
     let mut stopped = stopped.clone();
     tokio::spawn(async move {
+        let mut wait = timer.interval;
         loop {
+            let woken = async {
+                match &timer.wake {
+                    Some(wake) => wake.notified().await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
                 _ = stopped.changed() => return,
-                () = tokio::time::sleep(interval) => {}
+                () = tokio::time::sleep(wait) => {}
+                () = woken => {}
             }
+            let mut worked = false;
             loop {
                 match step().await {
-                    Ok(true) if !*stopped.borrow() => continue,
-                    Ok(_) => break,
+                    Ok(ran) => {
+                        worked |= !ran.idle;
+                        if ran.more && !*stopped.borrow() {
+                            continue;
+                        }
+                        break;
+                    }
                     Err(e) => {
-                        tracing::warn!(job = name, "jobs: step failed: {e}");
+                        tracing::warn!(job = timer.name, "jobs: step failed: {e}");
                         break;
                     }
                 }
             }
+            wait = timer.next_wait(wait, worked);
             if *stopped.borrow() {
                 return;
             }
@@ -218,7 +334,15 @@ pub(crate) async fn dispatch(state: &AppState<PgStorage>) -> Step {
     }
     let ports = state.public_ports().await.map_err(no_connection)?;
     record(&ports, &outcomes).await.map_err(|e| e.to_string())?;
-    Ok(fanned.more || leased.len() >= state.config.dispatch.batch as usize)
+    let idle = fanned.done == 0 && leased.is_empty();
+    if !idle {
+        // The handlers it ran may have marked products for search.
+        state.wake.search_sync.notify_one();
+    }
+    Ok(Ran {
+        more: fanned.more || leased.len() >= state.config.dispatch.batch as usize,
+        idle,
+    })
 }
 
 /// Rebuilds a batch of the search documents events marked (design note 0019, section
@@ -240,14 +364,17 @@ pub(crate) async fn search_sync(state: &AppState<PgStorage>) -> Step {
     for (product, error) in &synced.failed {
         tracing::warn!(%product, "search: rebuilding a product failed, retried later: {error}");
     }
-    Ok(synced.progress.more)
+    Ok(Ran::of(synced.progress))
 }
 
 /// Deletes uploads abandoned for over `media.abandoned_after` (design note 0013,
 /// section 3).
 async fn media_sweep(state: &AppState<PgStorage>) -> Step {
     let Some(media) = &state.media else {
-        return Ok(false);
+        return Ok(Ran {
+            more: false,
+            idle: true,
+        });
     };
     let ports = state
         .public_ports()
@@ -265,7 +392,10 @@ async fn media_sweep(state: &AppState<PgStorage>) -> Step {
     if swept > 0 {
         tracing::info!(deleted = swept, "media: swept abandoned uploads");
     }
-    Ok(false)
+    Ok(Ran {
+        more: false,
+        idle: swept == 0,
+    })
 }
 
 /// Deletes what's past keeping (`[jobs.prune]`): events, idempotency keys, and sessions
@@ -292,5 +422,55 @@ async fn prune(state: &AppState<PgStorage>) -> Step {
             "jobs: pruned"
         );
     }
-    Ok(events.more || keys.more || sessions.more)
+    Ok(Ran {
+        more: events.more || keys.more || sessions.more,
+        idle: events.done + keys.done + sessions.done == 0,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn timer() -> Timer {
+        Timer {
+            name: "test",
+            interval: Duration::from_secs(2),
+            idle: Duration::from_secs(60),
+            wake: None,
+        }
+    }
+
+    #[test]
+    fn an_idle_job_waits_twice_as_long_each_round() {
+        assert_eq!(
+            timer().next_wait(Duration::from_secs(2), false),
+            Duration::from_secs(4)
+        );
+    }
+
+    #[test]
+    fn an_idle_jobs_wait_stops_at_the_idle_interval() {
+        assert_eq!(
+            timer().next_wait(Duration::from_secs(32), false),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn finding_work_brings_the_wait_back_to_the_interval() {
+        assert_eq!(
+            timer().next_wait(Duration::from_secs(60), true),
+            Duration::from_secs(2)
+        );
+    }
+
+    #[test]
+    fn a_fixed_job_keeps_its_interval_when_idle() {
+        let hourly = Timer::fixed("prune", Duration::from_secs(3600));
+        assert_eq!(
+            hourly.next_wait(Duration::from_secs(3600), false),
+            Duration::from_secs(3600)
+        );
+    }
 }

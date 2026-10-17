@@ -6,13 +6,14 @@ use hypha_channels::{Channel, ChannelRepo, ChannelSnapshot};
 use hypha_core::{
     ChannelId, ProductId, Recorded, RepoError, Version, Versioned, stamp_insert, stamp_update,
 };
-use tokio_postgres::{GenericClient, Row, types::Type};
+use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
     columns::{col, stamp_columns, stamps_from_row, version_from_db, version_to_db, write_stamps},
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, in_transaction},
 };
 
@@ -39,7 +40,7 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
     async fn get(&self, id: ChannelId) -> Result<Option<Channel>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!(
                     "SELECT id, version, name, kind, {} FROM channels WHERE id = $1",
@@ -55,7 +56,7 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
     async fn find_by_name(&self, name_key: &str) -> Result<Option<Channel>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn
-            .client()
+            .db()
             .query_typed_opt(
                 &format!(
                     "SELECT id, version, name, kind, {} FROM channels WHERE name_key = $1",
@@ -70,7 +71,7 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
 
     async fn list(&self) -> Result<Vec<Channel>, RepoError> {
         let mut conn = self.conn().await;
-        conn.client()
+        conn.db()
             .query_typed(
                 &format!(
                     "SELECT id, version, name, kind, {} FROM channels ORDER BY created_at, id",
@@ -144,12 +145,12 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
 
     async fn publish(&self, channel: ChannelId, products: &[ProductId]) -> Result<(), RepoError> {
         let mut conn = self.conn().await;
-        publish(conn.client(), channel, products).await
+        publish(&conn.db(), channel, products).await
     }
 
     async fn unpublish(&self, channel: ChannelId, products: &[ProductId]) -> Result<(), RepoError> {
         let mut conn = self.conn().await;
-        unpublish(conn.client(), channel, products).await
+        unpublish(&conn.db(), channel, products).await
     }
 
     async fn published(
@@ -162,7 +163,7 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
         }
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT product_id FROM channel_products
                  WHERE channel_id = $1 AND product_id = ANY($2)",
@@ -187,7 +188,7 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
         }
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT product_id, channel_id FROM channel_products
                  WHERE product_id = ANY($1) ORDER BY product_id, channel_id",
@@ -209,7 +210,7 @@ impl<C: PgConnection> ChannelRepo for PgStore<C> {
 /// `ChannelRepo::publish` inside the caller's transaction (also a batch's). A missing
 /// channel fails on its foreign key.
 pub(crate) async fn publish(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     channel: ChannelId,
     products: &[ProductId],
 ) -> Result<(), RepoError> {
@@ -229,7 +230,7 @@ pub(crate) async fn publish(
 
 /// `ChannelRepo::unpublish` inside the caller's transaction.
 pub(crate) async fn unpublish(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     channel: ChannelId,
     products: &[ProductId],
 ) -> Result<(), RepoError> {

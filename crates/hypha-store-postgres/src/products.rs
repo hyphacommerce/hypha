@@ -11,7 +11,7 @@ use hypha_products::{
     ProductSnapshot, ProductSort, ProductSummary, VariantSnapshot,
 };
 use tokio_postgres::{
-    GenericClient, Row,
+    Row,
     types::{ToSql, Type},
 };
 use uuid::Uuid;
@@ -23,6 +23,7 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
@@ -30,7 +31,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     async fn get(&self, id: ProductId) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
         let ids = [id.as_uuid()];
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load(tx, Products::Ids(&ids)).await?.pop())
         })
     }
@@ -41,7 +42,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         }
         let mut conn = self.conn().await;
         let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
-        consistent_read!(conn.client(), |tx| load(tx, Products::Ids(&ids)).await)
+        consistent_read!(conn, |tx| load(tx, Products::Ids(&ids)).await)
     }
 
     /// One query whatever the page holds: each product's variant count and price ranges
@@ -109,7 +110,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 &format!(
                     "SELECT p.id, p.handle, p.title, p.status, p.vendor, p.product_type, c.variants, {stamps},
@@ -176,7 +177,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load(tx, Products::Handle(handle.as_str())).await?.pop())
         })
     }
@@ -184,14 +185,14 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
         let id = variant.as_uuid();
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load(tx, Products::OfVariant(id)).await?.pop())
         })
     }
 
     async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn.client(), |tx| {
+        consistent_read!(conn, |tx| {
             Ok(load(tx, Products::OfSku(sku)).await?.pop())
         })
     }
@@ -203,7 +204,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
         let mut conn = self.conn().await;
         let rows = conn
-            .client()
+            .db()
             .query_typed(
                 "SELECT DISTINCT product_id FROM variants WHERE id = ANY($1)",
                 &[(&ids, Type::UUID_ARRAY)],
@@ -246,7 +247,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
 
 /// `ProductRepo::insert` inside the caller's transaction: the row, then its children.
 pub(crate) async fn insert_product(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &ProductSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
@@ -273,7 +274,7 @@ pub(crate) async fn insert_product(
 
 /// `ProductRepo::update` inside a transaction (also a batch's): returns the new version.
 pub(crate) async fn update_product(
-    tx: &impl GenericClient,
+    tx: &impl Queries,
     s: &ProductSnapshot,
 ) -> Result<Version, RepoError> {
     let expected = version_to_db(s.version)?;
@@ -321,7 +322,7 @@ pub(crate) async fn update_product(
 /// Writes options, option values, variants and media in 4 statements however many there are:
 /// each column goes in as an array, `unnest` turns them back into rows, and `WITH
 /// ORDINALITY` numbers them, which is the position.
-async fn write_children(tx: &impl GenericClient, s: &ProductSnapshot) -> Result<(), RepoError> {
+async fn write_children(tx: &impl Queries, s: &ProductSnapshot) -> Result<(), RepoError> {
     let product_id = s.id.as_uuid();
 
     let option_ids: Vec<Uuid> = s.options.iter().map(|o| o.id.as_uuid()).collect();
@@ -455,7 +456,7 @@ impl Products<'_> {
 
 /// Loads the products `which` selects (none found is an empty list), in five queries
 /// sent at once.
-async fn load(client: &impl GenericClient, which: Products<'_>) -> Result<Vec<Product>, RepoError> {
+async fn load(client: &impl Queries, which: Products<'_>) -> Result<Vec<Product>, RepoError> {
     let param: [(&(dyn ToSql + Sync), Type); 1] = match &which {
         Products::Ids(ids) => [(ids, Type::UUID_ARRAY)],
         Products::Handle(handle) => [(handle, Type::TEXT)],

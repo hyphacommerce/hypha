@@ -63,6 +63,8 @@ pub struct ServerConfig {
 pub struct DatabaseConfig {
     pub pool_timeout: Duration,
     pub max_connections: Option<usize>,
+    /// Whether pooled connections keep their prepared statements.
+    pub statement_cache: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +87,8 @@ pub struct S3Config {
 /// Each job's switch (already off when `jobs.enabled` is) and interval.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JobsConfig {
+    /// The longest an idle job waits (`jobs.idle_interval`).
+    pub idle_interval: Duration,
     pub dispatch: JobConfig,
     pub prune: JobConfig,
     pub media_sweep: JobConfig,
@@ -527,6 +531,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         ("jobs.media_sweep.interval", jobs.media_sweep.interval),
         ("jobs.search_sync.interval", jobs.search_sync.interval),
         ("jobs.prune.sessions_after", jobs.prune.sessions_after),
+        ("jobs.idle_interval", jobs.idle_interval),
     ] {
         p.at_least(key, value, Duration::from_millis(1));
     }
@@ -608,6 +613,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             shutdown_grace: server.shutdown_grace.0,
         },
         database: DatabaseConfig {
+            statement_cache: file.database.statement_cache,
             pool_timeout: file.database.pool_timeout.0,
             max_connections: file
                 .database
@@ -659,6 +665,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             lease: jobs.search_sync.lease.0,
         },
         jobs: JobsConfig {
+            idle_interval: jobs.idle_interval.0,
             dispatch: job(jobs.dispatch.enabled, jobs.dispatch.interval),
             prune: job(jobs.prune.enabled, jobs.prune.interval),
             media_sweep: job(jobs.media_sweep.enabled, jobs.media_sweep.interval),
