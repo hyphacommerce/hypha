@@ -85,6 +85,26 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   border-top: var(--border-width, 1px) solid var(--color-border);
 }
 
+/* Settings → Search: a chosen filter (name and values, label, order) per row, and the
+   preview's mock checkboxes. */
+.facet-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+}
+.facet-row-divided {
+  border-top: var(--border-width, 1px) solid var(--color-border);
+}
+.facet-preview-box {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: var(--border-width, 1px) solid var(--color-border);
+  flex-shrink: 0;
+}
+
 /* The save bar (components/save-bar.tsx): sticky above the page's sections. */
 .save-bar {
   position: sticky;

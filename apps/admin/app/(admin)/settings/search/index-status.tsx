@@ -1,5 +1,6 @@
 "use client";
 
+import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -11,23 +12,25 @@ import { useEffect, useState, useTransition } from "react";
 import { type SearchStatus, indexStatus, rebuildIndex } from "./actions";
 
 /**
- * What the index holds and what's waiting to be rebuilt. While something waits, it
- * looks again every 2 seconds (the sync job's pace), so a rebuild shows its progress.
+ * Whether search is up to date: what the index holds and what's waiting to be rebuilt.
+ * While something waits, it looks again every 2 seconds (the sync job's pace), so a
+ * rebuild shows its progress.
  */
 export function IndexStatus({ status: initial }: { status: SearchStatus }) {
   const [status, setStatus] = useState(initial);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
+  const isBusy = status.queued > 0;
 
   useEffect(() => {
-    if (status.queued === 0) return;
+    if (!isBusy) return;
     const timer = setTimeout(async () => {
       const result = await indexStatus();
       if (result.status) setStatus(result.status);
       setError(result.error);
     }, 2000);
     return () => clearTimeout(timer);
-  }, [status]);
+  }, [status, isBusy]);
 
   const rebuild = () =>
     startTransition(async () => {
@@ -39,22 +42,33 @@ export function IndexStatus({ status: initial }: { status: SearchStatus }) {
   return (
     <Card>
       <VStack gap={4}>
-        <Text type="display-3" as="h2">
-          Search index
-        </Text>
+        <HStack gap={2} hAlign="between" vAlign="center">
+          <Text type="display-3" as="h2">
+            Search index
+          </Text>
+          {isBusy ? (
+            <Badge label="Updating" variant="warning" />
+          ) : (
+            <Badge label="Up to date" variant="success" />
+          )}
+        </HStack>
         {error && <Banner status="error" title={error} />}
+        <Text color="secondary">
+          {isBusy
+            ? `${status.queued.toLocaleString()} ${status.queued === 1 ? "product is" : "products are"} waiting to be rebuilt. Search keeps answering meanwhile, with the old data for those.`
+            : "Every product change has reached search. Edits to products, prices and stock show within a few seconds."}
+        </Text>
         <MetadataList>
-          <MetadataListItem label="Documents">
+          <MetadataListItem label="Searchable results">
             <Text>{status.documents.toLocaleString()}</Text>
           </MetadataListItem>
-          <MetadataListItem label="Waiting to be rebuilt">
-            <Text>{status.queued === 0 ? "Up to date" : status.queued.toLocaleString()}</Text>
+          <MetadataListItem label="Waiting">
+            <Text>{status.queued.toLocaleString()}</Text>
           </MetadataListItem>
         </MetadataList>
         <Text type="supporting" color="secondary">
-          One document per variant in each market that sells it. Changes reach search within a
-          few seconds; rebuild everything only after restoring a database or if search looks
-          wrong.
+          The index holds one entry per variant in each market that sells it. Rebuild it only
+          after restoring a database, or if search shows something it shouldn&apos;t.
         </Text>
         <HStack hAlign="end">
           <Button label="Rebuild index" isLoading={isPending} onClick={rebuild} />
