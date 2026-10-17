@@ -24,7 +24,7 @@ export function configSchema(): Promise<string> {
 /** Caddy's configuration: one site per domain, to its service. Over `https`, Caddy gets
  * and renews the certificates itself (Let's Encrypt), once the domains point at the
  * server. */
-export function caddyfile(d: Deployment): string {
+export function caddyfile(d: Deployment, acmeEmail?: string): string {
   const site = (host: string, upstream: string, compress: boolean) =>
     [
       `${url(d, host)} {`,
@@ -32,8 +32,14 @@ export function caddyfile(d: Deployment): string {
       `\treverse_proxy ${upstream}`,
       "}",
     ].join("\n");
+  // Let's Encrypt writes to the email before a certificate expires (Caddy renews them
+  // first); without one, certificates are issued all the same.
   const global =
-    d.scheme === "https" ? ["{", "\temail {$ACME_EMAIL}", "}"] : ["{", "\tauto_https off", "}"];
+    d.scheme === "https"
+      ? acmeEmail
+        ? ["{", `\temail ${acmeEmail}`, "}"]
+        : []
+      : ["{", "\tauto_https off", "}"];
   const sites = [
     site(d.domains.api, "api:3000", true),
     // Uploads and public files; SeaweedFS checks upload signatures against this host.
@@ -95,7 +101,7 @@ export function password(): string {
   return Array.from(randomBytes(24), (b) => alphabet[b % alphabet.length]).join("");
 }
 
-export type Owner = { email: string; storeName: string; acmeEmail?: string };
+export type Owner = { email: string; storeName: string };
 
 /** A new deployment's `.env`: the secrets made here, the addresses from the domains. */
 export function newEnv(d: Deployment, owner: Owner): EnvFile {
@@ -120,7 +126,6 @@ export function newEnv(d: Deployment, owner: Owner): EnvFile {
     .set("MEDIA_HOST", d.domains.media)
     .set("ADMIN_URL", d.domains.admin ? url(d, d.domains.admin) : "")
     .set("COMPOSE_PROFILES", apps(d).join(","));
-  if (d.scheme === "https") env.set("ACME_EMAIL", owner.acmeEmail ?? owner.email);
   if (d.domains.storefront) {
     env
       .comment("")

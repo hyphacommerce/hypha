@@ -31,8 +31,8 @@ test("an empty value stays empty", () => {
 });
 
 test("a server's Caddyfile asks for certificates and routes every domain", () => {
-  const file = caddyfile(vps);
-  assert.match(file, /email \{\$ACME_EMAIL\}/);
+  const file = caddyfile(vps, "ops@example.com");
+  assert.match(file, /^\{\n\temail ops@example\.com\n\}$/m);
   assert.match(file, /https:\/\/api\.example\.com \{\n\tencode zstd gzip\n\treverse_proxy api:3000\n\}/);
   assert.match(file, /https:\/\/media\.example\.com \{\n\treverse_proxy s3:8333\n\}/);
   assert.match(file, /https:\/\/admin\.example\.com \{/);
@@ -56,8 +56,11 @@ test("this machine's deployment is plain http, without certificates", () => {
   };
   assert.match(caddyfile(local), /auto_https off/);
   const env = newEnv(local, { email: "owner@example.com", storeName: "Shop" });
-  assert.equal(env.get("ACME_EMAIL"), undefined);
   assert.equal(env.get("MEDIA_URL"), "http://media.hypha.localhost");
+});
+
+test("without a contact email, a server's Caddyfile has no global options", () => {
+  assert.doesNotMatch(caddyfile(vps), /email|auto_https/);
 });
 
 test("every secret is new", () => {

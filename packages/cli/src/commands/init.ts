@@ -46,7 +46,7 @@ export const init = defineCommand({
     storefront: { type: "boolean", default: true, description: "Include the storefront (--no-storefront for your own)" },
     "owner-email": { type: "string", description: "The first staff user, the store's owner" },
     "store-name": { type: "string", description: "The store's name" },
-    "acme-email": { type: "string", description: "For Let's Encrypt's expiry notices (default the owner's)" },
+    "acme-email": { type: "string", description: "For Let's Encrypt's expiry notices (default the owner's; none for none)" },
     "build-on": { type: "string", description: "server (default) or here: where the images are built" },
     "remote-dir": { type: "string", default: "/opt/hypha", description: "The deployment's folder on the server" },
     yes: { type: "boolean", alias: "y", description: "Don't ask: defaults for what isn't given" },
@@ -144,13 +144,14 @@ export const init = defineCommand({
       scheme: target === "vps" ? "https" : "http",
       domains,
     };
-    const env = newEnv(d, { email, storeName, acmeEmail: args["acme-email"] });
+    const env = newEnv(d, { email, storeName });
+    const acme = args["acme-email"] === "none" ? undefined : (args["acme-email"] || email);
 
     await mkdir(join(dir, "seaweedfs"), { recursive: true });
     await saveDeployment(dir, d);
     await saveEnv(dir, env);
     await writeFile(join(dir, "compose.yaml"), await composeFile());
-    await writeFile(join(dir, "Caddyfile"), caddyfile(d));
+    await writeFile(join(dir, "Caddyfile"), caddyfile(d, acme));
     await writeFile(join(dir, "hypha.config.toml"), configToml());
     await writeFile(join(dir, "hypha.config.schema.json"), await configSchema());
     await writeFile(join(dir, "seaweedfs", "s3.json"), seaweedConfig(env.get("S3_ACCESS_KEY")!, env.get("S3_SECRET_KEY")!), {
