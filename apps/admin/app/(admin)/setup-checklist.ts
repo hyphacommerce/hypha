@@ -15,7 +15,7 @@ export async function setupSteps(): Promise<SetupStep[]> {
     client.GET("/admin/store"),
     client.GET("/admin/markets"),
     client.GET("/admin/locations"),
-    client.GET("/admin/products", { params: { query: { status: "active", limit: 50 } } }),
+    client.GET("/admin/products", { params: { query: { status: ["active"], limit: 50 } } }),
     client.GET("/admin/api-keys"),
   ]);
   const products = active.data?.items ?? [];

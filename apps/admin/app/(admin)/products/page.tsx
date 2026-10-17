@@ -107,7 +107,9 @@ export default async function ProductsPage({
 
   const client = await sessionClient();
   const [result, channelName, currencies, categories] = await Promise.all([
-    client.GET("/admin/products", { params: { query: { status, q, cursor } } }),
+    client.GET("/admin/products", {
+      params: { query: { status: status ? [status] : undefined, q, cursor } },
+    }),
     channelNames(client),
     loadCurrencies(),
     client.GET("/admin/categories"),
