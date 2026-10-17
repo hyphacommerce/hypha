@@ -288,6 +288,23 @@ impl InventoryItem {
     ///
     /// Returns only the shortage, not an `InventoryError`: a shortage is the one way it
     /// can fail, so callers can match it exhaustively.
+    /// How many `locations` can supply now (each location once), or `None` without a
+    /// limit: the item isn't tracked, or it keeps selling when out of stock. What a
+    /// storefront caps its quantity inputs at (design note 0024, §7).
+    pub fn sellable(&self, locations: &[Location]) -> Option<u64> {
+        if !self.tracked || self.continue_selling {
+            return None;
+        }
+        let mut seen = HashSet::new();
+        Some(
+            locations
+                .iter()
+                .filter(|l| seen.insert(l.id()))
+                .map(|l| u64::try_from(self.available(l.id()).max(0)).unwrap_or(0))
+                .sum(),
+        )
+    }
+
     pub fn can_supply(&self, quantity: Quantity, locations: &[Location]) -> Result<(), i64> {
         if !self.tracked {
             return Ok(());

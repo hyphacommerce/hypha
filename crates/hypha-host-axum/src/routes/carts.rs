@@ -192,6 +192,9 @@ pub(super) struct LineResponse {
     /// The variant's image, else the product's first media item; `null` without one,
     /// once checked out, or where the deployment has no file storage.
     image: Option<ProductMediaResponse>,
+    /// How many of the variant can be bought now, so a quantity input can stop there:
+    /// `null` when there's no limit (stock isn't tracked, or it sells past zero).
+    available_quantity: Option<u64>,
     #[serde(flatten)]
     state: LineState,
 }
@@ -230,6 +233,7 @@ impl From<&PricedCart> for CartResponse {
                     sku: l.details.as_ref().and_then(|d| d.sku.clone()),
                     handle: l.details.as_ref().and_then(|d| d.handle.clone()),
                     image: None,
+                    available_quantity: l.sellable,
                     state: match &l.status {
                         LineStatus::Priced {
                             unit_price,

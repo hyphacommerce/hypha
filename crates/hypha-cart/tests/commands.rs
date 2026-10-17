@@ -1257,6 +1257,7 @@ fn a_product_is_priced_and_stocked_in_the_countrys_market() {
             variant: vid("mug"),
             price: Some(Price::new(eur(900)).unwrap()),
             available: true,
+            sellable: Some(1),
         }]
     );
     assert!(offer.sold());

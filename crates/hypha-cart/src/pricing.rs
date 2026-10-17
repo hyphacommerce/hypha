@@ -74,6 +74,10 @@ pub struct PricedLine {
     /// unavailable line otherwise keeps its name, so a buyer sees what ran out.
     pub details: Option<LineDetails>,
     pub status: LineStatus,
+    /// How many of the variant the market's locations can supply now; `None` without a
+    /// limit (untracked, or selling past zero). A storefront caps the line's quantity at
+    /// it (design note 0024, §7).
+    pub sellable: Option<u64>,
 }
 
 impl PricedLine {
@@ -213,6 +217,7 @@ pub fn price_cart_with_shipping(
             quantity: line.quantity(),
             details: product.and_then(|p| line_details(p, line.variant())),
             status,
+            sellable: stock.sellable(line.variant()),
         });
     }
 

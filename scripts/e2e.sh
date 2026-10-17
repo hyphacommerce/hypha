@@ -593,7 +593,7 @@ contains "and the shipping line" '"code":"standard","name":"Standard","provider"
 step "archive mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
 step "get cart" 200 - "$BASE/storefront/carts/$CART"
 contains "mug line is unavailable" '"status":"unavailable","reason_code":"product_not_active"'
-contains "unavailable mug keeps its name" '"product_title":"Mug","variant_title":null,"sku":null,"handle":"mug","image":null,"status":"unavailable"'
+contains "unavailable mug keeps its name" '"product_title":"Mug","variant_title":null,"sku":null,"handle":"mug","image":null,"available_quantity":null,"status":"unavailable"'
 contains "total only counts the cup" '"total":{"amount":600,"currency":"EUR"},"fully_available":false'
 
 step "remove cup's fixed price" 204 - -X DELETE "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
@@ -694,9 +694,11 @@ step "raise lamps beyond stock" 409 out_of_stock -X PUT "$BASE/storefront/carts/
     -H "$JSON" -d '{"quantity":6}'
 step "set lamps to 3" 200 - -X PUT "$BASE/storefront/carts/$STOCK_CART/lines/$LAMP_VAR" -H "$JSON" -d '{"quantity":3}'
 contains "line holds 3" '"quantity":3'
+contains "and says 5 can be bought" '"available_quantity":5'
 step "stop tracking lamps" 200 - -X PATCH "$BASE/admin/inventory-items/$LAMP_ITEM" -H "$JSON" -d '{"tracked":false}'
 step "add 100 untracked lamps" 200 - -X POST "$BASE/storefront/carts/$STOCK_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":100}"
+contains "untracked lamps have no limit" '"available_quantity":null'
 step "remove the lamp line" 200 - -X DELETE "$BASE/storefront/carts/$STOCK_CART/lines/$LAMP_VAR"
 contains "cart is empty again" '"lines":[]'
 step "remove it again" 404 line_not_found -X DELETE "$BASE/storefront/carts/$STOCK_CART/lines/$LAMP_VAR"

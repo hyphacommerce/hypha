@@ -2907,6 +2907,15 @@
           },
           {
             "properties": {
+              "available_quantity": {
+                "description": "How many of the variant can be bought now, so a quantity input can stop there:\n`null` when there's no limit (stock isn't tracked, or it sells past zero).",
+                "format": "int64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "handle": {
                 "description": "The product's handle, to link to its page; `null` when the product is gone or the\ncart is checked out.",
                 "type": [

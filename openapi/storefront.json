@@ -411,6 +411,15 @@
           },
           {
             "properties": {
+              "available_quantity": {
+                "description": "How many of the variant can be bought now, so a quantity input can stop there:\n`null` when there's no limit (stock isn't tracked, or it sells past zero).",
+                "format": "int64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "handle": {
                 "description": "The product's handle, to link to its page; `null` when the product is gone or the\ncart is checked out.",
                 "type": [
@@ -1813,6 +1822,15 @@
             "description": "Whether one can be bought now (in stock, or stock isn't tracked); `null` where\nthere's no price.",
             "type": [
               "boolean",
+              "null"
+            ]
+          },
+          "available_quantity": {
+            "description": "How many can be bought now: the stock left in the market's locations, or `null`\nwhen there's no limit (stock isn't tracked, or it sells past zero). `0` where\nthere's no price.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
               "null"
             ]
           },

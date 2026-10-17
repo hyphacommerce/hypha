@@ -2746,6 +2746,12 @@ export interface components {
         };
         LineResponse: components["schemas"]["LineState"] & {
             /**
+             * Format: int64
+             * @description How many of the variant can be bought now, so a quantity input can stop there:
+             *     `null` when there's no limit (stock isn't tracked, or it sells past zero).
+             */
+            available_quantity?: number | null;
+            /**
              * @description The product's handle, to link to its page; `null` when the product is gone or the
              *     cart is checked out.
              */

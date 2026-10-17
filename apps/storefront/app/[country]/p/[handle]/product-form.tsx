@@ -61,10 +61,16 @@ export function ProductForm({
   const start = product.variants.find((v) => v.available) ?? product.variants[0];
   const cart = useCart();
   const [selections, setSelections] = useState<string[]>(start?.selections ?? []);
-  const [quantity, setQuantity] = useState(1);
+  const [wanted, setQuantity] = useState(1);
   const [error, setError] = useState<string>();
   const [pending, startAdding] = useTransition();
   const variant = variantWith(product, selections);
+  // How many more can go in the cart: the stock left, less what's in it already (the API
+  // refuses more). `null` stock means no limit.
+  const inCart = cart.cart?.lines.find((l) => l.variant === variant?.id)?.quantity ?? 0;
+  const stock = variant?.available_quantity;
+  const room = stock == null ? MAX_QUANTITY : Math.min(MAX_QUANTITY, Math.max(0, stock - inCart));
+  const quantity = Math.max(1, Math.min(wanted, room));
 
   const images = product.media.filter((m) => m.kind === "image");
   const variantImage = images.findIndex((m) => m.asset_id === variant?.media_asset_id);
@@ -102,9 +108,11 @@ export function ProductForm({
 
   const label = !variant
     ? "This combination isn't sold"
-    : variant.available
-      ? "Add to cart"
-      : "Sold out";
+    : !variant.available
+      ? "Sold out"
+      : room === 0
+        ? "All in stock are in your cart"
+        : "Add to cart";
 
   return (
     <Grid columns={{ minWidth: 340, repeat: "fit" }} gap={8}>
@@ -209,16 +217,17 @@ export function ProductForm({
                   isIconOnly
                   icon={<Icon icon={MinusIcon} size="sm" />}
                   isDisabled={quantity <= 1}
-                  clickAction={() => setQuantity((q) => Math.max(1, q - 1))}
+                  clickAction={() => setQuantity(Math.max(1, quantity - 1))}
                 />
                 <div style={{ width: 88 }}>
                   <NumberInput
                     label="Quantity"
                     isLabelHidden
                     value={quantity}
-                    onChange={(q) => setQuantity(Math.min(MAX_QUANTITY, Math.max(1, q || 1)))}
+                    onChange={(q) => setQuantity(Math.min(room, Math.max(1, q || 1)))}
                     min={1}
-                    max={MAX_QUANTITY}
+                    max={Math.max(1, room)}
+                    isDisabled={room === 0}
                     isIntegerOnly
                   />
                 </div>
@@ -227,10 +236,13 @@ export function ProductForm({
                   variant="ghost"
                   isIconOnly
                   icon={<Icon icon={PlusIcon} size="sm" />}
-                  isDisabled={quantity >= MAX_QUANTITY}
-                  clickAction={() => setQuantity((q) => Math.min(MAX_QUANTITY, q + 1))}
+                  isDisabled={quantity >= room}
+                  clickAction={() => setQuantity(Math.min(room, quantity + 1))}
                 />
               </HStack>
+              {variant?.available && stock != null && stock <= 5 && (
+                <Text type="supporting">{stock === 0 ? "None left" : `Only ${stock} left`}</Text>
+              )}
             </VStack>
             <Button
               label={label}
@@ -238,7 +250,7 @@ export function ProductForm({
               size="lg"
               width="100%"
               isLoading={pending}
-              isDisabled={!variant?.available}
+              isDisabled={!variant?.available || room === 0}
               clickAction={add}
             />
             {error && <Banner status="error" title={error} />}

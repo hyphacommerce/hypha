@@ -494,6 +494,12 @@ export interface components {
         Language: string;
         LineResponse: components["schemas"]["LineState"] & {
             /**
+             * Format: int64
+             * @description How many of the variant can be bought now, so a quantity input can stop there:
+             *     `null` when there's no limit (stock isn't tracked, or it sells past zero).
+             */
+            available_quantity?: number | null;
+            /**
              * @description The product's handle, to link to its page; `null` when the product is gone or the
              *     cart is checked out.
              */
@@ -952,6 +958,13 @@ export interface components {
              *     there's no price.
              */
             available?: boolean | null;
+            /**
+             * Format: int64
+             * @description How many can be bought now: the stock left in the market's locations, or `null`
+             *     when there's no limit (stock isn't tracked, or it sells past zero). `0` where
+             *     there's no price.
+             */
+            available_quantity?: number | null;
             id: components["schemas"]["VariantId"];
             media_asset_id?: components["schemas"]["AssetId"] | null;
             price?: components["schemas"]["Money"] | null;

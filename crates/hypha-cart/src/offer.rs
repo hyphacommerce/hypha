@@ -21,6 +21,9 @@ pub struct VariantOffer {
     /// Whether one can be bought now: in stock at a location serving the market, or not
     /// tracked. `false` whenever there's no price.
     pub available: bool,
+    /// How many can be bought now; `None` without a limit (untracked, or selling past
+    /// zero). A storefront caps its quantity at it.
+    pub sellable: Option<u64>,
 }
 
 /// A product's offer in the market of a country.
@@ -63,6 +66,7 @@ where
                 variant: v.id(),
                 price: None,
                 available: false,
+                sellable: Some(0),
             })
             .collect(),
     };
@@ -86,6 +90,11 @@ where
             VariantOffer {
                 variant,
                 available: price.is_some() && in_stock,
+                sellable: if price.is_some() {
+                    stock.sellable(variant)
+                } else {
+                    Some(0)
+                },
                 price,
             }
         })

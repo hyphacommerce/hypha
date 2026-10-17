@@ -65,6 +65,8 @@ function CartLineRow({
   useEffect(() => {
     asked.current = line.quantity;
   }, [line.quantity]);
+  // The stock left (the API refuses more); `null` is no limit.
+  const max = line.available_quantity ?? undefined;
   const ask = (quantity: number) => {
     if (quantity === asked.current) return;
     asked.current = quantity;
@@ -99,10 +101,11 @@ function CartLineRow({
                   size="sm"
                   value={line.quantity}
                   min={1}
+                  max={max === undefined ? undefined : Math.max(1, max)}
                   isIntegerOnly
                   isDisabled={isPending}
                   onChange={(q) => {
-                    if (q) ask(q);
+                    if (q) ask(max === undefined ? q : Math.max(1, Math.min(q, max)));
                   }}
                 />
               </div>
@@ -113,6 +116,11 @@ function CartLineRow({
                 isDisabled={isPending}
                 clickAction={() => ask(0)}
               />
+              {max !== undefined && max <= 5 && line.status === "priced" && (
+                <Text type="supporting">
+                  {line.quantity >= max ? "No more in stock" : `${max} in stock`}
+                </Text>
+              )}
             </HStack>
           </VStack>
         </StackItem>

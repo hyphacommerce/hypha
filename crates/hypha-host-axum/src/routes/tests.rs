@@ -4332,6 +4332,8 @@ async fn a_product_page_is_one_read_priced_in_the_shoppers_country() {
             &json!(true)
         )
     );
+    // Its stock isn't tracked: no limit on how many.
+    assert_eq!(variant["available_quantity"], Value::Null);
     assert_eq!(page["options"], json!([]));
 
     // By ID, the same read; without a country, no prices.
@@ -4347,6 +4349,7 @@ async fn a_product_page_is_one_read_priced_in_the_shoppers_country() {
         ),
         (&Value::Null, &Value::Null, &Value::Null)
     );
+    assert_eq!(bare["variants"][0]["available_quantity"], json!(0));
 
     // A country the store doesn't sell to: the product, marked not sold there (Q2).
     let (status, elsewhere) = get("/storefront/products/by-handle/mug?country=US".into()).await;

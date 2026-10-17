@@ -60,6 +60,8 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
                 handle: None,
                 image: None,
             }),
+            // Checked out: nothing more to buy on this line.
+            sellable: Some(0),
             status: LineStatus::Priced {
                 unit_price: line.unit_price,
                 total: line.total,

@@ -45,6 +45,12 @@ impl StockContext {
         })
     }
 
+    /// How many of `variant` the market's locations can supply now; `None` without a
+    /// limit (no item, untracked, or selling past zero).
+    pub fn sellable(&self, variant: VariantId) -> Option<u64> {
+        self.items.get(&variant)?.sellable(&self.locations)
+    }
+
     pub fn availability(&self, variant: VariantId, quantity: Quantity) -> Availability {
         let Some(item) = self.items.get(&variant) else {
             return Availability::Untracked;
@@ -114,6 +120,19 @@ mod tests {
             context(true).availability(vid(1), qty(3)),
             Availability::OutOfStock { available: 2 }
         );
+    }
+
+    #[test]
+    fn sellable_is_the_stock_or_no_limit() {
+        assert_eq!(context(true).sellable(vid(1)), Some(2));
+        assert_eq!(context(false).sellable(vid(1)), None, "untracked");
+        assert_eq!(context(true).sellable(vid(2)), None, "no item");
+        let mut overselling = context(true);
+        let item = overselling.items.remove(&vid(1)).unwrap();
+        let mut keeps = InventoryItem::new(item.id(), vid(1), true, true);
+        keeps.set_on_hand(loc(), 2, None).unwrap();
+        overselling.items.insert(vid(1), keeps);
+        assert_eq!(overselling.sellable(vid(1)), None, "keeps selling");
     }
 
     #[test]

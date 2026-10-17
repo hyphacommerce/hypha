@@ -579,6 +579,10 @@ pub(super) struct StorefrontVariantResponse {
     /// Whether one can be bought now (in stock, or stock isn't tracked); `null` where
     /// there's no price.
     available: Option<bool>,
+    /// How many can be bought now: the stock left in the market's locations, or `null`
+    /// when there's no limit (stock isn't tracked, or it sells past zero). `0` where
+    /// there's no price.
+    available_quantity: Option<u64>,
 }
 
 impl StorefrontProductResponse {
@@ -613,6 +617,10 @@ impl StorefrontProductResponse {
                         media_asset_id: v.media(),
                         price: priced.and_then(|o| o.price).map(|price| price.money()),
                         available: priced.filter(|o| o.price.is_some()).map(|o| o.available),
+                        available_quantity: match priced {
+                            Some(o) => o.sellable,
+                            None => Some(0),
+                        },
                     }
                 })
                 .collect(),
