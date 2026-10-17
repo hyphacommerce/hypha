@@ -9,11 +9,15 @@
 //! `waitUntil`, whether it wrote) reaches the shared state through `Scoped`, which makes
 //! the event current while its future is polled.
 //!
-//! The portable parts (`ids`, `limiter`, `schedule`) build natively, so their tests run
-//! with the workspace's; the rest is Workers only.
+//! Jobs run after each write (W6) and on a cron tick that touches the database only when
+//! KV's marks say there's work (W7, `marks`), so an idle serverless database can sleep.
+//!
+//! The portable parts (`ids`, `limiter`, `marks`, `schedule`) build natively, so their
+//! tests run with the workspace's; the rest is Workers only.
 
 pub mod ids;
 pub mod limiter;
+pub mod marks;
 pub mod schedule;
 
 #[cfg(target_arch = "wasm32")]
@@ -45,9 +49,10 @@ mod worker_main {
     use hypha_http::state::{AppState, HostEnv, HostParts, SharedState, Storage};
     use hypha_stores::StoreRepo;
     use tower_service::Service;
-    use worker::{Context, Env, HttpRequest, ScheduleContext, ScheduledEvent, event};
+    use worker::{Context, Env, HttpRequest, KvStore, ScheduleContext, ScheduledEvent, event};
 
     use crate::limiter::IsolateLimiter;
+    use crate::marks::{self, After, Marks, Run};
     use crate::platform;
     use crate::schedule::due;
     use crate::storage::WorkersStorage;
@@ -74,7 +79,14 @@ mod worker_main {
         static ISOLATE: RefCell<Option<Setup>> = const { RefCell::new(None) };
         /// The event whose future is being polled (`Scoped`).
         static CURRENT: RefCell<Option<Rc<Event>>> = const { RefCell::new(None) };
+        /// The `due` mark this isolate last read or wrote, so runs after writes don't
+        /// write the same one again.
+        static LAST_DUE: Cell<Option<u64>> = const { Cell::new(None) };
     }
+
+    /// The KV namespace holding the jobs' marks (W7). Without one, every tick runs the
+    /// jobs.
+    const JOBS_KV: &str = "JOBS";
 
     /// What belongs to one event: its `waitUntil`, and whether it wrote.
     struct Event {
@@ -271,27 +283,37 @@ mod worker_main {
         if event.wrote.get() {
             let state = Arc::clone(&isolate.state);
             let deadline = state.clock.now().plus(AFTER_RESPONSE);
+            let kv = env.kv(JOBS_KV).ok();
             ctx.wait_until(Scoped::new(&event, async move {
                 let jobs = state.config.jobs;
+                let mut run = Run::default();
                 if jobs.dispatch.enabled {
-                    steps("dispatch", &state, Some(deadline), || {
-                        jobs::dispatch_by(&state, deadline)
-                    })
-                    .await;
+                    run = run.and(
+                        steps("dispatch", &state, Some(deadline), || {
+                            jobs::dispatch_by(&state, deadline)
+                        })
+                        .await,
+                    );
                 }
                 if jobs.search_sync.enabled {
-                    steps("search sync", &state, Some(deadline), || {
-                        jobs::search_sync(&state)
-                    })
-                    .await;
+                    run = run.and(
+                        steps("search sync", &state, Some(deadline), || {
+                            jobs::search_sync(&state)
+                        })
+                        .await,
+                    );
+                }
+                if let Some(kv) = kv {
+                    mark(&kv, &state, marks::after(run, None), LAST_DUE.get()).await;
                 }
             }));
         }
         Ok(response)
     }
 
-    /// The cron tick (every minute, `wrangler.toml`): dispatch and search sync each
-    /// time, the others on the ticks that start their interval (`schedule::due`).
+    /// The cron tick (every minute, `wrangler.toml`): dispatch and search sync when
+    /// KV's marks say there's work (or on the safety net's ticks), the others on the
+    /// ticks that start their interval (`schedule::due`).
     #[event(scheduled)]
     async fn scheduled(tick: ScheduledEvent, env: Env, ctx: ScheduleContext) {
         let isolate = match isolate(&env).await {
@@ -304,13 +326,33 @@ mod worker_main {
         let event = Event::new(move |work| ctx.wait_until(work));
         let state = Arc::clone(&isolate.state);
         let at = tick.schedule() as u64;
+        let kv = env.kv(JOBS_KV).ok();
         Scoped::new(&event, async move {
             let jobs = state.config.jobs;
-            if jobs.dispatch.enabled {
-                steps("dispatch", &state, None, || jobs::dispatch(&state)).await;
-            }
-            if jobs.search_sync.enabled {
-                steps("search sync", &state, None, || jobs::search_sync(&state)).await;
+            let started = millis(state.clock.now());
+            let read = match &kv {
+                Some(kv) => read_marks(kv).await,
+                None => None,
+            };
+            let waiting = kv.is_none()
+                || due(at, marks::NET)
+                || read.is_none_or(|marks| marks.waiting(started));
+            if waiting {
+                let mut run = Run::default();
+                if jobs.dispatch.enabled {
+                    run = run.and(steps("dispatch", &state, None, || jobs::dispatch(&state)).await);
+                }
+                if jobs.search_sync.enabled {
+                    run = run.and(
+                        steps("search sync", &state, None, || jobs::search_sync(&state)).await,
+                    );
+                }
+                if let Some(kv) = &kv {
+                    let known = read.and_then(|marks| marks.due);
+                    mark(kv, &state, marks::after(run, Some(started)), known).await;
+                }
+            } else {
+                tracing::debug!("jobs: nothing waiting");
             }
             if jobs.prune.enabled && due(at, jobs.prune.interval) {
                 steps("prune", &state, None, || jobs::prune(&state)).await;
@@ -326,30 +368,96 @@ mod worker_main {
     }
 
     /// Runs `step` while it says there's more, up to `MAX_STEPS` and, with one, until
-    /// `deadline`.
+    /// `deadline`; says whether it found work and whether it left some.
     async fn steps<F: Future<Output = Step>>(
         job: &str,
         state: &AppState<WorkersStorage>,
         deadline: Option<Timestamp>,
         step: impl Fn() -> F,
-    ) {
+    ) -> Run {
+        let mut run = Run::default();
         for _ in 0..MAX_STEPS {
             match step().await {
-                Ok(ran) if ran.more => {}
-                result => {
-                    report(job, result);
-                    return;
+                Ok(ran) => {
+                    run.worked |= !ran.idle;
+                    if !ran.more {
+                        return run;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(job, error = %e, "job step failed");
+                    run.left = true;
+                    return run;
                 }
             }
             if deadline.is_some_and(|by| state.clock.now() >= by) {
-                return;
+                break;
+            }
+        }
+        // Stopped with more to do.
+        run.left = true;
+        run
+    }
+
+    fn millis(at: Timestamp) -> u64 {
+        u64::try_from(at.unix_micros() / 1000).unwrap_or(0)
+    }
+
+    /// The marks, or `None` when KV can't be read (the tick then runs the jobs).
+    async fn read_marks(kv: &KvStore) -> Option<Marks> {
+        let (written, checked, due) = futures_util::future::join3(
+            kv.get(marks::WRITTEN).text(),
+            kv.get(marks::CHECKED).text(),
+            kv.get(marks::DUE).text(),
+        )
+        .await;
+        match (written, checked, due) {
+            (Ok(written), Ok(checked), Ok(due)) => {
+                let marks = Marks::parse(written.as_deref(), checked.as_deref(), due.as_deref());
+                LAST_DUE.set(marks.due);
+                Some(marks)
+            }
+            (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+                tracing::warn!(error = %e, "jobs: cannot read the marks; running the jobs");
+                None
             }
         }
     }
 
-    fn report(job: &str, result: Step) {
-        if let Err(e) = result {
-            tracing::warn!(job, error = %e, "job step failed");
+    /// Writes what a run says to (`marks::after`); `known` is the `due` mark KV holds,
+    /// as far as this isolate knows, so the same one isn't written again.
+    async fn mark(
+        kv: &KvStore,
+        state: &AppState<WorkersStorage>,
+        after: After,
+        known: Option<u64>,
+    ) {
+        if after.written {
+            put(kv, marks::WRITTEN, millis(state.clock.now())).await;
+        }
+        if let Some(at) = after.checked {
+            put(kv, marks::CHECKED, at).await;
+        }
+        if after.due {
+            match jobs::next_due(state).await {
+                Ok(Some(due)) if Some(millis(due)) != known => {
+                    put(kv, marks::DUE, millis(due)).await;
+                    LAST_DUE.set(Some(millis(due)));
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "jobs: cannot read when work is next due"),
+            }
+        }
+    }
+
+    /// Writes one mark; a failure is logged (the safety net's tick catches up).
+    async fn put(kv: &KvStore, key: &str, at: u64) {
+        let put = match kv.put(key, at.to_string()) {
+            Ok(put) => put.execute().await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = put {
+            tracing::warn!(key, error = %e, "jobs: cannot write a mark");
         }
     }
 }

@@ -42,6 +42,8 @@ where
     outcomes(&make().await).await;
     scenario("outbox: an outcome under a lease that ran out is skipped");
     stale_outcomes(&make().await).await;
+    scenario("outbox: next_due is the earliest event or delivery that can run");
+    next_due(&make().await).await;
     scenario("outbox: prune_events drops old fanned-out events and their deliveries");
     prunes(&make().await).await;
     scenario("outbox: events_after reads after a seq, up to a limit");
@@ -405,6 +407,47 @@ async fn outcomes<S: HasProducts + HasOutbox>(store: &S) {
         outcome: DeliveryOutcome::Succeeded,
     };
     assert_eq!(outbox.record_outcomes(&[unknown]).await, Ok(()));
+}
+
+async fn next_due<S: HasProducts + HasOutbox>(store: &S) {
+    let outbox = store.outbox();
+    assert_eq!(outbox.next_due().await, Ok(None));
+    three_products(store).await;
+    // Not fanned out: due since the first occurred.
+    let first = all(store).await[0].occurred_at;
+    assert_eq!(outbox.next_due().await, Ok(Some(first)));
+    outbox.fan_out(10, at(0), &audit_only).await.unwrap();
+    assert_eq!(outbox.next_due().await, Ok(Some(at(0))));
+    // One still free; then all leased, so due when the leases end.
+    let leased = outbox.lease_due(at(0), at(60), 2).await.unwrap();
+    assert_eq!(outbox.next_due().await, Ok(Some(at(0))));
+    let last = outbox.lease_due(at(0), at(60), 10).await.unwrap();
+    assert_eq!(outbox.next_due().await, Ok(Some(at(60))));
+    let outcomes = vec![
+        Outcome::of(&leased[0], DeliveryOutcome::Succeeded),
+        Outcome::of(
+            &leased[1],
+            DeliveryOutcome::Failed {
+                error: "gone".to_string(),
+            },
+        ),
+        Outcome::of(
+            &last[0],
+            DeliveryOutcome::Retry {
+                error: "busy".to_string(),
+                at: at(300),
+            },
+        ),
+    ];
+    outbox.record_outcomes(&outcomes).await.unwrap();
+    assert_eq!(outbox.next_due().await, Ok(Some(at(300))));
+    // Leased again with a lease ending before its next attempt: the attempt counts.
+    let retried = outbox.lease_due(at(300), at(360), 10).await.unwrap();
+    outbox
+        .record_outcomes(&[Outcome::of(&retried[0], DeliveryOutcome::Succeeded)])
+        .await
+        .unwrap();
+    assert_eq!(outbox.next_due().await, Ok(None));
 }
 
 async fn stale_outcomes<S: HasProducts + HasOutbox>(store: &S) {

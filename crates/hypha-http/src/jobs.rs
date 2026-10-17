@@ -221,3 +221,14 @@ pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
         idle: events.done + keys.done + sessions.done == 0,
     })
 }
+
+/// When dispatch next has work (`OutboxRepo::next_due`), for a host that runs the jobs
+/// only when there's some (design note 0026, W7).
+pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestamp>, String> {
+    use hypha_core::{HasOutbox, OutboxRepo};
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "no connection".to_string())?;
+    ports.outbox().next_due().await.map_err(|e| e.to_string())
+}

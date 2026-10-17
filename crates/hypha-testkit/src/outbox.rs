@@ -290,6 +290,24 @@ impl OutboxRepo for InMemoryOutbox {
         Ok(pruned.len() as u32)
     }
 
+    async fn next_due(&self) -> Result<Option<Timestamp>, RepoError> {
+        let state = self.inner.lock().unwrap();
+        let events = state
+            .events
+            .iter()
+            .filter(|e| !state.fanned_out.contains(&e.seq))
+            .map(|e| e.occurred_at);
+        let deliveries = state
+            .deliveries
+            .iter()
+            .filter(|d| d.status == DeliveryStatus::Pending)
+            .map(|d| {
+                d.leased_until
+                    .map_or(d.next_attempt_at, |l| l.max(d.next_attempt_at))
+            });
+        Ok(events.chain(deliveries).min())
+    }
+
     async fn get_event(&self, id: Uuid) -> Result<Option<StoredEvent>, RepoError> {
         Ok(self.events().into_iter().find(|e| e.id == id))
     }

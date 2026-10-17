@@ -18,7 +18,14 @@ binding = "HYPERDRIVE"
 id = "00000000000000000000000000000000"
 localConnectionString = "postgres://hypha:hypha@localhost:5432/hypha_workers"
 
-# One tick a minute (W6): dispatch and search sync each time, prune and the media sweep
+# The jobs' marks (W7): a tick reads them first and touches Postgres only when there's
+# work, so an idle serverless database can sleep. `hypha deploy` creates the namespace
+# (`wrangler kv namespace create`); `wrangler dev` simulates it locally.
+[[kv_namespaces]]
+binding = "JOBS"
+id = "00000000000000000000000000000000"
+
+# One tick a minute (W6): dispatch and search sync when the marks say so, prune and the media sweep
 # on the ticks that start their `jobs.<job>.interval` (hourly by default).
 [triggers]
 crons = ["* * * * *"]

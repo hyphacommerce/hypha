@@ -355,6 +355,28 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
         })
     }
 
+    async fn next_due(&self) -> Result<Option<Timestamp>, RepoError> {
+        let mut conn = self.conn().await;
+        // `LEAST` and `GREATEST` skip NULLs: no lease, or nothing on one side.
+        let row = conn
+            .db()
+            .query_typed_one(
+                &format!(
+                    "SELECT {} FROM (SELECT LEAST(
+                         (SELECT min(occurred_at) FROM outbox_events WHERE fanned_out_at IS NULL),
+                         (SELECT min(GREATEST(next_attempt_at, leased_until))
+                          FROM event_deliveries WHERE status = 'pending')
+                     ) AS due) next",
+                    micros("due")
+                ),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        let due: Option<i64> = col(&row, "due")?;
+        Ok(due.map(Timestamp::from_unix_micros))
+    }
+
     async fn get_event(&self, id: Uuid) -> Result<Option<StoredEvent>, RepoError> {
         let mut conn = self.conn().await;
         let row = conn

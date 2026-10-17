@@ -284,6 +284,12 @@ pub trait OutboxRepo {
     /// skipped, as is an unknown one (pruned meanwhile).
     async fn record_outcomes(&self, outcomes: &[Outcome]) -> Result<(), RepoError>;
 
+    /// When the dispatcher next has work: now-or-earlier for an event not fanned out yet
+    /// (when it occurred), else the earliest a pending delivery can be leased (its next
+    /// attempt, or its lease's end if that's later). `None` when nothing is pending. A
+    /// host that runs the jobs only when there's work reads it (design note 0026, W7).
+    async fn next_due(&self) -> Result<Option<Timestamp>, RepoError>;
+
     /// Deletes up to `limit` events (and their deliveries) that occurred before
     /// `before` and were fanned out. Returns how many.
     async fn prune_events(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError>;

@@ -122,8 +122,8 @@ From Cloudflare's limits page (October 2026):
 
 | Job | Trigger | Notes |
 | --- | --- | --- |
-| Dispatch (fan out, deliver) | Every minute, if the KV marker says so; one step after each write (`wait_until`) | Retries record their next due time in KV |
-| Search sync | After a dispatch step that ran handlers; every minute if marked | The same `SearchQueue` |
+| Dispatch (fan out, deliver) | Every minute, if the KV marks say so (§6, step 5), and hourly regardless; after each write (`wait_until`) | Runs record when work is next due in KV |
+| Search sync | After each dispatch run; every minute if marked | The same `SearchQueue` |
 | Prune | Hourly | Unchanged |
 | Media sweep | Hourly | Unchanged |
 
@@ -174,7 +174,17 @@ the domains; `hypha deploy` then:
    handlers are the host's again (`Storage::Handlers`); and only the native pool ends
    read-only snapshots without waiting for the ROLLBACK (`PgConnection::ends_reads_unawaited`),
    so the VPS doesn't pay Hyperdrive's extra round trip.
-5. **Jobs** (W6, W7).
+5. **Jobs** (W6, W7; done, 2026-10-18). A tick reads three marks from KV (`JOBS`), each
+   a time, so no write undoes another's (KV has no compare-and-set): `written` when a
+   run ended with work left, `checked` when a tick's run left none (its start), and
+   `due`, when the dispatcher next has work (`OutboxRepo::next_due`: an event not fanned
+   out, a retry, a lease's end), written by a run that did something. It runs dispatch
+   and search sync when a run left work since the last clean check, when `due` came
+   between that check and now, or when nothing was ever checked; otherwise it doesn't
+   touch the database. After a write its own run usually does the work, so most writes
+   set no mark. What a lost mark could hide (two runs racing to write `due`, a run killed
+   before it marked, a search rebuild that failed) waits for the safety net: every hour's
+   first tick runs the jobs regardless.
 6. **CLI**: `--target cloudflare` (§5).
 7. **Caching**: the storefront's and admin's adapters (0025, §6), and the e2e script
    against a deployed Worker.
