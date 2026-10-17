@@ -8,7 +8,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { Skeleton } from "@/components/skeletons";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 
 import { Totals } from "@/components/totals";

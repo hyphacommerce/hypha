@@ -36,6 +36,52 @@ body {
   display: block;
 }
 
+/* A loading placeholder (components/skeletons.tsx): Astryx's Skeleton look in one
+   class, since a page's skeleton has a hundred of them. */
+.shop-bone {
+  background-color: var(--color-skeleton);
+  border-radius: var(--radius-container);
+  opacity: 0.25;
+  animation: shop-bone-fade var(--duration-medium-max) steps(10, end) var(--bone-delay, 1000ms)
+    infinite alternate;
+}
+
+.shop-bone[data-radius="1"] {
+  border-radius: var(--radius-inner);
+}
+
+.shop-bone[data-radius="2"] {
+  border-radius: var(--radius-element);
+}
+
+@keyframes shop-bone-fade {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shop-bone {
+    animation: none;
+  }
+}
+
+@media (prefers-contrast: more) and (not (forced-colors: active)) {
+  .shop-bone {
+    background-color: color-mix(in srgb, var(--color-skeleton), var(--color-text-primary) 30%);
+  }
+}
+
+@media (forced-colors: active) {
+  .shop-bone {
+    background-color: GrayText;
+    opacity: 1;
+  }
+}
+
 .shop-rounded {
   border-radius: var(--radius-container);
   overflow: hidden;

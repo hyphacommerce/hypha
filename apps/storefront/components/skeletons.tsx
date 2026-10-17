@@ -5,8 +5,33 @@
 import { AspectRatio } from "@astryxdesign/core/AspectRatio";
 import { Card } from "@astryxdesign/core/Card";
 import { Grid } from "@astryxdesign/core/Grid";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
+import type { CSSProperties } from "react";
+
+/**
+ * A placeholder with Astryx's Skeleton look (its colour token, fade, stagger and the
+ * reduced-motion and forced-colours fallbacks), as one element with one class
+ * (`.shop-bone`, globals.css). Astryx's own carries some fifteen atomic classes and
+ * inline variables, and a page's skeleton has a hundred placeholders, rendered with
+ * every dynamic page even when its content is ready at once: a quarter of the search
+ * page's HTML (design note 0025, §6).
+ */
+export function Skeleton({
+  width = "100%",
+  height = "100%",
+  radius = 3,
+  index = 0,
+}: {
+  width?: number | string;
+  height?: number | string;
+  /** Astryx's steps: 1 inner, 2 element, 3 container. */
+  radius?: 1 | 2 | 3;
+  /** Its place in a sequence: each starts fading 100 ms after the one before. */
+  index?: number;
+}) {
+  const style = { width, height, "--bone-delay": `${1000 + 100 * index}ms` } as CSSProperties;
+  return <div className="shop-bone" data-radius={radius} aria-hidden="true" style={style} />;
+}
 
 /** A product card: the image, the title, the price. */
 function CardSkeleton({ index }: { index: number }) {
