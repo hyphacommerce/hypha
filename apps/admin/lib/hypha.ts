@@ -211,6 +211,18 @@ export function describe(error: ApiError): string {
       return "Products take images and videos; a variant shows an image.";
     case "country_in_other_zone":
       return "A country you listed is already in another zone. A country ships from one zone.";
+    case "category_handle_taken":
+      return "Another category has that handle. Handles are unique across categories.";
+    case "category_cycle":
+      return "A category can't move under itself or one of its subcategories.";
+    case "category_too_deep":
+      return `${error.error.charAt(0).toUpperCase()}${error.error.slice(1)}.`;
+    case "category_has_children":
+      return "This category has subcategories. Move or delete them first.";
+    case "category_parent_not_found":
+      return "That parent category no longer exists. Reload the page.";
+    case "category_not_found":
+      return "That category no longer exists. Reload the page.";
     case "invalid_country_code":
       return "Countries are two-letter codes, like HR or DE.";
     case "unknown_country_code":

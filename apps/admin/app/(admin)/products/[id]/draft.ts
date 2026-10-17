@@ -45,6 +45,8 @@ export type Draft = {
   tags: string[];
   options: OptionDraft[];
   variants: VariantDraft[];
+  /** The categories it's directly in (design note 0022), sorted. */
+  categories: string[];
 };
 
 let nextKey = 0;
@@ -76,6 +78,7 @@ export function fromProduct(product: Product, currencies: Currencies): Draft {
         product.options.map((o, i) => [o.id, v.selections[i]] as const),
       ),
     })),
+    categories: [...product.categories].sort(),
   };
 }
 
@@ -151,6 +154,8 @@ export type SavePlan = {
   product?: AdminSchemas["UpdateProductRequest"];
   options?: { options: AdminSchemas["OptionRequest"][]; removeVariants: string[] };
   variants?: VariantPlan[];
+  /** The product's whole set of categories (`PUT …/categories`). */
+  categories?: string[];
 };
 
 function details(d: Draft) {
@@ -185,6 +190,7 @@ export function changes(draft: Draft, saved: Draft, currency: string, currencies
     variants:
       options ||
       !same(variantsKey(draft, currency, currencies), variantsKey(saved, currency, currencies)),
+    categories: !same([...draft.categories].sort(), [...saved.categories].sort()),
   };
 }
 
@@ -255,6 +261,7 @@ export function plan(
     }
     result.variants = planned;
   }
+  if (changed.categories) result.categories = [...draft.categories].sort();
   return { plan: result };
 }
 

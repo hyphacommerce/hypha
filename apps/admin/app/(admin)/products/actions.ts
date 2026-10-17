@@ -70,8 +70,8 @@ export type SaveResult = {
 
 /**
  * Saves the product editor's draft (design note 0021, section 8): the product's PATCH,
- * then its options, then its whole variant list (`PUT …/variants`), each only when its
- * part changed. Values created by the options step are found by option name and label
+ * then its options, then its whole variant list (`PUT …/variants`), then its categories
+ * (`PUT …/categories`, design note 0022), each only when its part changed. Values created by the options step are found by option name and label
  * for the variants that select them. Stops at the first failure: what came before it
  * stays saved.
  */
@@ -107,6 +107,16 @@ export async function saveProduct(id: string, plan: SavePlan): Promise<SaveResul
         body: { variants },
       });
       if (error) return { error: describe(error), options };
+      product = data;
+    }
+    if (plan.categories) {
+      const { error } = await client.PUT("/admin/products/{id}/categories", {
+        params: { path: { id } },
+        body: { categories: plan.categories },
+      });
+      if (error) return { error: describe(error), options };
+      // The product as it is now, its categories included.
+      const { data } = await client.GET("/admin/products/{id}", { params: { path: { id } } });
       product = data;
     }
     return { product };

@@ -20,6 +20,7 @@ import { PageHeader } from "@/components/page-header";
 import { Pager } from "@/components/pager";
 import { ProductStatusBadge } from "@/components/status";
 import { type Currencies, formatMoney } from "@/lib/format";
+import { pathsById } from "@/lib/categories";
 import { channelNames, loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
 
 import { SearchBox } from "./search-box";
@@ -49,6 +50,13 @@ function priceRanges(
         : `${formatMoney(min, currencies)} – ${formatMoney(max, currencies)}`,
     )
     .join(", ");
+}
+
+/** A product's categories by name, at most two then "+N". */
+function categoryNames(ids: string[], names: Map<string, string>): string {
+  if (ids.length === 0) return "—";
+  const shown = ids.slice(0, 2).map((id) => names.get(id)?.split(" › ").at(-1) ?? id);
+  return ids.length > 2 ? `${shown.join(", ")} +${ids.length - 2}` : shown.join(", ");
 }
 
 /** The product's featured image, small; a placeholder for none (or a video). */
@@ -98,11 +106,14 @@ export default async function ProductsPage({
   };
 
   const client = await sessionClient();
-  const [result, channelName, currencies] = await Promise.all([
+  const [result, channelName, currencies, categories] = await Promise.all([
     client.GET("/admin/products", { params: { query: { status, q, cursor } } }),
     channelNames(client),
     loadCurrencies(),
+    client.GET("/admin/categories"),
   ]);
+  // The tree once, for every row's category names.
+  const categoryName = pathsById(categories.data?.items ?? []);
   // A hand-edited URL (an old or foreign cursor, text over 255 characters): start the
   // list again, same status.
   if (result.response.status === 400 || result.response.status === 422) {
@@ -115,7 +126,12 @@ export default async function ProductsPage({
       <VStack gap={5}>
         <PageHeader
           title="Products"
-          actions={<Button label="Add product" variant="primary" href="/products/new" />}
+          actions={
+            <>
+              <Button label="Categories" variant="secondary" href="/products/categories" />
+              <Button label="Add product" variant="primary" href="/products/new" />
+            </>
+          }
         />
 
         <HStack gap={3} vAlign="center">
@@ -165,6 +181,7 @@ export default async function ProductsPage({
                 <TableHeaderCell>Product</TableHeaderCell>
                 <TableHeaderCell>Status</TableHeaderCell>
                 <TableHeaderCell>Channels</TableHeaderCell>
+                <TableHeaderCell>Categories</TableHeaderCell>
                 <TableHeaderCell>Variants</TableHeaderCell>
                 <TableHeaderCell>Price</TableHeaderCell>
               </TableRow>
@@ -193,6 +210,13 @@ export default async function ProductsPage({
                       <Text color="secondary">None</Text>
                     ) : (
                       product.channels.map((id) => channelName.get(id) ?? id).join(", ")
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {product.categories.length === 0 ? (
+                      <Text color="secondary">None</Text>
+                    ) : (
+                      categoryNames(product.categories, categoryName)
                     )}
                   </TableCell>
                   <TableCell>{product.variant_count}</TableCell>

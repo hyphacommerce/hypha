@@ -21,10 +21,11 @@ import { StatusActions } from "./status-actions";
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const [product, channels] = await Promise.all([
+  const [product, channels, categories] = await Promise.all([
     client.GET("/admin/products/{id}", { params: { path: { id } } }).then(loaded),
     // Without `channels:read` the page shows no Publishing card.
     client.GET("/admin/channels"),
+    client.GET("/admin/categories"),
   ]);
 
   return (
@@ -51,6 +52,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             )
           }
           media={<MediaSection id={product.id} media={product.media} />}
+          categoryTree={categories.data?.items}
         />
 
         <Card>

@@ -8,8 +8,10 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { type ReactNode, useEffect, useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
+import type { CategoryNode } from "@/lib/categories";
 
 import { saveProduct } from "../actions";
+import { CategoriesCard } from "./categories-card";
 import { ContentForm } from "./content-form";
 import { DetailsForm } from "./details-form";
 import { type Draft, changes, fromProduct, plan, rebaseOptions } from "./draft";
@@ -19,8 +21,8 @@ import { VariantsSection } from "./variants-section";
 type Product = AdminSchemas["ProductResponse"];
 
 /**
- * The product's details, content, options and variants as one draft (design note 0021,
- * section 8): edits change only the draft, and a bar at the top saves or discards them
+ * The product's details, content, categories, options and variants as one draft (design
+ * notes 0021, section 8, and 0022, section 5): edits change only the draft, and a bar at the top saves or discards them
  * together. Media and publishing (`media`, `publishing`) act at once, as before: an
  * upload can't wait for Save, and publishing is its own decision.
  *
@@ -31,10 +33,13 @@ export function ProductEditor({
   product,
   publishing,
   media,
+  categoryTree,
 }: {
   product: Product;
   publishing: ReactNode;
   media: ReactNode;
+  /** `undefined` when the tree couldn't be read: no Categories card then. */
+  categoryTree?: CategoryNode[];
 }) {
   const currencies = useCurrencies();
   const currency = product.variants[0]?.price.currency ?? "EUR";
@@ -45,7 +50,7 @@ export function ProductEditor({
 
   const saved = fromProduct(base, currencies);
   const changed = changes(draft, saved, currency, currencies);
-  const isDirty = changed.product || changed.options || changed.variants;
+  const isDirty = changed.product || changed.options || changed.variants || changed.categories;
 
   // A new saved product (React's "adjust state while rendering"): take it in, and reset
   // the draft to it unless the draft holds unsaved edits.
@@ -141,6 +146,7 @@ export function ProductEditor({
         onChange={edit}
       />
       {publishing}
+      {categoryTree && <CategoriesCard tree={categoryTree} draft={draft} onChange={edit} />}
       <ContentForm draft={draft} onChange={edit} />
       {media}
       <OptionsEditor draft={draft} savedTitles={savedTitles} onChange={edit} />
