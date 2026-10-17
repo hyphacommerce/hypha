@@ -6,6 +6,8 @@
 #
 #   pnpm dev                 # or: bash scripts/dev.sh
 #   HYPHA_DEV_API_ONLY=1 pnpm dev
+#   HYPHA_DEV_DB=hypha_demo HYPHA_OWNER_EMAIL=owner@example.com \
+#     HYPHA_OWNER_PASSWORD=demo-owner-password pnpm dev   # then `pnpm seed`
 #
 # The API's HYPHA_SECRET_KEY is made once and kept in .dev-secret-key (ignored by git),
 # since it seals 2FA secrets. Data lives in the hypha_preview database. On a fresh
@@ -22,12 +24,14 @@ if ! docker info >/dev/null 2>&1; then
 fi
 docker compose up -d --wait
 
-# A database of its own, apart from the one the tests use (`hypha`); DATABASE_URL wins.
+# A database of its own, apart from the one the tests use (`hypha`): `hypha_preview`,
+# or HYPHA_DEV_DB (`hypha_demo` for the seeded demo store); DATABASE_URL wins.
 if [ -z "${DATABASE_URL:-}" ]; then
+  DB="${HYPHA_DEV_DB:-hypha_preview}"
   docker compose exec -T postgres psql -U hypha -tAc \
-    "SELECT 1 FROM pg_database WHERE datname = 'hypha_preview'" | grep -q 1 ||
-    docker compose exec -T postgres psql -U hypha -qc "CREATE DATABASE hypha_preview"
-  export DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha_preview
+    "SELECT 1 FROM pg_database WHERE datname = '$DB'" | grep -q 1 ||
+    docker compose exec -T postgres psql -U hypha -qc "CREATE DATABASE $DB"
+  export DATABASE_URL="postgres://hypha:hypha@localhost:5432/$DB"
 fi
 
 if [ ! -s .dev-secret-key ]; then
