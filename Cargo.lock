@@ -906,6 +906,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-categories"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-channels"
 version = "0.1.0"
 dependencies = [
@@ -942,6 +955,7 @@ name = "hypha-config"
 version = "0.1.0"
 dependencies = [
  "hypha-auth",
+ "hypha-categories",
  "hypha-core",
  "hypha-dispatch",
  "hypha-media",
@@ -958,6 +972,7 @@ dependencies = [
 name = "hypha-core"
 version = "0.1.0"
 dependencies = [
+ "ammonia",
  "pollster",
  "serde",
  "serde_json",
@@ -1156,7 +1171,6 @@ dependencies = [
 name = "hypha-products"
 version = "0.1.0"
 dependencies = [
- "ammonia",
  "hypha-core",
  "hypha-testkit",
  "pollster",
@@ -1219,6 +1233,7 @@ dependencies = [
  "hypha-apps",
  "hypha-auth",
  "hypha-cart",
+ "hypha-categories",
  "hypha-channels",
  "hypha-checkout",
  "hypha-core",
@@ -1288,6 +1303,7 @@ dependencies = [
  "hypha-apps",
  "hypha-auth",
  "hypha-cart",
+ "hypha-categories",
  "hypha-channels",
  "hypha-core",
  "hypha-customers",

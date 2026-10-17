@@ -3,6 +3,7 @@ use std::fmt::Display;
 use hypha_apps::keys as app_keys;
 use hypha_auth::keys as auth_keys;
 use hypha_cart::repo::keys as cart_keys;
+use hypha_categories::keys as category_keys;
 use hypha_channels::keys as channel_keys;
 use hypha_core::{RepoError, idempotency::keys as idempotency_keys};
 use hypha_customers::repo::keys as customer_keys;
@@ -56,6 +57,8 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("stores_pkey", store_keys::STORE_ID),
     ("channels_pkey", channel_keys::CHANNEL_ID),
     ("channel_name", channel_keys::CHANNEL_NAME),
+    ("categories_pkey", category_keys::CATEGORY_ID),
+    ("category_handle", category_keys::CATEGORY_HANDLE),
     ("search_settings_pkey", search_keys::SETTINGS),
     ("idempotency_key", idempotency_keys::IDEMPOTENCY_KEY),
     ("orders_pkey", order_keys::ORDER_ID),

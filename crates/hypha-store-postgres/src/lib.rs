@@ -16,6 +16,7 @@ mod apps;
 mod auth;
 mod batch;
 mod carts;
+mod categories;
 mod channels;
 mod columns;
 mod config;

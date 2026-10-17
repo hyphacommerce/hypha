@@ -6,6 +6,7 @@ mod auth;
 mod batch;
 mod carts;
 mod catalogs;
+mod categories;
 mod channels;
 mod clock;
 mod customers;
@@ -37,6 +38,7 @@ pub use auth::{
 pub use batch::InMemoryBatch;
 pub use carts::InMemoryCartRepo;
 pub use catalogs::InMemoryCatalogRepo;
+pub use categories::InMemoryCategoryRepo;
 pub use channels::InMemoryChannelRepo;
 pub use clock::FixedClock;
 pub use customers::InMemoryCustomerRepo;

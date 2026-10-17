@@ -15,6 +15,12 @@
         "session_lifetime": "7d"
       }
     },
+    "categories": {
+      "$ref": "#/$defs/Categories",
+      "default": {
+        "max_depth": 5
+      }
+    },
     "database": {
       "$ref": "#/$defs/Database",
       "default": {
@@ -173,6 +179,21 @@
           "description": "How long a session lasts from login. At least 1 minute.",
           "$ref": "#/$defs/Duration",
           "default": "7d"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Categories": {
+      "description": "The product category tree (design note 0022).",
+      "type": "object",
+      "properties": {
+        "max_depth": {
+          "description": "How many levels categories nest, 1 to 10. Lowering it leaves deeper categories\nwhere they are: it applies to creating and moving.",
+          "type": "integer",
+          "format": "uint8",
+          "default": 5,
+          "maximum": 255,
+          "minimum": 0
         }
       },
       "additionalProperties": false

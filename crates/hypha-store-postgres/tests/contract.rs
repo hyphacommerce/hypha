@@ -263,3 +263,9 @@ async fn channel_repo() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn category_repo() {
+    let Some(url) = database_url() else { return };
+    contract::category_repo(async || fresh_store(&url, "contract_categories").await).await;
+}

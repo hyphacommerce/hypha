@@ -3,9 +3,10 @@ use hypha_auth::{
     keys as auth_keys,
 };
 use hypha_cart::{Cart, StageCarts, repo::keys as cart_keys};
+use hypha_categories::{Category, StageCategories, keys as category_keys};
 use hypha_channels::StagePublications;
 use hypha_core::{
-    CatalogId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
+    CatalogId, CategoryId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
     PriceListId, ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency,
     TaxClassId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
@@ -22,6 +23,7 @@ use hypha_users::{Invite, Role, StageInvites, StageRoles, StageUsers, User, keys
 use crate::{
     InMemoryPorts,
     auth::{unique_identity, unique_reset, unique_session},
+    categories::{check_parent, unique as unique_category},
     customers::unique as unique_customer,
     idempotency::insert_record,
     inventory_items,
@@ -69,6 +71,10 @@ enum Staged {
     UsedUpResets(IdentityId, Timestamp),
     CatalogProducts(CatalogId, Vec<ProductId>, bool),
     Publications(ChannelId, Vec<ProductId>, bool),
+    NewCategory(Category),
+    Category(Category),
+    DeletedCategory(CategoryId),
+    CategoryProducts(CategoryId, Vec<ProductId>, bool),
     TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
     FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
     Events(Vec<PendingEvent>, Option<Version>),
@@ -314,6 +320,10 @@ impl HasBatch for InMemoryPorts {
         let memberships_before = memberships.clone();
         let mut publications = self.channels.lock_products();
         let publications_before = publications.clone();
+        let mut categories = self.categories.categories.lock();
+        let categories_before = categories.clone();
+        let mut category_members = self.categories.lock_members();
+        let category_members_before = category_members.clone();
         let mut fixed_prices = self.price_lists.lock_fixed_prices();
         let fixed_prices_before = fixed_prices.clone();
         let mut tax_classes = self.tax_classes.lock_assignments();
@@ -498,6 +508,46 @@ impl HasBatch for InMemoryPorts {
                             }
                         }
                     }
+                    Staged::NewCategory(mut category) => {
+                        check_parent(&categories, &category)?;
+                        insert_row(
+                            &mut categories,
+                            category.id(),
+                            &mut category,
+                            category_keys::CATEGORY_ID,
+                            &unique_category,
+                        )?
+                    }
+                    Staged::Category(mut category) => {
+                        check_parent(&categories, &category)?;
+                        update_row(
+                            &mut categories,
+                            category.id(),
+                            &mut category,
+                            &unique_category,
+                        )?
+                    }
+                    Staged::DeletedCategory(id) => {
+                        // What the parent's foreign key enforces: no orphaned children.
+                        if categories.values().any(|c| c.parent() == Some(id)) {
+                            return Err(RepoError::Backend(format!("category {id} has children")));
+                        }
+                        categories.remove(&id);
+                        category_members.remove(&id);
+                    }
+                    Staged::CategoryProducts(category, products, add) => {
+                        if !categories.contains_key(&category) {
+                            return Err(missing("category", category));
+                        }
+                        let members = category_members.entry(category).or_default();
+                        for product in products {
+                            if add {
+                                members.insert(product);
+                            } else {
+                                members.remove(&product);
+                            }
+                        }
+                    }
                     Staged::TaxAssignment(products, class) => {
                         for product in products {
                             match class {
@@ -534,6 +584,8 @@ impl HasBatch for InMemoryPorts {
             *fulfillments = fulfillments_before;
             *memberships = memberships_before;
             *publications = publications_before;
+            *categories = categories_before;
+            *category_members = category_members_before;
             *fixed_prices = fixed_prices_before;
             *tax_classes = tax_classes_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
@@ -549,6 +601,37 @@ impl StagePublications for InMemoryBatch {
 
     fn unpublish_products(&mut self, channel: ChannelId, products: &[ProductId]) {
         self.stage(Staged::Publications(channel, products.to_vec(), false));
+    }
+}
+
+impl StageCategories for InMemoryBatch {
+    fn insert_category(&mut self, category: &mut Category) {
+        stamp_insert(category, self.now);
+        // The copy staged keeps no events: they're staged on their own, next.
+        let events = category.take_events();
+        self.stage(Staged::NewCategory(category.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        category.set_version(Version::NEW.next());
+    }
+
+    fn update_category(&mut self, category: &mut Category) {
+        stamp_update(category, self.now);
+        let version = category.version().next();
+        self.stage_events_of(category, version);
+        self.stage(Staged::Category(category.clone()));
+        category.set_version(version);
+    }
+
+    fn delete_category(&mut self, category: CategoryId) {
+        self.stage(Staged::DeletedCategory(category));
+    }
+
+    fn add_category_products(&mut self, category: CategoryId, products: &[ProductId]) {
+        self.stage(Staged::CategoryProducts(category, products.to_vec(), true));
+    }
+
+    fn remove_category_products(&mut self, category: CategoryId, products: &[ProductId]) {
+        self.stage(Staged::CategoryProducts(category, products.to_vec(), false));
     }
 }
 

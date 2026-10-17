@@ -5,8 +5,9 @@ use hypha_auth::{
     StageIdentities, StagePasswordResets, StageSessions,
 };
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
+use hypha_categories::{Category, CategorySnapshot, StageCategories};
 use hypha_core::{
-    CatalogId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
+    CatalogId, CategoryId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
     PriceListId, ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency,
     TaxClassId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
@@ -29,6 +30,10 @@ use crate::{
         update_password_reset, update_session, use_up_password_resets,
     },
     carts::{insert_cart, update_cart},
+    categories::{
+        add_category_products, delete_category, insert_category, remove_category_products,
+        update_category,
+    },
     customers::insert_customer,
     error::repo_error,
     fulfillments::{insert_fulfillment, update_fulfillment},
@@ -90,6 +95,11 @@ enum Staged {
     CatalogProducts(CatalogId, Vec<ProductId>, bool),
     /// Publications: published (`true`) or unpublished.
     Publications(ChannelId, Vec<ProductId>, bool),
+    NewCategory(CategorySnapshot),
+    Category(CategorySnapshot),
+    DeletedCategory(CategoryId),
+    /// Category membership: added (`true`) or removed.
+    CategoryProducts(CategoryId, Vec<ProductId>, bool),
     /// Fixed prices set (`Some` price) or removed (`None`), per variant.
     FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
     /// Events about the aggregate staged just before, with the version that write gives
@@ -127,17 +137,22 @@ impl Staged {
             Staged::NewPasswordReset(_) => 19,
             Staged::PasswordReset(_) => 20,
             Staged::UsedUpResets(..) => 21,
+            // Categories before their membership (a new one must exist first).
+            Staged::NewCategory(_) => 22,
+            Staged::Category(_) => 23,
+            Staged::DeletedCategory(_) => 24,
+            Staged::CategoryProducts(..) => 25,
             // Set-based writes (memberships, fixed prices, tax classes): one statement
             // each, whatever the number of rows.
-            Staged::CatalogProducts(..) => 22,
-            Staged::Publications(..) => 23,
-            Staged::FixedPrices(..) => 24,
-            Staged::TaxAssignment(..) => 25,
-            Staged::Idempotency(_) => 26,
-            Staged::InventoryItem(_) => 27,
-            Staged::DeletedInventoryItem(_) => 28,
+            Staged::CatalogProducts(..) => 26,
+            Staged::Publications(..) => 27,
+            Staged::FixedPrices(..) => 28,
+            Staged::TaxAssignment(..) => 29,
+            Staged::Idempotency(_) => 30,
+            Staged::InventoryItem(_) => 31,
+            Staged::DeletedInventoryItem(_) => 32,
             // Inserts into a table nothing else locks: anywhere would do.
-            Staged::Events(..) => 29,
+            Staged::Events(..) => 33,
         }
     }
 
@@ -176,6 +191,10 @@ impl Staged {
                 }
                 (Staged::CatalogProducts(a, ..), Staged::CatalogProducts(b, ..)) => a.cmp(b),
                 (Staged::Publications(a, ..), Staged::Publications(b, ..)) => a.cmp(b),
+                (Staged::NewCategory(a), Staged::NewCategory(b))
+                | (Staged::Category(a), Staged::Category(b)) => a.id.cmp(&b.id),
+                (Staged::DeletedCategory(a), Staged::DeletedCategory(b)) => a.cmp(b),
+                (Staged::CategoryProducts(a, ..), Staged::CategoryProducts(b, ..)) => a.cmp(b),
                 (Staged::FixedPrices(a, _), Staged::FixedPrices(b, _)) => a.cmp(b),
                 _ => Ordering::Equal,
             })
@@ -469,6 +488,17 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                 Staged::Publications(channel, products, false) => {
                     crate::channels::unpublish(&tx, channel, &products).await?
                 }
+                Staged::NewCategory(s) => insert_category(&tx, &s).await?,
+                Staged::Category(s) => {
+                    update_category(&tx, &s).await?;
+                }
+                Staged::DeletedCategory(id) => delete_category(&tx, id).await?,
+                Staged::CategoryProducts(category, products, true) => {
+                    add_category_products(&tx, category, &products).await?
+                }
+                Staged::CategoryProducts(category, products, false) => {
+                    remove_category_products(&tx, category, &products).await?
+                }
                 Staged::FixedPrices(list, changes) => {
                     let set: Vec<(VariantId, Price)> = changes
                         .iter()
@@ -502,6 +532,36 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         update_items(&tx, items).await?;
         delete_items(&tx, &deleted).await?;
         tx.commit().await.map_err(repo_error)
+    }
+}
+
+impl StageCategories for PgBatch {
+    fn insert_category(&mut self, category: &mut Category) {
+        stamp_insert(category, self.now);
+        let events = category.take_events();
+        self.stage(Staged::NewCategory(category.snapshot()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        category.set_version(Version::NEW.next());
+    }
+
+    fn update_category(&mut self, category: &mut Category) {
+        stamp_update(category, self.now);
+        let version = category.version().next();
+        self.stage_events_of(category, version);
+        self.stage(Staged::Category(category.snapshot()));
+        category.set_version(version);
+    }
+
+    fn delete_category(&mut self, category: CategoryId) {
+        self.stage(Staged::DeletedCategory(category));
+    }
+
+    fn add_category_products(&mut self, category: CategoryId, products: &[ProductId]) {
+        self.stage(Staged::CategoryProducts(category, products.to_vec(), true));
+    }
+
+    fn remove_category_products(&mut self, category: CategoryId, products: &[ProductId]) {
+        self.stage(Staged::CategoryProducts(category, products.to_vec(), false));
     }
 }
 

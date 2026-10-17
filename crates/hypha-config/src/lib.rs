@@ -15,6 +15,7 @@ pub mod units;
 use core::time::Duration;
 
 use hypha_auth::AuthSettings;
+use hypha_categories::CategorySettings;
 use hypha_core::ErrorCode;
 use hypha_dispatch::{DispatchSettings, LONGEST_RUN, RetrySchedule};
 use hypha_media::MediaSettings;
@@ -37,6 +38,7 @@ pub struct Config {
     pub allow_private_callbacks: bool,
     pub media: MediaConfig,
     pub auth: AuthSettings,
+    pub categories: CategorySettings,
     pub dispatch: DispatchSettings,
     /// The search sync job's batch and lease (design note 0019).
     pub search_sync: SyncSettings,
@@ -544,6 +546,17 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             );
         }
     }
+    let max_depth = file.categories.max_depth;
+    if !(1..=CategorySettings::MAX_DEPTH_LIMIT).contains(&max_depth) {
+        p.add(
+            "categories.max_depth",
+            Broken::NumberOutOfRange {
+                value: u64::from(max_depth),
+                min: 1,
+                max: u64::from(CategorySettings::MAX_DEPTH_LIMIT),
+            },
+        );
+    }
     // Long enough to rebuild a batch, so a lease doesn't end while its runner works.
     p.at_least(
         "jobs.search_sync.lease",
@@ -628,6 +641,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             password_reset_resend_after: auth.password_reset_resend_after.0,
             invite_lifetime: auth.invite_lifetime.0,
         },
+        categories: CategorySettings { max_depth },
         dispatch: DispatchSettings {
             batch: jobs.dispatch.batch,
             lease: jobs.dispatch.lease.0,
@@ -871,6 +885,27 @@ mod tests {
                 "jobs.search_sync.batch: is 0, 1 to 1000",
                 "jobs.search_sync.lease: is 5s, at least 10s is needed",
             ]
+        );
+    }
+
+    #[test]
+    fn categories_nest_1_to_10_levels() {
+        let config = load("").unwrap();
+        assert_eq!(config.categories.max_depth, 5);
+        assert_eq!(
+            load("[categories]\nmax_depth = 10")
+                .unwrap()
+                .categories
+                .max_depth,
+            10
+        );
+        assert_eq!(
+            problems(load("[categories]\nmax_depth = 0")),
+            ["categories.max_depth: is 0, 1 to 10"]
+        );
+        assert_eq!(
+            problems(load("[categories]\nmax_depth = 11")),
+            ["categories.max_depth: is 11, 1 to 10"]
         );
     }
 

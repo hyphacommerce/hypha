@@ -129,6 +129,8 @@ define_id!(OrderId, "ord");
 define_id!(OrderLineId, "ordl");
 define_id!(FulfillmentId, "ful");
 define_id!(ChannelId, "chan");
+// Categories (design note 0022).
+define_id!(CategoryId, "pcat");
 
 define_id!(RoleId, "role");
 define_id!(InviteId, "inv");

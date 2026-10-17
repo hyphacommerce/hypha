@@ -14,8 +14,8 @@ use hypha_users::{HasInvites, HasRoles, HasUsers};
 
 use crate::{
     InMemoryApiKeyRepo, InMemoryAppProviderRepo, InMemoryAppRepo, InMemoryAssetRepo,
-    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryChannelRepo, InMemoryCustomerRepo,
-    InMemoryFulfillmentRepo, InMemoryIdempotencyRepo, InMemoryIdentityRepo,
+    InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCategoryRepo, InMemoryChannelRepo,
+    InMemoryCustomerRepo, InMemoryFulfillmentRepo, InMemoryIdempotencyRepo, InMemoryIdentityRepo,
     InMemoryInventoryItemRepo, InMemoryInviteRepo, InMemoryLocationRepo, InMemoryMarketRepo,
     InMemoryOrderRepo, InMemoryOutbox, InMemoryPasswordResetRepo, InMemoryPriceListRepo,
     InMemoryProductRepo, InMemoryRoleRepo, InMemorySearchQueue, InMemorySearchSettingsRepo,
@@ -55,6 +55,8 @@ pub struct InMemoryPorts {
     pub invites: InMemoryInviteRepo,
     // Sales channels and their publications (design note 0020).
     pub channels: InMemoryChannelRepo,
+    // Categories and their membership (design note 0022).
+    pub categories: InMemoryCategoryRepo,
     // Search's queue and settings (design note 0019); the engine is passed apart.
     pub search_queue: InMemorySearchQueue,
     pub search_settings: InMemorySearchSettingsRepo,
@@ -90,6 +92,7 @@ impl Default for InMemoryPorts {
             roles: InMemoryRoleRepo::default(),
             invites: InMemoryInviteRepo::default(),
             channels: InMemoryChannelRepo::sharing(&outbox),
+            categories: InMemoryCategoryRepo::sharing(&outbox),
             search_queue: InMemorySearchQueue::default(),
             search_settings: InMemorySearchSettingsRepo::sharing(&outbox),
             outbox,
@@ -297,6 +300,13 @@ impl hypha_search_index::HasSearchSettings for InMemoryPorts {
     type SearchSettings = InMemorySearchSettingsRepo;
     fn search_settings(&self) -> &InMemorySearchSettingsRepo {
         &self.search_settings
+    }
+}
+
+impl hypha_categories::HasCategories for InMemoryPorts {
+    type Categories = InMemoryCategoryRepo;
+    fn categories(&self) -> &InMemoryCategoryRepo {
+        &self.categories
     }
 }
 

@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use hypha_auth::AuthSettings;
+use hypha_categories::CategorySettings;
 use hypha_dispatch::DispatchSettings;
 use hypha_media::MediaSettings;
 use hypha_search::SyncSettings;
@@ -27,6 +28,7 @@ pub struct File {
     pub outbound: Outbound,
     pub media: Media,
     pub auth: Auth,
+    pub categories: Categories,
     pub webhooks: Webhooks,
     pub jobs: Jobs,
     pub rate_limits: RateLimits,
@@ -201,6 +203,23 @@ impl Default for Auth {
             password_reset_lifetime: Dur(d.password_reset_lifetime),
             password_reset_resend_after: Dur(d.password_reset_resend_after),
             invite_lifetime: Dur(d.invite_lifetime),
+        }
+    }
+}
+
+/// The product category tree (design note 0022).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Categories {
+    /// How many levels categories nest, 1 to 10. Lowering it leaves deeper categories
+    /// where they are: it applies to creating and moving.
+    pub max_depth: u8,
+}
+
+impl Default for Categories {
+    fn default() -> Self {
+        Self {
+            max_depth: CategorySettings::default().max_depth,
         }
     }
 }
