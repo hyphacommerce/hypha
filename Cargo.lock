@@ -1035,6 +1035,7 @@ dependencies = [
  "hypha-apps",
  "hypha-auth",
  "hypha-cart",
+ "hypha-categories",
  "hypha-channels",
  "hypha-checkout",
  "hypha-config",
@@ -1122,6 +1123,7 @@ dependencies = [
 name = "hypha-merchandising"
 version = "0.1.0"
 dependencies = [
+ "hypha-categories",
  "hypha-core",
  "hypha-media",
  "hypha-products",
@@ -1184,6 +1186,7 @@ dependencies = [
 name = "hypha-search"
 version = "0.1.0"
 dependencies = [
+ "hypha-categories",
  "hypha-channels",
  "hypha-core",
  "hypha-inventory",
