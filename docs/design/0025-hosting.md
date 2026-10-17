@@ -115,9 +115,10 @@ is a round trip through Hyperdrive.
 - **A load's queries went one after another.** A product load (product, options,
   values, variants, media), a market, a location and an inventory item now select their
   children through the root's filter (a join) instead of waiting for its IDs, and send
-  them together (`try_join`), pipelined in one round trip; a read-only snapshot ends by
-  dropping its transaction (a queued ROLLBACK) instead of waiting for a COMMIT. Fewer
-  round trips matter little on one server and a lot through Hyperdrive.
+  them together (`try_join`), pipelined in one round trip. (A read-only snapshot also
+  ended by dropping its transaction, a queued ROLLBACK, instead of waiting for a COMMIT;
+  through Hyperdrive that stalled the next query, so transactions end explicitly again:
+  0026, §8.) Fewer round trips matter little on one server and a lot through Hyperdrive.
 - **The market was read twice** for a priced product, and once per market again by
   search sync (`load_pricing_for` takes the market already loaded). **The publishable
   key** was looked up on every storefront request; it's cached for 30 seconds

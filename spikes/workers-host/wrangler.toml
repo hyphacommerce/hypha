@@ -4,3 +4,14 @@ compatibility_date = "2026-10-01"
 
 [build]
 command = "true"
+
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "e784c457396d4446a8df31c612eb6958"
+
+[observability]
+enabled = true
+
+# Run next to the database (Neon, AWS eu-central-1): its round trips are most of a read.
+[placement]
+region = "aws:eu-central-1"

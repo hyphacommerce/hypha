@@ -1,7 +1,7 @@
 # 0026: The API on Cloudflare Workers
 
-- **Status:** Proposed (2026-10-17); W3 and W5 accepted. A spike (§8) settles the open
-  facts before the refactor starts. Which database to recommend is open (§9).
+- **Status:** Proposed (2026-10-17); W3 and W5 accepted. The spike (§8) ran on
+  2026-10-17: go. Which database to recommend is open (§9).
 - **Scope:**
   - `hypha-host-workers`: the same routes, commands and Postgres adapter as the VPS,
     on Workers, through Hyperdrive;
@@ -33,13 +33,14 @@ and cut most of it; this note carries that host to Workers.
 | W1 | **A native Workers host, `wasm32-unknown-unknown` with workers-rs** (the `worker` crate, its `http` feature), not Cloudflare Containers (0025, H2) and not, yet, workers-rs's Emscripten target. Emscripten would run Tokio and real sockets nearly unchanged, but it's an experimental preview on a patched Tokio fork; revisit when it isn't. *Proposed* |
 | W2 | **The same axum routes.** The `http` feature hands axum an `http::Request` and takes its response, so the route table, extractors, error mapping, DTOs and OpenAPI documents are shared, not rewritten. *Proposed* |
 | W3 | **Split `hypha-host-axum` into a library and two hosts.** `hypha-http` (routes, extractors, errors, DTOs, OpenAPI, the `Storage` and host-port traits, the key cache) builds for wasm; `hypha-host-axum` keeps Tokio, the pool, the job runner and signals; `hypha-host-workers` is the Workers `cdylib`. A pure move first, in its own commit (CLAUDE.md). *Hard to reverse: crate layout; Accepted* |
-| W4 | **Postgres through Hyperdrive with the same adapter.** `env.hyperdrive("DB")?.connect()` gives a `worker::Socket` (Tokio's `AsyncRead`/`AsyncWrite`), which `tokio_postgres::Config::connect_raw` takes; the connection task runs with `spawn_local`. One connection per request; Hyperdrive pools. No statement cache (0025, §6: `database.statement_cache` is a VPS setting; Hyperdrive's transaction pooling and prepared statements are a spike question). Cloudflare lists rust-postgres as supported and recommends `query_typed`, which every repository already uses. *Proposed* |
+| W4 | **Postgres through Hyperdrive with the same adapter.** `env.hyperdrive("DB")?.connect()` gives a `worker::Socket` (Tokio's `AsyncRead`/`AsyncWrite`), which `tokio_postgres::Config::connect_raw` takes; the connection task runs with `spawn_local`. One connection per request; Hyperdrive pools. No statement cache (0025, §6: `database.statement_cache` is a VPS setting). Cloudflare lists rust-postgres as supported and recommends `query_typed`, which every repository already uses. Proven by the spike: the connection string asks for a plain socket (`hyperdrive.connect()` + `NoTls`), and every transaction must end explicitly (§8). *Proposed* |
 | W5 | **Workers Paid ($5/month) is the baseline.** The free plan's 10 ms of CPU per request can't fit a staff login (Argon2id at OWASP's 19 MiB, 2 passes, natively tens of milliseconds, more in wasm), nor a dynamic page render (0025: ~13–30 ms). Free stays possible for a storefront that serves cached pages, never for the admin. Lowering Argon2's cost to fit is not an option. *Accepted* |
 | W6 | **Jobs are Cron Triggers, woken by writes.** `#[event(scheduled)]` runs the same steps the VPS runner does (`dispatch`, `search_sync`, `prune`, `media_sweep`); a successful write also runs one dispatch step in `ctx.wait_until` (the Workers form of 0025's `wake_after_writes`). Cron's floor is a minute. *Proposed* |
 | W7 | **A quiet store doesn't touch the database.** A cron tick that queried Postgres every minute would keep a serverless database (Neon) awake for good. Writes set a `dirty` marker in KV (and retries record when they're next due); a tick reads KV first and runs the steps only when there's work or a retry is due. *Proposed* |
 | W8 | **Rate limits on Cloudflare's Rate Limiting binding** (`RateLimiter`) behind 0009's `RateLimiter` port: per location and approximate, which suits brute-force limits on login and password reset. A Durable Object would be exact; not worth it for these routes. *Proposed* |
 | W9 | **Migrations and first-start setup run from the CLI, not the Worker.** There's no startup hook, and advisory locks don't survive transaction pooling. `hypha deploy` runs the host binary's `setup` (migrations, the owner, the default location, the search index) against the database's direct URL before deploying the Worker. *Proposed* |
 | W10 | **Files on R2 through the S3 adapter we have.** `hypha-store-s3` already takes its HTTP through an `HttpClient` port; the Workers host implements it with `worker::Fetch`. Public files are served from the bucket's custom domain, thumbnails by Cloudflare's image transformations (`media.transforms = "cloudflare"`, 0013). *Proposed* |
+| W12 | **The API Worker runs next to the database** (`placement.region`, e.g. `aws:eu-central-1` for a Neon database in Frankfurt), not wherever the request arrives: a read is a dozen sequential queries, and each one crossing Europe cost 20–25 ms (§8). `hypha init` sets it from the database's region. *Proposed* |
 | W11 | **Configuration from Worker variables.** `hypha-config` parses a string and reads the environment through a function it's given (0017, CF3): the Worker passes `HYPHA_CONFIG` (the TOML, if any) and reads `env.var` / `env.secret`. Same keys, same checks. *Proposed* |
 
 ## 1. What changes, piece by piece
@@ -170,21 +171,52 @@ the domains; `hypha deploy` then:
 - **workers-rs churn**: 0.x, with the axum example marked untested; versions pinned
   exactly, as with Astryx.
 
-## 8. Spike
+## 8. Spike: results (2026-10-17)
 
-One Worker, a day or two, before any refactor:
+`spikes/workers-host`: one Worker on workers-rs 0.8.7 (`http`, `axum`, `tokio-postgres`),
+axum routes, and the storefront's product read through the real commands
+(`get_product_view_by_handle`, `price_product`) and `PgStore`, over Hyperdrive to a
+Neon database (Postgres in AWS `eu-central-1`) holding the seeded store.
 
-- `GET /health` and `GET /storefront/products/by-handle/{handle}` through the existing
-  axum handler, on a Workers storage (Hyperdrive, `connect_raw`, `PgStore`), against
-  the test server's database or a Neon one.
-- Measure: wasm size (raw and gzip), cold start, CPU per request (product read, search),
-  query latency through Hyperdrive, and one Argon2id hash's CPU time.
-- Settle: whether a Service Binding call counts as a request; whether Hyperdrive keeps
-  prepared statements (and whether a request-scoped cache helps); that `wait_until` and
-  `scheduled` behave as §4 needs; the Rate Limiting binding on the plans.
+| | Result |
+| --- | --- |
+| Builds for `wasm32-unknown-unknown`, axum accepting the real handler (`#[worker::send]`) | Yes |
+| Module size (axum, the Postgres adapter, products, pricing, cart, auth) | 1.1 MB raw, 400 KB gzip |
+| Startup time | 3–6 ms (limit 1 s) |
+| `GET /health` | 2 ms CPU |
+| Connect to Hyperdrive and run one query | 4.5 ms CPU, 13 ms wall |
+| Product read, Worker wherever the request lands (Belgrade) | ~20 ms CPU, 350–430 ms wall |
+| Product read, Worker placed in Frankfurt (W12) | 20 ms CPU (10–28), 114 ms wall |
+| One Argon2id hash (OWASP parameters, a staff login) | 89 ms CPU (63–140) |
+| Service Binding calls (storefront and admin → API) | No request fee; CPU only (Workers pricing) |
 
-Go if a product read stays within a few milliseconds of CPU, a cold start under the
-limit with room, and a login under a second of CPU.
+What it settled:
+
+- **Hyperdrive and `tokio-postgres`**: `hyperdrive.connect()` returns a socket already
+  connected to Hyperdrive; the connection string says `sslmode=disable`, so
+  `connect_raw(socket, NoTls)`. A StartTLS socket fails the handshake.
+- **Dropped transactions stall the connection.** tokio-postgres ends a dropped
+  transaction by queueing a ROLLBACK without waiting; directly against Postgres that
+  works, through Hyperdrive the next query never answered. The adapter now ends every
+  transaction explicitly, COMMIT or ROLLBACK, waiting for it (`end_transaction`), which
+  undoes a round-trip saving from 0025 and costs the VPS a sub-millisecond round trip.
+- **Pipelined queries work through Hyperdrive** (the loads from 0025 that send their
+  queries together).
+- **Where the time goes**: connecting is cheap (Hyperdrive keeps its connections to the
+  database warm); a product read is about thirteen sequential round trips, so placement
+  is the lever (W12): 400 ms became 114. Fewer round trips are the next one: a load's
+  `BEGIN` and `COMMIT` could go out in the same pipeline as its queries (one round trip
+  per load instead of three), and single-statement reads need no transaction at all.
+- **CPU is higher than natively** (20 ms against about 1 ms on the VPS): the handshake,
+  the protocol's many small reads and writes crossing from wasm to JavaScript, and
+  wasm itself. At that rate the paid plan's 30 million CPU-ms a month cover about 1.5
+  million uncached product reads; the storefront's static pages cost the API nothing.
+- **Staff logins** fit the paid plan (89 ms) and not the free one (10 ms), as W5 says.
+
+Not tried in the spike, left to the build (lower risk, documented APIs): `wait_until`,
+the `scheduled` event, the Rate Limiting binding, R2 through the S3 adapter. Hyperdrive
+caches some query results; reads inside a transaction (every multi-query load) aren't
+cached, which is what consistency needs.
 
 ## 9. Databases (open)
 
