@@ -1,7 +1,8 @@
 # 0027: Payments: the provider port, cash on delivery and bank transfer
 
-- **Status:** Proposed (2026-10-18). Decided: PA2 (payment records), PA7 (the full set of
-  statuses), Q1 (markets and channels). Danilo set the frame: a payments port with cash on
+- **Status:** Accepted (2026-10-18). Decided: PA2 (payment records), PA7 (the full
+  set of statuses), Q1 (markets and channels), Q2 (no checkout without a method unless
+  the total is zero); the rest as recommended. Danilo set the frame: a payments port with cash on
   delivery and bank transfer built in, as the seam payment spores (Stripe first) plug
   into later.
 - **Scope:** payment methods a store offers (configured as data), the payments an order
@@ -36,7 +37,7 @@ leaves Stripe as "implement the port, add a webhook route", not a redesign of ch
 | PA3 | **The order's `financial_status` is derived from its payments and stored**, as `fulfillment_status` is from fulfilments (0018 FU3). Only payments move it; `POST /admin/orders/{id}/paid` stays, as "record the pending manual payment as received" |
 | PA4 | **Payment methods are data** (`pm_…`): a provider key (`manual` built in; `spore_stripe` later), a name shoppers see, instructions (bank details), the markets and sales channels it's offered in (Q1, *Decided*), enabled or not. A store can have several manual ones (cash on delivery, bank transfer, pay at pickup). *Hard to reverse (API)* |
 | PA5 | **The port is one trait, `PaymentProvider`, keyed by provider name**, listed by the host like event handlers (0019 §5.1): a tuple, static dispatch. `manual` is core's; a spore adds its own. Checkout asks the method's provider to start a payment and gets back what the shopper must do next |
-| PA6 | **A cart chooses a payment method** (`PUT /storefront/carts/{id}/payment-method`), checked at checkout like shipping: offered in the cart's market and enabled. Checkout writes the order and its payment in **one batch**. When the store has no enabled method at all, checkout works as today (no payment, order `pending`), so existing stores and scripts keep working |
+| PA6 | **A cart chooses a payment method** (`PUT /storefront/carts/{id}/payment-method`), checked at checkout like shipping: offered in the cart's market and channel and enabled. Checkout writes the order and its payment in **one batch**. Without a chosen method checkout is refused (`payment_method_required`) unless the total is zero (Q2) |
 | PA7 | **The full set of statuses now**, so the contract is fixed before clients depend on it: the order's `financial_status` is `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded` or `voided`; a payment's status is `pending`, `authorized`, `paid`, `failed`, `voided`, `partially_refunded` or `refunded`. Manual payments use `pending`, `paid` and `voided`; the rest wait for providers that move money that way. *Decided; hard to reverse (contract)* |
 | PA8 | **Cancelling an order voids its pending payments** (COD never collected, transfer never sent); a paid one stays paid, as 0018 Q3 decided |
 | PA9 | **New scopes `payments:read` and `payments:write`**: methods are settings (`payments:write`); recording money received stays `orders:write`, like today's `/paid`, since it's what staff do on an order |
@@ -195,7 +196,7 @@ Serbia only and kept off the agentic channel.
 one (Shopify: the store "can't accept payments right now"; Medusa: no payment session),
 except for orders that total zero, which need no payment. Both make a manual method the
 easy default (Medusa's `pp_system_default`). PA6 proposed the opposite (checkout as
-today without a method). Recommended now: follow them: `payment_method_required`
+today without a method). *Decided:* follow them: `payment_method_required`
 unless the total is zero; the setup guide and the seed add cash on delivery and bank
 transfer, and the admin warns while no method is enabled.
 
