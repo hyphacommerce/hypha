@@ -1,0 +1,54 @@
+New order {{ order.number }}
+
+{% if customer and customer.name %}{{ customer.name }} ({{ order.email }}){% else %}{{ order.email }}{% endif %} placed an order for {{ order.total.formatted }} on {{ order.placed_at.formatted }}.{% if order.payment %} Payment: {{ order.payment.method }} ({{ order.payment.status }}).{% endif %}
+{%- if admin_url %}
+
+View the order: {{ admin_url }}
+{%- endif %}
+
+Items:
+{%- for line in order.lines %}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}: {{ line.total.formatted }}
+{%- endfor %}
+
+Subtotal: {{ order.subtotal.formatted }}
+Shipping: {{ order.shipping.formatted }}
+{%- if not order.taxes_included %}
+Tax: {{ order.tax.formatted }}
+{%- endif %}
+Total: {{ order.total.formatted }}
+{%- if order.taxes_included %}
+Including {{ order.tax.formatted }} in taxes
+{%- endif %}
+{%- if order.shipping_address %}
+
+Shipping to:
+{%- if order.shipping_address.name %}
+{{ order.shipping_address.name }}
+{%- endif %}
+{%- if order.shipping_address.company %}
+{{ order.shipping_address.company }}
+{%- endif %}
+{{ order.shipping_address.line1 }}
+{%- if order.shipping_address.line2 %}
+{{ order.shipping_address.line2 }}
+{%- endif %}
+{% if order.shipping_address.postal_code %}{{ order.shipping_address.postal_code }} {% endif %}{{ order.shipping_address.city }}
+{%- if order.shipping_address.province %}
+{{ order.shipping_address.province }}
+{%- endif %}
+{{ order.shipping_address.country }}
+{%- if order.shipping_address.phone %}
+{{ order.shipping_address.phone }}
+{%- endif %}
+{%- endif %}
+{%- if order.shipping_method %}
+
+Shipping method: {{ order.shipping_method }}
+{%- endif %}
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

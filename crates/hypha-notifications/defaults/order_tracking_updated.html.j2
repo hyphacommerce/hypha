@@ -1,0 +1,118 @@
+{% extends "layout" %}
+
+{% block preheader %}There's new tracking information for your order {{ order.number }}.{% endblock %}
+
+{% block content %}
+<p
+  style="font-size:22px;line-height:30px;font-weight:700;color:#18181b;margin:8px 0 16px;margin-top:8px;margin-right:0;margin-bottom:16px;margin-left:0">
+  Tracking updated
+</p>
+{% if customer and customer.name %}
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+    Hi {{ customer.name }},
+  </p>
+{% else %}
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+    Hi,
+  </p>
+{% endif %}
+<p
+  style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+  The tracking information for a shipment from your order {{ order.number }} has changed. Here are the latest
+  details.
+</p>
+{% if fulfillment.tracking %}
+  <p
+    style="font-size:15px;line-height:22px;font-weight:600;color:#18181b;margin:24px 0 8px;margin-top:24px;margin-right:0;margin-bottom:8px;margin-left:0">
+    Tracking
+  </p>
+  {% for tracking in fulfillment.tracking %}
+    <p
+      style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 6px;margin-top:0;margin-right:0;margin-bottom:6px;margin-left:0">
+      {% if tracking.carrier %}{{ tracking.carrier }}: {% endif %}{% if tracking.url %}<a href="{{ tracking.url }}" style="color:{{ brand.accent }};text-decoration-line:none" target="_blank"
+          >{{ tracking.number }}</a
+        >{% else %}{{ tracking.number }}{% endif %}
+    </p>
+  {% endfor %}
+{% endif %}
+{% if order.url %}
+  <table
+    align="center"
+    width="100%"
+    border="0"
+    cellpadding="0"
+    cellspacing="0"
+    role="presentation"
+    style="margin:8px 0 24px">
+    <tbody>
+      <tr>
+        <td>
+          <a
+            href="{{ order.url }}"
+            style="line-height:100%;text-decoration:none;display:inline-block;max-width:100%;mso-padding-alt:0px;background-color:{{ brand.accent }};color:#ffffff;font-size:15px;font-weight:600;border-radius:6px;padding:12px 22px;padding-top:12px;padding-right:22px;padding-bottom:12px;padding-left:22px"
+            target="_blank"
+            ><span
+              ><!--[if mso]><i style="mso-font-width:366.66666666666663%;mso-text-raise:18px" hidden>&#8202;&#8202;&#8202;</i><![endif]--></span
+            ><span
+              style="max-width:100%;display:inline-block;line-height:120%;mso-padding-alt:0px;mso-text-raise:9px"
+              >View your order</span
+            ><span
+              ><!--[if mso]><i style="mso-font-width:366.66666666666663%" hidden>&#8202;&#8202;&#8202;&#8203;</i><![endif]--></span
+            ></a
+          >
+        </td>
+      </tr>
+    </tbody>
+  </table>
+{% endif %}
+<p
+  style="font-size:15px;line-height:22px;font-weight:600;color:#18181b;margin:24px 0 8px;margin-top:24px;margin-right:0;margin-bottom:8px;margin-left:0">
+  In this shipment
+</p>
+<table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+  <tbody>
+    <tr>
+      <td>
+        {% for line in fulfillment.lines %}
+          <table
+            align="center"
+            width="100%"
+            border="0"
+            cellpadding="0"
+            cellspacing="0"
+            role="presentation"
+            style="border-bottom:1px solid #e4e4e7">
+            <tbody style="width:100%">
+              <tr style="width:100%">
+                <td data-id="__react-email-column" style="padding:10px 0;vertical-align:top">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#18181b;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ line.title }}
+                  </p>
+                  {% if line.variant %}
+                    <p
+                      style="font-size:13px;line-height:20px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                      {{ line.variant }}
+                    </p>
+                  {% endif %}
+                </td>
+                <td
+                  align="right"
+                  data-id="__react-email-column"
+                  style="padding:10px 0;vertical-align:top;width:56px">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    × {{ line.quantity }}
+                  </p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        {% endfor %}
+      </td>
+    </tr>
+  </tbody>
+</table>
+{% endblock %}

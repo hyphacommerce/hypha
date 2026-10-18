@@ -32,8 +32,10 @@ minimumReleaseAgeExclude:
 
 # Dependency install scripts run only when listed here (pnpm blocks them by default).
 # workerd fetches the Workers runtime binary the dev server runs in. Astryx's scripts
-# only print a setup hint, so they stay off.
+# only print a setup hint, so they stay off. esbuild (react-email's preview server, which
+# packages/emails doesn't run) finds its binary in its platform package without its script.
 allowBuilds:
   workerd: true
+  esbuild: false
   "@astryxdesign/core": false
   "@astryxdesign/cli": false

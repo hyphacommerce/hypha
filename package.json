@@ -5,6 +5,8 @@
   "scripts": {
     "sdk:generate": "pnpm --filter @hypha/sdk generate",
     "sdk:check": "pnpm --filter @hypha/sdk check",
+    "emails:build": "pnpm --filter @hypha/emails build",
+    "emails:check": "pnpm --filter @hypha/emails check",
     "dev": "bash scripts/dev.sh",
     "prod": "bash scripts/prod.sh",
     "hypha": "node packages/cli/src/main.ts",

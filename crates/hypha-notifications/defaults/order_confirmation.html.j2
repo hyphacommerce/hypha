@@ -1,0 +1,283 @@
+{% extends "layout" %}
+
+{% block preheader %}Thanks for your order. Here's what you ordered and what happens next.{% endblock %}
+
+{% block content %}
+<p
+  style="font-size:22px;line-height:30px;font-weight:700;color:#18181b;margin:8px 0 16px;margin-top:8px;margin-right:0;margin-bottom:16px;margin-left:0">
+  Thanks for your order
+</p>
+{% if customer and customer.name %}
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+    Hi {{ customer.name }},
+  </p>
+{% else %}
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+    Hi,
+  </p>
+{% endif %}
+<p
+  style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+  We've received your order {{ order.number }} and we're getting it ready. We'll email you again when it ships.
+</p>
+{% if order.payment %}
+  <p
+    style="font-size:15px;line-height:22px;font-weight:600;color:#18181b;margin:24px 0 8px;margin-top:24px;margin-right:0;margin-bottom:8px;margin-left:0">
+    Payment
+  </p>
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 8px;margin-top:0;margin-right:0;margin-bottom:8px;margin-left:0">
+    {{ order.payment.method }}
+  </p>
+  {% if order.payment.instructions %}
+    <table
+      align="center"
+      width="100%"
+      border="0"
+      cellpadding="0"
+      cellspacing="0"
+      role="presentation"
+      style="background-color:#f4f4f5;border-left:3px solid {{ brand.accent }};border-radius:4px;margin:0 0 8px">
+      <tbody>
+        <tr>
+          <td style="padding:14px 16px">
+            <pre
+              style='white-space:pre-wrap;font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;font-size:14px;line-height:22px;color:#18181b;margin:0'>
+{{ order.payment.instructions }}</pre>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  {% endif %}
+{% endif %}
+{% if order.url %}
+  <table
+    align="center"
+    width="100%"
+    border="0"
+    cellpadding="0"
+    cellspacing="0"
+    role="presentation"
+    style="margin:8px 0 24px">
+    <tbody>
+      <tr>
+        <td>
+          <a
+            href="{{ order.url }}"
+            style="line-height:100%;text-decoration:none;display:inline-block;max-width:100%;mso-padding-alt:0px;background-color:{{ brand.accent }};color:#ffffff;font-size:15px;font-weight:600;border-radius:6px;padding:12px 22px;padding-top:12px;padding-right:22px;padding-bottom:12px;padding-left:22px"
+            target="_blank"
+            ><span
+              ><!--[if mso]><i style="mso-font-width:366.66666666666663%;mso-text-raise:18px" hidden>&#8202;&#8202;&#8202;</i><![endif]--></span
+            ><span
+              style="max-width:100%;display:inline-block;line-height:120%;mso-padding-alt:0px;mso-text-raise:9px"
+              >View your order</span
+            ><span
+              ><!--[if mso]><i style="mso-font-width:366.66666666666663%" hidden>&#8202;&#8202;&#8202;&#8203;</i><![endif]--></span
+            ></a
+          >
+        </td>
+      </tr>
+    </tbody>
+  </table>
+{% endif %}
+<p
+  style="font-size:15px;line-height:22px;font-weight:600;color:#18181b;margin:24px 0 8px;margin-top:24px;margin-right:0;margin-bottom:8px;margin-left:0">
+  Order {{ order.number }}
+</p>
+<p
+  style="font-size:13px;line-height:20px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+  Placed {{ order.placed_at.formatted }}
+</p>
+<table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+  <tbody>
+    <tr>
+      <td>
+        {% for line in order.lines %}
+          <table
+            align="center"
+            width="100%"
+            border="0"
+            cellpadding="0"
+            cellspacing="0"
+            role="presentation"
+            style="border-bottom:1px solid #e4e4e7">
+            <tbody style="width:100%">
+              <tr style="width:100%">
+                <td data-id="__react-email-column" style="padding:10px 0;vertical-align:top">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#18181b;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ line.title }}
+                  </p>
+                  {% if line.variant %}
+                    <p
+                      style="font-size:13px;line-height:20px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                      {{ line.variant }}
+                    </p>
+                  {% endif %}
+                </td>
+                <td
+                  align="right"
+                  data-id="__react-email-column"
+                  style="padding:10px 0;vertical-align:top;width:56px">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    × {{ line.quantity }}
+                  </p>
+                </td>
+                <td
+                  align="right"
+                  data-id="__react-email-column"
+                  style="padding:10px 0;vertical-align:top;width:110px">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#18181b;margin:0;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ line.total.formatted }}
+                  </p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        {% endfor %}
+      </td>
+    </tr>
+  </tbody>
+</table>
+<table
+  align="center"
+  width="100%"
+  border="0"
+  cellpadding="0"
+  cellspacing="0"
+  role="presentation"
+  style="margin-top:12px">
+  <tbody>
+    <tr>
+      <td>
+        <table
+          align="center"
+          width="100%"
+          border="0"
+          cellpadding="0"
+          cellspacing="0"
+          role="presentation">
+          <tbody style="width:100%">
+            <tr style="width:100%">
+              <td data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  Subtotal
+                </p>
+              </td>
+              <td align="right" data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#71717a;margin:0;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  {{ order.subtotal.formatted }}
+                </p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <table
+          align="center"
+          width="100%"
+          border="0"
+          cellpadding="0"
+          cellspacing="0"
+          role="presentation">
+          <tbody style="width:100%">
+            <tr style="width:100%">
+              <td data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  Shipping
+                </p>
+              </td>
+              <td align="right" data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#71717a;margin:0;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  {{ order.shipping.formatted }}
+                </p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        {% if not order.taxes_included %}
+          <table
+            align="center"
+            width="100%"
+            border="0"
+            cellpadding="0"
+            cellspacing="0"
+            role="presentation">
+            <tbody style="width:100%">
+              <tr style="width:100%">
+                <td data-id="__react-email-column" style="padding:3px 0">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    Tax
+                  </p>
+                </td>
+                <td align="right" data-id="__react-email-column" style="padding:3px 0">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#71717a;margin:0;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ order.tax.formatted }}
+                  </p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        {% endif %}
+        <table
+          align="center"
+          width="100%"
+          border="0"
+          cellpadding="0"
+          cellspacing="0"
+          role="presentation">
+          <tbody style="width:100%">
+            <tr style="width:100%">
+              <td data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#18181b;margin:0;font-weight:700;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  Total
+                </p>
+              </td>
+              <td align="right" data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#18181b;margin:0;font-weight:700;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  {{ order.total.formatted }}
+                </p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        {% if order.taxes_included %}
+          <p
+            style="font-size:13px;line-height:20px;color:#71717a;margin:0;text-align:right;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+            Including {{ order.tax.formatted }} in taxes
+          </p>
+        {% endif %}
+      </td>
+    </tr>
+  </tbody>
+</table>
+{% if order.shipping_address or order.shipping_method %}
+  <p
+    style="font-size:15px;line-height:22px;font-weight:600;color:#18181b;margin:24px 0 8px;margin-top:24px;margin-right:0;margin-bottom:8px;margin-left:0">
+    Delivery
+  </p>
+  {% if order.shipping_address %}
+    <p
+      style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 8px;margin-top:0;margin-right:0;margin-bottom:8px;margin-left:0">
+      {% if order.shipping_address.name %}{{ order.shipping_address.name }}<br />{% endif %}{% if order.shipping_address.company %}{{ order.shipping_address.company }}<br />{% endif %}{{ order.shipping_address.line1 }}<br />{% if order.shipping_address.line2 %}{{ order.shipping_address.line2 }}<br />{% endif %}{% if order.shipping_address.postal_code %}{{ order.shipping_address.postal_code }} {% endif %}{{ order.shipping_address.city }}<br />{% if order.shipping_address.province %}{{ order.shipping_address.province }}<br />{% endif %}{{ order.shipping_address.country }}{% if order.shipping_address.phone %}<br />{{ order.shipping_address.phone }}{% endif %}
+    </p>
+  {% endif %}
+  {% if order.shipping_method %}
+    <p
+      style="font-size:14px;line-height:20px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+      {{ order.shipping_method }}
+    </p>
+  {% endif %}
+{% endif %}
+{% endblock %}

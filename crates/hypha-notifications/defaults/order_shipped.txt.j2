@@ -1,0 +1,51 @@
+Hi{% if customer and customer.name %} {{ customer.name }}{% endif %},
+
+Good news: items from your order {{ order.number }} have shipped.
+{%- if fulfillment.tracking %}
+
+Tracking:
+{%- for tracking in fulfillment.tracking %}
+- {% if tracking.carrier %}{{ tracking.carrier }}: {% endif %}{{ tracking.number }}{% if tracking.url %} ({{ tracking.url }}){% endif %}
+{%- endfor %}
+{%- endif %}
+
+In this shipment:
+{%- for line in fulfillment.lines %}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}
+{%- endfor %}
+{%- if order.url %}
+
+View your order: {{ order.url }}
+{%- endif %}
+{%- if order.shipping_address %}
+
+Shipping to:
+{%- if order.shipping_address.name %}
+{{ order.shipping_address.name }}
+{%- endif %}
+{%- if order.shipping_address.company %}
+{{ order.shipping_address.company }}
+{%- endif %}
+{{ order.shipping_address.line1 }}
+{%- if order.shipping_address.line2 %}
+{{ order.shipping_address.line2 }}
+{%- endif %}
+{% if order.shipping_address.postal_code %}{{ order.shipping_address.postal_code }} {% endif %}{{ order.shipping_address.city }}
+{%- if order.shipping_address.province %}
+{{ order.shipping_address.province }}
+{%- endif %}
+{{ order.shipping_address.country }}
+{%- if order.shipping_address.phone %}
+{{ order.shipping_address.phone }}
+{%- endif %}
+{%- endif %}
+{%- if order.shipping_method %}
+
+Shipping method: {{ order.shipping_method }}
+{%- endif %}
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

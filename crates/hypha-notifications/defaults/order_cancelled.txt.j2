@@ -1,0 +1,30 @@
+Hi{% if customer and customer.name %} {{ customer.name }}{% endif %},
+
+Your order {{ order.number }} has been cancelled.{% if cancellation.reason %} Reason: {{ cancellation.reason }}.{% endif %}
+
+If you have any questions about it, just reply to this email.
+{%- if order.url %}
+
+View your order: {{ order.url }}
+{%- endif %}
+
+Order {{ order.number }}
+{%- for line in order.lines %}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}: {{ line.total.formatted }}
+{%- endfor %}
+
+Subtotal: {{ order.subtotal.formatted }}
+Shipping: {{ order.shipping.formatted }}
+{%- if not order.taxes_included %}
+Tax: {{ order.tax.formatted }}
+{%- endif %}
+Total: {{ order.total.formatted }}
+{%- if order.taxes_included %}
+Including {{ order.tax.formatted }} in taxes
+{%- endif %}
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

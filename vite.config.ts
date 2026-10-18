@@ -66,7 +66,13 @@ export default defineConfig({
         },
       },
       {
-        files: ["packages/cli/**", "scripts/**", "packages/sdk/scripts/**", "apps/*/scripts/**"],
+        files: [
+          "packages/cli/**",
+          "packages/emails/**",
+          "scripts/**",
+          "packages/sdk/scripts/**",
+          "apps/*/scripts/**",
+        ],
         plugins: ["node"],
         env: { node: true },
       },

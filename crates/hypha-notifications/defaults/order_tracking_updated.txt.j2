@@ -1,0 +1,25 @@
+Hi{% if customer and customer.name %} {{ customer.name }}{% endif %},
+
+The tracking information for a shipment from your order {{ order.number }} has changed. Here are the latest details.
+{%- if fulfillment.tracking %}
+
+Tracking:
+{%- for tracking in fulfillment.tracking %}
+- {% if tracking.carrier %}{{ tracking.carrier }}: {% endif %}{{ tracking.number }}{% if tracking.url %} ({{ tracking.url }}){% endif %}
+{%- endfor %}
+{%- endif %}
+
+In this shipment:
+{%- for line in fulfillment.lines %}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}
+{%- endfor %}
+{%- if order.url %}
+
+View your order: {{ order.url }}
+{%- endif %}
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

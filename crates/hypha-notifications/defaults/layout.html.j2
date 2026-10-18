@@ -1,0 +1,122 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html dir="ltr" lang="en">
+  <head>
+    <meta content="text/html; charset=UTF-8" http-equiv="Content-Type" />
+    <meta name="x-apple-disable-message-reformatting" />
+    <meta name="color-scheme" content="light" />
+    <meta name="supported-color-schemes" content="light" />
+    <title>{{ shop.name }}</title>
+  </head>
+  <body dir="ltr" lang="en" style="background-color:#f4f4f5;margin:0;padding:0">
+    <table
+      border="0"
+      width="100%"
+      cellpadding="0"
+      cellspacing="0"
+      role="presentation"
+      align="center">
+      <tbody>
+        <tr>
+          <td
+            dir="ltr"
+            lang="en"
+            style='background-color:#f4f4f5;margin:0;padding:24px 0;font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'>
+            <div
+              style="display:none;overflow:hidden;line-height:1px;opacity:0;max-height:0;max-width:0"
+              data-skip-in-text="true">
+              {% block preheader %}{% endblock %}‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​‌ ​
+            </div>
+            <table
+              align="center"
+              width="100%"
+              border="0"
+              cellpadding="0"
+              cellspacing="0"
+              role="presentation"
+              style="max-width:600px;background-color:#ffffff;border-top:4px solid {{ brand.accent }};border-radius:6px">
+              <tbody>
+                <tr style="width:100%">
+                  <td>
+                    <table
+                      align="center"
+                      width="100%"
+                      border="0"
+                      cellpadding="0"
+                      cellspacing="0"
+                      role="presentation">
+                      <tbody>
+                        <tr>
+                          <td style="padding:28px 32px 8px">
+                            {% if brand.logo_url %}
+                              <img
+                                alt="{{ shop.name }}"
+                                height="40"
+                                src="{{ brand.logo_url }}"
+                                style="display:block;outline:none;border:none;text-decoration:none" />
+                            {% else %}
+                              <p
+                                style="font-size:20px;line-height:24px;font-weight:700;color:#18181b;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                                {{ shop.name }}
+                              </p>
+                            {% endif %}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <table
+                      align="center"
+                      width="100%"
+                      border="0"
+                      cellpadding="0"
+                      cellspacing="0"
+                      role="presentation">
+                      <tbody>
+                        <tr>
+                          <td style="padding:8px 32px 24px">
+                            {% block content %}{% endblock %}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <table
+                      align="center"
+                      width="100%"
+                      border="0"
+                      cellpadding="0"
+                      cellspacing="0"
+                      role="presentation">
+                      <tbody>
+                        <tr>
+                          <td style="padding:0 32px 28px">
+                            <hr
+                              style="width:100%;border:none;border-color:#e4e4e7;border-top:1px solid #eaeaea;margin:0 0 20px" />
+                            {% if brand.footer %}
+                              <pre
+                                style='white-space:pre-wrap;font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:22px;color:#71717a;margin:0 0 8px'>
+{{ brand.footer }}</pre>
+                            {% endif %}
+                            <p
+                              style="font-size:12px;line-height:18px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                              {{ shop.name }}{% if shop.email %}
+                                ·
+                                <a
+                                  href="mailto:{{ shop.email }}"
+                                  style="color:#71717a;text-decoration-line:none"
+                                  target="_blank"
+                                  >{{ shop.email }}</a
+                                >{% endif %}
+                            </p>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>
