@@ -6,7 +6,7 @@ use hypha_core::{
 };
 use hypha_payments::{
     Payment, PaymentMethod, PaymentMethodRepo, PaymentMethodSnapshot, PaymentRepo, PaymentSnapshot,
-    ProviderKey,
+    ProviderKey, keys,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -174,19 +174,38 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
     }
 
     async fn delete(&self, method: &PaymentMethod) -> Result<(), RepoError> {
+        let id = method.id().as_uuid();
+        let version = version_to_db(method.version())?;
         let mut conn = self.conn().await;
-        let row = conn
+        // One statement: a checkout starting a payment with the method can't slip in
+        // between the check and the delete.
+        let deleted = conn
             .db()
             .query_typed_opt(
-                "DELETE FROM payment_methods WHERE id = $1 AND version = $2 RETURNING id",
-                &[
-                    (&method.id().as_uuid(), Type::UUID),
-                    (&version_to_db(method.version())?, Type::INT8),
-                ],
+                "DELETE FROM payment_methods WHERE id = $1 AND version = $2
+                     AND NOT EXISTS (SELECT 1 FROM payments WHERE method_id = $1
+                                     AND status IN ('pending', 'authorized'))
+                 RETURNING id",
+                &[(&id, Type::UUID), (&version, Type::INT8)],
             )
             .await
             .map_err(repo_error)?;
-        row.map(|_| ()).ok_or(RepoError::StaleVersion)
+        if deleted.is_some() {
+            return Ok(());
+        }
+        // Nothing deleted: still there at its version means an open payment held it.
+        let held = conn
+            .db()
+            .query_typed_opt(
+                "SELECT 1 AS found FROM payment_methods WHERE id = $1 AND version = $2",
+                &[(&id, Type::UUID), (&version, Type::INT8)],
+            )
+            .await
+            .map_err(repo_error)?;
+        Err(match held {
+            Some(_) => RepoError::Reference(keys::OPEN_PAYMENT_METHOD),
+            None => RepoError::StaleVersion,
+        })
     }
 }
 
@@ -259,20 +278,6 @@ impl<C: PgConnection> PaymentRepo for PgStore<C> {
             .iter()
             .map(payment_from_row)
             .collect()
-    }
-
-    async fn pending_for_method(&self, method: PaymentMethodId) -> Result<bool, RepoError> {
-        let mut conn = self.conn().await;
-        let row = conn
-            .db()
-            .query_typed_opt(
-                "SELECT 1 AS found FROM payments WHERE method_id = $1 AND status = 'pending'
-                 LIMIT 1",
-                &[(&method.as_uuid(), Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?;
-        Ok(row.is_some())
     }
 
     async fn insert(&self, payment: &mut Payment) -> Result<(), RepoError> {

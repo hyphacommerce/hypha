@@ -6,6 +6,9 @@ use crate::{Payment, PaymentMethod};
 pub mod keys {
     pub const PAYMENT_METHOD_ID: &str = "payment_method_id";
     pub const PAYMENT_ID: &str = "payment_id";
+    /// An open (`pending` or `authorized`) payment uses the method: deleting it is
+    /// refused (`RepoError::Reference`), checked in the same statement as the delete.
+    pub const OPEN_PAYMENT_METHOD: &str = "open_payment_method";
 }
 
 #[allow(async_fn_in_trait)]
@@ -19,7 +22,10 @@ pub trait PaymentMethodRepo {
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
     async fn update(&self, method: &mut PaymentMethod) -> Result<(), RepoError>;
     /// Removes `method` at the version it was loaded at, or fails with `StaleVersion`
-    /// (changed or gone since). Its payments keep its ID, name and provider.
+    /// (changed or gone since). Refused with `Reference(OPEN_PAYMENT_METHOD)` while an
+    /// open (`pending` or `authorized`) payment uses it, in the same step as the delete,
+    /// so a checkout racing it can't strand a payment (design note 0027, §7). Its other
+    /// payments keep its ID, name and provider.
     async fn delete(&self, method: &PaymentMethod) -> Result<(), RepoError>;
 }
 
@@ -28,14 +34,25 @@ pub trait PaymentRepo {
     async fn get(&self, id: PaymentId) -> Result<Option<Payment>, RepoError>;
     /// Every payment of `order`, newest first (by ID). An order has a handful.
     async fn list_for_order(&self, order: OrderId) -> Result<Vec<Payment>, RepoError>;
-    /// Whether a `pending` payment uses `method`: such a method can be disabled, not
-    /// deleted (design note 0027, §7).
-    async fn pending_for_method(&self, method: PaymentMethodId) -> Result<bool, RepoError>;
     /// Stores a new payment (version 1). Enforces `PAYMENT_ID`. Workflows insert
     /// through `StagePayments` instead, with the order.
     async fn insert(&self, payment: &mut Payment) -> Result<(), RepoError>;
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
     async fn update(&self, payment: &mut Payment) -> Result<(), RepoError>;
+}
+
+/// The newest payment of `order` (its payments sort newest first): the one checkout
+/// started, what a storefront shows.
+pub async fn newest_payment<S: HasPayments>(
+    ports: &S,
+    order: OrderId,
+) -> Result<Option<Payment>, RepoError> {
+    Ok(ports
+        .payments()
+        .list_for_order(order)
+        .await?
+        .into_iter()
+        .next())
 }
 
 /// Stages payment writes in a `hypha_core::HasBatch` batch; the adapter's batch type

@@ -1,7 +1,9 @@
+use std::sync::{Arc, Mutex};
+
 use hypha_core::{
     OrderId, PaymentId, PaymentMethodId, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
 };
-use hypha_payments::{Payment, PaymentMethod, PaymentMethodRepo, PaymentRepo, PaymentStatus, keys};
+use hypha_payments::{Payment, PaymentMethod, PaymentMethodRepo, PaymentRepo, keys};
 
 use crate::{
     InMemoryOutbox,
@@ -11,6 +13,9 @@ use crate::{
 #[derive(Default)]
 pub struct InMemoryPaymentMethodRepo {
     pub(crate) methods: Table<PaymentMethodId, PaymentMethod>,
+    /// The payments, when linked (`linked`, as `InMemoryPorts` does): a method an open
+    /// payment uses can't be deleted. Made on its own, it checks nothing.
+    pub(crate) payments: Option<Arc<Table<PaymentId, Payment>>>,
     /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with
     /// (methods record no events).
     pub(crate) outbox: InMemoryOutbox,
@@ -58,6 +63,15 @@ impl PaymentMethodRepo for InMemoryPaymentMethodRepo {
             Some(stored) if stored.version() == method.version() => {}
             _ => return Err(RepoError::StaleVersion),
         }
+        // Checked while the methods are locked, like the database's one statement.
+        if let Some(payments) = &self.payments
+            && payments
+                .lock()
+                .values()
+                .any(|p| p.method() == Some(method.id()) && p.status().is_open())
+        {
+            return Err(RepoError::Reference(keys::OPEN_PAYMENT_METHOD));
+        }
         rows.remove(&method.id());
         Ok(())
     }
@@ -65,8 +79,10 @@ impl PaymentMethodRepo for InMemoryPaymentMethodRepo {
 
 #[derive(Default)]
 pub struct InMemoryPaymentRepo {
-    pub(crate) payments: Table<PaymentId, Payment>,
+    pub(crate) payments: Arc<Table<PaymentId, Payment>>,
     pub(crate) outbox: InMemoryOutbox,
+    /// What the next `list_for_order` returns instead (`serve_next_list`).
+    stale: Mutex<Option<Vec<Payment>>>,
 }
 
 impl InMemoryPaymentRepo {
@@ -82,6 +98,12 @@ impl InMemoryPaymentRepo {
     pub fn outbox(&self) -> &InMemoryOutbox {
         &self.outbox
     }
+
+    /// The next `list_for_order` returns `payments`, copies loaded before another
+    /// request committed: for testing a command that loses that race.
+    pub fn serve_next_list(&self, payments: Vec<Payment>) {
+        *self.stale.lock().unwrap() = Some(payments);
+    }
 }
 
 impl PaymentRepo for InMemoryPaymentRepo {
@@ -90,6 +112,10 @@ impl PaymentRepo for InMemoryPaymentRepo {
     }
 
     async fn list_for_order(&self, order: OrderId) -> Result<Vec<Payment>, RepoError> {
+        let stale = self.stale.lock().unwrap().take();
+        if let Some(payments) = stale {
+            return Ok(payments);
+        }
         let mut found: Vec<Payment> = self
             .payments
             .all()
@@ -98,13 +124,6 @@ impl PaymentRepo for InMemoryPaymentRepo {
             .collect();
         found.sort_by_key(|p| std::cmp::Reverse(p.id().as_uuid()));
         Ok(found)
-    }
-
-    async fn pending_for_method(&self, method: PaymentMethodId) -> Result<bool, RepoError> {
-        Ok(self
-            .payments
-            .find(|p| p.method() == Some(method) && p.status() == PaymentStatus::Pending)
-            .is_some())
     }
 
     async fn insert(&self, payment: &mut Payment) -> Result<(), RepoError> {
@@ -124,4 +143,15 @@ impl PaymentRepo for InMemoryPaymentRepo {
         self.outbox.write(events, Some(payment.version()));
         Ok(())
     }
+}
+
+/// A method repo and a payment repo linked like the database's tables (deleting a
+/// method checks its open payments), sharing `outbox`.
+pub(crate) fn linked(outbox: &InMemoryOutbox) -> (InMemoryPaymentMethodRepo, InMemoryPaymentRepo) {
+    let payments = InMemoryPaymentRepo::sharing(outbox);
+    let methods = InMemoryPaymentMethodRepo {
+        payments: Some(Arc::clone(&payments.payments)),
+        ..InMemoryPaymentMethodRepo::sharing(outbox)
+    };
+    (methods, payments)
 }

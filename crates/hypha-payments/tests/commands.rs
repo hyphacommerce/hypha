@@ -235,3 +235,23 @@ fn methods_need_the_payments_scopes() {
         )))
     );
 }
+
+#[test]
+fn a_method_with_an_authorized_payment_is_not_deleted_either() {
+    let (ports, ids) = (InMemoryPorts::default(), SequentialIds::default());
+    let id = create(&ports, &ids, cod(None));
+    let method = block_on(get_payment_method(&Ctx::system(), &ports, id)).unwrap();
+    let mut payment = Payment::new(NewPayment::by(
+        &method,
+        PaymentId::from_uuid(Uuid::from_u128(50)),
+        OrderId::from_uuid(Uuid::from_u128(51)),
+        Money::new(1000, Currency::EUR).unwrap(),
+    ))
+    .unwrap();
+    payment.authorize(None).unwrap();
+    block_on(ports.payments.insert(&mut payment)).unwrap();
+    assert_eq!(
+        block_on(delete_payment_method(&Ctx::system(), &ports, id)),
+        Err(CommandError::PaymentMethodInUse(id))
+    );
+}

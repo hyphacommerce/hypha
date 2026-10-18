@@ -4,8 +4,8 @@ use hypha_core::{
 };
 use hypha_orders::{HasOrders, OrderRepo, StageOrders};
 use hypha_payments::{
-    HasPayments, NewPayment, NewPaymentMethod, Payment, PaymentMethod, PaymentMethodRepo,
-    PaymentRepo, PaymentStatus, ProviderKey, StagePayments, keys,
+    HasPaymentMethods, HasPayments, NewPayment, NewPaymentMethod, Payment, PaymentMethod,
+    PaymentMethodRepo, PaymentRepo, PaymentStatus, ProviderKey, StagePayments, keys,
 };
 use uuid::Uuid;
 
@@ -35,8 +35,13 @@ pub async fn payment_repo<R: PaymentRepo>(make: impl AsyncFn() -> R) {
     payment_unique_id(&make().await).await;
     scenario("payment: an order's payments, newest first, and no other order's");
     lists_for_order(&make().await).await;
-    scenario("payment: whether a pending payment uses a method");
-    pending_for_method(&make().await).await;
+}
+
+/// Runs the scenarios that span methods and payments: a method an open payment uses
+/// can't be deleted, checked in the same step as the delete.
+pub async fn payment_method_delete<S: HasPaymentMethods + HasPayments>(make: impl AsyncFn() -> S) {
+    scenario("payment method: delete is refused while an open payment uses it");
+    open_payments_keep_their_method(&make().await).await;
 }
 
 /// Runs the batch scenarios for payments (design note 0027): a payment and its order
@@ -270,20 +275,43 @@ async fn lists_for_order<R: PaymentRepo>(repo: &R) {
     assert_eq!(listed[1], voided);
 }
 
-async fn pending_for_method<R: PaymentRepo>(repo: &R) {
-    assert_eq!(repo.pending_for_method(mid(1)).await, Ok(false));
+async fn open_payments_keep_their_method<S: HasPaymentMethods + HasPayments>(ports: &S) {
+    let mut m = method(1, 0);
+    ports.payment_methods().insert(&mut m).await.unwrap();
+    let mut other = method(2, 1);
+    ports.payment_methods().insert(&mut other).await.unwrap();
+    // Pending, then authorized: both hold the method.
     let mut p = payment(1, 1, 1);
-    repo.insert(&mut p).await.unwrap();
-    assert_eq!(repo.pending_for_method(mid(1)).await, Ok(true));
-    assert_eq!(repo.pending_for_method(mid(2)).await, Ok(false));
+    ports.payments().insert(&mut p).await.unwrap();
+    let in_use = Err(RepoError::Reference(keys::OPEN_PAYMENT_METHOD));
+    assert_eq!(ports.payment_methods().delete(&m).await, in_use);
+    p.authorize(None).unwrap();
+    ports.payments().update(&mut p).await.unwrap();
+    assert_eq!(ports.payment_methods().delete(&m).await, in_use);
+    // Refused, it's still there, unchanged.
+    assert_eq!(
+        ports.payment_methods().get(m.id()).await,
+        Ok(Some(m.clone()))
+    );
+    // A stale method is stale, whatever its payments.
+    let mut newer = m.clone();
+    newer.set_enabled(false);
+    ports.payment_methods().update(&mut newer).await.unwrap();
+    assert_eq!(
+        ports.payment_methods().delete(&m).await,
+        Err(RepoError::StaleVersion)
+    );
+    // Another method's open payment doesn't hold this one.
+    assert_eq!(ports.payment_methods().delete(&other).await, Ok(()));
+    // Once nothing open uses it (paid, voided), it goes.
     p.pay(at(0), None).unwrap();
-    repo.update(&mut p).await.unwrap();
-    assert_eq!(repo.pending_for_method(mid(1)).await, Ok(false));
+    ports.payments().update(&mut p).await.unwrap();
     let mut voided = payment(2, 1, 1);
-    repo.insert(&mut voided).await.unwrap();
+    ports.payments().insert(&mut voided).await.unwrap();
     voided.void(at(0)).unwrap();
-    repo.update(&mut voided).await.unwrap();
-    assert_eq!(repo.pending_for_method(mid(1)).await, Ok(false));
+    ports.payments().update(&mut voided).await.unwrap();
+    assert_eq!(ports.payment_methods().delete(&newer).await, Ok(()));
+    assert_eq!(ports.payment_methods().get(m.id()).await, Ok(None));
 }
 
 async fn events<S: HasOutbox>(ports: &S) -> Vec<StoredEvent> {

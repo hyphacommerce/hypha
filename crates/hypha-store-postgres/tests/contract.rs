@@ -147,6 +147,15 @@ async fn payment_method_repo() {
 }
 
 #[tokio::test]
+async fn payment_method_delete() {
+    let Some(url) = database_url() else { return };
+    contract::payment_method_delete(async || {
+        fresh_store(&url, "contract_payment_method_delete").await
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn payment_repo() {
     let Some(url) = database_url() else { return };
     contract::payment_repo(async || fresh_store(&url, "contract_payments").await).await;

@@ -74,6 +74,7 @@ impl Default for InMemoryPorts {
     fn default() -> Self {
         let outbox = InMemoryOutbox::default();
         let (apps, app_providers) = crate::apps::linked(&outbox);
+        let (payment_methods, payments) = crate::payments::linked(&outbox);
         let channels = InMemoryChannelRepo::sharing(&outbox);
         let categories = InMemoryCategoryRepo::sharing(&outbox);
         Self {
@@ -90,8 +91,8 @@ impl Default for InMemoryPorts {
             idempotency: InMemoryIdempotencyRepo::default(),
             orders: InMemoryOrderRepo::sharing(&outbox),
             fulfillments: InMemoryFulfillmentRepo::sharing(&outbox),
-            payment_methods: InMemoryPaymentMethodRepo::sharing(&outbox),
-            payments: InMemoryPaymentRepo::sharing(&outbox),
+            payment_methods,
+            payments,
             assets: InMemoryAssetRepo::default(),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
             app_providers,

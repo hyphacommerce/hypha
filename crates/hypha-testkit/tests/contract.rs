@@ -261,6 +261,13 @@ fn payment_method_repo() {
 }
 
 #[test]
+fn payment_method_delete() {
+    block_on(contract::payment_method_delete(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
 fn payment_repo() {
     block_on(contract::payment_repo(async || {
         hypha_testkit::InMemoryPaymentRepo::default()

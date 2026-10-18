@@ -8,8 +8,8 @@ use hypha_core::{
 use thiserror::Error;
 
 use crate::{
-    HasPaymentMethods, HasPayments, NewPaymentMethod, PaymentError, PaymentMethod,
-    PaymentMethodRepo, PaymentProviders, PaymentRepo, ProviderKey,
+    HasPaymentMethods, NewPaymentMethod, PaymentError, PaymentMethod, PaymentMethodRepo,
+    PaymentProviders, ProviderKey, keys,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -22,8 +22,9 @@ pub enum CommandError {
     Payment(#[from] PaymentError),
     #[error("payment method {0} not found")]
     PaymentMethodNotFound(PaymentMethodId),
-    /// Deleting a method a pending payment uses: disable it instead.
-    #[error("payment method {0} is used by a pending payment; disable it instead")]
+    /// Deleting a method an open (pending or authorized) payment uses: disable it
+    /// instead.
+    #[error("payment method {0} is used by an open payment; disable it instead")]
     PaymentMethodInUse(PaymentMethodId),
 }
 
@@ -188,18 +189,21 @@ pub async fn update_payment_method<S: HasPaymentMethods, P: PaymentProviders>(
     Ok(method)
 }
 
-/// Deletes a method no pending payment uses (`payment_method_in_use` otherwise: disable
-/// it instead). Payments it made keep its name and provider.
-pub async fn delete_payment_method<S: HasPaymentMethods + HasPayments>(
+/// Deletes a method no open (pending or authorized) payment uses
+/// (`payment_method_in_use` otherwise: disable it instead). The check and the delete are
+/// one step in storage, so a checkout starting a payment with it at the same moment
+/// can't be stranded. Payments it made keep its name and provider.
+pub async fn delete_payment_method<S: HasPaymentMethods>(
     ctx: &Ctx,
     ports: &S,
     id: PaymentMethodId,
 ) -> Result<(), CommandError> {
     ctx.require(Scope::PaymentsWrite)?;
     let method = load(ports.payment_methods(), id).await?;
-    if ports.payments().pending_for_method(id).await? {
-        return Err(CommandError::PaymentMethodInUse(id));
+    match ports.payment_methods().delete(&method).await {
+        Err(RepoError::Reference(keys::OPEN_PAYMENT_METHOD)) => {
+            Err(CommandError::PaymentMethodInUse(id))
+        }
+        done => Ok(done?),
     }
-    ports.payment_methods().delete(&method).await?;
-    Ok(())
 }

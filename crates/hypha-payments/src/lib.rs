@@ -28,4 +28,5 @@ pub use provider::{
 };
 pub use repo::{
     HasPaymentMethods, HasPayments, PaymentMethodRepo, PaymentRepo, StagePayments, keys,
+    newest_payment,
 };
