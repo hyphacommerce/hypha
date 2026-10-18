@@ -149,6 +149,15 @@ async function sessionExpired(): Promise<never> {
   redirect(`/session-expired?next=${encodeURIComponent(safeNext(back))}`);
 }
 
+/** The pages outside the login, which make no sense to come back to after it. */
+const PUBLIC_PAGES = [
+  "/login",
+  "/session-expired",
+  "/invite",
+  "/forgot-password",
+  "/reset-password",
+];
+
 /**
  * A path on this admin to go to after signing in, or "/". Only plain local paths: never
  * another origin (`//evil.example`, `/\\evil.example`), nor the login pages themselves.
@@ -157,7 +166,13 @@ export function safeNext(path: string | null | undefined): string {
   if (!path || !path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\")) {
     return "/";
   }
-  if (path.startsWith("/login") || path.startsWith("/session-expired")) return "/";
+  if (
+    PUBLIC_PAGES.some(
+      (page) => path === page || path.startsWith(`${page}/`) || path.startsWith(`${page}?`),
+    )
+  ) {
+    return "/";
+  }
   return path;
 }
 
@@ -260,6 +275,38 @@ export function describe(error: ApiError): string {
       return "Too many wrong codes. Try again in a few minutes.";
     case "invalid_token":
       return "That sign-in expired. Start again.";
+    case "wrong_password":
+      return "That isn't your current password.";
+    case "password_too_short":
+      return "Use at least 8 characters for the password.";
+    case "password_too_long":
+      return "The password can be at most 128 characters.";
+    case "mfa_enabled":
+      return "Two-factor authentication is already on.";
+    case "mfa_not_enabled":
+      return "Two-factor authentication is off.";
+    case "mfa_setup_not_started":
+      return "That setup expired. Start setting up the authenticator again.";
+    case "session_required":
+      return "Only a signed-in staff member can do this.";
+    case "user_exists":
+      return "Someone with that email is already on the team.";
+    case "user_not_found":
+      return "That staff member no longer exists. Reload the page.";
+    case "role_not_found":
+      return "That role no longer exists. Reload the page.";
+    case "role_name_taken":
+      return "Another role already has that name.";
+    case "role_scopes_required":
+      return "A role needs at least one scope.";
+    case "owner_role_fixed":
+      return "The owner role always has every scope; it can't be changed.";
+    case "last_owner":
+      return "The store keeps at least one active owner. Make someone else an owner first.";
+    case "not_allowed_to_grant":
+      return "You can only give away scopes your own role has.";
+    case "notification_failed":
+      return "The email couldn't be sent. Check the email settings under Notifications, then try again.";
     case "handle_taken":
       return "Another product already uses that handle. Pick a different one.";
     case "channel_name_taken":
