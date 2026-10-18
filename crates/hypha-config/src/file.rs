@@ -18,7 +18,8 @@ use serde::{Deserialize, Serialize};
 use crate::units::{Dur, Size};
 
 /// Hypha's settings for one deployment. Secrets (`DATABASE_URL`, `HYPHA_SECRET_KEY`, the
-/// S3 keys) stay in environment variables and have no key here.
+/// S3 keys, the email provider's password or key) stay in environment variables and
+/// have no key here.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 #[schemars(title = "hypha.config.toml")]
@@ -28,6 +29,7 @@ pub struct File {
     pub outbound: Outbound,
     pub media: Media,
     pub auth: Auth,
+    pub email: Email,
     pub categories: Categories,
     pub webhooks: Webhooks,
     pub jobs: Jobs,
@@ -211,6 +213,88 @@ impl Default for Auth {
             invite_lifetime: Dur(d.invite_lifetime),
         }
     }
+}
+
+/// How emails go out (design note 0028): order confirmations, shipping updates, staff
+/// invites and password resets.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Email {
+    /// Who sends them: `log` writes each one to the log instead (development only),
+    /// `smtp` uses `email.smtp` (not on Workers), `resend` Resend's API with the key in
+    /// `HYPHA_RESEND_API_KEY`. `HYPHA_EMAIL_SENDER` wins.
+    pub sender: EmailSender,
+    /// The address emails come from, on a domain the provider verified; the shop's name
+    /// (notification settings) is shown with it. Required unless `sender` is `log`.
+    /// `HYPHA_EMAIL_FROM` wins.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    pub smtp: Smtp,
+}
+
+/// Who sends emails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EmailSender {
+    /// Written to the log, not sent.
+    #[default]
+    Log,
+    /// An SMTP server (`email.smtp`): any provider's, or Mailpit locally.
+    Smtp,
+    /// Resend's API; the key is `HYPHA_RESEND_API_KEY`.
+    Resend,
+}
+
+impl EmailSender {
+    /// As the file writes it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EmailSender::Log => "log",
+            EmailSender::Smtp => "smtp",
+            EmailSender::Resend => "resend",
+        }
+    }
+}
+
+/// The SMTP server, when `email.sender` is `smtp`. The password is `HYPHA_SMTP_PASSWORD`,
+/// never here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Smtp {
+    /// The server's host name. `HYPHA_SMTP_HOST` wins.
+    pub host: String,
+    /// Its port: usually 587 with `starttls`, 465 with `tls`, 25 or 1025 (Mailpit) with
+    /// `none`. `HYPHA_SMTP_PORT` wins.
+    pub port: u16,
+    /// How the connection is encrypted. `HYPHA_SMTP_TLS` wins.
+    pub tls: SmtpTls,
+    /// The login, if the server wants one; its password is `HYPHA_SMTP_PASSWORD`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+}
+
+impl Default for Smtp {
+    fn default() -> Self {
+        Self {
+            host: "localhost".to_string(),
+            port: 587,
+            tls: SmtpTls::Starttls,
+            username: None,
+        }
+    }
+}
+
+/// How an SMTP connection is encrypted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SmtpTls {
+    /// Plain text: a server on this machine or network (Mailpit) only.
+    None,
+    /// Plain, then upgraded with STARTTLS, which is required (port 587).
+    #[default]
+    Starttls,
+    /// TLS from the first byte (port 465).
+    Tls,
 }
 
 /// The product category tree (design note 0022).

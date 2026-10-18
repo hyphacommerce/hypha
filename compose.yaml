@@ -1,5 +1,6 @@
-# Local development services: Postgres (design note 0001) and an S3 server for media
-# files (design note 0013).
+# Local development services: Postgres (design note 0001), an S3 server for media
+# files (design note 0013) and Mailpit, which catches the emails the API sends (design
+# note 0028).
 #
 #   docker compose up -d          # start them in the background
 #   docker compose down           # stop them (data is kept in the named volumes)
@@ -8,6 +9,8 @@
 # `.cargo/config.toml` points the host and the tests at both:
 #   DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha
 #   HYPHA_S3_ENDPOINT=http://localhost:8333 (bucket hypha-media, created on first use)
+#   HYPHA_EMAIL_SENDER=smtp, HYPHA_SMTP_HOST=localhost, HYPHA_SMTP_PORT=1025 (Mailpit;
+#   its inbox is http://localhost:8025)
 #
 # Development only: the credentials are not secret.
 services:
@@ -48,6 +51,15 @@ services:
     volumes:
       - s3-data:/data
       - ./dev/seaweedfs-s3.json:/config/s3.json:ro
+
+  # Mailpit: an SMTP server that delivers nowhere, with an inbox to read what arrived
+  # (http://localhost:8025) and an API the end-to-end script checks. Messages are kept
+  # in memory, so a restart empties it.
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    ports:
+      - "1025:1025"
+      - "8025:8025"
 
 volumes:
   postgres-data:

@@ -1,6 +1,7 @@
 //! What a host provides that this crate can't do portably (design note 0026, §1): time,
 //! IDs, randomness, CPU-heavy work, work after the response, rate limits, calls to
-//! merchant URLs, the media storage's HTTP, and a signal after each write. The native
+//! merchant URLs, the media storage's HTTP, sending email, and a signal after each
+//! write. The native
 //! host (`hypha-host-axum`) gives Tokio's and the operating system's; a Workers host
 //! gives the runtime's (`Date.now()`, `crypto.getRandomValues`, `fetch`, `waitUntil`).
 //!
@@ -15,6 +16,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use hypha_core::{Clock, IdGenerator, Random, Timestamp};
+use hypha_notifications::{EmailSender, OutgoingEmail, SendError, Sent};
 use hypha_store_s3::{HttpClient, HttpRequest, HttpResponse};
 use uuid::Uuid;
 
@@ -237,6 +239,47 @@ impl HostHttp {
 impl HttpClient for HostHttp {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, String> {
         (self.0)(request).await
+    }
+}
+
+/// The email sender the operator picked (`email.sender`, design note 0028, §5): the log
+/// (`crate::email::LogSender`), SMTP (native only) or Resend, each host building its
+/// own. One concrete `EmailSender` for this crate and `hypha-mail`, whichever it is.
+#[derive(Clone)]
+pub struct HostMail {
+    name: &'static str,
+    send: Arc<SendMail>,
+}
+
+/// How a host sends an email.
+type SendMail = dyn Fn(OutgoingEmail) -> BoxFuture<Result<Sent, SendError>> + Send + Sync;
+
+impl HostMail {
+    /// `name` is the sender's (`EmailSender::name`), recorded on each message.
+    pub fn new(
+        name: &'static str,
+        send: impl Fn(OutgoingEmail) -> BoxFuture<Result<Sent, SendError>> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            name,
+            send: Arc::new(send),
+        }
+    }
+}
+
+impl std::fmt::Debug for HostMail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("HostMail").field(&self.name).finish()
+    }
+}
+
+impl EmailSender for HostMail {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    async fn send(&self, email: &OutgoingEmail) -> Result<Sent, SendError> {
+        (self.send)(email.clone()).await
     }
 }
 

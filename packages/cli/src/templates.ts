@@ -76,9 +76,58 @@ export function seaweedConfig(accessKey: string, secretKey: string): string {
   )}\n`;
 }
 
+/** How the API sends email (design note 0028, §5): `[email]` in its settings file, the
+ * password or key in `.env`. */
+export type EmailSettings =
+  | { sender: "log" }
+  | { sender: "resend"; from: string; apiKey: string }
+  | {
+      sender: "smtp";
+      from: string;
+      host: string;
+      port: number;
+      tls: SmtpTls;
+      username?: string;
+      password?: string;
+    };
+
+export type SmtpTls = "none" | "starttls" | "tls";
+
+/** A TOML string: a JSON string is a valid TOML basic string. */
+function str(value: string): string {
+  return JSON.stringify(value);
+}
+
+/** `[email]` as TOML: the sender and the from address (the secrets stay in `.env`). */
+export function emailToml(email: EmailSettings): string[] {
+  if (email.sender === "log") {
+    return [
+      "# Emails are only written to the API's log until a sender is set (design note 0028):",
+      '# [email] sender = "resend" (HYPHA_RESEND_API_KEY in .env) or "smtp" ([email.smtp],',
+      "# HYPHA_SMTP_PASSWORD in .env), and the from address. `hypha init --force` asks again.",
+      "# [email]",
+    ];
+  }
+  const lines = ["[email]", `sender = ${str(email.sender)}`, `from = ${str(email.from)}`];
+  if (email.sender === "smtp") {
+    lines.push(
+      "",
+      "[email.smtp]",
+      `host = ${str(email.host)}`,
+      `port = ${email.port}`,
+      `tls = ${str(email.tls)}`,
+      ...(email.username ? [`username = ${str(email.username)}`] : []),
+    );
+  }
+  return lines;
+}
+
 /** The API's settings file, mostly empty: every key has a default, and the environment
  * in compose.yaml sets the deployment's own. */
-export function configToml(target: Target = "vps"): string {
+export function configToml(
+  target: Target = "vps",
+  email: EmailSettings = { sender: "log" },
+): string {
   const header =
     target === "cloudflare"
       ? [
@@ -96,10 +145,24 @@ export function configToml(target: Target = "vps"): string {
     "#:schema ./hypha.config.schema.json",
     ...header,
     "",
+    ...emailToml(email),
+    "",
     "# [rate_limits]",
     "# [dispatch]",
     "",
   ].join("\n");
+}
+
+/** The email provider's secret in `.env`, which `deploy` passes to the API. */
+export function setEmailSecret(env: EnvFile, email: EmailSettings): EnvFile {
+  if (email.sender === "resend") {
+    env.comment("").comment("Resend's API key, for sending emails.");
+    env.set("HYPHA_RESEND_API_KEY", email.apiKey);
+  } else if (email.sender === "smtp" && email.password) {
+    env.comment("").comment("The SMTP server's password, for sending emails.");
+    env.set("HYPHA_SMTP_PASSWORD", email.password);
+  }
+  return env;
 }
 
 export function secret(bytes = 32): string {

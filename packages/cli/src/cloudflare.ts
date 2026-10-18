@@ -358,6 +358,8 @@ export async function deployCloudflare(
         "HYPHA_OWNER_PASSWORD",
         "HYPHA_OWNER_NAME",
         "HYPHA_STORE_NAME",
+        // Setup starts the host, which checks the email sender it's configured with.
+        "HYPHA_RESEND_API_KEY",
       ]),
     };
     spin.message("Setting the database up");
@@ -454,6 +456,8 @@ export async function deployCloudflare(
     );
     const secrets: Record<string, string> = { HYPHA_SECRET_KEY: secretKey };
     if (callerKey) secrets.HYPHA_CALLER_KEY = callerKey;
+    const resendKey = env.get("HYPHA_RESEND_API_KEY");
+    if (resendKey) secrets.HYPHA_RESEND_API_KEY = resendKey;
     if (media)
       Object.assign(secrets, {
         HYPHA_S3_ACCESS_KEY_ID: keyId!,

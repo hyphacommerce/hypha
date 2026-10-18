@@ -132,10 +132,12 @@ function fakeTools(): {
   tools: Tools;
   calls: string[];
   secrets: string[];
+  hostEnvs: Record<string, string>[];
   apps: Record<string, Deployed>;
 } {
   const calls: string[] = [];
   const secrets: string[] = [];
+  const hostEnvs: Record<string, string>[] = [];
   const deployedApps: Record<string, Deployed> = {};
   let namespaces = 0;
   const tools: Tools = {
@@ -159,6 +161,7 @@ function fakeTools(): {
     },
     async host(_binary, args, env) {
       calls.push(`host ${args.join(" ")} DATABASE_URL=${env.DATABASE_URL}`);
+      hostEnvs.push(env);
       return args[0] === "config" ? JSON.stringify({ slots: 100, bindings: BINDINGS }) : "";
     },
     async checkToolchain() {},
@@ -181,7 +184,7 @@ function fakeTools(): {
       deployedApps[app] = { env, secrets: JSON.parse(await readFile(secretsFile, "utf8")) };
     },
   };
-  return { tools, calls, secrets, apps: deployedApps };
+  return { tools, calls, secrets, hostEnvs, apps: deployedApps };
 }
 
 async function folder(d: Deployment, r2 = true): Promise<{ dir: string; env: EnvFile }> {
@@ -267,6 +270,21 @@ test("a later deploy updates Hyperdrive (cache still off) and creates nothing ag
     HYPHA_SECRET_KEY: "f".repeat(64),
     HYPHA_CALLER_KEY: env.get("HYPHA_CALLER_KEY"),
   });
+});
+
+test("the Resend key goes to the Worker as a secret, and to setup", async () => {
+  const d = deployment();
+  Object.assign(d.cloudflare!, {
+    accountId: "a".repeat(32),
+    hyperdriveId: "1".repeat(32),
+    kvId: "2".repeat(32),
+  });
+  const { dir, env } = await folder(d, false);
+  env.set("HYPHA_RESEND_API_KEY", "re_123");
+  const { tools, secrets, hostEnvs } = fakeTools();
+  await deployCloudflare(dir, d, env, tools);
+  assert.equal(JSON.parse(secrets[0]).HYPHA_RESEND_API_KEY, "re_123");
+  assert.equal(hostEnvs[0].HYPHA_RESEND_API_KEY, "re_123");
 });
 
 test("Hyperdrive gets the URL without its query, TLS as --sslmode, and never a cache", () => {

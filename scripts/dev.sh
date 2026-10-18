@@ -78,7 +78,7 @@ until curl -sf "http://127.0.0.1:$API_PORT/health" >/dev/null; do
   fi
   sleep 1
 done
-echo "API ready: http://127.0.0.1:$API_PORT"
+echo "API ready: http://127.0.0.1:$API_PORT  Emails (Mailpit): http://localhost:8025"
 
 if [ -z "${HYPHA_DEV_API_ONLY:-}" ]; then
   pnpm --filter admin dev > >(label admin) 2>&1 &

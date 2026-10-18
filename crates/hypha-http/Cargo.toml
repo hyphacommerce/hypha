@@ -31,6 +31,7 @@ hypha-media = { path = "../hypha-media" }
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-shipping = { path = "../hypha-shipping" }
 hypha-apps = { path = "../hypha-apps" }
+hypha-notifications = { path = "../hypha-notifications" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-config = { path = "../hypha-config" }
 utoipa = "6"

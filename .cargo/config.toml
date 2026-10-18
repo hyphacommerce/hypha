@@ -1,5 +1,6 @@
 # The services `docker compose up -d` starts, for `cargo test` (route tests, the
-# Postgres and S3 adapters' tests) and `cargo run -p hypha-host-axum`. Variables in the
+# Postgres and S3 adapters' tests) and `cargo run -p hypha-host-axum`, emails included
+# (Mailpit: http://localhost:8025). Variables in the
 # environment win (`force = false`), so the same tests can run against R2.
 [env]
 DATABASE_URL = { value = "postgres://hypha:hypha@localhost:5432/hypha", force = false }
@@ -10,3 +11,9 @@ HYPHA_S3_ACCESS_KEY_ID = { value = "hypha", force = false }
 HYPHA_S3_SECRET_ACCESS_KEY = { value = "hypha-dev-secret", force = false }
 # The compose server starts empty; `cargo run` creates the bucket.
 HYPHA_S3_CREATE_BUCKET = { value = "true", force = false }
+# Emails go to Mailpit (design note 0028, §6): readable at http://localhost:8025.
+HYPHA_EMAIL_SENDER = { value = "smtp", force = false }
+HYPHA_EMAIL_FROM = { value = "shop@hypha.localhost", force = false }
+HYPHA_SMTP_HOST = { value = "localhost", force = false }
+HYPHA_SMTP_PORT = { value = "1025", force = false }
+HYPHA_SMTP_TLS = { value = "none", force = false }

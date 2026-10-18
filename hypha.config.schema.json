@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "hypha.config.toml",
-  "description": "Hypha's settings for one deployment. Secrets (`DATABASE_URL`, `HYPHA_SECRET_KEY`, the\nS3 keys) stay in environment variables and have no key here.",
+  "description": "Hypha's settings for one deployment. Secrets (`DATABASE_URL`, `HYPHA_SECRET_KEY`, the\nS3 keys, the email provider's password or key) stay in environment variables and\nhave no key here.",
   "type": "object",
   "properties": {
     "auth": {
@@ -26,6 +26,17 @@
       "default": {
         "pool_timeout": "5s",
         "statement_cache": true
+      }
+    },
+    "email": {
+      "$ref": "#/$defs/Email",
+      "default": {
+        "sender": "log",
+        "smtp": {
+          "host": "localhost",
+          "port": 587,
+          "tls": "starttls"
+        }
       }
     },
     "jobs": {
@@ -263,6 +274,53 @@
         "7d"
       ],
       "pattern": "^\\s*[0-9]+(ms|s|m|h|d)\\s*$"
+    },
+    "Email": {
+      "description": "How emails go out (design note 0028): order confirmations, shipping updates, staff\ninvites and password resets.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "The address emails come from, on a domain the provider verified; the shop's name\n(notification settings) is shown with it. Required unless `sender` is `log`.\n`HYPHA_EMAIL_FROM` wins.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sender": {
+          "description": "Who sends them: `log` writes each one to the log instead (development only),\n`smtp` uses `email.smtp` (not on Workers), `resend` Resend's API with the key in\n`HYPHA_RESEND_API_KEY`. `HYPHA_EMAIL_SENDER` wins.",
+          "$ref": "#/$defs/EmailSender",
+          "default": "log"
+        },
+        "smtp": {
+          "$ref": "#/$defs/Smtp",
+          "default": {
+            "host": "localhost",
+            "port": 587,
+            "tls": "starttls"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "EmailSender": {
+      "description": "Who sends emails.",
+      "oneOf": [
+        {
+          "description": "Written to the log, not sent.",
+          "type": "string",
+          "const": "log"
+        },
+        {
+          "description": "An SMTP server (`email.smtp`): any provider's, or Mailpit locally.",
+          "type": "string",
+          "const": "smtp"
+        },
+        {
+          "description": "Resend's API; the key is `HYPHA_RESEND_API_KEY`.",
+          "type": "string",
+          "const": "resend"
+        }
+      ]
     },
     "Job": {
       "description": "A job that runs every `interval`, and again at once while it has more to do.",
@@ -624,6 +682,58 @@
         "2MiB"
       ],
       "pattern": "^\\s*[0-9]+(B|KiB|MiB|GiB|KB|MB|GB)\\s*$"
+    },
+    "Smtp": {
+      "description": "The SMTP server, when `email.sender` is `smtp`. The password is `HYPHA_SMTP_PASSWORD`,\nnever here.",
+      "type": "object",
+      "properties": {
+        "host": {
+          "description": "The server's host name. `HYPHA_SMTP_HOST` wins.",
+          "type": "string",
+          "default": "localhost"
+        },
+        "port": {
+          "description": "Its port: usually 587 with `starttls`, 465 with `tls`, 25 or 1025 (Mailpit) with\n`none`. `HYPHA_SMTP_PORT` wins.",
+          "type": "integer",
+          "format": "uint16",
+          "default": 587,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "tls": {
+          "description": "How the connection is encrypted. `HYPHA_SMTP_TLS` wins.",
+          "$ref": "#/$defs/SmtpTls",
+          "default": "starttls"
+        },
+        "username": {
+          "description": "The login, if the server wants one; its password is `HYPHA_SMTP_PASSWORD`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "SmtpTls": {
+      "description": "How an SMTP connection is encrypted.",
+      "oneOf": [
+        {
+          "description": "Plain text: a server on this machine or network (Mailpit) only.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "Plain, then upgraded with STARTTLS, which is required (port 587).",
+          "type": "string",
+          "const": "starttls"
+        },
+        {
+          "description": "TLS from the first byte (port 465).",
+          "type": "string",
+          "const": "tls"
+        }
+      ]
     },
     "Transforms": {
       "description": "How thumbnails are made.",

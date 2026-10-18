@@ -88,7 +88,7 @@ until curl -sf "http://127.0.0.1:$API_PORT/health" >/dev/null; do
   fi
   sleep 1
 done
-echo "API ready: http://127.0.0.1:$API_PORT"
+echo "API ready: http://127.0.0.1:$API_PORT  Emails (Mailpit): http://localhost:8025"
 
 pnpm --filter admin start > >(label admin) 2>&1 &
 pids+=($!)

@@ -28,9 +28,12 @@ import {
   composeFile,
   configSchema,
   configToml,
+  type EmailSettings,
   newCloudflareEnv,
   newEnv,
   seaweedConfig,
+  setEmailSecret,
+  type SmtpTls,
 } from "../templates.ts";
 import { ask, dirArg, guarded, setUnattended } from "./shared.ts";
 import { obtainToken } from "./token.ts";
@@ -49,6 +52,8 @@ const KEPT = [
   "R2_ACCESS_KEY_ID",
   "R2_SECRET_ACCESS_KEY",
   "CLOUDFLARE_API_TOKEN",
+  "HYPHA_RESEND_API_KEY",
+  "HYPHA_SMTP_PASSWORD",
 ];
 
 /** A Cloudflare deployment's name: its resources' prefix. */
@@ -153,6 +158,24 @@ export const init = defineCommand({
       default: true,
       description: "cloudflare: files on R2 (--no-media for none)",
     },
+    "email-sender": {
+      type: "string",
+      description:
+        "How emails go out: log (written to the API's log, the default), resend, or smtp (not on cloudflare)",
+    },
+    "email-from": {
+      type: "string",
+      description: "The address emails come from, on a domain your provider verified",
+    },
+    "resend-api-key": { type: "string", description: "resend: the API key (re_…)" },
+    "smtp-host": { type: "string", description: "smtp: the server's host name" },
+    "smtp-port": { type: "string", description: "smtp: its port (default 587)" },
+    "smtp-tls": {
+      type: "string",
+      description: "smtp: starttls (default), tls (port 465) or none",
+    },
+    "smtp-username": { type: "string", description: "smtp: the login, if it needs one" },
+    "smtp-password": { type: "string", description: "smtp: the login's password" },
     yes: { type: "boolean", alias: "y", description: "Don't ask: defaults for what isn't given" },
     force: {
       type: "boolean",
@@ -263,6 +286,7 @@ export const init = defineCommand({
       const storeName = await ask(args["store-name"], "My store", () =>
         p.text({ message: "The store's name", initialValue: "My store" }),
       );
+      const emailSettings = await askEmail(args, target, domains.storefront ?? domains.api);
 
       const d: Deployment = {
         version: 1,
@@ -273,7 +297,7 @@ export const init = defineCommand({
         scheme: target === "vps" ? "https" : "http",
         domains,
       };
-      const env = newEnv(d, { email, storeName });
+      const env = setEmailSecret(newEnv(d, { email, storeName }), emailSettings);
       // Written again (new domains, say): the server's data was made with these, so they
       // stay, and so do the owner and the storefront's keys.
       const earlier = args.force ? await loadEnv(dir).catch(() => undefined) : undefined;
@@ -291,7 +315,7 @@ export const init = defineCommand({
       await saveEnv(dir, env);
       await writeFile(join(dir, "compose.yaml"), await composeFile());
       await writeFile(join(dir, "Caddyfile"), caddyfile(d, acme));
-      await writeFile(join(dir, "hypha.config.toml"), configToml());
+      await writeFile(join(dir, "hypha.config.toml"), configToml(target, emailSettings));
       await writeFile(join(dir, "hypha.config.schema.json"), await configSchema());
       await writeFile(
         join(dir, "seaweedfs", "s3.json"),
@@ -309,6 +333,7 @@ export const init = defineCommand({
         ...(domains.admin ? [`Admin      ${url(d, domains.admin)}`] : []),
         ...(domains.storefront ? [`Storefront ${url(d, domains.storefront)}`] : []),
         `Files      ${url(d, domains.media)}`,
+        `Emails     ${emailLine(emailSettings)}`,
       ];
       p.note(lines.join("\n"), `Written to ${dir}`);
       if (target === "vps") {
@@ -354,7 +379,7 @@ type CloudflareArgs = {
   "r2-access-key-id"?: string;
   "r2-secret-access-key"?: string;
   media?: boolean;
-};
+} & EmailArgs;
 
 /**
  * `--target cloudflare` (design note 0026, §5): the API, the admin and the storefront as
@@ -460,6 +485,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   const storeName = await ask(args["store-name"], "My store", () =>
     p.text({ message: "The store's name", initialValue: "My store" }),
   );
+  const emailSettings = await askEmail(args, "cloudflare", domains.storefront ?? domains.api);
 
   // Written again: keep what Cloudflare already holds (the resources' IDs).
   const earlierState = args.force ? await loadDeployment(dir).catch(() => undefined) : undefined;
@@ -483,11 +509,14 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
       ...(earlier?.cacheKvId ? { cacheKvId: earlier.cacheKvId } : {}),
     },
   };
-  const env = newCloudflareEnv({ email, storeName }, databaseUrl, {
-    token,
-    r2,
-    storefront: Boolean(domains.storefront),
-  });
+  const env = setEmailSecret(
+    newCloudflareEnv({ email, storeName }, databaseUrl, {
+      token,
+      r2,
+      storefront: Boolean(domains.storefront),
+    }),
+    emailSettings,
+  );
   // The database URL, token and R2 keys given now win; the secret key, the owner and
   // the storefront's keys stay.
   const given = new Set([
@@ -495,6 +524,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     "CLOUDFLARE_API_TOKEN",
     "R2_ACCESS_KEY_ID",
     "R2_SECRET_ACCESS_KEY",
+    "HYPHA_RESEND_API_KEY",
   ]);
   if (earlierEnv)
     for (const key of KEPT) {
@@ -507,7 +537,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   await chmod(dir, 0o700);
   await saveDeployment(dir, d);
   await saveEnv(dir, env);
-  await writeFile(join(dir, "hypha.config.toml"), configToml("cloudflare"));
+  await writeFile(join(dir, "hypha.config.toml"), configToml("cloudflare", emailSettings));
   await writeFile(join(dir, "hypha.config.schema.json"), await configSchema());
   await writeFile(
     join(dir, ".gitignore"),
@@ -520,6 +550,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
       ...(domains.admin ? [`Admin      ${url(d, domains.admin)}`] : []),
       ...(domains.storefront ? [`Storefront ${url(d, domains.storefront)}`] : []),
       `Files      ${media ? url(d, domains.media) : "off (no R2 keys)"}`,
+      `Emails     ${emailLine(emailSettings)}`,
       `Database   ${new URL(databaseUrl).host}`,
     ].join("\n"),
     `Written to ${dir}`,
@@ -528,4 +559,143 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     "hypha deploy needs Rust with `rustup target add wasm32-unknown-unknown` and `cargo install worker-build`.",
   );
   p.outro(`Next: hypha deploy${args.dir === "hypha-deploy" ? "" : ` --dir ${args.dir}`}`);
+}
+
+/** The flags `askEmail` reads. */
+export type EmailArgs = {
+  yes?: boolean;
+  "email-sender"?: string;
+  "email-from"?: string;
+  "resend-api-key"?: string;
+  "smtp-host"?: string;
+  "smtp-port"?: string;
+  "smtp-tls"?: string;
+  "smtp-username"?: string;
+  "smtp-password"?: string;
+};
+
+/** Every value answered or flagged, else an error naming the flag. */
+function required(value: string, flag: string, why: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error(`--${flag} is required ${why}`);
+  return trimmed;
+}
+
+/**
+ * How the API sends email (design note 0028, §5): the log (nothing is sent; the
+ * default), Resend with its API key, or an SMTP server (a server's own, not Workers').
+ * `domain` suggests the from address.
+ */
+export async function askEmail(
+  args: EmailArgs,
+  target: Target,
+  domain: string,
+): Promise<EmailSettings> {
+  type Sender = EmailSettings["sender"];
+  const sender = await ask(args["email-sender"], "log", () =>
+    p.select<Sender>({
+      message: "How should emails (order confirmations, invites) go out?",
+      options: [
+        { value: "resend", label: "Resend", hint: "an API key from resend.com" },
+        ...(target === "cloudflare"
+          ? []
+          : [{ value: "smtp" as const, label: "SMTP", hint: "any provider's server" }]),
+        { value: "log", label: "Not yet", hint: "written to the API's log; set it up later" },
+      ],
+    }),
+  );
+  if (sender !== "log" && sender !== "resend" && sender !== "smtp") {
+    throw new Error(`--email-sender is log, resend or smtp, not ${sender}`);
+  }
+  if (sender === "smtp" && target === "cloudflare") {
+    throw new Error("--email-sender smtp isn't available on Cloudflare Workers: use resend");
+  }
+  if (sender === "log") return { sender };
+  const why = `with --email-sender ${sender}`;
+  const from = required(
+    await ask(args["email-from"], "", () =>
+      p.text({
+        message: "The address emails come from (on a domain your provider verified)",
+        placeholder: `shop@mail.${domain}`,
+        validate: checkEmail,
+      }),
+    ),
+    "email-from",
+    why,
+  );
+  if (checkEmail(from)) throw new Error(`--email-from: ${from} isn't an email address`);
+  if (sender === "resend") {
+    const apiKey = required(
+      await ask(args["resend-api-key"], "", () =>
+        p.password({
+          message: "Resend's API key (resend.com/api-keys, with sending access)",
+          validate: (v) => (v?.trim().startsWith("re_") ? undefined : "a key starting re_"),
+        }),
+      ),
+      "resend-api-key",
+      why,
+    );
+    return { sender, from, apiKey };
+  }
+  const host = required(
+    await ask(args["smtp-host"], "", () =>
+      p.text({
+        message: "The SMTP server",
+        placeholder: "smtp.example.com",
+        validate: (v) => (v?.trim() ? undefined : "a host name"),
+      }),
+    ),
+    "smtp-host",
+    why,
+  );
+  const tlsAnswer = await ask(args["smtp-tls"], "starttls", () =>
+    p.select<SmtpTls>({
+      message: "How is the connection encrypted?",
+      options: [
+        { value: "starttls", label: "STARTTLS", hint: "usually port 587" },
+        { value: "tls", label: "TLS", hint: "usually port 465" },
+        { value: "none", label: "None", hint: "a server on the same network only" },
+      ],
+    }),
+  );
+  if (tlsAnswer !== "starttls" && tlsAnswer !== "tls" && tlsAnswer !== "none") {
+    throw new Error(`--smtp-tls is starttls, tls or none, not ${tlsAnswer}`);
+  }
+  const tls: SmtpTls = tlsAnswer;
+  const defaultPort = tls === "tls" ? "465" : "587";
+  const portAnswer = await ask(args["smtp-port"], defaultPort, () =>
+    p.text({ message: "Its port", initialValue: defaultPort }),
+  );
+  const port = Number(portAnswer);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`--smtp-port: ${portAnswer} isn't a port (1 to 65535)`);
+  }
+  const username = (
+    await ask(args["smtp-username"], "", () =>
+      p.text({ message: "The login (empty for none)", placeholder: "apikey" }),
+    )
+  ).trim();
+  if (!username) return { sender, from, host, port, tls };
+  const password = required(
+    await ask(args["smtp-password"], "", () =>
+      p.password({
+        message: "Its password",
+        validate: (v) => (v ? undefined : "the login's password"),
+      }),
+    ),
+    "smtp-password",
+    "with --smtp-username",
+  );
+  return { sender, from, host, port, tls, username, password };
+}
+
+function emailLine(email: EmailSettings): string {
+  switch (email.sender) {
+    case "log":
+      return "logged, not sent (set [email] in hypha.config.toml)";
+    case "resend":
+      return `Resend, from ${email.from}`;
+    case "smtp":
+      return `SMTP ${email.host}:${email.port}, from ${email.from}`;
+  }
 }

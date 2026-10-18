@@ -23,7 +23,7 @@ use hypha_search::SyncSettings;
 use ipnet::IpNet;
 use thiserror::Error;
 
-pub use file::{File, Quota, RateLimits, Transforms};
+pub use file::{EmailSender, File, Quota, RateLimits, SmtpTls, Transforms};
 pub use units::{Dur, Size, UnitError};
 
 /// The file read when `HYPHA_CONFIG` names none, if it's there.
@@ -38,6 +38,7 @@ pub struct Config {
     pub allow_private_callbacks: bool,
     pub media: MediaConfig,
     pub auth: AuthSettings,
+    pub email: EmailConfig,
     pub categories: CategorySettings,
     pub dispatch: DispatchSettings,
     /// The search sync job's batch and lease (design note 0019).
@@ -82,6 +83,48 @@ pub struct S3Config {
     pub region: String,
     pub bucket: String,
     pub create_bucket: bool,
+}
+
+/// How emails go out (design note 0028, §5). The secrets (`HYPHA_SMTP_PASSWORD`,
+/// `HYPHA_RESEND_API_KEY`) aren't here: the hosts read them when they build the sender.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmailConfig {
+    pub sender: SenderConfig,
+    /// The address emails come from: `email.from`, or `EmailConfig::LOG_FROM` for the
+    /// log without one.
+    pub from: hypha_core::Email,
+}
+
+impl EmailConfig {
+    /// Where logged emails say they're from when `email.from` is unset.
+    pub const LOG_FROM: &str = "shop@example.com";
+}
+
+/// Who sends emails, with what it needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SenderConfig {
+    Log,
+    Smtp(SmtpConfig),
+    Resend,
+}
+
+impl SenderConfig {
+    /// As `email.sender` names it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            SenderConfig::Log => EmailSender::Log.as_str(),
+            SenderConfig::Smtp(_) => EmailSender::Smtp.as_str(),
+            SenderConfig::Resend => EmailSender::Resend.as_str(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmtpConfig {
+    pub host: String,
+    pub port: u16,
+    pub tls: SmtpTls,
+    pub username: Option<String>,
 }
 
 /// Each job's switch (already off when `jobs.enabled` is) and interval.
@@ -163,6 +206,18 @@ pub enum Broken {
     NotTransforms(String),
     #[error("is required with an endpoint (or HYPHA_S3_BUCKET)")]
     BucketRequired,
+    #[error("{0:?} isn't an email address")]
+    NotEmail(String),
+    #[error("is required with sender `{0}`")]
+    FromRequired(&'static str),
+    #[error("is `log`, `smtp` or `resend`, not {0:?}")]
+    NotSender(String),
+    #[error("is `none`, `starttls` or `tls`, not {0:?}")]
+    NotTls(String),
+    #[error("{0:?} isn't a port, 1 to 65535")]
+    NotPort(String),
+    #[error("can't be empty")]
+    Empty,
 }
 
 fn because_of(key: Option<&str>) -> String {
@@ -184,6 +239,12 @@ impl ErrorCode for Broken {
             Broken::NotFlag(_) => "config_not_flag",
             Broken::NotTransforms(_) => "config_not_transforms",
             Broken::BucketRequired => "config_bucket_required",
+            Broken::NotEmail(_) => "config_not_email",
+            Broken::FromRequired(_) => "config_from_required",
+            Broken::NotSender(_) => "config_not_sender",
+            Broken::NotTls(_) => "config_not_tls",
+            Broken::NotPort(_) => "config_not_port",
+            Broken::Empty => "config_empty",
         }
     }
 }
@@ -319,6 +380,48 @@ fn apply_env(
     }
     if let Some(create) = flag("HYPHA_S3_CREATE_BUCKET", problems) {
         file.media.s3.create_bucket = create;
+    }
+    // Email (design note 0028): what `.cargo/config.toml` points development at Mailpit
+    // with, and what a container sets without a file.
+    match env("HYPHA_EMAIL_SENDER").as_deref() {
+        None => {}
+        Some("log") => file.email.sender = EmailSender::Log,
+        Some("smtp") => file.email.sender = EmailSender::Smtp,
+        Some("resend") => file.email.sender = EmailSender::Resend,
+        Some(other) => problems.push(Problem {
+            key: "HYPHA_EMAIL_SENDER".to_string(),
+            broken: Broken::NotSender(other.to_string()),
+        }),
+    }
+    if let Some(from) = env("HYPHA_EMAIL_FROM") {
+        file.email.from = Some(from);
+        set.push(("email.from", "HYPHA_EMAIL_FROM"));
+    }
+    if let Some(host) = env("HYPHA_SMTP_HOST") {
+        file.email.smtp.host = host;
+        set.push(("email.smtp.host", "HYPHA_SMTP_HOST"));
+    }
+    if let Some(port) = env("HYPHA_SMTP_PORT") {
+        match port.trim().parse::<u16>() {
+            Ok(port) => {
+                file.email.smtp.port = port;
+                set.push(("email.smtp.port", "HYPHA_SMTP_PORT"));
+            }
+            Err(_) => problems.push(Problem {
+                key: "HYPHA_SMTP_PORT".to_string(),
+                broken: Broken::NotPort(port),
+            }),
+        }
+    }
+    match env("HYPHA_SMTP_TLS").as_deref() {
+        None => {}
+        Some("none") => file.email.smtp.tls = SmtpTls::None,
+        Some("starttls") => file.email.smtp.tls = SmtpTls::Starttls,
+        Some("tls") => file.email.smtp.tls = SmtpTls::Tls,
+        Some(other) => problems.push(Problem {
+            key: "HYPHA_SMTP_TLS".to_string(),
+            broken: Broken::NotTls(other.to_string()),
+        }),
     }
     set
 }
@@ -496,6 +599,54 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         p.between(key, value, min, LONGEST);
     }
 
+    // Email.
+    let email = &file.email;
+    let from = match &email.from {
+        Some(from) => hypha_core::Email::new(from)
+            .inspect_err(|_| p.add("email.from", Broken::NotEmail(from.clone())))
+            .ok(),
+        None => {
+            if email.sender != EmailSender::Log {
+                p.add("email.from", Broken::FromRequired(email.sender.as_str()));
+            }
+            None
+        }
+    };
+    let sender = match email.sender {
+        EmailSender::Log => SenderConfig::Log,
+        EmailSender::Resend => SenderConfig::Resend,
+        EmailSender::Smtp => {
+            let smtp = &email.smtp;
+            if smtp.host.trim().is_empty() {
+                p.add("email.smtp.host", Broken::Empty);
+            }
+            if smtp.port == 0 {
+                p.add("email.smtp.port", Broken::Zero);
+            }
+            if smtp
+                .username
+                .as_deref()
+                .is_some_and(|u| u.trim().is_empty())
+            {
+                p.add("email.smtp.username", Broken::Empty);
+            }
+            SenderConfig::Smtp(SmtpConfig {
+                host: smtp.host.trim().to_string(),
+                port: smtp.port,
+                tls: smtp.tls,
+                username: smtp.username.clone(),
+            })
+        }
+    };
+    let email = EmailConfig {
+        sender,
+        // A constant that passes `Email::new`; only used when there are no problems.
+        from: from.unwrap_or_else(|| {
+            hypha_core::Email::new(EmailConfig::LOG_FROM)
+                .unwrap_or_else(|_| unreachable!("LOG_FROM is an address"))
+        }),
+    };
+
     // Webhooks.
     let hooks = &file.webhooks;
     for (i, wait) in hooks.retry.iter().enumerate() {
@@ -647,6 +798,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             password_reset_resend_after: auth.password_reset_resend_after.0,
             invite_lifetime: auth.invite_lifetime.0,
         },
+        email,
         categories: CategorySettings { max_depth },
         dispatch: DispatchSettings {
             batch: jobs.dispatch.batch,
@@ -1064,6 +1216,138 @@ mod tests {
             [
                 "HYPHA_ALLOW_PRIVATE_CALLBACKS: is true or false, not \"yes\"",
                 "HYPHA_MEDIA_TRANSFORMS: is `cloudflare` or `none`, not \"imgix\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn email_is_logged_by_default_from_a_placeholder() {
+        let config = Config::defaults();
+        assert_eq!(config.email.sender, SenderConfig::Log);
+        assert_eq!(config.email.from.as_str(), EmailConfig::LOG_FROM);
+        assert_eq!(config.email.sender.name(), "log");
+    }
+
+    #[test]
+    fn smtp_takes_its_server_and_the_from_address() {
+        let config = load(
+            r#"
+            [email]
+            sender = "smtp"
+            from = "Shop@Mail.Example.com"
+
+            [email.smtp]
+            host = "smtp.example.com"
+            port = 465
+            tls = "tls"
+            username = "apikey"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.email.from.as_str(), "shop@mail.example.com");
+        assert_eq!(
+            config.email.sender,
+            SenderConfig::Smtp(SmtpConfig {
+                host: "smtp.example.com".to_string(),
+                port: 465,
+                tls: SmtpTls::Tls,
+                username: Some("apikey".to_string()),
+            })
+        );
+        let smtp = load("[email]\nsender = \"smtp\"\nfrom = \"a@b.co\"").unwrap();
+        assert_eq!(
+            smtp.email.sender,
+            SenderConfig::Smtp(SmtpConfig {
+                host: "localhost".to_string(),
+                port: 587,
+                tls: SmtpTls::Starttls,
+                username: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_sender_other_than_the_log_needs_a_from_address() {
+        assert_eq!(
+            problems(load("[email]\nsender = \"resend\"")),
+            ["email.from: is required with sender `resend`"]
+        );
+        assert_eq!(
+            problems(load("[email]\nsender = \"smtp\"")),
+            ["email.from: is required with sender `smtp`"]
+        );
+        let resend = load("[email]\nsender = \"resend\"\nfrom = \"shop@example.com\"");
+        assert_eq!(resend.unwrap().email.sender, SenderConfig::Resend);
+    }
+
+    #[test]
+    fn email_values_are_checked() {
+        let found = problems(load(
+            r#"
+            [email]
+            sender = "smtp"
+            from = "not an address"
+
+            [email.smtp]
+            host = " "
+            port = 0
+            username = ""
+            "#,
+        ));
+        assert_eq!(
+            found,
+            [
+                "email.from: \"not an address\" isn't an email address",
+                "email.smtp.host: can't be empty",
+                "email.smtp.port: is at least 1",
+                "email.smtp.username: can't be empty",
+            ]
+        );
+        assert!(matches!(
+            load("[email]\nsender = \"sendgrid\""),
+            Err(ConfigError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn email_variables_win_over_the_file_and_name_themselves() {
+        let config = Config::load(
+            Some("[email]\nsender = \"resend\"\nfrom = \"shop@example.com\""),
+            env(&[
+                ("HYPHA_EMAIL_SENDER", "smtp"),
+                ("HYPHA_EMAIL_FROM", "dev@hypha.localhost"),
+                ("HYPHA_SMTP_HOST", "mailpit"),
+                ("HYPHA_SMTP_PORT", "1025"),
+                ("HYPHA_SMTP_TLS", "none"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(config.email.from.as_str(), "dev@hypha.localhost");
+        assert_eq!(
+            config.email.sender,
+            SenderConfig::Smtp(SmtpConfig {
+                host: "mailpit".to_string(),
+                port: 1025,
+                tls: SmtpTls::None,
+                username: None,
+            })
+        );
+        let found = problems(Config::load(
+            None,
+            env(&[
+                ("HYPHA_EMAIL_SENDER", "postmark"),
+                ("HYPHA_EMAIL_FROM", "nope"),
+                ("HYPHA_SMTP_PORT", "70000"),
+                ("HYPHA_SMTP_TLS", "ssl"),
+            ]),
+        ));
+        assert_eq!(
+            found,
+            [
+                "HYPHA_EMAIL_FROM: \"nope\" isn't an email address",
+                "HYPHA_EMAIL_SENDER: is `log`, `smtp` or `resend`, not \"postmark\"",
+                "HYPHA_SMTP_PORT: \"70000\" isn't a port, 1 to 65535",
+                "HYPHA_SMTP_TLS: is `none`, `starttls` or `tls`, not \"ssl\"",
             ]
         );
     }

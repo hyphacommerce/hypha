@@ -20,6 +20,8 @@ hypha-store-postgres = { path = "../hypha-store-postgres" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-users = { path = "../hypha-users" }
+hypha-notifications = { path = "../hypha-notifications" }
+hypha-mail-resend = { path = "../hypha-mail-resend" }
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 tower-http = { version = "0.6", features = ["trace"] }
@@ -39,6 +41,9 @@ tokio-postgres = "0.7.18"
 tokio-postgres-rustls = "0.14"
 rustls-platform-verifier = "0.7"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+# The SMTP email sender (`email.rs`, design note 0028): Tokio and rustls with aws-lc-rs,
+# certificates checked by the OS's verifier as Postgres's are; no native-tls/OpenSSL.
+lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "pool", "hostname", "builder", "tokio1-rustls", "aws-lc-rs", "rustls-platform-verifier"] }
 # `config rate-limits` prints JSON.
 serde_json.workspace = true
 

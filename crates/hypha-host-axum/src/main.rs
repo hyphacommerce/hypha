@@ -15,6 +15,7 @@ use hypha_http::rate_limit::{RateLimiter, Rule};
 use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, SharedState, Storage};
 
 mod calls;
+mod email;
 mod handlers;
 #[cfg(test)]
 mod handlers_test;
@@ -155,6 +156,15 @@ async fn main() {
             }
             config
         }
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+    };
+    // Built now so a missing key or password stops startup; the next stage (design note
+    // 0028) passes it to the state.
+    let _mail = match email::email_sender(&config.email, |name| std::env::var(name).ok()) {
+        Ok(mail) => mail,
         Err(e) => {
             tracing::error!("{e}");
             std::process::exit(1);
@@ -427,7 +437,6 @@ async fn serve(prepared: Prepared) {
     }
     let grace = config.server.shutdown_grace;
     let addr = config.server.bind.clone();
-    tracing::warn!("emails (invites, password resets) are logged, not sent: development only");
     let router: Router<_> = hypha_http::router!(PgStorage);
     let app = router
         .layer(axum::middleware::from_fn(record_peer))

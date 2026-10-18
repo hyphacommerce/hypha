@@ -124,7 +124,7 @@ async fn send_call(call: OutboundCall) -> Result<Vec<u8>, CallError> {
 }
 
 /// What happens when a body is longer than its limit.
-enum Overflow {
+pub(crate) enum Overflow {
     /// It's an error (an app's answer).
     Fail,
     /// The rest is left unread (the media storage's reads, `HttpRequest::body_limit`).
@@ -132,7 +132,7 @@ enum Overflow {
 }
 
 /// Reads `response`'s body chunk by chunk, so an endless one stops at `limit`.
-async fn read_body(
+pub(crate) async fn read_body(
     response: &mut worker::Response,
     limit: usize,
     overflow: Overflow,

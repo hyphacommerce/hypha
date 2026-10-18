@@ -23,6 +23,8 @@ pub mod peer;
 pub mod schedule;
 
 #[cfg(target_arch = "wasm32")]
+mod email;
+#[cfg(target_arch = "wasm32")]
 mod handlers;
 #[cfg(target_arch = "wasm32")]
 mod log;
@@ -58,6 +60,7 @@ mod worker_main {
         Context, Env, HttpRequest, KvStore, RateLimiter, ScheduleContext, ScheduledEvent, event,
     };
 
+    use crate::email;
     use crate::limiter::IsolateLimiter;
     use crate::marks::{self, After, Marks, Run};
     use crate::platform;
@@ -190,6 +193,9 @@ mod worker_main {
         )?;
         let secret_key = hypha_http::state::parse_secret_key(&secret_key)
             .map_err(|e| format!("HYPHA_SECRET_KEY: {e}"))?;
+        // Built now so a missing key (or `smtp`) stops setup; the next stage (design note
+        // 0028) passes it to the state.
+        let _mail = email::email_sender(&config.email, |name| env_string(&env, name))?;
         let runtime = platform::runtime();
         // An isolate's `env` is the same bindings for every event, so one is kept.
         let storage = WorkersStorage::new(env.clone(), runtime.clock.clone());
