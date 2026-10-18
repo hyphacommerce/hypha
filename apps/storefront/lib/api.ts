@@ -92,11 +92,12 @@ export const loadCategories = cache(
 );
 
 /**
- * A category page's category, cached and tagged with its handle. A missing or hidden one
- * is `null` (the page 404s), not cached as an error.
+ * A category page's category, cached and tagged with its handle, once per request (its
+ * metadata and the page share it). A missing or hidden one is `null` (the page 404s),
+ * not cached as an error.
  */
-export function loadCategory(handle: string) {
-  return unstable_cache(
+export const loadCategory = cache((handle: string) =>
+  unstable_cache(
     async () => {
       const { data } = await api().GET("/storefront/categories/by-handle/{handle}", {
         params: { path: { handle } },
@@ -105,15 +106,16 @@ export function loadCategory(handle: string) {
     },
     ["category", handle],
     { tags: [TAGS.categories, TAGS.category(handle)], revalidate: FRESH_SECONDS },
-  )();
-}
+  )(),
+);
 
 /**
  * A product page's product, priced and stocked in `country`, cached and tagged with its
- * handle (the webhook expires it). A missing one is `null`.
+ * handle (the webhook expires it), once per request (its metadata and the page share
+ * it). A missing one is `null`.
  */
-export function loadProduct(handle: string, country: string) {
-  return unstable_cache(
+export const loadProduct = cache((handle: string, country: string) =>
+  unstable_cache(
     async () => {
       const { data } = await api().GET("/storefront/products/by-handle/{handle}", {
         params: { path: { handle }, query: { country } },
@@ -122,8 +124,8 @@ export function loadProduct(handle: string, country: string) {
     },
     ["product", handle, country],
     { tags: [TAGS.products, TAGS.product(handle), TAGS.prices], revalidate: FRESH_SECONDS },
-  )();
-}
+  )(),
+);
 
 /** A message for the shopper, by the API's stable error code. */
 export function describe(error: { code: string; error: string }): string {

@@ -42,9 +42,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  */
 export default async function CategoryPage({ params }: Props) {
   const { country: folder, handle } = await params;
-  const country = await countryOf(folder);
+  const [country, category] = await Promise.all([countryOf(folder), load(handle)]);
   const code = country.country;
-  const category = await load(handle);
   const ancestors = [...category.ancestors].reverse();
   const first = await readListingPage({
     country: code,

@@ -30,22 +30,19 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
   const code = country.country;
   const digits = country.minor_units;
   const id = await cartId(code);
+  if (!id) redirect(link(code, "/cart"));
   const client = api();
-  const cart = id
-    ? (await client.GET("/storefront/carts/{id}", { params: { path: { id } } })).data
-    : undefined;
+  // The options alongside the cart, not after it: they only count once the cart has an
+  // address and something to ship, and otherwise the API refuses them (unused here).
+  const [{ data: cart }, options] = await Promise.all([
+    client.GET("/storefront/carts/{id}", { params: { path: { id } } }),
+    client.GET("/storefront/carts/{id}/shipping-options", { params: { path: { id } } }),
+  ]);
   if (!cart || cart.order || cart.lines.length === 0) redirect(link(code, "/cart"));
 
   const address = cart.shipping_address;
   const ships = cart.shipping_groups.length > 0;
-  const offers =
-    ships && address
-      ? ((
-          await client.GET("/storefront/carts/{id}/shipping-options", {
-            params: { path: { id: cart.id } },
-          })
-        ).data?.groups ?? [])
-      : [];
+  const offers = ships && address ? (options.data?.groups ?? []) : [];
   const detailsDone = Boolean(cart.email) && (!ships || Boolean(address));
   const ready = detailsDone && cart.fully_available && (!ships || cart.shipping_ready);
   const missing = !detailsDone

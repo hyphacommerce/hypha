@@ -40,9 +40,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  */
 export default async function ProductPage({ params }: Props) {
   const { country: folder, handle } = await params;
-  const country = await countryOf(folder);
+  // Both at once: the folder is the country's code (the proxy lets only sold-to
+  // countries' folders through), and an unknown one 404s either way.
+  const [country, product] = await Promise.all([
+    countryOf(folder),
+    load(handle, folder.toUpperCase()),
+  ]);
   const code = country.country;
-  const product = await load(handle, code);
 
   return (
     <VStack gap={5}>

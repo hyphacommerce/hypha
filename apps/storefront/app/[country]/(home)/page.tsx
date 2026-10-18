@@ -70,20 +70,28 @@ function Shelf({
  * stocked for the country.
  */
 export default async function HomePage({ params }: { params: Promise<{ country: string }> }) {
-  const country = await countryOf((await params).country);
-  const code = country.country;
-  const digits = country.minor_units;
-  const productBase = link(code, "/p");
-  const [store, categories, newest, value] = await Promise.all([
+  // Every read at once: the folder is the country's code (the proxy lets only sold-to
+  // countries' folders through), and the category shelves start as soon as the
+  // categories are in, without waiting for the other reads.
+  const folder = (await params).country;
+  const code = folder.toUpperCase();
+  const [country, store, categories, newest, value, shelves] = await Promise.all([
+    countryOf(folder),
     loadStore(),
     loadCategories(),
     shelf({ country: code, sort: "newest", limit: 8 }),
     shelf({ country: code, sort: "price_asc", limit: 4 }),
+    loadCategories().then((all) =>
+      Promise.all(
+        all
+          .slice(0, 3)
+          .map((c) => shelf({ country: code, sort: "newest", limit: 4, category: c.id })),
+      ),
+    ),
   ]);
   const featured = categories.slice(0, 3);
-  const shelves = await Promise.all(
-    featured.map((c) => shelf({ country: code, sort: "newest", limit: 4, category: c.id })),
-  );
+  const digits = country.minor_units;
+  const productBase = link(code, "/p");
   const hero = newest.find((hit) => hit.image?.kind === "image")?.image;
 
   if (newest.length === 0) {

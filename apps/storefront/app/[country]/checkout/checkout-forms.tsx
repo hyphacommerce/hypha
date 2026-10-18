@@ -2,8 +2,8 @@
 
 // Checkout's forms (design note 0024, §7; the `payment-form` template without its card
 // section, since orders are placed unpaid, 0021 SU8): contact and address, a shipping
-// option per group, and "Place order". Each saves through its server action, and the
-// page re-renders from the cart the API answers with.
+// option per group, and "Place order". Each saves through its server action, which
+// answers with the page re-rendered from the cart (`refresh()`).
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -12,7 +12,6 @@ import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import {
@@ -35,7 +34,6 @@ export function DetailsForm({
   /** Whether the cart already has them (the button says "Update"). */
   saved: boolean;
 }) {
-  const router = useRouter();
   const [details, setDetails] = useState(initial);
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
@@ -52,9 +50,9 @@ export function DetailsForm({
       return;
     }
     start(async () => {
+      // A save answers with the page re-rendered (`refresh` in the action).
       const result = await saveDetails(country, details);
       setError(result?.error);
-      if (!result) router.refresh();
     });
   };
 
@@ -136,7 +134,6 @@ export function ShippingChoice({
   selected?: string;
   problem?: boolean;
 }) {
-  const router = useRouter();
   const [value, setValue] = useState(selected ?? "");
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
@@ -146,7 +143,6 @@ export function ShippingChoice({
       const result = await selectShipping({ country, group, option });
       setError(result?.error);
       if (result) setValue(selected ?? "");
-      else router.refresh();
     });
   };
 

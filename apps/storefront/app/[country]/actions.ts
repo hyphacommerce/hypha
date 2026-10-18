@@ -7,6 +7,7 @@
 // the browser, and the cart's actions answer with the cart, for the drawer to show.
 // The forms take typed input and get the shopper's message back when the API refused.
 
+import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -39,20 +40,18 @@ function optional(value: string | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-/** The shopper's open cart in `country`: the one in the cookie, or a new one. */
-async function openCart(country: string): Promise<string> {
-  const client = api();
-  const existing = await cartId(country);
-  if (existing) {
-    const { data } = await client.GET("/storefront/carts/{id}", {
-      params: { path: { id: existing } },
-    });
-    if (data && !data.order) return existing;
-  }
+/** A new cart in `country`, remembered in the shopper's cookies. */
+async function newCart(country: string): Promise<string> {
   const { data, error } = await (await shopperApi()).POST("/storefront/carts", { body: { country } });
   if (error) throw new Error(`couldn't create a cart: ${error.code}`);
   await rememberCart(country, data.id);
   return data.id;
+}
+
+/** Whether a refusal means the cart can't take changes any more: gone (or another
+ * channel's), or checked out. A new cart takes the line instead. */
+function cartClosed(error: ApiError): boolean {
+  return error.code === "cart_not_found" || error.code === "cart_completed";
 }
 
 /** The cart in the cookie, or back to the (empty) cart page without one. */
@@ -67,8 +66,13 @@ async function currentCart(country: string): Promise<string> {
 export async function loadCart(country: string): Promise<Cart | null> {
   const id = await cartId(country);
   if (!id) return null;
-  const { data } = await api().GET("/storefront/carts/{id}", { params: { path: { id } } });
-  return data && !data.order ? data : null;
+  const { data, response } = await api().GET("/storefront/carts/{id}", {
+    params: { path: { id } },
+  });
+  if (data && !data.order) return data;
+  // Gone or an order now: forget it (and its flag), so pages stop asking.
+  if (data || response.status === 404) await forgetCart(country);
+  return null;
 }
 
 /** Adds a variant to the cart (opening one if needed), and answers with the cart. */
@@ -77,11 +81,17 @@ export async function addToCart(input: {
   variant: string;
   quantity: number;
 }): Promise<CartResult> {
-  const id = await openCart(input.country);
-  const { data, error } = await api().POST("/storefront/carts/{id}/lines", {
-    params: { path: { id } },
-    body: { variant: input.variant, quantity: Math.max(1, Math.floor(input.quantity) || 1) },
-  });
+  const body = { variant: input.variant, quantity: Math.max(1, Math.floor(input.quantity) || 1) };
+  const add = (id: string) =>
+    api().POST("/storefront/carts/{id}/lines", { params: { path: { id } }, body });
+  // Straight to the cart in the cookie; only a cart that's gone or checked out makes a
+  // new one (no read first: one call for the usual case).
+  const existing = await cartId(input.country);
+  let result = existing ? await add(existing) : undefined;
+  if (!result || (result.error && cartClosed(result.error))) {
+    result = await add(await newCart(input.country));
+  }
+  const { data, error } = result;
   if (error) return { cart: await loadCart(input.country), error: describe(error) };
   return { cart: data };
 }
@@ -120,7 +130,8 @@ export type Details = {
   phone: string;
 };
 
-/** Checkout's first step: the email and the shipping address, together. */
+/** Checkout's first step: the email and the shipping address, together. One after the
+ * other: both write the cart, so at once they'd race for its version. */
 export async function saveDetails(country: string, details: Details): Promise<ActionResult> {
   const id = await currentCart(country);
   const client = api();
@@ -147,6 +158,8 @@ export async function saveDetails(country: string, details: Details): Promise<Ac
     },
   });
   if (address.error) return refused(address.error);
+  // The page re-renders in this action's answer: no second request to refresh it.
+  refresh();
 }
 
 /** Checkout's second step: a shipping option for one group of lines. */
@@ -161,6 +174,7 @@ export async function selectShipping(input: {
     body: { option: input.option },
   });
   if (error) return refused(error);
+  refresh();
 }
 
 /**

@@ -1,7 +1,8 @@
 "use client";
 
 // The shopper's cart in the browser (design note 0024, §7). Pages are static (ISR), so
-// none of them knows the cart: this reads it once the page is here (`loadCart`) and
+// none of them knows the cart: this reads it once the page is here (`loadCart`, only when
+// the `has_cart_<country>` cookie says there is one, `lib/cart-flag.ts`) and
 // keeps it while the shopper adds, changes and removes lines, for the header's count,
 // the drawer and the cart page. Every change answers with the cart, so nothing reloads.
 
@@ -18,6 +19,7 @@ import {
 
 import { type Cart, addToCart, loadCart, setQuantity } from "@/app/[country]/actions";
 import { CloseOnNavigate } from "@/components/close-on-navigate";
+import { hasCartFlag } from "@/lib/cart-flag";
 
 type CartContext = {
   country: string;
@@ -60,6 +62,12 @@ export function CartProvider({
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
+    // No cart in this country (the flag cookie says so): nothing to read.
+    if (!hasCartFlag(country)) {
+      setCart(null);
+      setIsLoading(false);
+      return;
+    }
     let current = true;
     loadCart(country).then((found) => {
       if (!current) return;

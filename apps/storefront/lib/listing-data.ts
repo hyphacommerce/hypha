@@ -26,19 +26,25 @@ type SearchResult =
   | { data: StorefrontSchemas["SearchResponse"]; error?: undefined }
   | { data?: undefined; error: { code: string; error: string } };
 
+/** A search, as the API answers it. */
+async function searchNow(query: SearchQuery): Promise<SearchResult> {
+  const { data, error } = await api().GET("/storefront/search", { params: { query } });
+  return data ? { data } : { error: error ?? { code: "unknown", error: "search failed" } };
+}
+
 /**
  * A search, cached and tagged (`listings`, `prices`) so a static page showing it is
- * re-rendered when the webhook says products or prices changed.
+ * re-rendered when the webhook says products or prices changed. Free text (`q`) isn't
+ * cached: shoppers' words are mostly distinct, so each would only add an entry (a KV
+ * write on Workers) that hardly anyone reads again; the search page that shows them is
+ * dynamic anyway.
  */
 export function search(query: SearchQuery): Promise<SearchResult> {
-  return unstable_cache(
-    async (): Promise<SearchResult> => {
-      const { data, error } = await api().GET("/storefront/search", { params: { query } });
-      return data ? { data } : { error: error ?? { code: "unknown", error: "search failed" } };
-    },
-    ["search", JSON.stringify(query)],
-    { tags: [TAGS.listings, TAGS.prices], revalidate: FRESH_SECONDS },
-  )();
+  if (query.q?.trim()) return searchNow(query);
+  return unstable_cache(() => searchNow(query), ["search", JSON.stringify(query)], {
+    tags: [TAGS.listings, TAGS.prices],
+    revalidate: FRESH_SECONDS,
+  })();
 }
 
 /** Minor units as major ones ("1050" → "10.5"). */

@@ -7,6 +7,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { api } from "@/lib/api";
+import { cartFlagCookie } from "@/lib/cart-flag";
 import { COUNTRY_COOKIE, pickCountry, routing } from "@/lib/routing";
 
 /** The store's countries, kept for a minute: they change rarely, and every page asks. */
@@ -32,7 +33,30 @@ async function countryCodes(): Promise<string[]> {
   return cached?.codes ?? [];
 }
 
+/**
+ * Carts remembered before the flag cookie existed (`lib/cart-flag.ts`): the flag, so the
+ * page reads them. Only the cookies' names: nothing is called.
+ */
+function flagCarts(request: NextRequest, response: NextResponse): NextResponse {
+  for (const { name } of request.cookies.getAll()) {
+    const country = /^cart_([a-z]{2})$/.exec(name)?.[1];
+    if (country && !request.cookies.has(cartFlagCookie(country))) {
+      response.cookies.set(cartFlagCookie(country), "1", {
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 30,
+      });
+    }
+  }
+  return response;
+}
+
 export async function proxy(request: NextRequest) {
+  return flagCarts(request, await route(request));
+}
+
+async function route(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
   const codes = await countryCodes();
   const geolocated =
