@@ -74,9 +74,13 @@ export async function loadDeployment(dir: string): Promise<Deployment> {
   } catch {
     throw new Error(`no deployment in ${dir}: run \`hypha init\` first (or pass --dir)`);
   }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- written by `saveDeployment`; its version is checked next
   const d = JSON.parse(text) as Deployment;
-  if (d.version !== 1)
-    throw new Error(`${join(dir, STATE_FILE)}: version ${d.version} is newer than this CLI`);
+  if (d.version !== 1) {
+    throw new Error(
+      `${join(dir, STATE_FILE)}: version ${JSON.stringify(d.version)} is newer than this CLI`,
+    );
+  }
   return d;
 }
 
@@ -88,6 +92,10 @@ export async function saveDeployment(dir: string, d: Deployment): Promise<void> 
 
 /** One line of a `.env` file: a variable, or a comment or blank kept as written. */
 type Line = { key: string; value: string } | { text: string };
+
+function isBlank(line: Line | undefined): boolean {
+  return line !== undefined && "text" in line && line.text === "";
+}
 
 /** A `.env` file as Docker Compose reads it, kept in order with its comments. */
 export class EnvFile {
@@ -113,13 +121,7 @@ export class EnvFile {
       }
       lines.push({ key: match[1], value });
     }
-    while (
-      lines.length > 0 &&
-      "text" in lines[lines.length - 1] &&
-      (lines[lines.length - 1] as { text: string }).text === ""
-    ) {
-      lines.pop();
-    }
+    while (isBlank(lines.at(-1))) lines.pop();
     return new EnvFile(lines);
   }
 

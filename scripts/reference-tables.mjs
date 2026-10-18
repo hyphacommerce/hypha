@@ -29,7 +29,7 @@ const icu = `CLDR ${process.versions.cldr} (ICU ${process.versions.icu})`;
 
 /** A Rust string literal. Names are printable text; anything else is a bug upstream. */
 function rust(s) {
-  if (/[\u0000-\u001f\u007f]/.test(s)) throw new Error(`control character in ${JSON.stringify(s)}`);
+  if (/\p{Cc}/u.test(s)) throw new Error(`control character in ${JSON.stringify(s)}`);
   return `"${s.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 

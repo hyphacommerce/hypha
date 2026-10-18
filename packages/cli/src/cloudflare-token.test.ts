@@ -20,16 +20,24 @@ test("the link fills in every permission deploying needs", () => {
   );
 });
 
+/** The URL a fake `fetch` was called with. */
+function urlOf(input: RequestInfo | URL): string {
+  return input instanceof Request ? input.url : input.toString();
+}
+
+/** A successful answer from Cloudflare's API. */
+function answer(result: unknown): Response {
+  return new Response(JSON.stringify({ success: true, result }), { status: 200 });
+}
+
 /** Cloudflare's API as a fake: `refused` paths answer 403. */
 function cloudflare(
   options: { accounts?: { id: string; name: string }[]; refused?: string[]; zone?: string } = {},
 ) {
   const asked: string[] = [];
   const get = (async (input: RequestInfo | URL) => {
-    const path = String(input).replace("https://api.cloudflare.com/client/v4", "");
+    const path = urlOf(input).replace("https://api.cloudflare.com/client/v4", "");
     asked.push(path);
-    const answer = (result: unknown) =>
-      new Response(JSON.stringify({ success: true, result }), { status: 200 });
     if ((options.refused ?? []).some((r) => path.startsWith(r)))
       return new Response("{}", { status: 403 });
     if (path === "/user/tokens/verify") return answer({ status: "active" });
@@ -72,7 +80,7 @@ test("R2 is tried, and required only when asked", async () => {
 
 test("R2's keys from a token: its ID and the SHA-256 of its value, user or account token", async () => {
   const user = (async (input: RequestInfo | URL) =>
-    String(input).endsWith("/user/tokens/verify")
+    urlOf(input).endsWith("/user/tokens/verify")
       ? new Response(
           JSON.stringify({ success: true, result: { id: "f".repeat(32), status: "active" } }),
         )
@@ -82,7 +90,7 @@ test("R2's keys from a token: its ID and the SHA-256 of its value, user or accou
     secret: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
   });
   const account = (async (input: RequestInfo | URL) =>
-    String(input).endsWith("/accounts/acc/tokens/verify")
+    urlOf(input).endsWith("/accounts/acc/tokens/verify")
       ? new Response(
           JSON.stringify({ success: true, result: { id: "e".repeat(32), status: "active" } }),
         )

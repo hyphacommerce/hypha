@@ -232,7 +232,7 @@ test("a first deploy sets the database up, creates the resources with Hyperdrive
     callerKey,
   );
   // The secrets don't stay on disk; what was created is remembered.
-  assert.deepEqual((await readdir(dir)).sort(), [
+  assert.deepEqual((await readdir(dir)).toSorted(), [
     ".env",
     "hypha.config.toml",
     "hypha.json",
@@ -287,7 +287,7 @@ test("a failed Hyperdrive call doesn't print the database's password", async () 
   const d = deployment();
   const { dir, env } = await folder(d, false);
   const { tools } = fakeTools();
-  const wrangler = tools.wrangler;
+  const wrangler = tools.wrangler.bind(tools);
   tools.wrangler = async (args, options) => {
     if (args[0] === "hyperdrive") throw new Error(`\`wrangler ${args.join(" ")}\` failed (exit 1)`);
     return wrangler(args, options);

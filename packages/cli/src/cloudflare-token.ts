@@ -92,10 +92,17 @@ type Envelope<T> = { success: boolean; result: T; errors?: { code: number; messa
 async function call<T>(get: typeof fetch, token: string, path: string): Promise<T | null> {
   const response = await get(`${API}${path}`, { headers: { authorization: `Bearer ${token}` } });
   if (response.status === 401 || response.status === 403) return null;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Cloudflare's documented envelope; `success` is checked
   const body = (await response.json().catch(() => null)) as Envelope<T> | null;
   if (!body) throw new Error(`Cloudflare's API answered ${path} with ${response.status}`);
   if (!body.success) return null;
   return body.result;
+}
+
+/** The permission `key` names, as the form shows it, with why deploying needs it. */
+function lacking(key: string): string {
+  const permission = PERMISSIONS.find((p) => p.key === key)!;
+  return `${NAMES[key] ?? key} (${permission.type}): ${permission.why}`;
 }
 
 export type Checked = {
@@ -165,10 +172,6 @@ export async function checkToken(
     [`/zones/${zoneId}/workers/routes`, "workers_routes"],
     [`/zones/${zoneId}/dns_records?per_page=1`, "dns"],
   ];
-  const lacking = (key: string) => {
-    const permission = PERMISSIONS.find((p) => p.key === key)!;
-    return `${NAMES[key] ?? key} (${permission.type}): ${permission.why}`;
-  };
   const missing: string[] = [];
   for (const [path, key] of probes) {
     if ((await call<unknown>(get, token, path)) === null) missing.push(lacking(key));

@@ -35,11 +35,12 @@ export async function ask(
   if (!process.stdin.isTTY)
     throw new Error("a value is missing and there's no terminal to ask in: pass its flag");
   const answer = await prompt();
-  if (p.isCancel(answer)) {
+  // Clack's prompts answer a string, or its cancel symbol (no other symbol).
+  if (p.isCancel(answer) || typeof answer !== "string") {
     p.cancel("Cancelled.");
     process.exit(1);
   }
-  return answer as string;
+  return answer;
 }
 
 export async function open(dir: string): Promise<{ d: Deployment; machine: Machine }> {

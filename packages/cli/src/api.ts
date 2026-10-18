@@ -51,19 +51,32 @@ export function lookupVia(
         : options.family === 6 || options.family === "IPv6"
           ? 6
           : 0;
-    Promise.all([
-      family === 6 ? [] : resolve4(host).catch(() => []),
-      family === 4 ? [] : resolve6(host).catch(() => []),
-    ]).then(([v4, v6]) => {
-      const found: Address[] = [
-        ...v4.map((address) => ({ address, family: 4 as const })),
-        ...v6.map((address) => ({ address, family: 6 as const })),
-      ];
-      if (found.length === 0) return fallback(host, options, callback);
-      if (options.all) callback(null, found);
+    // Outside a `then()`, so an error thrown by the callback (the socket's own code)
+    // isn't caught as a rejection of the lookup.
+    void (async () => {
+      const found = await addressesOf(host, family, resolve4, resolve6);
+      if (found.length === 0) fallback(host, options, callback);
+      else if (options.all) callback(null, found);
       else callback(null, found[0].address, found[0].family);
-    });
+    })();
   };
+}
+
+/** `host`'s addresses in `family` (0 for both, IPv4 first); none when a resolver fails. */
+async function addressesOf(
+  host: string,
+  family: 0 | 4 | 6,
+  resolve4: Resolve,
+  resolve6: Resolve,
+): Promise<Address[]> {
+  const [v4, v6] = await Promise.all([
+    family === 6 ? [] : resolve4(host).catch(() => []),
+    family === 4 ? [] : resolve6(host).catch(() => []),
+  ]);
+  return [
+    ...v4.map((address) => ({ address, family: 4 as const })),
+    ...v6.map((address) => ({ address, family: 6 as const })),
+  ];
 }
 
 const resolver = new Resolver({ timeout: 3000, tries: 2 });
@@ -73,7 +86,7 @@ resolver.setServers(["1.1.1.1", "8.8.8.8"]);
 const freshLookup = lookupVia(
   (host) => resolver.resolve4(host),
   (host) => resolver.resolve6(host),
-  systemLookup as LookupFunction,
+  systemLookup,
 );
 
 function send(
@@ -179,6 +192,7 @@ export class Staff {
   static async login(d: Deployment, email: string, password: string): Promise<Staff> {
     const { status, body } = await send(d, "POST", "/admin/auth/login", { email, password });
     if (status !== 200) throw new ApiError("POST", "/admin/auth/login", status, body);
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the login route's documented answer
     const answer = body as { status: string; session?: { token: string } };
     if (answer.status !== "authenticated" || !answer.session) {
       throw new Error(
@@ -191,6 +205,7 @@ export class Staff {
   async call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const { status, body: answer } = await send(this.d, method, path, body, this.token);
     if (status < 200 || status >= 300) throw new ApiError(method, path, status, answer);
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the caller names the route's documented answer
     return answer as T;
   }
 }

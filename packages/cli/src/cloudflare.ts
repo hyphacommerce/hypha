@@ -256,6 +256,7 @@ async function redacted<T>(work: Promise<T>, password: string): Promise<T> {
     return await work;
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    // oxlint-disable-next-line preserve-caught-error -- a `cause` would carry the password this leaves out
     throw new Error(
       password
         ? message.replaceAll(password, "***").replaceAll(encodeURIComponent(password), "***")
@@ -303,6 +304,7 @@ export async function deployCloudflare(
     );
   }
   if (!cf.accountId) {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- wrangler's `whoami --json`
     const who = JSON.parse(
       await tools.wrangler(["whoami", "--json"], { capture: true }).catch(() => {
         throw new Error(
@@ -360,6 +362,7 @@ export async function deployCloudflare(
     };
     spin.message("Setting the database up");
     await tools.host(binary, ["setup"], hostEnv);
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- our own host's `config rate-limits`
     const { bindings } = JSON.parse(
       await tools.host(binary, ["config", "rate-limits"], hostEnv),
     ) as {
@@ -497,8 +500,8 @@ export async function deployCloudflare(
     // 5. The storefront's keys, as on a VPS: a publishable key and its webhook app.
     if (d.domains.storefront) {
       const email = env.get("HYPHA_OWNER_EMAIL");
-      const password = env.get("HYPHA_OWNER_PASSWORD");
-      if (!email || !password) {
+      const ownerPassword = env.get("HYPHA_OWNER_PASSWORD");
+      if (!email || !ownerPassword) {
         if (!env.get("STOREFRONT_KEY")) {
           throw new Error(
             "no owner credentials in .env to connect the storefront: set STOREFRONT_KEY and HYPHA_WEBHOOK_SECRET there",
@@ -506,14 +509,14 @@ export async function deployCloudflare(
         }
       } else if (!env.get("STOREFRONT_KEY")) {
         start("Connecting the storefront: a publishable key and its webhook");
-        const keys = await tools.connectStorefront(d, email, password);
+        const keys = await tools.connectStorefront(d, email, ownerPassword);
         env.set("STOREFRONT_KEY", keys.key).set("HYPHA_WEBHOOK_SECRET", keys.webhookSecret ?? "");
         await saveEnv(dir, env);
         stop("Storefront connected");
       } else {
-        const moved = await tools.syncWebhook(d, email, password).catch((e: unknown) => {
+        const moved = await tools.syncWebhook(d, email, ownerPassword).catch((e: unknown) => {
           p.log.warn(
-            `Couldn't check the storefront's webhook: ${e instanceof Error ? e.message : e}`,
+            `Couldn't check the storefront's webhook: ${e instanceof Error ? e.message : String(e)}`,
           );
           return null;
         });
@@ -581,6 +584,7 @@ export async function deployCloudflare(
 
 /** The KV namespace titled `title`: the one already there, or a new one. */
 async function namespace(tools: Tools, title: string): Promise<string> {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- wrangler's `kv namespace list`
   const listed = JSON.parse(
     await tools.wrangler(["kv", "namespace", "list"], { capture: true }),
   ) as {
@@ -631,10 +635,10 @@ export function hereTools(d: Deployment, env: EnvFile): Tools {
       );
     },
     // Only what setup needs: no DATABASE_URL, HYPHA_* or S3 settings from this shell.
-    host: (binary, args, env) =>
+    host: (binary, args, hostEnv) =>
       run(binary, args, {
         cwd: REPO,
-        env: { RUST_LOG: "info", ...env },
+        env: { RUST_LOG: "info", ...hostEnv },
         bareEnv: true,
         capture: true,
       }),
@@ -650,12 +654,12 @@ export function hereTools(d: Deployment, env: EnvFile): Tools {
       }
     },
     now: () => Date.now(),
-    answers: (d) => waitForHealth(d, 300),
+    answers: (deployed) => waitForHealth(deployed, 300),
     reachable: (target) => waitForAnswer(target, 300),
-    connectStorefront: async (d, email, password) =>
-      connectStorefront(d, await Staff.login(d, email, password)),
-    syncWebhook: async (d, email, password) =>
-      syncWebhook(d, await Staff.login(d, email, password)),
+    connectStorefront: async (deployed, email, password) =>
+      connectStorefront(deployed, await Staff.login(deployed, email, password)),
+    syncWebhook: async (deployed, email, password) =>
+      syncWebhook(deployed, await Staff.login(deployed, email, password)),
     async deployApp(app, appEnv, secretsFile) {
       const cwd = join(REPO, "apps", app);
       // A Workers build (not a VPS's Node one), with the deployment's values.

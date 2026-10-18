@@ -23,7 +23,6 @@ import {
 } from "../deployment.ts";
 import { checkR2Keys, isTokenValue, r2KeysOf } from "../cloudflare-token.ts";
 import { BLOCK, checkDatabaseUrl } from "../cloudflare.ts";
-import { run } from "../shell.ts";
 import {
   caddyfile,
   composeFile,
@@ -173,7 +172,7 @@ export const init = defineCommand({
         process.exit(1);
       }
 
-      const target = (await ask(args.target, "vps", () =>
+      const target = await ask(args.target, "vps", () =>
         p.select<Target>({
           message: "Where should Hypha run?",
           options: [
@@ -190,7 +189,7 @@ export const init = defineCommand({
             { value: "local", label: "This machine", hint: "to try the production setup locally" },
           ],
         }),
-      )) as Target;
+      );
       if (target !== "vps" && target !== "local" && target !== "cloudflare") {
         throw new Error(`--target is vps, cloudflare or local, not ${target}`);
       }
@@ -230,7 +229,7 @@ export const init = defineCommand({
             ? { storefront: await sub(args["storefront-domain"], "The shop's address", domain) }
             : {}),
         };
-        buildOn = (await ask(args["build-on"], "server", () =>
+        const buildAnswer = await ask(args["build-on"], "server", () =>
           p.select<BuildOn>({
             message: "Where should the images be built?",
             options: [
@@ -242,9 +241,10 @@ export const init = defineCommand({
               { value: "here", label: "Here", hint: "then copied over; for small servers" },
             ],
           }),
-        )) as BuildOn;
-        if (buildOn !== "server" && buildOn !== "here")
-          throw new Error(`--build-on is server or here, not ${buildOn}`);
+        );
+        if (buildAnswer !== "server" && buildAnswer !== "here")
+          throw new Error(`--build-on is server or here, not ${buildAnswer}`);
+        buildOn = buildAnswer;
       } else {
         domains = {
           api: "api.hypha.localhost",

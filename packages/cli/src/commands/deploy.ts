@@ -209,6 +209,7 @@ async function preflight(
     throw new Error(
       `can't reach ${machine.ssh} over SSH without a password (key-based login is needed):\n` +
         (e instanceof CommandFailed ? e.output.trim() : String(e)),
+      { cause: e },
     );
   }
 
