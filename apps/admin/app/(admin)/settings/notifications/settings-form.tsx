@@ -252,7 +252,7 @@ export function NotificationSettingsForm({
           <TextInput
             label="Order page URL"
             isOptional
-            placeholder="https://shop.example.com/order/{order}/confirmed?token={token}"
+            placeholder="https://shop.example.com/order/{order}?token={token}"
             value={form.orderUrl}
             isDisabled={!canWrite}
             onChange={(orderUrl) => set({ orderUrl })}

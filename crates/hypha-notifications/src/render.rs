@@ -47,10 +47,16 @@ pub fn render<C: Serialize + ?Sized>(
         add(TemplatePart::Text, text)?;
     }
     let context = Value::from(minijinja::value::Serde(context));
+    let source = |part: TemplatePart| match part {
+        TemplatePart::Layout => Some(layout),
+        TemplatePart::Subject => Some(sources.subject()),
+        TemplatePart::Html => Some(sources.html()),
+        TemplatePart::Text => sources.text(),
+    };
     let run = |part: TemplatePart| {
         env.get_template(part.as_str())
             .and_then(|template| template.render(context.clone()))
-            .map_err(|e| render_error(&e, part))
+            .map_err(|e| with_line(render_error(&e, part), &e, source))
     };
     let subject = one_line(&run(TemplatePart::Subject)?);
     let html = run(TemplatePart::Html)?;
@@ -147,6 +153,31 @@ fn problem(e: &minijinja::Error, rendering: TemplatePart) -> TemplateProblem {
         line: e.line(),
         message,
     }
+}
+
+/// The longest quote of the failing line in a problem's message.
+const QUOTE_CHARS: usize = 100;
+
+/// Quotes the line an undefined value is on: minijinja says only "undefined value",
+/// and the line is what lets a merchant spot `customer.nmae`.
+fn with_line<'a>(
+    error: RenderError,
+    e: &minijinja::Error,
+    source: impl Fn(TemplatePart) -> Option<&'a str>,
+) -> RenderError {
+    let RenderError::Invalid(mut problem) = error else {
+        return error;
+    };
+    if e.kind() == ErrorKind::UndefinedError
+        && let Some(line) = problem.line
+        && let Some(text) = source(problem.part).and_then(|s| s.lines().nth(line - 1))
+    {
+        let text = text.trim();
+        let quote: String = text.chars().take(QUOTE_CHARS).collect();
+        let more = if quote.len() < text.len() { "…" } else { "" };
+        problem.message = format!("{} in “{quote}{more}”", problem.message);
+    }
+    RenderError::Invalid(problem)
 }
 
 fn render_error(e: &minijinja::Error, rendering: TemplatePart) -> RenderError {
@@ -634,6 +665,10 @@ mod tests {
         };
         assert_eq!(problem.part, TemplatePart::Html);
         assert_eq!(problem.line, Some(2));
+        assert_eq!(
+            problem.message, "undefined value in “{{ order.nubmer }}”",
+            "the line is quoted, so the misspelling shows"
+        );
     }
 
     #[test]
