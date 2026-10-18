@@ -261,8 +261,10 @@ function MethodDialog({
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
+      {/* The fields scroll on short screens; the buttons stay in view below them. A flex
+          item keeps its content's height unless allowed to shrink (`minHeight: 0`). */}
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
       <VStack gap={4} padding={4}>
-        {error && <Banner status="error" title={error} />}
         {!method && (
           <Selector
             label="Kind"
@@ -317,6 +319,10 @@ function MethodDialog({
           value={form.enabled}
           onChange={(enabled) => set({ enabled })}
         />
+      </VStack>
+      </div>
+      <VStack gap={3} padding={4}>
+        {error && <Banner status="error" title={error} />}
         <HStack gap={2} hAlign="end">
           <Button label="Cancel" variant="ghost" onClick={onClose} />
           <Button
