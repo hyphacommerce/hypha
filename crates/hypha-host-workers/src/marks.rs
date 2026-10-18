@@ -23,6 +23,8 @@ use std::time::Duration;
 pub const WRITTEN: &str = "jobs:written";
 pub const CHECKED: &str = "jobs:checked";
 pub const DUE: &str = "jobs:due";
+/// Set while prune or the media sweep has work left: the next tick goes on with it.
+pub const BACKLOG: &str = "jobs:backlog";
 
 /// How often a tick runs the jobs whatever the marks say.
 pub const NET: Duration = Duration::from_secs(3600);
@@ -68,8 +70,8 @@ pub struct Run {
     pub left: bool,
     /// A step found something to do.
     pub worked: bool,
-    /// The earliest time work a step couldn't finish is due again (a failed search
-    /// rebuild, when its lease ends), in milliseconds; the outbox says its own.
+    /// The earliest time work a step couldn't finish is due again (a retry, a delivery or
+    /// search rebuild left under its lease), in milliseconds.
     pub retry_at: Option<u64>,
 }
 
@@ -108,8 +110,9 @@ pub fn after(run: Run, started: Option<u64>) -> After {
     After {
         written: run.left,
         checked: started.filter(|_| !run.left),
-        // A tick's run checks it each time: it's the one that keeps it right.
-        due: run.left || run.worked || run.retry_at.is_some() || started.is_some(),
+        // A tick's run checks it each time: it's the one that keeps it right. After a write,
+        // only a run that left something (now or for later) does: most leave nothing.
+        due: run.left || run.retry_at.is_some() || started.is_some(),
         retry_at: run.retry_at,
     }
 }
@@ -188,12 +191,12 @@ mod tests {
     }
 
     #[test]
-    fn a_run_that_worked_after_a_write_reads_the_due_time() {
+    fn a_run_that_did_all_its_work_after_a_write_reads_nothing() {
         let run = Run {
             worked: true,
             ..Run::default()
         };
-        assert!(after(run, None).due);
+        assert!(!after(run, None).due);
         assert!(!after(run, None).written);
     }
 

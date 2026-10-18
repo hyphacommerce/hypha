@@ -6,7 +6,9 @@ use hypha_dispatch::VariantCleanup;
 use hypha_merchandising::CategoryImageCleanup;
 use hypha_search::SearchIndexer;
 
-/// Every handler, in no particular order (names must be unique; a test checks).
+/// Every handler, in no particular order: the same as `hypha-host-axum`'s (whose test
+/// checks the names are unique), so both hosts deliver events to the same destinations.
+/// Keep the two in step.
 pub type Handlers = (VariantCleanup, SearchIndexer, CategoryImageCleanup);
 
 pub const HANDLERS: Handlers = (VariantCleanup, SearchIndexer, CategoryImageCleanup);

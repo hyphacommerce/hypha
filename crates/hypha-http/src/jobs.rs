@@ -128,6 +128,18 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
         }
         outcomes.push(Outcome::of(delivery, outcome));
     }
+    // When this step's unfinished work is due again: a retry's time, or the lease's end
+    // of a delivery it didn't start (out of time); a host that runs jobs only when
+    // there's work records it (design note 0026, W7).
+    let retries = outcomes.iter().filter_map(|o| match &o.outcome {
+        hypha_core::DeliveryOutcome::Retry { at, .. } => Some(*at),
+        _ => None,
+    });
+    let unstarted = leased
+        .iter()
+        .filter(|d| !outcomes.iter().any(|o| o.delivery == d.id))
+        .map(|d| d.leased_until);
+    let retry_at = retries.chain(unstarted).min();
     if !outcomes.is_empty() {
         let ports = state.public_ports().await.map_err(no_connection)?;
         record(&ports, &outcomes).await.map_err(|e| e.to_string())?;
@@ -138,8 +150,7 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
     Ok(Ran {
         more: fanned.more || leased.len() >= state.config.dispatch.batch as usize,
         idle,
-        // Deliveries left under their lease are the outbox's to say (`next_due`).
-        retry_at: None,
+        retry_at,
     })
 }
 

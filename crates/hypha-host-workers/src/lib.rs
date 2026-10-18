@@ -155,9 +155,14 @@ mod worker_main {
             slot.get_or_insert_with(|| set_up(env.clone()).boxed_local().shared())
                 .clone()
         });
-        let isolate = setup.await;
+        let isolate = setup.clone().await;
+        // Only this setup: another event may have started a newer one meanwhile.
         if isolate.is_err() {
-            ISOLATE.set(None);
+            ISOLATE.with_borrow_mut(|slot| {
+                if slot.as_ref().is_some_and(|s| s.ptr_eq(&setup)) {
+                    *slot = None;
+                }
+            });
         }
         isolate
     }
@@ -411,14 +416,32 @@ mod worker_main {
             } else {
                 tracing::debug!("jobs: nothing waiting");
             }
-            if jobs.prune.enabled && due(at, jobs.prune.interval) {
-                steps("prune", &state, None, || jobs::prune(&state)).await;
+            // An interval job that left work goes on at the next tick, not its next interval,
+            // as the native runner repeats while there's more (`marks::BACKLOG`).
+            let backlog = match &kv {
+                Some(kv) => kv.get(marks::BACKLOG).text().await.ok().flatten().is_some(),
+                None => false,
+            };
+            let mut left = false;
+            if jobs.prune.enabled && (backlog || due(at, jobs.prune.interval)) {
+                left |= steps("prune", &state, None, || jobs::prune(&state))
+                    .await
+                    .left;
             }
             if jobs.media_sweep.enabled
                 && state.media.is_some()
-                && due(at, jobs.media_sweep.interval)
+                && (backlog || due(at, jobs.media_sweep.interval))
             {
-                steps("media sweep", &state, None, || jobs::media_sweep(&state)).await;
+                left |= steps("media sweep", &state, None, || jobs::media_sweep(&state))
+                    .await
+                    .left;
+            }
+            if let Some(kv) = &kv {
+                if left {
+                    put(kv, marks::BACKLOG, started).await;
+                } else if backlog && let Err(e) = kv.delete(marks::BACKLOG).await {
+                    tracing::warn!(error = %e, "jobs: cannot clear the backlog mark");
+                }
             }
         })
         .await;

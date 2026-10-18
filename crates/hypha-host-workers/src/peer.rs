@@ -6,7 +6,7 @@
 //! ours, and then the caller's `X-Forwarded-For` names the client, as a trusted proxy's
 //! does natively. Portable, so its tests run natively.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 
 /// Who called: `binding` is the caller a Service Binding's props name, if any.
 pub fn client_address(
@@ -15,8 +15,15 @@ pub fn client_address(
     forwarded_for: Option<&str>,
 ) -> Option<IpAddr> {
     match binding {
-        // The last hop the caller appended: the address of whoever called it.
-        Some(_) => forwarded_for?.rsplit(',').next()?.trim().parse().ok(),
+        // The last hop the caller appended: the address of whoever called it. Without
+        // one (a call made for no client), every such call shares one address: limits
+        // count them together rather than refusing them.
+        Some(_) => Some(
+            forwarded_for
+                .and_then(|f| f.rsplit(',').next())
+                .and_then(|ip| ip.trim().parse().ok())
+                .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+        ),
         None => connecting_ip?.trim().parse().ok(),
     }
 }
@@ -47,11 +54,15 @@ mod tests {
     }
 
     #[test]
-    fn through_a_binding_a_connecting_ip_alone_counts_for_nothing() {
+    fn through_a_binding_without_a_client_every_call_shares_one_address() {
+        let shared = Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
         assert_eq!(
             client_address(Some("admin"), Some("203.0.113.7"), None),
-            None
+            shared
         );
-        assert_eq!(client_address(Some("admin"), None, Some("not an ip")), None);
+        assert_eq!(
+            client_address(Some("admin"), None, Some("not an ip")),
+            shared
+        );
     }
 }
