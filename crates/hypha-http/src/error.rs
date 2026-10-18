@@ -995,7 +995,7 @@ impl From<hypha_apps::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Apps, deliveries and events only ever arrive in URLs (a malformed key in
             // one is `AppNotFound` too); a new app's key in a body is a conflict when
-            // taken, and malformed is `App(InvalidKey)`, 422.
+            // taken, and malformed is `App(Key(_))`, 422.
             E::AppNotFound(_) | E::DeliveryNotFound { .. } | E::EventNotFound(_) => {
                 StatusCode::NOT_FOUND
             }
