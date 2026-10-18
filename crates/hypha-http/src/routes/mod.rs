@@ -249,6 +249,7 @@ macro_rules! route_table {
             [admin, GET, "/admin/notification-templates", notifications::list_templates],
             [admin, GET, "/admin/notification-templates/{key}", notifications::fetch_template],
             [admin, PUT, "/admin/notification-templates/{key}", notifications::save_template],
+            [admin, PATCH, "/admin/notification-templates/{key}", notifications::set_template_enabled],
             [admin, DELETE, "/admin/notification-templates/{key}", notifications::revert_template],
             [admin, POST, "/admin/notification-templates/{key}/preview", notifications::preview],
             [admin, POST, "/admin/notification-templates/{key}/test", notifications::send_test],

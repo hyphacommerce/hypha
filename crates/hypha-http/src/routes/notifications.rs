@@ -11,6 +11,7 @@ use hypha_notifications::{
     NotificationStatus, Rendered, TemplateError, TemplateKey, TemplatePart, TemplateProblem,
     get_notification, get_notification_settings, get_notification_template,
     list_notification_templates, list_notifications, revert_notification_template,
+    set_notification_template_enabled,
 };
 use serde::{Deserialize, Serialize};
 
@@ -452,6 +453,36 @@ pub async fn save_template<S: Storage>(
         text: req.text,
     };
     let template = hypha_mail::save_template(&ctx, &ports, key, input, enabled).await?;
+    Ok(Json(template_response(&state, &ports, &template).await?))
+}
+
+/// Whether a template is sent, apart from its sources.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetNotificationTemplateRequest {
+    enabled: bool,
+}
+
+/// Turns a template on or off, keeping its sources: a default stays a default (and
+/// gets later improvements). Turning off one that can't be is `template_required`.
+#[utoipa::path(
+    patch,
+    path = "/admin/notification-templates/{key}",
+    params(("key" = String, Path, pattern = "^[a-z_]+$", example = "order_confirmation")),
+    request_body = SetNotificationTemplateRequest,
+    responses((status = 200, description = "OK", body = NotificationTemplateResponse)),
+    extensions(("x-hypha-scopes" = json!(["notifications:write"]))),
+)]
+pub async fn set_template_enabled<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(key): PathId<String>,
+    body: JsonBody<SetNotificationTemplateRequest>,
+) -> Result<Json<NotificationTemplateResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let key = template_key(&key)?;
+    let template = set_notification_template_enabled(&ctx, &ports, key, req.enabled).await?;
     Ok(Json(template_response(&state, &ports, &template).await?))
 }
 

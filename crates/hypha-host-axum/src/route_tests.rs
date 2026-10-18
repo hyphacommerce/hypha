@@ -5285,6 +5285,36 @@ async fn templates_are_listed_read_saved_checked_and_reverted() {
 }
 
 #[tokio::test]
+async fn a_template_is_turned_off_and_on_without_its_sources() {
+    let app = app().await;
+    let path = "/admin/notification-templates/order_shipped";
+    let (status, off) = send(&app, "PATCH", path, Some(r#"{"enabled":false}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{off}");
+    assert_eq!(
+        (&off["enabled"], &off["customized"]),
+        (&json!(false), &json!(false)),
+        "a default turned off is still the default"
+    );
+    let (status, on) = send(&app, "PATCH", path, Some(r#"{"enabled":true}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{on}");
+    assert_eq!(on["enabled"], true);
+
+    let (status, json) = send(
+        &app,
+        "PATCH",
+        "/admin/notification-templates/staff_password_reset",
+        Some(r#"{"enabled":false}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "template_required")
+    );
+    let (status, json) = send(&app, "PATCH", path, Some(r#"{"enabled":null}"#)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
+}
+
+#[tokio::test]
 async fn a_test_send_goes_to_the_calling_staff_member_only() {
     let app = app().await;
     let path = "/admin/notification-templates/order_shipped/test";
