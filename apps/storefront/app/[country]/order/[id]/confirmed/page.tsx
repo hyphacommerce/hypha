@@ -162,12 +162,9 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
                     {payment.method_name ?? "Payment"}: {formatMoney(payment.amount, digits)}
                   </Text>
                   {payment.instructions && payment.status === "pending" && (
-                    <VStack gap={2}>
-                      <Text color="secondary">
-                        <span className="shop-pre-line">{payment.instructions}</span>
-                      </Text>
-                      <Text weight="medium">Use order #{order.number} as the payment reference.</Text>
-                    </VStack>
+                    <Text color="secondary">
+                      <span className="shop-pre-line">{payment.instructions}</span>
+                    </Text>
                   )}
                 </>
               )}
