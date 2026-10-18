@@ -224,6 +224,7 @@ async fn carts_racing_for_the_last_units_never_oversell() {
         let input = Checkout {
             cart,
             expected_total: None,
+            return_url: None,
             idempotency: None,
         };
         checkout(
@@ -305,6 +306,7 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
         let input = Checkout {
             cart,
             expected_total: None,
+            return_url: None,
             idempotency: None,
         };
         checkout(
@@ -356,6 +358,7 @@ async fn retries_with_the_same_key_all_get_the_one_order() {
         let input = Checkout {
             cart,
             expected_total: None,
+            return_url: None,
             idempotency: Some(IdempotencyRequest {
                 key: "checkout-1".to_string(),
                 fingerprint: [7; 32],

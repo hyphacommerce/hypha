@@ -15,6 +15,11 @@ pub enum AppError {
     InvalidSubscription(String),
     #[error("an app subscribes to at most {max} event patterns")]
     TooManySubscriptions { max: usize },
+    /// A point (or a version of it) this build doesn't know (design note 0029, §3).
+    #[error("no extension point {point:?} version {version}")]
+    UnknownExtensionPoint { point: String, version: u16 },
+    #[error("extension point {0:?} is listed twice")]
+    DuplicateExtensionPoint(String),
 }
 
 impl ErrorCode for AppError {
@@ -26,6 +31,8 @@ impl ErrorCode for AppError {
             AppError::InvalidTimeout { .. } => "invalid_timeout",
             AppError::InvalidSubscription(_) => "invalid_subscription",
             AppError::TooManySubscriptions { .. } => "too_many_subscriptions",
+            AppError::UnknownExtensionPoint { .. } => "unknown_extension_point",
+            AppError::DuplicateExtensionPoint(_) => "duplicate_extension_point",
         }
     }
 }

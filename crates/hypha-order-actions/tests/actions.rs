@@ -1198,3 +1198,160 @@ fn an_order_with_an_authorized_payment_isnt_cancelled() {
     );
     assert_eq!((world.order(), world.stock()), before);
 }
+
+// ---- payment events (design note 0029, §3.1) ----
+
+impl World {
+    fn report(
+        &self,
+        kind: hypha_order_actions::PaymentEventKind,
+        amount: Option<i64>,
+        idempotency: Option<IdempotencyRequest>,
+    ) -> Result<hypha_core::Idempotent<OrderPayments>, CommandError> {
+        let input = hypha_order_actions::PaymentEvent {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            kind,
+            amount,
+            reference: Some("pi_1".to_string()),
+            occurred_at: None,
+            idempotency,
+        };
+        block_on(hypha_order_actions::record_payment_event(
+            &Ctx::system(),
+            &self.ports,
+            &self.clock,
+            input,
+        ))
+    }
+}
+
+#[test]
+fn an_authorization_then_a_capture_move_the_payment_and_the_order() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    let done = world.report(K::Authorized, None, None).unwrap().value;
+    assert_eq!(done.payments[0].status(), PaymentStatus::Authorized);
+    assert_eq!(done.payments[0].reference(), Some("pi_1"));
+    assert_eq!(done.order.financial_status(), FinancialStatus::Authorized);
+    let done = world.report(K::Paid, Some(2000), None).unwrap().value;
+    assert_eq!(done.payments[0].status(), PaymentStatus::Paid);
+    assert_eq!(world.order().financial_status(), FinancialStatus::Paid);
+    let types = world.outbox.types();
+    assert!(
+        types.ends_with(&[
+            "payment.authorized".to_string(),
+            "payment.paid".to_string(),
+            "order.paid".to_string()
+        ]),
+        "{types:?}"
+    );
+}
+
+#[test]
+fn a_report_repeated_changes_nothing() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    world.report(K::Paid, None, None).unwrap();
+    let before = world.outbox.types().len();
+    let again = world.report(K::Paid, None, None).unwrap().value;
+    assert_eq!(again.payments[0].status(), PaymentStatus::Paid);
+    assert_eq!(world.outbox.types().len(), before);
+}
+
+#[test]
+fn a_report_with_its_key_replays() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    world.report(K::Paid, None, None).unwrap();
+    let first = world
+        .report(K::PartiallyRefunded, Some(500), key("refund-1", 1))
+        .unwrap();
+    assert!(!first.replayed);
+    let again = world
+        .report(K::PartiallyRefunded, Some(500), key("refund-1", 1))
+        .unwrap();
+    assert!(again.replayed);
+    assert_eq!(again.value.payments[0].refunded(), eur(500));
+    assert_eq!(
+        again.value.order.financial_status(),
+        FinancialStatus::PartiallyRefunded
+    );
+    // The rest, then.
+    let done = world.report(K::Refunded, None, None).unwrap().value;
+    assert_eq!(done.payments[0].refunded(), eur(2000));
+    assert_eq!(done.order.financial_status(), FinancialStatus::Refunded);
+}
+
+#[test]
+fn a_report_the_status_cant_take_is_refused() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    world.report(K::Voided, None, None).unwrap();
+    assert_eq!(
+        world.report(K::Paid, None, None).map(|_| ()),
+        Err(CommandError::Payment(PaymentError::InvalidTransition {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            from: PaymentStatus::Voided,
+            to: PaymentStatus::Paid,
+        }))
+    );
+    assert_eq!(world.order().financial_status(), FinancialStatus::Voided);
+}
+
+#[test]
+fn a_whole_payment_reported_with_another_amount_is_refused() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    assert_eq!(
+        world.report(K::Paid, Some(1500), None).map(|_| ()),
+        Err(CommandError::AmountMismatch {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            expected: 2000,
+            reported: 1500,
+        })
+    );
+}
+
+#[test]
+fn reporting_needs_payments_write() {
+    let world = World::new();
+    pending_payment(&world);
+    let input = hypha_order_actions::PaymentEvent {
+        payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+        kind: hypha_order_actions::PaymentEventKind::Paid,
+        amount: None,
+        reference: None,
+        occurred_at: None,
+        idempotency: None,
+    };
+    assert_eq!(
+        block_on(hypha_order_actions::record_payment_event(
+            &user_with(vec![Scope::OrdersWrite]),
+            &world.ports,
+            &world.clock,
+            input,
+        ))
+        .map(|_| ()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::PaymentsWrite
+        )))
+    );
+}
+
+#[test]
+fn an_unknown_payment_is_reported() {
+    let world = World::new();
+    assert_eq!(
+        world
+            .report(hypha_order_actions::PaymentEventKind::Paid, None, None)
+            .map(|_| ()),
+        Err(CommandError::PaymentNotFound(
+            hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001))
+        ))
+    );
+}

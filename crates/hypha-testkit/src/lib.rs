@@ -34,7 +34,7 @@ mod tax_classes;
 mod tax_regions;
 mod users;
 
-pub use apps::InMemoryAppRepo;
+pub use apps::{InMemoryAppRepo, InMemoryExtensionEndpointRepo};
 pub use auth::{
     InMemoryApiKeyRepo, InMemoryIdentityRepo, InMemoryPasswordResetRepo, InMemorySessionRepo,
 };

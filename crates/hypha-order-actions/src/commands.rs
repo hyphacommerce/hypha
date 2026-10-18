@@ -60,6 +60,23 @@ pub enum CommandError {
     /// marking the order paid or cancelling it waits for providers that can.
     #[error("payment {payment} of order {order} is authorized; only its provider can settle it")]
     PaymentAuthorized { order: OrderId, payment: PaymentId },
+    #[error("payment {0} not found")]
+    PaymentNotFound(PaymentId),
+    /// An app reported on a payment another provider collects (design note 0029,
+    /// §3.1: only the payment's own app may).
+    #[error("payment {payment} isn't collected by {app}")]
+    PaymentNotYours {
+        payment: PaymentId,
+        app: hypha_core::AppKey,
+    },
+    /// A report of the whole payment (authorized, paid) with another amount: partial
+    /// captures don't exist yet.
+    #[error("payment {payment} is of {expected}, but {reported} was reported")]
+    AmountMismatch {
+        payment: PaymentId,
+        expected: i64,
+        reported: i64,
+    },
     /// Cancelling an order with standing fulfilments: these, to cancel first (FU7).
     #[error("order {order} has {} standing fulfilments; cancel them first", .fulfillments.len())]
     HasFulfillments {
@@ -85,6 +102,9 @@ impl ErrorCode for CommandError {
             CommandError::HasFulfillments { .. } => "order_has_fulfillments",
             CommandError::NotPayable { .. } => "order_not_payable",
             CommandError::PaymentAuthorized { .. } => "payment_authorized",
+            CommandError::PaymentNotFound(_) => "payment_not_found",
+            CommandError::PaymentNotYours { .. } => "payment_not_yours",
+            CommandError::AmountMismatch { .. } => "payment_amount_mismatch",
         }
     }
 }
@@ -542,7 +562,10 @@ fn lost_a_race(e: &CommandError) -> bool {
     matches!(e, CommandError::Repo(RepoError::StaleVersion))
 }
 
-async fn load_order<S: HasOrders>(ports: &S, id: OrderId) -> Result<Order, CommandError> {
+pub(crate) async fn load_order<S: HasOrders>(
+    ports: &S,
+    id: OrderId,
+) -> Result<Order, CommandError> {
     ports
         .orders()
         .get(id)

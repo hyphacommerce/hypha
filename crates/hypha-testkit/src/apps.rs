@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use hypha_apps::{App, AppKey, AppRepo, keys};
+use hypha_apps::{App, AppKey, AppRepo, ExtensionEndpoint, ExtensionEndpointRepo, keys};
 use hypha_core::{RepoError, Version, Versioned, stamp_insert, stamp_update};
 
 use crate::{InMemoryAppProviderRepo, InMemoryOutbox};
@@ -20,13 +20,21 @@ pub struct InMemoryAppRepo {
     apps: Apps,
     /// The providers to delete with their app, when linked.
     providers: Option<InMemoryAppProviderRepo>,
+    /// The extension endpoints to delete with their app, when linked.
+    endpoints: Option<Endpoints>,
     /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with.
     outbox: InMemoryOutbox,
 }
 
-/// An app repo and a provider repo linked like the database's tables, sharing `outbox`'s
-/// clock: what `InMemoryPorts` holds.
-pub(crate) fn linked(outbox: &InMemoryOutbox) -> (InMemoryAppRepo, InMemoryAppProviderRepo) {
+/// An app repo, a provider repo and an endpoint repo linked like the database's tables,
+/// sharing `outbox`'s clock: what `InMemoryPorts` holds.
+pub(crate) fn linked(
+    outbox: &InMemoryOutbox,
+) -> (
+    InMemoryAppRepo,
+    InMemoryAppProviderRepo,
+    InMemoryExtensionEndpointRepo,
+) {
     let apps = Apps::default();
     let providers = InMemoryAppProviderRepo {
         apps: Some(Arc::clone(&apps)),
@@ -39,12 +47,17 @@ pub(crate) fn linked(outbox: &InMemoryOutbox) -> (InMemoryAppRepo, InMemoryAppPr
         apps: None,
         outbox: outbox.clone(),
     };
+    let endpoints = InMemoryExtensionEndpointRepo {
+        endpoints: Endpoints::default(),
+        apps: Some(Arc::clone(&apps)),
+    };
     let app_repo = InMemoryAppRepo {
         apps,
         providers: Some(cascade),
+        endpoints: Some(Arc::clone(&endpoints.endpoints)),
         outbox: outbox.clone(),
     };
-    (app_repo, providers)
+    (app_repo, providers, endpoints)
 }
 
 impl AppRepo for InMemoryAppRepo {
@@ -89,6 +102,65 @@ impl AppRepo for InMemoryAppRepo {
                 .lock()
                 .unwrap()
                 .retain(|k, _| k.as_str() != key.as_str());
+        }
+        if let Some(endpoints) = &self.endpoints {
+            endpoints.lock().unwrap().remove(key.as_str());
+        }
+        Ok(())
+    }
+}
+
+/// Extension endpoints by app key, then point.
+pub(crate) type Endpoints = Arc<Mutex<BTreeMap<String, Vec<ExtensionEndpoint>>>>;
+
+/// Apps' extension endpoints (design note 0029, §3). Linked to an app repo
+/// (`InMemoryPorts`), an endpoint needs its app, and goes with it, like the database's
+/// foreign key; alone, any app will do.
+#[derive(Default)]
+pub struct InMemoryExtensionEndpointRepo {
+    endpoints: Endpoints,
+    apps: Option<Apps>,
+}
+
+impl ExtensionEndpointRepo for InMemoryExtensionEndpointRepo {
+    async fn list_for_app(&self, app: &AppKey) -> Result<Vec<ExtensionEndpoint>, RepoError> {
+        let mut found = self
+            .endpoints
+            .lock()
+            .unwrap()
+            .get(app.as_str())
+            .cloned()
+            .unwrap_or_default();
+        found.sort_by(|a, b| a.point.cmp(&b.point));
+        Ok(found)
+    }
+
+    async fn get(&self, app: &AppKey, point: &str) -> Result<Option<ExtensionEndpoint>, RepoError> {
+        Ok(self
+            .endpoints
+            .lock()
+            .unwrap()
+            .get(app.as_str())
+            .and_then(|all| all.iter().find(|e| e.point == point).cloned()))
+    }
+
+    async fn replace_for_app(
+        &self,
+        app: &AppKey,
+        endpoints: &[ExtensionEndpoint],
+    ) -> Result<(), RepoError> {
+        if let Some(apps) = &self.apps
+            && !apps.lock().unwrap().contains_key(app.as_str())
+        {
+            return Err(RepoError::Reference(
+                hypha_apps::endpoints::keys::ENDPOINT_APP,
+            ));
+        }
+        let mut stored = self.endpoints.lock().unwrap();
+        if endpoints.is_empty() {
+            stored.remove(app.as_str());
+        } else {
+            stored.insert(app.as_str().to_string(), endpoints.to_vec());
         }
         Ok(())
     }

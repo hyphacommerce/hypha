@@ -8,6 +8,7 @@
 
 pub mod app;
 pub mod commands;
+pub mod endpoints;
 pub mod error;
 pub mod repo;
 
@@ -16,6 +17,10 @@ pub use commands::{
     CommandError, CreateApp, SECRET_PREFIX, UpdateApp, WebhookInput, create_app, delete_app,
     get_app, get_event, list_apps, list_deliveries, open_secret, retry_delivery, rotate_app_secret,
     update_app,
+};
+pub use endpoints::{
+    EndpointInput, ExtensionEndpoint, ExtensionEndpointRepo, HasExtensionEndpoints, KnownPoint,
+    list_extension_endpoints, set_extension_endpoints,
 };
 pub use error::AppError;
 pub use hypha_core::{AppKey, AppKeyError};

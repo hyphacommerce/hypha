@@ -58,7 +58,7 @@ fn new_methods_go_after_the_others() {
 fn a_method_needs_a_provider_this_build_has() {
     let (ports, ids) = (InMemoryPorts::default(), SequentialIds::default());
     let mut stripe = cod(None);
-    stripe.provider = "spore_stripe".to_string();
+    stripe.provider = "app_stripe".to_string();
     assert_eq!(
         block_on(create_payment_method(
             &Ctx::system(),
@@ -68,7 +68,7 @@ fn a_method_needs_a_provider_this_build_has() {
             stripe
         )),
         Err(CommandError::Payment(PaymentError::UnknownProvider(
-            ProviderKey::new("spore_stripe").unwrap()
+            ProviderKey::new("app_stripe").unwrap()
         )))
     );
     let mut bad = cod(None);
@@ -253,5 +253,181 @@ fn a_method_with_an_authorized_payment_is_not_deleted_either() {
     assert_eq!(
         block_on(delete_payment_method(&Ctx::system(), &ports, id)),
         Err(CommandError::PaymentMethodInUse(id))
+    );
+}
+
+/// A provider under an app's key that accepts captures and voids and refuses refunds,
+/// keeping what it was asked.
+#[derive(Default)]
+struct Gateway {
+    asked: std::cell::RefCell<Vec<hypha_payments::ActionRequest>>,
+}
+
+impl hypha_payments::PaymentProvider for &Gateway {
+    fn key(&self) -> ProviderKey {
+        ProviderKey::new("app_gateway").unwrap()
+    }
+
+    fn check_settings(&self, _: &serde_json::Value) -> Result<(), PaymentError> {
+        Ok(())
+    }
+
+    async fn start(
+        &self,
+        _: &hypha_payments::PaymentRequest,
+    ) -> Result<hypha_payments::Started, PaymentError> {
+        unreachable!("not started here")
+    }
+
+    async fn act(
+        &self,
+        request: &hypha_payments::ActionRequest,
+    ) -> Result<hypha_payments::ActionAnswer, PaymentError> {
+        self.asked.borrow_mut().push(request.clone());
+        Ok(match request.action {
+            hypha_payments::PaymentAction::Refund => hypha_payments::ActionAnswer::Refused {
+                reason: "too late".to_string(),
+            },
+            _ => hypha_payments::ActionAnswer::Accepted {
+                reference: Some("ch_1".to_string()),
+            },
+        })
+    }
+}
+
+/// A payment of 10 EUR by a method of the gateway, moved by `prepare`, stored.
+fn gateway_payment(ports: &InMemoryPorts, prepare: impl FnOnce(&mut Payment)) -> PaymentId {
+    let id = PaymentId::from_uuid(Uuid::from_u128(60));
+    let mut payment = Payment::new(NewPayment {
+        id,
+        order: OrderId::from_uuid(Uuid::from_u128(61)),
+        method: None,
+        method_name: None,
+        provider: ProviderKey::new("app_gateway").unwrap(),
+        amount: Money::new(1000, Currency::EUR).unwrap(),
+        instructions: None,
+    })
+    .unwrap();
+    prepare(&mut payment);
+    block_on(ports.payments.insert(&mut payment)).unwrap();
+    id
+}
+
+fn act(
+    ports: &InMemoryPorts,
+    gateway: &Gateway,
+    payment: PaymentId,
+    action: hypha_payments::PaymentAction,
+    amount: Option<i64>,
+) -> Result<hypha_payments::Acted, CommandError> {
+    block_on(hypha_payments::act_on_payment(
+        &Ctx::system(),
+        ports,
+        &SequentialIds::default(),
+        &(gateway,),
+        hypha_payments::ActOnPayment {
+            payment,
+            action,
+            amount,
+            idempotency_key: None,
+        },
+    ))
+}
+
+#[test]
+fn an_accepted_capture_waits_for_the_providers_report() {
+    use hypha_payments::{PaymentAction, PaymentStatus};
+    let ports = InMemoryPorts::default();
+    let gateway = Gateway::default();
+    let id = gateway_payment(&ports, |p| {
+        p.authorize(Some("pi_1".to_string())).unwrap();
+    });
+    let acted = act(&ports, &gateway, id, PaymentAction::Capture, None).unwrap();
+    assert_eq!(acted.reference.as_deref(), Some("ch_1"));
+    assert_eq!(acted.payment.status(), PaymentStatus::Authorized);
+    let asked = gateway.asked.borrow();
+    assert_eq!(asked[0].reference.as_deref(), Some("pi_1"));
+    assert_eq!(asked[0].idempotency_key, format!("{id}:capture"));
+}
+
+#[test]
+fn an_action_must_fit_the_payments_status() {
+    use hypha_payments::{PaymentAction, PaymentStatus};
+    let ports = InMemoryPorts::default();
+    let gateway = Gateway::default();
+    let id = gateway_payment(&ports, |_| {});
+    assert_eq!(
+        act(&ports, &gateway, id, PaymentAction::Capture, None),
+        Err(CommandError::Payment(PaymentError::InvalidTransition {
+            payment: id,
+            from: PaymentStatus::Pending,
+            to: PaymentStatus::Paid,
+        }))
+    );
+    assert!(gateway.asked.borrow().is_empty());
+}
+
+#[test]
+fn a_refused_refund_says_why_and_one_too_big_isnt_asked() {
+    use hypha_payments::{PaymentAction, PaymentStatus};
+    let ports = InMemoryPorts::default();
+    let gateway = Gateway::default();
+    let at = hypha_core::Timestamp::from_unix_micros(1);
+    let id = gateway_payment(&ports, |p| {
+        p.pay(at, None).unwrap();
+    });
+    assert_eq!(
+        act(&ports, &gateway, id, PaymentAction::Refund, Some(1001)),
+        Err(CommandError::Payment(PaymentError::InvalidRefund {
+            payment: id,
+            amount: 1001,
+            paid: 1000,
+            refunded: 0,
+            reported: PaymentStatus::Refunded,
+        }))
+    );
+    assert!(gateway.asked.borrow().is_empty());
+    assert_eq!(
+        act(&ports, &gateway, id, PaymentAction::Refund, Some(300)),
+        Err(CommandError::PaymentRefused {
+            payment: id,
+            reason: "too late".to_string()
+        })
+    );
+    assert_eq!(
+        gateway.asked.borrow()[0].amount,
+        Some(Money::new(300, Currency::EUR).unwrap())
+    );
+}
+
+#[test]
+fn manual_payments_take_no_actions() {
+    use hypha_payments::PaymentAction;
+    let ports = InMemoryPorts::default();
+    let id = PaymentId::from_uuid(Uuid::from_u128(70));
+    let mut payment = Payment::new(NewPayment::recorded_by_hand(
+        id,
+        OrderId::from_uuid(Uuid::from_u128(71)),
+        Money::new(1000, Currency::EUR).unwrap(),
+    ))
+    .unwrap();
+    block_on(ports.payments.insert(&mut payment)).unwrap();
+    assert_eq!(
+        block_on(hypha_payments::act_on_payment(
+            &Ctx::system(),
+            &ports,
+            &SequentialIds::default(),
+            &PROVIDERS,
+            hypha_payments::ActOnPayment {
+                payment: id,
+                action: PaymentAction::Void,
+                amount: None,
+                idempotency_key: None,
+            },
+        )),
+        Err(CommandError::Payment(PaymentError::ActionUnsupported {
+            provider: ProviderKey::manual(),
+            action: PaymentAction::Void,
+        }))
     );
 }

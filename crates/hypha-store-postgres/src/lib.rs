@@ -23,6 +23,7 @@ mod channels;
 mod columns;
 mod config;
 mod customers;
+mod endpoints;
 mod error;
 mod extensions;
 mod fulfillments;

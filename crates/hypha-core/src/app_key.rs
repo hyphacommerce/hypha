@@ -56,6 +56,22 @@ impl fmt::Display for AppKey {
     }
 }
 
+/// Which extension points apps answer (design note 0029, §3, "Registering"): what a
+/// domain asks before naming an app for a flow (the store's search app), without
+/// depending on apps. The host answers from the app's registrations. No `Send` bound,
+/// like every port.
+#[allow(async_fn_in_trait)]
+pub trait AppPoints {
+    /// Whether `app` is installed, enabled and answers `point` (`search.query`).
+    async fn answers(&self, app: &AppKey, point: &str) -> Result<bool, crate::RepoError>;
+}
+
+impl<T: AppPoints + ?Sized> AppPoints for &T {
+    async fn answers(&self, app: &AppKey, point: &str) -> Result<bool, crate::RepoError> {
+        (**self).answers(app, point).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

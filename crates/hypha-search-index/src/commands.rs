@@ -2,7 +2,7 @@
 //! merchant's settings, a full rebuild, and how far behind the index is. Searching a
 //! market is `hypha_search::search` (it resolves the market).
 
-use hypha_core::{AuthError, Ctx, ErrorCode, RepoError, Scope};
+use hypha_core::{AppKey, AppPoints, AuthError, Ctx, ErrorCode, RepoError, Scope};
 use thiserror::Error;
 
 use crate::{
@@ -47,20 +47,29 @@ pub async fn get_search_settings<S: HasSearchSettings>(
     Ok(ports.search_settings().get().await?.unwrap_or_default())
 }
 
+/// The extension point a search app answers (design note 0029, §3.1); the same name
+/// as `hypha_extensions::SearchQuery`'s (a host test keeps them equal: this leaf
+/// doesn't depend on the catalog).
+pub const SEARCH_POINT: &str = "search.query";
+
 /// Changes only what's `Some`, like a JSON Merge Patch.
 #[derive(Debug, Clone, Default)]
 pub struct UpdateSearchSettings {
     pub split_by: Option<Vec<String>>,
     /// Facet keys as strings (`option.color`) and labels.
     pub facets: Option<Vec<(String, Option<String>)>>,
+    /// The app answering searches (`Some(None)`: the built-in engine again).
+    pub search_app: Option<Option<String>>,
 }
 
 /// Changes the settings (search settings are how products are presented, so
 /// `products:write`). Changing the splits rebuilds every document, through the
-/// `search_settings.changed` event.
+/// `search_settings.changed` event. A search app must be installed, enabled and answer
+/// `search.query` (`search_app_unavailable`), as `apps` says.
 pub async fn update_search_settings<S: HasSearchSettings>(
     ctx: &Ctx,
     ports: &S,
+    apps: &impl AppPoints,
     input: UpdateSearchSettings,
 ) -> Result<SearchSettings, CommandError> {
     ctx.require(Scope::ProductsWrite)?;
@@ -81,6 +90,19 @@ pub async fn update_search_settings<S: HasSearchSettings>(
             })
             .collect::<Result<Vec<_>, SearchError>>()?;
         settings.set_facets(facets)?;
+    }
+    if let Some(app) = input.search_app {
+        let app = app
+            .map(|key| AppKey::new(&key))
+            .transpose()
+            .map_err(SearchError::SearchApp)?;
+        if let Some(key) = &app
+            && settings.search_app() != Some(key)
+            && !apps.answers(key, SEARCH_POINT).await?
+        {
+            return Err(SearchError::SearchAppUnavailable(key.clone()).into());
+        }
+        settings.set_search_app(app);
     }
     if is_new {
         ports.search_settings().insert(&mut settings).await?;

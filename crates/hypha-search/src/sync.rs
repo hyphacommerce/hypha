@@ -14,18 +14,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use hypha_categories::{CategoryRepo, CategoryTree, HasCategories};
 use hypha_channels::{ChannelRepo, HasChannels};
 use hypha_core::{
-    CategoryId, Clock, ErrorCode, Keyset, PageLimit, PageRequest, ProductId, Progress, RepoError,
-    SortKey, VariantId,
+    CategoryId, ChannelId, Clock, ErrorCode, Keyset, PageLimit, PageRequest, ProductId, Progress,
+    RepoError, SortKey, VariantId,
 };
 use hypha_inventory::{
     HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo, StockContext,
 };
-use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, MarketRepo};
+use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo};
 use hypha_pricing::load_pricing_for;
 use hypha_products::{HasProducts, Product, ProductFilter, ProductRepo, ProductSort};
 use hypha_search_index::{
     HasSearchQueue, HasSearchSettings, IndexError, Mark, SearchDocument, SearchIndex, SearchQueue,
-    SearchSettingsRepo, Target,
+    SearchSettings, SearchSettingsRepo, Target,
 };
 use thiserror::Error;
 
@@ -203,65 +203,10 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
     if writing.is_empty() {
         return Ok(failed);
     }
-    let variants: Vec<VariantId> = loaded
-        .values()
-        .flat_map(|p| p.variants().iter().map(|v| v.id()))
-        .collect();
-    let search_settings = ports.search_settings().get().await?.unwrap_or_default();
-    // Items don't depend on the market; only which locations serve it does.
-    let items = ports
-        .inventory_items()
-        .for_variants(&variants)
-        .await?
-        .into_iter()
-        .map(|i| (i.variant(), i))
-        .collect();
-    let mut stock = StockContext {
-        items,
-        locations: vec![],
-    };
-    // Publications don't depend on the market either.
-    let channels = ports.channels().channels_of(&writing).await?;
-    let channels_of = |id: ProductId| channels.get(&id).map_or(&[][..], Vec::as_slice);
-    // Each product's categories with their ancestors (CA3), from one tree. Only the ones
-    // a storefront shows: a hidden category hides everything below it (CA4), so a
-    // product only in a hidden subcategory isn't listed under its visible ancestors.
-    let tree = CategoryTree::new(ports.categories().list_all().await?);
-    let categories: BTreeMap<ProductId, Vec<CategoryId>> = ports
-        .categories()
-        .categories_of(&writing)
-        .await?
-        .into_iter()
-        .map(|(product, direct)| {
-            let all: BTreeSet<CategoryId> = direct
-                .iter()
-                .filter(|c| tree.is_shown(**c))
-                .flat_map(|c| std::iter::once(*c).chain(tree.ancestors(*c)))
-                .collect();
-            (product, all.into_iter().collect())
-        })
-        .collect();
-    let categories_of = |id: ProductId| categories.get(&id).map_or(&[][..], Vec::as_slice);
-
+    let mut sources = Sources::load(ports, loaded, &writing).await?;
     for market in ports.markets().list_all().await? {
         let market_id = market.id();
-        // The market as just listed, not read again per market.
-        let pricing = load_pricing_for(ports, market, &writing, &variants).await?;
-        stock.locations = ports.locations().serving(market_id).await?;
-        let documents: Vec<SearchDocument> = writing
-            .iter()
-            .filter_map(|id| loaded.get(id))
-            .flat_map(|p| {
-                build_documents(
-                    p,
-                    &pricing,
-                    &stock,
-                    &search_settings,
-                    channels_of(p.id()),
-                    categories_of(p.id()),
-                )
-            })
-            .collect();
+        let documents = sources.documents(ports, market, &writing).await?;
         if let Err(batch_error) = index.replace(market_id, &writing, &documents).await {
             // Find which product the engine refuses: one at a time.
             let mut any_failed = false;
@@ -285,6 +230,128 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
         }
     }
     Ok(failed)
+}
+
+/// What documents are made of, for a set of products, loaded once for every market:
+/// the products, their stock items, publications and categories, and the settings.
+struct Sources {
+    loaded: BTreeMap<ProductId, Product>,
+    variants: Vec<VariantId>,
+    settings: SearchSettings,
+    stock: StockContext,
+    channels: BTreeMap<ProductId, Vec<ChannelId>>,
+    categories: BTreeMap<ProductId, Vec<CategoryId>>,
+}
+
+impl Sources {
+    async fn load<S: SyncPorts>(
+        ports: &S,
+        loaded: BTreeMap<ProductId, Product>,
+        ids: &[ProductId],
+    ) -> Result<Self, SyncError> {
+        let variants: Vec<VariantId> = loaded
+            .values()
+            .flat_map(|p| p.variants().iter().map(|v| v.id()))
+            .collect();
+        let settings = ports.search_settings().get().await?.unwrap_or_default();
+        // Items don't depend on the market; only which locations serve it does.
+        let items = ports
+            .inventory_items()
+            .for_variants(&variants)
+            .await?
+            .into_iter()
+            .map(|i| (i.variant(), i))
+            .collect();
+        let stock = StockContext {
+            items,
+            locations: vec![],
+        };
+        // Publications don't depend on the market either.
+        let channels = ports
+            .channels()
+            .channels_of(ids)
+            .await?
+            .into_iter()
+            .collect();
+        // Each product's categories with their ancestors (CA3), from one tree. Only the
+        // ones a storefront shows: a hidden category hides everything below it (CA4),
+        // so a product only in a hidden subcategory isn't listed under its visible
+        // ancestors.
+        let tree = CategoryTree::new(ports.categories().list_all().await?);
+        let categories = ports
+            .categories()
+            .categories_of(ids)
+            .await?
+            .into_iter()
+            .map(|(product, direct)| {
+                let all: BTreeSet<CategoryId> = direct
+                    .iter()
+                    .filter(|c| tree.is_shown(**c))
+                    .flat_map(|c| std::iter::once(*c).chain(tree.ancestors(*c)))
+                    .collect();
+                (product, all.into_iter().collect())
+            })
+            .collect();
+        Ok(Self {
+            loaded,
+            variants,
+            settings,
+            stock,
+            channels,
+            categories,
+        })
+    }
+
+    /// `ids`' documents in `market`, priced and stocked there.
+    async fn documents<S: SyncPorts>(
+        &mut self,
+        ports: &S,
+        market: Market,
+        ids: &[ProductId],
+    ) -> Result<Vec<SearchDocument>, SyncError> {
+        let market_id = market.id();
+        // The market as the caller has it, not read again.
+        let pricing = load_pricing_for(ports, market, ids, &self.variants).await?;
+        self.stock.locations = ports.locations().serving(market_id).await?;
+        let none: &[ChannelId] = &[];
+        let no_categories: &[CategoryId] = &[];
+        Ok(ids
+            .iter()
+            .filter_map(|id| self.loaded.get(id))
+            .flat_map(|p| {
+                build_documents(
+                    p,
+                    &pricing,
+                    &self.stock,
+                    &self.settings,
+                    self.channels.get(&p.id()).map_or(none, Vec::as_slice),
+                    self.categories
+                        .get(&p.id())
+                        .map_or(no_categories, Vec::as_slice),
+                )
+            })
+            .collect())
+    }
+}
+
+/// `ids`' documents in `market` as the sync job would build them now: priced and
+/// stocked there, none for a product that's gone, inactive or not in the market's
+/// catalog. For hits an app found (design note 0029, §3.1): Hypha shows its own prices
+/// and stock, never an app's.
+pub async fn documents_for<S: SyncPorts>(
+    ports: &S,
+    market: Market,
+    ids: &[ProductId],
+) -> Result<Vec<SearchDocument>, SyncError> {
+    let loaded: BTreeMap<ProductId, Product> = ports
+        .products()
+        .get_many(ids)
+        .await?
+        .into_iter()
+        .map(|p| (p.id(), p))
+        .collect();
+    let mut sources = Sources::load(ports, loaded, ids).await?;
+    sources.documents(ports, market, ids).await
 }
 
 /// `ids`' products, in one query; if that fails (one can't be restored, say), one at a

@@ -1,10 +1,11 @@
 //! The merchant's search settings (design note 0019, section 6): which options split
-//! listings, and which facets a storefront shows. One per store.
+//! listings, which facets a storefront shows, and the app that answers searches instead
+//! of the built-in engine (design note 0029, §3.1). One per store.
 
 use std::collections::HashSet;
 
 use hypha_core::{
-    Event, PendingEvent, Recorded, Recorder, Stamped, Stamps, Subject, TextError, Version,
+    AppKey, Event, PendingEvent, Recorded, Recorder, Stamped, Stamps, Subject, TextError, Version,
     Versioned, optional_text, required_text,
 };
 use serde::Serialize;
@@ -28,14 +29,17 @@ pub struct SearchSettings {
     split_by: Vec<String>,
     /// The facets to show, in order; empty means the defaults (`default_facets`).
     facets: Vec<FacetSetting>,
+    /// The app answering `/storefront/search` (`search.query`); `None` for the
+    /// built-in engine, which also answers whenever the app fails.
+    search_app: Option<AppKey>,
     events: Recorder,
 }
 
 /// The subject kind of its events; there's one per store, so the subject ID is nil.
 pub const SEARCH_SETTINGS: &str = "search_settings";
 
-/// `search_settings.changed`: which of `split_by` and `facets` changed. A changed
-/// `split_by` changes every listing key, so search rebuilds every document.
+/// `search_settings.changed`: which of `split_by`, `facets` and `search_app` changed. A
+/// changed `split_by` changes every listing key, so search rebuilds every document.
 #[derive(Debug, Serialize)]
 pub struct SearchSettingsChanged {
     pub fields: Vec<&'static str>,
@@ -53,6 +57,7 @@ impl Default for SearchSettings {
             stamps: None,
             split_by: Vec::new(),
             facets: Vec::new(),
+            search_app: None,
             events: Recorder::default(),
         }
     }
@@ -111,6 +116,15 @@ impl SearchSettings {
         Ok(())
     }
 
+    /// Names the app that answers searches (`None`: the built-in engine). The caller
+    /// checked that it answers `search.query`.
+    pub fn set_search_app(&mut self, app: Option<AppKey>) {
+        if app != self.search_app {
+            self.search_app = app;
+            self.changed("search_app");
+        }
+    }
+
     fn changed(&mut self, field: &'static str) {
         // One event per write, naming every field: coalesce with a pending one.
         let mut fields: Vec<&'static str> = self
@@ -122,6 +136,7 @@ impl SearchSettings {
             .filter_map(|f| match f.as_str() {
                 Some("split_by") => Some("split_by"),
                 Some("facets") => Some("facets"),
+                Some("search_app") => Some("search_app"),
                 _ => None,
             })
             .collect();
@@ -143,6 +158,10 @@ impl SearchSettings {
         &self.facets
     }
 
+    pub fn search_app(&self) -> Option<&AppKey> {
+        self.search_app.as_ref()
+    }
+
     pub fn snapshot(&self) -> SearchSettingsSnapshot {
         SearchSettingsSnapshot {
             version: self.version,
@@ -153,6 +172,7 @@ impl SearchSettings {
                 .iter()
                 .map(|f| (f.key.to_string(), f.label.clone()))
                 .collect(),
+            search_app: self.search_app.as_ref().map(|a| a.as_str().to_string()),
         }
     }
 
@@ -171,6 +191,11 @@ impl SearchSettings {
             })
             .collect::<Result<Vec<_>, SearchError>>()?;
         settings.set_facets(facets)?;
+        settings.search_app = s
+            .search_app
+            .map(|a| AppKey::new(&a))
+            .transpose()
+            .map_err(SearchError::SearchApp)?;
         settings.version = s.version;
         settings.stamps = s.stamps;
         settings.events = Recorder::default();
@@ -185,6 +210,8 @@ pub struct SearchSettingsSnapshot {
     pub stamps: Option<Stamps>,
     pub split_by: Vec<String>,
     pub facets: Vec<(String, Option<String>)>,
+    /// The search app's key.
+    pub search_app: Option<String>,
 }
 
 impl Recorded for SearchSettings {

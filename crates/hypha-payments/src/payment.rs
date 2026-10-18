@@ -7,7 +7,10 @@ use hypha_core::{
 
 use crate::{
     PaymentError, PaymentMethod, ProviderKey,
-    events::{PAYMENT, PaymentCreated, PaymentPaid, PaymentVoided},
+    events::{
+        PAYMENT, PaymentAuthorized, PaymentCreated, PaymentFailed, PaymentPaid, PaymentRefunded,
+        PaymentVoided,
+    },
     method::instructions_text,
 };
 
@@ -297,20 +300,134 @@ impl Payment {
         Ok(true)
     }
 
-    /// The provider holds the money (a card authorization). For providers that
-    /// authorize first; their events come with them.
-    pub fn authorize(&mut self, reference: Option<String>) -> Result<(), PaymentError> {
+    /// The provider holds the money (a card authorization; `payment.authorized`), with
+    /// `reference` when given. Returns whether that changed anything: an authorized
+    /// payment stays as it was. Refused unless pending.
+    pub fn authorize(&mut self, reference: Option<String>) -> Result<bool, PaymentError> {
+        if self.status == PaymentStatus::Authorized {
+            return Ok(false);
+        }
         let reference = optional_text("reference", reference)?;
         self.move_to(PaymentStatus::Authorized)?;
         if reference.is_some() {
             self.reference = reference;
         }
+        let authorized = PaymentAuthorized {
+            payment: self.id,
+            order: self.order,
+            method: self.method,
+            provider: self.provider.to_string(),
+            amount: self.amount,
+            reference: self.reference.clone(),
+        };
+        self.events.record(self.subject(), &authorized);
+        Ok(true)
+    }
+
+    /// The provider declined it (`payment.failed`), with `reference` when given.
+    /// Returns whether that changed anything: a failed payment stays failed. Refused
+    /// unless pending or authorized.
+    pub fn fail(&mut self, reference: Option<String>) -> Result<bool, PaymentError> {
+        if self.status == PaymentStatus::Failed {
+            return Ok(false);
+        }
+        let reference = optional_text("reference", reference)?;
+        self.move_to(PaymentStatus::Failed)?;
+        if reference.is_some() {
+            self.reference = reference;
+        }
+        let failed = PaymentFailed {
+            payment: self.id,
+            order: self.order,
+            method: self.method,
+            provider: self.provider.to_string(),
+            amount: self.amount,
+            reference: self.reference.clone(),
+        };
+        self.events.record(self.subject(), &failed);
+        Ok(true)
+    }
+
+    /// Records `amount` given back (`payment.refunded`), or everything left when
+    /// `None`, leaving it `reported`: `refunded` must give back all that's left,
+    /// `partially_refunded` less (`invalid_refund_amount` otherwise, as for a refund of
+    /// nothing or of more than is left). Refused unless paid or partially refunded.
+    pub fn refund(
+        &mut self,
+        amount: Option<Money>,
+        reported: PaymentStatus,
+        reference: Option<String>,
+    ) -> Result<(), PaymentError> {
+        if !matches!(
+            reported,
+            PaymentStatus::Refunded | PaymentStatus::PartiallyRefunded
+        ) || !self.status.can_become(reported)
+        {
+            return Err(PaymentError::InvalidTransition {
+                payment: self.id,
+                from: self.status,
+                to: reported,
+            });
+        }
+        let currency = self.amount.currency();
+        let left = self.amount.amount() - self.refunded.amount();
+        let amount = match amount {
+            Some(given) if given.currency() != currency => {
+                return Err(PaymentError::CurrencyMismatch {
+                    expected: currency,
+                    found: given.currency(),
+                });
+            }
+            Some(given) => given.amount(),
+            None => left,
+        };
+        let after = self.refunded.amount() + amount;
+        let fits = amount > 0
+            && amount <= left
+            && match reported {
+                PaymentStatus::Refunded => after == self.amount.amount(),
+                _ => after < self.amount.amount(),
+            };
+        if !fits {
+            return Err(PaymentError::InvalidRefund {
+                payment: self.id,
+                amount,
+                paid: self.amount.amount(),
+                refunded: self.refunded.amount(),
+                reported,
+            });
+        }
+        let reference = optional_text("reference", reference)?;
+        let given = Money::new(amount, currency)?;
+        self.refunded = Money::new(after, currency)?;
+        self.status = reported;
+        if reference.is_some() {
+            self.reference = reference;
+        }
+        let refunded = PaymentRefunded {
+            payment: self.id,
+            order: self.order,
+            method: self.method,
+            provider: self.provider.to_string(),
+            amount: given,
+            refunded: self.refunded,
+            status: self.status.as_str(),
+            reference: self.reference.clone(),
+        };
+        self.events.record(self.subject(), &refunded);
         Ok(())
     }
 
-    /// The provider declined it. For providers that can; their events come with them.
-    pub fn fail(&mut self) -> Result<(), PaymentError> {
-        self.move_to(PaymentStatus::Failed)
+    /// Keeps the provider's ID for the payment (what its start answered); a blank one
+    /// keeps the current. Returns whether that changed anything. Records nothing: the
+    /// payment's own events carry it from then on.
+    pub fn set_reference(&mut self, reference: Option<String>) -> Result<bool, PaymentError> {
+        let reference = optional_text("reference", reference)?;
+        if reference.is_none() || reference == self.reference {
+            return Ok(false);
+        }
+        self.reference = reference;
+        Ok(true)
     }
 
     pub fn id(&self) -> PaymentId {
@@ -674,8 +791,87 @@ mod tests {
         assert_eq!(p.pay(at(), None), Ok(true));
         assert_eq!(p.reference(), Some("pi_1"));
         let mut declined = new_payment(2, 1000);
-        declined.fail().unwrap();
+        assert_eq!(declined.fail(None), Ok(true));
+        assert_eq!(declined.fail(None), Ok(false));
         assert_eq!(declined.status(), PaymentStatus::Failed);
+    }
+
+    #[test]
+    fn authorizing_records_it_once() {
+        let mut p = new_payment(1, 1000);
+        types(&mut p);
+        assert_eq!(p.authorize(Some("pi_1".to_string())), Ok(true));
+        assert_eq!(p.authorize(None), Ok(false));
+        assert_eq!(types(&mut p), ["payment.authorized"]);
+    }
+
+    fn paid(n: u128, amount: i64) -> Payment {
+        let mut p = new_payment(n, amount);
+        p.pay(at(), None).unwrap();
+        types(&mut p);
+        p
+    }
+
+    #[test]
+    fn refunds_add_up_to_the_status_reported() {
+        let mut p = paid(1, 1000);
+        assert_eq!(
+            p.refund(Some(eur(300)), PaymentStatus::PartiallyRefunded, None),
+            Ok(())
+        );
+        assert_eq!(
+            (p.status(), p.refunded()),
+            (PaymentStatus::PartiallyRefunded, eur(300))
+        );
+        // The rest, without an amount.
+        assert_eq!(p.refund(None, PaymentStatus::Refunded, None), Ok(()));
+        assert_eq!(
+            (p.status(), p.refunded()),
+            (PaymentStatus::Refunded, eur(1000))
+        );
+        assert_eq!(types(&mut p), ["payment.refunded", "payment.refunded"]);
+        assert!(Payment::restore(p.snapshot()).is_ok());
+    }
+
+    #[test]
+    fn a_refund_must_fit_what_was_reported() {
+        let refused = |amount: i64, reported| {
+            let mut p = paid(1, 1000);
+            p.refund(Some(eur(amount)), reported, None)
+        };
+        let invalid = |amount, reported| {
+            Err(PaymentError::InvalidRefund {
+                payment: PaymentId::from_uuid(Uuid::from_u128(1)),
+                amount,
+                paid: 1000,
+                refunded: 0,
+                reported,
+            })
+        };
+        use PaymentStatus::{PartiallyRefunded as Partly, Refunded as All};
+        assert_eq!(refused(0, Partly), invalid(0, Partly));
+        assert_eq!(refused(1000, Partly), invalid(1000, Partly));
+        assert_eq!(refused(999, All), invalid(999, All));
+        assert_eq!(refused(1001, All), invalid(1001, All));
+        assert_eq!(refused(1000, All), Ok(()));
+        let mut pending = new_payment(2, 1000);
+        assert_eq!(
+            pending.refund(None, All, None),
+            Err(PaymentError::InvalidTransition {
+                payment: PaymentId::from_uuid(Uuid::from_u128(2)),
+                from: PaymentStatus::Pending,
+                to: All,
+            })
+        );
+    }
+
+    #[test]
+    fn a_reference_is_kept_unless_blank() {
+        let mut p = new_payment(1, 1000);
+        assert_eq!(p.set_reference(Some("pi_1".to_string())), Ok(true));
+        assert_eq!(p.set_reference(Some(" ".to_string())), Ok(false));
+        assert_eq!(p.set_reference(Some("pi_1".to_string())), Ok(false));
+        assert_eq!(p.reference(), Some("pi_1"));
     }
 
     #[test]

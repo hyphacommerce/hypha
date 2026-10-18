@@ -240,6 +240,7 @@ impl World {
             cart,
             expected_total: expected,
             idempotency: None,
+            return_url: None,
         };
         block_on(checkout(
             &Ctx::system(),
@@ -502,6 +503,7 @@ impl World {
             cart,
             expected_total: None,
             idempotency: None,
+            return_url: None,
         };
         let placed = block_on(checkout(
             &Ctx::system(),

@@ -1,4 +1,4 @@
-use hypha_core::{ErrorCode, TextError};
+use hypha_core::{AppKey, AppKeyError, ErrorCode, TextError};
 use thiserror::Error;
 
 use crate::FacetKey;
@@ -28,6 +28,12 @@ pub enum SearchError {
     TooDeep { max: u32 },
     #[error("a page has 1 to {max} results")]
     InvalidLimit { max: u32 },
+    /// Not an app key.
+    #[error(transparent)]
+    SearchApp(AppKeyError),
+    /// The app isn't installed, isn't enabled, or doesn't answer `search.query`.
+    #[error("app {0} doesn't answer search.query")]
+    SearchAppUnavailable(AppKey),
 }
 
 impl ErrorCode for SearchError {
@@ -43,6 +49,8 @@ impl ErrorCode for SearchError {
             SearchError::InvalidPriceRange => "invalid_price_range",
             SearchError::TooDeep { .. } => "search_too_deep",
             SearchError::InvalidLimit { .. } => "invalid_limit",
+            SearchError::SearchApp(e) => e.code(),
+            SearchError::SearchAppUnavailable(_) => "search_app_unavailable",
         }
     }
 }

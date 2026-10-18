@@ -10,14 +10,16 @@ use hypha_payments::{HasPaymentMethods, PaymentMethod, PaymentMethodRepo, Paymen
 
 use crate::CommandError;
 
-/// Offered to `cart`: enabled, in its market and channel (`PaymentMethod::offered_in`),
-/// and of a provider this build has.
-fn offered<P: PaymentProviders>(
+/// Offered in `market` and `channel`: enabled, in them (`PaymentMethod::offered_in`),
+/// and of a provider the host offers (one this build has, or an installed, enabled app
+/// implementing `payments.start`).
+pub(crate) async fn offered<P: PaymentProviders>(
     method: &PaymentMethod,
-    cart: &hypha_cart::Cart,
+    market: hypha_core::MarketId,
+    channel: hypha_core::ChannelId,
     providers: &P,
-) -> bool {
-    method.offered_in(cart.market(), cart.channel()) && providers.has(method.provider())
+) -> Result<bool, CommandError> {
+    Ok(method.offered_in(market, channel) && providers.available(method.provider()).await?)
 }
 
 /// The methods a buyer can choose for the cart, in position order (`carts:read`).
@@ -35,13 +37,13 @@ pub async fn cart_payment_methods<S: HasCarts + HasPaymentMethods, P: PaymentPro
         // Another channel's cart reads as missing (design note 0020).
         .filter(|cart| cart.visible_in(ctx.channel()))
         .ok_or(CommandError::CartNotFound(id))?;
-    Ok(ports
-        .payment_methods()
-        .list()
-        .await?
-        .into_iter()
-        .filter(|m| offered(m, &cart, providers))
-        .collect())
+    let mut methods = Vec::new();
+    for method in ports.payment_methods().list().await? {
+        if offered(&method, cart.market(), cart.channel(), providers).await? {
+            methods.push(method);
+        }
+    }
+    Ok(methods)
 }
 
 /// Sets how the buyer will pay (`carts:write`), or clears it with `None`: a method that
@@ -71,7 +73,7 @@ pub async fn set_payment_method<S: CartPorts + HasPaymentMethods, P: PaymentProv
             .get(method)
             .await?
             .ok_or(CommandError::PaymentMethodNotFound(method))?;
-        if !offered(&found, &cart, providers) {
+        if !offered(&found, cart.market(), cart.channel(), providers).await? {
             return Err(CommandError::PaymentMethodUnavailable(method));
         }
     }
@@ -101,7 +103,9 @@ pub(crate) async fn checkout_method<S: HasPaymentMethods, P: PaymentProviders>(
         return Err(CommandError::PaymentMethodRequired(cart.id()));
     };
     match ports.payment_methods().get(id).await? {
-        Some(method) if offered(&method, cart, providers) => Ok(Some(method)),
+        Some(method) if offered(&method, cart.market(), cart.channel(), providers).await? => {
+            Ok(Some(method))
+        }
         _ => Err(CommandError::PaymentMethodUnavailable(id)),
     }
 }

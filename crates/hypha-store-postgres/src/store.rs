@@ -385,6 +385,7 @@ accessors! {
     hypha_notifications::HasNotificationSettings => NotificationSettings, notification_settings;
     hypha_notifications::HasNotifications => Notifications, notifications;
     hypha_extensions::HasExtensionCalls => ExtensionCalls, extension_calls;
+    hypha_apps::HasExtensionEndpoints => ExtensionEndpoints, extension_endpoints;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one
