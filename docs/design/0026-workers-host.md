@@ -209,6 +209,22 @@ the domains; `hypha deploy` then:
    deploy --prebuilt --secrets-file`; each app's `cloudflare.config.ts` takes the
    deployment's Worker name, account, domain and API Worker (`HYPHA_CF_*`), and binds the
    API (`API`, props `{ caller }`, W14), which the apps use through `#api-fetch`.
+   Deployed for real (2026-10-18, a test store on Neon):
+   - All three Workers came up on their custom domains; a second deploy created nothing
+     new.
+   - Uploads went to R2 and were served from the bucket's domain.
+   - The storefront rendered through the binding: 1.5 s cold, 60 ms cached.
+   - Renaming a product through the API reached the live product page in under 10 s:
+     post-write dispatch, then the webhook, then KV and Workers Cache revalidation.
+   - Signed-in admin pages rendered in 0.6–0.9 s, with no stale reads.
+   - Quiet cron ticks left `checked` alone (no database work); a pending retry was
+     recorded in `due`.
+   - The e2e script against the deployed API passed 616 of 641 steps. The failures were
+     its localhost webhook receiver, which a Worker can't reach; per-address login limits
+     that spread over isolates (W8: exact per isolate only); and a bad R2 key pair, which
+     the CLI now refuses and avoids by deriving the keys from the token.
+   - New custom domains can sit in a machine's DNS cache as missing for minutes, so the
+     CLI looks them up through public resolvers.
 7. **Caching**: the storefront's adapters (2026-10-18): vinext's Workers Cache adapter for
    ISR pages and its KV adapter for `unstable_cache` data (`<name>-cache`), so the
    webhook's revalidation reaches every isolate; through the binding the admin caches no
