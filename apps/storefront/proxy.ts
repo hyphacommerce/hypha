@@ -56,8 +56,12 @@ export async function proxy(request: NextRequest) {
   return flagCarts(request, await route(request));
 }
 
+/** An email's order link (`app/order/[id]/route.ts`): country-less in both modes. */
+const ORDER_LINK = /^\/order\/[^/]+$/;
+
 async function route(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
+  if (ORDER_LINK.test(pathname)) return NextResponse.next();
   const codes = await countryCodes();
   const geolocated =
     request.headers.get("x-vercel-ip-country") ?? request.headers.get("cf-ipcountry");

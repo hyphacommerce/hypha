@@ -159,6 +159,7 @@ export const deploy = defineCommand({
           await machine.upload(dir, [ENV_FILE]);
           await machine.sh("docker compose up -d storefront", { capture: true });
           spin.stop("Storefront connected");
+          if (keys.orderUrl) p.log.step(`Order links in emails go to ${keys.orderUrl}`);
         }
       }
 

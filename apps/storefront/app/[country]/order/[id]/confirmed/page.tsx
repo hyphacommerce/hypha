@@ -9,6 +9,7 @@ import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 import type { StorefrontSchemas } from "@hypha/sdk/storefront";
 
@@ -61,19 +62,22 @@ type Props = {
 
 /**
  * An order's confirmation (design note 0024, §7): read with the order's access token,
- * kept in an httpOnly cookie when it was placed here, or given in the link (`?token=`),
- * as a confirmation email would. Without the right token the order isn't shown: its ID
- * alone reads nothing.
+ * kept in an httpOnly cookie when it was placed here or opened from an email's link
+ * (`/order/<id>?token=`, `app/order/[id]/route.ts`). Without the right token the order
+ * isn't shown: its ID alone reads nothing.
  */
 export default async function OrderConfirmedPage({ params, searchParams }: Props) {
   const { country: folder, id } = await params;
+  // A token in this page's URL (an older link's shape): through the handler, which
+  // keeps it in the cookie and comes back here without it.
+  const given = (await searchParams).token;
+  if (typeof given === "string" && given) {
+    redirect(`/order/${encodeURIComponent(id)}?token=${encodeURIComponent(given)}`);
+  }
   const country = await countryOf(folder);
   const code = country.country;
   const digits = country.minor_units;
-  const given = (await searchParams).token;
-  const token =
-    (typeof given === "string" ? given : undefined) ??
-    (await cookies()).get(orderTokenCookie(id))?.value;
+  const token = (await cookies()).get(orderTokenCookie(id))?.value;
   const order = token
     ? (
         await api().GET("/storefront/orders/{id}", {
@@ -87,7 +91,7 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
       <EmptyState
         headingLevel={1}
         title="We can't show this order"
-        description="Open it from the link in your confirmation email, on the device you ordered on."
+        description="Open it from the link in your order confirmation email."
         actions={<Button label="Back to the shop" href={link(code, "/")} variant="primary" />}
       />
     );

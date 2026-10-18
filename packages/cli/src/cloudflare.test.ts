@@ -173,7 +173,11 @@ function fakeTools(): {
     },
     async connectStorefront() {
       calls.push("connect storefront");
-      return { key: "hypha_pk_shop", webhookSecret: "hypha_as_hook" };
+      return {
+        key: "hypha_pk_shop",
+        webhookSecret: "hypha_as_hook",
+        orderUrl: "https://shop.example.com/order/{order}?token={token}",
+      };
     },
     async syncWebhook() {
       calls.push("sync webhook");

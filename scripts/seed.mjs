@@ -581,6 +581,19 @@ async function main() {
     setup_finished: true,
   });
 
+  console.log("Notification settings");
+  // Emails in the shop's colours (clay 700, the theme's accent), new orders to the owner,
+  // and order links into the storefront: `/order/<id>?token=` keeps the token in the
+  // buyer's cookie and opens the confirmation (design note 0028, §7).
+  await admin.patch("/admin/notification-settings", {
+    accent: "#953f21",
+    sender_name: "Lumen & Loom",
+    reply_to: "hello@lumenandloom.example",
+    footer: "Lumen & Loom d.o.o. · Ilica 42, 10000 Zagreb, Croatia · hello@lumenandloom.example",
+    staff_recipients: [EMAIL],
+    order_url: `${STOREFRONT_URL}/order/{order}?token={token}`,
+  });
+
   console.log("Tax regions");
   for (const [country, percent] of Object.entries(VAT)) {
     await admin.post("/admin/tax-regions", { country, default_rate_ppm: percent * 10_000 });

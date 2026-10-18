@@ -42,6 +42,20 @@ export function orderTokenCookie(order: string): string {
   return `order_token_${order}`;
 }
 
+/**
+ * Keeps an order's access token for this buyer (httpOnly: the page reads it on the
+ * server), from checkout or from the confirmation email's link (`app/order/[id]`).
+ */
+export async function rememberOrder(order: string, token: string) {
+  (await cookies()).set(orderTokenCookie(order), token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+  });
+}
+
 export async function forgetCart(country: string) {
   const jar = await cookies();
   jar.delete(cartCookie(country));

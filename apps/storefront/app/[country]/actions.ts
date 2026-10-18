@@ -17,7 +17,7 @@ import { api, describe, loadCountries, shopperApi } from "@/lib/api";
 import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
-import { cartId, forgetCart, link, mode, orderTokenCookie, rememberCart } from "@/lib/site";
+import { cartId, forgetCart, link, mode, rememberCart, rememberOrder } from "@/lib/site";
 
 /** What a refused action tells its form. */
 export type ActionResult = { error: string } | undefined;
@@ -222,13 +222,7 @@ export async function placeOrder(input: {
   }
   // The confirmation reads the order with its access token, kept here for this buyer:
   // the order's ID alone reads nothing (design note 0024, §7).
-  (await cookies()).set(orderTokenCookie(data.id), data.access_token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30,
-  });
+  await rememberOrder(data.id, data.access_token);
   await forgetCart(input.country);
   // A provider that pays on its own page sends the shopper there (design note 0027, §3);
   // instructions (cash on delivery, bank transfer) are on the confirmation, read from

@@ -222,7 +222,8 @@ export interface Tools {
   answers(d: Deployment): Promise<boolean>;
   /** Whether `url` answers at all (below 500) within a few minutes: a new app's domain. */
   reachable(url: string): Promise<boolean>;
-  /** As the owner, a publishable key and the storefront's webhook app (storefront.ts). */
+  /** As the owner, a publishable key, the storefront's webhook app and the emails' order
+   * links (storefront.ts). */
   connectStorefront(d: Deployment, email: string, password: string): Promise<StorefrontKeys>;
   /** As the owner, points the storefront's webhook at its domain; the new URL if it moved. */
   syncWebhook(d: Deployment, email: string, password: string): Promise<string | null>;
@@ -517,6 +518,7 @@ export async function deployCloudflare(
         env.set("STOREFRONT_KEY", keys.key).set("HYPHA_WEBHOOK_SECRET", keys.webhookSecret ?? "");
         await saveEnv(dir, env);
         stop("Storefront connected");
+        if (keys.orderUrl) p.log.step(`Order links in emails go to ${keys.orderUrl}`);
       } else {
         const moved = await tools.syncWebhook(d, email, ownerPassword).catch((e: unknown) => {
           p.log.warn(
