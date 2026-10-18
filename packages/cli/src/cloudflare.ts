@@ -125,7 +125,9 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
     "",
     "[build]",
     'command = "worker-build --release"',
-    `cwd = ${str(crate)}`,
+    // Absolute: wrangler runs the build from its own working directory, reading `cwd`
+    // as given (unlike `main`, which is relative to this file).
+    `cwd = ${str(WORKER_CRATE)}`,
     "",
     "# Next to the database: its round trips are most of a request (W12).",
     ...placement,
