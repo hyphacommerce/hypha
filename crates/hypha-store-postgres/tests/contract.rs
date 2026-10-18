@@ -140,6 +140,25 @@ async fn fulfillment_repo() {
 }
 
 #[tokio::test]
+async fn payment_method_repo() {
+    let Some(url) = database_url() else { return };
+    contract::payment_method_repo(async || fresh_store(&url, "contract_payment_methods").await)
+        .await;
+}
+
+#[tokio::test]
+async fn payment_repo() {
+    let Some(url) = database_url() else { return };
+    contract::payment_repo(async || fresh_store(&url, "contract_payments").await).await;
+}
+
+#[tokio::test]
+async fn payment_batch() {
+    let Some(url) = database_url() else { return };
+    contract::payment_batch(async || fresh_store(&url, "contract_payment_batch").await).await;
+}
+
+#[tokio::test]
 async fn identity_repo() {
     let Some(url) = database_url() else { return };
     contract::identity_repo(async || fresh_store(&url, "contract_identities").await).await;

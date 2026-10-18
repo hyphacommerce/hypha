@@ -1,8 +1,8 @@
 use hypha_cart::{Cart, CartLineSnapshot, CartRepo, CartSnapshot, SelectedShipping, StoredQuote};
 use hypha_core::{
-    CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, Price, ProductId,
-    RepoError, ShippingOptionId, Timestamp, VariantId, Version, Versioned, stamp_insert,
-    stamp_update,
+    CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, PaymentMethodId,
+    Price, ProductId, RepoError, ShippingOptionId, Timestamp, VariantId, Version, Versioned,
+    stamp_insert, stamp_update,
 };
 use hypha_shipping::ProviderKey;
 use tokio_postgres::types::{ToSql, Type};
@@ -46,8 +46,8 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
 pub(crate) async fn insert_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO carts (id, version, market_id, country, email, customer_id, order_id,
-             channel_id)
-         VALUES ($1, 1, $2, $3, $4, $5, $6, $7)",
+             channel_id, payment_method_id)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.market.as_uuid(), Type::UUID),
@@ -56,6 +56,7 @@ pub(crate) async fn insert_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<(
             (&s.customer.map(|c| c.as_uuid()), Type::UUID),
             (&s.order.map(|o| o.as_uuid()), Type::UUID),
             (&s.channel.as_uuid(), Type::UUID),
+            (&s.payment_method.map(|m| m.as_uuid()), Type::UUID),
         ],
     )
     .await
@@ -119,7 +120,7 @@ pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<V
     let bumped = tx
         .query_typed_opt(
             "UPDATE carts SET version = version + 1, market_id = $3, country = $4, email = $5,
-                     customer_id = $6, order_id = $7
+                     customer_id = $6, order_id = $7, payment_method_id = $8
                  WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -129,6 +130,7 @@ pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<V
                 (&s.email.as_ref().map(Email::as_str), Type::TEXT),
                 (&s.customer.map(|c| c.as_uuid()), Type::UUID),
                 (&s.order.map(|o| o.as_uuid()), Type::UUID),
+                (&s.payment_method.map(|m| m.as_uuid()), Type::UUID),
             ],
         )
         .await
@@ -180,7 +182,8 @@ async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, Re
     let Some(row) = client
         .query_typed_opt(
             &format!(
-                "SELECT version, market_id, country, email, customer_id, order_id, channel_id, {},
+                "SELECT version, market_id, country, email, customer_id, order_id, channel_id,
+                        payment_method_id, {},
                         shipping_option_id, quote_amount, quote_currency, quote_provider,
                         quote_service, quote_reference, {}, {}
                  FROM carts WHERE id = $1",
@@ -231,6 +234,8 @@ async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, Re
             .map_err(corrupt)?,
         customer: col::<Option<Uuid>>(&row, "customer_id")?.map(CustomerId::from_uuid),
         order: col::<Option<Uuid>>(&row, "order_id")?.map(OrderId::from_uuid),
+        payment_method: col::<Option<Uuid>>(&row, "payment_method_id")?
+            .map(PaymentMethodId::from_uuid),
         shipping_address: address_from_row(&row, "shipping_")?,
         shipping: match col::<Option<Uuid>>(&row, "shipping_option_id")? {
             None => None,

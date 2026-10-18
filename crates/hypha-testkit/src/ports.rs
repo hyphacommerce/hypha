@@ -22,10 +22,10 @@ use crate::{
     InMemoryCartRepo, InMemoryCatalogRepo, InMemoryCategoryRepo, InMemoryChannelRepo,
     InMemoryCustomerRepo, InMemoryFulfillmentRepo, InMemoryIdempotencyRepo, InMemoryIdentityRepo,
     InMemoryInventoryItemRepo, InMemoryInviteRepo, InMemoryLocationRepo, InMemoryMarketRepo,
-    InMemoryOrderRepo, InMemoryOutbox, InMemoryPasswordResetRepo, InMemoryPriceListRepo,
-    InMemoryProductRepo, InMemoryRoleRepo, InMemorySearchQueue, InMemorySearchSettingsRepo,
-    InMemorySessionRepo, InMemoryShippingZoneRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo,
-    InMemoryUserRepo,
+    InMemoryOrderRepo, InMemoryOutbox, InMemoryPasswordResetRepo, InMemoryPaymentMethodRepo,
+    InMemoryPaymentRepo, InMemoryPriceListRepo, InMemoryProductRepo, InMemoryRoleRepo,
+    InMemorySearchQueue, InMemorySearchSettingsRepo, InMemorySessionRepo, InMemoryShippingZoneRepo,
+    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, InMemoryUserRepo,
 };
 
 /// Every repository of one store, in memory: the tests' world. It has every accessor, so it is `hypha_cart::CartPorts`; the fields are
@@ -46,6 +46,9 @@ pub struct InMemoryPorts {
     pub idempotency: InMemoryIdempotencyRepo,
     pub orders: InMemoryOrderRepo,
     pub fulfillments: InMemoryFulfillmentRepo,
+    // Payment methods and payments (design note 0027).
+    pub payment_methods: InMemoryPaymentMethodRepo,
+    pub payments: InMemoryPaymentRepo,
     pub assets: InMemoryAssetRepo,
     pub shipping_zones: InMemoryShippingZoneRepo,
     pub app_providers: InMemoryAppProviderRepo,
@@ -87,6 +90,8 @@ impl Default for InMemoryPorts {
             idempotency: InMemoryIdempotencyRepo::default(),
             orders: InMemoryOrderRepo::sharing(&outbox),
             fulfillments: InMemoryFulfillmentRepo::sharing(&outbox),
+            payment_methods: InMemoryPaymentMethodRepo::sharing(&outbox),
+            payments: InMemoryPaymentRepo::sharing(&outbox),
             assets: InMemoryAssetRepo::default(),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
             app_providers,
@@ -233,6 +238,20 @@ impl HasFulfillments for InMemoryPorts {
     }
 }
 
+impl hypha_payments::HasPaymentMethods for InMemoryPorts {
+    type PaymentMethods = InMemoryPaymentMethodRepo;
+    fn payment_methods(&self) -> &InMemoryPaymentMethodRepo {
+        &self.payment_methods
+    }
+}
+
+impl hypha_payments::HasPayments for InMemoryPorts {
+    type Payments = InMemoryPaymentRepo;
+    fn payments(&self) -> &InMemoryPaymentRepo {
+        &self.payments
+    }
+}
+
 impl HasOrders for InMemoryPorts {
     type Orders = InMemoryOrderRepo;
     fn orders(&self) -> &InMemoryOrderRepo {
@@ -368,6 +387,44 @@ impl hypha_auth::ChannelDirectory for InMemoryPorts {
 impl InMemoryPorts {
     /// The channel `storefront` sells through.
     pub const ONLINE_STORE: u128 = 0x0c4a_77e1;
+    /// The method `pay_by_hand` chooses.
+    pub const BANK_TRANSFER: u128 = 0x0ba2_c7f2;
+
+    /// Makes `cart` pay by bank transfer (design note 0027): a `manual` method offered
+    /// everywhere, made on first use with instructions, chosen on the cart directly (no
+    /// command, no checks). For tests of checkout that aren't about payments.
+    pub fn pay_by_hand(&self, cart: hypha_core::CartId) -> hypha_core::PaymentMethodId {
+        use hypha_cart::CartRepo;
+        use hypha_payments::{NewPaymentMethod, PaymentMethod, PaymentMethodRepo, ProviderKey};
+        let id = hypha_core::PaymentMethodId::from_uuid(uuid::Uuid::from_u128(Self::BANK_TRANSFER));
+        if now_or_never(self.payment_methods.get(id))
+            .unwrap_or_else(|e| panic!("{e}"))
+            .is_none()
+        {
+            let mut method = PaymentMethod::new(NewPaymentMethod {
+                id,
+                provider: ProviderKey::manual(),
+                name: "Bank transfer".to_string(),
+                instructions: Some("IBAN HR12 3456 7890; quote your order number".to_string()),
+                markets: vec![],
+                channels: vec![],
+                enabled: true,
+                position: 0,
+                settings: serde_json::json!({}),
+            })
+            .unwrap_or_else(|e| panic!("{e}"));
+            now_or_never(self.payment_methods.insert(&mut method))
+                .unwrap_or_else(|e| panic!("{e}"));
+        }
+        let mut stored = now_or_never(self.carts.get(cart))
+            .unwrap_or_else(|e| panic!("{e}"))
+            .unwrap_or_else(|| panic!("no cart {cart}"));
+        stored
+            .set_payment_method(Some(id))
+            .unwrap_or_else(|e| panic!("{e}"));
+        now_or_never(self.carts.update(&mut stored)).unwrap_or_else(|e| panic!("{e}"));
+        id
+    }
 
     /// A storefront's caller (design note 0020): in an "Online Store" channel, made on
     /// first use, with every product that exists now published there and every scope.

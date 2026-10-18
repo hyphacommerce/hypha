@@ -128,6 +128,9 @@ define_id!(AddressId, "addr");
 define_id!(OrderId, "ord");
 define_id!(OrderLineId, "ordl");
 define_id!(FulfillmentId, "ful");
+// Payment methods and payments (design note 0027).
+define_id!(PaymentMethodId, "pm");
+define_id!(PaymentId, "pay");
 define_id!(ChannelId, "chan");
 // Categories (design note 0022).
 define_id!(CategoryId, "pcat");

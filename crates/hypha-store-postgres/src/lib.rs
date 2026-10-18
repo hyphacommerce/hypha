@@ -32,6 +32,7 @@ mod media;
 mod migrate;
 mod orders;
 mod outbox;
+mod payments;
 mod products;
 mod search;
 mod shipping;

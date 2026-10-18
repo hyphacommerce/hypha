@@ -508,7 +508,7 @@ where
 
     let (mut stale, mut changed) = (f, o.clone());
     stale.set_tracking(vec![]).unwrap();
-    changed.mark_paid().unwrap();
+    changed.set_financial_status(hypha_core::FinancialStatus::Paid);
     let mut batch = ports.batch();
     batch.update_order(&mut changed);
     batch.update_fulfillment(&mut stale);

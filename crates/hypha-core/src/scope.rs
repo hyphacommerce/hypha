@@ -82,6 +82,12 @@ pub enum Scope {
     ChannelsRead,
     #[serde(rename = "channels:write")]
     ChannelsWrite,
+    /// The payment methods a store offers (design note 0027, PA9). Recording money
+    /// received on an order is `orders:write`; reading an order's payments, `orders:read`.
+    #[serde(rename = "payments:read")]
+    PaymentsRead,
+    #[serde(rename = "payments:write")]
+    PaymentsWrite,
 }
 
 impl Scope {
@@ -121,6 +127,8 @@ impl Scope {
             Scope::FulfillmentsWrite => "fulfillments:write",
             Scope::ChannelsRead => "channels:read",
             Scope::ChannelsWrite => "channels:write",
+            Scope::PaymentsRead => "payments:read",
+            Scope::PaymentsWrite => "payments:write",
         }
     }
 
@@ -145,6 +153,7 @@ impl Scope {
             Scope::AppsRead => Some(Scope::AppsWrite),
             Scope::FulfillmentsRead => Some(Scope::FulfillmentsWrite),
             Scope::ChannelsRead => Some(Scope::ChannelsWrite),
+            Scope::PaymentsRead => Some(Scope::PaymentsWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -161,7 +170,8 @@ impl Scope {
             | Scope::ShippingWrite
             | Scope::AppsWrite
             | Scope::FulfillmentsWrite
-            | Scope::ChannelsWrite => None,
+            | Scope::ChannelsWrite
+            | Scope::PaymentsWrite => None,
         }
     }
 
@@ -177,7 +187,7 @@ impl Scope {
         Scope::Checkout,
     ];
 
-    pub const ALL: [Scope; 33] = [
+    pub const ALL: [Scope; 35] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -211,6 +221,8 @@ impl Scope {
         Scope::FulfillmentsWrite,
         Scope::ChannelsRead,
         Scope::ChannelsWrite,
+        Scope::PaymentsRead,
+        Scope::PaymentsWrite,
     ];
 }
 

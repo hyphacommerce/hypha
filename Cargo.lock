@@ -984,11 +984,13 @@ dependencies = [
  "hypha-inventory",
  "hypha-markets",
  "hypha-orders",
+ "hypha-payments",
  "hypha-products",
  "hypha-shipping",
  "hypha-tax",
  "hypha-testkit",
  "pollster",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -1083,6 +1085,7 @@ dependencies = [
  "hypha-inventory",
  "hypha-markets",
  "hypha-merchandising",
+ "hypha-payments",
  "hypha-products",
  "hypha-search",
  "hypha-search-index",
@@ -1117,6 +1120,7 @@ dependencies = [
  "hypha-dispatch",
  "hypha-http",
  "hypha-merchandising",
+ "hypha-payments",
  "hypha-search",
  "hypha-store-postgres",
  "hypha-store-s3",
@@ -1156,6 +1160,7 @@ dependencies = [
  "hypha-merchandising",
  "hypha-order-actions",
  "hypha-orders",
+ "hypha-payments",
  "hypha-products",
  "hypha-search",
  "hypha-search-index",
@@ -1241,6 +1246,7 @@ dependencies = [
  "hypha-fulfillment",
  "hypha-inventory",
  "hypha-orders",
+ "hypha-payments",
  "hypha-testkit",
  "pollster",
  "thiserror",
@@ -1255,6 +1261,19 @@ dependencies = [
  "hypha-testkit",
  "pollster",
  "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-payments"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -1347,6 +1366,7 @@ dependencies = [
  "hypha-media",
  "hypha-order-actions",
  "hypha-orders",
+ "hypha-payments",
  "hypha-products",
  "hypha-search-index",
  "hypha-shipping",
@@ -1415,6 +1435,7 @@ dependencies = [
  "hypha-markets",
  "hypha-media",
  "hypha-orders",
+ "hypha-payments",
  "hypha-products",
  "hypha-search-index",
  "hypha-shipping",

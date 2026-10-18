@@ -158,7 +158,7 @@ async fn updates<R: OrderRepo>(repo: &R) {
     repo.insert(&mut o).await.unwrap();
     let stale = o.clone();
 
-    o.mark_paid().unwrap();
+    o.set_financial_status(FinancialStatus::Paid);
     repo.update(&mut o).await.unwrap();
     assert_eq!(o.version(), Version::new(2));
     let stored = repo.get(o.id()).await.unwrap().unwrap();
@@ -175,6 +175,15 @@ async fn updates<R: OrderRepo>(repo: &R) {
     repo.update(&mut edited).await.unwrap();
     assert_eq!(edited.version(), Version::new(3));
     assert_eq!(repo.get(o.id()).await, Ok(Some(edited)));
+
+    // Every payment status is stored (design note 0027, PA7).
+    for status in FinancialStatus::ALL {
+        let mut current = repo.get(o.id()).await.unwrap().unwrap();
+        current.set_financial_status(status);
+        repo.update(&mut current).await.unwrap();
+        let stored = repo.get(o.id()).await.unwrap().unwrap();
+        assert_eq!(stored.financial_status(), status);
+    }
 
     let mut stale = stale;
     assert_eq!(repo.update(&mut stale).await, Err(RepoError::StaleVersion));
@@ -248,7 +257,7 @@ async fn list_pages<R: OrderRepo>(repo: &R) {
     // Orders 1 to 3, inserted out of order; 3 has two lines, is paid and partly
     // fulfilled; 2 is cancelled.
     let mut full = order_with(3, vec![full_line(31), plain_line(32)], true);
-    full.mark_paid().unwrap();
+    full.set_financial_status(FinancialStatus::Paid);
     full.fulfil(&[(full.lines()[1].id, Quantity::new(1).unwrap())])
         .unwrap();
     repo.insert(&mut full).await.unwrap();
@@ -417,7 +426,7 @@ async fn list_filtered<R: OrderRepo>(repo: &R) {
     // 1: ana, HR, day 1, paid; 2: Ivo, RS, day 2, cancelled; 3: ana in USD, day 3,
     // fulfilled; 4: ivo, HR, day 4.
     let mut ana = varied(1, 500, Currency::EUR, "Ana@Example.hr", "HR", 1);
-    ana.mark_paid().unwrap();
+    ana.set_financial_status(FinancialStatus::Paid);
     let mut ivo = varied(2, 500, Currency::EUR, "ivo@example.rs", "RS", 2);
     ivo.cancel(
         Timestamp::from_unix_micros(1_767_400_000_000_000),
@@ -600,7 +609,7 @@ async fn shipping_round_trips<R: OrderRepo>(repo: &R) {
     assert_eq!(repo.get(order.id()).await, Ok(Some(order.clone())));
 
     // Updates keep it (the whole order is written).
-    order.mark_paid().unwrap();
+    order.set_financial_status(FinancialStatus::Paid);
     repo.update(&mut order).await.unwrap();
     assert_eq!(repo.get(order.id()).await, Ok(Some(order)));
 }

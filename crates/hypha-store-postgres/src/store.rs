@@ -361,6 +361,8 @@ accessors! {
     hypha_core::HasIdempotency => Idempotency, idempotency;
     hypha_orders::HasOrders => Orders, orders;
     hypha_fulfillment::HasFulfillments => Fulfillments, fulfillments;
+    hypha_payments::HasPaymentMethods => PaymentMethods, payment_methods;
+    hypha_payments::HasPayments => Payments, payments;
     hypha_auth::HasIdentities => Identities, identities;
     hypha_auth::HasSessions => Sessions, sessions;
     hypha_auth::HasApiKeys => ApiKeys, api_keys;

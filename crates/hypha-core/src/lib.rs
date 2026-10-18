@@ -6,6 +6,7 @@ pub mod description;
 pub mod email;
 pub mod error_code;
 pub mod events;
+pub mod financial;
 pub mod handle;
 pub mod handlers;
 pub mod idempotency;
@@ -39,6 +40,7 @@ pub use events::{
     HasOutbox, OutboxRepo, Outcome, PendingEvent, Recorded, Recorder, SignalsDispatch, StageEvents,
     StoredEvent, Subject,
 };
+pub use financial::FinancialStatus;
 pub use handle::{Handle, HandleError};
 pub use handlers::{EventHandler, EventHandlers};
 pub use idempotency::{
@@ -48,9 +50,9 @@ pub use idempotency::{
 pub use ids::{
     AddressId, AgentId, ApiKeyId, AssetId, CartId, CatalogId, CategoryId, ChannelId, CustomerId,
     DeliveryId, EventId, FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId, LocationId,
-    MarketId, OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId, PriceListId,
-    ProductId, RoleId, SessionId, ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId,
-    TaxClassId, TaxRegionId, UserId, VariantId,
+    MarketId, OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId, PaymentId,
+    PaymentMethodId, PriceListId, ProductId, RoleId, SessionId, ShippingGroupId, ShippingOptionId,
+    ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId, VariantId,
 };
 pub use language::{Language, LanguageError};
 pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};

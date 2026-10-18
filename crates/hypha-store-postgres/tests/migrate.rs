@@ -446,3 +446,64 @@ fn every_code_0040_accepts_is_still_in_core() {
         assert!(hypha_core::CountryCode::new(code).is_ok(), "{code}");
     }
 }
+
+/// Core before payments (design note 0027): migrations 0001 to 0046.
+const BEFORE_PAYMENTS: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(46).0,
+};
+
+#[tokio::test]
+async fn orders_marked_paid_before_payments_get_their_payment() {
+    let Some(mut client) = fresh_schema("migrate_0047_payments").await else {
+        return;
+    };
+    migrate(&mut client, &[BEFORE_PAYMENTS]).await.unwrap();
+    for (n, status) in [(1, "paid"), (2, "pending")] {
+        client
+            .batch_execute(&format!(
+                "INSERT INTO orders (id, version, number, placed_at, cart_id, market_id,
+                     currency, country, taxes_included, customer_id, email, subtotal,
+                     tax_total, total, financial_status, fulfillment_status, channel_id)
+                 VALUES ('00000000-0000-0000-0000-00000000000{n}', 2, 100{n}, now(),
+                     gen_random_uuid(), gen_random_uuid(), 'EUR', 'HR', true,
+                     gen_random_uuid(), 'ana@example.hr', 1250, 0, 1250, '{status}',
+                     'unfulfilled', gen_random_uuid())"
+            ))
+            .await
+            .unwrap();
+    }
+    migrate(&mut client, &[CORE]).await.unwrap();
+
+    let payments = client
+        .query(
+            "SELECT order_id::text, provider, currency, amount, status, paid_at IS NOT NULL,
+                 method_id IS NULL
+             FROM payments",
+            &[],
+        )
+        .await
+        .unwrap();
+    assert_eq!(payments.len(), 1, "only the paid order");
+    let p = &payments[0];
+    assert_eq!(
+        (
+            p.get::<_, String>(0),
+            p.get::<_, String>(1),
+            p.get::<_, String>(2),
+            p.get::<_, i64>(3),
+            p.get::<_, String>(4),
+            p.get::<_, bool>(5),
+            p.get::<_, bool>(6),
+        ),
+        (
+            "00000000-0000-0000-0000-000000000001".to_string(),
+            "manual".to_string(),
+            "EUR".to_string(),
+            1250,
+            "paid".to_string(),
+            true,
+            true
+        )
+    );
+}

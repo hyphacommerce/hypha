@@ -17,6 +17,7 @@ use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems}
 use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_orders::{Order, OrderSnapshot, StageOrders};
+use hypha_payments::{Payment, PaymentSnapshot, StagePayments};
 use hypha_products::{Product, ProductSnapshot, StageProducts};
 use hypha_tax::StageTaxAssignments;
 use hypha_users::{
@@ -46,6 +47,7 @@ use crate::{
     media::replace_usages,
     orders::{insert_order, update_order},
     outbox::insert_events,
+    payments::{insert_payment, update_payment},
     products::update_product,
     store::{Db, end_transaction},
     store::{PgConnection, PgStore},
@@ -68,6 +70,8 @@ enum Staged {
     Order(OrderSnapshot),
     NewFulfillment(FulfillmentSnapshot),
     Fulfillment(FulfillmentSnapshot),
+    NewPayment(PaymentSnapshot),
+    Payment(PaymentSnapshot),
     NewCart(CartSnapshot),
     Cart(CartSnapshot),
     Product(ProductSnapshot),
@@ -120,40 +124,42 @@ impl Staged {
             Staged::Order(_) => 1,
             Staged::NewFulfillment(_) => 2,
             Staged::Fulfillment(_) => 3,
-            Staged::NewCart(_) => 4,
-            Staged::Cart(_) => 5,
-            Staged::Product(_) => 6,
-            Staged::AssetUsages(..) => 7,
-            Staged::NewCustomer(_) => 8,
-            Staged::NewRole(_) => 9,
-            Staged::Role(_) => 10,
-            Staged::NewUser(_) => 11,
-            Staged::User(_) => 12,
-            Staged::Invite(_) => 13,
-            Staged::NewIdentity(_) => 14,
-            Staged::Identity(_) => 15,
-            Staged::NewSession(_) => 16,
-            Staged::Session(_) => 17,
-            Staged::SessionRevocation(..) => 18,
-            Staged::NewPasswordReset(_) => 19,
-            Staged::PasswordReset(_) => 20,
-            Staged::UsedUpResets(..) => 21,
+            Staged::NewPayment(_) => 4,
+            Staged::Payment(_) => 5,
+            Staged::NewCart(_) => 6,
+            Staged::Cart(_) => 7,
+            Staged::Product(_) => 8,
+            Staged::AssetUsages(..) => 9,
+            Staged::NewCustomer(_) => 10,
+            Staged::NewRole(_) => 11,
+            Staged::Role(_) => 12,
+            Staged::NewUser(_) => 13,
+            Staged::User(_) => 14,
+            Staged::Invite(_) => 15,
+            Staged::NewIdentity(_) => 16,
+            Staged::Identity(_) => 17,
+            Staged::NewSession(_) => 18,
+            Staged::Session(_) => 19,
+            Staged::SessionRevocation(..) => 20,
+            Staged::NewPasswordReset(_) => 21,
+            Staged::PasswordReset(_) => 22,
+            Staged::UsedUpResets(..) => 23,
             // Categories before their membership (a new one must exist first).
-            Staged::NewCategory(_) => 22,
-            Staged::Category(_) => 23,
-            Staged::DeletedCategory(_) => 24,
-            Staged::CategoryProducts(..) => 25,
+            Staged::NewCategory(_) => 24,
+            Staged::Category(_) => 25,
+            Staged::DeletedCategory(_) => 26,
+            Staged::CategoryProducts(..) => 27,
             // Set-based writes (memberships, fixed prices, tax classes): one statement
             // each, whatever the number of rows.
-            Staged::CatalogProducts(..) => 26,
-            Staged::Publications(..) => 27,
-            Staged::FixedPrices(..) => 28,
-            Staged::TaxAssignment(..) => 29,
-            Staged::Idempotency(_) => 30,
-            Staged::InventoryItem(_) => 31,
-            Staged::DeletedInventoryItem(_) => 32,
+            Staged::CatalogProducts(..) => 28,
+            Staged::Publications(..) => 29,
+            Staged::FixedPrices(..) => 30,
+            Staged::TaxAssignment(..) => 31,
+            Staged::Idempotency(_) => 32,
+            Staged::InventoryItem(_) => 33,
+            Staged::DeletedInventoryItem(_) => 34,
             // Inserts into a table nothing else locks: anywhere would do.
-            Staged::Events(..) => 33,
+            Staged::Events(..) => 35,
         }
     }
 
@@ -167,6 +173,8 @@ impl Staged {
                 | (Staged::Order(a), Staged::Order(b)) => a.id.cmp(&b.id),
                 (Staged::NewFulfillment(a), Staged::NewFulfillment(b))
                 | (Staged::Fulfillment(a), Staged::Fulfillment(b)) => a.id.cmp(&b.id),
+                (Staged::NewPayment(a), Staged::NewPayment(b))
+                | (Staged::Payment(a), Staged::Payment(b)) => a.id.cmp(&b.id),
                 (Staged::NewCart(a), Staged::NewCart(b)) | (Staged::Cart(a), Staged::Cart(b)) => {
                     a.id.cmp(&b.id)
                 }
@@ -386,6 +394,23 @@ impl StageFulfillments for PgBatch {
     }
 }
 
+impl StagePayments for PgBatch {
+    fn insert_payment(&mut self, payment: &mut Payment) {
+        stamp_insert(payment, self.now);
+        self.stage(Staged::NewPayment(payment.snapshot()));
+        self.stage_events_of(payment, Version::NEW.next());
+        payment.set_version(Version::NEW.next());
+    }
+
+    fn update_payment(&mut self, payment: &mut Payment) {
+        stamp_update(payment, self.now);
+        self.stage(Staged::Payment(payment.snapshot()));
+        let version = payment.version().next();
+        self.stage_events_of(payment, version);
+        payment.set_version(version);
+    }
+}
+
 impl StageCustomers for PgBatch {
     fn insert_customer(&mut self, customer: &mut Customer) {
         stamp_insert(customer, self.now);
@@ -439,6 +464,10 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::NewFulfillment(s) => insert_fulfillment(&db, &s).await?,
                     Staged::Fulfillment(s) => {
                         update_fulfillment(&db, &s).await?;
+                    }
+                    Staged::NewPayment(s) => insert_payment(&db, &s).await?,
+                    Staged::Payment(s) => {
+                        update_payment(&db, &s).await?;
                     }
                     Staged::NewCart(s) => insert_cart(&db, &s).await?,
                     Staged::Cart(s) => {

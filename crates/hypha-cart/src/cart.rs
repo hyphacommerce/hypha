@@ -1,7 +1,7 @@
 use hypha_core::{
     Address, AddressParts, CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, OrderId,
-    Price, ProductId, Quantity, ShippingGroupId, ShippingOptionId, Stamped, Stamps, Timestamp,
-    VariantId, Version, Versioned,
+    PaymentMethodId, Price, ProductId, Quantity, ShippingGroupId, ShippingOptionId, Stamped,
+    Stamps, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_shipping::ProviderKey;
 
@@ -92,6 +92,9 @@ pub struct Cart {
     shipping_address: Option<Address>,
     /// The choice for the cart's one group of shippable lines (SH8).
     shipping: Option<SelectedShipping>,
+    /// How the buyer will pay (design note 0027, PA6): checked when chosen and again
+    /// at checkout.
+    payment_method: Option<PaymentMethodId>,
 }
 
 impl Versioned for Cart {
@@ -129,6 +132,7 @@ impl Cart {
             status: CartStatus::Open,
             shipping_address: None,
             shipping: None,
+            payment_method: None,
         }
     }
 
@@ -201,6 +205,14 @@ impl Cart {
             return Err(CartError::ShippingAddressRequired);
         }
         self.shipping = selected;
+        Ok(())
+    }
+
+    /// The buyer's payment method; `None` clears it. Commands check it's offered
+    /// (`hypha_checkout::set_payment_method`).
+    pub fn set_payment_method(&mut self, method: Option<PaymentMethodId>) -> Result<(), CartError> {
+        self.ensure_open()?;
+        self.payment_method = method;
         Ok(())
     }
 
@@ -313,6 +325,10 @@ impl Cart {
         self.shipping.as_ref()
     }
 
+    pub fn payment_method(&self) -> Option<PaymentMethodId> {
+        self.payment_method
+    }
+
     /// The line holding `variant`.
     pub fn line(&self, variant: VariantId) -> Result<CartLine, CartError> {
         self.lines
@@ -340,6 +356,7 @@ pub struct CartSnapshot {
     /// Checked by `Address::new` on restore.
     pub shipping_address: Option<AddressParts>,
     pub shipping: Option<SelectedShipping>,
+    pub payment_method: Option<PaymentMethodId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -375,6 +392,7 @@ impl Cart {
             },
             shipping_address: self.shipping_address.as_ref().map(|a| a.parts().clone()),
             shipping: self.shipping.clone(),
+            payment_method: self.payment_method,
         }
     }
 
@@ -425,6 +443,7 @@ impl Cart {
             },
             shipping_address,
             shipping: s.shipping,
+            payment_method: s.payment_method,
         })
     }
 }

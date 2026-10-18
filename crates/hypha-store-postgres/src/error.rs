@@ -12,6 +12,7 @@ use hypha_inventory::repo::keys as inventory_keys;
 use hypha_markets::repo::keys as market_keys;
 use hypha_media::repo::keys as media_keys;
 use hypha_orders::repo::keys as order_keys;
+use hypha_payments::keys as payment_keys;
 use hypha_products::repo::keys as product_keys;
 use hypha_search_index::keys as search_keys;
 use hypha_shipping::keys as shipping_keys;
@@ -66,6 +67,8 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("order_cart", order_keys::ORDER_CART),
     ("order_lines_pkey", order_keys::ORDER_LINE_ID),
     ("fulfillments_pkey", fulfillment_keys::FULFILLMENT_ID),
+    ("payment_methods_pkey", payment_keys::PAYMENT_METHOD_ID),
+    ("payments_pkey", payment_keys::PAYMENT_ID),
     ("identities_pkey", auth_keys::IDENTITY_ID),
     ("identity_principal", auth_keys::IDENTITY_PRINCIPAL),
     ("identity_login", auth_keys::IDENTITY_LOGIN),

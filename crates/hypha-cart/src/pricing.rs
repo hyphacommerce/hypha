@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use hypha_core::{
     Address, AssetId, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money,
-    MoneyError, OrderId, Price, ProductId, Quantity, VariantId,
+    MoneyError, OrderId, PaymentMethodId, Price, ProductId, Quantity, VariantId,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, resolve_price};
@@ -116,6 +116,8 @@ pub struct PricedCart {
     pub tax_total: Money,
     /// What the buyer pays.
     pub total: Money,
+    /// How the buyer chose to pay (design note 0027); checked again at checkout.
+    pub payment_method: Option<PaymentMethodId>,
 }
 
 impl PricedCart {
@@ -258,6 +260,7 @@ pub fn price_cart_with_shipping(
         shipping_total: totals.shipping_total,
         tax_total: totals.tax_total,
         total: totals.total,
+        payment_method: cart.payment_method(),
     }
 }
 

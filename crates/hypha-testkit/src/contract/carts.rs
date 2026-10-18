@@ -19,6 +19,23 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
     buyer_cleared(&make().await).await;
     scenario("cart: shipping address, choice and quote round trip, and clear");
     shipping_round_trips(&make().await).await;
+    scenario("cart: the payment method round trips on insert and update, and clears");
+    payment_method_round_trips(&make().await).await;
+}
+
+async fn payment_method_round_trips<R: CartRepo>(repo: &R) {
+    let method = |n| Some(hypha_core::PaymentMethodId::from_uuid(Uuid::from_u128(n)));
+    let mut c = cart(1);
+    c.set_payment_method(method(70)).unwrap();
+    repo.insert(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+    c.set_payment_method(method(71)).unwrap();
+    repo.update(&mut c).await.unwrap();
+    let stored = repo.get(c.id()).await.unwrap().unwrap();
+    assert_eq!(stored.payment_method(), method(71));
+    c.set_payment_method(None).unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c)));
 }
 
 fn cart(n: u128) -> Cart {

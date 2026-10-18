@@ -36,43 +36,10 @@ impl fmt::Display for OrderNumber {
     }
 }
 
-/// Where the money is (design note 0007, O3). Payment providers move it later
-/// (`Authorized`, `Refunded`, …); for now an order is placed `Pending` and can be marked
-/// `Paid` (e.g. a bank transfer arrived).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FinancialStatus {
-    Pending,
-    Paid,
-}
-
-impl FinancialStatus {
-    /// The same string used in JSON and storage, e.g. "paid".
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            FinancialStatus::Pending => "pending",
-            FinancialStatus::Paid => "paid",
-        }
-    }
-}
-
-impl fmt::Display for FinancialStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for FinancialStatus {
-    /// The text that didn't match a status.
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, String> {
-        match s {
-            "pending" => Ok(FinancialStatus::Pending),
-            "paid" => Ok(FinancialStatus::Paid),
-            other => Err(other.to_string()),
-        }
-    }
-}
+/// Where the money is (design note 0027): derived from the order's payments and
+/// stored here; defined in core so `hypha-payments` can derive it without depending on
+/// orders.
+pub use hypha_core::FinancialStatus;
 
 /// Where the goods are (design note 0007, O3), derived from the lines' fulfilled
 /// quantities (design note 0018, FU3) and stored for lists.
@@ -400,20 +367,29 @@ impl Order {
         Subject::new(ORDER, self.id.as_uuid())
     }
 
-    /// Records that the order is paid; returns whether that changed anything (an order
-    /// already paid stays as it is). A cancelled order can't be marked paid.
-    pub fn mark_paid(&mut self) -> Result<bool, OrderError> {
-        if self.financial_status == FinancialStatus::Paid {
-            return Ok(false);
+    /// Sets the payment status its payments now add up to (design note 0027, PA3), and
+    /// returns whether it changed. Becoming `paid` records `order.paid`. Not refused for
+    /// a cancelled order: cancelling voids its pending payments, which moves it too. The
+    /// workflow that changes a payment calls this in the same batch.
+    pub fn set_financial_status(&mut self, status: FinancialStatus) -> bool {
+        if self.financial_status == status {
+            return false;
         }
-        self.refuse_cancelled()?;
-        self.financial_status = FinancialStatus::Paid;
-        let paid = OrderPaid {
-            order: self.id,
-            amount: self.total,
-        };
-        self.events.record(self.subject(), &paid);
-        Ok(true)
+        self.financial_status = status;
+        if status == FinancialStatus::Paid {
+            let paid = OrderPaid {
+                order: self.id,
+                amount: self.total,
+            };
+            self.events.record(self.subject(), &paid);
+        }
+        true
+    }
+
+    /// Refused for a cancelled order (`order_cancelled`): what recording a payment by
+    /// hand checks first.
+    pub fn ensure_not_cancelled(&self) -> Result<(), OrderError> {
+        self.refuse_cancelled()
     }
 
     fn refuse_cancelled(&self) -> Result<(), OrderError> {
@@ -1095,23 +1071,23 @@ mod tests {
     }
 
     #[test]
-    fn a_cancelled_order_cant_be_fulfilled_unfulfilled_or_paid() {
+    fn a_cancelled_order_cant_be_fulfilled_unfulfilled_or_paid_by_hand() {
         let mut order = placed();
         order.cancel(at(), CancelReason::Inventory).unwrap();
         let cancelled = Err(OrderError::Cancelled(order.id()));
         assert_eq!(order.fulfil(&[(line_id(1), q(1))]), cancelled);
         assert_eq!(order.unfulfil(&[(line_id(1), q(1))]), cancelled);
-        assert_eq!(order.mark_paid(), Err(OrderError::Cancelled(order.id())));
+        assert_eq!(order.ensure_not_cancelled(), cancelled);
     }
 
     #[test]
     fn a_paid_order_can_be_cancelled_and_stays_paid() {
         // Refunds come with payment spores (FU7, Q3).
         let mut order = placed();
-        order.mark_paid().unwrap();
+        order.set_financial_status(FinancialStatus::Paid);
         assert_eq!(order.cancel(at(), CancelReason::Customer), Ok(true));
         assert_eq!(order.financial_status(), FinancialStatus::Paid);
-        assert_eq!(order.mark_paid(), Ok(false));
+        assert!(!order.set_financial_status(FinancialStatus::Paid));
     }
 
     #[test]
@@ -1239,17 +1215,30 @@ mod tests {
     }
 
     #[test]
-    fn mark_paid_changes_a_pending_order_once() {
+    fn becoming_paid_records_order_paid_once() {
         let mut order = Order::place(new_order()).unwrap();
-        assert_eq!(order.mark_paid(), Ok(true));
+        order.take_events();
+        assert!(order.set_financial_status(FinancialStatus::Paid));
         assert_eq!(order.financial_status(), FinancialStatus::Paid);
-        assert_eq!(order.mark_paid(), Ok(false));
+        assert!(!order.set_financial_status(FinancialStatus::Paid));
+        let events = order.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "order.paid");
+    }
+
+    #[test]
+    fn other_statuses_record_nothing() {
+        let mut order = Order::place(new_order()).unwrap();
+        order.take_events();
+        assert!(order.set_financial_status(FinancialStatus::Voided));
+        assert!(order.set_financial_status(FinancialStatus::PartiallyPaid));
+        assert_eq!(order.take_events().len(), 0);
     }
 
     #[test]
     fn restore_round_trips() {
         let mut order = Order::place(new_order()).unwrap();
-        order.mark_paid().unwrap();
+        order.set_financial_status(FinancialStatus::Paid);
         order.fulfil(&[(line_id(2), q(1))]).unwrap();
         assert_eq!(Order::restore(order.snapshot()), Ok(order));
     }
@@ -1263,13 +1252,10 @@ mod tests {
 
     #[test]
     fn statuses_parse_back_from_their_strings() {
-        for status in [FinancialStatus::Pending, FinancialStatus::Paid] {
-            assert_eq!(status.as_str().parse(), Ok(status));
-        }
         assert_eq!("unfulfilled".parse(), Ok(FulfillmentStatus::Unfulfilled));
         assert_eq!(
-            "refunded".parse::<FinancialStatus>(),
-            Err("refunded".to_string())
+            "shipped".parse::<FulfillmentStatus>(),
+            Err("shipped".to_string())
         );
     }
 }

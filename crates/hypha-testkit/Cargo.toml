@@ -23,6 +23,7 @@ hypha-apps = { path = "../hypha-apps" }
 hypha-search-index = { path = "../hypha-search-index" }
 hypha-channels = { path = "../hypha-channels" }
 hypha-categories = { path = "../hypha-categories" }
+hypha-payments = { path = "../hypha-payments" }
 sha2 = "0.11"
 uuid.workspace = true
 # The contract's outbox scenarios stage events of their own and read their payloads.

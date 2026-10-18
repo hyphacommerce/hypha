@@ -1,12 +1,11 @@
 use hypha_core::{
-    Actor, AuthError, CartId, CountryCode, Ctx, Currency, CustomerId, Email, Keyset, MarketId,
-    Money, OrderId, OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Scope, Timestamp,
-    UserId, VariantId, Version, Versioned,
+    Actor, AuthError, CartId, CountryCode, Ctx, Currency, CustomerId, Email, MarketId, Money,
+    OrderId, OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Scope, Timestamp, UserId,
+    VariantId,
 };
 use hypha_orders::{
-    CancelReason, CommandError, FinancialStatus, ListOrders, NewOrder, Order, OrderError,
-    OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderSort, OrderSummary, get_order,
-    get_placed_order, list_orders, mark_order_paid,
+    CommandError, ListOrders, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, get_order,
+    get_placed_order, list_orders,
 };
 use hypha_testkit::InMemoryOrderRepo;
 use pollster::block_on;
@@ -94,94 +93,6 @@ fn get_order_needs_orders_read() {
 }
 
 #[test]
-fn mark_order_paid_stores_the_payment() {
-    let repo = repo_with_order();
-    let paid = block_on(mark_order_paid(&Ctx::system(), &repo, order_id())).unwrap();
-    assert_eq!(paid.financial_status(), FinancialStatus::Paid);
-    assert_eq!(block_on(repo.get(order_id())), Ok(Some(paid)));
-}
-
-#[test]
-fn marking_a_paid_order_again_writes_nothing() {
-    let repo = repo_with_order();
-    block_on(mark_order_paid(&Ctx::system(), &repo, order_id())).unwrap();
-    let again = block_on(mark_order_paid(&Ctx::system(), &repo, order_id())).unwrap();
-    assert_eq!(again.version(), Version::new(2));
-    // Placed, then paid once.
-    assert_eq!(repo.outbox().types(), ["order.placed", "order.paid"]);
-}
-
-#[test]
-fn mark_order_paid_needs_orders_write() {
-    let repo = repo_with_order();
-    let ctx = user_with(vec![Scope::OrdersRead]);
-    assert_eq!(
-        block_on(mark_order_paid(&ctx, &repo, order_id())),
-        Err(CommandError::Auth(AuthError::MissingScope(
-            Scope::OrdersWrite
-        )))
-    );
-}
-
-/// An order repo whose first `get` returns `stale`: the order as this request loaded it,
-/// before another request changed it.
-struct LoadedBeforeAChange {
-    repo: InMemoryOrderRepo,
-    stale: std::cell::RefCell<Option<Order>>,
-}
-
-impl OrderRepo for LoadedBeforeAChange {
-    async fn get(&self, id: OrderId) -> Result<Option<Order>, hypha_core::RepoError> {
-        // Taken in its own statement: a temporary in a `match` scrutinee lives until the
-        // `match` ends, so the borrow would be held across the `.await` below.
-        let stale = self.stale.borrow_mut().take();
-        match stale {
-            Some(stale) => Ok(Some(stale)),
-            None => self.repo.get(id).await,
-        }
-    }
-    async fn get_by_number(
-        &self,
-        number: OrderNumber,
-    ) -> Result<Option<Order>, hypha_core::RepoError> {
-        self.repo.get_by_number(number).await
-    }
-    async fn list(
-        &self,
-        filter: &OrderFilter,
-        sort: OrderSort,
-        page: PageRequest<Keyset<OrderId>>,
-    ) -> Result<Page<OrderSummary>, hypha_core::RepoError> {
-        self.repo.list(filter, sort, page).await
-    }
-    async fn insert(&self, order: &mut Order) -> Result<(), hypha_core::RepoError> {
-        self.repo.insert(order).await
-    }
-    async fn update(&self, order: &mut Order) -> Result<(), hypha_core::RepoError> {
-        self.repo.update(order).await
-    }
-    async fn next_number(&self) -> Result<OrderNumber, hypha_core::RepoError> {
-        self.repo.next_number().await
-    }
-}
-
-#[test]
-fn marking_an_order_paid_twice_at_once_succeeds_both_times() {
-    let repo = repo_with_order();
-    let stale = block_on(repo.get(order_id())).unwrap();
-    // The other request wins and marks it paid first.
-    block_on(mark_order_paid(&Ctx::system(), &repo, order_id())).unwrap();
-
-    let racing = LoadedBeforeAChange {
-        repo,
-        stale: std::cell::RefCell::new(stale),
-    };
-    let order = block_on(mark_order_paid(&Ctx::system(), &racing, order_id())).unwrap();
-    assert_eq!(order.financial_status(), FinancialStatus::Paid);
-    assert_eq!(order.version(), Version::new(2));
-}
-
-#[test]
 fn list_orders_returns_a_page() {
     let repo = repo_with_order();
     let page = block_on(list_orders(
@@ -243,22 +154,5 @@ fn list_orders_needs_orders_read() {
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::OrdersRead
         )))
-    );
-}
-
-#[test]
-fn a_cancelled_order_cant_be_marked_paid() {
-    let repo = repo_with_order();
-    let mut order = block_on(repo.get(order_id())).unwrap().unwrap();
-    order
-        .cancel(
-            Timestamp::from_unix_micros(1_767_312_000_000_000),
-            CancelReason::Fraud,
-        )
-        .unwrap();
-    block_on(repo.update(&mut order)).unwrap();
-    assert_eq!(
-        block_on(mark_order_paid(&Ctx::system(), &repo, order_id())),
-        Err(CommandError::Order(OrderError::Cancelled(order_id())))
     );
 }

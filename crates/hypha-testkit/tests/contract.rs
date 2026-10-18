@@ -252,3 +252,22 @@ fn channel_repo() {
 fn category_repo() {
     block_on(contract::category_repo(async || InMemoryPorts::default()));
 }
+
+#[test]
+fn payment_method_repo() {
+    block_on(contract::payment_method_repo(async || {
+        hypha_testkit::InMemoryPaymentMethodRepo::default()
+    }));
+}
+
+#[test]
+fn payment_repo() {
+    block_on(contract::payment_repo(async || {
+        hypha_testkit::InMemoryPaymentRepo::default()
+    }));
+}
+
+#[test]
+fn payment_batch() {
+    block_on(contract::payment_batch(async || InMemoryPorts::default()));
+}
