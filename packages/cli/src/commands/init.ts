@@ -21,7 +21,7 @@ import {
   type Target,
   url,
 } from "../deployment.ts";
-import { checkToken, templateUrl } from "../cloudflare-token.ts";
+import { checkR2Keys, checkToken, isTokenValue, r2KeysOf, templateUrl } from "../cloudflare-token.ts";
 import { BLOCK, checkDatabaseUrl } from "../cloudflare.ts";
 import { run } from "../shell.ts";
 import {
@@ -100,8 +100,12 @@ export const init = defineCommand({
       type: "string",
       description: "cloudflare: a placement region (aws:eu-central-1) instead of measuring the database's host",
     },
-    "r2-access-key-id": { type: "string", description: "cloudflare: an R2 API token's access key ID (media is off without)" },
-    "r2-secret-access-key": { type: "string", description: "cloudflare: that token's secret access key" },
+    "r2-access-key-id": {
+      type: "string",
+      description: "cloudflare: R2's Access Key ID, or an R2 token's value (default: derived from the API token)",
+    },
+    "r2-secret-access-key": { type: "string", description: "cloudflare: R2's Secret Access Key, with an Access Key ID" },
+    media: { type: "boolean", default: true, description: "cloudflare: files on R2 (--no-media for none)" },
     yes: { type: "boolean", alias: "y", description: "Don't ask: defaults for what isn't given" },
     force: { type: "boolean", description: "Write an existing deployment again (keeps its secrets, owner and keys)" },
   },
@@ -273,6 +277,7 @@ type CloudflareArgs = {
   region?: string;
   "r2-access-key-id"?: string;
   "r2-secret-access-key"?: string;
+  media?: boolean;
 };
 
 /**
@@ -322,20 +327,14 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     }),
   );
   if (!NAME.test(name)) throw new Error(`--name: ${name} should be lowercase letters, digits and dashes`);
-  const r2Key = await ask(args["r2-access-key-id"], "", () =>
-    p.text({
-      message: "An R2 API token's access key ID, for files (R2 → Manage API tokens; empty for no media)",
-      defaultValue: "",
-    }),
-  );
-  const r2Secret = r2Key
-    ? await ask(args["r2-secret-access-key"], undefined, () =>
-        p.password({ message: "Its secret access key", validate: (v) => (v ? undefined : "the token's secret") }),
-      )
-    : "";
+  // Files: R2 keys by flag (an R2 token's value is turned into them), else the ones
+  // `--force` keeps, else derived from the deploy token if it may use R2.
+  const r2Flag = (args["r2-access-key-id"] ?? "").trim();
+  const earlierEnv = args.force ? await loadEnv(dir).catch(() => undefined) : undefined;
+  const keptR2 = earlierEnv?.get("R2_ACCESS_KEY_ID") ? earlierEnv : undefined;
+  const wantsMedia = args.media !== false;
 
   // The token everything deploys with (cloudflare-token.ts).
-  const earlierEnv = args.force ? await loadEnv(dir).catch(() => undefined) : undefined;
   const knownToken = earlierEnv?.get("CLOUDFLARE_API_TOKEN") || process.env.CLOUDFLARE_API_TOKEN || undefined;
   if (!args["api-token"] && !knownToken) {
     const link = templateUrl(`Hypha ${name}`);
@@ -354,7 +353,12 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   spin.start("Checking the token");
   let checked;
   try {
-    checked = await checkToken(token, domain, { accountId: args["account-id"], media: Boolean(r2Key) });
+    checked = await checkToken(token, domain, {
+      accountId: args["account-id"],
+      zoneId: args["zone-id"],
+      // Required when the deploy token is to give the keys and none came otherwise.
+      media: false,
+    });
   } catch (e) {
     spin.error("The token won't do");
     throw e;
@@ -367,6 +371,24 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     );
   }
   spin.stop(`The token reaches the account and ${domain}`);
+
+  let r2 = { id: "", secret: "" };
+  if (!wantsMedia) {
+    // --no-media: files off.
+  } else if (r2Flag) {
+    r2 = isTokenValue(r2Flag)
+      ? await r2KeysOf(r2Flag, checked.accountId)
+      : { id: r2Flag, secret: (args["r2-secret-access-key"] ?? "").trim() };
+    const wrong = checkR2Keys(r2.id, r2.secret);
+    if (wrong) throw new Error(`the R2 keys: ${wrong}`);
+  } else if (keptR2) {
+    r2 = { id: keptR2.get("R2_ACCESS_KEY_ID")!, secret: keptR2.get("R2_SECRET_ACCESS_KEY") ?? "" };
+  } else if (checked.r2) {
+    r2 = await r2KeysOf(token, checked.accountId);
+  } else {
+    p.log.warn("The token can't use R2, so uploads are off: add R2 (edit) to it, then run init --force.");
+  }
+  const media = Boolean(r2.id);
 
   const email = (
     await ask(args["owner-email"], undefined, () =>
@@ -391,7 +413,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     cloudflare: {
       name,
       accountId: checked.accountId,
-      zoneId: args["zone-id"] || checked.zoneId,
+      zoneId: checked.zoneId,
       ...(args.region ? { region: args.region } : {}),
       // A namespace_id is a number unique per account: a random block per deployment.
       rateLimitBase: earlier?.rateLimitBase ?? (1 + randomInt(90_000)) * BLOCK,
@@ -402,16 +424,12 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   };
   const env = newCloudflareEnv({ email, storeName }, databaseUrl, {
     token,
-    r2: { id: r2Key.trim(), secret: r2Secret.trim() },
+    r2,
     storefront: Boolean(domains.storefront),
   });
   // The database URL, token and R2 keys given now win; the secret key, the owner and
   // the storefront's keys stay.
-  const given = new Set([
-    "DATABASE_URL",
-    "CLOUDFLARE_API_TOKEN",
-    ...(r2Key ? ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"] : []),
-  ]);
+  const given = new Set(["DATABASE_URL", "CLOUDFLARE_API_TOKEN", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"]);
   if (earlierEnv) for (const key of KEPT) {
     const value = earlierEnv.get(key);
     if (!given.has(key) && value !== undefined && value !== "" && env.get(key) !== undefined) env.set(key, value);
@@ -430,7 +448,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
       `API        ${url(d, domains.api)}`,
       ...(domains.admin ? [`Admin      ${url(d, domains.admin)}`] : []),
       ...(domains.storefront ? [`Storefront ${url(d, domains.storefront)}`] : []),
-      `Files      ${r2Key ? url(d, domains.media) : "off (no R2 keys)"}`,
+      `Files      ${media ? url(d, domains.media) : "off (no R2 keys)"}`,
       `Database   ${new URL(databaseUrl).host}`,
     ].join("\n"),
     `Written to ${dir}`,
@@ -441,7 +459,12 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
 
 /** Opens `link` in the browser, if this machine has a way; the link is printed anyway. */
 function openInBrowser(link: string): void {
+  // Not `cmd /c start`: cmd would split the link at its `&`s.
   const [program, ...args] =
-    process.platform === "darwin" ? ["open"] : process.platform === "win32" ? ["cmd", "/c", "start", '""'] : ["xdg-open"];
+    process.platform === "darwin"
+      ? ["open"]
+      : process.platform === "win32"
+        ? ["rundll32", "url.dll,FileProtocolHandler"]
+        : ["xdg-open"];
   run(program, [...args, link], { capture: true }).catch(() => {});
 }

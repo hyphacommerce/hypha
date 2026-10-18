@@ -20,6 +20,7 @@ import { join, relative } from "node:path";
 import * as p from "@clack/prompts";
 
 import { Staff, waitForAnswer, waitForHealth } from "./api.ts";
+import { checkR2Keys } from "./cloudflare-token.ts";
 import { type App, apps, type Deployment, type EnvFile, saveDeployment, saveEnv, url } from "./deployment.ts";
 import { connectStorefront, type StorefrontKeys, syncWebhook } from "./storefront.ts";
 import { run } from "./shell.ts";
@@ -255,6 +256,8 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
   const keyId = env.get("R2_ACCESS_KEY_ID");
   const keySecret = env.get("R2_SECRET_ACCESS_KEY");
   const media = Boolean(keyId && keySecret);
+  const wrongKeys = media ? checkR2Keys(keyId!, keySecret!) : undefined;
+  if (wrongKeys) throw new Error(`.env: R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY: ${wrongKeys}`);
 
   // The account: init found it from the API token. Without a token (a deployment from
   // before it), wrangler's own login, which can only deploy the API.

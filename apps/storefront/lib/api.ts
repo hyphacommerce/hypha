@@ -32,12 +32,19 @@ export function api(extra: Record<string, string> = {}) {
 /**
  * A client that passes the shopper's address on, for the calls Hypha limits per address
  * (creating a cart; design note 0009), so the limit counts the shopper, not this server.
- * Only from Cloudflare's `cf-connecting-ip`, which the browser can't forge; the API
- * believes it only through its own Service Binding (design note 0026). Server actions
- * only: it reads the request's headers.
+ * Only from a source the browser can't forge, as the admin's (`apps/admin/lib/hypha.ts`):
+ * Cloudflare's `cf-connecting-ip` on Workers (the API believes it through its own Service
+ * Binding, design note 0026), or, behind this deployment's own proxy
+ * (`STOREFRONT_TRUST_X_FORWARDED_FOR=true`, a VPS's Caddy), the last `x-forwarded-for`
+ * entry, which the API believes from its trusted proxies. Server actions only: it reads
+ * the request's headers.
  */
 export async function shopperApi() {
-  const ip = (await headers()).get("cf-connecting-ip")?.trim();
+  const h = await headers();
+  let ip = h.get("cf-connecting-ip")?.trim();
+  if (!ip && process.env.STOREFRONT_TRUST_X_FORWARDED_FOR === "true") {
+    ip = h.get("x-forwarded-for")?.split(",").at(-1)?.trim();
+  }
   return api(ip ? { "x-forwarded-for": ip } : {});
 }
 

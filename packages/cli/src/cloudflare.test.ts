@@ -164,8 +164,8 @@ async function folder(d: Deployment, r2 = true): Promise<{ dir: string; env: Env
   const env = new EnvFile()
     .set("HYPHA_SECRET_KEY", "f".repeat(64))
     .set("DATABASE_URL", DB)
-    .set("R2_ACCESS_KEY_ID", r2 ? "key" : "")
-    .set("R2_SECRET_ACCESS_KEY", r2 ? "shh" : "")
+    .set("R2_ACCESS_KEY_ID", r2 ? "a".repeat(32) : "")
+    .set("R2_SECRET_ACCESS_KEY", r2 ? "b".repeat(64) : "")
     .set("HYPHA_OWNER_EMAIL", "owner@example.com")
     .set("HYPHA_OWNER_PASSWORD", "pw")
     .set("CLOUDFLARE_API_TOKEN", "cf-token");
@@ -194,8 +194,8 @@ test("a first deploy sets the database up, creates the resources with Hyperdrive
   ]);
   assert.deepEqual(JSON.parse(secrets[0]), {
     HYPHA_SECRET_KEY: "f".repeat(64),
-    HYPHA_S3_ACCESS_KEY_ID: "key",
-    HYPHA_S3_SECRET_ACCESS_KEY: "shh",
+    HYPHA_S3_ACCESS_KEY_ID: "a".repeat(32),
+    HYPHA_S3_SECRET_ACCESS_KEY: "b".repeat(64),
   });
   // The secrets don't stay on disk; what was created is remembered.
   assert.deepEqual((await readdir(dir)).sort(), ["hypha.config.toml", "hypha.json", "wrangler.toml"]);

@@ -168,7 +168,7 @@ export function newCloudflareEnv(
     .comment("The database's direct URL: `hypha deploy` sets it up and points Hyperdrive at it.")
     .set("DATABASE_URL", databaseUrl)
     .comment("")
-    .comment("An R2 API token's keys (R2 → Manage API tokens, Object Read & Write); empty: media off.")
+    .comment("R2's S3 keys for files (derived from an R2-capable token: its ID, the SHA-256 of its value); empty: off.")
     .set("R2_ACCESS_KEY_ID", options.r2.id)
     .set("R2_SECRET_ACCESS_KEY", options.r2.secret)
     .comment("")
