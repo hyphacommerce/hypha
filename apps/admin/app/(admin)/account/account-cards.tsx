@@ -1,18 +1,23 @@
 "use client";
 
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
+import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { Divider } from "@astryxdesign/core/Divider";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import type { AdminSchemas } from "@hypha/sdk/admin";
 import { type FormEvent, type ReactNode, startTransition, useState, useTransition } from "react";
 
+import { DateTime } from "@/components/date-time";
 import { NewPasswordFields, fieldText, newPasswordProblem } from "@/components/new-password";
 
 import { logout } from "../../login/actions";
-import { changePassword, updateName } from "./actions";
+import { changePassword, revokeOtherSessions, revokeSession, updateName } from "./actions";
 
 export function AccountCard({
   title,
@@ -49,18 +54,8 @@ export function AccountCard({
   );
 }
 
-/** Who you are to the team; the name is editable with `users:write`. */
-export function ProfileCard({
-  name,
-  email,
-  role,
-  canRename,
-}: {
-  name: string;
-  email: string;
-  role: string;
-  canRename: boolean;
-}) {
+/** Who you are to the team; anyone may change their own name. */
+export function ProfileCard({ name, email, role }: { name: string; email: string; role: string }) {
   const [draft, setDraft] = useState<string>();
   const [error, setError] = useState<string>();
   const [isPending, startSaving] = useTransition();
@@ -81,13 +76,8 @@ export function ProfileCard({
   return (
     <AccountCard
       title="Profile"
-      description={
-        canRename
-          ? "Your name shows to your team. Your email is how you sign in; it can't change."
-          : "Your name shows to your team. Ask someone who manages staff to change it; your email can't change."
-      }
+      description="Your name shows to your team. Your email is how you sign in; it can't change."
       action={
-        canRename &&
         draft === undefined && (
           <Button label="Edit name" variant="secondary" size="sm" onClick={() => setDraft(name)} />
         )
@@ -190,19 +180,121 @@ export function PasswordCard() {
   );
 }
 
-/** Signing out here, and how to sign out everywhere else. */
-export function SessionsCard() {
+type Session = AdminSchemas["MySessionResponse"];
+
+/** "Firefox on macOS" from a `User-Agent`, or `undefined` when it names neither. */
+export function deviceName(userAgent: string | null | undefined): string | undefined {
+  if (!userAgent) return undefined;
+  // Order matters: Edge and Opera say Chrome too, Chrome says Safari.
+  const browsers: [RegExp, string][] = [
+    [/Edg\//, "Edge"],
+    [/OPR\//, "Opera"],
+    [/Firefox\//, "Firefox"],
+    [/Chrome\//, "Chrome"],
+    [/Safari\//, "Safari"],
+    [/curl\//, "curl"],
+  ];
+  const systems: [RegExp, string][] = [
+    [/iPhone|iPad/, "iOS"],
+    [/Android/, "Android"],
+    [/Mac OS X|Macintosh/, "macOS"],
+    [/Windows/, "Windows"],
+    [/CrOS/, "ChromeOS"],
+    [/Linux/, "Linux"],
+  ];
+  const browser = browsers.find(([pattern]) => pattern.test(userAgent))?.[1];
+  const system = systems.find(([pattern]) => pattern.test(userAgent))?.[1];
+  if (browser && system) return `${browser} on ${system}`;
+  return browser ?? system;
+}
+
+/**
+ * Where the account is signed in: each session with its browser, address and last use;
+ * signing one out, or every other one at once.
+ */
+export function SessionsCard({ sessions }: { sessions: Session[] }) {
+  const [error, setError] = useState<string>();
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [busy, setBusy] = useState<string>();
+  const [isPending, startWork] = useTransition();
+  const others = sessions.filter((s) => !s.current);
+
+  const signOut = (session: Session) => {
+    if (session.current) {
+      startTransition(() => logout());
+      return;
+    }
+    setBusy(session.id);
+    startWork(async () => {
+      setError((await revokeSession(session.id)).error);
+      setBusy(undefined);
+    });
+  };
+  const signOutOthers = () =>
+    startWork(async () => {
+      setError((await revokeOtherSessions()).error);
+      setIsConfirming(false);
+    });
+
   return (
     <AccountCard
       title="Sessions"
-      description="A sign-in lasts until you sign out or it expires. To sign out every other device at once, change your password."
+      description="Where your account is signed in. Sign out a device you don't recognise, then change your password."
       action={
-        <Button
-          label="Sign out"
-          variant="secondary"
-          onClick={() => startTransition(() => logout())}
-        />
+        others.length > 0 && (
+          <Button
+            label="Sign out everywhere else"
+            variant="secondary"
+            size="sm"
+            onClick={() => setIsConfirming(true)}
+          />
+        )
       }
-    />
+    >
+      {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
+      <VStack gap={3}>
+        {sessions.map((session, i) => (
+          <VStack key={session.id} gap={3}>
+            {i > 0 && <Divider />}
+            <HStack gap={3} hAlign="between" vAlign="center">
+              <VStack gap={1}>
+                <HStack gap={2} vAlign="center">
+                  <Text weight="medium">{deviceName(session.user_agent) ?? "Unknown device"}</Text>
+                  {session.current && <Badge label="This device" variant="success" />}
+                </HStack>
+                <Text type="supporting" color="secondary">
+                  {session.ip ? `${session.ip} · ` : ""}
+                  {session.current ? (
+                    "Active now"
+                  ) : (
+                    <>
+                      Last active <DateTime value={session.last_used_at} short />
+                    </>
+                  )}
+                  {" · Signed in "}
+                  <DateTime value={session.created_at} short />
+                </Text>
+              </VStack>
+              <Button
+                label="Sign out"
+                variant={session.current ? "secondary" : "ghost"}
+                size="sm"
+                isLoading={isPending && busy === session.id}
+                onClick={() => signOut(session)}
+              />
+            </HStack>
+          </VStack>
+        ))}
+      </VStack>
+      <AlertDialog
+        isOpen={isConfirming}
+        onOpenChange={setIsConfirming}
+        title="Sign out everywhere else?"
+        description={`${others.length === 1 ? "The other device" : `The ${others.length} other devices`} must sign in again. This one stays signed in.`}
+        actionLabel="Sign out others"
+        isActionLoading={isPending}
+        onAction={signOutOthers}
+      />
+    </AccountCard>
   );
 }

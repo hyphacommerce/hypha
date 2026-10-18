@@ -10,14 +10,16 @@ import { Text } from "@astryxdesign/core/Text";
 import { type SearchableItem, createStaticSource } from "@astryxdesign/core/Typeahead";
 import { MagnifyingGlassIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   ACCOUNT_NAV,
   MAIN_NAV,
   type NavIcon,
-  SETTINGS_GROUPS,
   SETTINGS_NAV,
+  canOpen,
+  visibleNav,
+  visibleSettings,
 } from "@/lib/navigation";
 
 type Command = SearchableItem<{ group: string; icon?: NavIcon; hint?: string; keywords: string[] }>;
@@ -33,35 +35,38 @@ function command(
   return { id: href, label, auxiliaryData: { group, icon, hint, keywords } };
 }
 
-const COMMANDS: Command[] = [
-  ...MAIN_NAV.flatMap((item) => [
-    command("Go to", item.label, item.href, item.icon),
-    ...(item.children ?? []).map((child) =>
-      command("Go to", child.label, child.href, item.icon, item.label),
+/** Every page `scopes` can open (all while they're unknown, `null`). */
+function commands(scopes: readonly string[] | null): Command[] {
+  return [
+    ...visibleNav(MAIN_NAV, scopes).flatMap((item) => [
+      command("Go to", item.label, item.href, item.icon),
+      ...(item.children ?? []).map((child) =>
+        command("Go to", child.label, child.href, item.icon, item.label),
+      ),
+    ]),
+    command("Go to", SETTINGS_NAV.label, SETTINGS_NAV.href, SETTINGS_NAV.icon),
+    command("Go to", ACCOUNT_NAV.label, ACCOUNT_NAV.href, ACCOUNT_NAV.icon, undefined, [
+      "password",
+      "two-factor",
+      "2fa",
+      "profile",
+    ]),
+    ...visibleSettings(scopes).flatMap((group) =>
+      group.pages.map((page) =>
+        command("Settings", page.label, page.href, page.icon, group.title, [
+          group.title,
+          page.description,
+        ]),
+      ),
     ),
-  ]),
-  command("Go to", SETTINGS_NAV.label, SETTINGS_NAV.href, SETTINGS_NAV.icon),
-  command("Go to", ACCOUNT_NAV.label, ACCOUNT_NAV.href, ACCOUNT_NAV.icon, undefined, [
-    "password",
-    "two-factor",
-    "2fa",
-    "profile",
-  ]),
-  ...SETTINGS_GROUPS.flatMap((group) =>
-    group.pages.map((page) =>
-      command("Settings", page.label, page.href, page.icon, group.title, [
-        group.title,
-        page.description,
-      ]),
-    ),
-  ),
-  command("Create", "New product", "/products/new", PlusIcon),
-  command("Create", "New market", "/markets/new", PlusIcon),
-];
-
-const source = createStaticSource(COMMANDS, {
-  keywords: (item) => item.auxiliaryData?.keywords ?? [],
-});
+    ...[
+      { label: "New product", href: "/products/new", scope: "products:write" },
+      { label: "New market", href: "/markets/new", scope: "markets:write" },
+    ]
+      .filter((page) => canOpen(page, scopes))
+      .map((page) => command("Create", page.label, page.href, PlusIcon)),
+  ];
+}
 
 function CommandRow({ item }: { item: Command }) {
   const Icon = item.auxiliaryData?.icon;
@@ -80,9 +85,16 @@ function CommandRow({ item }: { item: Command }) {
   );
 }
 
-export function CommandMenu() {
+export function CommandMenu({ scopes = null }: { scopes?: readonly string[] | null }) {
   const [isOpen, setIsOpen] = useState(false);
   const router = useRouter();
+  const source = useMemo(
+    () =>
+      createStaticSource(commands(scopes), {
+        keywords: (item) => item.auxiliaryData?.keywords ?? [],
+      }),
+    [scopes],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

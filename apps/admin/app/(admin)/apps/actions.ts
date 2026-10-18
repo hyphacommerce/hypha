@@ -1,5 +1,6 @@
 "use server";
 
+import type { AdminSchemas } from "@hypha/sdk/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -30,6 +31,21 @@ export async function removeApp(key: string, isDelete: boolean): Promise<Result>
   if (error) return { error: describe(error) };
   revalidatePath("/apps");
   if (isDelete) redirect("/apps");
+  revalidatePath(`/apps/${key}`);
+  return {};
+}
+
+/**
+ * Narrows an installed app's grant to `scopes` (design note 0029, §4.1): the others stop
+ * working at once.
+ */
+export async function narrowGrant(key: string, scopes: AdminSchemas["Scope"][]): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.PATCH("/admin/apps/{key}/grant", {
+    params: { path: { key } },
+    body: { scopes },
+  });
+  if (error) return { error: describe(error) };
   revalidatePath(`/apps/${key}`);
   return {};
 }

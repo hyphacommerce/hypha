@@ -1,3 +1,5 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { Grid } from "@astryxdesign/core/Grid";
@@ -6,10 +8,16 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 
 import { PageHeader } from "@/components/page-header";
-import { SETTINGS_GROUPS } from "@/lib/navigation";
+import { requireStaff } from "@/lib/hypha";
+import { visibleSettings } from "@/lib/navigation";
 
-/** Settings: every settings page, grouped, so the side nav needs only one entry. */
-export default function SettingsPage() {
+/**
+ * Settings: every settings page the user's role can open, grouped, so the side nav
+ * needs only one entry.
+ */
+export default async function SettingsPage() {
+  const me = await requireStaff();
+  const groups = visibleSettings(me.scopes);
   return (
     <Section padding={6}>
       <VStack gap={6} maxWidth={960}>
@@ -17,7 +25,15 @@ export default function SettingsPage() {
           title="Settings"
           description="How the store runs, who works on it, and what connects to it."
         />
-        {SETTINGS_GROUPS.map((group) => (
+        {groups.length === 0 && (
+          <Banner
+            status="info"
+            title="Your role has no settings to open"
+            description="Ask the store owner if you need access. Your own account is always under Your account."
+            endContent={<Button label="Your account" variant="secondary" href="/account" />}
+          />
+        )}
+        {groups.map((group) => (
           <Card key={group.title}>
             <VStack gap={4}>
               <VStack gap={1}>

@@ -21,6 +21,7 @@ import { actorLabel, appState, isPersonalDataScope, personalDataLabel } from "@/
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
 
 import { AppActions } from "./app-actions";
+import { ReduceAccess } from "./reduce-access";
 
 const HISTORY_STATUS: Record<string, { label: string; variant: "success" | "warning" | "error" }> =
   {
@@ -103,6 +104,13 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
             app.grant
               ? "What the app's tokens may do, at most: approved by staff when it was installed."
               : "This app has no OAuth grant: it can't call the API, only receive webhooks."
+          }
+          action={
+            canWrite &&
+            app.grant &&
+            app.installed &&
+            !app.uninstalled_at &&
+            scopes.length > 0 && <ReduceAccess appKey={app.key} name={app.name} scopes={scopes} />
           }
         >
           {app.grant ? (

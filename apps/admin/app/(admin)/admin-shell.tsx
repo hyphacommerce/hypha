@@ -15,9 +15,15 @@ import { ArrowRightStartOnRectangleIcon, RocketLaunchIcon } from "@heroicons/rea
 import { usePathname } from "next/navigation";
 import { startTransition, type ReactNode } from "react";
 
-import { CommandMenu } from "@/components/command-palette";
 import { Wordmark } from "@/components/wordmark";
-import { ACCOUNT_NAV, MAIN_NAV, type NavItem, SETTINGS_NAV, covers } from "@/lib/navigation";
+import {
+  ACCOUNT_NAV,
+  MAIN_NAV,
+  type NavItem,
+  SETTINGS_NAV,
+  covers,
+  visibleNav,
+} from "@/lib/navigation";
 
 import { logout } from "../login/actions";
 
@@ -88,18 +94,34 @@ function NavEntry({ item, current }: { item: NavItem; current: string | undefine
   );
 }
 
+/**
+ * The store's sections the staff member can open: all of them until their scopes are
+ * known (`null`, while the layout streams them in), so the frame never waits.
+ */
+export function StoreNav({ scopes }: { scopes: readonly string[] | null }) {
+  const current = currentHref(usePathname());
+  return visibleNav(MAIN_NAV, scopes).map((item) => (
+    <NavEntry key={item.href} item={item} current={current} />
+  ));
+}
+
 export function AdminShell({
+  storeNav,
+  commandMenu,
   userMenu,
   setupItem,
   children,
 }: {
+  /** The store's sections (`StoreNav`), trimmed to the user's scopes once known. */
+  storeNav: ReactNode;
+  /** The ⌘K palette (`CommandMenu`), likewise. */
+  commandMenu: ReactNode;
   userMenu: ReactNode;
   /** The setup guide's item, above Settings while the guide shows. */
   setupItem?: ReactNode;
   children: ReactNode;
 }) {
-  const pathname = usePathname();
-  const current = currentHref(pathname);
+  const current = currentHref(usePathname());
 
   return (
     <AppShell
@@ -110,7 +132,7 @@ export function AdminShell({
           heading={<Wordmark />}
           endContent={
             <HStack gap={1} vAlign="center">
-              <CommandMenu />
+              {commandMenu}
               {userMenu}
             </HStack>
           }
@@ -118,11 +140,7 @@ export function AdminShell({
       }
       sideNav={
         <SideNav resizable={{ defaultWidth: 240, minWidth: 180, maxWidth: 360 }}>
-          <SideNavSection title="Store">
-            {MAIN_NAV.map((item) => (
-              <NavEntry key={item.href} item={item} current={current} />
-            ))}
-          </SideNavSection>
+          <SideNavSection title="Store">{storeNav}</SideNavSection>
           <SideNavSection title="Manage">
             {setupItem}
             <NavEntry item={SETTINGS_NAV} current={current} />

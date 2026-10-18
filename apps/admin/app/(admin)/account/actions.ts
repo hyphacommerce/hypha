@@ -5,7 +5,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { describe, requireStaff, sessionClient } from "@/lib/hypha";
+import { describe, sessionClient } from "@/lib/hypha";
 
 export type Result = { error?: string };
 export type TotpSetup = Result & { secret?: string; uri?: string };
@@ -13,18 +13,33 @@ export type RecoveryCodes = Result & { codes?: string[] };
 
 const PAGE = "/account";
 
-/**
- * Renames the staff member. The API has no "me" route for it, so it's the user's own
- * record, which needs `users:write`.
- */
+/** Renames the staff member: their own name, which needs no scope. */
 export async function updateName(name: string): Promise<Result> {
-  const [client, me] = await Promise.all([sessionClient(), requireStaff()]);
-  const { error } = await client.PATCH("/admin/users/{id}", {
-    params: { path: { id: me.user.id } },
-    body: { name },
-  });
+  const client = await sessionClient();
+  const { error } = await client.PATCH("/admin/me", { body: { name } });
   if (error) return { error: describe(error) };
   revalidatePath("/", "layout");
+  return {};
+}
+
+/** Signs one of the staff member's other sessions out: that device must sign in again. */
+export async function revokeSession(id: string): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.DELETE("/admin/me/sessions/{id}", {
+    params: { path: { id } },
+  });
+  // Already signed out (it expired, or another tab did it): the list is just stale.
+  if (error && error.code !== "session_not_found") return { error: describe(error) };
+  revalidatePath(PAGE);
+  return {};
+}
+
+/** Signs out every session of the staff member's but this one. */
+export async function revokeOtherSessions(): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.POST("/admin/me/sessions/revoke-others");
+  if (error) return { error: describe(error) };
+  revalidatePath(PAGE);
   return {};
 }
 

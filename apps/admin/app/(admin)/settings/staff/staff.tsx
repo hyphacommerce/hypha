@@ -3,6 +3,7 @@
 // Staff, their pending invites and the roles (design note 0024, AU6): whole lists, so
 // they sort and filter here.
 
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -20,7 +21,7 @@ import { useState, useTransition } from "react";
 import { DateTime } from "@/components/date-time";
 import { ClientResourceTable, byText } from "@/components/resource-table/resource-table";
 
-import { inviteStaff, saveRole, updateStaff } from "./actions";
+import { inviteStaff, revokeInvite, saveRole, updateStaff } from "./actions";
 
 type Scope = AdminSchemas["Scope"];
 type User = AdminSchemas["UserResponse"];
@@ -60,6 +61,7 @@ export function Staff({
 }) {
   const [inviting, setInviting] = useState<{ email: string; role?: string }>();
   const [managing, setManaging] = useState<User>();
+  const [revoking, setRevoking] = useState<Invite>();
   const [editingRole, setEditingRole] = useState<Role | "new">();
   const roleName = new Map(roles.map((r) => [r.id, r.name]));
   const memberCount = new Map<string, number>();
@@ -118,16 +120,19 @@ export function Staff({
     {
       key: "actions",
       header: "",
-      width: pixel(110),
+      width: pixel(190),
       align: "end",
       renderCell: (i) =>
         canInvite && (
-          <Button
-            label="Resend"
-            size="sm"
-            variant="ghost"
-            onClick={() => setInviting({ email: i.email, role: i.role })}
-          />
+          <HStack gap={1} hAlign="end">
+            <Button
+              label="Resend"
+              size="sm"
+              variant="ghost"
+              onClick={() => setInviting({ email: i.email, role: i.role })}
+            />
+            <Button label="Revoke" size="sm" variant="ghost" onClick={() => setRevoking(i)} />
+          </HStack>
         ),
     },
   ];
@@ -237,6 +242,7 @@ export function Staff({
       {managing && (
         <ManageDialog user={managing} roles={roles} onClose={() => setManaging(undefined)} />
       )}
+      {revoking && <RevokeInviteDialog invite={revoking} onClose={() => setRevoking(undefined)} />}
       {editingRole && (
         <RoleDialog
           role={editingRole === "new" ? undefined : editingRole}
@@ -245,6 +251,31 @@ export function Staff({
         />
       )}
     </VStack>
+  );
+}
+
+/** Asks before withdrawing an invite; its link stops working at once. */
+function RevokeInviteDialog({ invite, onClose }: { invite: Invite; onClose: () => void }) {
+  const [error, setError] = useState<string>();
+  const [isPending, startTransition] = useTransition();
+  const revoke = () =>
+    startTransition(async () => {
+      const result = await revokeInvite(invite.id);
+      if (result.error) setError(result.error);
+      else onClose();
+    });
+  return (
+    <AlertDialog
+      isOpen
+      onOpenChange={(isOpen) => !isOpen && onClose()}
+      title={`Revoke the invite for ${invite.email}?`}
+      description={
+        error ?? "The link in their email stops working at once. You can invite them again later."
+      }
+      actionLabel="Revoke invite"
+      isActionLoading={isPending}
+      onAction={revoke}
+    />
   );
 }
 

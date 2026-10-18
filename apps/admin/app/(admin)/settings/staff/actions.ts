@@ -23,6 +23,18 @@ export async function inviteStaff(email: string, role: string): Promise<Result> 
 }
 
 /**
+ * Withdraws a pending invite: its link stops working at once. Already gone (accepted,
+ * or withdrawn in another tab) only means the list was stale.
+ */
+export async function revokeInvite(id: string): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.DELETE("/admin/invites/{id}", { params: { path: { id } } });
+  if (error && error.code !== "invite_not_found") return { error: describe(error) };
+  revalidatePath(PAGE);
+  return {};
+}
+
+/**
  * Moves a staff member to another role, or disables or enables them. Disabling ends
  * their sessions and reset links at once; the last active owner can't be moved or
  * disabled (`last_owner`).
