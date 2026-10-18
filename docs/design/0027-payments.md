@@ -207,3 +207,67 @@ which the model allows later without a migration of meaning.
 **Q4. A COD fee?** Recommended: later, as a cart adjustment, not a payment field: it
 changes the order total, tax and the shopper's price display, so it belongs with
 pricing.
+
+## As built (steps 1–4)
+
+The Rust side, routes, OpenAPI, SDK and e2e steps; the admin and storefront screens
+(steps 5–6) and the seed come next. Where it differs from the note, or decides what the
+note left open:
+
+- **`FinancialStatus` lives in `hypha-core`** (`financial.rs`), re-exported by
+  `hypha-orders`: both leaves name it, and `hypha_payments::financial_status(total,
+  &payments)` derives it without payments depending on orders. The order stores it
+  through `Order::set_financial_status`, which records `order.paid` when it becomes
+  `paid`; `Order::mark_paid` and `hypha_orders::mark_order_paid` are gone.
+- **Recording money is `hypha_order_actions::mark_paid`** (a workflow, since it writes a
+  payment and its order): the newest open payment becomes `paid` with the optional
+  `reference`, or, for an order without one, a `manual` payment of the total is created
+  and paid, in one batch, retried on a lost race. `cancel_order` voids `pending`
+  payments in its batch (an `authorized` one would need its provider, so it waits for
+  one that authorizes) and moves the status only when it voided something, so an
+  order without payments keeps its own. New crate edges: `hypha-checkout` →
+  `hypha-payments`, `hypha-order-actions` → `hypha-payments`; `hypha-cart` doesn't
+  depend on payments.
+- **The cart keeps only the method's ID.** Choosing (`set_payment_method`) and listing
+  (`cart_payment_methods`) are in `hypha-checkout`, which can read methods. "Offered"
+  means enabled, in the cart's market and channel, and of a provider this build has.
+- **`payment_method_required` whenever the total is above zero** (Q2), not "when the
+  store has enabled methods" as §4 step 3 still says. A zero-total order gets no payment
+  even if a method was chosen; its status stays `pending` until staff mark it paid
+  (which records a zero `manual` payment).
+- **A payment's `method` is optional, and it copies the method's name too**
+  (`method_name`), with the provider and instructions: a payment staff record on an
+  order placed without a method has neither, and a renamed or deleted method doesn't
+  change what an order shows. *Hard to reverse (API: `method` and `method_name` are
+  nullable).*
+- **Migration 0047** creates `payment_methods` and `payments`, adds
+  `carts.payment_method_id`, widens the orders' `financial_status` check to the seven
+  statuses, and gives every order already `paid` the payment that marking stands for
+  (`manual`, the total, paid when the order last changed).
+- **Providers:** `PaymentProviders` is implemented for tuples of `PaymentProvider`s and
+  found by key, like event handlers; each host lists `(ManualProvider,)` in
+  `payments.rs` and names it as `Storage::Payments` (`payment_providers()`). Keys are
+  `manual` or `spore_<name>`. `ManualProvider` takes no settings (`{}` or `null`) and
+  answers `Instructions` with the payment's copied instructions (empty when none).
+  Checkout asks the provider after the commit; a replayed checkout asks again while the
+  payment is open. A provider that fails leaves `next_action` `null` (logged).
+- **Methods record no events** (they're settings); payments record `payment.created`,
+  `.paid` (with the reference) and `.voided`.
+- **Limits:** instructions up to 2000 characters; names and references are short text
+  (255). `position` is a plain sort key (ties by ID); a new method goes after the
+  others; reordering is PATCHing positions.
+- **API:** `GET/POST /admin/payment-methods`, `GET/PATCH/DELETE
+  /admin/payment-methods/{id}` (`payments:*`); `GET /storefront/carts/{id}/payment-methods`
+  (`carts:read`), `PUT /storefront/carts/{id}/payment-method` (`carts:write`, `null`
+  clears). The cart response gains `payment_method`; the admin order response gains
+  `payments` (newest first); the storefront order and checkout responses gain `payment`
+  (status, method name, instructions, amount) and checkout `next_action`
+  (`{"type": "instructions" | "client_secret" | "redirect", …}`). `POST
+  /admin/orders/{id}/paid` takes an optional `{"reference"}` and now answers with the
+  admin order (a superset of what it returned). The setup checklist gains `payment`.
+- **Codes:** `payment_method_required` and `payment_method_unavailable` are 409 at
+  checkout; choosing a method answers 422 `payment_method_unavailable` or
+  `payment_method_not_found`; deleting a method a pending payment uses is 409
+  `payment_method_in_use`; `invalid_payment_provider`, `payment_provider_unknown`,
+  `invalid_payment_settings` and `instructions_too_long` are 422;
+  `invalid_payment_transition` is 409.
