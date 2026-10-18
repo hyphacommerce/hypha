@@ -654,8 +654,8 @@ pub async fn payment_methods<S: Storage>(
     PathId(id): PathId<CartId>,
 ) -> Result<Json<CartPaymentMethodsResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let providers = state.storage.payment_providers();
-    let methods = hypha_checkout::cart_payment_methods(&ctx, &ports, providers, id).await?;
+    let providers = state.payments(&ports);
+    let methods = hypha_checkout::cart_payment_methods(&ctx, &ports, &providers, id).await?;
     Ok(Json(CartPaymentMethodsResponse {
         items: methods.iter().map(CartPaymentMethodResponse::new).collect(),
     }))
@@ -690,9 +690,9 @@ pub async fn set_payment_method<S: Storage>(
 ) -> Result<Json<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    let providers = state.storage.payment_providers();
+    let providers = state.payments(&ports);
     let priced =
-        hypha_checkout::set_payment_method(&ctx, &ports, providers, id, req.payment_method)
+        hypha_checkout::set_payment_method(&ctx, &ports, &providers, id, req.payment_method)
             .await
             // The method arrives in the body: invalid input, not the cart's state.
             .map_err(|e| ApiError::from(e).unprocessable_if("payment_method_unavailable"))?;

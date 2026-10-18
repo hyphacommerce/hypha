@@ -619,7 +619,7 @@ contains "and ready" '"shipping_ready":true'
 
 echo "## payment methods (design note 0027)"
 METHODS="$BASE/admin/payment-methods"
-step "a provider this build doesn't have" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
+step "a provider key that isn't one" 422 invalid_payment_provider -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"spore_stripe","name":"Card"}'
 step "settings the manual provider doesn't take" 422 invalid_payment_settings -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"manual","name":"Bank transfer","settings":{"iban":"HR12"}}'
@@ -733,6 +733,131 @@ contains "told to pay the courier" '"next_action":{"type":"instructions","instru
 contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
 contains "it copies the address" '"shipping_address":{"first_name":"Ana","last_name":"Horvat"'
 contains "and the shipping line" '"code":"standard","name":"Standard","provider":null,"service":null,"reference":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
+
+echo "## payment and search apps (design note 0029, §3.1)"
+step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
+    -d '{"provider":"app_pay","name":"Card"}'
+step "an app that isn't installed searches nothing" 422 search_app_unavailable -X PATCH \
+    "$BASE/admin/search/settings" -H "$JSON" -d '{"search_app":"app_find"}'
+# Fake payment and search apps when python3 is here (the host must run with
+# HYPHA_ALLOW_PRIVATE_CALLBACKS=true to reach them).
+if command -v python3 >/dev/null 2>&1; then
+    APPS_PORT=${E2E_APPS_PORT:-3199}
+    python3 - "$APPS_PORT" "$MUG" <<'PY' &
+import http.server, json, sys
+
+MUG = sys.argv[2]
+ANSWERS = {
+    "/start": {"next_action": {"type": "client_widget", "element": "pay-card",
+                               "props": {"client_secret": "pi_e2e_secret"}},
+               "reference": "pi_e2e"},
+    "/capture": {"status": "accepted", "reference": "ch_e2e"},
+    "/void": {"status": "refused", "reason": "already captured"},
+    "/search": {"hits": [{"product": MUG}], "total": 1},
+}
+
+class App(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("content-length", 0)))
+        answer = ANSWERS.get(self.path)
+        self.send_response(200 if answer is not None else 404)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(answer or {"code": "unknown_extension"}).encode())
+
+    def log_message(self, *args):
+        pass
+
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), App).serve_forever()
+PY
+    APPS=$!
+    disown "$APPS"
+    sleep 1
+    APP_URL="http://127.0.0.1:$APPS_PORT"
+    step "a payment app" 201 - -X POST "$BASE/admin/apps" -H "$JSON" -d '{"key":"app_pay","name":"Pay"}'
+    step "a point this Hypha doesn't call" 422 unknown_extension_point -X PUT \
+        "$BASE/admin/apps/app_pay/extension-points" -H "$JSON" \
+        -d "{\"extension_points\":[{\"point\":\"payments.teleport\",\"version\":1,\"url\":\"$APP_URL/x\"}]}"
+    step "it starts, captures and voids payments" 200 - -X PUT "$BASE/admin/apps/app_pay/extension-points" \
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"payments.start\",\"version\":1,\"url\":\"$APP_URL/start\"},{\"point\":\"payments.capture\",\"version\":1,\"url\":\"$APP_URL/capture\"},{\"point\":\"payments.void\",\"version\":1,\"url\":\"$APP_URL/void\"}]}"
+    contains "by point" '"extension_points":[{"point":"payments.capture"'
+    step "card, collected by the app" 201 - -X POST "$METHODS" -H "$JSON" -d '{"provider":"app_pay","name":"Card"}'
+    CARD=$(pm)
+    contains "the app's key is the provider" '"provider":"app_pay"'
+    step "a cart paying by card" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+    CARD_CART="$BASE/storefront/carts/$(id)"
+    step "a mug in it" 200 - -X POST "$CARD_CART/lines" -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+    step "shipped to Zagreb" 200 - -X PUT "$CARD_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"first_name":"Ana","last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+    step "by standard" 200 - -X PUT "$CARD_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+    step "with an email" 200 - -X PUT "$CARD_CART/email" -H "$JSON" -d '{"email":"card@example.hr"}'
+    step "the card is offered" 200 - "$CARD_CART/payment-methods"
+    contains "by the app" "{\"id\":\"$CARD\",\"name\":\"Card\",\"provider\":\"app_pay\""
+    step "pay by card" 200 - -X PUT "$CARD_CART/payment-method" -H "$JSON" -d "{\"payment_method\":\"$CARD\"}"
+    step "checkout by card" 201 - -X POST "$CARD_CART/checkout" -H "$JSON" \
+        -d '{"return_url":"https://shop.example/back"}'
+    CARD_ORDER=$(id)
+    contains "the app's widget is next" '"next_action":{"type":"client_widget","element":"pay-card","props":{"client_secret":"pi_e2e_secret"}},"payment_error":null'
+    CARD_TOKEN=$(sed -E 's/.*"access_token":"(hypha_ord_[0-9a-f]+)".*/\1/' <<<"$BODY")
+    step "the admin sees the app's payment" 200 - "$BASE/admin/orders/$CARD_ORDER"
+    contains "pending, with the app's reference" '"provider":"app_pay","amount":{"amount":1390,"currency":"EUR"},"status":"pending","refunded":{"amount":0,"currency":"EUR"},"reference":"pi_e2e"'
+    CARD_PAYMENT=$(sed -E 's/.*"payments":\[\{"id":"(pay_[0-9a-f]+)".*/\1/' <<<"$BODY")
+    step "the buyer starts it again" 200 - -X POST \
+        "$BASE/storefront/orders/$CARD_ORDER/payment?token=$CARD_TOKEN" -H "$JSON" -d '{}'
+    contains "the same widget" '"next_action":{"type":"client_widget","element":"pay-card"'
+    step "without the right token" 404 order_not_found -X POST \
+        "$BASE/storefront/orders/$CARD_ORDER/payment?token=hypha_ord_00" -H "$JSON" -d '{}'
+    PAYMENTS="$BASE/admin/payments/$CARD_PAYMENT"
+    step "capture before it's authorized" 409 invalid_payment_transition -X POST "$PAYMENTS/capture" \
+        -H "$JSON" -d '{}'
+    step "the app reports it authorized" 200 - -X POST "$PAYMENTS/events" -H "$JSON" \
+        -H 'idempotency-key: evt_e2e_1' -d '{"type":"authorized","reference":"pi_e2e"}'
+    contains "the order is authorized" '"financial_status":"authorized"'
+    replayed "the report again replays" -X POST "$PAYMENTS/events" -H "$JSON" \
+        -H 'idempotency-key: evt_e2e_1' -d '{"type":"authorized","reference":"pi_e2e"}'
+    step "an authorized order can't be marked paid by hand" 409 payment_authorized -X POST \
+        "$BASE/admin/orders/$CARD_ORDER/paid"
+    step "staff void it, the provider refuses" 409 payment_refused -X POST "$PAYMENTS/void" -H "$JSON" -d '{}'
+    contains "and says why" '"details":{"reason":"already captured"}'
+    step "staff capture it" 202 - -X POST "$PAYMENTS/capture" -H "$JSON" -d '{}'
+    contains "accepted; the payment waits for the app" '"reference":"ch_e2e","payment":{'
+    contains "still authorized" '"status":"authorized"'
+    step "the app reports it paid" 200 - -X POST "$PAYMENTS/events" -H "$JSON" \
+        -H 'idempotency-key: evt_e2e_2' -d '{"type":"paid","occurred_at":"2026-10-18T12:00:00Z"}'
+    contains "the order is paid" '"financial_status":"paid"'
+    step "a refund the app doesn't answer" 409 payment_action_unsupported -X POST "$PAYMENTS/refund" \
+        -H "$JSON" -d '{"amount":300}'
+    step "a refund of more than was paid" 422 invalid_refund_amount -X POST "$PAYMENTS/events" -H "$JSON" \
+        -d '{"type":"partially_refunded","amount":5000}'
+    step "the app reports a partial refund" 200 - -X POST "$PAYMENTS/events" -H "$JSON" \
+        -H 'idempotency-key: evt_e2e_3' -d '{"type":"partially_refunded","amount":300}'
+    contains "partly refunded" '"refunded":{"amount":300,"currency":"EUR"}'
+    contains "and so is the order" '"financial_status":"partially_refunded"'
+    step "an unknown payment" 404 payment_not_found -X POST \
+        "$BASE/admin/payments/pay_00000000000000000000000000000000/events" -H "$JSON" -d '{"type":"paid"}'
+    step "the app's calls" 200 - "$BASE/admin/apps/app_pay/extension-calls"
+    contains "the capture" '"point":"payments.capture","version":1,'
+    contains "and the start, for its payment" "\"point\":\"payments.start\",\"version\":1,"
+    contains "with the payment" "\"correlation\":\"$CARD_PAYMENT\""
+
+    step "a search app" 201 - -X POST "$BASE/admin/apps" -H "$JSON" -d '{"key":"app_find","name":"Find"}'
+    step "the payment app doesn't search" 422 search_app_unavailable -X PATCH \
+        "$BASE/admin/search/settings" -H "$JSON" -d '{"search_app":"app_pay"}'
+    step "it answers search.query" 200 - -X PUT "$BASE/admin/apps/app_find/extension-points" -H "$JSON" \
+        -d "{\"extension_points\":[{\"point\":\"search.query\",\"version\":1,\"url\":\"$APP_URL/search\"}]}"
+    step "searches go to the app" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" \
+        -d '{"search_app":"app_find"}'
+    contains "the setting is kept" '"search_app":"app_find"'
+    step "the app answers a storefront search" 200 - "$BASE/storefront/search?country=HR&q=nothing"
+    contains "the mug it found" "\"items\":[{\"product\":\"$MUG\""
+    contains "one in all, no price range" '"total":1,'
+    kill "$APPS" 2>/dev/null
+    step "the app is down: the built-in engine answers" 200 - "$BASE/storefront/search?country=HR&q=nothing"
+    contains "finding nothing" '"items":[],"total":0'
+    step "back to the built-in engine" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" \
+        -d '{"search_app":null}'
+    contains "no search app" '"search_app":null'
+fi
 
 step "archive mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
 step "get cart" 200 - "$BASE/storefront/carts/$CART"
@@ -966,7 +1091,7 @@ step "an unknown facet" 422 unknown_facet "$BASE/storefront/search?country=HR&fi
 step "no market sells to Japan" 422 no_market_for_country "$BASE/storefront/search?country=JP"
 step "pages stop 1000 deep" 422 search_too_deep "$BASE/storefront/search?country=HR&cursor=$(printf '{"v":1,"after":"1000","filters":[["country","HR"]]}' | base64 | tr '+/' '-_' | tr -d '=\n')"
 step "search settings" 200 - "$BASE/admin/search/settings"
-contains "the defaults" '{"split_by":[],"facets":[]}'
+contains "the defaults" '{"split_by":[],"facets":[],"search_app":null}'
 step "split listings by colour" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" \
     -d '{"split_by":["Color"],"facets":[{"key":"vendor","label":"Brand"},{"key":"option.color"}]}'
 step "at most 3 splits" 422 too_many_splits -X PATCH "$BASE/admin/search/settings" -H "$JSON" \

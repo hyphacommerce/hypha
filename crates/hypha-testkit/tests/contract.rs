@@ -113,6 +113,13 @@ fn extension_call_repo() {
 }
 
 #[test]
+fn extension_endpoint_repo() {
+    block_on(contract::extension_endpoint_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
 fn fulfillment_repo() {
     block_on(contract::fulfillment_repo(async || {
         InMemoryFulfillmentRepo::default()

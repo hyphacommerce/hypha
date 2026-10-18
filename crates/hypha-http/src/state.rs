@@ -380,6 +380,34 @@ impl<S> AppState<S> {
             store: self.store,
         }
     }
+
+    /// Where a request's apps answer extension points (`app_endpoints.rs`).
+    pub fn app_endpoints<'a, P>(
+        &'a self,
+        ports: &'a P,
+    ) -> crate::app_endpoints::HostAppEndpoints<'a, P> {
+        crate::app_endpoints::HostAppEndpoints {
+            ports,
+            env: &self.env,
+        }
+    }
+}
+
+impl<S: Storage> AppState<S> {
+    /// A request's payment providers: the ones this host was built with and the
+    /// store's payment apps (design note 0029, §3.1).
+    pub fn payments<'a, P>(
+        &'a self,
+        ports: &'a P,
+    ) -> crate::payments::HostPayments<'a, P, S::Payments> {
+        crate::payments::HostPayments {
+            built_in: self.storage.payment_providers(),
+            ports,
+            endpoints: self.app_endpoints(ports),
+            caller: self.extensions(),
+            env: &self.env,
+        }
+    }
 }
 
 impl<S> AppState<S> {
@@ -439,6 +467,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_oauth::HasOAuthRequests
         + hypha_oauth::HasOAuthCodes
         + hypha_oauth::HasOAuthTokens
+        + hypha_apps::HasExtensionEndpoints
         + hypha_search_index::HasSearchQueue
         + hypha_search_index::HasSearchSettings
         + hypha_channels::HasChannels

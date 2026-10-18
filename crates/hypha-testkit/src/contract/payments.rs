@@ -104,7 +104,7 @@ fn method(n: u128, position: u32) -> PaymentMethod {
 fn bare_method(n: u128) -> PaymentMethod {
     PaymentMethod::new(NewPaymentMethod {
         id: mid(n),
-        provider: ProviderKey::new("spore_stripe").unwrap(),
+        provider: ProviderKey::new("app_stripe").unwrap(),
         name: "Card".to_string(),
         instructions: None,
         markets: vec![],

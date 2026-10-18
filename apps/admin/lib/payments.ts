@@ -37,10 +37,10 @@ export const PAYMENT_PRESETS: PaymentPreset[] = [
   },
 ];
 
-/** What a provider key reads as. */
+/** What a provider key reads as: "Manual", or the app's name from its key (`app_stripe`). */
 export function providerLabel(provider: string): string {
   if (provider === "manual") return "Manual";
-  return provider.startsWith("spore_") ? provider.slice("spore_".length) : provider;
+  return provider.startsWith("app_") ? provider.slice("app_".length) : provider;
 }
 
 /**

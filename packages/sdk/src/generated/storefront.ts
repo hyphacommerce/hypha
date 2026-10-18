@@ -285,6 +285,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/orders/{id}/payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Starts paying for an order again (design note 0027, §4), with its access token, when
+         *     checkout's start failed or the provider declined: a `pending` payment is started
+         *     again (its app sees the same idempotency key, the payment's ID); after a `failed`
+         *     one, a new payment is made with the same method and started. Answers like checkout,
+         *     with `next_action` or `payment_error`. A missing or wrong token, or another
+         *     channel's order, is `404 order_not_found`; a cancelled order `409 order_cancelled`;
+         *     nothing to start (authorized, paid, refunded, or nothing was due) `409
+         *     order_not_payable`; the method no longer offered `409 payment_method_unavailable`.
+         */
+        post: operations["storefront.orders.start_payment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/products/by-handle/{handle}": {
         parameters: {
             query?: never;
@@ -334,7 +360,10 @@ export interface paths {
         };
         /**
          * Searches the products the shopper's market sells, priced and stocked there; without
-         *     `q`, the market's product listing. Pages go at most 1,000 results deep.
+         *     `q`, the market's product listing. Pages go at most 1,000 results deep. With a search
+         *     app set (`search_app` in the settings), the app chooses and orders the results
+         *     (`search.query`, design note 0029) and Hypha shows its own prices and stock for them;
+         *     `price` is then `null`. When the app fails, the built-in engine answers.
          */
         get: operations["storefront.search.storefront_search"];
         put?: never;
@@ -395,8 +424,8 @@ export interface components {
             instructions?: string | null;
             name: string;
             /**
-             * @description `manual` or a spore's key: what the storefront shows after choosing (instructions,
-             *     or a provider's widget).
+             * @description `manual` or an app's key: what the storefront shows after choosing (instructions,
+             *     or the app's widget).
              */
             provider: string;
         };
@@ -464,10 +493,16 @@ export interface components {
         ChannelId: string;
         CheckoutRequest: {
             expected_total?: components["schemas"]["Money"] | null;
+            /**
+             * @description Where a payment provider's page sends the buyer back (a redirect), passed to the
+             *     payment's app.
+             */
+            return_url?: string | null;
         };
         /** @description What checkout answers: the placed order and what the shopper must do next to pay. */
         CheckoutResponse: components["schemas"]["PlacedOrderResponse"] & {
             next_action?: components["schemas"]["NextActionResponse"] | null;
+            payment_error?: components["schemas"]["Error"] | null;
         };
         /**
          * @description An ISO 3166-1 alpha-2 country code.
@@ -624,15 +659,16 @@ export interface components {
              */
             currency: string;
         };
-        /** @description What the shopper must do next to pay (design note 0027, §3). */
+        /** @description What the shopper must do next to pay (design note 0027, §3; 0029, §7). */
         NextActionResponse: {
             instructions: string;
             /** @enum {string} */
             type: "instructions";
         } | {
-            client_secret: string;
+            element: string;
+            props: Record<string, never>;
             /** @enum {string} */
-            type: "client_secret";
+            type: "client_widget";
         } | {
             /** @enum {string} */
             type: "redirect";
@@ -986,6 +1022,10 @@ export interface components {
         ShippingOptionId: string;
         ShippingOptionsResponse: {
             groups: components["schemas"]["GroupOffersResponse"][];
+        };
+        StartPaymentRequest: {
+            /** @description Where a payment provider's page sends the buyer back (a redirect). */
+            return_url?: string | null;
         };
         /** @description A category in the storefront's tree, with its shown children. */
         StorefrontCategoryNode: {
@@ -2531,6 +2571,116 @@ export interface operations {
             };
             /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.orders.start_payment": {
+        parameters: {
+            query: {
+                /** @description The order's `access_token`, from checkout's answer. */
+                token: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["OrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartPaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

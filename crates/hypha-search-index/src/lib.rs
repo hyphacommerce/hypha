@@ -17,8 +17,8 @@ pub mod settings;
 pub mod terms;
 
 pub use commands::{
-    CommandError, SearchStatus, UpdateSearchSettings, get_search_settings, queue_all, reindex,
-    search_status, update_search_settings,
+    CommandError, SEARCH_POINT, SearchStatus, UpdateSearchSettings, get_search_settings, queue_all,
+    reindex, search_status, update_search_settings,
 };
 pub use document::{PriceRange, SearchDocument, WeightedTerms};
 pub use error::{IndexError, SearchError};

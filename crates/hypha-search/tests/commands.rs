@@ -411,6 +411,7 @@ fn splitting_by_an_option_rebuilds_every_listing() {
     block_on(update_search_settings(
         &Ctx::system(),
         &w.ports,
+        &w.ports,
         UpdateSearchSettings {
             split_by: Some(vec!["color".to_string()]),
             ..UpdateSearchSettings::default()
@@ -451,6 +452,7 @@ fn changing_only_the_facets_rebuilds_nothing() {
     w.settle();
     block_on(update_search_settings(
         &Ctx::system(),
+        &w.ports,
         &w.ports,
         UpdateSearchSettings {
             facets: Some(vec![("vendor".to_string(), Some("Brand".to_string()))]),
@@ -548,6 +550,7 @@ fn the_merchants_facets_and_labels_replace_the_defaults() {
     block_on(update_search_settings(
         &Ctx::system(),
         &w.ports,
+        &w.ports,
         UpdateSearchSettings {
             facets: Some(vec![
                 ("option.Size".to_string(), Some("Size".to_string())),
@@ -644,6 +647,7 @@ fn searching_needs_products_read_and_settings_need_write() {
         block_on(update_search_settings(
             &reader,
             &w.ports,
+            &w.ports,
             UpdateSearchSettings::default()
         ))
         .map(|_| ()),
@@ -666,6 +670,7 @@ fn settings_are_stored_on_first_save_and_updated_after() {
     let save = |names: &[&str]| {
         block_on(update_search_settings(
             &ctx,
+            &w.ports,
             &w.ports,
             UpdateSearchSettings {
                 split_by: Some(names.iter().map(|n| n.to_string()).collect()),
@@ -886,4 +891,65 @@ fn a_product_only_in_a_hidden_subcategory_isnt_listed_under_its_parent() {
         };
         assert_eq!(doc.categories, expected, "{}", doc.title);
     }
+}
+
+// ---------- the search app (design note 0029, §3.1) ----------
+
+fn set_search_app(w: &World, app: Option<&str>) -> Result<Option<String>, IndexError> {
+    block_on(update_search_settings(
+        &Ctx::system(),
+        &w.ports,
+        &w.ports,
+        UpdateSearchSettings {
+            search_app: Some(app.map(str::to_string)),
+            ..UpdateSearchSettings::default()
+        },
+    ))
+    .map(|s| s.search_app().map(|a| a.to_string()))
+}
+
+#[test]
+fn a_search_app_must_answer_search_queries() {
+    use hypha_apps::{App, AppRepo, ExtensionEndpoint, ExtensionEndpointRepo, NewApp};
+    let w = World::new();
+    let key = hypha_core::AppKey::new("app_find").unwrap();
+    assert_eq!(
+        set_search_app(&w, Some("app_find")),
+        Err(IndexError::Search(SearchError::SearchAppUnavailable(
+            key.clone()
+        )))
+    );
+    assert!(matches!(
+        set_search_app(&w, Some("find")),
+        Err(IndexError::Search(SearchError::SearchApp(_)))
+    ));
+    let mut app = App::new(NewApp {
+        key: key.clone(),
+        id: hypha_core::AppId::from_uuid(uuid::Uuid::from_u128(0xf1d)),
+        name: "Find".to_string(),
+        secret: hypha_core::Sealed::from_bytes(vec![1]),
+        webhook: None,
+        subscriptions: vec![],
+    })
+    .unwrap();
+    block_on(w.ports.apps.insert(&mut app)).unwrap();
+    let endpoint = ExtensionEndpoint {
+        point: hypha_search_index::SEARCH_POINT.to_string(),
+        version: 1,
+        url: hypha_core::CallbackUrl::new("https://find.example/q").unwrap(),
+    };
+    block_on(
+        w.ports
+            .extension_endpoints
+            .replace_for_app(&key, &[endpoint]),
+    )
+    .unwrap();
+    assert_eq!(
+        set_search_app(&w, Some("app_find")),
+        Ok(Some("app_find".to_string()))
+    );
+    let stored = block_on(get_search_settings(&Ctx::system(), &w.ports)).unwrap();
+    assert_eq!(stored.search_app(), Some(&key));
+    // Back to the built-in engine.
+    assert_eq!(set_search_app(&w, None), Ok(None));
 }

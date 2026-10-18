@@ -77,6 +77,8 @@ pub struct InMemoryPorts {
     pub notifications: crate::InMemoryNotificationRepo,
     // Calls to apps' extension points (design note 0029).
     pub extension_calls: crate::InMemoryExtensionCallRepo,
+    /// Where apps answer extension points, linked to `apps`.
+    pub extension_endpoints: crate::InMemoryExtensionEndpointRepo,
     // The store itself (design note 0006, model A: its row is in its own database), so
     // the ports are its directory too, as a host's are.
     pub stores: crate::InMemoryStoreRepo,
@@ -85,7 +87,7 @@ pub struct InMemoryPorts {
 impl Default for InMemoryPorts {
     fn default() -> Self {
         let outbox = InMemoryOutbox::default();
-        let (apps, app_providers, oauth) = crate::apps::linked(&outbox);
+        let (apps, app_providers, oauth, extension_endpoints) = crate::apps::linked(&outbox);
         let (payment_methods, payments) = crate::payments::linked(&outbox);
         let channels = InMemoryChannelRepo::sharing(&outbox);
         let categories = InMemoryCategoryRepo::sharing(&outbox);
@@ -125,6 +127,7 @@ impl Default for InMemoryPorts {
             notification_settings: crate::InMemoryNotificationSettingsRepo::sharing(&outbox),
             notifications: crate::InMemoryNotificationRepo::sharing(&outbox),
             extension_calls: crate::InMemoryExtensionCallRepo::default(),
+            extension_endpoints,
             stores: crate::InMemoryStoreRepo::sharing(&outbox),
             outbox,
         }
@@ -422,6 +425,27 @@ impl hypha_extensions::HasExtensionCalls for InMemoryPorts {
     type ExtensionCalls = crate::InMemoryExtensionCallRepo;
     fn extension_calls(&self) -> &crate::InMemoryExtensionCallRepo {
         &self.extension_calls
+    }
+}
+
+impl hypha_apps::HasExtensionEndpoints for InMemoryPorts {
+    type ExtensionEndpoints = crate::InMemoryExtensionEndpointRepo;
+    fn extension_endpoints(&self) -> &crate::InMemoryExtensionEndpointRepo {
+        &self.extension_endpoints
+    }
+}
+
+/// An app answers a point when it's installed, enabled and has an endpoint for it: what
+/// hosts answer from the same repos.
+impl hypha_core::AppPoints for InMemoryPorts {
+    async fn answers(
+        &self,
+        app: &hypha_core::AppKey,
+        point: &str,
+    ) -> Result<bool, hypha_core::RepoError> {
+        use hypha_apps::{AppRepo, ExtensionEndpointRepo};
+        let enabled = self.apps.get(app).await?.is_some_and(|a| a.enabled());
+        Ok(enabled && self.extension_endpoints.get(app, point).await?.is_some())
     }
 }
 

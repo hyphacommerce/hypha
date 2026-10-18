@@ -7,8 +7,10 @@
 
 pub mod commands;
 mod payment;
+mod start;
 mod view;
 
 pub use commands::{CHECKOUT, Checkout, CheckoutPorts, CommandError, Placed, checkout};
 pub use payment::{cart_payment_methods, set_payment_method};
+pub use start::{StartPayment, start_order_payment};
 pub use view::view_cart;

@@ -895,7 +895,7 @@ impl<C: PgConnection> SearchSettingsRepo for PgStore<C> {
             .db()
             .query_typed_opt(
                 &format!(
-                    "SELECT version, split_by, facet_keys, facet_labels, {}
+                    "SELECT version, split_by, facet_keys, facet_labels, search_app, {}
                      FROM search_settings",
                     stamp_columns("")
                 ),
@@ -911,6 +911,7 @@ impl<C: PgConnection> SearchSettingsRepo for PgStore<C> {
             stamps: stamps_from_row(&row)?,
             split_by: col(&row, "split_by")?,
             facets: keys.into_iter().zip(labels).collect(),
+            search_app: col(&row, "search_app")?,
         })
         .map(Some)
         .map_err(|e| corrupt(format!("search settings: {e}")))
@@ -925,12 +926,14 @@ impl<C: PgConnection> SearchSettingsRepo for PgStore<C> {
         let (keys, labels) = facet_columns(&s);
         in_transaction!(self, |tx| {
             tx.query_typed(
-                "INSERT INTO search_settings (version, split_by, facet_keys, facet_labels)
-                 VALUES (1, $1, $2, $3)",
+                "INSERT INTO search_settings
+                     (version, split_by, facet_keys, facet_labels, search_app)
+                 VALUES (1, $1, $2, $3, $4)",
                 &[
                     (&s.split_by, Type::TEXT_ARRAY),
                     (&keys, Type::TEXT_ARRAY),
                     (&labels, Type::TEXT_ARRAY),
+                    (&s.search_app, Type::TEXT),
                 ],
             )
             .await
@@ -953,13 +956,14 @@ impl<C: PgConnection> SearchSettingsRepo for PgStore<C> {
                 .query_typed_opt(
                     "UPDATE search_settings
                      SET version = version + 1, split_by = $2, facet_keys = $3,
-                         facet_labels = $4
+                         facet_labels = $4, search_app = $5
                      WHERE version = $1 RETURNING version",
                     &[
                         (&version_to_db(s.version)?, Type::INT8),
                         (&s.split_by, Type::TEXT_ARRAY),
                         (&keys, Type::TEXT_ARRAY),
                         (&labels, Type::TEXT_ARRAY),
+                        (&s.search_app, Type::TEXT),
                     ],
                 )
                 .await

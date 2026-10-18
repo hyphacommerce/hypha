@@ -19,6 +19,7 @@ thiserror.workspace = true
 [dev-dependencies]
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
+hypha-apps = { path = "../hypha-apps" }
 pollster = "0.4"
 
 [lints]

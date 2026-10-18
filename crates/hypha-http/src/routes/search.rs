@@ -8,8 +8,8 @@ use hypha_core::{AssetId, CategoryId, Money, ProductId, VariantId};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_search::{SearchInput, search};
 use hypha_search_index::{
-    Group, Sort, UpdateSearchSettings, get_search_settings, reindex, search_status,
-    update_search_settings,
+    Group, HasSearchSettings, SearchSettingsRepo, Sort, UpdateSearchSettings, get_search_settings,
+    reindex, search_status, update_search_settings,
 };
 use serde::{Deserialize, Serialize};
 
@@ -182,7 +182,10 @@ pub struct SearchResponse {
 }
 
 /// Searches the products the shopper's market sells, priced and stocked there; without
-/// `q`, the market's product listing. Pages go at most 1,000 results deep.
+/// `q`, the market's product listing. Pages go at most 1,000 results deep. With a search
+/// app set (`search_app` in the settings), the app chooses and orders the results
+/// (`search.query`, design note 0029) and Hypha shows its own prices and stock for them;
+/// `price` is then `null`. When the app fails, the built-in engine answers.
 #[utoipa::path(
     get,
     path = "/storefront/search",
@@ -199,6 +202,7 @@ pub async fn storefront_search<S: Storage>(
     let (page, params, scope) = query.parse::<u32>()?;
     let offset = page.after.unwrap_or(0);
     let limit = page.limit.get();
+    let words = params.q.clone();
     let input = SearchInput {
         country: params.country,
         q: params.q,
@@ -212,7 +216,22 @@ pub async fn storefront_search<S: Storage>(
         offset,
         limit,
     };
-    let found = search(&ctx, &ports, &state.storage.search(&ports), input).await?;
+    // The store's search app, if one is set; settings that can't be read leave the
+    // search to the built-in engine (which reads them again, and reports the failure).
+    let app = match ports.search_settings().get().await {
+        Ok(settings) => settings.and_then(|s| s.search_app().cloned()),
+        Err(_) => None,
+    };
+    let engine = crate::search_app::AppSearch {
+        built_in: state.storage.search(&ports),
+        ports: &ports,
+        app,
+        words,
+        endpoints: state.app_endpoints(&ports),
+        caller: state.extensions(),
+        env: &state.env,
+    };
+    let found = search(&ctx, &ports, &engine, input).await?;
     let results = found.results;
 
     // Each image once, in one query.
@@ -313,6 +332,9 @@ pub struct SearchSettingsResponse {
     /// The facets storefronts show, in order. Empty: the defaults (product type,
     /// vendor, the market's most used options, tags).
     facets: Vec<FacetSettingResponse>,
+    /// The app that answers storefront searches (`search.query`, design note 0029);
+    /// `null` for the built-in engine, which also answers whenever the app fails.
+    search_app: Option<String>,
 }
 
 impl From<&hypha_search_index::SearchSettings> for SearchSettingsResponse {
@@ -327,6 +349,7 @@ impl From<&hypha_search_index::SearchSettings> for SearchSettingsResponse {
                     label: f.label.clone(),
                 })
                 .collect(),
+            search_app: s.search_app().map(|a| a.to_string()),
         }
     }
 }
@@ -370,9 +393,15 @@ pub struct UpdateSearchSettingsRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = Vec<FacetSettingRequest>, required = false)]
     facets: Option<Vec<FacetSettingRequest>>,
+    /// An installed, enabled app answering `search.query` (`app_<name>`;
+    /// `search_app_unavailable` otherwise); `null` for the built-in engine.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>, required = false)]
+    search_app: Option<Option<String>>,
 }
 
-/// Changes which options split listings and which facets storefronts show.
+/// Changes which options split listings, which facets storefronts show, and the app
+/// that answers searches.
 #[utoipa::path(
     patch,
     path = "/admin/search/settings",
@@ -392,8 +421,10 @@ pub async fn update_settings<S: Storage>(
         facets: req
             .facets
             .map(|facets| facets.into_iter().map(|f| (f.key, f.label)).collect()),
+        search_app: req.search_app,
     };
-    let settings = update_search_settings(&ctx, &ports, input).await?;
+    let apps = state.app_endpoints(&ports);
+    let settings = update_search_settings(&ctx, &ports, &apps, input).await?;
     Ok(Json(SearchSettingsResponse::from(&settings)))
 }
 

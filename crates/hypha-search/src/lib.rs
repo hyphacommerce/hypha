@@ -15,4 +15,4 @@ pub mod sync;
 pub use build::build_documents;
 pub use commands::{CommandError, DEFAULT_OPTION_FACETS, Found, SearchInput, search};
 pub use handler::SearchIndexer;
-pub use sync::{SyncError, SyncPorts, SyncSettings, Synced, sync};
+pub use sync::{SyncError, SyncPorts, SyncSettings, Synced, documents_for, sync};

@@ -1,22 +1,26 @@
-//! Payment providers (design note 0027, §3): who collects a payment. `manual` is
-//! built in (cash on delivery, bank transfer: staff record what happened); a spore adds
-//! its own (`spore_stripe`). The host lists the providers it was built with in its
-//! `payments.rs`, a tuple like its event handlers: static dispatch, so futures stay
-//! provably `Send` on concrete types.
+//! Payment providers (design note 0027, §3; 0029, §3.1): who collects a payment.
+//! `manual` is built in (cash on delivery, bank transfer: staff record what happened);
+//! an app collects through the extension points `payments.start`, `.capture`, `.void`
+//! and `.refund` under its own key (`app_stripe`). The host lists the providers it was
+//! built with in its `payments.rs`, a tuple like its event handlers (static dispatch, so
+//! futures stay provably `Send` on concrete types), and answers for apps itself.
 
 use std::fmt;
 
-use hypha_core::{Money, OrderId, PaymentId, PaymentMethodId};
+use hypha_core::{
+    AppKey, ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId, PaymentMethodId,
+    RepoError,
+};
 
 use crate::PaymentError;
 
-/// Which provider: `manual`, or a compiled-in spore's `spore_<name>` (the name is
-/// lowercase ASCII letters, digits and `_`, starting with a letter).
+/// Which provider: `manual`, or an app's key `app_<name>` (the name is lowercase ASCII
+/// letters, digits and `_`, starting with a letter; design note 0029, §10 item 5).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProviderKey(String);
 
 impl ProviderKey {
-    pub const MAX_LEN: usize = 64;
+    pub const MAX_LEN: usize = AppKey::MAX_LEN;
     /// The built-in provider's key.
     pub const MANUAL: &'static str = "manual";
 
@@ -24,24 +28,28 @@ impl ProviderKey {
         if key == Self::MANUAL {
             return Ok(Self::manual());
         }
-        let invalid = || PaymentError::InvalidProviderKey(key.to_string());
-        let name = key.strip_prefix("spore_").ok_or_else(invalid)?;
-        let mut chars = name.chars();
-        let valid = key.len() <= Self::MAX_LEN
-            && chars.next().is_some_and(|c| c.is_ascii_lowercase())
-            && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-        if !valid {
-            return Err(invalid());
+        match AppKey::new(key) {
+            Ok(app) => Ok(Self::of_app(&app)),
+            Err(_) => Err(PaymentError::InvalidProviderKey(key.to_string())),
         }
-        Ok(Self(key.to_string()))
     }
 
     pub fn manual() -> Self {
         Self(Self::MANUAL.to_string())
     }
 
+    /// The app `app` as a provider: its key is the app's.
+    pub fn of_app(app: &AppKey) -> Self {
+        Self(app.as_str().to_string())
+    }
+
     pub fn is_manual(&self) -> bool {
         self.0 == Self::MANUAL
+    }
+
+    /// The app that collects for this provider; `None` for `manual`.
+    pub fn app(&self) -> Option<AppKey> {
+        AppKey::new(&self.0).ok()
     }
 
     pub fn as_str(&self) -> &str {
@@ -55,8 +63,8 @@ impl fmt::Display for ProviderKey {
     }
 }
 
-/// What a provider is asked to collect: the payment checkout just committed, as plain
-/// values.
+/// What a provider is asked to collect: the payment checkout just committed (or a retry
+/// of it), as plain values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentRequest {
     pub payment: PaymentId,
@@ -65,42 +73,123 @@ pub struct PaymentRequest {
     pub order_number: i64,
     pub method: PaymentMethodId,
     pub amount: Money,
+    /// Where the order was placed, to whom, and where it ships.
+    pub channel: ChannelId,
+    pub market: MarketId,
+    pub country: CountryCode,
+    /// The buyer's email. Personal data (design note 0029, AP10): a provider passes it
+    /// on only where the rules on personal data allow.
+    pub customer_email: Email,
+    /// Where the storefront wants the buyer back after a redirect, when it said.
+    pub return_url: Option<String>,
     /// The method's instructions as the payment copied them.
     pub instructions: Option<String>,
     /// The method's provider settings.
     pub settings: serde_json::Value,
 }
 
-/// What the shopper must do next (design note 0027, §3).
+/// What a provider answered to a start: what the shopper does next, and its own ID for
+/// the payment (kept on it as its `reference`), when it has one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Started {
+    pub next_action: NextAction,
+    pub reference: Option<String>,
+}
+
+/// What the shopper must do next (design note 0027, §3; 0029, §7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NextAction {
     /// Nothing online: show the instructions (cash on delivery, bank transfer). Empty
     /// when the method has none.
     Instructions(String),
-    /// A provider's page or widget: card fields.
-    ClientSecret {
-        secret: String,
+    /// Mount the app's storefront element (a custom element) with these properties (a
+    /// card form's client secret), and wait for its `hypha:payment-confirmed` event.
+    ClientWidget {
+        element: String,
+        props: serde_json::Map<String, serde_json::Value>,
     },
-    Redirect {
-        url: String,
+    /// Send the shopper to the provider's page.
+    Redirect { url: String },
+}
+
+/// What staff ask a provider to do with a payment (design note 0029, §3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PaymentAction {
+    /// Collect an authorized payment.
+    Capture,
+    /// Release a payment before money moved.
+    Void,
+    /// Give back some or all of a collected one.
+    Refund,
+}
+
+impl PaymentAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PaymentAction::Capture => "capture",
+            PaymentAction::Void => "void",
+            PaymentAction::Refund => "refund",
+        }
+    }
+}
+
+impl fmt::Display for PaymentAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// An action for a provider to take on a payment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionRequest {
+    pub action: PaymentAction,
+    pub payment: PaymentId,
+    pub order: OrderId,
+    /// For a capture or refund, how much (at most what's left); `None` for the whole.
+    pub amount: Option<Money>,
+    /// The provider's ID for the payment, as it gave it on start.
+    pub reference: Option<String>,
+    /// The same for every retry of this action, so a provider does it once.
+    pub idempotency_key: String,
+}
+
+/// Whether the provider took the action. Accepted isn't done: the payment moves when
+/// the provider reports what happened (`hypha_order_actions::record_payment_event`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionAnswer {
+    Accepted {
+        reference: Option<String>,
+    },
+    /// The provider said no, in words staff are shown.
+    Refused {
+        reason: String,
     },
 }
 
 /// One provider. No `Send` bound, like every port (Workers).
 #[allow(async_fn_in_trait)]
 pub trait PaymentProvider {
-    /// "manual", "spore_stripe".
+    /// "manual".
     fn key(&self) -> ProviderKey;
     /// Checks a method's settings when staff save it.
     fn check_settings(&self, settings: &serde_json::Value) -> Result<(), PaymentError>;
     /// Starts collecting `payment` (committed with its order): what the shopper must do
     /// next.
-    async fn start(&self, payment: &PaymentRequest) -> Result<NextAction, PaymentError>;
+    async fn start(&self, payment: &PaymentRequest) -> Result<Started, PaymentError>;
+    /// Captures, voids or refunds a payment. A provider that can't (the default):
+    /// `payment_action_unsupported`.
+    async fn act(&self, request: &ActionRequest) -> Result<ActionAnswer, PaymentError> {
+        Err(PaymentError::ActionUnsupported {
+            provider: self.key(),
+            action: request.action,
+        })
+    }
 }
 
 /// The built-in provider (design note 0027, PA5): nothing to call. Its next action is
 /// the method's instructions; staff record the money when it arrives
-/// (`POST /admin/orders/{id}/paid`). It takes no settings.
+/// (`POST /admin/orders/{id}/paid`), and cancelling the order voids it. It takes no
+/// settings and no actions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ManualProvider;
 
@@ -110,33 +199,42 @@ impl PaymentProvider for ManualProvider {
     }
 
     fn check_settings(&self, settings: &serde_json::Value) -> Result<(), PaymentError> {
-        match settings {
-            serde_json::Value::Null => Ok(()),
-            serde_json::Value::Object(map) if map.is_empty() => Ok(()),
-            _ => Err(PaymentError::InvalidSettings {
-                provider: self.key(),
-                reason: "the manual provider takes no settings: send {}".to_string(),
-            }),
-        }
+        no_settings(&self.key(), settings)
     }
 
-    async fn start(&self, payment: &PaymentRequest) -> Result<NextAction, PaymentError> {
-        Ok(NextAction::Instructions(
-            payment.instructions.clone().unwrap_or_default(),
-        ))
+    async fn start(&self, payment: &PaymentRequest) -> Result<Started, PaymentError> {
+        Ok(Started {
+            next_action: NextAction::Instructions(payment.instructions.clone().unwrap_or_default()),
+            reference: None,
+        })
     }
 }
 
-/// The providers a host was built with: a tuple of `PaymentProvider`s, found by key.
+/// The check of a provider that takes no settings (`manual`; an app, which keeps its
+/// own, design note 0029, §4.2): `{}` or `null`.
+pub fn no_settings(
+    provider: &ProviderKey,
+    settings: &serde_json::Value,
+) -> Result<(), PaymentError> {
+    match settings {
+        serde_json::Value::Null => Ok(()),
+        serde_json::Value::Object(map) if map.is_empty() => Ok(()),
+        _ => Err(PaymentError::InvalidSettings {
+            provider: provider.clone(),
+            reason: format!("{provider} takes no settings: send {{}}"),
+        }),
+    }
+}
+
+/// The providers a host offers: the ones it was built with (a tuple of
+/// `PaymentProvider`s, found by key) and, in a host, the store's payment apps.
 #[allow(async_fn_in_trait)]
 pub trait PaymentProviders {
-    /// Every provider's key, in order.
-    fn keys(&self) -> Vec<ProviderKey>;
-    /// Whether one has `key`.
-    fn has(&self, key: &ProviderKey) -> bool {
-        self.keys().contains(key)
-    }
-    /// The provider `key`'s check; `UnknownProvider` if there's none.
+    /// Whether `key` can collect payments now: a provider this build has, or an
+    /// installed, enabled app that implements `payments.start`.
+    async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError>;
+    /// The provider `key`'s check of a method's settings; `UnknownProvider` if there's
+    /// no such provider.
     fn check_settings(
         &self,
         key: &ProviderKey,
@@ -147,12 +245,18 @@ pub trait PaymentProviders {
         &self,
         key: &ProviderKey,
         payment: &PaymentRequest,
-    ) -> Result<NextAction, PaymentError>;
+    ) -> Result<Started, PaymentError>;
+    /// The provider `key`'s `act`; `UnknownProvider` if there's none.
+    async fn act(
+        &self,
+        key: &ProviderKey,
+        request: &ActionRequest,
+    ) -> Result<ActionAnswer, PaymentError>;
 }
 
 impl<T: PaymentProviders + ?Sized> PaymentProviders for &T {
-    fn keys(&self) -> Vec<ProviderKey> {
-        (**self).keys()
+    async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
+        (**self).available(key).await
     }
 
     fn check_settings(
@@ -167,8 +271,16 @@ impl<T: PaymentProviders + ?Sized> PaymentProviders for &T {
         &self,
         key: &ProviderKey,
         payment: &PaymentRequest,
-    ) -> Result<NextAction, PaymentError> {
+    ) -> Result<Started, PaymentError> {
         (**self).start(key, payment).await
+    }
+
+    async fn act(
+        &self,
+        key: &ProviderKey,
+        request: &ActionRequest,
+    ) -> Result<ActionAnswer, PaymentError> {
+        (**self).act(key, request).await
     }
 }
 
@@ -178,9 +290,9 @@ macro_rules! tuple_providers {
     ($($p:ident),+) => {
         #[allow(non_snake_case)]
         impl<$($p: PaymentProvider),+> PaymentProviders for ($($p,)+) {
-            fn keys(&self) -> Vec<ProviderKey> {
+            async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
                 let ($($p,)+) = self;
-                vec![$($p.key()),+]
+                Ok(false $(|| &$p.key() == key)+)
             }
 
             fn check_settings(
@@ -201,11 +313,25 @@ macro_rules! tuple_providers {
                 &self,
                 key: &ProviderKey,
                 payment: &PaymentRequest,
-            ) -> Result<NextAction, PaymentError> {
+            ) -> Result<Started, PaymentError> {
                 let ($($p,)+) = self;
                 $(
                     if &$p.key() == key {
                         return $p.start(payment).await;
+                    }
+                )+
+                Err(PaymentError::UnknownProvider(key.clone()))
+            }
+
+            async fn act(
+                &self,
+                key: &ProviderKey,
+                request: &ActionRequest,
+            ) -> Result<ActionAnswer, PaymentError> {
+                let ($($p,)+) = self;
+                $(
+                    if &$p.key() == key {
+                        return $p.act(request).await;
                     }
                 )+
                 Err(PaymentError::UnknownProvider(key.clone()))
@@ -231,19 +357,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keys_are_manual_or_a_spore() {
+    fn keys_are_manual_or_an_app() {
         assert_eq!(ProviderKey::new("manual").map(|k| k.is_manual()), Ok(true));
-        assert_eq!(
-            ProviderKey::new("spore_stripe").map(|k| k.to_string()),
-            Ok("spore_stripe".to_string())
-        );
+        let stripe = ProviderKey::new("app_stripe").unwrap();
+        assert_eq!(stripe.to_string(), "app_stripe");
+        assert_eq!(stripe.app(), Some(AppKey::new("app_stripe").unwrap()));
+        assert_eq!(ProviderKey::manual().app(), None);
         for bad in [
             "",
             "stripe",
-            "app_stripe",
-            "spore_",
-            "spore_9x",
-            "spore_Stripe",
+            "spore_stripe",
+            "app_",
+            "app_9x",
+            "app_Stripe",
             "Manual",
         ] {
             assert_eq!(
@@ -252,7 +378,7 @@ mod tests {
                 "{bad:?}"
             );
         }
-        let long = format!("spore_{}", "a".repeat(ProviderKey::MAX_LEN - 6));
+        let long = format!("app_{}", "a".repeat(ProviderKey::MAX_LEN - 4));
         assert!(ProviderKey::new(&long).is_ok());
         assert!(ProviderKey::new(&format!("{long}a")).is_err());
     }
@@ -280,8 +406,20 @@ mod tests {
             order_number: 1001,
             method: PaymentMethodId::from_uuid(Uuid::from_u128(3)),
             amount: Money::new(1000, Currency::EUR).unwrap(),
+            channel: ChannelId::from_uuid(Uuid::from_u128(4)),
+            market: MarketId::from_uuid(Uuid::from_u128(5)),
+            country: CountryCode::new("HR").unwrap(),
+            customer_email: Email::new("buyer@example.com").unwrap(),
+            return_url: None,
             instructions: instructions.map(str::to_string),
             settings: serde_json::json!({}),
+        }
+    }
+
+    fn instructions(text: &str) -> Started {
+        Started {
+            next_action: NextAction::Instructions(text.to_string()),
+            reference: None,
         }
     }
 
@@ -289,21 +427,42 @@ mod tests {
     fn manual_answers_with_the_instructions() {
         assert_eq!(
             pollster::block_on(ManualProvider.start(&request(Some("IBAN HR12")))),
-            Ok(NextAction::Instructions("IBAN HR12".to_string()))
+            Ok(instructions("IBAN HR12"))
         );
         assert_eq!(
             pollster::block_on(ManualProvider.start(&request(None))),
-            Ok(NextAction::Instructions(String::new()))
+            Ok(instructions(""))
+        );
+    }
+
+    #[test]
+    fn manual_takes_no_actions() {
+        let action = ActionRequest {
+            action: PaymentAction::Capture,
+            payment: PaymentId::from_uuid(Uuid::from_u128(1)),
+            order: OrderId::from_uuid(Uuid::from_u128(2)),
+            amount: None,
+            reference: None,
+            idempotency_key: "k".to_string(),
+        };
+        assert_eq!(
+            pollster::block_on(ManualProvider.act(&action)),
+            Err(PaymentError::ActionUnsupported {
+                provider: ProviderKey::manual(),
+                action: PaymentAction::Capture
+            })
         );
     }
 
     #[test]
     fn a_tuple_finds_its_provider_by_key() {
         let providers = (ManualProvider,);
-        assert_eq!(providers.keys(), [ProviderKey::manual()]);
-        assert!(providers.has(&ProviderKey::manual()));
-        let stripe = ProviderKey::new("spore_stripe").unwrap();
-        assert!(!providers.has(&stripe));
+        assert_eq!(
+            pollster::block_on(providers.available(&ProviderKey::manual())),
+            Ok(true)
+        );
+        let stripe = ProviderKey::new("app_stripe").unwrap();
+        assert_eq!(pollster::block_on(providers.available(&stripe)), Ok(false));
         assert_eq!(
             providers.check_settings(&stripe, &serde_json::json!({})),
             Err(PaymentError::UnknownProvider(stripe.clone()))
@@ -314,7 +473,7 @@ mod tests {
         );
         assert_eq!(
             pollster::block_on(providers.start(&ProviderKey::manual(), &request(Some("x")))),
-            Ok(NextAction::Instructions("x".to_string()))
+            Ok(instructions("x"))
         );
     }
 }

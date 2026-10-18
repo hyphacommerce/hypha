@@ -226,8 +226,8 @@ export async function placeOrder(input: {
   await forgetCart(input.country);
   // A provider that pays on its own page sends the shopper there (design note 0027, §3);
   // instructions (cash on delivery, bank transfer) are on the confirmation, read from
-  // the order's payment. A card widget (`client_secret`) needs a payment spore's
-  // component, which this shop doesn't have yet.
+  // the order's payment. A payment app's widget (`client_widget`) needs the app's
+  // storefront element (design note 0029, §7), which this shop doesn't load yet.
   const next = data.next_action;
   // The URL is the API's answer (the provider's page), not the shopper's input.
   // react-doctor-disable-next-line react-doctor/clickjacking-redirect-risk

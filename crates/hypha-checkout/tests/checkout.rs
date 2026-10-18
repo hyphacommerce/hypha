@@ -196,6 +196,7 @@ impl World {
             cart,
             expected_total,
             idempotency,
+            return_url: None,
         };
         block_on(checkout(
             ctx,
@@ -839,7 +840,7 @@ fn a_method_of_a_provider_not_in_this_build_is_unavailable() {
         .unwrap()
         .unwrap();
     let mut s = method.snapshot();
-    s.provider = ProviderKey::new("spore_stripe").unwrap();
+    s.provider = ProviderKey::new("app_stripe").unwrap();
     s.version = method.version();
     method = PaymentMethod::restore(s).unwrap();
     block_on(world.payment_methods.update(&mut method)).unwrap();
@@ -1004,5 +1005,233 @@ fn a_checked_out_cart_keeps_its_method() {
         ))
         .map(|_| ()),
         Err(CommandError::CartCompleted { cart, order })
+    );
+}
+
+/// A payment app as checkout sees it through the host: `app_card`, answering a card
+/// widget with its reference, or failing while `down`; it keeps the payments it was
+/// asked to start.
+#[derive(Default)]
+struct CardApp {
+    down: std::cell::Cell<bool>,
+    started: std::cell::RefCell<Vec<hypha_core::PaymentId>>,
+}
+
+impl hypha_payments::PaymentProvider for &CardApp {
+    fn key(&self) -> ProviderKey {
+        ProviderKey::new("app_card").unwrap()
+    }
+
+    fn check_settings(&self, _: &serde_json::Value) -> Result<(), hypha_payments::PaymentError> {
+        Ok(())
+    }
+
+    async fn start(
+        &self,
+        payment: &hypha_payments::PaymentRequest,
+    ) -> Result<hypha_payments::Started, hypha_payments::PaymentError> {
+        self.started.borrow_mut().push(payment.payment);
+        if self.down.get() {
+            return Err(hypha_payments::PaymentError::AppUnavailable {
+                app: hypha_core::AppKey::new("app_card").unwrap(),
+                point: "payments.start",
+                reason: "answered HTTP 503".to_string(),
+            });
+        }
+        let mut props = serde_json::Map::new();
+        props.insert("client_secret".to_string(), "pi_1_secret".into());
+        Ok(hypha_payments::Started {
+            next_action: NextAction::ClientWidget {
+                element: "card-payment".to_string(),
+                props,
+            },
+            reference: Some(format!("pi_{}", payment.order_number)),
+        })
+    }
+}
+
+/// `cart`'s payment by card: a method of `app_card`.
+fn pay_by_card(world: &World, cart: CartId) -> PaymentMethodId {
+    let mut method = PaymentMethod::new(NewPaymentMethod {
+        id: PaymentMethodId::from_uuid(Uuid::from_u128(1300)),
+        provider: ProviderKey::new("app_card").unwrap(),
+        name: "Card".to_string(),
+        instructions: None,
+        markets: vec![],
+        channels: vec![],
+        enabled: true,
+        position: 1,
+        settings: serde_json::json!({}),
+    })
+    .unwrap();
+    block_on(world.payment_methods.insert(&mut method)).unwrap();
+    let mut stored = block_on(world.carts.get(cart)).unwrap().unwrap();
+    stored.set_payment_method(Some(method.id())).unwrap();
+    block_on(world.carts.update(&mut stored)).unwrap();
+    method.id()
+}
+
+fn check_out_by(world: &World, cart: CartId, app: &CardApp) -> Placed {
+    let input = Checkout {
+        cart,
+        expected_total: None,
+        idempotency: None,
+        return_url: None,
+    };
+    block_on(checkout(
+        &Ctx::system(),
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        &NoRateProviders,
+        &(ManualProvider, app),
+        input,
+    ))
+    .unwrap()
+    .value
+}
+
+fn pay_again(
+    world: &World,
+    order: hypha_core::OrderId,
+    app: &CardApp,
+) -> Result<Placed, CommandError> {
+    block_on(hypha_checkout::start_order_payment(
+        &world.ports.storefront(),
+        &world.ports,
+        &world.ids,
+        &(ManualProvider, app),
+        hypha_checkout::StartPayment {
+            order,
+            return_url: None,
+        },
+    ))
+}
+
+#[test]
+fn an_app_method_starts_its_payment_and_keeps_the_reference() {
+    let world = World::new();
+    let app = CardApp::default();
+    let cart = world.cart();
+    pay_by_card(&world, cart);
+    let placed = check_out_by(&world, cart, &app);
+    assert!(matches!(
+        placed.next_action,
+        Some(Ok(NextAction::ClientWidget { ref element, .. })) if element == "card-payment"
+    ));
+    let payment = placed.payment.unwrap();
+    assert_eq!(app.started.borrow().as_slice(), [payment.id()]);
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    let number = placed.order.number().value();
+    assert_eq!(stored.reference(), Some(format!("pi_{number}").as_str()));
+    assert_eq!(stored.status(), PaymentStatus::Pending);
+}
+
+#[test]
+fn a_failed_start_leaves_the_order_placed_and_asking_again_starts_the_same_payment() {
+    let world = World::new();
+    let app = CardApp::default();
+    app.down.set(true);
+    let cart = world.cart();
+    pay_by_card(&world, cart);
+    let placed = check_out_by(&world, cart, &app);
+    assert!(matches!(
+        placed.next_action,
+        Some(Err(hypha_payments::PaymentError::AppUnavailable { .. }))
+    ));
+    let payment = placed.payment.unwrap();
+    assert_eq!(payment.status(), PaymentStatus::Pending);
+    assert_eq!(payment.reference(), None);
+
+    app.down.set(false);
+    let again = pay_again(&world, placed.order.id(), &app).unwrap();
+    assert!(matches!(
+        again.next_action,
+        Some(Ok(NextAction::ClientWidget { .. }))
+    ));
+    assert_eq!(again.payment.map(|p| p.id()), Some(payment.id()));
+    assert_eq!(
+        app.started.borrow().as_slice(),
+        [payment.id(), payment.id()],
+        "the same payment, so the same idempotency key"
+    );
+}
+
+#[test]
+fn after_a_failed_payment_asking_again_makes_a_new_one() {
+    let world = World::new();
+    let app = CardApp::default();
+    let cart = world.cart();
+    pay_by_card(&world, cart);
+    let placed = check_out_by(&world, cart, &app);
+    let first = placed.payment.unwrap().id();
+    let mut declined = block_on(world.payments.get(first)).unwrap().unwrap();
+    declined.fail(None).unwrap();
+    block_on(world.payments.update(&mut declined)).unwrap();
+
+    let again = pay_again(&world, placed.order.id(), &app).unwrap();
+    let second = again.payment.unwrap();
+    assert_ne!(second.id(), first);
+    assert_eq!(second.status(), PaymentStatus::Pending);
+    assert_eq!(second.amount(), placed.order.total());
+    let payments = block_on(world.payments.list_for_order(placed.order.id())).unwrap();
+    assert_eq!(
+        payments.iter().map(|p| p.id()).collect::<Vec<_>>(),
+        [second.id(), first]
+    );
+    assert_eq!(app.started.borrow().last(), Some(&second.id()));
+}
+
+#[test]
+fn a_paid_order_has_no_payment_to_start() {
+    let world = World::new();
+    let app = CardApp::default();
+    let cart = world.cart();
+    pay_by_card(&world, cart);
+    let placed = check_out_by(&world, cart, &app);
+    let mut paid = block_on(world.payments.get(placed.payment.unwrap().id()))
+        .unwrap()
+        .unwrap();
+    paid.pay(world.clock.now(), None).unwrap();
+    block_on(world.payments.update(&mut paid)).unwrap();
+    let mut order = block_on(world.orders.get(placed.order.id()))
+        .unwrap()
+        .unwrap();
+    order.set_financial_status(FinancialStatus::Paid);
+    block_on(world.orders.update(&mut order)).unwrap();
+    assert_eq!(
+        pay_again(&world, order.id(), &app).map(|_| ()),
+        Err(CommandError::NotPayable {
+            order: order.id(),
+            status: FinancialStatus::Paid
+        })
+    );
+}
+
+#[test]
+fn another_channels_order_is_not_found_when_asking_to_pay() {
+    let world = World::new();
+    let app = CardApp::default();
+    let cart = world.cart();
+    pay_by_card(&world, cart);
+    let order = check_out_by(&world, cart, &app).order.id();
+    let other = Ctx::in_channel(
+        Actor::System,
+        vec![Scope::Checkout],
+        hypha_core::ChannelId::from_uuid(Uuid::from_u128(4242)),
+    );
+    assert_eq!(
+        block_on(hypha_checkout::start_order_payment(
+            &other,
+            &world.ports,
+            &world.ids,
+            &(ManualProvider, &app),
+            hypha_checkout::StartPayment {
+                order,
+                return_url: None
+            },
+        ))
+        .map(|_| ()),
+        Err(CommandError::OrderNotFound(order))
     );
 }

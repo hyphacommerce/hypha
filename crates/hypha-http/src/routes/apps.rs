@@ -10,7 +10,7 @@ use hypha_core::{
     AppId, DeliveryId, DeliveryRecord, DeliveryStatus, EventId, HasOutbox, OAuthRequestId, Scope,
     Stamped,
 };
-use hypha_extensions::list_extension_calls;
+use hypha_extensions::{ExtensionPoint, list_extension_calls};
 use hypha_oauth::{narrow_grant, request_history, uninstall};
 use serde::{Deserialize, Serialize};
 
@@ -694,4 +694,106 @@ pub async fn event<S: Storage>(
         envelope.data = crate::redact::event_data(|s| ctx.has_scope(s), &event.data);
     }
     Ok(Json(envelope))
+}
+
+// ---------- extension endpoints (design note 0029, §3) ----------
+
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionEndpointDto {
+    /// A point this Hypha calls apps through: `payments.start`, `payments.capture`,
+    /// `payments.void`, `payments.refund` or `search.query` (`unknown_extension_point`
+    /// otherwise). Shipping rates are registered as a shipping provider's
+    /// `callback_url`.
+    point: String,
+    /// The version the app answers (1).
+    version: u16,
+    /// Where Hypha POSTs the point's request, signed: `https://`, or `http://localhost`
+    /// for development.
+    url: String,
+}
+
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionEndpointsDto {
+    /// By point name.
+    extension_points: Vec<ExtensionEndpointDto>,
+}
+
+impl ExtensionEndpointsDto {
+    fn of(endpoints: Vec<hypha_apps::ExtensionEndpoint>) -> Self {
+        Self {
+            extension_points: endpoints
+                .into_iter()
+                .map(|e| ExtensionEndpointDto {
+                    point: e.point,
+                    version: e.version,
+                    url: e.url.as_str().to_string(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The points an app may register here: every point this build knows but
+/// `shipping.rates`, whose URL is the shipping provider's `callback_url`.
+fn registrable() -> Vec<hypha_apps::KnownPoint> {
+    hypha_extensions::KNOWN
+        .iter()
+        .filter(|(name, _)| *name != hypha_extensions::ShippingRates::NAME)
+        .map(|&(name, version)| hypha_apps::KnownPoint { name, version })
+        .collect()
+}
+
+/// Where the app answers extension points: the URLs Hypha calls for a payment method
+/// it collects (`payments.*`) or the store's searches (`search.query`).
+#[utoipa::path(
+    get,
+    path = "/admin/apps/{key}/extension-points",
+    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_stripe")),
+    responses((status = 200, description = "OK", body = ExtensionEndpointsDto)),
+    extensions(("x-hypha-scopes" = json!(["apps:read"]))),
+)]
+pub async fn extension_points<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(key): PathId<String>,
+) -> Result<Json<ExtensionEndpointsDto>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let endpoints = hypha_apps::list_extension_endpoints(&ctx, &ports, &key).await?;
+    Ok(Json(ExtensionEndpointsDto::of(endpoints)))
+}
+
+/// Sets where a private app (one without a manifest) answers extension points,
+/// replacing what it had; an empty list stops every call. Each point once
+/// (`duplicate_extension_point`), a point and version this Hypha knows
+/// (`unknown_extension_point`). Calls are signed with the app's secret.
+#[utoipa::path(
+    put,
+    path = "/admin/apps/{key}/extension-points",
+    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_stripe")),
+    request_body = ExtensionEndpointsDto,
+    responses((status = 200, description = "OK", body = ExtensionEndpointsDto)),
+    extensions(("x-hypha-scopes" = json!(["apps:write"]))),
+)]
+pub async fn set_extension_points<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(key): PathId<String>,
+    body: JsonBody<ExtensionEndpointsDto>,
+) -> Result<Json<ExtensionEndpointsDto>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let inputs = req
+        .extension_points
+        .into_iter()
+        .map(|e| hypha_apps::EndpointInput {
+            point: e.point,
+            version: e.version,
+            url: e.url,
+        })
+        .collect();
+    let endpoints =
+        hypha_apps::set_extension_endpoints(&ctx, &ports, &key, inputs, &registrable()).await?;
+    Ok(Json(ExtensionEndpointsDto::of(endpoints)))
 }

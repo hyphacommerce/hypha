@@ -3851,9 +3851,10 @@ async fn every_route_refuses_the_other_surfaces_credentials() {
 
 // ---------- fulfilment (design note 0018) ----------
 
-/// A shop selling mugs that need no shipping, 10 at the warehouse, and an order for 3
-/// placed through the storefront. Returns (order ID, its line ID, the warehouse's ID).
-async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) {
+/// A shop selling mugs that need no shipping, 10 at the warehouse, and a storefront
+/// cart for 3 with an email, before choosing how to pay. Returns (the publishable key,
+/// the cart's path, the warehouse's ID).
+async fn cart_for_three_mugs(app: &TestApp) -> (String, String, String) {
     let (market, mug) = market_selling_a_mug(app).await;
     let (_, mugs) = send(app, "GET", "/admin/products?limit=1", None).await;
     let product = mugs["items"][0]["id"].as_str().unwrap().to_string();
@@ -3897,6 +3898,13 @@ async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) 
         Some(r#"{"email":"ana@example.hr"}"#),
     )
     .await;
+    (pk, cart_path, location)
+}
+
+/// `cart_for_three_mugs`, paid on delivery and placed through the storefront. Returns
+/// (order ID, its line ID, the warehouse's ID).
+async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) {
+    let (pk, cart_path, location) = cart_for_three_mugs(app).await;
     pay_on_delivery(app, &pk, &cart_path).await;
     let (status, order) = send_as(
         app,
@@ -4553,7 +4561,10 @@ async fn search_settings_reindex_and_status_over_http() {
     let (status, settings) = send(&app, "GET", "/admin/search/settings", None).await;
     assert_eq!(
         (status, &settings),
-        (StatusCode::OK, &json!({"split_by": [], "facets": []}))
+        (
+            StatusCode::OK,
+            &json!({"split_by": [], "facets": [], "search_app": null})
+        )
     );
     let (status, body) = send(
         &app,
@@ -5075,7 +5086,7 @@ async fn payments_are_recorded_and_voided_over_http() {
 #[tokio::test]
 async fn payment_methods_are_checked_and_changed_over_http() {
     let app = app().await;
-    let body = r#"{"provider":"spore_stripe","name":"Card"}"#;
+    let body = r#"{"provider":"app_stripe","name":"Card"}"#;
     let (status, json) = send(&app, "POST", "/admin/payment-methods", Some(body)).await;
     assert_eq!(
         (status, code(&json)),
@@ -5653,4 +5664,413 @@ async fn notifications_need_their_scopes() {
     .await;
     let (status, json) = send_as(&app, &both, "GET", "/admin/notifications", None).await;
     assert_eq!(status, StatusCode::OK, "{json}");
+}
+
+// ---------- an app's payments and searches (design note 0029, §3.1) ----------
+
+/// What a fake app answers per path: a status and a JSON body.
+type AppAnswers = Arc<Mutex<std::collections::BTreeMap<String, (u16, Value)>>>;
+/// What it saw: the path, `Hypha-Extension`, `Idempotency-Key` and the body.
+type AppSaw = Arc<Mutex<Vec<(String, String, String, Value)>>>;
+
+/// A fake app on a free local port: each POST answers what `answers` holds for its
+/// path (404 for a path it doesn't), and is kept. Its base URL, answers and calls.
+async fn fake_app(answers: &[(&str, u16, Value)]) -> (String, AppAnswers, AppSaw) {
+    use axum::{
+        body::Bytes,
+        http::{HeaderMap, Uri},
+    };
+    let table: AppAnswers = Arc::new(Mutex::new(
+        answers
+            .iter()
+            .map(|(path, status, body)| (path.to_string(), (*status, body.clone())))
+            .collect(),
+    ));
+    let saw: AppSaw = Arc::default();
+    let (answering, log) = (Arc::clone(&table), Arc::clone(&saw));
+    let app = Router::new().fallback(move |uri: Uri, headers: HeaderMap, body: Bytes| {
+        let (answering, log) = (Arc::clone(&answering), Arc::clone(&log));
+        async move {
+            let header = |name: &str| {
+                headers
+                    .get(name)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            let path = uri.path().to_string();
+            log.lock().unwrap().push((
+                path.clone(),
+                header("hypha-extension"),
+                header("idempotency-key"),
+                serde_json::from_slice(&body).unwrap_or(Value::Null),
+            ));
+            let (status, answer) = answering
+                .lock()
+                .unwrap()
+                .get(&path)
+                .cloned()
+                .unwrap_or((404, json!({"code": "unknown_extension"})));
+            (
+                StatusCode::from_u16(status).unwrap(),
+                [(CONTENT_TYPE, "application/json")],
+                answer.to_string(),
+            )
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    (url, table, saw)
+}
+
+/// App `key` answering `points` (name and path) at `base`.
+async fn app_answering(app: &TestApp, key: &str, base: &str, points: &[(&str, &str)]) {
+    create_app(app, json!({"key": key, "name": key})).await;
+    let body = json!({
+        "extension_points": points
+            .iter()
+            .map(|(point, path)| json!({"point": point, "version": 1, "url": format!("{base}{path}")}))
+            .collect::<Vec<_>>()
+    });
+    let path = format!("/admin/apps/{key}/extension-points");
+    let (status, json) = send(app, "PUT", &path, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+}
+
+/// What a card app answers to a start: its widget, and its own ID for the payment.
+fn card_widget() -> Value {
+    json!({
+        "next_action": {"type": "client_widget", "element": "card-payment",
+                        "props": {"client_secret": "pi_test_secret"}},
+        "reference": "pi_test"
+    })
+}
+
+/// A cart for three mugs that pays by `app_card`'s method: the publishable key, the
+/// cart's path.
+async fn cart_paying_by_card(app: &TestApp, base: &str) -> (String, String) {
+    app_answering(
+        app,
+        "app_card",
+        base,
+        &[
+            ("payments.start", "/start"),
+            ("payments.capture", "/capture"),
+            ("payments.refund", "/refund"),
+        ],
+    )
+    .await;
+    let body = r#"{"provider":"app_card","name":"Card"}"#;
+    let (status, method) = send(app, "POST", "/admin/payment-methods", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{method}");
+    let (pk, cart_path, _) = cart_for_three_mugs(app).await;
+    let body = json!({ "payment_method": method["id"] }).to_string();
+    let path = format!("{cart_path}/payment-method");
+    let (status, cart) = send_as(app, &pk, "PUT", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{cart}");
+    (pk, cart_path)
+}
+
+/// Reports `body` on `payment` with `key`.
+async fn report(app: &TestApp, payment: &str, key: &str, body: Value) -> (StatusCode, Value) {
+    let auth = format!("Bearer {}", app.admin_key);
+    send_with(
+        app,
+        &[(AUTHORIZATION.as_str(), &auth), ("idempotency-key", key)],
+        "POST",
+        &format!("/admin/payments/{payment}/events"),
+        Some(&body.to_string()),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
+    let app = app().await;
+    let (base, _, saw) = fake_app(&[
+        ("/start", 200, card_widget()),
+        (
+            "/capture",
+            200,
+            json!({"status": "accepted", "reference": "ch_1"}),
+        ),
+        (
+            "/refund",
+            200,
+            json!({"status": "refused", "reason": "too late"}),
+        ),
+    ])
+    .await;
+    // Only an installed app answering payments.start collects.
+    let body = r#"{"provider":"app_nobody","name":"Card"}"#;
+    let (status, json) = send(&app, "POST", "/admin/payment-methods", Some(body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "payment_provider_unknown")
+    );
+    let (pk, cart_path) = cart_paying_by_card(&app, &base).await;
+
+    let (status, placed) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some(r#"{"return_url":"https://shop.example/back"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    assert_eq!(
+        placed["next_action"],
+        json!({"type": "client_widget", "element": "card-payment",
+               "props": {"client_secret": "pi_test_secret"}})
+    );
+    assert_eq!(placed["payment_error"], Value::Null);
+    assert_eq!(placed["payment"]["status"], "pending");
+    let order = placed["id"].as_str().unwrap().to_string();
+    let (_, admin) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
+    let payment = admin["payments"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(admin["payments"][0]["provider"], "app_card");
+    assert_eq!(admin["payments"][0]["reference"], "pi_test");
+    {
+        let saw = saw.lock().unwrap();
+        let (path, point, key, body) = &saw[0];
+        assert_eq!(
+            (path.as_str(), point.as_str()),
+            ("/start", "payments.start")
+        );
+        assert_eq!(key, &payment, "the payment's ID is the idempotency key");
+        assert_eq!(body["return_url"], "https://shop.example/back");
+        assert_eq!(body["order"], order.as_str());
+        assert!(body.get("customer_email").is_none(), "no grant, no email");
+    }
+
+    // A pending payment can't be captured; once the app reports it authorized, it can.
+    let capture = format!("/admin/payments/{payment}/capture");
+    let (status, json) = send(&app, "POST", &capture, Some("{}")).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "invalid_payment_transition")
+    );
+    let (status, json) = report(&app, &payment, "evt_1", json!({"type": "authorized"})).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["financial_status"], "authorized");
+    assert_eq!(json["payment"]["status"], "authorized");
+    let (status, json) = send(&app, "POST", &capture, Some("{}")).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{json}");
+    assert_eq!(json["reference"], "ch_1");
+    assert_eq!(
+        json["payment"]["status"], "authorized",
+        "until the app reports"
+    );
+    assert_eq!(saw.lock().unwrap()[1].2, format!("{payment}:capture"));
+    let (status, json) = report(
+        &app,
+        &payment,
+        "evt_2",
+        json!({"type": "paid", "occurred_at": "2026-10-18T12:00:00Z"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["financial_status"], "paid");
+    assert_eq!(json["payment"]["paid_at"], "2026-10-18T12:00:00Z");
+
+    // The provider refuses a refund; then the app reports one it made itself, once.
+    let refund = format!("/admin/payments/{payment}/refund");
+    let (status, json) = send(&app, "POST", &refund, Some(r#"{"amount":100}"#)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "payment_refused")
+    );
+    assert_eq!(json["details"], json!({"reason": "too late"}));
+    let partial = json!({"type": "partially_refunded", "amount": 100});
+    for _ in 0..2 {
+        let (status, json) = report(&app, &payment, "evt_3", partial.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        assert_eq!(json["financial_status"], "partially_refunded");
+        assert_eq!(json["payment"]["refunded"]["amount"], 100);
+    }
+    let (status, json) = report(&app, &payment, "evt_4", json!({"type": "voided"})).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "invalid_payment_transition")
+    );
+
+    // Every call is in the app's log, with its payment.
+    let (_, calls) = send(&app, "GET", "/admin/apps/app_card/extension-calls", None).await;
+    let points: Vec<&str> = calls["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["point"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        points,
+        ["payments.refund", "payments.capture", "payments.start"]
+    );
+}
+
+#[tokio::test]
+async fn a_payment_that_couldnt_start_is_started_again_with_the_order_token() {
+    let app = app().await;
+    let (base, answers, saw) = fake_app(&[("/start", 503, json!({"code": "provider_down"}))]).await;
+    let (pk, cart_path) = cart_paying_by_card(&app, &base).await;
+    let (status, placed) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    assert_eq!(placed["next_action"], Value::Null);
+    assert_eq!(placed["payment_error"]["code"], "app_unavailable");
+    assert_eq!(
+        placed["payment_error"]["details"],
+        json!({"app": "app_card", "point": "payments.start"})
+    );
+    assert_eq!(placed["payment"]["status"], "pending");
+
+    let order = placed["id"].as_str().unwrap();
+    let token = placed["access_token"].as_str().unwrap();
+    let wrong = format!(
+        "/storefront/orders/{order}/payment?token=hypha_ord_{}",
+        "0".repeat(64)
+    );
+    let (status, json) = send_as(&app, &pk, "POST", &wrong, Some("{}")).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "order_not_found")
+    );
+    answers
+        .lock()
+        .unwrap()
+        .insert("/start".to_string(), (200, card_widget()));
+    let again = format!("/storefront/orders/{order}/payment?token={token}");
+    let (status, json) = send_as(&app, &pk, "POST", &again, Some("{}")).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["next_action"]["type"], "client_widget");
+    assert_eq!(json["payment_error"], Value::Null);
+    let saw = saw.lock().unwrap();
+    assert_eq!(saw.len(), 2);
+    assert_eq!(
+        saw[0].2, saw[1].2,
+        "the same payment, the same idempotency key"
+    );
+}
+
+#[tokio::test]
+async fn a_search_app_answers_storefront_searches_and_the_engine_stands_in() {
+    let app = app().await;
+    market_selling_a_mug(&app).await;
+    settle_search(&app).await;
+    let (_, mugs) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let mug = mugs["items"][0]["id"].as_str().unwrap().to_string();
+    let (base, answers, saw) = fake_app(&[(
+        "/search",
+        200,
+        json!({"hits": [{"product": mug}], "total": 1}),
+    )])
+    .await;
+
+    let patch = r#"{"search_app":"app_find"}"#;
+    let (status, json) = send(&app, "PATCH", "/admin/search/settings", Some(patch)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "search_app_unavailable")
+    );
+    app_answering(&app, "app_find", &base, &[("search.query", "/search")]).await;
+    let (status, json) = send(&app, "PATCH", "/admin/search/settings", Some(patch)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["search_app"], "app_find");
+
+    let pk = publishable(&app).await;
+    let url = "/storefront/search?country=HR&q=nothing%20like%20it";
+    let (status, found) = send_as(&app, &pk, "GET", url, None).await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["total"], 1);
+    assert_eq!(found["items"][0]["product"], mug.as_str());
+    assert_eq!(found["items"][0]["title"], "Mug");
+    assert_eq!(found["items"][0]["price"]["amount"], 1000, "Hypha's price");
+    assert_eq!(found["price"], Value::Null);
+    {
+        let saw = saw.lock().unwrap();
+        assert_eq!(saw[0].1, "search.query");
+        assert_eq!(saw[0].3["query"], "nothing like it");
+        assert_eq!(saw[0].3["currency"], "EUR");
+    }
+
+    // The app fails: the built-in engine answers, finding nothing for these words.
+    answers
+        .lock()
+        .unwrap()
+        .insert("/search".to_string(), (500, json!({})));
+    let (status, found) = send_as(&app, &pk, "GET", url, None).await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["total"], 0);
+    let (status, found) = send_as(
+        &app,
+        &pk,
+        "GET",
+        "/storefront/search?country=HR&q=mug",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["items"][0]["product"], mug.as_str());
+
+    let (status, json) = send(
+        &app,
+        "PATCH",
+        "/admin/search/settings",
+        Some(r#"{"search_app":null}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["search_app"], Value::Null);
+}
+
+#[tokio::test]
+async fn extension_points_are_checked_when_registered() {
+    let app = app().await;
+    create_app(&app, json!({"key": "app_pay", "name": "Pay"})).await;
+    let path = "/admin/apps/app_pay/extension-points";
+    for (body, expected) in [
+        (
+            json!({"extension_points": [{"point": "payments.teleport", "version": 1, "url": "https://pay.example/x"}]}),
+            "unknown_extension_point",
+        ),
+        (
+            json!({"extension_points": [{"point": "shipping.rates", "version": 1, "url": "https://pay.example/x"}]}),
+            "unknown_extension_point",
+        ),
+        (
+            json!({"extension_points": [{"point": "payments.start", "version": 2, "url": "https://pay.example/x"}]}),
+            "unknown_extension_point",
+        ),
+        (
+            json!({"extension_points": [
+                {"point": "payments.start", "version": 1, "url": "https://pay.example/a"},
+                {"point": "payments.start", "version": 1, "url": "https://pay.example/b"}]}),
+            "duplicate_extension_point",
+        ),
+    ] {
+        let (status, json) = send(&app, "PUT", path, Some(&body.to_string())).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::UNPROCESSABLE_ENTITY, expected),
+            "{body}"
+        );
+    }
+    let body = json!({"extension_points": [{"point": "payments.start", "version": 1, "url": "https://pay.example/a"}]});
+    let (status, json) = send(&app, "PUT", path, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let (_, read) = send(&app, "GET", path, None).await;
+    assert_eq!(read, body);
+    let (status, json) = send(&app, "GET", "/admin/apps/app_none/extension-points", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "app_not_found")
+    );
 }

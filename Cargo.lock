@@ -1429,6 +1429,7 @@ dependencies = [
 name = "hypha-search"
 version = "0.1.0"
 dependencies = [
+ "hypha-apps",
  "hypha-categories",
  "hypha-channels",
  "hypha-core",

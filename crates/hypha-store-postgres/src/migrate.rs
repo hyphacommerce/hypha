@@ -274,6 +274,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "oauth",
             sql: include_str!("../migrations/0050_oauth.sql"),
         },
+        Migration {
+            version: 51,
+            name: "app_endpoints",
+            sql: include_str!("../migrations/0051_app_endpoints.sql"),
+        },
     ],
 };
 

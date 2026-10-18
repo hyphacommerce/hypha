@@ -527,3 +527,45 @@ verification, OAuth client with PKCE, extension handler types generated from
 `docs/apps/bridge.md`), `packages/app-blocks` (the block JSON Schema, version 1, and a
 React renderer on Astryx), `packages/storefront-elements` (the element loader and
 events, `docs/apps/elements.md`).
+
+## As built: payments and search through apps (§10 items 5–6)
+
+- **Providers:** a payment method's provider is `manual` or an app's key (`app_<name>`;
+  `spore_` is gone from `ProviderKey`). `PaymentProviders` grew `available` (async),
+  `act` (capture, void, refund) and `start` answering `Started { next_action, reference }`;
+  `hypha-http`'s `HostPayments` answers app keys through `call::<PaymentsStart>` and
+  friends and delegates the rest to the host's built-in tuple. An app method is offered
+  when the app is installed, enabled and registers `payments.start`; it takes no
+  settings. `NextAction` is `instructions | client_widget { element, props } | redirect`
+  (`client_secret` is dropped: nothing could produce it).
+- **Checkout keeps the order on a failed start** (0027 §4, not this note's "the order
+  isn't placed"): the payment stays `pending`, the answer has `next_action: null` and
+  `payment_error` (the error body, `app_unavailable` with `{app, point}`), and
+  `POST /storefront/orders/{id}/payment?token=` starts it again: a `pending` payment with
+  the same idempotency key (its ID), after a `failed` one a new payment with the same
+  method. Checkout takes an optional `return_url`, passed to the app. The provider's
+  `reference` is kept on the payment. `customer_email` is never sent until grants exist
+  (AP10).
+- **Reports:** `POST /admin/payments/{id}/events` (`payments:write`, `Idempotency-Key`)
+  is `hypha_order_actions::record_payment_event`: `authorized | paid | failed | voided |
+  partially_refunded | refunded`, with `amount` (a refund's own amount; the whole
+  payment otherwise), `reference`, `occurred_at`. New events `payment.authorized`,
+  `.failed`, `.refunded`. A repeated report changes nothing. Only the payment's own app
+  may report once app credentials exist (`reporting_app` in `payment_events.rs` reads
+  `Actor::App` then; until then staff and keys may).
+- **Staff actions:** `POST /admin/payments/{id}/capture | void | refund` (`orders:write`)
+  answer **202** when the app accepts and move nothing (Shopify's model: the app reports
+  the result); `409 payment_refused` with `details.reason`; `409
+  payment_action_unsupported` for `manual` or an app without that point. Captures and
+  voids are whole; the idempotency key sent to the app is the request's
+  `Idempotency-Key`, else `<payment>:capture` / `:void`.
+- **Search:** `SearchSettings::search_app` (`PATCH /admin/search/settings`, checked
+  through core's `AppPoints` port: `search_app_unavailable`). `/storefront/search` then
+  uses `AppSearch`, a `SearchIndex` that asks the app and builds Hypha's own documents
+  for its hits (`hypha_search::documents_for`, so prices, stock and channel visibility
+  are Hypha's), with no `price` range; on failure the built-in engine answers.
+- **Registrations (temporary seam):** until manifests (§4) land, apps register points
+  through `PUT /admin/apps/{key}/extension-points` (table `app_extension_endpoints`,
+  migration 0051; 0050 is left for OAuth). Everything reads them through `hypha-http`'s
+  `AppEndpoints` (`app_endpoints.rs`), which is what to re-point at manifest
+  registrations filtered by the grant.

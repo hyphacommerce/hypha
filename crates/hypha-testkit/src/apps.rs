@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use hypha_apps::{App, AppKey, AppRepo, keys};
+use hypha_apps::{App, AppKey, AppRepo, ExtensionEndpoint, ExtensionEndpointRepo, keys};
 use hypha_core::{AppId, Recorded, RepoError, Version, Versioned, stamp_insert, stamp_update};
 
 use crate::{InMemoryAppProviderRepo, InMemoryOAuth, InMemoryOutbox};
@@ -22,15 +22,22 @@ pub struct InMemoryAppRepo {
     providers: Option<InMemoryAppProviderRepo>,
     /// The tokens to delete with their app, when linked.
     oauth: Option<InMemoryOAuth>,
+    /// The extension endpoints to delete with their app, when linked.
+    endpoints: Option<Endpoints>,
     /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with.
     outbox: InMemoryOutbox,
 }
 
-/// An app repo, a provider repo and the OAuth repos linked like the database's
-/// tables, sharing `outbox`'s clock: what `InMemoryPorts` holds.
+/// An app repo, a provider repo, the OAuth repos and an endpoint repo linked like the
+/// database's tables, sharing `outbox`'s clock: what `InMemoryPorts` holds.
 pub(crate) fn linked(
     outbox: &InMemoryOutbox,
-) -> (InMemoryAppRepo, InMemoryAppProviderRepo, InMemoryOAuth) {
+) -> (
+    InMemoryAppRepo,
+    InMemoryAppProviderRepo,
+    InMemoryOAuth,
+    InMemoryExtensionEndpointRepo,
+) {
     let apps = Apps::default();
     let providers = InMemoryAppProviderRepo {
         apps: Some(Arc::clone(&apps)),
@@ -44,13 +51,18 @@ pub(crate) fn linked(
         outbox: outbox.clone(),
     };
     let oauth = InMemoryOAuth::linked(&apps);
+    let endpoints = InMemoryExtensionEndpointRepo {
+        endpoints: Endpoints::default(),
+        apps: Some(Arc::clone(&apps)),
+    };
     let app_repo = InMemoryAppRepo {
         apps,
         providers: Some(cascade),
         oauth: Some(oauth.clone()),
+        endpoints: Some(Arc::clone(&endpoints.endpoints)),
         outbox: outbox.clone(),
     };
-    (app_repo, providers, oauth)
+    (app_repo, providers, oauth, endpoints)
 }
 
 /// The `APP_ID` rule: another app with the same ID.
@@ -106,6 +118,65 @@ impl AppRepo for InMemoryAppRepo {
         }
         if let Some(oauth) = &self.oauth {
             oauth.drop_app_tokens(key);
+        }
+        if let Some(endpoints) = &self.endpoints {
+            endpoints.lock().unwrap().remove(key.as_str());
+        }
+        Ok(())
+    }
+}
+
+/// Extension endpoints by app key, then point.
+pub(crate) type Endpoints = Arc<Mutex<BTreeMap<String, Vec<ExtensionEndpoint>>>>;
+
+/// Apps' extension endpoints (design note 0029, §3). Linked to an app repo
+/// (`InMemoryPorts`), an endpoint needs its app, and goes with it, like the database's
+/// foreign key; alone, any app will do.
+#[derive(Default)]
+pub struct InMemoryExtensionEndpointRepo {
+    endpoints: Endpoints,
+    apps: Option<Apps>,
+}
+
+impl ExtensionEndpointRepo for InMemoryExtensionEndpointRepo {
+    async fn list_for_app(&self, app: &AppKey) -> Result<Vec<ExtensionEndpoint>, RepoError> {
+        let mut found = self
+            .endpoints
+            .lock()
+            .unwrap()
+            .get(app.as_str())
+            .cloned()
+            .unwrap_or_default();
+        found.sort_by(|a, b| a.point.cmp(&b.point));
+        Ok(found)
+    }
+
+    async fn get(&self, app: &AppKey, point: &str) -> Result<Option<ExtensionEndpoint>, RepoError> {
+        Ok(self
+            .endpoints
+            .lock()
+            .unwrap()
+            .get(app.as_str())
+            .and_then(|all| all.iter().find(|e| e.point == point).cloned()))
+    }
+
+    async fn replace_for_app(
+        &self,
+        app: &AppKey,
+        endpoints: &[ExtensionEndpoint],
+    ) -> Result<(), RepoError> {
+        if let Some(apps) = &self.apps
+            && !apps.lock().unwrap().contains_key(app.as_str())
+        {
+            return Err(RepoError::Reference(
+                hypha_apps::endpoints::keys::ENDPOINT_APP,
+            ));
+        }
+        let mut stored = self.endpoints.lock().unwrap();
+        if endpoints.is_empty() {
+            stored.remove(app.as_str());
+        } else {
+            stored.insert(app.as_str().to_string(), endpoints.to_vec());
         }
         Ok(())
     }

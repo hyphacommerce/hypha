@@ -2171,11 +2171,11 @@
             ]
           },
           "provider": {
-            "description": "`manual`, or a spore's `spore_<name>` this build has (`payment_provider_unknown`\notherwise).",
+            "description": "`manual`, or an app's key `app_<name>`: an installed, enabled app answering the\nextension point `payments.start` (`payment_provider_unknown` otherwise).",
             "type": "string"
           },
           "settings": {
-            "description": "The provider's settings, checked by it (`invalid_payment_settings`); `manual`\ntakes none (`{}`, the default).",
+            "description": "The provider's settings, checked by it (`invalid_payment_settings`); `manual` and\napps take none (`{}`, the default).",
             "type": [
               "object",
               "null"
@@ -2881,6 +2881,47 @@
           "started_at",
           "duration_ms",
           "outcome"
+        ],
+        "type": "object"
+      },
+      "ExtensionEndpointDto": {
+        "additionalProperties": false,
+        "properties": {
+          "point": {
+            "description": "A point this Hypha calls apps through: `payments.start`, `payments.capture`,\n`payments.void`, `payments.refund` or `search.query` (`unknown_extension_point`\notherwise). Shipping rates are registered as a shipping provider's\n`callback_url`.",
+            "type": "string"
+          },
+          "url": {
+            "description": "Where Hypha POSTs the point's request, signed: `https://`, or `http://localhost`\nfor development.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version the app answers (1).",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "point",
+          "version",
+          "url"
+        ],
+        "type": "object"
+      },
+      "ExtensionEndpointsDto": {
+        "additionalProperties": false,
+        "properties": {
+          "extension_points": {
+            "description": "By point name.",
+            "items": {
+              "$ref": "#/components/schemas/ExtensionEndpointDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "extension_points"
         ],
         "type": "object"
       },
@@ -4801,6 +4842,94 @@
         ],
         "type": "object"
       },
+      "PaymentActionAcceptedResponse": {
+        "description": "The provider took the action. Nothing has moved yet: the payment changes when the\nprovider reports what happened (`POST /admin/payments/{id}/events`).",
+        "properties": {
+          "payment": {
+            "$ref": "#/components/schemas/PaymentResponse",
+            "description": "The payment as it is still."
+          },
+          "reference": {
+            "description": "The provider's ID for the capture or refund, when it gave one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "payment"
+        ],
+        "type": "object"
+      },
+      "PaymentEventRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "In the payment's minor units. For a refund, how much this one gave back\n(required for `partially_refunded`; for `refunded`, absent is all that was left).\nOtherwise absent or the payment's whole amount (`payment_amount_mismatch`).",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "occurred_at": {
+            "description": "When it happened at the provider, RFC 3339; absent is now.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reference": {
+            "description": "The provider's ID for the payment (a PaymentIntent's `pi_…`), kept on it. Up to\n255 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/PaymentEventTypeDto"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "PaymentEventResponse": {
+        "description": "A payment after a report, and the payment status of its order.",
+        "properties": {
+          "financial_status": {
+            "$ref": "#/components/schemas/FinancialStatusDto",
+            "description": "The order's payment status, derived from its payments."
+          },
+          "order": {
+            "$ref": "#/components/schemas/OrderId"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/PaymentResponse"
+          }
+        },
+        "required": [
+          "payment",
+          "order",
+          "financial_status"
+        ],
+        "type": "object"
+      },
+      "PaymentEventTypeDto": {
+        "description": "What a payment's provider reports (`type`): the status the payment is in now.\n\nKnown values: `authorized`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "authorized",
+          "paid",
+          "failed",
+          "voided",
+          "partially_refunded",
+          "refunded"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "PaymentId": {
         "description": "A PaymentId: `pay_` and 32 hex digits.",
         "examples": [
@@ -4876,11 +5005,11 @@
             "type": "integer"
           },
           "provider": {
-            "description": "`manual` (cash on delivery, bank transfer: staff record the money), or a spore's\n`spore_<name>`.",
+            "description": "`manual` (cash on delivery, bank transfer: staff record the money), or the key of\nthe app that collects (`app_<name>`).",
             "type": "string"
           },
           "settings": {
-            "description": "The provider's own settings (`{}` for `manual`).",
+            "description": "The provider's own settings (`{}` for `manual` and apps, which keep their own).",
             "type": "object"
           },
           "updated_at": {
@@ -4948,7 +5077,7 @@
             ]
           },
           "provider": {
-            "description": "`manual`, or a spore's key.",
+            "description": "`manual`, or the key of the app that collects it.",
             "type": "string"
           },
           "reference": {
@@ -4960,7 +5089,7 @@
           },
           "refunded": {
             "$ref": "#/components/schemas/Money",
-            "description": "What was given back; zero until refunds exist."
+            "description": "What was given back."
           },
           "status": {
             "$ref": "#/components/schemas/PaymentStatusDto"
@@ -5692,6 +5821,20 @@
         ],
         "type": "object"
       },
+      "RefundRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "In the payment's minor units, more than zero and at most what's left to give back;\nabsent for all of it.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "RegistrationsResponse": {
         "description": "What an installed app registers, from its manifest, in force with its grant.",
         "properties": {
@@ -5962,6 +6105,13 @@
               "$ref": "#/components/schemas/FacetSettingResponse"
             },
             "type": "array"
+          },
+          "search_app": {
+            "description": "The app that answers storefront searches (`search.query`, design note 0029);\n`null` for the built-in engine, which also answers whenever the app fails.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "split_by": {
             "description": "Option names whose values split listings, in order (\"show each Color\nseparately\"). Empty: one listing per product.",
@@ -7369,6 +7519,13 @@
             },
             "type": "array"
           },
+          "search_app": {
+            "description": "An installed, enabled app answering `search.query` (`app_<name>`;\n`search_app_unavailable` otherwise); `null` for the built-in engine.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "split_by": {
             "description": "At most 3 option names, unique ignoring case. Changing them rebuilds every\nsearch document in the background.",
             "items": {
@@ -7725,6 +7882,11 @@
         "required": [
           "url"
         ],
+        "type": "object"
+      },
+      "WholePaymentRequest": {
+        "additionalProperties": false,
+        "description": "A capture or a void: of the whole payment, so the body is `{}`.",
         "type": "object"
       }
     },
@@ -9011,6 +9173,236 @@
         ],
         "x-hypha-scopes": [
           "apps:read"
+        ]
+      }
+    },
+    "/admin/apps/{key}/extension-points": {
+      "get": {
+        "operationId": "admin.apps.extension_points",
+        "parameters": [
+          {
+            "example": "app_stripe",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionEndpointsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Where the app answers extension points: the URLs Hypha calls for a payment method\nit collects (`payments.*`) or the store's searches (`search.query`).",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      },
+      "put": {
+        "operationId": "admin.apps.set_extension_points",
+        "parameters": [
+          {
+            "example": "app_stripe",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtensionEndpointsDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionEndpointsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets where a private app (one without a manifest) answers extension points,\nreplacing what it had; an empty list stops every call. Each point once\n(`duplicate_extension_point`), a point and version this Hypha knows\n(`unknown_extension_point`). Calls are signed with the app's secret.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
         ]
       }
     },
@@ -20007,6 +20399,618 @@
         ]
       }
     },
+    "/admin/payments/{id}/capture": {
+      "post": {
+        "operationId": "admin.payments.capture",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentId"
+            }
+          },
+          {
+            "description": "Passed to the app, so a retried action is done once.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WholePaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentActionAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Asks the payment's app to capture an authorized payment (`payments.capture`). 202:\nthe app accepted; the payment becomes `paid` when the app reports it. Refused by the\nprovider: `409 payment_refused` with its `reason`. Not authorized: `409\ninvalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the\napp gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,\nis passed to the app.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "orders:write"
+        ]
+      }
+    },
+    "/admin/payments/{id}/events": {
+      "post": {
+        "operationId": "admin.payments.report_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentId"
+            }
+          },
+          {
+            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentEventResponse"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Idempotent-Replayed": {
+                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What a payment's provider reports (design note 0029, §3.1): a payment app tells\nHypha what its provider did (Stripe's webhook landed on the app). Moves the payment\nand its order's payment status in one batch, recording `payment.authorized`,\n`.paid`, `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the\nstatus a payment is in already changes nothing. Send an `Idempotency-Key` (the\nprovider's event ID): a retry with it answers as the first did, and a refund isn't\ncounted twice. A move the payment's status doesn't allow is `409\ninvalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "payments:write"
+        ]
+      }
+    },
+    "/admin/payments/{id}/refund": {
+      "post": {
+        "operationId": "admin.payments.refund",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentId"
+            }
+          },
+          {
+            "description": "Passed to the app, so a retried refund gives back once.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentActionAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Asks the payment's app to refund some or all of a paid payment (`payments.refund`).\n202 and the errors as for a capture; an amount that doesn't fit is `422\ninvalid_refund_amount`. Send an `Idempotency-Key`: the app gives back once per key.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "orders:write"
+        ]
+      }
+    },
+    "/admin/payments/{id}/void": {
+      "post": {
+        "operationId": "admin.payments.void",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentId"
+            }
+          },
+          {
+            "description": "Passed to the app, so a retried action is done once.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WholePaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentActionAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Asks the payment's app to void a pending or authorized payment (`payments.void`),\nreleasing what it holds. 202 and the errors as for a capture.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "orders:write"
+        ]
+      }
+    },
     "/admin/price-lists": {
       "get": {
         "operationId": "admin.markets.list_price_lists",
@@ -23418,7 +24422,7 @@
             "bearer": []
           }
         ],
-        "summary": "Changes which options split listings and which facets storefronts show.",
+        "summary": "Changes which options split listings, which facets storefronts show, and the app\nthat answers searches.",
         "tags": [
           "search"
         ],

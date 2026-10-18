@@ -31,6 +31,11 @@ pub enum AppError {
     /// Narrowing can only take scopes away: more needs an authorization staff approve.
     #[error("the grant doesn't have {0}; adding scopes takes a new authorization")]
     GrantNotNarrower(Scope),
+    /// A point (or a version of it) this build doesn't know (design note 0029, §3).
+    #[error("no extension point {point:?} version {version}")]
+    UnknownExtensionPoint { point: String, version: u16 },
+    #[error("extension point {0:?} is listed twice")]
+    DuplicateExtensionPoint(String),
 }
 
 impl ErrorCode for AppError {
@@ -47,6 +52,8 @@ impl ErrorCode for AppError {
             AppError::ManifestForOtherApp(_) => "manifest_invalid",
             AppError::NotInstalled => "app_not_installed",
             AppError::GrantNotNarrower(_) => "grant_not_narrower",
+            AppError::UnknownExtensionPoint { .. } => "unknown_extension_point",
+            AppError::DuplicateExtensionPoint(_) => "duplicate_extension_point",
         }
     }
 }

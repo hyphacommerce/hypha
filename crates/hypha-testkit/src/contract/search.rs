@@ -377,6 +377,7 @@ fn configured() -> SearchSettings {
         },
     ])
     .unwrap();
+    s.set_search_app(Some(hypha_core::AppKey::new("app_find").unwrap()));
     s
 }
 
@@ -401,6 +402,7 @@ async fn settings_versions<R: SearchSettingsRepo>(repo: &R) {
 
     let mut stale = repo.get().await.unwrap().unwrap();
     s.set_split_by(vec![]).unwrap();
+    s.set_search_app(None);
     repo.update(&mut s).await.unwrap();
     assert_eq!(s.version(), Version::new(2));
     assert_eq!(repo.get().await, Ok(Some(s.clone())));

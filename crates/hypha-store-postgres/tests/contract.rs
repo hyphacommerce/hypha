@@ -135,6 +135,15 @@ async fn extension_call_repo() {
 }
 
 #[tokio::test]
+async fn extension_endpoint_repo() {
+    let Some(url) = database_url() else { return };
+    contract::extension_endpoint_repo(async || {
+        fresh_store(&url, "contract_extension_endpoints").await
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn order_repo() {
     let Some(url) = database_url() else { return };
     contract::order_repo(async || fresh_store(&url, "contract_orders").await).await;

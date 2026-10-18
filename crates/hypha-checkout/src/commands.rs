@@ -19,11 +19,13 @@ use hypha_orders::{
 };
 use hypha_payments::{
     HasPaymentMethods, HasPayments, NewPayment, NextAction, Payment, PaymentError,
-    PaymentMethodRepo, PaymentProviders, PaymentRequest, StagePayments, newest_payment,
+    PaymentProviders, StagePayments, newest_payment,
 };
 use hypha_shipping::{OfferOutcome, RateProvider};
 use hypha_tax::{TaxLine, TaxSource};
 use thiserror::Error;
+
+use crate::start::{restart, start};
 
 /// The operation name checkout's idempotency records carry.
 pub const CHECKOUT: &str = "checkout";
@@ -80,6 +82,16 @@ pub enum CommandError {
     PaymentMethodUnavailable(PaymentMethodId),
     #[error("payment method {0} not found")]
     PaymentMethodNotFound(PaymentMethodId),
+    /// No such order, or another channel's (design note 0020).
+    #[error("order {0} not found")]
+    OrderNotFound(OrderId),
+    /// Nothing to start paying for: the order is authorized, paid or refunded already,
+    /// or has no payment at all (nothing was due at checkout).
+    #[error("order {order}'s payments are {status}; there's no payment to start")]
+    NotPayable {
+        order: OrderId,
+        status: hypha_core::FinancialStatus,
+    },
 }
 
 impl ErrorCode for CommandError {
@@ -104,6 +116,8 @@ impl ErrorCode for CommandError {
             CommandError::PaymentMethodRequired(_) => "payment_method_required",
             CommandError::PaymentMethodUnavailable(_) => "payment_method_unavailable",
             CommandError::PaymentMethodNotFound(_) => "payment_method_not_found",
+            CommandError::OrderNotFound(_) => "order_not_found",
+            CommandError::NotPayable { .. } => "order_not_payable",
         }
     }
 }
@@ -162,6 +176,9 @@ pub struct Checkout {
     pub expected_total: Option<Money>,
     /// A retry with the same key returns the order the first request placed.
     pub idempotency: Option<IdempotencyRequest>,
+    /// Where the storefront wants the buyer back after a payment provider's page (a
+    /// redirect), passed to the provider.
+    pub return_url: Option<String>,
 }
 
 /// Turns a cart into an order (design note 0007, section 2).
@@ -196,8 +213,9 @@ pub async fn checkout<
     input: Checkout,
 ) -> Result<Idempotent<Placed>, CommandError> {
     ctx.require(Scope::Checkout)?;
+    let return_url = input.return_url.as_deref();
     if let Some(order) = replay_of(ctx, ports, input.idempotency.as_ref()).await? {
-        return replay(ports, payments, order).await;
+        return replay(ports, payments, order, return_url).await;
     }
 
     let mut attempts = Attempts::first();
@@ -219,9 +237,9 @@ pub async fn checkout<
         {
             Err(e) => e,
             Ok(placed) => {
-                let (order, payment, settings) = placed.value;
-                let next_action = match &payment {
-                    Some(p) => Some(start(payments, &order, p, settings).await),
+                let (order, mut payment, settings) = placed.value;
+                let next_action = match &mut payment {
+                    Some(p) => Some(start(ports, payments, &order, p, settings, return_url).await?),
                     None => None,
                 };
                 return Ok(Idempotent::fresh(Placed {
@@ -235,34 +253,12 @@ pub async fn checkout<
         // attempt failed because of it (the cart is completed, its version moved on, or
         // the key is taken), and that order is this request's answer too.
         if let Some(order) = replay_of(ctx, ports, input.idempotency.as_ref()).await? {
-            return replay(ports, payments, order).await;
+            return replay(ports, payments, order, return_url).await;
         }
         if !(lost_a_race(&e) && attempts.another()) {
             return Err(e);
         }
     }
-}
-
-/// Asks `payment`'s provider to start collecting it, with its method's `settings`.
-async fn start<Q: PaymentProviders>(
-    providers: &Q,
-    order: &Order,
-    payment: &Payment,
-    settings: serde_json::Value,
-) -> Result<NextAction, PaymentError> {
-    let Some(method) = payment.method() else {
-        return Err(PaymentError::UnknownProvider(payment.provider().clone()));
-    };
-    let request = PaymentRequest {
-        payment: payment.id(),
-        order: order.id(),
-        order_number: order.number().value(),
-        method,
-        amount: payment.amount(),
-        instructions: payment.instructions().map(str::to_string),
-        settings,
-    };
-    providers.start(payment.provider(), &request).await
 }
 
 /// What one attempt placed: the order, its payment, and the payment method's provider
@@ -683,6 +679,7 @@ async fn replay<S: HasOrders + HasPayments + HasPaymentMethods, Q: PaymentProvid
     ports: &S,
     providers: &Q,
     order: OrderId,
+    return_url: Option<&str>,
 ) -> Result<Idempotent<Placed>, CommandError> {
     let Some(order) = ports.orders().get(order).await? else {
         // Records only point at orders written in the same batch; orders aren't deleted.
@@ -691,23 +688,10 @@ async fn replay<S: HasOrders + HasPayments + HasPaymentMethods, Q: PaymentProvid
         ))
         .into());
     };
-    let payment = newest_payment(ports, order.id()).await?;
-    let next_action = match &payment {
+    let mut payment = newest_payment(ports, order.id()).await?;
+    let next_action = match &mut payment {
         Some(p) if p.status().is_open() => {
-            let method = match p.method() {
-                Some(id) => ports.payment_methods().get(id).await?,
-                None => None,
-            };
-            Some(match (method, p.method()) {
-                (Some(method), _) => start(providers, &order, p, method.settings().clone()).await,
-                // `manual` takes no settings: its instructions are the payment's copy.
-                _ if p.provider().is_manual() => {
-                    start(providers, &order, p, serde_json::Value::Null).await
-                }
-                // Another provider needs the method's settings, and the method is gone.
-                (None, Some(id)) => Err(PaymentError::MethodUnavailable(id)),
-                (None, None) => Err(PaymentError::UnknownProvider(p.provider().clone())),
-            })
+            Some(restart(ports, providers, &order, p, return_url).await?)
         }
         _ => None,
     };
