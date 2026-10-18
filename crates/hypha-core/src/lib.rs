@@ -1,4 +1,5 @@
 pub mod address;
+pub mod app_key;
 pub mod callback_url;
 pub mod country;
 pub mod ctx;
@@ -29,6 +30,7 @@ pub mod version;
 pub mod weight;
 
 pub use address::{Address, AddressError, AddressParts};
+pub use app_key::{AppKey, AppKeyError};
 pub use callback_url::{CallbackUrl, CallbackUrlError};
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
