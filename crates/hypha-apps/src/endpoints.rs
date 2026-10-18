@@ -8,7 +8,7 @@ use std::fmt;
 
 use hypha_core::{AppKey, CallbackUrl, Ctx, RepoError, Scope};
 
-use crate::{AppError, AppRepo, CommandError, HasApps};
+use crate::{App, AppError, AppRepo, CommandError, HasApps};
 
 /// One point an app answers: `payments.start` v1 at its URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +25,8 @@ pub struct ExtensionEndpoint {
 pub struct KnownPoint {
     pub name: &'static str,
     pub version: u16,
+    /// What an installed app's grant needs for Hypha to call it there.
+    pub scope: Scope,
 }
 
 impl fmt::Display for KnownPoint {
@@ -70,7 +72,38 @@ impl<T: HasExtensionEndpoints + ?Sized> HasExtensionEndpoints for &T {
     }
 }
 
-/// An app's endpoints (`apps:read`); `app_not_found` for an app that doesn't exist.
+/// Where `app` answers `point`, and the app (design note 0029, §3 "Registering",
+/// §4.1 step 5): the one rule every flow calling apps goes through. An app installed
+/// from its manifest answers where the manifest says, only while its grant has
+/// `point.scope`; an app made by hand where staff set (`set_extension_endpoints`). The
+/// version must be the one this build calls. `None` when the app is missing,
+/// disabled, uninstalled, not granted the point's scope, or doesn't answer it.
+pub async fn find_endpoint<S: HasApps + HasExtensionEndpoints>(
+    ports: &S,
+    app: &AppKey,
+    point: KnownPoint,
+) -> Result<Option<(App, ExtensionEndpoint)>, RepoError> {
+    let Some(found) = ports.apps().get(app).await? else {
+        return Ok(None);
+    };
+    if !found.may_answer(point.scope) {
+        return Ok(None);
+    }
+    let endpoint = match found.manifest_endpoints() {
+        Some(registered) => registered
+            .into_iter()
+            .find(|e| e.point == point.name && e.version == point.version),
+        None => ports
+            .extension_endpoints()
+            .get(app, point.name)
+            .await?
+            .filter(|e| e.version == point.version),
+    };
+    Ok(endpoint.map(|e| (found, e)))
+}
+
+/// An app's endpoints (`apps:read`): its manifest's registrations for an app installed
+/// from one, else what staff set; `app_not_found` for an app that doesn't exist.
 pub async fn list_extension_endpoints<S: HasApps + HasExtensionEndpoints>(
     ctx: &Ctx,
     ports: &S,
@@ -78,7 +111,11 @@ pub async fn list_extension_endpoints<S: HasApps + HasExtensionEndpoints>(
 ) -> Result<Vec<ExtensionEndpoint>, CommandError> {
     ctx.require(Scope::AppsRead)?;
     let app = existing(ports, key).await?;
-    Ok(ports.extension_endpoints().list_for_app(&app).await?)
+    if let Some(mut registered) = app.manifest_endpoints() {
+        registered.sort_by(|a, b| a.point.cmp(&b.point));
+        return Ok(registered);
+    }
+    Ok(ports.extension_endpoints().list_for_app(app.key()).await?)
 }
 
 /// An endpoint as a request gives it.
@@ -92,7 +129,8 @@ pub struct EndpointInput {
 /// Replaces an app's endpoints (`apps:write`): each a point and version in `known`
 /// (`unknown_extension_point` otherwise), named once (`duplicate_extension_point`), at
 /// an `https://` URL (or `http://` to localhost, like webhooks). An empty list removes
-/// them, and the app is no longer called at any point.
+/// them, and the app is no longer called at any point. Only for apps made by hand: one
+/// installed from its manifest registers there (`endpoints_from_manifest`).
 pub async fn set_extension_endpoints<S: HasApps + HasExtensionEndpoints>(
     ctx: &Ctx,
     ports: &S,
@@ -101,7 +139,11 @@ pub async fn set_extension_endpoints<S: HasApps + HasExtensionEndpoints>(
     known: &[KnownPoint],
 ) -> Result<Vec<ExtensionEndpoint>, CommandError> {
     ctx.require(Scope::AppsWrite)?;
-    let app = existing(ports, key).await?;
+    let found = existing(ports, key).await?;
+    if found.manifest().is_some() {
+        return Err(AppError::EndpointsFromManifest(found.key().clone()).into());
+    }
+    let app = found.key().clone();
     let mut endpoints: Vec<ExtensionEndpoint> = Vec::with_capacity(inputs.len());
     for input in inputs {
         if !known
@@ -140,9 +182,8 @@ pub async fn set_extension_endpoints<S: HasApps + HasExtensionEndpoints>(
     }
 }
 
-async fn existing<S: HasApps>(ports: &S, key: &str) -> Result<AppKey, CommandError> {
+async fn existing<S: HasApps>(ports: &S, key: &str) -> Result<App, CommandError> {
     let not_found = || CommandError::AppNotFound(key.to_string());
     let app = AppKey::new(key).map_err(|_| not_found())?;
-    ports.apps().get(&app).await?.ok_or_else(not_found)?;
-    Ok(app)
+    ports.apps().get(&app).await?.ok_or_else(not_found)
 }

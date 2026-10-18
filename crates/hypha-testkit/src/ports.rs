@@ -435,17 +435,24 @@ impl hypha_apps::HasExtensionEndpoints for InMemoryPorts {
     }
 }
 
-/// An app answers a point when it's installed, enabled and has an endpoint for it: what
-/// hosts answer from the same repos.
+/// An app answers a point as `hypha_apps::find_endpoint` says (installed or made by
+/// hand, enabled, granted the point's scope, with an endpoint for it): what hosts
+/// answer from the same repos.
 impl hypha_core::AppPoints for InMemoryPorts {
     async fn answers(
         &self,
         app: &hypha_core::AppKey,
         point: &str,
     ) -> Result<bool, hypha_core::RepoError> {
-        use hypha_apps::{AppRepo, ExtensionEndpointRepo};
-        let enabled = self.apps.get(app).await?.is_some_and(|a| a.enabled());
-        Ok(enabled && self.extension_endpoints.get(app, point).await?.is_some())
+        let Some(k) = hypha_extensions::known_point(point) else {
+            return Ok(false);
+        };
+        let point = hypha_apps::KnownPoint {
+            name: k.name,
+            version: k.version,
+            scope: k.scope,
+        };
+        Ok(hypha_apps::find_endpoint(self, app, point).await?.is_some())
     }
 }
 

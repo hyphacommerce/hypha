@@ -3181,7 +3181,18 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
             .unwrap();
         assert_eq!(*signature, hypha_http::outbound::sign(&secret, at, body));
         let sent: Value = serde_json::from_slice(body).unwrap();
-        assert_eq!(sent["request"]["destination"]["city"], "Zagreb");
+        // An app made by hand has no grant: the shopper's address goes as its country
+        // only (design note 0029, AP10).
+        let destination = &sent["request"]["destination"];
+        assert_eq!(destination["country"], "HR");
+        assert_eq!(destination.get("city"), None);
+        assert_eq!(destination.get("line1"), None);
+        assert!(
+            destination["redacted"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("postal_code"))
+        );
         assert_eq!(sent["request"]["items"][0]["quantity"], 2);
         // One ID for the request, in the header and the body.
         assert!(request_id.starts_with("rreq_"));

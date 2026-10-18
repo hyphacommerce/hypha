@@ -143,9 +143,12 @@ where
             country: payment.country,
             return_url: payment.return_url.clone(),
             // Personal data goes to an app only when its grant has
-            // `customer_data:email` (design note 0029, AP10). Apps get grants with
-            // OAuth (§4.1); until then no app has one, so the email stays here.
-            customer_email: None,
+            // `customer_data:email` (design note 0029, AP10).
+            customer_email: if endpoint.redaction.removes_email() {
+                None
+            } else {
+                Some(payment.customer_email.clone())
+            },
         };
         // The payment's ID: a retried start (the shopper asking again) must not
         // charge twice.

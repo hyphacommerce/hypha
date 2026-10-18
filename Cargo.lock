@@ -1366,6 +1366,7 @@ dependencies = [
 name = "hypha-order-actions"
 version = "0.1.0"
 dependencies = [
+ "hypha-apps",
  "hypha-core",
  "hypha-fulfillment",
  "hypha-inventory",

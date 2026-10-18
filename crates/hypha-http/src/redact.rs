@@ -1,7 +1,8 @@
 //! Personal data leaves only for callers allowed to see it (design note 0029, AP10,
 //! §4.2). One place decides, per field, for every channel: admin responses (the DTO
-//! families below), webhook payloads (`event_data`) and, later, extension requests and
-//! proxy headers.
+//! families below), webhook payloads (`event_data`), extension requests (`for_app`:
+//! `payments.start`'s `customer_email`, `shipping.rates`' destination) and, later, proxy
+//! headers.
 //!
 //! The rules:
 //! - A staff session (`Actor::User`) sees everything: staff work the store.
@@ -15,12 +16,14 @@
 //!   never call this module.
 //! - Staff records (users, invites, the store's own settings) aren't customer data:
 //!   `users:read` governs them, not these scopes.
-//! - Webhooks: the receiving app's grant decides (a hand-made app without a grant sees
-//!   no personal data).
+//! - Webhooks and extension requests: the receiving app's grant decides (a hand-made
+//!   app without a grant sees no personal data).
 
 use std::fmt;
 
+use hypha_apps::App;
 use hypha_core::{Ctx, Scope};
+use hypha_extensions::PostalAddress;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{MapAccess, SeqAccess, Visitor},
@@ -73,8 +76,44 @@ impl Redaction {
         }
     }
 
+    /// For what Hypha sends `app` (webhooks, extension requests): its grant's scopes;
+    /// an app without a grant (made by hand, or uninstalled) gets no personal data.
+    pub fn for_app(app: &App) -> Self {
+        Self::by_scopes(|scope| app.grant().is_some_and(|g| g.has(scope)))
+    }
+
     pub fn is_none(&self) -> bool {
         *self == Self::NONE
+    }
+
+    /// Whether email addresses go.
+    pub fn removes_email(&self) -> bool {
+        self.email
+    }
+
+    /// A postal address an extension point sends (`shipping.rates`' destination), as
+    /// `address` strips one in a response: names, phone, street, postal code, city and
+    /// province go without their scopes, listed in its `redacted`; country and company
+    /// stay.
+    pub fn postal_address(&self, a: &mut PostalAddress) {
+        let removed: Vec<&'static str> = self
+            .removed()
+            .filter(|f| [NAME, PHONE, ADDRESS].iter().any(|g| g.contains(f)))
+            .collect();
+        for field in &removed {
+            match *field {
+                "first_name" => a.first_name = None,
+                "last_name" => a.last_name = None,
+                "phone" => a.phone = None,
+                "line1" => a.line1 = None,
+                "line2" => a.line2 = None,
+                "city" => a.city = None,
+                "province" => a.province = None,
+                "postal_code" => a.postal_code = None,
+                _ => {}
+            }
+        }
+        a.redacted = (!removed.is_empty()).then(|| removed.iter().map(|f| f.to_string()).collect());
     }
 
     fn removed(&self) -> impl Iterator<Item = &'static str> {
@@ -470,5 +509,55 @@ mod tests {
             "names of fields are no data"
         );
         assert_eq!(event_data(|_| true, &data), data);
+    }
+
+    fn destination() -> PostalAddress {
+        PostalAddress {
+            first_name: Some("Ana".into()),
+            last_name: Some("Horvat".into()),
+            company: Some("Shop d.o.o.".into()),
+            line1: Some("Ilica 1".into()),
+            line2: None,
+            city: Some("Zagreb".into()),
+            province: None,
+            postal_code: Some("10000".into()),
+            country: hypha_core::CountryCode::new("HR").unwrap(),
+            phone: Some("+385 1".into()),
+            redacted: None,
+        }
+    }
+
+    #[test]
+    fn a_rate_apps_destination_keeps_only_the_country_and_company_without_scopes() {
+        let mut a = destination();
+        Redaction::by_scopes(|_| false).postal_address(&mut a);
+        assert_eq!(
+            serde_json::to_value(&a).unwrap(),
+            json!({"first_name": null, "company": "Shop d.o.o.", "line2": null,
+                   "province": null, "postal_code": null, "country": "HR", "phone": null,
+                   "redacted": ["first_name", "last_name", "phone", "line1", "line2",
+                                "city", "province", "postal_code"]})
+        );
+    }
+
+    #[test]
+    fn customer_data_address_unlocks_the_street_and_postal_code_only() {
+        let mut a = destination();
+        Redaction::by_scopes(|s| s == Scope::CustomerDataAddress).postal_address(&mut a);
+        assert_eq!(a.postal_code.as_deref(), Some("10000"));
+        assert_eq!(a.line1.as_deref(), Some("Ilica 1"));
+        assert_eq!(a.last_name, None);
+        assert_eq!(a.phone, None);
+        assert_eq!(
+            a.redacted,
+            Some(vec![
+                "first_name".into(),
+                "last_name".into(),
+                "phone".into()
+            ])
+        );
+        let mut all = destination();
+        Redaction::NONE.postal_address(&mut all);
+        assert_eq!(all, destination());
     }
 }

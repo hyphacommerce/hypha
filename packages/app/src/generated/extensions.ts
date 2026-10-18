@@ -270,20 +270,25 @@ export interface components {
             reference?: string | null;
         };
         /**
-         * @description A postal address as the API writes it. The Admin and Storefront APIs' address
-         *     responses are this type too, so every channel spells addresses one way.
+         * @description A postal address as Hypha sends it to an app (0015 §5's shape). Personal fields
+         *     (names, phone, street, postal code, city, province) are left out without the app's
+         *     `customer_data:name` / `:phone` / `:address` scopes (design note 0029, AP10) and
+         *     listed in `redacted`: the ones every address has (`last_name`, `line1`, `city`) are
+         *     then absent, the optional ones `null`. Country and company always come.
          */
         PostalAddressResponse: {
-            city: string;
+            city?: string | null;
             company?: string | null;
             country: components["schemas"]["CountryCode"];
             first_name?: string | null;
-            last_name: string;
-            line1: string;
+            last_name?: string | null;
+            line1?: string | null;
             line2?: string | null;
             phone?: string | null;
             postal_code?: string | null;
             province?: string | null;
+            /** @description The personal fields left out for this app. */
+            redacted?: string[] | null;
         };
         /**
          * @description A ProductId: `prod_` and 32 hex digits.

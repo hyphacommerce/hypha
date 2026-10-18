@@ -1269,7 +1269,8 @@ cat >"$MANIFEST_FILE" <<JSON
  "app_url":"$APP_BASE","redirect_uris":["/callback"],
  "scopes":["orders:read","customers:read","customer_data:email"],
  "scope_reasons":{"customer_data:email":"receipts"},"privacy_url":"/privacy",
- "webhooks":{"url":"/hooks","events":["order.*"]}}
+ "webhooks":{"url":"/hooks","events":["order.*"]},
+ "extension_points":[{"point":"search.query","version":1,"url":"/search"}]}
 JSON
 if command -v python3 >/dev/null 2>&1; then
     python3 - "$HOOK_PORT" "$HOOKS_FILE" "$MANIFEST_FILE" <<'PY' &
@@ -1447,6 +1448,12 @@ if [[ -n $HOOKS ]]; then
     AUTH=("${OWNER_AUTH[@]}")
     step "the app's grant" 200 - "$BASE/admin/apps/app_e2e_helper"
     contains "installed, with its scopes" '"installed":true,"grant":{"scopes":["customers:read","orders:read"]'
+    step "its extension points are its manifest's" 200 - "$BASE/admin/apps/app_e2e_helper/extension-points"
+    contains "resolved against its app_url" "\"url\":\"$APP_BASE/search\""
+    step "which staff don't set" 409 endpoints_from_manifest -X PUT \
+        "$BASE/admin/apps/app_e2e_helper/extension-points" -H "$JSON" -d '{"extension_points":[]}'
+    step "nor is it called without products:read" 422 search_app_unavailable -X PATCH \
+        "$BASE/admin/search/settings" -H "$JSON" -d '{"search_app":"app_e2e_helper"}'
     step "uninstall it" 204 - -X DELETE "$BASE/admin/apps/app_e2e_helper"
     wait_for "it hears it last" "$BASE/admin/apps/app_e2e_helper/deliveries?status=succeeded" '"event_type":"app.uninstalled"'
     step "delete it for good" 204 - -X DELETE "$BASE/admin/apps/app_e2e_helper"

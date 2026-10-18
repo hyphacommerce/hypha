@@ -6,7 +6,7 @@
 use core::time::Duration;
 
 use hypha_core::{
-    ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId, PaymentMethodId,
+    ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId, PaymentMethodId, Scope,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +21,9 @@ impl ExtensionPoint for PaymentsStart {
     const TIMEOUT: Duration = Duration::from_secs(15);
     /// `app_unavailable`: the order isn't placed.
     const ON_FAILURE: OnFailure = OnFailure::FailClosed;
+    /// A payment app reports what happened through `POST /admin/payments/{id}/events`,
+    /// which takes `payments:write`: without it, it can't do its job.
+    const SCOPE: Scope = Scope::PaymentsWrite;
     type Request = PaymentStartRequest;
     type Response = PaymentStartResponse;
 
@@ -133,6 +136,7 @@ macro_rules! payment_action {
             const TIMEOUT: Duration = Duration::from_secs(15);
             /// `app_unavailable`: nothing changes on the payment.
             const ON_FAILURE: OnFailure = OnFailure::FailClosed;
+            const SCOPE: Scope = Scope::PaymentsWrite;
             type Request = PaymentActionRequest;
             type Response = PaymentActionResponse;
         }

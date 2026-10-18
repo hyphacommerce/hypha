@@ -740,13 +740,19 @@ impl ExtensionEndpointsDto {
 fn registrable() -> Vec<hypha_apps::KnownPoint> {
     hypha_extensions::KNOWN
         .iter()
-        .filter(|(name, _)| *name != hypha_extensions::ShippingRates::NAME)
-        .map(|&(name, version)| hypha_apps::KnownPoint { name, version })
+        .filter(|k| k.name != hypha_extensions::ShippingRates::NAME)
+        .map(|k| hypha_apps::KnownPoint {
+            name: k.name,
+            version: k.version,
+            scope: k.scope,
+        })
         .collect()
 }
 
 /// Where the app answers extension points: the URLs Hypha calls for a payment method
-/// it collects (`payments.*`) or the store's searches (`search.query`).
+/// it collects (`payments.*`) or the store's searches (`search.query`). For an app
+/// installed from its manifest, the manifest's registrations (called only while its
+/// grant has each point's scope).
 #[utoipa::path(
     get,
     path = "/admin/apps/{key}/extension-points",
@@ -767,7 +773,9 @@ pub async fn extension_points<S: Storage>(
 /// Sets where a private app (one without a manifest) answers extension points,
 /// replacing what it had; an empty list stops every call. Each point once
 /// (`duplicate_extension_point`), a point and version this Hypha knows
-/// (`unknown_extension_point`). Calls are signed with the app's secret.
+/// (`unknown_extension_point`). Calls are signed with the app's secret. An app
+/// installed from its manifest registers its points there instead
+/// (`endpoints_from_manifest`, 409).
 #[utoipa::path(
     put,
     path = "/admin/apps/{key}/extension-points",

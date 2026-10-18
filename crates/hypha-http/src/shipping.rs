@@ -13,8 +13,8 @@ use std::time::Duration;
 use hypha_apps::{App, AppKey, AppRepo, HasApps, open_secret};
 use hypha_core::{CartId, Clock, Price};
 use hypha_extensions::{
-    Endpoint, ExtensionError, HasExtensionCalls, PostalAddress, QuotedRate, RateCallbackRequest,
-    RateItemBody, RateRequestBody, ShippingRates, call,
+    Endpoint, ExtensionError, ExtensionPoint, HasExtensionCalls, PostalAddress, QuotedRate,
+    RateCallbackRequest, RateItemBody, RateRequestBody, ShippingRates, call,
 };
 use hypha_shipping::{
     AppProvider, AppProviderRepo, DeliveryEstimate, HasAppProviders, ProviderError, ProviderKey,
@@ -26,6 +26,7 @@ use crate::{
     extensions::HostExtensions,
     host::{HostCalls, HostClock, HostIds},
     outbound::{CallError, Method, OutboundPolicy, SignedCall},
+    redact::Redaction,
     routes::rfc3339,
     state::HostEnv,
 };
@@ -88,12 +89,21 @@ impl<P: HasAppProviders + HasApps + HasExtensionCalls> RateProvider for HostRate
         match key.kind() {
             ProviderKind::App => {
                 let (provider, app) = self.app(key).await?;
+                // Called only as its grant allows (design note 0029, §4.1 step 5).
+                if !app.may_answer(ShippingRates::SCOPE) {
+                    return Err(ProviderError::Disabled(key.clone()));
+                }
                 let secret = open_secret(self.env, &app).map_err(|e| failed(key, e.to_string()))?;
                 let id = request_id(self.ids);
+                let mut body = wire_request(request);
+                // The shopper's address as far as the app's grant allows (AP10): without
+                // `customer_data:address` only the country (and company) go, so a rate
+                // app quoting by postal code needs it. The origin is the store's own.
+                Redaction::for_app(&app).postal_address(&mut body.destination);
                 let payload = RateCallbackRequest {
                     id: id.clone(),
                     sent_at: rfc3339(self.clock.now()).map_err(|_| failed(key, "bad clock"))?,
-                    request: wire_request(request),
+                    request: body,
                 };
                 let headers = [(REQUEST_ID_HEADER, id.clone())];
                 let endpoint = Endpoint {

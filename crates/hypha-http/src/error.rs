@@ -1090,11 +1090,12 @@ impl From<hypha_apps::CommandError> for ApiError {
 impl ApiError {
     /// An app's own rules (design notes 0016, 0029): bad input is 422, with every
     /// manifest problem in `details.errors` (`[{"path", "message"}]`); an app that isn't
-    /// installed through OAuth, for uninstalling or narrowing, 409.
+    /// installed through OAuth, for uninstalling or narrowing, and staff setting the
+    /// endpoints of one whose manifest registers them, 409.
     fn from_app(e: hypha_apps::AppError) -> Self {
         use hypha_apps::AppError as E;
         let status = match &e {
-            E::NotInstalled => StatusCode::CONFLICT,
+            E::NotInstalled | E::EndpointsFromManifest(_) => StatusCode::CONFLICT,
             E::IncompleteManifest => return Self::internal(e),
             _ => StatusCode::UNPROCESSABLE_ENTITY,
         };

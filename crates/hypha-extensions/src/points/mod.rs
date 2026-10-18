@@ -21,13 +21,36 @@ pub use shipping::{
 
 use crate::ExtensionPoint;
 
-/// Every point this build knows, as its name and version: what an app may register
-/// (design note 0029, §3, "Registering").
-pub const KNOWN: &[(&str, u16)] = &[
-    (ShippingRates::NAME, ShippingRates::VERSION),
-    (PaymentsStart::NAME, PaymentsStart::VERSION),
-    (PaymentsCapture::NAME, PaymentsCapture::VERSION),
-    (PaymentsVoid::NAME, PaymentsVoid::VERSION),
-    (PaymentsRefund::NAME, PaymentsRefund::VERSION),
-    (SearchQuery::NAME, SearchQuery::VERSION),
+use hypha_core::Scope;
+
+/// A point this build knows: its name, version and the scope a grant needs for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Known {
+    pub name: &'static str,
+    pub version: u16,
+    pub scope: Scope,
+}
+
+const fn known<P: ExtensionPoint>() -> Known {
+    Known {
+        name: P::NAME,
+        version: P::VERSION,
+        scope: P::SCOPE,
+    }
+}
+
+/// Every point this build knows: what an app may register (design note 0029, §3,
+/// "Registering").
+pub const KNOWN: &[Known] = &[
+    known::<ShippingRates>(),
+    known::<PaymentsStart>(),
+    known::<PaymentsCapture>(),
+    known::<PaymentsVoid>(),
+    known::<PaymentsRefund>(),
+    known::<SearchQuery>(),
 ];
+
+/// The point named `name`, when this build knows it.
+pub fn known_point(name: &str) -> Option<Known> {
+    KNOWN.iter().copied().find(|k| k.name == name)
+}

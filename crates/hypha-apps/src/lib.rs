@@ -27,7 +27,7 @@ pub use commands::{
 };
 pub use endpoints::{
     EndpointInput, ExtensionEndpoint, ExtensionEndpointRepo, HasExtensionEndpoints, KnownPoint,
-    list_extension_endpoints, set_extension_endpoints,
+    find_endpoint, list_extension_endpoints, set_extension_endpoints,
 };
 pub use error::AppError;
 pub use events::{APP, AppGrantChanged, AppInstalled, AppUninstalled};

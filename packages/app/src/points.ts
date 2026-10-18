@@ -22,6 +22,8 @@ export interface PostalAddress {
   postal_code?: string | null;
   country: string;
   phone?: string | null;
+  /** The personal fields left out for this app. */
+  redacted?: string[];
 }
 
 // ---------- shipping.rates v1 (today's callback, unchanged: AP9) ----------

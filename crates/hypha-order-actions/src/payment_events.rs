@@ -5,9 +5,10 @@
 //! `financial_status` in one batch, under 0027's rules (the moves `PaymentStatus`
 //! allows).
 
+use hypha_apps::{AppRepo, HasApps};
 use hypha_core::{
-    AppKey, Attempts, Clock, Ctx, HasIdempotency, IdempotencyRecord, IdempotencyRequest,
-    Idempotent, Money, PaymentId, RepoError, Scope, StageIdempotency, Timestamp, earlier_id,
+    Actor, Attempts, Clock, Ctx, HasIdempotency, IdempotencyRecord, IdempotencyRequest, Idempotent,
+    Money, PaymentId, RepoError, Scope, StageIdempotency, Timestamp, earlier_id,
 };
 use hypha_orders::StageOrders;
 use hypha_payments::{
@@ -50,13 +51,29 @@ pub struct PaymentEvent {
     pub idempotency: Option<IdempotencyRequest>,
 }
 
-/// The app reporting, when an app's own credentials make the call (`Actor::App`, design
-/// note 0029, §15): it may report only on the payments it collects. Until app
-/// credentials exist, every caller is staff, an API key or the system, who may report
-/// on any payment with `payments:write`.
-fn reporting_app(ctx: &Ctx) -> Option<AppKey> {
-    let _ = ctx.actor();
-    None
+/// Whether `ctx` may report on `payment`. An app calling with its own OAuth token
+/// (`Actor::App`, design note 0029, §15) only on the payments it collects: their
+/// provider is the app (`app_<name>`, the app with that key and this ID). Staff, API
+/// keys and the system may report on any payment with `payments:write`.
+async fn check_reporter<S: HasApps>(
+    ctx: &Ctx,
+    ports: &S,
+    payment: &Payment,
+) -> Result<(), CommandError> {
+    let Actor::App(caller) = ctx.actor() else {
+        return Ok(());
+    };
+    let collector = match payment.provider().app() {
+        Some(key) => ports.apps().get(&key).await?,
+        None => None,
+    };
+    if collector.is_some_and(|app| app.id() == caller) {
+        return Ok(());
+    }
+    Err(CommandError::PaymentNotYours {
+        payment: payment.id(),
+        app: caller,
+    })
 }
 
 /// Records what a payment's provider reports (`payments:write`), moving the payment
@@ -68,7 +85,7 @@ fn reporting_app(ctx: &Ctx) -> Option<AppKey> {
 /// the status doesn't allow (`invalid_payment_transition`), an amount that doesn't fit
 /// (`invalid_refund_amount`, `payment_amount_mismatch`). A cancelled order still takes
 /// reports: they say where the money is.
-pub async fn record_payment_event<S: OrderActionPorts>(
+pub async fn record_payment_event<S: OrderActionPorts + HasApps>(
     ctx: &Ctx,
     ports: &S,
     clock: &impl Clock,
@@ -93,7 +110,7 @@ pub async fn record_payment_event<S: OrderActionPorts>(
     }
 }
 
-async fn record_once<S: OrderActionPorts>(
+async fn record_once<S: OrderActionPorts + HasApps>(
     ctx: &Ctx,
     ports: &S,
     clock: &impl Clock,
@@ -104,14 +121,7 @@ async fn record_once<S: OrderActionPorts>(
         .get(input.payment)
         .await?
         .ok_or(CommandError::PaymentNotFound(input.payment))?;
-    if let Some(app) = reporting_app(ctx)
-        && payment.provider().app().as_ref() != Some(&app)
-    {
-        return Err(CommandError::PaymentNotYours {
-            payment: payment.id(),
-            app,
-        });
-    }
+    check_reporter(ctx, ports, &payment).await?;
     let mut order = load_order(ports, payment.order()).await?;
     let mut payments = ports.payments().list_for_order(order.id()).await?;
     let Some(at) = payments.iter().position(|p| p.id() == payment.id()) else {

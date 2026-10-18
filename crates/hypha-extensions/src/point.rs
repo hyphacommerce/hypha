@@ -3,6 +3,7 @@
 
 use core::time::Duration;
 
+use hypha_core::Scope;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::ExtensionError;
@@ -22,6 +23,11 @@ pub trait ExtensionPoint {
     /// (a shipping provider's `timeout_ms`).
     const TIMEOUT: Duration;
     const ON_FAILURE: OnFailure;
+    /// The scope an app installed through OAuth must have been granted for Hypha to
+    /// call it here (design note 0029, §4.1 step 5: a point needing a scope the grant
+    /// lacks isn't called). Apps made by hand, with no grant, are called on what staff
+    /// registered for them.
+    const SCOPE: Scope;
     /// The body Hypha sends.
     type Request: Serialize;
     /// The body a 2xx answer must parse as; anything else is an `invalid` call.
@@ -93,6 +99,7 @@ mod tests {
         const VERSION: u16 = 1;
         const TIMEOUT: Duration = Duration::from_secs(1);
         const ON_FAILURE: OnFailure = OnFailure::FailClosed;
+        const SCOPE: Scope = Scope::OrdersRead;
         type Request = ();
         type Response = u8;
     }
@@ -103,6 +110,7 @@ mod tests {
         const VERSION: u16 = 1;
         const TIMEOUT: Duration = Duration::from_secs(1);
         const ON_FAILURE: OnFailure = OnFailure::Fallback;
+        const SCOPE: Scope = Scope::OrdersRead;
         type Request = ();
         type Response = u8;
     }

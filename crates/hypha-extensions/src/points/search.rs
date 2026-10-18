@@ -6,7 +6,7 @@
 
 use core::time::Duration;
 
-use hypha_core::{CategoryId, ChannelId, Currency, MarketId, ProductId, VariantId};
+use hypha_core::{CategoryId, ChannelId, Currency, MarketId, ProductId, Scope, VariantId};
 use serde::{Deserialize, Serialize};
 
 use crate::{ExtensionPoint, OnFailure};
@@ -20,6 +20,8 @@ impl ExtensionPoint for SearchQuery {
     const TIMEOUT: Duration = Duration::from_secs(3);
     /// The built-in engine answers instead.
     const ON_FAILURE: OnFailure = OnFailure::Fallback;
+    /// It answers with products and variants, so it reads them.
+    const SCOPE: Scope = Scope::ProductsRead;
     type Request = SearchQueryRequest;
     type Response = SearchQueryResponse;
 

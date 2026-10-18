@@ -171,14 +171,18 @@ export interface paths {
         };
         /**
          * Where the app answers extension points: the URLs Hypha calls for a payment method
-         *     it collects (`payments.*`) or the store's searches (`search.query`).
+         *     it collects (`payments.*`) or the store's searches (`search.query`). For an app
+         *     installed from its manifest, the manifest's registrations (called only while its
+         *     grant has each point's scope).
          */
         get: operations["admin.apps.extension_points"];
         /**
          * Sets where a private app (one without a manifest) answers extension points,
          *     replacing what it had; an empty list stops every call. Each point once
          *     (`duplicate_extension_point`), a point and version this Hypha knows
-         *     (`unknown_extension_point`). Calls are signed with the app's secret.
+         *     (`unknown_extension_point`). Calls are signed with the app's secret. An app
+         *     installed from its manifest registers its points there instead
+         *     (`endpoints_from_manifest`, 409).
          */
         put: operations["admin.apps.set_extension_points"];
         post?: never;

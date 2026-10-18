@@ -4,7 +4,7 @@
 
 use core::time::Duration;
 
-use hypha_core::{Address, CountryCode, Currency, Money, VariantId};
+use hypha_core::{Address, CountryCode, Currency, Money, Scope, VariantId};
 use serde::{Deserialize, Serialize};
 
 use crate::{ExtensionPoint, OnFailure};
@@ -20,6 +20,9 @@ impl ExtensionPoint for ShippingRates {
     /// The app's options are hidden (`provider_failed`); a zone's backups show when no
     /// regular option is left (0015, SH7).
     const ON_FAILURE: OnFailure = OnFailure::Fallback;
+    /// The rate settings it answers for are shipping's. The destination's street and
+    /// postal code are personal data besides (`customer_data:address`, AP10).
+    const SCOPE: Scope = Scope::ShippingRead;
     type Request = RateCallbackRequest;
     type Response = RatesResponse;
 
@@ -89,8 +92,11 @@ pub struct RateItemBody {
     pub weight_grams: Option<u32>,
 }
 
-/// A postal address as the API writes it. The Admin and Storefront APIs' address
-/// responses are this type too, so every channel spells addresses one way.
+/// A postal address as Hypha sends it to an app (0015 §5's shape). Personal fields
+/// (names, phone, street, postal code, city, province) are left out without the app's
+/// `customer_data:name` / `:phone` / `:address` scopes (design note 0029, AP10) and
+/// listed in `redacted`: the ones every address has (`last_name`, `line1`, `city`) are
+/// then absent, the optional ones `null`. Country and company always come.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "openapi",
@@ -99,15 +105,21 @@ pub struct RateItemBody {
 )]
 pub struct PostalAddress {
     pub first_name: Option<String>,
-    pub last_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_name: Option<String>,
     pub company: Option<String>,
-    pub line1: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line1: Option<String>,
     pub line2: Option<String>,
-    pub city: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
     pub province: Option<String>,
     pub postal_code: Option<String>,
     pub country: CountryCode,
     pub phone: Option<String>,
+    /// The personal fields left out for this app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redacted: Option<Vec<String>>,
 }
 
 impl From<&Address> for PostalAddress {
@@ -115,15 +127,16 @@ impl From<&Address> for PostalAddress {
         let p = a.parts();
         Self {
             first_name: p.first_name.clone(),
-            last_name: p.last_name.clone(),
+            last_name: Some(p.last_name.clone()),
             company: p.company.clone(),
-            line1: p.line1.clone(),
+            line1: Some(p.line1.clone()),
             line2: p.line2.clone(),
-            city: p.city.clone(),
+            city: Some(p.city.clone()),
             province: p.province.clone(),
             postal_code: p.postal_code.clone(),
             country: a.country(),
             phone: p.phone.clone(),
+            redacted: None,
         }
     }
 }
@@ -177,15 +190,16 @@ mod tests {
                 origin: None,
                 destination: PostalAddress {
                     first_name: None,
-                    last_name: "Horvat".to_string(),
+                    last_name: Some("Horvat".to_string()),
                     company: None,
-                    line1: "Ilica 1".to_string(),
+                    line1: Some("Ilica 1".to_string()),
                     line2: None,
-                    city: "Zagreb".to_string(),
+                    city: Some("Zagreb".to_string()),
                     province: None,
                     postal_code: None,
                     country: CountryCode::new("HR").unwrap(),
                     phone: None,
+                    redacted: None,
                 },
                 items: vec![RateItemBody {
                     variant: VariantId::from_uuid(uuid::Uuid::from_u128(1)),

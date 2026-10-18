@@ -1355,3 +1355,108 @@ fn an_unknown_payment_is_reported() {
         ))
     );
 }
+
+// ---- who may report (design note 0029, §3.1, §15) ----
+
+fn app_id(n: u128) -> hypha_core::AppId {
+    hypha_core::AppId::from_uuid(Uuid::from_u128(n))
+}
+
+/// App `key` (ID `id`), and the order's pending payment collected by it.
+fn app_payment(world: &World, key: &str, id: hypha_core::AppId) {
+    use hypha_apps::AppRepo;
+    let mut app = hypha_apps::App::new(hypha_apps::NewApp {
+        key: hypha_core::AppKey::new(key).unwrap(),
+        id,
+        name: "Pay".to_string(),
+        secret: hypha_core::Sealed::from_bytes(vec![1]),
+        webhook: None,
+        subscriptions: vec![],
+    })
+    .unwrap();
+    block_on(world.apps.insert(&mut app)).unwrap();
+    let mut payment = Payment::new(NewPayment {
+        id: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+        order: order_id(),
+        method: None,
+        method_name: Some("Card".to_string()),
+        provider: ProviderKey::new(key).unwrap(),
+        amount: eur(2000),
+        instructions: None,
+    })
+    .unwrap();
+    block_on(world.payments.insert(&mut payment)).unwrap();
+}
+
+impl World {
+    fn report_as(
+        &self,
+        actor: Actor,
+        kind: hypha_order_actions::PaymentEventKind,
+    ) -> Result<PaymentStatus, CommandError> {
+        let ctx = Ctx::new(actor, vec![Scope::PaymentsWrite]);
+        let input = hypha_order_actions::PaymentEvent {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            kind,
+            amount: None,
+            reference: None,
+            occurred_at: None,
+            idempotency: None,
+        };
+        block_on(hypha_order_actions::record_payment_event(
+            &ctx,
+            &self.ports,
+            &self.clock,
+            input,
+        ))
+        .map(|done| done.value.payments[0].status())
+    }
+}
+
+#[test]
+fn an_app_reports_on_the_payments_it_collects() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    app_payment(&world, "app_pay", app_id(71));
+    assert_eq!(
+        world.report_as(Actor::App(app_id(71)), K::Paid),
+        Ok(PaymentStatus::Paid)
+    );
+}
+
+#[test]
+fn an_app_cant_report_on_another_providers_payment() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    app_payment(&world, "app_pay", app_id(71));
+    assert_eq!(
+        world.report_as(Actor::App(app_id(72)), K::Paid),
+        Err(CommandError::PaymentNotYours {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            app: app_id(72),
+        })
+    );
+}
+
+#[test]
+fn an_app_cant_report_on_a_manual_payment() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    assert_eq!(
+        world.report_as(Actor::App(app_id(71)), K::Paid),
+        Err(CommandError::PaymentNotYours {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            app: app_id(71),
+        })
+    );
+}
+
+#[test]
+fn staff_report_on_an_apps_payment() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    app_payment(&world, "app_pay", app_id(71));
+    let staff = Actor::User(hypha_core::UserId::from_uuid(Uuid::from_u128(9)));
+    assert_eq!(world.report_as(staff, K::Paid), Ok(PaymentStatus::Paid));
+}

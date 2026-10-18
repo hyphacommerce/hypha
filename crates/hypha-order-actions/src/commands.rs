@@ -67,7 +67,7 @@ pub enum CommandError {
     #[error("payment {payment} isn't collected by {app}")]
     PaymentNotYours {
         payment: PaymentId,
-        app: hypha_core::AppKey,
+        app: hypha_core::AppId,
     },
     /// A report of the whole payment (authorized, paid) with another amount: partial
     /// captures don't exist yet.

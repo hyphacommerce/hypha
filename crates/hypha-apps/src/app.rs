@@ -3,6 +3,7 @@ use hypha_core::{
     Sealed, Stamped, Stamps, Subject, Timestamp, Version, Versioned, required_text,
 };
 
+use crate::endpoints::ExtensionEndpoint;
 use crate::events::{APP, AppGrantChanged, AppInstalled, AppUninstalled};
 use crate::manifest::AppManifest;
 
@@ -481,6 +482,42 @@ impl App {
     /// Installed through OAuth and in force: a grant, not uninstalled.
     pub fn is_installed(&self) -> bool {
         self.grant.is_some() && self.uninstalled_at.is_none()
+    }
+
+    /// Whether Hypha calls it at an extension point that needs `scope` (design note
+    /// 0029, §4.1 step 5): enabled, and either made by hand (staff registered its
+    /// endpoints, as they did its webhook) or installed with a grant that has `scope`.
+    /// Uninstalled, or installed from a manifest but not granted: never.
+    pub fn may_answer(&self, scope: Scope) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        match (&self.grant, &self.manifest) {
+            (None, None) => true,
+            (Some(grant), _) => self.uninstalled_at.is_none() && grant.has(scope),
+            (None, Some(_)) => false,
+        }
+    }
+
+    /// The extension points its manifest registers (URLs resolved against its
+    /// `app_url`); `None` for an app without a manifest, whose endpoints staff set.
+    pub fn manifest_endpoints(&self) -> Option<Vec<ExtensionEndpoint>> {
+        let manifest = self.manifest.as_ref()?;
+        Some(
+            manifest
+                .manifest
+                .document()
+                .extension_points
+                .iter()
+                .filter_map(|p| {
+                    Some(ExtensionEndpoint {
+                        point: p.point.clone(),
+                        version: p.version,
+                        url: CallbackUrl::new(&p.url).ok()?,
+                    })
+                })
+                .collect(),
+        )
     }
 }
 

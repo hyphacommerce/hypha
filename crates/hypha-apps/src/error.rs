@@ -36,6 +36,10 @@ pub enum AppError {
     UnknownExtensionPoint { point: String, version: u16 },
     #[error("extension point {0:?} is listed twice")]
     DuplicateExtensionPoint(String),
+    /// An app installed from its manifest registers its points there (§4.1 step 5);
+    /// staff set endpoints only for apps made by hand.
+    #[error("app {0} registers its extension points in its manifest")]
+    EndpointsFromManifest(AppKey),
 }
 
 impl ErrorCode for AppError {
@@ -54,6 +58,7 @@ impl ErrorCode for AppError {
             AppError::GrantNotNarrower(_) => "grant_not_narrower",
             AppError::UnknownExtensionPoint { .. } => "unknown_extension_point",
             AppError::DuplicateExtensionPoint(_) => "duplicate_extension_point",
+            AppError::EndpointsFromManifest(_) => "endpoints_from_manifest",
         }
     }
 }

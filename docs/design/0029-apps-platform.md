@@ -544,15 +544,17 @@ events, `docs/apps/elements.md`).
   `POST /storefront/orders/{id}/payment?token=` starts it again: a `pending` payment with
   the same idempotency key (its ID), after a `failed` one a new payment with the same
   method. Checkout takes an optional `return_url`, passed to the app. The provider's
-  `reference` is kept on the payment. `customer_email` is never sent until grants exist
-  (AP10).
+  `reference` is kept on the payment. `customer_email` is sent only to an app whose
+  grant has `customer_data:email` (AP10; never to an app made by hand).
 - **Reports:** `POST /admin/payments/{id}/events` (`payments:write`, `Idempotency-Key`)
   is `hypha_order_actions::record_payment_event`: `authorized | paid | failed | voided |
   partially_refunded | refunded`, with `amount` (a refund's own amount; the whole
   payment otherwise), `reference`, `occurred_at`. New events `payment.authorized`,
-  `.failed`, `.refunded`. A repeated report changes nothing. Only the payment's own app
-  may report once app credentials exist (`reporting_app` in `payment_events.rs` reads
-  `Actor::App` then; until then staff and keys may).
+  `.failed`, `.refunded`. A repeated report changes nothing. An app calling with its own token
+  (`Actor::App(AppId)`) may report only on payments whose provider is that app (the
+  provider key's app, loaded by key, has the caller's ID; `payment_not_yours`, 403,
+  otherwise, a `manual` payment included); staff and API keys with `payments:write` on
+  any (`check_reporter` in `payment_events.rs`).
 - **Staff actions:** `POST /admin/payments/{id}/capture | void | refund` (`orders:write`)
   answer **202** when the app accepts and move nothing (Shopify's model: the app reports
   the result); `409 payment_refused` with `details.reason`; `409
@@ -564,8 +566,38 @@ events, `docs/apps/elements.md`).
   uses `AppSearch`, a `SearchIndex` that asks the app and builds Hypha's own documents
   for its hits (`hypha_search::documents_for`, so prices, stock and channel visibility
   are Hypha's), with no `price` range; on failure the built-in engine answers.
-- **Registrations (temporary seam):** until manifests (§4) land, apps register points
-  through `PUT /admin/apps/{key}/extension-points` (table `app_extension_endpoints`,
-  migration 0051; 0050 is left for OAuth). Everything reads them through `hypha-http`'s
-  `AppEndpoints` (`app_endpoints.rs`), which is what to re-point at manifest
-  registrations filtered by the grant.
+- **Registrations:** `hypha_apps::find_endpoint` is the one rule, read through
+  `hypha-http`'s `HostAppEndpoints` (`app_endpoints.rs`, also core's `AppPoints`, so
+  the payment-method and search-app checks agree with the calls). An app installed
+  through OAuth answers where its manifest's `extension_points` say (URLs resolved
+  against `app_url`; the entry's version must be the one this build calls), and only
+  while it is enabled, not uninstalled, and its grant has the point's scope (§4.1 step
+  5). An app made by hand (no manifest) answers where staff set with
+  `PUT /admin/apps/{key}/extension-points` (table `app_extension_endpoints`, migration
+  0051 after OAuth's 0050); that route refuses an app with a manifest
+  (`endpoints_from_manifest`, 409), and `GET` lists the manifest's registrations for
+  one. Uninstalled: none.
+- **Scopes per point** (`ExtensionPoint::SCOPE`, what the grant must have; an app made
+  by hand has no grant and is called on what staff registered):
+
+  | Point | Scope | Why |
+  | --- | --- | --- |
+  | `payments.start`, `.capture`, `.void`, `.refund` | `payments:write` | the app reports results through `POST /admin/payments/{id}/events`, which takes it: without it a payment app can't do its job |
+  | `search.query` | `products:read` | it answers with products and variants |
+  | `shipping.rates` | `shipping:read` | it answers for shipping's rate settings |
+
+  Rate apps keep their URL in shipping's `AppProvider` (0015), not the manifest; the
+  gate (`App::may_answer`) applies to them all the same (`shipping_provider_disabled` otherwise).
+- **Personal data in requests (AP10):** `Redaction::for_app` (`redact.rs`) decides,
+  as for webhooks: the app's grant, nothing for an app without one. `payments.start`'s
+  `customer_email` needs `customer_data:email`. `shipping.rates`' destination follows
+  the address rule exactly: without `customer_data:address` the street lines, postal
+  code, city and province go, without `:name` the names, without `:phone` the phone;
+  country and company stay, and `redacted` lists what went (`last_name`, `line1`,
+  `city` are then absent, the optional fields `null`, so an unredacted body is byte for
+  byte 0015's). So **a rate app that quotes by postal code or city must be installed
+  through OAuth with `customer_data:address`**; an app made by hand (0016) gets the
+  country only, which is enough for zone-style flat rates. The origin (the store's
+  location) isn't customer data and is sent whole.
+- **Actors:** writes by an app's token are stamped `Actor::App(AppId)` in the outbox
+  and idempotency records like any actor (`AppId` is `Copy`).
