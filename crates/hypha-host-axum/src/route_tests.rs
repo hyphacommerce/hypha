@@ -5107,7 +5107,7 @@ async fn notification_settings_round_trip_as_merge_patch() {
         "sender_name": "Kafa",
         "reply_to": "help@example.hr",
         "staff_recipients": ["orders@example.hr"],
-        "order_url": "https://shop.example.hr/order/{order}/confirmed?token={token}",
+        "order_url": "https://shop.example.hr/order/{order}?token={token}",
     })
     .to_string();
     let (status, saved) = send(&app, "PATCH", "/admin/notification-settings", Some(&body)).await;

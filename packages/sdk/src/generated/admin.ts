@@ -4224,7 +4224,7 @@ export interface components {
             logo?: components["schemas"]["AssetId"] | null;
             /**
              * @description An http(s) URL with `{order}`, and optionally `{token}`, e.g.
-             *     `https://shop.example.com/order/{order}/confirmed?token={token}`.
+             *     `https://shop.example.com/order/{order}?token={token}`.
              */
             order_url?: string | null;
             reply_to?: string | null;

@@ -6517,7 +6517,7 @@
             ]
           },
           "order_url": {
-            "description": "An http(s) URL with `{order}`, and optionally `{token}`, e.g.\n`https://shop.example.com/order/{order}/confirmed?token={token}`.",
+            "description": "An http(s) URL with `{order}`, and optionally `{token}`, e.g.\n`https://shop.example.com/order/{order}?token={token}`.",
             "type": [
               "string",
               "null"

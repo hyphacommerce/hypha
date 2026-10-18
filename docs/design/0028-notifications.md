@@ -98,7 +98,7 @@ payment (0027 copies them at checkout), not a template of their own.
 - `staff_recipients: Vec<Email>` (at most 10) for `staff_new_order`;
 - `order_url: Option<String>`, a pattern with `{order}` and `{token}` for the link to the
   order's page (the API stays URL-agnostic; `hypha deploy` sets it when it connects the
-  storefront: `https://shop…/order/{order}/confirmed?token={token}`). Without one, emails
+  storefront: `https://shop…/order/{order}?token={token}`). Without one, emails
   have no order link.
 
 **`Notification`** (`ntf_…`, aggregate root): `template: TemplateKey`, `to: Email`,

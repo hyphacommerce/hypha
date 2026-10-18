@@ -276,7 +276,7 @@ fn full_settings() -> NotificationSettings {
     s.set_staff_recipients(vec![email("b@kafa.example"), email("a@kafa.example")])
         .unwrap();
     s.set_order_url(Some(
-        OrderUrl::new("https://shop.kafa.example/order/{order}/confirmed?token={token}").unwrap(),
+        OrderUrl::new("https://shop.kafa.example/order/{order}?token={token}").unwrap(),
     ));
     s
 }

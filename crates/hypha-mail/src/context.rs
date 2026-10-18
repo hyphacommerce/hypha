@@ -466,7 +466,7 @@ fn sample_order_mail() -> OrderMail {
             id: id.to_string(),
             number: "#1001".to_string(),
             url: Some(format!(
-                "https://shop.fernandfield.example/order/{id}/confirmed?token=hypha_ord_sample"
+                "https://shop.fernandfield.example/order/{id}?token=hypha_ord_sample"
             )),
             email: "ana.horvat@example.com".to_string(),
             placed_at: TimeValue::of(SAMPLE_PLACED_AT, None),

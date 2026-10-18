@@ -257,7 +257,7 @@ pub struct UpdateNotificationSettingsRequest {
     #[schema(value_type = Vec<String>, required = false)]
     staff_recipients: Option<Vec<String>>,
     /// An http(s) URL with `{order}`, and optionally `{token}`, e.g.
-    /// `https://shop.example.com/order/{order}/confirmed?token={token}`.
+    /// `https://shop.example.com/order/{order}?token={token}`.
     #[serde(default, deserialize_with = "patch::nullable")]
     #[schema(value_type = Option<String>, required = false)]
     order_url: Option<Option<String>>,

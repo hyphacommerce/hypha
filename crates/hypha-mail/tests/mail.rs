@@ -424,7 +424,7 @@ fn an_order_link_is_made_from_the_settings_pattern_and_the_token() {
     let ports = world();
     let input = UpdateSettings {
         order_url: Some(Some(
-            "https://shop.example.com/order/{order}/confirmed?token={token}".to_string(),
+            "https://shop.example.com/order/{order}?token={token}".to_string(),
         )),
         ..UpdateSettings::default()
     };
@@ -433,7 +433,7 @@ fn an_order_link_is_made_from_the_settings_pattern_and_the_token() {
     block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
     let text = &env.sender.sent()[0].text;
     let link = format!(
-        "https://shop.example.com/order/{}/confirmed?token=tok_{}",
+        "https://shop.example.com/order/{}?token=tok_{}",
         order_id(),
         order_id()
     );
