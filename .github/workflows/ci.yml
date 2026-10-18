@@ -73,6 +73,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Oxfmt and Oxlint (Vite+, the root vite.config.ts), then React Doctor (doctor.config.ts).
+      - run: pnpm fmt:check
+      - run: pnpm lint
+      - run: pnpm lint:react
       - run: pnpm sdk:check
       - run: pnpm --filter admin theme:check
       - run: pnpm --filter storefront theme:check
