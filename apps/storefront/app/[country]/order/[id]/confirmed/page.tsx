@@ -12,6 +12,7 @@ import { cookies } from "next/headers";
 
 import type { StorefrontSchemas } from "@hypha/sdk/storefront";
 
+import { ReloadCart } from "@/components/cart/cart-provider";
 import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
 import { api, countryOf } from "@/lib/api";
@@ -94,6 +95,8 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
   );
   return (
     <VStack gap={8} maxWidth={960}>
+      {/* The order was placed from the cart the header still counts: read it again. */}
+      <ReloadCart />
       <VStack gap={2}>
         <HStack gap={3} vAlign="center" wrap="wrap">
           <Heading level={1} type="display-2">

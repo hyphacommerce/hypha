@@ -40,6 +40,9 @@ type CartContext = {
   add: (variant: string, quantity: number) => Promise<string | undefined>;
   /** Sets a line's quantity; 0 removes it. */
   change: (variant: string, quantity: number) => void;
+  /** Reads the cart again from the cookies: after something outside the provider
+   * changed it (placing the order forgets the cart, `ReloadCart`). */
+  reload: () => void;
 };
 
 const Context = createContext<CartContext | null>(null);
@@ -61,23 +64,30 @@ export function CartProvider({
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
 
-  useEffect(() => {
+  // Which read is the latest: an older one answering late is dropped.
+  const reads = useRef(0);
+  const reload = useCallback(() => {
+    const read = ++reads.current;
     // No cart in this country (the flag cookie says so): nothing to read.
     if (!hasCartFlag(country)) {
       setCart(null);
       setIsLoading(false);
       return;
     }
-    let current = true;
     loadCart(country).then((found) => {
-      if (!current) return;
+      if (read !== reads.current) return;
       setCart(found);
       setIsLoading(false);
     });
-    return () => {
-      current = false;
-    };
   }, [country]);
+
+  useEffect(() => {
+    reload();
+    return () => {
+      // Unmounted or another country: whatever is in flight is stale.
+      reads.current += 1;
+    };
+  }, [reload]);
 
   const add = useCallback(
     async (variant: string, quantity: number) => {
@@ -119,8 +129,9 @@ export function CartProvider({
       close: () => setIsOpen(false),
       add,
       change,
+      reload,
     }),
-    [country, digits, base, cart, isLoading, isPending, error, isOpen, add, change],
+    [country, digits, base, cart, isLoading, isPending, error, isOpen, add, change, reload],
   );
 
   return (
@@ -130,6 +141,17 @@ export function CartProvider({
       {children}
     </Context>
   );
+}
+
+/**
+ * Reads the cart again when it renders: for a page reached after the cart changed on
+ * the server, like the order confirmation (placing the order forgot the cart and its
+ * flag cookie, but the provider, kept across the navigation, still holds the old cart).
+ */
+export function ReloadCart() {
+  const { reload } = useCart();
+  useEffect(() => reload(), [reload]);
+  return null;
 }
 
 /** The cart; only inside a country's layout, which provides it. */

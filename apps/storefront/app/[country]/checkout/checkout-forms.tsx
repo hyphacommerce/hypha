@@ -221,6 +221,7 @@ export function PaymentChoice({
             key={m.id}
             value={m.id}
             label={m.name}
+            className="shop-option-top"
             description={
               m.id === value && m.instructions ? (
                 <span className="shop-pre-line">{m.instructions}</span>

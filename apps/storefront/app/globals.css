@@ -137,3 +137,11 @@ body {
 .shop-pre-line {
   white-space: pre-line;
 }
+
+/* A radio option whose description runs several lines (a payment method's
+   instructions): the radio stays beside the name, as on one-line options, rather than
+   centred on the whole block. Its 24px control matches the label's line. (RadioListItem
+   doesn't pass Item's `align="start"` on; unlayered, this wins over Astryx's layers.) */
+.shop-option-top {
+  align-items: flex-start;
+}
