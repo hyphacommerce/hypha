@@ -1,7 +1,8 @@
 # 0026: The API on Cloudflare Workers
 
-- **Status:** Proposed (2026-10-17); W3 and W5 accepted. The spike (§8) ran on
-  2026-10-17: go. Which database to recommend is open (§9).
+- **Status:** Accepted (2026-10-18). Built and deployed for real: the API, the admin and
+  the storefront as Workers on one domain, next to a VPS deployment of the same code.
+  What's left is §10. Which database to recommend is open (§9).
 - **Scope:**
   - `hypha-host-workers`: the same routes, commands and Postgres adapter as the VPS,
     on Workers, through Hyperdrive;
@@ -335,6 +336,40 @@ A D1 adapter is the size of the Postgres one (about 10,000 lines) plus its migra
 nothing above the adapter changes. The order would be: Postgres through Hyperdrive first
 (it reuses everything), then D1 as its own note and adapter, starting with a spike on
 the two risky rows (version checks in a batch, FTS5 ranking against the contract).
+
+## 10. Leftovers (2026-10-18)
+
+What this work left open, in order of importance:
+
+1. **Pipelining reads in the Postgres adapter.** A load runs inside BEGIN … ROLLBACK
+   (2 extra round trips), and `PgStore` keeps its connection behind a lock, so
+   independent loads go one after another. A priced cart is about 34 round trips,
+   checkout about 70, a product page about 18 (5–8 ms each over Hyperdrive). Pipelining
+   them, and pricing's four reads as one query, would bring a cart to about 5 and
+   checkout to about 15. Deliberately left out of the performance pass: it changes how
+   storage shares its connection, and a D1 adapter (§9) must stay possible. Decide
+   together with D1.
+2. **Search sync rebuilds markets one at a time** (about 15 round trips per market per
+   changed product; about 80 with four markets). Batch them when doing item 1.
+3. **One rate-limit implementation.** The Workers isolate limiter (`limiter.rs`) and the
+   native `governor` one implement the same GCRA quotas twice (review item 9): share one.
+4. **A parity test for the event handlers.** Each host lists its handlers in
+   `handlers.rs`; a test should fail when the two lists differ.
+5. **e2e against a deployed Worker.** Run against `hotsource.tech` it passed except where
+   the script itself can't work there: its webhook receiver listens on localhost, and
+   login limits count per isolate. Give the script a mode for a deployed API.
+6. **The storefront on Workers:** search and cart pages are rendered on every request
+   (free-text searches aren't cached, by choice); KV writes come mostly from tag
+   expiry after admin changes (about 30 for a new product, one per country). Fine on
+   Workers Paid; trim the per-country expiry if large imports matter.
+7. **Workers Free can't run Hypha:** its 10 ms CPU limit kills logins and renders, and
+   its 1,000 KV writes a day run out on the first seed. `hypha deploy` should say so
+   when the account is on Free.
+8. **The admin's setup checklist** takes about 450 ms. Left as is: it's used once.
+
+Measured on Workers Paid after the performance pass (median, from Belgrade): cached
+shop pages 90–110 ms; admin pages 360–710 ms with 3–6 API calls each; an API call
+33–75 ms. Cost at a million shop page views a month: about $5–6 of Workers.
 
 ## Sources
 
