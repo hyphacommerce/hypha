@@ -13,13 +13,12 @@ use hypha_core::{
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_order_actions::{
     BuyerEmail, CancelOrder, MarkPaid, OrderView, cancel_order, mark_paid as record_paid,
-    order_view,
+    order_view, view_of,
 };
 use hypha_orders::{
     CancelReason, FinancialStatus, FulfillmentStatus, HasOrders, ListOrders, Order,
     OrderFilterInput, OrderLine, OrderSort, OrderSummary, get_placed_order, list_orders,
 };
-use hypha_payments::{HasPayments, Payment, PaymentRepo};
 use hypha_products::{HasProducts, ProductRepo};
 use serde::{Deserialize, Serialize};
 
@@ -446,19 +445,6 @@ pub async fn checkout_handler<S: Storage>(
     ))
 }
 
-/// The order's newest payment: what a storefront shows.
-async fn newest_payment<P: HasPayments>(
-    ports: &P,
-    order: OrderId,
-) -> Result<Option<Payment>, ApiError> {
-    Ok(ports
-        .payments()
-        .list_for_order(order)
-        .await?
-        .into_iter()
-        .next())
-}
-
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
@@ -489,7 +475,7 @@ pub async fn fetch_placed<S: Storage>(
         return Err(hypha_orders::CommandError::OrderNotFound(id).into());
     }
     let order = get_placed_order(&ctx, ports.orders(), id).await?;
-    let payment = newest_payment(&ports, id).await?;
+    let payment = hypha_payments::newest_payment(&ports, id).await?;
     Ok(Json(PlacedOrderResponse {
         order: OrderResponse::with_images(&order, &ports, state.media.as_ref()).await?,
         access_token: token,
@@ -773,8 +759,10 @@ pub struct CancelOrderRequest {
 
 /// Cancels the order: every line's reserved stock is released and its pending payments
 /// are voided. Refused while fulfilments stand (`order_has_fulfillments`, 409, listing
-/// them): cancel those first. A paid order stays paid; refund it outside Hypha for now.
-/// Cancelling it again changes nothing.
+/// them): cancel those first. Refused while a payment is authorized
+/// (`payment_authorized`, 409, `details.payment`): the held money is its provider's to
+/// release. A paid order stays paid; refund it outside Hypha for now. Cancelling it
+/// again changes nothing.
 #[utoipa::path(
     post,
     path = "/admin/orders/{id}/cancel",
@@ -823,10 +811,14 @@ pub struct MarkPaidRequest {
 }
 
 /// Records that the order's money arrived (a bank transfer, cash from the courier;
-/// design note 0027, §5): its pending payment becomes `paid`, with the `reference` when
-/// given, and so does the order. An order without a payment gets a `manual` one, paid
-/// on the spot. The body is optional (none, `{}` or `{"reference": …}`). Marking a paid order
-/// again changes nothing; a cancelled one is refused (409 `order_cancelled`).
+/// design note 0027, §5): its pending payments become `paid`, with the `reference` when
+/// given, and so does the order. A `pending` order without an open payment gets a
+/// `manual` one of its total, paid on the spot. The body is optional (none, `{}` or
+/// `{"reference": …}`). Marking a paid order again changes nothing. Refused (409): a
+/// cancelled order (`order_cancelled`), an authorized payment (`payment_authorized`,
+/// `details.payment`: only its provider can capture it), and any other payment status
+/// (`order_not_payable`, `details.financial_status`: partially paid, refunded or
+/// voided, where money moved already).
 #[utoipa::path(
     post,
     path = "/admin/orders/{id}/paid",
@@ -847,8 +839,8 @@ pub async fn mark_paid<S: Storage>(
         order: id,
         reference: req.reference,
     };
-    record_paid(&ctx, &ports, &state.ids, &state.clock, input).await?;
-    let view = order_view(&ctx, &ports, id).await?;
+    let done = record_paid(&ctx, &ports, &state.ids, &state.clock, input).await?;
+    let view = view_of(&ports, done.order, done.payments).await?;
     let order = OrderResponse::with_images(&view.order, &ports, state.media.as_ref()).await?;
     Ok(Json(AdminOrderResponse::new(&view, order)?))
 }

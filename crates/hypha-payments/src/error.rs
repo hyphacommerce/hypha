@@ -1,4 +1,4 @@
-use hypha_core::{Currency, ErrorCode, MoneyError, PaymentId, TextError};
+use hypha_core::{Currency, ErrorCode, MoneyError, PaymentId, PaymentMethodId, TextError};
 use thiserror::Error;
 
 use crate::{PaymentMethod, PaymentStatus, ProviderKey};
@@ -28,6 +28,10 @@ pub enum PaymentError {
         provider: ProviderKey,
         reason: String,
     },
+    /// An open payment's method is gone, and its provider (not `manual`) needs the
+    /// method's settings to go on collecting it.
+    #[error("payment method {0} is gone; its provider can't go on without its settings")]
+    MethodUnavailable(PaymentMethodId),
     #[error("instructions are longer than {max} characters", max = PaymentMethod::MAX_INSTRUCTIONS_LEN)]
     InstructionsTooLong,
     /// A move the payment's status doesn't allow (PA7), e.g. paying a voided payment.
@@ -57,6 +61,7 @@ impl ErrorCode for PaymentError {
             PaymentError::UnknownProvider(_) => "payment_provider_unknown",
             PaymentError::InvalidSettings { .. } => "invalid_payment_settings",
             PaymentError::ProviderFailed { .. } => "payment_provider_failed",
+            PaymentError::MethodUnavailable(_) => "payment_method_unavailable",
             PaymentError::InstructionsTooLong => "instructions_too_long",
             PaymentError::InvalidTransition { .. } => "invalid_payment_transition",
             PaymentError::CurrencyMismatch { .. } => "currency_mismatch",

@@ -19,7 +19,7 @@ use hypha_orders::{
 };
 use hypha_payments::{
     HasPaymentMethods, HasPayments, NewPayment, NextAction, Payment, PaymentError,
-    PaymentMethodRepo, PaymentProviders, PaymentRepo, PaymentRequest, StagePayments,
+    PaymentMethodRepo, PaymentProviders, PaymentRequest, StagePayments, newest_payment,
 };
 use hypha_shipping::{OfferOutcome, RateProvider};
 use hypha_tax::{TaxLine, TaxSource};
@@ -691,24 +691,23 @@ async fn replay<S: HasOrders + HasPayments + HasPaymentMethods, Q: PaymentProvid
         ))
         .into());
     };
-    let payment = ports
-        .payments()
-        .list_for_order(order.id())
-        .await?
-        .into_iter()
-        .next();
+    let payment = newest_payment(ports, order.id()).await?;
     let next_action = match &payment {
         Some(p) if p.status().is_open() => {
-            let settings = match p.method() {
-                Some(id) => ports
-                    .payment_methods()
-                    .get(id)
-                    .await?
-                    .map(|m| m.settings().clone()),
+            let method = match p.method() {
+                Some(id) => ports.payment_methods().get(id).await?,
                 None => None,
             };
-            let settings = settings.unwrap_or(serde_json::Value::Null);
-            Some(start(providers, &order, p, settings).await)
+            Some(match (method, p.method()) {
+                (Some(method), _) => start(providers, &order, p, method.settings().clone()).await,
+                // `manual` takes no settings: its instructions are the payment's copy.
+                _ if p.provider().is_manual() => {
+                    start(providers, &order, p, serde_json::Value::Null).await
+                }
+                // Another provider needs the method's settings, and the method is gone.
+                (None, Some(id)) => Err(PaymentError::MethodUnavailable(id)),
+                (None, None) => Err(PaymentError::UnknownProvider(p.provider().clone())),
+            })
         }
         _ => None,
     };

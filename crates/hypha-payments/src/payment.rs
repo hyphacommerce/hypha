@@ -8,6 +8,7 @@ use hypha_core::{
 use crate::{
     PaymentError, PaymentMethod, ProviderKey,
     events::{PAYMENT, PaymentCreated, PaymentPaid, PaymentVoided},
+    method::instructions_text,
 };
 
 /// Where one payment is (design note 0027, PA7). Manual payments use `Pending`, `Paid`
@@ -76,7 +77,10 @@ impl PaymentStatus {
         )
     }
 
-    /// Nothing collected yet, and it could still be: what cancelling an order voids.
+    /// Nothing collected yet, and it could still be: what marking an order paid
+    /// records. Cancelling an order voids the `pending` ones; an `authorized` one holds
+    /// money only its provider can release, so cancelling refuses it
+    /// (`payment_authorized`) until providers can.
     pub fn is_open(self) -> bool {
         matches!(self, PaymentStatus::Pending | PaymentStatus::Authorized)
     }
@@ -428,16 +432,7 @@ impl Payment {
         if s.voided_at.is_some() != (s.status == PaymentStatus::Voided) {
             return Err(inconsistent("voided_at doesn't match the status"));
         }
-        let instructions = match s.instructions {
-            Some(text) => {
-                let text = text.trim().to_string();
-                if text.chars().count() > PaymentMethod::MAX_INSTRUCTIONS_LEN {
-                    return Err(PaymentError::InstructionsTooLong);
-                }
-                (!text.is_empty()).then_some(text)
-            }
-            None => None,
-        };
+        let instructions = instructions_text(s.instructions)?;
         Ok(Self {
             id: s.id,
             version: s.version,

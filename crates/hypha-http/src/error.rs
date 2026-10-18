@@ -793,7 +793,10 @@ impl From<hypha_order_actions::CommandError> for ApiError {
             // The order or fulfilment in the URL; the location comes in the body.
             E::OrderNotFound(_) | E::FulfillmentNotFound(_) => StatusCode::NOT_FOUND,
             E::LocationNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            E::HasFulfillments { .. } => StatusCode::CONFLICT,
+            // The order's or its payments' state.
+            E::HasFulfillments { .. } | E::NotPayable { .. } | E::PaymentAuthorized { .. } => {
+                StatusCode::CONFLICT
+            }
             E::Order(o) => match order_error_status(o) {
                 Some(status) => status,
                 None => return Self::internal(e),
@@ -828,6 +831,8 @@ impl From<hypha_order_actions::CommandError> for ApiError {
             E::HasFulfillments { fulfillments, .. } => {
                 Some(json!({ "fulfillments": fulfillments }))
             }
+            E::NotPayable { status, .. } => Some(json!({ "financial_status": status.as_str() })),
+            E::PaymentAuthorized { payment, .. } => Some(json!({ "payment": payment })),
             E::Order(o) => order_details(o),
             _ => None,
         };
@@ -906,6 +911,9 @@ fn payment_error_status(e: &hypha_payments::PaymentError) -> Option<StatusCode> 
         P::InvalidTransition { .. } => Some(StatusCode::CONFLICT),
         // A provider that couldn't do what was asked.
         P::ProviderFailed { .. } => Some(StatusCode::BAD_GATEWAY),
+        // An open payment whose method was deleted (only a checkout replay meets it, and
+        // logs it): the state of the store, not the request.
+        P::MethodUnavailable(_) => Some(StatusCode::CONFLICT),
         P::Money(_) | P::CurrencyMismatch { .. } | P::Inconsistent { .. } => None,
     }
 }

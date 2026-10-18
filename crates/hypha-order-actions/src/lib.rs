@@ -15,4 +15,4 @@ pub use commands::{
     OrderPayments, cancel_fulfillment, cancel_order, fulfill, mark_paid,
 };
 pub use email::BuyerEmail;
-pub use view::{OrderView, Unfulfilled, order_view};
+pub use view::{OrderView, Unfulfilled, order_view, view_of};

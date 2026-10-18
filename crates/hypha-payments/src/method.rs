@@ -163,7 +163,7 @@ impl PaymentMethod {
 }
 
 /// Trimmed, blank is none, at most `MAX_INSTRUCTIONS_LEN` characters.
-fn instructions_text(text: Option<String>) -> Result<Option<String>, PaymentError> {
+pub(crate) fn instructions_text(text: Option<String>) -> Result<Option<String>, PaymentError> {
     let Some(text) = text else { return Ok(None) };
     let text = text.trim();
     if text.chars().count() > PaymentMethod::MAX_INSTRUCTIONS_LEN {

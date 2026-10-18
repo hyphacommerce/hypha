@@ -386,13 +386,9 @@ impl Order {
         true
     }
 
-    /// Refused for a cancelled order (`order_cancelled`): what recording a payment by
-    /// hand checks first.
-    pub fn ensure_not_cancelled(&self) -> Result<(), OrderError> {
-        self.refuse_cancelled()
-    }
-
-    fn refuse_cancelled(&self) -> Result<(), OrderError> {
+    /// Refused for a cancelled order (`order_cancelled`): what shipping it and recording
+    /// a payment by hand check first.
+    pub fn refuse_if_cancelled(&self) -> Result<(), OrderError> {
         match self.cancelled {
             Some(_) => Err(OrderError::Cancelled(self.id)),
             None => Ok(()),
@@ -403,7 +399,7 @@ impl Order {
     /// refused for a cancelled order, a line the order doesn't have, or more than a
     /// line has left to ship (the same line twice counts twice).
     pub fn fulfil(&mut self, lines: &[(OrderLineId, Quantity)]) -> Result<(), OrderError> {
-        self.refuse_cancelled()?;
+        self.refuse_if_cancelled()?;
         let mut next = self.lines.clone();
         for (id, quantity) in lines {
             let line = line_in(&mut next, *id)?;
@@ -425,7 +421,7 @@ impl Order {
     /// refused for a cancelled order (its stock is gone back already), a line the order
     /// doesn't have, or more than a line has fulfilled.
     pub fn unfulfil(&mut self, lines: &[(OrderLineId, Quantity)]) -> Result<(), OrderError> {
-        self.refuse_cancelled()?;
+        self.refuse_if_cancelled()?;
         let mut next = self.lines.clone();
         for (id, quantity) in lines {
             let line = line_in(&mut next, *id)?;
@@ -1077,7 +1073,7 @@ mod tests {
         let cancelled = Err(OrderError::Cancelled(order.id()));
         assert_eq!(order.fulfil(&[(line_id(1), q(1))]), cancelled);
         assert_eq!(order.unfulfil(&[(line_id(1), q(1))]), cancelled);
-        assert_eq!(order.ensure_not_cancelled(), cancelled);
+        assert_eq!(order.refuse_if_cancelled(), cancelled);
     }
 
     #[test]

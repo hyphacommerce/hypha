@@ -245,8 +245,9 @@ pub async fn update<S: Storage>(
     Ok(Json(PaymentMethodResponse::new(&method)?))
 }
 
-/// Deletes a payment method. One a pending payment uses is refused
-/// (`payment_method_in_use`, 409): disable it instead. Payments it made keep its name.
+/// Deletes a payment method. One an open (pending or authorized) payment uses is
+/// refused (`payment_method_in_use`, 409): disable it instead. Payments it made keep
+/// its name.
 #[utoipa::path(
     delete,
     path = "/admin/payment-methods/{id}",

@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use hypha_core::{
     Attempts, AuthError, Clock, Ctx, ErrorCode, FulfillmentId, HasBatch, HasIdempotency,
     IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, LocationId,
-    OrderId, OrderLineId, Quantity, QuantityError, RepoError, Scope, StageIdempotency, VariantId,
-    earlier_id,
+    OrderId, OrderLineId, PaymentId, Quantity, QuantityError, RepoError, Scope, StageIdempotency,
+    VariantId, earlier_id,
 };
 use hypha_fulfillment::{
     Fulfillment, FulfillmentError, FulfillmentLine, FulfillmentRepo, HasFulfillments,
@@ -48,6 +48,18 @@ pub enum CommandError {
     FulfillmentNotFound(FulfillmentId),
     #[error("location {0} not found")]
     LocationNotFound(LocationId),
+    /// Its payment status can't be settled by recording money by hand: some was
+    /// collected or given back already (partially paid, refunded), or every payment was
+    /// voided. Refunds and partial payments come with payment spores.
+    #[error("order {order}'s payments are {status}; it can't be marked paid")]
+    NotPayable {
+        order: OrderId,
+        status: hypha_core::FinancialStatus,
+    },
+    /// An authorized payment holds money only its provider can capture or release:
+    /// marking the order paid or cancelling it waits for providers that can.
+    #[error("payment {payment} of order {order} is authorized; only its provider can settle it")]
+    PaymentAuthorized { order: OrderId, payment: PaymentId },
     /// Cancelling an order with standing fulfilments: these, to cancel first (FU7).
     #[error("order {order} has {} standing fulfilments; cancel them first", .fulfillments.len())]
     HasFulfillments {
@@ -71,6 +83,8 @@ impl ErrorCode for CommandError {
             CommandError::FulfillmentNotFound(_) => "fulfillment_not_found",
             CommandError::LocationNotFound(_) => "location_not_found",
             CommandError::HasFulfillments { .. } => "order_has_fulfillments",
+            CommandError::NotPayable { .. } => "order_not_payable",
+            CommandError::PaymentAuthorized { .. } => "payment_authorized",
         }
     }
 }
@@ -331,8 +345,9 @@ pub struct OrderPayments {
 /// its pending payments are voided (design note 0027, PA8: cash never collected, a
 /// transfer never sent), in the same batch as the order, whose payment status follows
 /// (`voided` once every payment is). Refused while fulfilments stand
-/// (`order_has_fulfillments`, listing them). A paid payment stays paid until refunds
-/// exist. Cancelling it again changes nothing, and says so (`false`), so only the
+/// (`order_has_fulfillments`, listing them), and while a payment is authorized
+/// (`payment_authorized`: the held money is its provider's to release, which no
+/// provider can yet). A paid payment stays paid until refunds exist. Cancelling it again changes nothing, and says so (`false`), so only the
 /// request that cancelled it tells the buyer.
 pub async fn cancel_order<S: OrderActionPorts>(
     ctx: &Ctx,
@@ -379,12 +394,21 @@ async fn cancel_order_once<S: OrderActionPorts>(
         }
         Err(e) => return Err(e.into()),
     }
+    let mut payments = ports.payments().list_for_order(order.id()).await?;
+    if let Some(held) = payments
+        .iter()
+        .find(|p| p.status() == PaymentStatus::Authorized)
+    {
+        return Err(CommandError::PaymentAuthorized {
+            order: order.id(),
+            payment: held.id(),
+        });
+    }
     let mut stock = Stock::load(ports, &order).await?;
     let lines: Vec<OrderLineId> = order.lines().iter().map(|l| l.id).collect();
     for line in lines {
         stock.change(&order, line, |item, reference| Ok(item.release(reference)))?;
     }
-    let mut payments = ports.payments().list_for_order(order.id()).await?;
     let mut voided = Vec::new();
     for (i, payment) in payments.iter_mut().enumerate() {
         if payment.status() == PaymentStatus::Pending && payment.void(now)? {
@@ -413,15 +437,22 @@ pub struct MarkPaid {
     pub reference: Option<String>,
 }
 
-/// Records the order's pending payment as paid, with `reference` (design note 0027,
-/// §5): the order's payment status follows (`paid`, recording `order.paid`), in one
-/// batch. An order with no open payment (placed before payments, or with nothing to pay
-/// at checkout) gets a `manual` payment of its total, created and paid on the spot, so
-/// this works for every order.
+/// Records money staff received by hand (design note 0027, §5), with `reference`, in
+/// one batch with the order, whose payment status follows (`paid` records
+/// `order.paid`):
 ///
-/// Marking a paid order again changes nothing, even when two requests mark it at once
-/// (the loser of the race reloads and finds it paid). A cancelled order is refused
-/// (`order_cancelled`).
+/// - an order with open payments: its `pending` ones become `paid` (an `authorized` one
+///   is refused, `payment_authorized`: only its provider can capture it);
+/// - an order with none and a `pending` status (placed before payments, with nothing to
+///   pay at checkout, or whose every attempt failed): a `manual` payment of its total,
+///   created and paid on the spot;
+/// - a `paid` order: nothing changes, even when two requests mark it at once (the loser
+///   of the race reloads and finds it paid);
+/// - any other status (partially paid or refunded, refunded, voided) is refused
+///   (`order_not_payable`): money moved already, so recording the whole total again
+///   would be wrong.
+///
+/// A cancelled order is refused (`order_cancelled`).
 pub async fn mark_paid<S: OrderActionPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -445,33 +476,53 @@ async fn mark_paid_once<S: OrderActionPorts>(
     clock: &impl Clock,
     input: &MarkPaid,
 ) -> Result<OrderPayments, CommandError> {
+    use hypha_core::FinancialStatus;
+
     let mut order = load_order(ports, input.order).await?;
     let mut payments = ports.payments().list_for_order(order.id()).await?;
-    if order.financial_status() == hypha_core::FinancialStatus::Paid {
+    if order.financial_status() == FinancialStatus::Paid {
         return Ok(OrderPayments { order, payments });
     }
-    order.ensure_not_cancelled()?;
+    order.refuse_if_cancelled()?;
+    if let Some(held) = payments
+        .iter()
+        .find(|p| p.status() == PaymentStatus::Authorized)
+    {
+        return Err(CommandError::PaymentAuthorized {
+            order: order.id(),
+            payment: held.id(),
+        });
+    }
     let now = clock.now();
-    // The newest open one: what checkout started.
-    let open = payments.iter().position(|p| p.status().is_open());
-    let (index, created) = match open {
-        Some(i) => (i, false),
-        None => {
-            let id = hypha_core::PaymentId::from_uuid(ids.new_uuid());
-            let payment =
-                Payment::new(NewPayment::recorded_by_hand(id, order.id(), order.total()))?;
-            payments.insert(0, payment);
-            (0, true)
+    let mut changed: Vec<usize> = (0..payments.len())
+        .filter(|&i| payments[i].status() == PaymentStatus::Pending)
+        .collect();
+    let created = changed.is_empty();
+    if created {
+        if order.financial_status() != FinancialStatus::Pending {
+            return Err(CommandError::NotPayable {
+                order: order.id(),
+                status: order.financial_status(),
+            });
         }
-    };
-    payments[index].pay(now, input.reference.clone())?;
+        let id = hypha_core::PaymentId::from_uuid(ids.new_uuid());
+        let payment = Payment::new(NewPayment::recorded_by_hand(id, order.id(), order.total()))?;
+        // Newest first, like the repo lists them.
+        payments.insert(0, payment);
+        changed.push(0);
+    }
+    for &i in &changed {
+        payments[i].pay(now, input.reference.clone())?;
+    }
     order.set_financial_status(financial_status(order.total(), &payments)?);
 
     let mut batch = ports.batch();
-    if created {
-        batch.insert_payment(&mut payments[index]);
-    } else {
-        batch.update_payment(&mut payments[index]);
+    for &i in &changed {
+        if created {
+            batch.insert_payment(&mut payments[i]);
+        } else {
+            batch.update_payment(&mut payments[i]);
+        }
     }
     batch.update_order(&mut order);
     ports.commit(batch).await?;

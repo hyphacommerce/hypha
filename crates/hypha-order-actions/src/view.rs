@@ -41,7 +41,20 @@ pub async fn order_view<S: HasOrders + HasInventoryItems + HasPayments>(
         .get(id)
         .await?
         .ok_or(CommandError::OrderNotFound(id))?;
+    // In series: one store runs one query at a time (Postgres: a connection per
+    // request), so joining these would gain nothing.
     let payments = ports.payments().list_for_order(id).await?;
+    view_of(ports, order, payments).await
+}
+
+/// The view of an order and its payments a command just returned (no need to read
+/// them again): only the stock it waits in is read. The caller checked `orders:read`
+/// (or more) already.
+pub async fn view_of<S: HasInventoryItems>(
+    ports: &S,
+    order: Order,
+    payments: Vec<Payment>,
+) -> Result<OrderView, CommandError> {
     if order.cancelled().is_some() {
         return Ok(OrderView {
             order,

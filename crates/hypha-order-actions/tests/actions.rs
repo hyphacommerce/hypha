@@ -15,7 +15,9 @@ use hypha_orders::{
     CancelReason, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderError, OrderLine,
     OrderNumber, OrderRepo,
 };
-use hypha_payments::{NewPayment, Payment, PaymentError, PaymentRepo, PaymentStatus, ProviderKey};
+use hypha_payments::{
+    NewPayment, Payment, PaymentError, PaymentRepo, PaymentSnapshot, PaymentStatus, ProviderKey,
+};
 use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
@@ -936,4 +938,206 @@ fn cancelling_an_order_without_payments_leaves_it_pending() {
     let world = World::new();
     let cancelled = world.cancel(CancelReason::Customer).unwrap();
     assert_eq!(cancelled.financial_status(), FinancialStatus::Pending);
+}
+
+/// Payment `n` of the order, stored as `status` with `refunded` given back (built
+/// straight from a snapshot: providers that authorize and refund don't exist yet), and
+/// the order's payment status following its payments.
+fn stored_payment(world: &World, n: u128, amount: i64, status: PaymentStatus, refunded: i64) {
+    let mut payment = Payment::restore(PaymentSnapshot {
+        id: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8100 + n)),
+        version: hypha_core::Version::NEW,
+        stamps: None,
+        order: order_id(),
+        method: None,
+        method_name: None,
+        provider: ProviderKey::manual(),
+        amount: eur(amount),
+        status,
+        refunded: eur(refunded),
+        reference: None,
+        instructions: None,
+        paid_at: status.captured().then_some(FixedClock::DEFAULT),
+        voided_at: (status == PaymentStatus::Voided).then_some(FixedClock::DEFAULT),
+    })
+    .unwrap();
+    block_on(world.payments.insert(&mut payment)).unwrap();
+    let payments = block_on(world.payments.list_for_order(order_id())).unwrap();
+    let mut order = world.order();
+    order.set_financial_status(hypha_payments::financial_status(order.total(), &payments).unwrap());
+    block_on(world.orders.update(&mut order)).unwrap();
+}
+
+#[test]
+fn marking_paid_records_every_pending_payment() {
+    let world = World::new();
+    stored_payment(&world, 1, 1200, PaymentStatus::Pending, 0);
+    stored_payment(&world, 2, 800, PaymentStatus::Pending, 0);
+    let done = world.mark_paid(Some("RF-1")).unwrap();
+    assert_eq!(done.order.financial_status(), FinancialStatus::Paid);
+    assert_eq!(done.payments.len(), 2, "no manual payment added");
+    for p in &done.payments {
+        assert_eq!(
+            (p.status(), p.reference()),
+            (PaymentStatus::Paid, Some("RF-1"))
+        );
+    }
+    assert_eq!(
+        block_on(world.payments.list_for_order(order_id())),
+        Ok(done.payments)
+    );
+}
+
+#[test]
+fn marking_pending_payments_paid_besides_one_already_paid() {
+    // Partially paid: part collected, the rest still pending.
+    let world = World::new();
+    stored_payment(&world, 1, 1200, PaymentStatus::Paid, 0);
+    stored_payment(&world, 2, 800, PaymentStatus::Pending, 0);
+    assert_eq!(
+        world.order().financial_status(),
+        FinancialStatus::PartiallyPaid
+    );
+    let done = world.mark_paid(None).unwrap();
+    assert_eq!(done.order.financial_status(), FinancialStatus::Paid);
+    assert_eq!(done.payments.len(), 2);
+}
+
+#[test]
+fn an_authorized_payment_isnt_marked_paid_by_hand() {
+    for others in [vec![], vec![PaymentStatus::Pending]] {
+        let world = World::new();
+        stored_payment(&world, 1, 2000, PaymentStatus::Authorized, 0);
+        for (n, status) in others.iter().enumerate() {
+            stored_payment(&world, 2 + n as u128, 2000, *status, 0);
+        }
+        let before = world.order();
+        let events = world.outbox.types().len();
+        assert_eq!(
+            world.mark_paid(None),
+            Err(CommandError::PaymentAuthorized {
+                order: order_id(),
+                payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8101)),
+            })
+        );
+        assert_eq!(world.order(), before);
+        assert_eq!(world.outbox.types().len(), events);
+    }
+}
+
+#[test]
+fn money_already_moved_isnt_recorded_again() {
+    let cases = [
+        (PaymentStatus::Paid, 500, 0, FinancialStatus::PartiallyPaid),
+        (
+            PaymentStatus::PartiallyRefunded,
+            2000,
+            500,
+            FinancialStatus::PartiallyRefunded,
+        ),
+        (
+            PaymentStatus::Refunded,
+            2000,
+            2000,
+            FinancialStatus::Refunded,
+        ),
+        // Every payment voided, on an order still open.
+        (PaymentStatus::Voided, 2000, 0, FinancialStatus::Voided),
+    ];
+    for (payment, amount, refunded, status) in cases {
+        let world = World::new();
+        stored_payment(&world, 1, amount, payment, refunded);
+        assert_eq!(world.order().financial_status(), status);
+        let events = world.outbox.types().len();
+        assert_eq!(
+            world.mark_paid(None),
+            Err(CommandError::NotPayable {
+                order: order_id(),
+                status
+            }),
+            "{payment}"
+        );
+        assert_eq!(world.order().financial_status(), status);
+        assert_eq!(
+            block_on(world.payments.list_for_order(order_id()))
+                .unwrap()
+                .len(),
+            1,
+            "no manual payment for {payment}"
+        );
+        assert_eq!(world.outbox.types().len(), events);
+    }
+}
+
+#[test]
+fn an_order_whose_payments_failed_gets_a_manual_one() {
+    let world = World::new();
+    stored_payment(&world, 1, 2000, PaymentStatus::Failed, 0);
+    assert_eq!(world.order().financial_status(), FinancialStatus::Pending);
+    let done = world.mark_paid(None).unwrap();
+    assert_eq!(done.order.financial_status(), FinancialStatus::Paid);
+    assert_eq!(done.payments.len(), 2);
+    assert_eq!(
+        (done.payments[0].provider(), done.payments[0].status()),
+        (&ProviderKey::manual(), PaymentStatus::Paid)
+    );
+}
+
+#[test]
+fn marking_paid_twice_at_once_succeeds_both_times() {
+    let world = World::new();
+    let pending = pending_payment(&world);
+    // Both requests load the order and its pending payment; the other one commits first.
+    let stale_order = world.order();
+    let stale_payments = block_on(world.payments.list_for_order(order_id())).unwrap();
+    let first = world.mark_paid(Some("first")).unwrap();
+    let events = world.outbox.types().len();
+
+    world.orders.serve_next_get(stale_order);
+    world.payments.serve_next_list(stale_payments);
+    let second = world.mark_paid(Some("second")).unwrap();
+    // The loser's write was stale; it reloaded, found the order paid and left it.
+    assert_eq!(second, first);
+    assert_eq!(second.order.financial_status(), FinancialStatus::Paid);
+    let stored = block_on(world.payments.list_for_order(order_id())).unwrap();
+    assert_eq!(stored.len(), 1, "no duplicate manual payment");
+    assert_eq!(
+        (stored[0].id(), stored[0].status(), stored[0].reference()),
+        (pending.id(), PaymentStatus::Paid, Some("first"))
+    );
+    assert_eq!(world.outbox.types().len(), events);
+}
+
+#[test]
+fn marking_an_order_without_payments_twice_at_once_records_one() {
+    let world = World::new();
+    let stale_order = world.order();
+    let first = world.mark_paid(None).unwrap();
+    // The loser saw no payments: it creates a manual one, its batch fails on the stale
+    // order, so that payment is never written.
+    world.orders.serve_next_get(stale_order);
+    world.payments.serve_next_list(vec![]);
+    let second = world.mark_paid(None).unwrap();
+    assert_eq!(second, first);
+    assert_eq!(
+        block_on(world.payments.list_for_order(order_id()))
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn an_order_with_an_authorized_payment_isnt_cancelled() {
+    let world = World::new();
+    stored_payment(&world, 1, 2000, PaymentStatus::Authorized, 0);
+    let before = (world.order(), world.stock());
+    assert_eq!(
+        world.cancel(CancelReason::Customer),
+        Err(CommandError::PaymentAuthorized {
+            order: order_id(),
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8101)),
+        })
+    );
+    assert_eq!((world.order(), world.stock()), before);
 }

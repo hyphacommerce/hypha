@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicI64, Ordering},
+};
 
 use hypha_core::{
     Keyset, OrderId, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
@@ -14,6 +17,8 @@ pub struct InMemoryOrderRepo {
     /// The last number handed out; the first `next_number` is 1001, like Postgres.
     last_number: AtomicI64,
     pub(crate) outbox: InMemoryOutbox,
+    /// What the next `get` returns instead of the stored order (`serve_next_get`).
+    stale: Mutex<Option<Order>>,
 }
 
 impl Default for InMemoryOrderRepo {
@@ -22,6 +27,7 @@ impl Default for InMemoryOrderRepo {
             orders: Table::default(),
             last_number: AtomicI64::new(1000),
             outbox: InMemoryOutbox::default(),
+            stale: Mutex::new(None),
         }
     }
 }
@@ -38,6 +44,12 @@ impl InMemoryOrderRepo {
     /// The events this repo wrote (into its outbox, shared or not).
     pub fn outbox(&self) -> &InMemoryOutbox {
         &self.outbox
+    }
+
+    /// The next `get` returns `order`, a copy loaded before another request committed:
+    /// for testing a command that loses that race (its write is then stale).
+    pub fn serve_next_get(&self, order: Order) {
+        *self.stale.lock().unwrap() = Some(order);
     }
 }
 
@@ -58,6 +70,10 @@ pub(crate) fn unique(new: &Order, other: &Order) -> Option<&'static str> {
 
 impl OrderRepo for InMemoryOrderRepo {
     async fn get(&self, id: OrderId) -> Result<Option<Order>, RepoError> {
+        let stale = self.stale.lock().unwrap().take();
+        if let Some(order) = stale.filter(|o| o.id() == id) {
+            return Ok(Some(order));
+        }
         Ok(self.orders.get(&id))
     }
 
