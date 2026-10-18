@@ -24,7 +24,11 @@ export type RateKind = RateDraft["kind"];
 
 export const RATE_KINDS: { value: RateKind; label: string; description: string }[] = [
   { value: "flat", label: "Flat", description: "One price per order." },
-  { value: "free_over", label: "Free from an amount", description: "A price, free from a subtotal." },
+  {
+    value: "free_over",
+    label: "Free from an amount",
+    description: "A price, free from a subtotal.",
+  },
   { value: "subtotal", label: "By subtotal", description: "Tiers by the order's subtotal." },
   { value: "weight", label: "By weight", description: "Tiers by the order's weight." },
   { value: "provider", label: "Rate app", description: "Quoted live by a rate app." },
@@ -39,7 +43,18 @@ export function emptyDraft(kind: RateKind, currency: Currency): RateDraft {
       return { kind, tables: [{ currency, price: "", freeFrom: "" }] };
     case "subtotal":
     case "weight":
-      return { kind, tables: [{ currency, tiers: [{ upTo: "", price: "" }, { upTo: "", price: "" }] }] };
+      return {
+        kind,
+        tables: [
+          {
+            currency,
+            tiers: [
+              { upTo: "", price: "" },
+              { upTo: "", price: "" },
+            ],
+          },
+        ],
+      };
     case "provider":
       return { kind, provider: "", service: "" };
   }
@@ -50,11 +65,15 @@ export function toDraft(rate: RateDto, currencies: Currencies): RateDraft {
   if (rate.type === "provider") {
     return { kind: "provider", provider: rate.provider, service: rate.service };
   }
-  const price = (currency: Currency, amount: number) => moneyInput({ amount, currency }, currencies);
+  const price = (currency: Currency, amount: number) =>
+    moneyInput({ amount, currency }, currencies);
   if (rate.basis === "flat") {
     return {
       kind: "flat",
-      prices: rate.tables.map((t) => ({ currency: t.currency, price: price(t.currency, t.tiers[0].amount) })),
+      prices: rate.tables.map((t) => ({
+        currency: t.currency,
+        price: price(t.currency, t.tiers[0].amount),
+      })),
     };
   }
   const isFreeOver =
@@ -81,7 +100,11 @@ export function toDraft(rate: RateDto, currencies: Currencies): RateDraft {
       currency: t.currency,
       tiers: t.tiers.map((tier) => ({
         upTo:
-          tier.up_to == null ? "" : basis === "weight" ? String(tier.up_to) : price(t.currency, tier.up_to),
+          tier.up_to == null
+            ? ""
+            : basis === "weight"
+              ? String(tier.up_to)
+              : price(t.currency, tier.up_to),
         price: price(t.currency, tier.amount),
       })),
     })),
@@ -101,7 +124,9 @@ export function fromDraft(
       if (!draft.provider || !draft.service.trim()) {
         return { error: "Choose a rate app and the service it quotes." };
       }
-      return { rate: { type: "provider", provider: draft.provider, service: draft.service.trim() } };
+      return {
+        rate: { type: "provider", provider: draft.provider, service: draft.service.trim() },
+      };
     case "flat": {
       const tables = [];
       for (const { currency, price } of draft.prices) {
@@ -172,8 +197,14 @@ export function describeRate(rate: RateDto, currencies: Currencies): string {
     case "free_over":
       return rate.tables
         .map((t) => {
-          const price = formatMoney({ amount: t.tiers[0].amount, currency: t.currency }, currencies);
-          const from = formatMoney({ amount: t.tiers[0].up_to ?? 0, currency: t.currency }, currencies);
+          const price = formatMoney(
+            { amount: t.tiers[0].amount, currency: t.currency },
+            currencies,
+          );
+          const from = formatMoney(
+            { amount: t.tiers[0].up_to ?? 0, currency: t.currency },
+            currencies,
+          );
           return `${price}, free from ${from}`;
         })
         .join(" · ");

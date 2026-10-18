@@ -19,25 +19,70 @@ function scale(hexes: string[]): Scale {
 
 /** Clay: clay-700 is the fill with white ink (5.6:1); clay-300 the fill on dark. */
 const clay = scale([
-  "#FDF4EF", "#FAE5DA", "#F3C9B3", "#E9A584", "#DD7F57", "#CC6339",
-  "#B4502A", "#953F21", "#77331D", "#5C2918", "#3A190E",
+  "#FDF4EF",
+  "#FAE5DA",
+  "#F3C9B3",
+  "#E9A584",
+  "#DD7F57",
+  "#CC6339",
+  "#B4502A",
+  "#953F21",
+  "#77331D",
+  "#5C2918",
+  "#3A190E",
 ]);
 /** Warm stone greys. */
 const stone = scale([
-  "#FBF8F3", "#F4EFE7", "#E8E1D6", "#D5CCBE", "#ABA192", "#7D7466",
-  "#635B4F", "#4D463C", "#36312A", "#26221D", "#1A1714",
+  "#FBF8F3",
+  "#F4EFE7",
+  "#E8E1D6",
+  "#D5CCBE",
+  "#ABA192",
+  "#7D7466",
+  "#635B4F",
+  "#4D463C",
+  "#36312A",
+  "#26221D",
+  "#1A1714",
 ]);
 const moss = scale([
-  "#F1F7EE", "#DEEDD8", "#BFDCB3", "#97C586", "#6DA95A", "#4E8E3C",
-  "#3C742D", "#305C25", "#26481E", "#1C3517", "#11220E",
+  "#F1F7EE",
+  "#DEEDD8",
+  "#BFDCB3",
+  "#97C586",
+  "#6DA95A",
+  "#4E8E3C",
+  "#3C742D",
+  "#305C25",
+  "#26481E",
+  "#1C3517",
+  "#11220E",
 ]);
 const amber = scale([
-  "#FFF7E8", "#FEEBC8", "#FBD48D", "#F4B852", "#E49B24", "#C47F10",
-  "#A0650C", "#7F4F0D", "#613D0F", "#472D0C", "#2D1C07",
+  "#FFF7E8",
+  "#FEEBC8",
+  "#FBD48D",
+  "#F4B852",
+  "#E49B24",
+  "#C47F10",
+  "#A0650C",
+  "#7F4F0D",
+  "#613D0F",
+  "#472D0C",
+  "#2D1C07",
 ]);
 const rose = scale([
-  "#FDF2F2", "#FBE3E3", "#F5C3C3", "#EC9B9B", "#E06E6E", "#CC4B4B",
-  "#B03737", "#8F2D2D", "#712626", "#561E1E", "#371212",
+  "#FDF2F2",
+  "#FBE3E3",
+  "#F5C3C3",
+  "#EC9B9B",
+  "#E06E6E",
+  "#CC4B4B",
+  "#B03737",
+  "#8F2D2D",
+  "#712626",
+  "#561E1E",
+  "#371212",
 ]);
 
 /** A token's `[light, dark]` values. */

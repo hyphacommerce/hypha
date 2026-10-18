@@ -154,7 +154,8 @@ export function ProductBulkActions({
               title: "Publish to",
               items: Object.entries(channels).map(([id, name]) => ({
                 label: name,
-                onClick: () => run(`Published to ${name}:`, () => setProductsPublished(id, items, true)),
+                onClick: () =>
+                  run(`Published to ${name}:`, () => setProductsPublished(id, items, true)),
               })),
             },
             {
@@ -169,7 +170,9 @@ export function ProductBulkActions({
                     description: `${name} stops showing and selling them. Other channels keep them.`,
                     actionLabel: "Unpublish",
                     run: () =>
-                      run(`Unpublished from ${name}:`, () => setProductsPublished(id, items, false)),
+                      run(`Unpublished from ${name}:`, () =>
+                        setProductsPublished(id, items, false),
+                      ),
                   }),
               })),
             },
@@ -245,7 +248,9 @@ function CategoryDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={440} purpose="form">
       <DialogHeader
-        title={mode === "add" ? `Add ${products} to a category` : `Remove ${products} from a category`}
+        title={
+          mode === "add" ? `Add ${products} to a category` : `Remove ${products} from a category`
+        }
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>

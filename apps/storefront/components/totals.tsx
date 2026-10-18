@@ -9,10 +9,18 @@ import { LineImage } from "./line-image";
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
     <HStack hAlign="between" vAlign="center">
-      <Text type={strong ? "large" : "body"} color={strong ? "primary" : "secondary"} weight={strong ? "semibold" : undefined}>
+      <Text
+        type={strong ? "large" : "body"}
+        color={strong ? "primary" : "secondary"}
+        weight={strong ? "semibold" : undefined}
+      >
         {label}
       </Text>
-      <Text type={strong ? "large" : "body"} weight={strong ? "semibold" : undefined} hasTabularNumbers>
+      <Text
+        type={strong ? "large" : "body"}
+        weight={strong ? "semibold" : undefined}
+        hasTabularNumbers
+      >
         {value}
       </Text>
     </HStack>
@@ -66,10 +74,10 @@ export function SummaryLine({
       <LineImage image={image} size={48} />
       <StackItem size="fill">
         <VStack gap={0.5}>
-        <Text type="body" weight="medium">
-          {quantity} × {title}
-        </Text>
-        {variant && <Text type="supporting">{variant}</Text>}
+          <Text type="body" weight="medium">
+            {quantity} × {title}
+          </Text>
+          {variant && <Text type="supporting">{variant}</Text>}
         </VStack>
       </StackItem>
       <Text type="body" hasTabularNumbers>

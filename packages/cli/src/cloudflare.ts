@@ -22,7 +22,15 @@ import * as p from "@clack/prompts";
 
 import { Staff, waitForAnswer, waitForHealth } from "./api.ts";
 import { checkR2Keys } from "./cloudflare-token.ts";
-import { type App, apps, type Deployment, type EnvFile, saveDeployment, saveEnv, url } from "./deployment.ts";
+import {
+  type App,
+  apps,
+  type Deployment,
+  type EnvFile,
+  saveDeployment,
+  saveEnv,
+  url,
+} from "./deployment.ts";
 import { connectStorefront, type StorefrontKeys, syncWebhook } from "./storefront.ts";
 import { run } from "./shell.ts";
 import { REPO } from "./templates.ts";
@@ -38,7 +46,13 @@ export const BLOCK = 100;
 
 /** A Rate Limiting binding as `hypha-host-axum config rate-limits` prints it: sized
  * from the deployment's `[rate_limits]` by the API itself (`Rule::binding_limit`). */
-export type Binding = { rule: string; binding: string; slot: number; limit: number; period: number };
+export type Binding = {
+  rule: string;
+  binding: string;
+  slot: number;
+  limit: number;
+  period: number;
+};
 
 /** The database's `host:port`, which the Worker is placed next to. */
 export function databaseHost(databaseUrl: string): string {
@@ -55,9 +69,12 @@ export function checkDatabaseUrl(databaseUrl: string | undefined): string | unde
   } catch {
     return "a Postgres URL like postgres://user:password@host:5432/database";
   }
-  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") return "a postgres:// URL";
+  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:")
+    return "a postgres:// URL";
   if (!parsed.username || !parsed.password) return "a URL with the user and password";
-  if (/^(localhost|127\.|\[?::1\]?$|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(parsed.hostname)) {
+  if (
+    /^(localhost|127\.|\[?::1\]?$|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(parsed.hostname)
+  ) {
     return "a database Cloudflare can reach: Hyperdrive connects from Cloudflare's network, not from here";
   }
   return undefined;
@@ -174,7 +191,11 @@ export function corsRules(adminOrigin: string): string {
     {
       rules: [
         {
-          allowed: { origins: [adminOrigin], methods: ["GET", "HEAD", "PUT"], headers: ["content-type"] },
+          allowed: {
+            origins: [adminOrigin],
+            methods: ["GET", "HEAD", "PUT"],
+            headers: ["content-type"],
+          },
           exposeHeaders: ["ETag"],
           maxAgeSeconds: 3600,
         },
@@ -222,7 +243,9 @@ export function hyperdriveOrigin(databaseUrl: string): string[] {
   return [
     "--connection-string",
     parsed.toString(),
-    ...(sslmode && ["require", "verify-ca", "verify-full"].includes(sslmode) ? ["--sslmode", sslmode] : []),
+    ...(sslmode && ["require", "verify-ca", "verify-full"].includes(sslmode)
+      ? ["--sslmode", sslmode]
+      : []),
     "--caching-disabled",
   ];
 }
@@ -233,7 +256,11 @@ async function redacted<T>(work: Promise<T>, password: string): Promise<T> {
     return await work;
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    throw new Error(password ? message.replaceAll(password, "***").replaceAll(encodeURIComponent(password), "***") : message);
+    throw new Error(
+      password
+        ? message.replaceAll(password, "***").replaceAll(encodeURIComponent(password), "***")
+        : message,
+    );
   }
 }
 
@@ -246,7 +273,12 @@ async function tolerate(work: Promise<unknown>, already: RegExp): Promise<void> 
   }
 }
 
-export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile, tools: Tools): Promise<void> {
+export async function deployCloudflare(
+  dir: string,
+  d: Deployment,
+  env: EnvFile,
+  tools: Tools,
+): Promise<void> {
   const cf = d.cloudflare;
   if (!cf) throw new Error("hypha.json: a cloudflare deployment needs `cloudflare`");
   const databaseUrl = env.get("DATABASE_URL");
@@ -271,9 +303,13 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
     );
   }
   if (!cf.accountId) {
-    const who = JSON.parse(await tools.wrangler(["whoami", "--json"], { capture: true }).catch(() => {
-      throw new Error("wrangler isn't logged in: run `wrangler login` (or set CLOUDFLARE_API_TOKEN)");
-    })) as { accounts?: { id: string; name: string }[] };
+    const who = JSON.parse(
+      await tools.wrangler(["whoami", "--json"], { capture: true }).catch(() => {
+        throw new Error(
+          "wrangler isn't logged in: run `wrangler login` (or set CLOUDFLARE_API_TOKEN)",
+        );
+      }),
+    ) as { accounts?: { id: string; name: string }[] };
     const accounts = who.accounts ?? [];
     if (accounts.length !== 1) {
       throw new Error(
@@ -315,11 +351,18 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
       DATABASE_URL: databaseUrl,
       HYPHA_SECRET_KEY: secretKey,
       HYPHA_CONFIG: join(dir, "hypha.config.toml"),
-      ...pick(env, ["HYPHA_OWNER_EMAIL", "HYPHA_OWNER_PASSWORD", "HYPHA_OWNER_NAME", "HYPHA_STORE_NAME"]),
+      ...pick(env, [
+        "HYPHA_OWNER_EMAIL",
+        "HYPHA_OWNER_PASSWORD",
+        "HYPHA_OWNER_NAME",
+        "HYPHA_STORE_NAME",
+      ]),
     };
     spin.message("Setting the database up");
     await tools.host(binary, ["setup"], hostEnv);
-    const { bindings } = JSON.parse(await tools.host(binary, ["config", "rate-limits"], hostEnv)) as {
+    const { bindings } = JSON.parse(
+      await tools.host(binary, ["config", "rate-limits"], hostEnv),
+    ) as {
       bindings: Binding[];
     };
     stop("Database ready");
@@ -330,7 +373,10 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
     const password = decodeURIComponent(new URL(databaseUrl).password);
     if (cf.hyperdriveId) {
       // Every deploy: the URL may have changed, and the cache must stay off.
-      await redacted(tools.wrangler(["hyperdrive", "update", cf.hyperdriveId, ...origin], { capture: true }), password);
+      await redacted(
+        tools.wrangler(["hyperdrive", "update", cf.hyperdriveId, ...origin], { capture: true }),
+        password,
+      );
     } else {
       const out = await redacted(
         tools.wrangler(["hyperdrive", "create", hyperdriveName(d), ...origin], { capture: true }),
@@ -345,12 +391,18 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
       await saveDeployment(dir, d);
     }
     if (media) {
-      await tolerate(tools.wrangler(["r2", "bucket", "create", bucket(d)], { capture: true }), /already exists|10004/i);
+      await tolerate(
+        tools.wrangler(["r2", "bucket", "create", bucket(d)], { capture: true }),
+        /already exists|10004/i,
+      );
       if (d.domains.admin) {
         const rules = join(dir, ".cors.json");
         await writeFile(rules, corsRules(url(d, d.domains.admin)));
         try {
-          await tools.wrangler(["r2", "bucket", "cors", "set", bucket(d), "--file", rules, "--force"], { capture: true });
+          await tools.wrangler(
+            ["r2", "bucket", "cors", "set", bucket(d), "--file", rules, "--force"],
+            { capture: true },
+          );
         } finally {
           await rm(rules, { force: true });
         }
@@ -358,7 +410,18 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
       if (cf.zoneId) {
         await tolerate(
           tools.wrangler(
-            ["r2", "bucket", "domain", "add", bucket(d), "--domain", d.domains.media, "--zone-id", cf.zoneId, "--force"],
+            [
+              "r2",
+              "bucket",
+              "domain",
+              "add",
+              bucket(d),
+              "--domain",
+              d.domains.media,
+              "--zone-id",
+              cf.zoneId,
+              "--force",
+            ],
             { capture: true },
           ),
           /already|exists/i,
@@ -369,8 +432,9 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
 
     // 3. The Worker, with its secrets.
     const compatibilityDate =
-      /^compatibility_date\s*=\s*"([^"]+)"/m.exec(await readFile(join(WORKER_CRATE, WRANGLER_FILE), "utf8"))?.[1] ??
-      "2026-10-01";
+      /^compatibility_date\s*=\s*"([^"]+)"/m.exec(
+        await readFile(join(WORKER_CRATE, WRANGLER_FILE), "utf8"),
+      )?.[1] ?? "2026-10-01";
     await writeFile(
       join(dir, WRANGLER_FILE),
       wranglerToml(d, {
@@ -387,25 +451,46 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
     );
     const secrets: Record<string, string> = { HYPHA_SECRET_KEY: secretKey };
     if (callerKey) secrets.HYPHA_CALLER_KEY = callerKey;
-    if (media) Object.assign(secrets, { HYPHA_S3_ACCESS_KEY_ID: keyId!, HYPHA_S3_SECRET_ACCESS_KEY: keySecret! });
+    if (media)
+      Object.assign(secrets, {
+        HYPHA_S3_ACCESS_KEY_ID: keyId!,
+        HYPHA_S3_SECRET_ACCESS_KEY: keySecret!,
+      });
     const secretsPath = join(dir, SECRETS_FILE);
     await writeFile(secretsPath, JSON.stringify(secrets), { mode: 0o600 });
     p.log.step("Building and deploying the Worker (worker-build --release)…");
     try {
-      await tools.wrangler(["deploy", "--config", join(dir, WRANGLER_FILE), "--secrets-file", secretsPath]);
+      await tools.wrangler([
+        "deploy",
+        "--config",
+        join(dir, WRANGLER_FILE),
+        "--secrets-file",
+        secretsPath,
+      ]);
     } finally {
       await rm(secretsPath, { force: true });
     }
 
     // 4. Setup may have queued work (a search rebuild): the next tick runs the jobs (W7).
     await tools.wrangler(
-      ["kv", "key", "put", "jobs:written", String(tools.now()), "--namespace-id", cf.kvId, "--remote"],
+      [
+        "kv",
+        "key",
+        "put",
+        "jobs:written",
+        String(tools.now()),
+        "--namespace-id",
+        cf.kvId,
+        "--remote",
+      ],
       { capture: true },
     );
     start("Waiting for the API (a new custom domain can take a minute)");
     if (!(await tools.answers(d))) {
       stop("The API didn't answer", true);
-      throw new Error(`${url(d, d.domains.api)}/health didn't answer in 5 minutes: see \`hypha logs\``);
+      throw new Error(
+        `${url(d, d.domains.api)}/health didn't answer in 5 minutes: see \`hypha logs\``,
+      );
     }
     stop("The API is running");
 
@@ -415,7 +500,9 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
       const password = env.get("HYPHA_OWNER_PASSWORD");
       if (!email || !password) {
         if (!env.get("STOREFRONT_KEY")) {
-          throw new Error("no owner credentials in .env to connect the storefront: set STOREFRONT_KEY and HYPHA_WEBHOOK_SECRET there");
+          throw new Error(
+            "no owner credentials in .env to connect the storefront: set STOREFRONT_KEY and HYPHA_WEBHOOK_SECRET there",
+          );
         }
       } else if (!env.get("STOREFRONT_KEY")) {
         start("Connecting the storefront: a publishable key and its webhook");
@@ -425,7 +512,9 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
         stop("Storefront connected");
       } else {
         const moved = await tools.syncWebhook(d, email, password).catch((e: unknown) => {
-          p.log.warn(`Couldn't check the storefront's webhook: ${e instanceof Error ? e.message : e}`);
+          p.log.warn(
+            `Couldn't check the storefront's webhook: ${e instanceof Error ? e.message : e}`,
+          );
           return null;
         });
         if (moved) p.log.step(`The storefront's webhook now goes to ${moved}`);
@@ -449,7 +538,10 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
         ...(app === "storefront" ? { HYPHA_CF_CACHE_KV: cf.cacheKvId! } : {}),
       };
       // The binding's base URL; the binding itself skips the internet.
-      const appSecrets: Record<string, string> = { HYPHA_API_URL: url(d, d.domains.api), HYPHA_CALLER_KEY: callerKey! };
+      const appSecrets: Record<string, string> = {
+        HYPHA_API_URL: url(d, d.domains.api),
+        HYPHA_CALLER_KEY: callerKey!,
+      };
       if (app === "storefront") {
         appSecrets.STOREFRONT_KEY = env.get("STOREFRONT_KEY") ?? "";
         appSecrets.HYPHA_WEBHOOK_SECRET = env.get("HYPHA_WEBHOOK_SECRET") ?? "";
@@ -467,12 +559,20 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
       start(`Waiting for the ${app} at ${url(d, d.domains[app]!)}`);
       if (!(await tools.reachable(url(d, d.domains[app]!)))) {
         stop(`The ${app} didn't answer`, true);
-        throw new Error(`${url(d, d.domains[app]!)} didn't answer in 5 minutes: see \`hypha logs ${app}\``);
+        throw new Error(
+          `${url(d, d.domains[app]!)} didn't answer in 5 minutes: see \`hypha logs ${app}\``,
+        );
       }
       stop(`The ${app} is running`);
     }
-    if (!media) p.log.warn("Media is off: add an R2 API token's keys to .env (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY), then deploy.");
-    else if (!cf.zoneId) p.log.warn("Files are served by signed URLs: pass --zone-id to `hypha init --force` for the media domain.");
+    if (!media)
+      p.log.warn(
+        "Media is off: add an R2 API token's keys to .env (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY), then deploy.",
+      );
+    else if (!cf.zoneId)
+      p.log.warn(
+        "Files are served by signed URLs: pass --zone-id to `hypha init --force` for the media domain.",
+      );
   } catch (e) {
     if (spinning) stop("Stopped", true);
     throw e;
@@ -481,7 +581,9 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
 
 /** The KV namespace titled `title`: the one already there, or a new one. */
 async function namespace(tools: Tools, title: string): Promise<string> {
-  const listed = JSON.parse(await tools.wrangler(["kv", "namespace", "list"], { capture: true })) as {
+  const listed = JSON.parse(
+    await tools.wrangler(["kv", "namespace", "list"], { capture: true }),
+  ) as {
     id: string;
     title: string;
   }[];
@@ -518,17 +620,31 @@ export function hereTools(d: Deployment, env: EnvFile): Tools {
       return run("wrangler", args, { capture, cwd: REPO, env: auth() });
     },
     async buildHost() {
-      await run("cargo", ["build", "--release", "-p", "hypha-host-axum"], { cwd: REPO, capture: true });
-      return join(process.env.CARGO_TARGET_DIR ?? join(REPO, "target"), "release", "hypha-host-axum");
+      await run("cargo", ["build", "--release", "-p", "hypha-host-axum"], {
+        cwd: REPO,
+        capture: true,
+      });
+      return join(
+        process.env.CARGO_TARGET_DIR ?? join(REPO, "target"),
+        "release",
+        "hypha-host-axum",
+      );
     },
     // Only what setup needs: no DATABASE_URL, HYPHA_* or S3 settings from this shell.
     host: (binary, args, env) =>
-      run(binary, args, { cwd: REPO, env: { RUST_LOG: "info", ...env }, bareEnv: true, capture: true }),
+      run(binary, args, {
+        cwd: REPO,
+        env: { RUST_LOG: "info", ...env },
+        bareEnv: true,
+        capture: true,
+      }),
     async checkToolchain() {
       await run("worker-build", ["--version"], { capture: true }).catch(() => {
         throw new Error("worker-build is missing: `cargo install worker-build`");
       });
-      const targets = await run("rustup", ["target", "list", "--installed"], { capture: true }).catch(() => "");
+      const targets = await run("rustup", ["target", "list", "--installed"], {
+        capture: true,
+      }).catch(() => "");
       if (!targets.includes("wasm32-unknown-unknown")) {
         throw new Error("the wasm target is missing: `rustup target add wasm32-unknown-unknown`");
       }
@@ -536,14 +652,19 @@ export function hereTools(d: Deployment, env: EnvFile): Tools {
     now: () => Date.now(),
     answers: (d) => waitForHealth(d, 300),
     reachable: (target) => waitForAnswer(target, 300),
-    connectStorefront: async (d, email, password) => connectStorefront(d, await Staff.login(d, email, password)),
-    syncWebhook: async (d, email, password) => syncWebhook(d, await Staff.login(d, email, password)),
+    connectStorefront: async (d, email, password) =>
+      connectStorefront(d, await Staff.login(d, email, password)),
+    syncWebhook: async (d, email, password) =>
+      syncWebhook(d, await Staff.login(d, email, password)),
     async deployApp(app, appEnv, secretsFile) {
       const cwd = join(REPO, "apps", app);
       // A Workers build (not a VPS's Node one), with the deployment's values.
       const buildEnv = { ...appEnv, ...auth(), HYPHA_TARGET: "", NODE_ENV: "production" };
       await run("pnpm", ["exec", "vite", "build"], { cwd, env: buildEnv, capture: true });
-      await run("pnpm", ["exec", "cf", "deploy", "--prebuilt", "--secrets-file", secretsFile], { cwd, env: buildEnv });
+      await run("pnpm", ["exec", "cf", "deploy", "--prebuilt", "--secrets-file", secretsFile], {
+        cwd,
+        env: buildEnv,
+      });
     },
   };
 }

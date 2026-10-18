@@ -90,7 +90,9 @@ export function ProductForm({
     }
     setSelections(next);
     setError(undefined);
-    const image = images.findIndex((m) => m.asset_id === variantWith(product, next)?.media_asset_id);
+    const image = images.findIndex(
+      (m) => m.asset_id === variantWith(product, next)?.media_asset_id,
+    );
     if (image >= 0) setShown(image);
   };
 
@@ -164,9 +166,7 @@ export function ProductForm({
                   {formatMoney(variant.price, digits)}
                 </Text>
               ) : null}
-              {product.prices_include_tax === false && (
-                <Text type="supporting">plus tax</Text>
-              )}
+              {product.prices_include_tax === false && <Text type="supporting">plus tax</Text>}
               {variant && !variant.available && <Badge label="Sold out" variant="neutral" />}
             </HStack>
           </VStack>
@@ -271,20 +271,20 @@ export function ProductForm({
               </>
             )}
             {hasDetails && (
-            <Collapsible value="details" trigger={<Heading level={3}>Details</Heading>}>
-              <VStack gap={1}>
-                {product.vendor && <Text>Brand: {product.vendor}</Text>}
-                {product.product_type && <Text>Type: {product.product_type}</Text>}
-                {variant?.title && <Text>Variant: {variant.title}</Text>}
-                {product.tags.length > 0 && (
-                  <HStack gap={1} wrap="wrap">
-                    {product.tags.map((t) => (
-                      <Badge key={t} label={t} variant="neutral" />
-                    ))}
-                  </HStack>
-                )}
-              </VStack>
-            </Collapsible>
+              <Collapsible value="details" trigger={<Heading level={3}>Details</Heading>}>
+                <VStack gap={1}>
+                  {product.vendor && <Text>Brand: {product.vendor}</Text>}
+                  {product.product_type && <Text>Type: {product.product_type}</Text>}
+                  {variant?.title && <Text>Variant: {variant.title}</Text>}
+                  {product.tags.length > 0 && (
+                    <HStack gap={1} wrap="wrap">
+                      {product.tags.map((t) => (
+                        <Badge key={t} label={t} variant="neutral" />
+                      ))}
+                    </HStack>
+                  )}
+                </VStack>
+              </Collapsible>
             )}
             {hasDetails && <Divider />}
           </CollapsibleGroup>

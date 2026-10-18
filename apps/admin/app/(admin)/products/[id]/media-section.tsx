@@ -301,9 +301,7 @@ function LibraryPicker({
   useEffect(() => load(), []);
 
   const toggle = (asset: string, isSelected: boolean) =>
-    setPicked((before) =>
-      isSelected ? [...before, asset] : before.filter((id) => id !== asset),
-    );
+    setPicked((before) => (isSelected ? [...before, asset] : before.filter((id) => id !== asset)));
 
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={760} purpose="form">
@@ -322,66 +320,71 @@ function LibraryPicker({
         />
       </VStack>
       <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
-      <VStack gap={4} padding={4}>
-        {assets === undefined ? (
-          <HStack hAlign="center" padding={6}>
-            <Spinner aria-label="Loading the library" />
-          </HStack>
-        ) : assets.length === 0 ? (
-          <EmptyState
-            icon={<PhotoIcon width={32} />}
-            title={query ? `Nothing matches “${query}”` : "The library is empty"}
-            description={
-              query
-                ? "Search looks at file names, alt text and titles."
-                : "Upload files on the Media page, or drop them on this product."
-            }
-          />
-        ) : (
-          <Grid columns={{ minWidth: 130 }} gap={2}>
-            {assets.map((asset) => {
-              const isAttached = attached.has(asset.id);
-              const isPicked = picked.includes(asset.id);
-              return (
-                <SelectableCard
-                  key={asset.id}
-                  label={asset.title ?? asset.filename}
-                  isSelected={isPicked}
-                  isDisabled={isAttached || (!isPicked && picked.length >= room)}
-                  onChange={(isSelected) => toggle(asset.id, isSelected)}
-                  padding={0}
-                >
-                  <VStack gap={0}>
-                    <Preview
-                      item={{
-                        kind: asset.kind,
-                        url: asset.url ?? "",
-                        thumbnail_url: asset.thumbnail_url,
-                        alt: asset.alt,
-                      }}
-                    />
-                    <VStack gap={0} padding={2}>
-                      <Text type="supporting" maxLines={1}>
-                        {asset.title ?? asset.filename}
-                      </Text>
-                      {isAttached && (
-                        <Text type="supporting" color="secondary">
-                          On this product
+        <VStack gap={4} padding={4}>
+          {assets === undefined ? (
+            <HStack hAlign="center" padding={6}>
+              <Spinner aria-label="Loading the library" />
+            </HStack>
+          ) : assets.length === 0 ? (
+            <EmptyState
+              icon={<PhotoIcon width={32} />}
+              title={query ? `Nothing matches “${query}”` : "The library is empty"}
+              description={
+                query
+                  ? "Search looks at file names, alt text and titles."
+                  : "Upload files on the Media page, or drop them on this product."
+              }
+            />
+          ) : (
+            <Grid columns={{ minWidth: 130 }} gap={2}>
+              {assets.map((asset) => {
+                const isAttached = attached.has(asset.id);
+                const isPicked = picked.includes(asset.id);
+                return (
+                  <SelectableCard
+                    key={asset.id}
+                    label={asset.title ?? asset.filename}
+                    isSelected={isPicked}
+                    isDisabled={isAttached || (!isPicked && picked.length >= room)}
+                    onChange={(isSelected) => toggle(asset.id, isSelected)}
+                    padding={0}
+                  >
+                    <VStack gap={0}>
+                      <Preview
+                        item={{
+                          kind: asset.kind,
+                          url: asset.url ?? "",
+                          thumbnail_url: asset.thumbnail_url,
+                          alt: asset.alt,
+                        }}
+                      />
+                      <VStack gap={0} padding={2}>
+                        <Text type="supporting" maxLines={1}>
+                          {asset.title ?? asset.filename}
                         </Text>
-                      )}
+                        {isAttached && (
+                          <Text type="supporting" color="secondary">
+                            On this product
+                          </Text>
+                        )}
+                      </VStack>
                     </VStack>
-                  </VStack>
-                </SelectableCard>
-              );
-            })}
-          </Grid>
-        )}
-        {next && (
-          <HStack hAlign="center">
-            <Button label="Load more" variant="ghost" isLoading={isLoading} onClick={() => load(next)} />
-          </HStack>
-        )}
-      </VStack>
+                  </SelectableCard>
+                );
+              })}
+            </Grid>
+          )}
+          {next && (
+            <HStack hAlign="center">
+              <Button
+                label="Load more"
+                variant="ghost"
+                isLoading={isLoading}
+                onClick={() => load(next)}
+              />
+            </HStack>
+          )}
+        </VStack>
       </div>
       <VStack gap={3} padding={4}>
         {error && <Banner status="error" title={error} />}

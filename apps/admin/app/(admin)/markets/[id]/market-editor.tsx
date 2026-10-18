@@ -96,7 +96,9 @@ export function MarketEditor({
                 value={name}
                 onChange={setName}
                 onEnter={save}
-                status={name.trim() ? undefined : { type: "error", message: "A market needs a name." }}
+                status={
+                  name.trim() ? undefined : { type: "error", message: "A market needs a name." }
+                }
               />
               <Switch
                 label="Prices include tax"
@@ -123,8 +125,7 @@ export function MarketEditor({
                   Countries
                 </Text>
                 <Text type="supporting" color="secondary">
-                  Shoppers in these countries buy from this market. A country belongs to one
-                  market.
+                  Shoppers in these countries buy from this market. A country belongs to one market.
                 </Text>
               </VStack>
               <CountryPicker

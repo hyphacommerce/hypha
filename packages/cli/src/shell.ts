@@ -11,7 +11,9 @@ export class CommandFailed extends Error {
 
   constructor(command: string, code: number | null, output: string) {
     const tail = output.trim().split("\n").slice(-15).join("\n");
-    super(`\`${command}\` failed${code === null ? "" : ` (exit ${code})`}${tail ? `:\n${tail}` : ""}`);
+    super(
+      `\`${command}\` failed${code === null ? "" : ` (exit ${code})`}${tail ? `:\n${tail}` : ""}`,
+    );
     this.command = command;
     this.code = code;
     this.output = output;
@@ -67,14 +69,20 @@ export function run(program: string, args: string[], options: RunOptions = {}): 
     const child = spawn(program, args, {
       cwd,
       env: env ? { ...base, ...env } : base,
-      stdio: [input === undefined ? "inherit" : "pipe", capture ? "pipe" : "inherit", capture ? "pipe" : "inherit"],
+      stdio: [
+        input === undefined ? "inherit" : "pipe",
+        capture ? "pipe" : "inherit",
+        capture ? "pipe" : "inherit",
+      ],
     });
     let out = "";
     let err = "";
     child.stdout?.on("data", (chunk) => (out += chunk));
     child.stderr?.on("data", (chunk) => (err += chunk));
     if (input !== undefined) child.stdin?.end(input);
-    child.on("error", (e) => reject(new CommandFailed(`${program} ${args.join(" ")}`, null, e.message)));
+    child.on("error", (e) =>
+      reject(new CommandFailed(`${program} ${args.join(" ")}`, null, e.message)),
+    );
     child.on("close", (code) => {
       if (code === 0) resolve(out);
       else reject(new CommandFailed(`${program} ${args.join(" ")}`, code, `${out}\n${err}`));
@@ -105,7 +113,9 @@ export function pipe(
     first.on("error", () => fail(a[0], null));
     second.on("error", () => fail(b[0], null));
     first.on("close", (code) => code !== 0 && fail(`${a[0]} ${a[1].join(" ")}`, code));
-    second.on("close", (code) => (code === 0 ? !failed && resolve() : fail(`${b[0]} ${b[1].join(" ")}`, code)));
+    second.on("close", (code) =>
+      code === 0 ? !failed && resolve() : fail(`${b[0]} ${b[1].join(" ")}`, code),
+    );
   });
 }
 
@@ -134,17 +144,32 @@ export function server(ssh: string, dir: string): Machine {
     ssh,
     sh(command, { capture, input } = {}) {
       // C.UTF-8 exists everywhere; macOS's `LC_CTYPE=UTF-8`, which ssh passes on, doesn't.
-      return run("ssh", [...options, ssh, `export LC_ALL=C.UTF-8; mkdir -p ${quote(dir)} && cd ${quote(dir)} && ${command}`], {
-        capture,
-        input,
-      });
+      return run(
+        "ssh",
+        [
+          ...options,
+          ssh,
+          `export LC_ALL=C.UTF-8; mkdir -p ${quote(dir)} && cd ${quote(dir)} && ${command}`,
+        ],
+        {
+          capture,
+          input,
+        },
+      );
     },
     // Without macOS's extended attributes (COPYFILE_DISABLE, --no-xattrs), which GNU tar
     // warns about, and owned by the user extracting them, not this machine's user ID.
     upload(from, files) {
       return pipe(
         ["tar", ["--no-xattrs", "-C", from, "-czf", "-", ...files]],
-        ["ssh", [...options, ssh, `mkdir -p ${quote(dir)} && tar -C ${quote(dir)} --no-same-owner -xzf -`]],
+        [
+          "ssh",
+          [
+            ...options,
+            ssh,
+            `mkdir -p ${quote(dir)} && tar -C ${quote(dir)} --no-same-owner -xzf -`,
+          ],
+        ],
         { env: { COPYFILE_DISABLE: "1" } },
       );
     },

@@ -75,7 +75,8 @@ export async function loadDeployment(dir: string): Promise<Deployment> {
     throw new Error(`no deployment in ${dir}: run \`hypha init\` first (or pass --dir)`);
   }
   const d = JSON.parse(text) as Deployment;
-  if (d.version !== 1) throw new Error(`${join(dir, STATE_FILE)}: version ${d.version} is newer than this CLI`);
+  if (d.version !== 1)
+    throw new Error(`${join(dir, STATE_FILE)}: version ${d.version} is newer than this CLI`);
   return d;
 }
 
@@ -112,7 +113,11 @@ export class EnvFile {
       }
       lines.push({ key: match[1], value });
     }
-    while (lines.length > 0 && "text" in lines[lines.length - 1] && (lines[lines.length - 1] as { text: string }).text === "") {
+    while (
+      lines.length > 0 &&
+      "text" in lines[lines.length - 1] &&
+      (lines[lines.length - 1] as { text: string }).text === ""
+    ) {
       lines.pop();
     }
     return new EnvFile(lines);

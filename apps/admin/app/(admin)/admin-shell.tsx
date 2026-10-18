@@ -87,7 +87,9 @@ function covers(pathname: string, href: string): boolean {
 }
 
 /** Every item's href, flattened, to find the one that covers a page most closely. */
-const ALL_HREFS = NAV.flatMap((s) => s.items.flatMap((i) => [i.href, ...(i.children ?? []).map((c) => c.href)]));
+const ALL_HREFS = NAV.flatMap((s) =>
+  s.items.flatMap((i) => [i.href, ...(i.children ?? []).map((c) => c.href)]),
+);
 
 /** The nav item a page belongs to: the longest href that covers it. */
 function currentHref(pathname: string): string | undefined {

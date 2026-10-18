@@ -168,7 +168,9 @@ export function ProductPicker({
           </VStack>
         ) : items && items.length === 0 ? (
           <VStack gap={1} padding={6} hAlign="center">
-            <Text weight="medium">{q || statuses.length ? "No products match" : "No products yet"}</Text>
+            <Text weight="medium">
+              {q || statuses.length ? "No products match" : "No products yet"}
+            </Text>
             <Text type="supporting" color="secondary">
               {q || statuses.length
                 ? "Try other words, or clear the status filters."

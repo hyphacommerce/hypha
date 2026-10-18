@@ -31,17 +31,23 @@ export default defineConfig({
     env: {
       ASSETS: bindings.assets(),
       ...workersCache.env,
-      VINEXT_KV_CACHE: bindings.kv(deploy.HYPHA_CF_CACHE_KV ? { id: deploy.HYPHA_CF_CACHE_KV } : undefined),
+      VINEXT_KV_CACHE: bindings.kv(
+        deploy.HYPHA_CF_CACHE_KV ? { id: deploy.HYPHA_CF_CACHE_KV } : undefined,
+      ),
       // Per deployment, so not in source: `.dev.vars` locally (see .env.example), Worker
       // secrets in production. Server-side only (design note 0023, SF2).
       HYPHA_API_URL: bindings.secret(),
       STOREFRONT_KEY: bindings.secret(),
       HYPHA_WEBHOOK_SECRET: bindings.secret(),
-      ...(deploy.STOREFRONT_ROUTING ? { STOREFRONT_ROUTING: bindings.text(deploy.STOREFRONT_ROUTING) } : {}),
+      ...(deploy.STOREFRONT_ROUTING
+        ? { STOREFRONT_ROUTING: bindings.text(deploy.STOREFRONT_ROUTING) }
+        : {}),
       // The API through a Service Binding (lib/api-fetch.workerd.ts), with the
       // deployment's caller key, so the API believes the shopper's address we pass on (not the
       // binding's props: Cloudflare drops them for a Worker with a placement, as the API's).
-      ...(api ? { API: bindings.worker({ worker: api }), HYPHA_CALLER_KEY: bindings.secret() } : {}),
+      ...(api
+        ? { API: bindings.worker({ worker: api }), HYPHA_CALLER_KEY: bindings.secret() }
+        : {}),
     },
     exports: { ...workersCache.exports },
   }),

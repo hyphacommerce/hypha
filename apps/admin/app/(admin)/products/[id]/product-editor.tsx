@@ -61,7 +61,12 @@ export function ProductEditor({
 
   const saved = fromProduct(base, currencies);
   const changed = changes(draft, saved, currency, currencies);
-  const isDirty = changed.product || changed.options || changed.variants || changed.categories || changed.channels;
+  const isDirty =
+    changed.product ||
+    changed.options ||
+    changed.variants ||
+    changed.categories ||
+    changed.channels;
 
   // A new saved product (React's "adjust state while rendering"): take it in, and reset
   // the draft to it unless the draft holds unsaved edits.
@@ -118,9 +123,7 @@ export function ProductEditor({
     });
   };
 
-  const savedTitles = Object.fromEntries(
-    base.variants.map((v) => [v.id, v.title ?? "Default"]),
-  );
+  const savedTitles = Object.fromEntries(base.variants.map((v) => [v.id, v.title ?? "Default"]));
 
   return (
     <>

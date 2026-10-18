@@ -36,7 +36,12 @@ const SORTS: Record<string, SortDef> = {
 };
 
 const FILTERS: FilterDef[] = [
-  { kind: "search", param: "q", label: "Search", placeholder: "Search customers by email, name or phone" },
+  {
+    kind: "search",
+    param: "q",
+    label: "Search",
+    placeholder: "Search customers by email, name or phone",
+  },
 ];
 
 /** "Ana Horvat", or nothing for a customer known only by email. */
@@ -93,7 +98,10 @@ export function CustomersTable({
         title: "No customers yet",
         description: "Checkout adds a customer for each new email; they show up here.",
       }}
-      noResults={{ title: "No customers match", description: "Search looks at emails, names and phones." }}
+      noResults={{
+        title: "No customers match",
+        description: "Search looks at emails, names and phones.",
+      }}
     />
   );
 }

@@ -99,8 +99,7 @@ function load(editor: LexicalEditor, html: string) {
         const dom = new DOMParser().parseFromString(html, "text/html");
         let paragraph: ElementNode | null = null;
         for (const node of $generateNodesFromDOM(editor, dom)) {
-          const isBlock =
-            ($isElementNode(node) || $isDecoratorNode(node)) && !node.isInline();
+          const isBlock = ($isElementNode(node) || $isDecoratorNode(node)) && !node.isInline();
           if (isBlock) {
             paragraph = null;
             root.append(node);

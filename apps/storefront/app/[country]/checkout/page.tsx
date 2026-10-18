@@ -14,7 +14,13 @@ import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { cartId, link } from "@/lib/site";
 
-import { DetailsForm, PAYMENT_STEP, PaymentChoice, PlaceOrder, ShippingChoice } from "./checkout-forms";
+import {
+  DetailsForm,
+  PAYMENT_STEP,
+  PaymentChoice,
+  PlaceOrder,
+  ShippingChoice,
+} from "./checkout-forms";
 
 /** Per request: it reads the shopper's cart or query (design note 0024, §7). */
 export const dynamic = "force-dynamic";
@@ -131,7 +137,9 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
                   <Text color="secondary">This store can't take orders right now.</Text>
                 ) : !detailsDone || !shippingDone ? (
                   <Text color="secondary">
-                    {detailsDone ? "Choose how your order ships first." : "Enter your details first."}
+                    {detailsDone
+                      ? "Choose how your order ships first."
+                      : "Enter your details first."}
                   </Text>
                 ) : (
                   <PaymentChoice

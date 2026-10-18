@@ -18,30 +18,84 @@ function scale(hexes: string[]): Scale {
 
 /** Foxfire: brand-400 is the fill, always with brand-950 ink on it. */
 const brand = scale([
-  "#F5FEE8", "#EAFBCF", "#D9F7A5", "#C6F073", "#B8E948", "#A2D128",
-  "#7EA602", "#5F7E01", "#455C01", "#304204", "#1D2904",
+  "#F5FEE8",
+  "#EAFBCF",
+  "#D9F7A5",
+  "#C6F073",
+  "#B8E948",
+  "#A2D128",
+  "#7EA602",
+  "#5F7E01",
+  "#455C01",
+  "#304204",
+  "#1D2904",
 ]);
 /** Greys with a faint moss tint (oklch chroma 0.006, hue 130). */
 const neutral = scale([
-  "#FAFAF9", "#F3F4F2", "#E6E8E5", "#D4D5D2", "#A3A5A1", "#6A6C68",
-  "#575955", "#444642", "#30322F", "#232522", "#1A1B19",
+  "#FAFAF9",
+  "#F3F4F2",
+  "#E6E8E5",
+  "#D4D5D2",
+  "#A3A5A1",
+  "#6A6C68",
+  "#575955",
+  "#444642",
+  "#30322F",
+  "#232522",
+  "#1A1B19",
 ]);
 /** Emerald, 30° away from brand and darker, so success never reads as brand. */
 const success = scale([
-  "#EDFBF1", "#D9F5E1", "#BAECCA", "#91DBAB", "#5EC386", "#24A965",
-  "#028B4F", "#02703F", "#01532D", "#003B1E", "#002712",
+  "#EDFBF1",
+  "#D9F5E1",
+  "#BAECCA",
+  "#91DBAB",
+  "#5EC386",
+  "#24A965",
+  "#028B4F",
+  "#02703F",
+  "#01532D",
+  "#003B1E",
+  "#002712",
 ]);
 const warning = scale([
-  "#FFF5EA", "#FFE9D1", "#FDD7AC", "#F1BC7E", "#DF9B44", "#C47D04",
-  "#A06604", "#825100", "#613C01", "#462900", "#2F1A00",
+  "#FFF5EA",
+  "#FFE9D1",
+  "#FDD7AC",
+  "#F1BC7E",
+  "#DF9B44",
+  "#C47D04",
+  "#A06604",
+  "#825100",
+  "#613C01",
+  "#462900",
+  "#2F1A00",
 ]);
 const danger = scale([
-  "#FFF4F3", "#FEE7E4", "#FFD1CD", "#FFB0A9", "#F28881", "#E85854",
-  "#C8393A", "#9A3936", "#752725", "#521D1B", "#371210",
+  "#FFF4F3",
+  "#FEE7E4",
+  "#FFD1CD",
+  "#FFB0A9",
+  "#F28881",
+  "#E85854",
+  "#C8393A",
+  "#9A3936",
+  "#752725",
+  "#521D1B",
+  "#371210",
 ]);
 const info = scale([
-  "#F0F8FF", "#DEEFFF", "#C2E2FF", "#95CEFE", "#5DB2F7", "#3496DE",
-  "#037AC0", "#02629C", "#004975", "#003355", "#002139",
+  "#F0F8FF",
+  "#DEEFFF",
+  "#C2E2FF",
+  "#95CEFE",
+  "#5DB2F7",
+  "#3496DE",
+  "#037AC0",
+  "#02629C",
+  "#004975",
+  "#003355",
+  "#002139",
 ]);
 
 /** A token's `[light, dark]` values. */

@@ -79,7 +79,10 @@ export async function readListingPage(input: {
     total: data.total,
     facets: data.facets.filter((f) => f.values.length > 0),
     priceHint: data.price
-      ? { min: major(data.price.min.amount, input.digits), max: major(data.price.max.amount, input.digits) }
+      ? {
+          min: major(data.price.min.amount, input.digits),
+          max: major(data.price.max.amount, input.digits),
+        }
       : undefined,
     nextCursor: data.next_cursor ?? null,
   };

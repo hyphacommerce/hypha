@@ -84,7 +84,8 @@ export function formatDateTime(
       timeZoneName: "short",
     }).format(at);
   }
-  const year = (d: Date) => new Intl.DateTimeFormat("en-GB", { year: "numeric", timeZone }).format(d);
+  const year = (d: Date) =>
+    new Intl.DateTimeFormat("en-GB", { year: "numeric", timeZone }).format(d);
   const thisYear = year(at) === year(new Date());
   return new Intl.DateTimeFormat("en-GB", {
     day: "numeric",

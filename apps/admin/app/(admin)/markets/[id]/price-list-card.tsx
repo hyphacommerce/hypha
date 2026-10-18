@@ -104,7 +104,11 @@ export function PriceListCard({
           </VStack>
           {list && (
             <HStack gap={2}>
-              <Button label="Add fixed price" variant="secondary" onClick={() => setIsAdding(true)} />
+              <Button
+                label="Add fixed price"
+                variant="secondary"
+                onClick={() => setIsAdding(true)}
+              />
               <Button
                 label="Detach"
                 variant="ghost"
@@ -124,7 +128,9 @@ export function PriceListCard({
             <AdjustmentForm market={market} list={list} />
             {!page || page.items.length === 0 ? (
               <Text color="secondary">
-                {isFirstPage ? "No fixed prices: every variant follows the adjustment." : "No more."}
+                {isFirstPage
+                  ? "No fixed prices: every variant follows the adjustment."
+                  : "No more."}
               </Text>
             ) : (
               <Table>
@@ -165,7 +171,9 @@ export function PriceListCard({
                             size="sm"
                             variant="ghost"
                             isDisabled={isPending}
-                            onClick={() => run(() => removeFixedPrice(market.id, list.id, fixed.variant))}
+                            onClick={() =>
+                              run(() => removeFixedPrice(market.id, list.id, fixed.variant))
+                            }
                           />
                         </HStack>
                       </TableCell>
@@ -216,7 +224,9 @@ function AttachForm({
   const bps = parsePercent(percent);
 
   const attach = (input: Parameters<typeof attachPriceList>[2]) =>
-    startTransition(async () => setError((await attachPriceList(market.id, catalog.id, input)).error));
+    startTransition(async () =>
+      setError((await attachPriceList(market.id, catalog.id, input)).error),
+    );
 
   return (
     <VStack gap={3}>
@@ -227,7 +237,9 @@ function AttachForm({
           description="Applied to every base price: -10 is 10% off, 5 is 5% more."
           value={percent}
           onChange={setPercent}
-          status={bps === null ? { type: "error", message: "A number, like -10 or 5.5." } : undefined}
+          status={
+            bps === null ? { type: "error", message: "A number, like -10 or 5.5." } : undefined
+          }
         />
         <Button
           label="Create price list"
@@ -276,7 +288,9 @@ function AdjustmentForm({ market, list }: { market: Market; list: PriceList }) {
           description="Applied to every base price without a fixed price: -10 is 10% off."
           value={percent}
           onChange={setPercent}
-          status={bps === null ? { type: "error", message: "A number, like -10 or 5.5." } : undefined}
+          status={
+            bps === null ? { type: "error", message: "A number, like -10 or 5.5." } : undefined
+          }
         />
         <Button
           label="Save"
@@ -284,7 +298,9 @@ function AdjustmentForm({ market, list }: { market: Market; list: PriceList }) {
           isDisabled={!isChanged}
           onClick={() =>
             bps !== null &&
-            startTransition(async () => setError((await setAdjustment(market.id, list.id, bps)).error))
+            startTransition(async () =>
+              setError((await setAdjustment(market.id, list.id, bps)).error),
+            )
           }
         />
       </HStack>

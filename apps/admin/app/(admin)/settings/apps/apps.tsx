@@ -162,7 +162,12 @@ function AppRow({
               <Text type="supporting" color="secondary">
                 Its rate settings go too.
               </Text>
-              <Button label="Cancel" size="sm" variant="ghost" onClick={() => setConfirming(undefined)} />
+              <Button
+                label="Cancel"
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirming(undefined)}
+              />
               <Button
                 label="Delete app"
                 size="sm"
@@ -181,7 +186,12 @@ function AppRow({
               <Text type="supporting" color="secondary">
                 The current secret stops working at once.
               </Text>
-              <Button label="Cancel" size="sm" variant="ghost" onClick={() => setConfirming(undefined)} />
+              <Button
+                label="Cancel"
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirming(undefined)}
+              />
               <Button
                 label="New secret"
                 size="sm"
@@ -250,13 +260,17 @@ function AppDialog({
   const shownKey =
     app?.key ??
     key ??
-    `app_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
+    `app_${name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")}`;
   const isComplete = name.trim() && shownKey !== "app_";
 
   const submit = () => {
     if (!isComplete) return;
     const timeoutMs = Number(timeout);
-    if (!Number.isInteger(timeoutMs)) return setError("Enter the timeout in milliseconds, like 10000.");
+    if (!Number.isInteger(timeoutMs))
+      return setError("Enter the timeout in milliseconds, like 10000.");
     const input = { name, webhookUrl, timeoutMs, subscriptions: patterns };
     startTransition(async () => {
       if (app) {

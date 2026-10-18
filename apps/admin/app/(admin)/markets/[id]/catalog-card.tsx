@@ -62,8 +62,8 @@ export function CatalogCard({
               Catalog
             </Text>
             <Text type="supporting" color="secondary">
-              The products this market can buy. A product also needs to be active and published
-              to the storefront's channel.
+              The products this market can buy. A product also needs to be active and published to
+              the storefront's channel.
             </Text>
           </VStack>
           {catalog ? (
@@ -81,9 +81,7 @@ export function CatalogCard({
         {!catalog ? (
           <Text color="secondary">This market has no catalog yet, so it sells nothing.</Text>
         ) : !page || page.items.length === 0 ? (
-          <Text color="secondary">
-            {isFirstPage ? "No products yet." : "No more products."}
-          </Text>
+          <Text color="secondary">{isFirstPage ? "No products yet." : "No more products."}</Text>
         ) : (
           <Table>
             <TableHeader>

@@ -29,17 +29,28 @@ type Answer = { status: number; body: unknown };
 
 /** Every name to 127.0.0.1: this machine's deployment, whatever its `*.localhost`. */
 const loopback: LookupFunction = (_host, options, callback) =>
-  options.all ? callback(null, [{ address: "127.0.0.1", family: 4 }]) : callback(null, "127.0.0.1", 4);
+  options.all
+    ? callback(null, [{ address: "127.0.0.1", family: 4 }])
+    : callback(null, "127.0.0.1", 4);
 
 type Address = { address: string; family: 4 | 6 };
 type Resolve = (host: string) => Promise<string[]>;
 
 /** A lookup through `resolve4`/`resolve6` (IPv4 first), falling back to `fallback` for
  * IP literals and for names they don't know (a split-horizon or private name). */
-export function lookupVia(resolve4: Resolve, resolve6: Resolve, fallback: LookupFunction): LookupFunction {
+export function lookupVia(
+  resolve4: Resolve,
+  resolve6: Resolve,
+  fallback: LookupFunction,
+): LookupFunction {
   return (host, options, callback) => {
     if (isIP(host)) return fallback(host, options, callback);
-    const family = options.family === 4 || options.family === "IPv4" ? 4 : options.family === 6 || options.family === "IPv6" ? 6 : 0;
+    const family =
+      options.family === 4 || options.family === "IPv4"
+        ? 4
+        : options.family === 6 || options.family === "IPv6"
+          ? 6
+          : 0;
     Promise.all([
       family === 6 ? [] : resolve4(host).catch(() => []),
       family === 4 ? [] : resolve6(host).catch(() => []),
@@ -65,7 +76,13 @@ const freshLookup = lookupVia(
   systemLookup as LookupFunction,
 );
 
-function send(d: Deployment, method: string, path: string, body?: unknown, token?: string): Promise<Answer> {
+function send(
+  d: Deployment,
+  method: string,
+  path: string,
+  body?: unknown,
+  token?: string,
+): Promise<Answer> {
   const target = new URL(path, `${d.scheme}://${d.domains.api}`);
   const request = target.protocol === "https:" ? httpsRequest : httpRequest;
   const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -131,10 +148,14 @@ export async function waitForAnswer(target: string, seconds: number): Promise<bo
   const request = parsed.protocol === "https:" ? httpsRequest : httpRequest;
   while (Date.now() < until) {
     const status = await new Promise<number>((resolve) => {
-      const req = request(parsed, { method: "GET", timeout: 15_000, lookup: freshLookup }, (res) => {
-        res.resume();
-        resolve(res.statusCode ?? 0);
-      });
+      const req = request(
+        parsed,
+        { method: "GET", timeout: 15_000, lookup: freshLookup },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
       req.on("timeout", () => req.destroy(new Error("timed out")));
       req.on("error", () => resolve(0));
       req.end();
@@ -160,7 +181,9 @@ export class Staff {
     if (status !== 200) throw new ApiError("POST", "/admin/auth/login", status, body);
     const answer = body as { status: string; session?: { token: string } };
     if (answer.status !== "authenticated" || !answer.session) {
-      throw new Error(`logging in needs ${answer.status} (the owner has two-factor on): set the storefront up in the admin`);
+      throw new Error(
+        `logging in needs ${answer.status} (the owner has two-factor on): set the storefront up in the admin`,
+      );
     }
     return new Staff(d, answer.session.token);
   }

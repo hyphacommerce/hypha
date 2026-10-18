@@ -123,7 +123,9 @@ export default async function AppDeliveriesPage({
                         <HStack gap={1}>
                           <Badge label={shown.label} variant={shown.variant} />
                           <Text type="supporting" color="secondary">
-                            {delivery.attempts === 1 ? "1 attempt" : `${delivery.attempts} attempts`}
+                            {delivery.attempts === 1
+                              ? "1 attempt"
+                              : `${delivery.attempts} attempts`}
                           </Text>
                         </HStack>
                         {delivery.last_error && (

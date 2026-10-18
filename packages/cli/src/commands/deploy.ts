@@ -12,7 +12,16 @@ import { defineCommand } from "citty";
 
 import { Staff, waitForHealth } from "../api.ts";
 import { deployCloudflare, hereTools } from "../cloudflare.ts";
-import { apps, type Deployment, ENV_FILE, loadDeployment, loadEnv, saveDeployment, saveEnv, url } from "../deployment.ts";
+import {
+  apps,
+  type Deployment,
+  ENV_FILE,
+  loadDeployment,
+  loadEnv,
+  saveDeployment,
+  saveEnv,
+  url,
+} from "../deployment.ts";
 import { build, images } from "../images.ts";
 import { CommandFailed, type Machine } from "../shell.ts";
 import { connectStorefront, syncWebhook } from "../storefront.ts";
@@ -20,14 +29,28 @@ import { dirArg, guarded, open } from "./shared.ts";
 import { obtainToken } from "./token.ts";
 
 /** What the server runs: copied on every deploy. */
-const FILES = [ENV_FILE, "compose.yaml", "Caddyfile", "hypha.config.toml", "hypha.config.schema.json", "seaweedfs/s3.json"];
+const FILES = [
+  ENV_FILE,
+  "compose.yaml",
+  "Caddyfile",
+  "hypha.config.toml",
+  "hypha.config.schema.json",
+  "seaweedfs/s3.json",
+];
 
 export const deploy = defineCommand({
-  meta: { name: "deploy", description: "Build, copy and start the deployment (again after any change)" },
+  meta: {
+    name: "deploy",
+    description: "Build, copy and start the deployment (again after any change)",
+  },
   args: {
     dir: dirArg,
     "skip-build": { type: "boolean", description: "Use the images already there" },
-    yes: { type: "boolean", alias: "y", description: "Don't ask (installing Docker, DNS warnings)" },
+    yes: {
+      type: "boolean",
+      alias: "y",
+      description: "Don't ask (installing Docker, DNS warnings)",
+    },
   },
   run: ({ args }) =>
     guarded(async () => {
@@ -58,10 +81,19 @@ export const deploy = defineCommand({
         const password = env.get("HYPHA_OWNER_PASSWORD");
         const lines = [
           `API        ${url(deployment, deployment.domains.api)}`,
-          ...(deployment.domains.admin ? [`Admin      ${url(deployment, deployment.domains.admin)}`] : []),
-          ...(deployment.domains.storefront ? [`Storefront ${url(deployment, deployment.domains.storefront)}`] : []),
+          ...(deployment.domains.admin
+            ? [`Admin      ${url(deployment, deployment.domains.admin)}`]
+            : []),
+          ...(deployment.domains.storefront
+            ? [`Storefront ${url(deployment, deployment.domains.storefront)}`]
+            : []),
         ];
-        if (password) lines.push("", `Log in as ${env.get("HYPHA_OWNER_EMAIL")} with ${password}`, "(then change it)");
+        if (password)
+          lines.push(
+            "",
+            `Log in as ${env.get("HYPHA_OWNER_EMAIL")} with ${password}`,
+            "(then change it)",
+          );
         p.note(lines.join("\n"), "Deployed");
         p.outro("Done.");
         return;
@@ -73,7 +105,9 @@ export const deploy = defineCommand({
 
       if (!args["skip-build"]) {
         for (const image of images(apps(d))) {
-          p.log.step(`Building ${image.tag}${machine.ssh ? (d.buildOn === "server" ? " on the server" : " here") : ""}…`);
+          p.log.step(
+            `Building ${image.tag}${machine.ssh ? (d.buildOn === "server" ? " on the server" : " here") : ""}…`,
+          );
           await build(d, machine, image);
         }
       }
@@ -82,7 +116,8 @@ export const deploy = defineCommand({
       spin.start("Copying the deployment and starting it");
       await machine.upload(dir, FILES);
       // The folder is root's alone; inside it, the services' containers read their files.
-      if (machine.ssh) await machine.sh(`chmod 700 . && chmod 600 ${ENV_FILE} && chmod 644 seaweedfs/s3.json`);
+      if (machine.ssh)
+        await machine.sh(`chmod 700 . && chmod 600 ${ENV_FILE} && chmod 644 seaweedfs/s3.json`);
       await machine.sh("docker compose up -d --remove-orphans", { capture: true });
       spin.message("Waiting for the API (the first time, Caddy is also getting certificates)");
       if (!(await waitForHealth(d, 300))) {
@@ -102,7 +137,11 @@ export const deploy = defineCommand({
           await Staff.login(d, email, password)
             .then((staff) => syncWebhook(d, staff))
             .then((moved) => moved && p.log.step(`The storefront's webhook now goes to ${moved}`))
-            .catch((e) => p.log.warn(`Couldn't check the storefront's webhook: ${e instanceof Error ? e.message : e}`));
+            .catch((e) =>
+              p.log.warn(
+                `Couldn't check the storefront's webhook: ${e instanceof Error ? e.message : e}`,
+              ),
+            );
         }
       } else if (d.domains.storefront && !env.get("STOREFRONT_KEY")) {
         spin.start("Connecting the storefront: a publishable key and its webhook");
@@ -110,7 +149,9 @@ export const deploy = defineCommand({
         const password = env.get("HYPHA_OWNER_PASSWORD");
         if (!email || !password) {
           spin.error("Skipped");
-          p.log.warn("No owner credentials in .env: set STOREFRONT_KEY and HYPHA_WEBHOOK_SECRET there, then deploy.");
+          p.log.warn(
+            "No owner credentials in .env: set STOREFRONT_KEY and HYPHA_WEBHOOK_SECRET there, then deploy.",
+          );
         } else {
           const keys = await connectStorefront(d, await Staff.login(d, email, password));
           env.set("STOREFRONT_KEY", keys.key).set("HYPHA_WEBHOOK_SECRET", keys.webhookSecret ?? "");
@@ -127,7 +168,12 @@ export const deploy = defineCommand({
         ...(d.domains.storefront ? [`Storefront ${url(d, d.domains.storefront)}`] : []),
       ];
       const password = env.get("HYPHA_OWNER_PASSWORD");
-      if (password) lines.push("", `Log in as ${env.get("HYPHA_OWNER_EMAIL")} with ${password}`, "(then change it)");
+      if (password)
+        lines.push(
+          "",
+          `Log in as ${env.get("HYPHA_OWNER_EMAIL")} with ${password}`,
+          "(then change it)",
+        );
       p.note(lines.join("\n"), "Deployed");
       p.outro("Done.");
     }),
@@ -135,12 +181,19 @@ export const deploy = defineCommand({
 
 /** Checks the server before anything is built: SSH, Docker (offering to install it),
  * and that the domains point at it. */
-async function preflight(d: Deployment, machine: Machine, yes: boolean, building: boolean): Promise<void> {
+async function preflight(
+  d: Deployment,
+  machine: Machine,
+  yes: boolean,
+  building: boolean,
+): Promise<void> {
   if (!machine.ssh) {
     await machine.sh("docker compose version", { capture: true }).catch(() => {
       throw new Error("Docker with Compose isn't running here: start Docker Desktop");
     });
-    const bytes = Number((await machine.sh("docker info --format '{{.MemTotal}}'", { capture: true })).trim());
+    const bytes = Number(
+      (await machine.sh("docker info --format '{{.MemTotal}}'", { capture: true })).trim(),
+    );
     if (building && bytes < BUILD_MEMORY_MB * 1024 * 1024) {
       throw new Error(
         `Docker has ${(bytes / 2 ** 30).toFixed(1)} GiB of memory; compiling the API needs about 5: ` +
@@ -170,7 +223,8 @@ async function preflight(d: Deployment, machine: Machine, yes: boolean, building
         (await p.confirm({
           message: `Docker isn't installed on ${machine.ssh}. Install it with Docker's script (get.docker.com)?`,
         })) === true);
-    if (!install) throw new Error("Docker with Compose is needed on the server: install it, then deploy again");
+    if (!install)
+      throw new Error("Docker with Compose is needed on the server: install it, then deploy again");
     p.log.step("Installing Docker…");
     await machine.sh("curl -fsSL https://get.docker.com | sh");
   }
@@ -184,11 +238,15 @@ async function preflight(d: Deployment, machine: Machine, yes: boolean, building
   for (const domain of Object.values(d.domains)) {
     if (!domain) continue;
     const ips = await addresses(domain);
-    if (!ips.some((ip) => serverIps.includes(ip))) wrong.push(`${domain} → ${ips.join(", ") || "nothing"}`);
+    if (!ips.some((ip) => serverIps.includes(ip)))
+      wrong.push(`${domain} → ${ips.join(", ") || "nothing"}`);
   }
   if (wrong.length > 0) {
     p.log.warn(`These domains don't point at ${serverIps.join(", ")} (yet?):\n${wrong.join("\n")}`);
-    const go = yes || (process.stdin.isTTY && (await p.confirm({ message: "Deploy anyway?", initialValue: false })) === true);
+    const go =
+      yes ||
+      (process.stdin.isTTY &&
+        (await p.confirm({ message: "Deploy anyway?", initialValue: false })) === true);
     if (!go) throw new Error("fix the DNS records (or wait for them to spread), then deploy again");
   }
 }
@@ -201,16 +259,24 @@ const BUILD_MEMORY_MB = 5120;
  * it finishes) or building here instead. */
 async function ensureBuildMemory(machine: Machine, yes: boolean): Promise<void> {
   const meminfo = await machine.sh("cat /proc/meminfo", { capture: true });
-  const kb = (name: string) => Number(new RegExp(`^${name}:\\s+(\\d+)`, "m").exec(meminfo)?.[1] ?? 0);
+  const kb = (name: string) =>
+    Number(new RegExp(`^${name}:\\s+(\\d+)`, "m").exec(meminfo)?.[1] ?? 0);
   const totalMb = Math.floor((kb("MemTotal") + kb("SwapTotal")) / 1024);
   if (totalMb >= BUILD_MEMORY_MB) return;
   const swapMb = Math.ceil((BUILD_MEMORY_MB - totalMb) / 1024) * 1024 + 1024;
-  p.log.warn(`The server has ${totalMb} MB of memory and swap; compiling the API needs about ${BUILD_MEMORY_MB}.`);
+  p.log.warn(
+    `The server has ${totalMb} MB of memory and swap; compiling the API needs about ${BUILD_MEMORY_MB}.`,
+  );
   const add =
     yes ||
     (process.stdin.isTTY &&
-      (await p.confirm({ message: `Add a ${swapMb / 1024} GB swap file (/swapfile, kept across reboots)?` })) === true);
-  if (!add) throw new Error("not enough memory to compile there: add swap, or `--build-on here` in `hypha init`");
+      (await p.confirm({
+        message: `Add a ${swapMb / 1024} GB swap file (/swapfile, kept across reboots)?`,
+      })) === true);
+  if (!add)
+    throw new Error(
+      "not enough memory to compile there: add swap, or `--build-on here` in `hypha init`",
+    );
   await machine.sh(
     [
       `fallocate -l ${swapMb}M /swapfile`,
@@ -224,6 +290,9 @@ async function ensureBuildMemory(machine: Machine, yes: boolean): Promise<void> 
 }
 
 async function addresses(host: string): Promise<string[]> {
-  const [v4, v6] = await Promise.all([resolve4(host).catch(() => []), resolve6(host).catch(() => [])]);
+  const [v4, v6] = await Promise.all([
+    resolve4(host).catch(() => []),
+    resolve6(host).catch(() => []),
+  ]);
   return [...v4, ...v6];
 }

@@ -13,7 +13,10 @@ type Binding = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Re
 
 /** The API's Service Binding as a `fetch`, when the deployment bound one. */
 export function apiFetch(): typeof fetch | undefined {
-  const { API: binding, HYPHA_CALLER_KEY: key } = env as { API?: Binding; HYPHA_CALLER_KEY?: string };
+  const { API: binding, HYPHA_CALLER_KEY: key } = env as {
+    API?: Binding;
+    HYPHA_CALLER_KEY?: string;
+  };
   if (!binding) return undefined;
   return (input, init) => {
     const request = new Request(input, init);

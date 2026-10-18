@@ -141,7 +141,11 @@ export function VariantsSection({
                 isLabelHidden
                 size="sm"
                 value={
-                  chosen.length === 0 ? false : chosen.length === shown.length ? true : "indeterminate"
+                  chosen.length === 0
+                    ? false
+                    : chosen.length === shown.length
+                      ? true
+                      : "indeterminate"
                 }
                 onChange={(isSelected: boolean) =>
                   select(
@@ -366,9 +370,7 @@ export function VariantsSection({
           idKey="key"
           columns={columns}
         />
-        {shown.length === 0 && (
-          <Text color="secondary">No variant matches “{filter.trim()}”.</Text>
-        )}
+        {shown.length === 0 && <Text color="secondary">No variant matches “{filter.trim()}”.</Text>}
       </VStack>
       {isAdding && (
         <AddVariantDialog
@@ -444,7 +446,12 @@ function BulkBar({
             onEnter={() => onSet({ weight })}
             width={110}
           />
-          <Button label="Set weight" size="sm" variant="secondary" onClick={() => onSet({ weight })} />
+          <Button
+            label="Set weight"
+            size="sm"
+            variant="secondary"
+            onClick={() => onSet({ weight })}
+          />
         </HStack>
         <Button
           label="Remove"
@@ -653,11 +660,16 @@ function StockDialog({
                         ? `${level.reserved} reserved for orders, ${level.available} available.`
                         : undefined
                     }
-                    value={form.counts[location.id] === "" ? undefined : Number(form.counts[location.id])}
+                    value={
+                      form.counts[location.id] === "" ? undefined : Number(form.counts[location.id])
+                    }
                     onChange={(count) =>
                       setForm((before) => ({
                         ...before,
-                        counts: { ...before.counts, [location.id]: count == null ? "" : String(count) },
+                        counts: {
+                          ...before.counts,
+                          [location.id]: count == null ? "" : String(count),
+                        },
                       }))
                     }
                     min={0}
@@ -785,7 +797,9 @@ function AddVariantDialog({
   const [price, setPrice] = useState(() => kept(current)[0]?.price ?? "");
 
   const taken = new Set(
-    kept(draft).map((v) => draft.options.map((o) => v.selections[o.key] ?? valuesOf(o)[0]?.key).join("\n")),
+    kept(draft).map((v) =>
+      draft.options.map((o) => v.selections[o.key] ?? valuesOf(o)[0]?.key).join("\n"),
+    ),
   );
   const isTaken = taken.has(draft.options.map((o) => selections[o.key]).join("\n"));
   const isComplete =

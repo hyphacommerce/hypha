@@ -32,7 +32,9 @@ export default defineConfig({
       // The API through a Service Binding (lib/api-fetch.workerd.ts), with the
       // deployment's caller key, so the API believes the user's address we pass on (not the
       // binding's props: Cloudflare drops them for a Worker with a placement, as the API's).
-      ...(api ? { API: bindings.worker({ worker: api }), HYPHA_CALLER_KEY: bindings.secret() } : {}),
+      ...(api
+        ? { API: bindings.worker({ worker: api }), HYPHA_CALLER_KEY: bindings.secret() }
+        : {}),
     },
   }),
 });

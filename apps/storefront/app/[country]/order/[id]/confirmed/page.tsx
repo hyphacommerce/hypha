@@ -27,7 +27,10 @@ export const metadata: Metadata = { title: "Order confirmed" };
 type PaymentStatus = StorefrontSchemas["PaymentStatusDto"];
 
 /** A payment's status for the buyer (an unknown one shows as it is: the enum is open). */
-function paymentStatus(status: PaymentStatus): { label: string; variant: "success" | "warning" | "error" | "neutral" } {
+function paymentStatus(status: PaymentStatus): {
+  label: string;
+  variant: "success" | "warning" | "error" | "neutral";
+} {
   switch (status) {
     case "pending":
       return { label: "Awaiting payment", variant: "warning" };
@@ -175,7 +178,13 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
               <VStack gap={1}>
                 <Heading level={2}>Ships to</Heading>
                 <Text>{[to.first_name, to.last_name].filter(Boolean).join(" ")}</Text>
-                {[to.company, to.line1, to.line2, [to.postal_code, to.city].filter(Boolean).join(" "), to.province]
+                {[
+                  to.company,
+                  to.line1,
+                  to.line2,
+                  [to.postal_code, to.city].filter(Boolean).join(" "),
+                  to.province,
+                ]
                   .filter(Boolean)
                   .map((line) => (
                     <Text key={line} color="secondary">

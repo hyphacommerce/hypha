@@ -30,11 +30,16 @@ export function SetupGuideCard() {
               Setup guide
             </Text>
             <Text type="supporting" color="secondary">
-              Finished or hidden. Show it again in the menu and on the home page, from the
-              step it was left on.
+              Finished or hidden. Show it again in the menu and on the home page, from the step it
+              was left on.
             </Text>
           </VStack>
-          <Button label="Show the setup guide" variant="secondary" isLoading={isPending} onClick={reopen} />
+          <Button
+            label="Show the setup guide"
+            variant="secondary"
+            isLoading={isPending}
+            onClick={reopen}
+          />
         </HStack>
         {error && <Banner status="error" title={error} />}
       </VStack>

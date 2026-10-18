@@ -13,11 +13,7 @@ import { Uploader } from "./uploader";
 const KINDS: AdminSchemas["AssetKindDto"][] = ["image", "video", "file"];
 const SORTS = ["newest", "oldest", "name_asc", "name_desc"] as const;
 
-export default async function MediaPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
+export default async function MediaPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams;
   const client = await sessionClient();
   const result = await client.GET("/admin/assets", {

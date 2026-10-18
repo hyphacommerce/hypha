@@ -11,7 +11,12 @@ const vps: Deployment = {
   remoteDir: "/opt/hypha",
   buildOn: "server",
   scheme: "https",
-  domains: { api: "api.example.com", media: "media.example.com", admin: "admin.example.com", storefront: "example.com" },
+  domains: {
+    api: "api.example.com",
+    media: "media.example.com",
+    admin: "admin.example.com",
+    storefront: "example.com",
+  },
 };
 
 test("a .env keeps its comments and order when a value changes", () => {
@@ -33,10 +38,16 @@ test("an empty value stays empty", () => {
 test("a server's Caddyfile asks for certificates and routes every domain", () => {
   const file = caddyfile(vps, "ops@example.com");
   assert.match(file, /^\{\n\temail ops@example\.com\n\}$/m);
-  assert.match(file, /https:\/\/api\.example\.com \{\n\tencode zstd gzip\n\treverse_proxy api:3000\n\}/);
+  assert.match(
+    file,
+    /https:\/\/api\.example\.com \{\n\tencode zstd gzip\n\treverse_proxy api:3000\n\}/,
+  );
   assert.match(file, /https:\/\/media\.example\.com \{\n\treverse_proxy s3:8333\n\}/);
   assert.match(file, /https:\/\/admin\.example\.com \{/);
-  assert.match(file, /https:\/\/example\.com \{\n\tencode zstd gzip\n\treverse_proxy storefront:3000/);
+  assert.match(
+    file,
+    /https:\/\/example\.com \{\n\tencode zstd gzip\n\treverse_proxy storefront:3000/,
+  );
 });
 
 test("without a storefront, there's no site for it and no profile", () => {
@@ -52,7 +63,11 @@ test("this machine's deployment is plain http, without certificates", () => {
     ...vps,
     target: "local",
     scheme: "http",
-    domains: { api: "api.hypha.localhost", media: "media.hypha.localhost", storefront: "shop.hypha.localhost" },
+    domains: {
+      api: "api.hypha.localhost",
+      media: "media.hypha.localhost",
+      storefront: "shop.hypha.localhost",
+    },
   };
   assert.match(caddyfile(local), /auto_https off/);
   const env = newEnv(local, { email: "owner@example.com", storeName: "Shop" });
@@ -66,7 +81,12 @@ test("without a contact email, a server's Caddyfile has no global options", () =
 test("every secret is new", () => {
   const a = newEnv(vps, { email: "o@example.com", storeName: "S" });
   const b = newEnv(vps, { email: "o@example.com", storeName: "S" });
-  for (const key of ["POSTGRES_PASSWORD", "HYPHA_SECRET_KEY", "S3_SECRET_KEY", "HYPHA_OWNER_PASSWORD"]) {
+  for (const key of [
+    "POSTGRES_PASSWORD",
+    "HYPHA_SECRET_KEY",
+    "S3_SECRET_KEY",
+    "HYPHA_OWNER_PASSWORD",
+  ]) {
     assert.notEqual(a.get(key), b.get(key), key);
   }
   assert.match(a.get("HYPHA_SECRET_KEY")!, /^[0-9a-f]{64}$/);

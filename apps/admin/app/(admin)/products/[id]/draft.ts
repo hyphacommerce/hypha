@@ -89,7 +89,9 @@ export function fromProduct(product: Product, currencies: Currencies): Draft {
  * it shows in its option, so saving shouldn't drop it. */
 export function valuesOf(option: OptionDraft): ValueDraft[] {
   const typed = option.adding.trim();
-  return typed === "" ? option.values : [...option.values, { key: `${option.key}:typed`, label: typed }];
+  return typed === ""
+    ? option.values
+    : [...option.values, { key: `${option.key}:typed`, label: typed }];
 }
 
 /** The value keys a variant selects, one per option in order; `null` where its value
@@ -143,7 +145,10 @@ export function parseGrams(input: string): number | null | undefined {
 
 /** A variant's selection, named so the save can find values created by the same save:
  * by ID once saved, by option name and label until then. */
-export type SelectionRef = { option: { id?: string; name: string }; value: { id?: string; label: string } };
+export type SelectionRef = {
+  option: { id?: string; name: string };
+  value: { id?: string; label: string };
+};
 
 export type VariantPlan = {
   id: string | null;
@@ -247,9 +252,11 @@ export function plan(
     for (const v of variants) {
       const title = variantTitle(draft, v) ?? "the variant";
       const amount = parseMoney(v.price, currency, currencies);
-      if (amount === null) return { error: `Enter the price of ${title} as a number, like 18 or 18.50.` };
+      if (amount === null)
+        return { error: `Enter the price of ${title} as a number, like 18 or 18.50.` };
       const grams = parseGrams(v.weight);
-      if (grams === undefined) return { error: `Enter the weight of ${title} in whole grams, like 350.` };
+      if (grams === undefined)
+        return { error: `Enter the weight of ${title} in whole grams, like 350.` };
       const keys = resolvedSelections(draft, v);
       const combination = keys.join("\n");
       if (seen.has(combination)) return { error: `Two variants are ${title}. Remove one of them.` };

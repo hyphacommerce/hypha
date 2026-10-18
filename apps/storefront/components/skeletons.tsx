@@ -50,7 +50,13 @@ function CardSkeleton({ index }: { index: number }) {
 }
 
 /** A grid of `count` product cards, as `ProductGrid` lays them out. */
-export function ProductGridSkeleton({ count = 8, minWidth = 180 }: { count?: number; minWidth?: number }) {
+export function ProductGridSkeleton({
+  count = 8,
+  minWidth = 180,
+}: {
+  count?: number;
+  minWidth?: number;
+}) {
   return (
     <Grid columns={{ minWidth, repeat: "fill" }} gap={5}>
       {Array.from({ length: count }, (_, i) => (

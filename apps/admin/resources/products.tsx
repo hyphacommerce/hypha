@@ -117,7 +117,12 @@ export function ProductsTable({
     Object.entries(categories).map(([id, path]) => [id, path.split(" › ").at(-1) ?? path]),
   );
   const filters: FilterDef[] = [
-    { kind: "search", param: "q", label: "Search", placeholder: "Search products by title, handle or SKU" },
+    {
+      kind: "search",
+      param: "q",
+      label: "Search",
+      placeholder: "Search products by title, handle or SKU",
+    },
     { kind: "multi", param: "status", label: "Status", options: STATUSES },
     {
       kind: "select",
@@ -192,7 +197,11 @@ export function ProductsTable({
       key: "updated",
       header: "Changed",
       width: pixel(170),
-      renderCell: (product) => <Text color="secondary"><DateTime value={product.updated_at} short /></Text>,
+      renderCell: (product) => (
+        <Text color="secondary">
+          <DateTime value={product.updated_at} short />
+        </Text>
+      ),
     },
   ];
   return (
@@ -230,7 +239,8 @@ export function ProductsTable({
         }}
         noResults={{
           title: "No products match these filters",
-          description: "Search looks at titles, handles and SKUs; vendor, type and tag match whole.",
+          description:
+            "Search looks at titles, handles and SKUs; vendor, type and tag match whole.",
         }}
       />
     </VStack>

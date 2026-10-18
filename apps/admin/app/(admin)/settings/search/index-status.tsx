@@ -67,8 +67,8 @@ export function IndexStatus({ status: initial }: { status: SearchStatus }) {
           </MetadataListItem>
         </MetadataList>
         <Text type="supporting" color="secondary">
-          The index holds one entry per variant in each market that sells it. Rebuild it only
-          after restoring a database, or if search shows something it shouldn&apos;t.
+          The index holds one entry per variant in each market that sells it. Rebuild it only after
+          restoring a database, or if search shows something it shouldn&apos;t.
         </Text>
         <HStack hAlign="end">
           <Button label="Rebuild index" isLoading={isPending} onClick={rebuild} />

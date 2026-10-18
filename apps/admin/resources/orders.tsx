@@ -35,7 +35,10 @@ const SORT_OPTIONS: SortOption[] = [
 
 const VIEWS: View[] = [
   { label: "All", params: {} },
-  { label: "Unfulfilled", params: { fulfillment_status: ["unfulfilled", "partially_fulfilled"], cancelled: ["false"] } },
+  {
+    label: "Unfulfilled",
+    params: { fulfillment_status: ["unfulfilled", "partially_fulfilled"], cancelled: ["false"] },
+  },
   { label: "Unpaid", params: { financial_status: UNPAID, cancelled: ["false"] } },
   { label: "Cancelled", params: { cancelled: ["true"] } },
 ];
@@ -63,7 +66,12 @@ export function OrdersTable({
 }) {
   const [outcome, setOutcome] = useState<BulkOutcome>();
   const filters: FilterDef[] = [
-    { kind: "search", param: "q", label: "Search", placeholder: "Search orders by number or email" },
+    {
+      kind: "search",
+      param: "q",
+      label: "Search",
+      placeholder: "Search orders by number or email",
+    },
     {
       kind: "multi",
       param: "financial_status",
@@ -160,7 +168,11 @@ export function OrdersTable({
       header: "Payment",
       width: pixel(130),
       renderCell: (order) =>
-        order.cancelled_at ? <Text color="secondary">—</Text> : <PaymentBadge status={order.financial_status} />,
+        order.cancelled_at ? (
+          <Text color="secondary">—</Text>
+        ) : (
+          <PaymentBadge status={order.financial_status} />
+        ),
     },
     {
       key: "fulfilment",
@@ -210,7 +222,8 @@ export function OrdersTable({
         }}
         noResults={{
           title: "No orders match these filters",
-          description: "Search finds an order by its number (1001 or #1001) or by text in its email.",
+          description:
+            "Search finds an order by its number (1001 or #1001) or by text in its email.",
         }}
       />
     </VStack>

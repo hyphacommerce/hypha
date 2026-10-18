@@ -130,22 +130,32 @@ export function Listing({
               pointerEvents: isBusy ? "none" : undefined,
             }}
           >
-          {page.items.length === 0 ? (
-            <EmptyState
-              title="No products here"
-              description={narrowed ? "Nothing matches these filters." : "Nothing is for sale here yet."}
-              actions={
-                narrowed ? (
-                  <Button
-                    label="Clear filters"
-                    href={listingHref(base, changed(state, { filters: [], min: undefined, max: undefined }))}
-                  />
-                ) : undefined
-              }
-            />
-          ) : (
-            <ProductGrid hits={page.items} digits={digits} productBase={productBase} minWidth={180} />
-          )}
+            {page.items.length === 0 ? (
+              <EmptyState
+                title="No products here"
+                description={
+                  narrowed ? "Nothing matches these filters." : "Nothing is for sale here yet."
+                }
+                actions={
+                  narrowed ? (
+                    <Button
+                      label="Clear filters"
+                      href={listingHref(
+                        base,
+                        changed(state, { filters: [], min: undefined, max: undefined }),
+                      )}
+                    />
+                  ) : undefined
+                }
+              />
+            ) : (
+              <ProductGrid
+                hits={page.items}
+                digits={digits}
+                productBase={productBase}
+                minWidth={180}
+              />
+            )}
           </div>
           {(previous || page.nextCursor) && (
             <HStack gap={2} hAlign="center">
@@ -156,7 +166,9 @@ export function Listing({
               />
               <Button
                 label="Next"
-                href={page.nextCursor ? listingHref(base, nextPage(state, page.nextCursor)) : undefined}
+                href={
+                  page.nextCursor ? listingHref(base, nextPage(state, page.nextCursor)) : undefined
+                }
                 isDisabled={!page.nextCursor}
               />
             </HStack>

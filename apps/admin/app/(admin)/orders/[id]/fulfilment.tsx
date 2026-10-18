@@ -113,9 +113,7 @@ export function FulfilButton({ order, places }: { order: Order; places: Place[] 
   return (
     <>
       <Button label="Fulfil items" variant="primary" onClick={() => setIsOpen(true)} />
-      {isOpen && (
-        <FulfilDialog order={order} places={places} onClose={() => setIsOpen(false)} />
-      )}
+      {isOpen && <FulfilDialog order={order} places={places} onClose={() => setIsOpen(false)} />}
     </>
   );
 }
@@ -302,16 +300,24 @@ function Shipment({
             </HStack>
           ) : (
             <HStack gap={1}>
-              <Button label="Edit tracking" size="sm" variant="ghost" onClick={() => setEditing(true)} />
-              <Button label="Take back" size="sm" variant="ghost" onClick={() => setConfirming(true)} />
+              <Button
+                label="Edit tracking"
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditing(true)}
+              />
+              <Button
+                label="Take back"
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirming(true)}
+              />
             </HStack>
           ))}
       </HStack>
       {error && <Banner status="error" title={error} />}
       <Text>
-        {fulfillment.lines
-          .map((line) => `${line.quantity} × ${describe(line.line)}`)
-          .join(", ")}
+        {fulfillment.lines.map((line) => `${line.quantity} × ${describe(line.line)}`).join(", ")}
       </Text>
       {fulfillment.tracking.map((t) => (
         <Text key={t.number} type="supporting">

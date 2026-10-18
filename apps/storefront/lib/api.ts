@@ -85,10 +85,14 @@ export async function countryOf(folder: string): Promise<Country> {
 
 /** The shown category tree, once per request (and cached, tagged `categories`). */
 export const loadCategories = cache(
-  unstable_cache(async () => loaded(await api().GET("/storefront/categories")).items, ["categories"], {
-    tags: [TAGS.categories],
-    revalidate: FRESH_SECONDS,
-  }),
+  unstable_cache(
+    async () => loaded(await api().GET("/storefront/categories")).items,
+    ["categories"],
+    {
+      tags: [TAGS.categories],
+      revalidate: FRESH_SECONDS,
+    },
+  ),
 );
 
 /**

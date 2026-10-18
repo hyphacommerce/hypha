@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "Hosting Hypha: `hypha init` writes a deployment, `hypha deploy` runs it on a server (design note 0025) or the API on Cloudflare Workers (0026).",
-  "type": "module",
   "bin": {
     "hypha": "./src/main.ts"
   },
+  "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test src/*.test.ts"

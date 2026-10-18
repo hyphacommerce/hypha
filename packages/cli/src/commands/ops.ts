@@ -18,14 +18,22 @@ export const status = defineCommand({
       if (deployment.target === "cloudflare") {
         p.intro("hypha status → Cloudflare");
         let ok = await healthy(deployment);
-        p.log.step(`${workerName(deployment)}  ${url(deployment, deployment.domains.api)}/health ${ok ? "answers" : "doesn't answer"}`);
+        p.log.step(
+          `${workerName(deployment)}  ${url(deployment, deployment.domains.api)}/health ${ok ? "answers" : "doesn't answer"}`,
+        );
         for (const app of apps(deployment)) {
           const target = url(deployment, deployment.domains[app]!);
           const answers = await waitForAnswer(target, 1);
           ok &&= answers;
-          p.log.step(`${appWorker(deployment, app)}  ${target} ${answers ? "answers" : "doesn't answer"}`);
+          p.log.step(
+            `${appWorker(deployment, app)}  ${target} ${answers ? "answers" : "doesn't answer"}`,
+          );
         }
-        p.outro(ok ? "Everything answers" : "Something doesn't answer: see `hypha logs <api|admin|storefront>`");
+        p.outro(
+          ok
+            ? "Everything answers"
+            : "Something doesn't answer: see `hypha logs <api|admin|storefront>`",
+        );
         if (!ok) process.exitCode = 1;
         return;
       }
@@ -39,7 +47,10 @@ export const status = defineCommand({
 });
 
 export const logs = defineCommand({
-  meta: { name: "logs", description: "A service's logs (api, admin, storefront, caddy, postgres, s3), or all" },
+  meta: {
+    name: "logs",
+    description: "A service's logs (api, admin, storefront, caddy, postgres, s3), or all",
+  },
   args: {
     dir: dirArg,
     service: { type: "positional", required: false, description: "One service; all without" },
@@ -55,13 +66,16 @@ export const logs = defineCommand({
         const env: Record<string, string> = {};
         const token = (await loadEnv(args.dir).catch(() => undefined))?.get("CLOUDFLARE_API_TOKEN");
         if (token) env.CLOUDFLARE_API_TOKEN = token;
-        if (deployment.cloudflare?.accountId) env.CLOUDFLARE_ACCOUNT_ID = deployment.cloudflare.accountId;
+        if (deployment.cloudflare?.accountId)
+          env.CLOUDFLARE_ACCOUNT_ID = deployment.cloudflare.accountId;
         await run("wrangler", ["tail", worker, "--format", "pretty"], { env });
         return;
       }
       const { machine } = await open(args.dir);
       const service = args.service ? ` ${quote(args.service)}` : "";
-      await machine.sh(`docker compose logs --tail ${quote(args.tail)}${args.follow ? " -f" : ""}${service}`);
+      await machine.sh(
+        `docker compose logs --tail ${quote(args.tail)}${args.follow ? " -f" : ""}${service}`,
+      );
     }),
 });
 

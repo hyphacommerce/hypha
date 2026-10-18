@@ -44,11 +44,15 @@ export function DetailsForm({
   const set = (key: keyof Details) => (value: string) =>
     setDetails((d) => ({ ...d, [key]: value }));
   const required = (key: keyof Details) =>
-    tried && details[key].trim() === "" ? { type: "error" as const, message: "Required" } : undefined;
+    tried && details[key].trim() === ""
+      ? { type: "error" as const, message: "Required" }
+      : undefined;
 
   const submit = () => {
     setTried(true);
-    if (["email", "last_name", "line1", "city"].some((k) => details[k as keyof Details].trim() === "")) {
+    if (
+      ["email", "last_name", "line1", "city"].some((k) => details[k as keyof Details].trim() === "")
+    ) {
       return;
     }
     start(async () => {
@@ -58,7 +62,11 @@ export function DetailsForm({
     });
   };
 
-  const field = (key: keyof Details, label: string, options: { required?: boolean; type?: "email" } = {}) => (
+  const field = (
+    key: keyof Details,
+    label: string,
+    options: { required?: boolean; type?: "email" } = {},
+  ) => (
     <TextInput
       size="lg"
       label={label}
@@ -213,9 +221,18 @@ export function PaymentChoice({
   return (
     <VStack gap={2}>
       {problem && (
-        <Banner status="warning" title="The payment method you chose can't be used now: choose again." />
+        <Banner
+          status="warning"
+          title="The payment method you chose can't be used now: choose again."
+        />
       )}
-      <RadioList label="Payment method" isLabelHidden value={value} onChange={choose} isDisabled={pending}>
+      <RadioList
+        label="Payment method"
+        isLabelHidden
+        value={value}
+        onChange={choose}
+        isDisabled={pending}
+      >
         {methods.map((m) => (
           <RadioListItem
             key={m.id}

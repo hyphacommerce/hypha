@@ -36,7 +36,13 @@ function deployment(): Deployment {
 const BINDINGS: Binding[] = [
   { rule: "login_ip", binding: "RL_LOGIN_IP", slot: 0, limit: 12, period: 60 },
   { rule: "login_email", binding: "RL_LOGIN_EMAIL", slot: 2, limit: 50, period: 60 },
-  { rule: "shipping_quotes_cart", binding: "RL_SHIPPING_QUOTES_CART", slot: 8, limit: 40, period: 60 },
+  {
+    rule: "shipping_quotes_cart",
+    binding: "RL_SHIPPING_QUOTES_CART",
+    slot: 8,
+    limit: 40,
+    period: 60,
+  },
 ];
 
 test("the Worker is placed next to the database's host, whoever runs it", () => {
@@ -72,14 +78,29 @@ test("wrangler.toml binds Hyperdrive, KV and a rate limiter per rule, and is pla
   const file = toml(deployment());
   assert.match(file, /^name = "hypha-api"$/m);
   assert.match(file, /^routes = \[\{ pattern = "api\.example\.com", custom_domain = true \}\]$/m);
-  assert.match(file, /\[placement\]\nmode = "targeted"\nhost = "ep-quiet-sky\.eu-central-1\.aws\.neon\.tech:5432"/);
+  assert.match(
+    file,
+    /\[placement\]\nmode = "targeted"\nhost = "ep-quiet-sky\.eu-central-1\.aws\.neon\.tech:5432"/,
+  );
   assert.match(file, /\[\[hyperdrive\]\]\nbinding = "HYPERDRIVE"\nid = "h{32}"/);
   assert.match(file, /\[\[kv_namespaces\]\]\nbinding = "JOBS"\nid = "k{32}"/);
   // Each rule at its own slot in the deployment's block, whatever else is listed.
-  assert.match(file, /name = "RL_LOGIN_IP"\nnamespace_id = "5000"\nsimple = \{ limit = 12, period = 60 \}/);
-  assert.match(file, /name = "RL_LOGIN_EMAIL"\nnamespace_id = "5002"\nsimple = \{ limit = 50, period = 60 \}/);
-  assert.match(file, /name = "RL_SHIPPING_QUOTES_CART"\nnamespace_id = "5008"\nsimple = \{ limit = 40, period = 60 \}/);
-  assert.match(file, /^HYPHA_CONFIG = "\[rate_limits\.login_ip\]\\nburst = 20\\nper = \\"30s\\"\\n"$/m);
+  assert.match(
+    file,
+    /name = "RL_LOGIN_IP"\nnamespace_id = "5000"\nsimple = \{ limit = 12, period = 60 \}/,
+  );
+  assert.match(
+    file,
+    /name = "RL_LOGIN_EMAIL"\nnamespace_id = "5002"\nsimple = \{ limit = 50, period = 60 \}/,
+  );
+  assert.match(
+    file,
+    /name = "RL_SHIPPING_QUOTES_CART"\nnamespace_id = "5008"\nsimple = \{ limit = 40, period = 60 \}/,
+  );
+  assert.match(
+    file,
+    /^HYPHA_CONFIG = "\[rate_limits\.login_ip\]\\nburst = 20\\nper = \\"30s\\"\\n"$/m,
+  );
   assert.match(file, /^HYPHA_ADMIN_URL = "https:\/\/admin\.example\.com"$/m);
   assert.match(file, /^main = "\.\.\/crates\/hypha-host-workers\/build\/worker\/shim\.mjs"$/m);
   // Wherever wrangler runs from: it reads the build's cwd as given.
@@ -107,7 +128,12 @@ test("media is R2's S3 endpoint, public files from the bucket's domain only with
 /** What `deployApp` was given, per app. */
 type Deployed = { env: Record<string, string>; secrets: Record<string, string> };
 
-function fakeTools(): { tools: Tools; calls: string[]; secrets: string[]; apps: Record<string, Deployed> } {
+function fakeTools(): {
+  tools: Tools;
+  calls: string[];
+  secrets: string[];
+  apps: Record<string, Deployed>;
+} {
   const calls: string[] = [];
   const secrets: string[] = [];
   const deployedApps: Record<string, Deployed> = {};
@@ -116,7 +142,8 @@ function fakeTools(): { tools: Tools; calls: string[]; secrets: string[]; apps: 
     async wrangler(args) {
       calls.push(`wrangler ${args.join(" ")}`);
       const command = args.slice(0, 3).join(" ");
-      if (args[0] === "whoami") return JSON.stringify({ accounts: [{ id: "a".repeat(32), name: "Shop" }] });
+      if (args[0] === "whoami")
+        return JSON.stringify({ accounts: [{ id: "a".repeat(32), name: "Shop" }] });
       if (command.startsWith("hyperdrive create")) return `Created\n{ "id": "${"1".repeat(32)}" }`;
       if (command === "kv namespace list") return "[]";
       if (command === "kv namespace create") return `id = "${String(2 + namespaces++).repeat(32)}"`;
@@ -200,9 +227,17 @@ test("a first deploy sets the database up, creates the resources with Hyperdrive
   });
   // The admin is deployed, so the API gets a caller key, made once and kept.
   assert.match(callerKey, /^[0-9a-f]{64}$/);
-  assert.equal(EnvFile.parse(await readFile(join(dir, ".env"), "utf8")).get("HYPHA_CALLER_KEY"), callerKey);
+  assert.equal(
+    EnvFile.parse(await readFile(join(dir, ".env"), "utf8")).get("HYPHA_CALLER_KEY"),
+    callerKey,
+  );
   // The secrets don't stay on disk; what was created is remembered.
-  assert.deepEqual((await readdir(dir)).sort(), [".env", "hypha.config.toml", "hypha.json", "wrangler.toml"]);
+  assert.deepEqual((await readdir(dir)).sort(), [
+    ".env",
+    "hypha.config.toml",
+    "hypha.json",
+    "wrangler.toml",
+  ]);
   const saved = await loadDeployment(dir);
   assert.equal(saved.cloudflare?.accountId, "a".repeat(32));
   assert.equal(saved.cloudflare?.hyperdriveId, "1".repeat(32));
@@ -211,26 +246,41 @@ test("a first deploy sets the database up, creates the resources with Hyperdrive
 
 test("a later deploy updates Hyperdrive (cache still off) and creates nothing again", async () => {
   const d = deployment();
-  Object.assign(d.cloudflare!, { accountId: "a".repeat(32), hyperdriveId: "1".repeat(32), kvId: "2".repeat(32), zoneId: "z1" });
+  Object.assign(d.cloudflare!, {
+    accountId: "a".repeat(32),
+    hyperdriveId: "1".repeat(32),
+    kvId: "2".repeat(32),
+    zoneId: "z1",
+  });
   const { dir, env } = await folder(d, false);
   const { tools, calls, secrets } = fakeTools();
   await deployCloudflare(dir, d, env, tools);
   assert.ok(
-    calls.includes(`wrangler hyperdrive update ${"1".repeat(32)} --connection-string ${PLAIN} --sslmode require --caching-disabled`),
+    calls.includes(
+      `wrangler hyperdrive update ${"1".repeat(32)} --connection-string ${PLAIN} --sslmode require --caching-disabled`,
+    ),
   );
   assert.ok(!calls.some((c) => / create /.test(c) || c.includes("kv namespace list")));
   // No R2 keys: no bucket, no media secrets.
   assert.ok(!calls.some((c) => c.includes(" r2 ")));
-  assert.deepEqual(JSON.parse(secrets[0]), { HYPHA_SECRET_KEY: "f".repeat(64), HYPHA_CALLER_KEY: env.get("HYPHA_CALLER_KEY") });
+  assert.deepEqual(JSON.parse(secrets[0]), {
+    HYPHA_SECRET_KEY: "f".repeat(64),
+    HYPHA_CALLER_KEY: env.get("HYPHA_CALLER_KEY"),
+  });
 });
 
 test("Hyperdrive gets the URL without its query, TLS as --sslmode, and never a cache", () => {
-  assert.deepEqual(hyperdriveOrigin(DB), ["--connection-string", PLAIN, "--sslmode", "require", "--caching-disabled"]);
-  assert.deepEqual(hyperdriveOrigin("postgres://u:p@db.example.com:6543/x?sslmode=prefer&application_name=a"), [
+  assert.deepEqual(hyperdriveOrigin(DB), [
     "--connection-string",
-    "postgres://u:p@db.example.com:6543/x",
+    PLAIN,
+    "--sslmode",
+    "require",
     "--caching-disabled",
   ]);
+  assert.deepEqual(
+    hyperdriveOrigin("postgres://u:p@db.example.com:6543/x?sslmode=prefer&application_name=a"),
+    ["--connection-string", "postgres://u:p@db.example.com:6543/x", "--caching-disabled"],
+  );
 });
 
 test("a failed Hyperdrive call doesn't print the database's password", async () => {
@@ -282,11 +332,19 @@ test("a bare environment keeps what Windows needs for DNS and TLS, and nothing e
 test("the admin and storefront deploy after the API, bound to it, with the storefront connected", async () => {
   const d = deployment();
   d.domains.storefront = "shop.example.com";
-  Object.assign(d.cloudflare!, { accountId: "a".repeat(32), hyperdriveId: "1".repeat(32), kvId: "2".repeat(32) });
+  Object.assign(d.cloudflare!, {
+    accountId: "a".repeat(32),
+    hyperdriveId: "1".repeat(32),
+    kvId: "2".repeat(32),
+  });
   const { dir, env } = await folder(d, false);
   const { tools, calls, apps } = fakeTools();
   await deployCloudflare(dir, d, env, tools);
-  const tail = calls.slice(calls.indexOf(`wrangler kv key put jobs:written 1800000000000 --namespace-id ${"2".repeat(32)} --remote`) + 1);
+  const tail = calls.slice(
+    calls.indexOf(
+      `wrangler kv key put jobs:written 1800000000000 --namespace-id ${"2".repeat(32)} --remote`,
+    ) + 1,
+  );
   assert.deepEqual(tail, [
     "connect storefront",
     "wrangler kv namespace list",
@@ -314,7 +372,10 @@ test("the admin and storefront deploy after the API, bound to it, with the store
     STOREFRONT_KEY: "hypha_pk_shop",
     HYPHA_WEBHOOK_SECRET: "hypha_as_hook",
   });
-  assert.deepEqual(apps.admin.secrets, { HYPHA_API_URL: "https://api.example.com", HYPHA_CALLER_KEY: callerKey });
+  assert.deepEqual(apps.admin.secrets, {
+    HYPHA_API_URL: "https://api.example.com",
+    HYPHA_CALLER_KEY: callerKey,
+  });
   assert.equal(apps.admin.env.HYPHA_CF_WORKER, "hypha-admin");
   // The keys are kept for the next deploy, and the cache's namespace is remembered.
   const kept = EnvFile.parse(await readFile(join(dir, ".env"), "utf8"));
@@ -327,7 +388,12 @@ test("the admin and storefront deploy after the API, bound to it, with the store
 test("a connected storefront keeps its keys and only checks its webhook", async () => {
   const d = deployment();
   d.domains.storefront = "shop.example.com";
-  Object.assign(d.cloudflare!, { accountId: "a".repeat(32), hyperdriveId: "1".repeat(32), kvId: "2".repeat(32), cacheKvId: "3".repeat(32) });
+  Object.assign(d.cloudflare!, {
+    accountId: "a".repeat(32),
+    hyperdriveId: "1".repeat(32),
+    kvId: "2".repeat(32),
+    cacheKvId: "3".repeat(32),
+  });
   const { dir, env } = await folder(d, false);
   env.set("STOREFRONT_KEY", "hypha_pk_old").set("HYPHA_WEBHOOK_SECRET", "hypha_as_old");
   const { tools, calls, apps } = fakeTools();

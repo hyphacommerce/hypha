@@ -204,8 +204,8 @@ export function SetupWizard({
             Set up your store
           </Text>
           <Text color="secondary">
-            Six steps to a storefront that can take orders. Each saves as you go; leave and
-            come back, and it opens where you were.
+            Six steps to a storefront that can take orders. Each saves as you go; leave and come
+            back, and it opens where you were.
           </Text>
         </VStack>
         <Button
@@ -229,7 +229,12 @@ export function SetupWizard({
       <HStack gap={5} vAlign="start" wrap="wrap">
         <VStack width={260}>
           <Card>
-            <Stepper activeStep={active} orientation="vertical" onStepClick={setActive} label="Setup">
+            <Stepper
+              activeStep={active}
+              orientation="vertical"
+              onStepClick={setActive}
+              label="Setup"
+            >
               {STEPS.map((s, i) => {
                 const isDone = s.isDone(data.done);
                 return (
@@ -254,7 +259,11 @@ export function SetupWizard({
             <Text color="secondary">{step.description}</Text>
           </VStack>
           {step.isDone(data.done) && (
-            <Banner status="success" title="Done" description="Change or add to it below, or go on." />
+            <Banner
+              status="success"
+              title="Done"
+              description="Change or add to it below, or go on."
+            />
           )}
           {/* Starts the form again once a save's refresh brings what it made, so its
               defaults (countries without a zone, a new market) aren't the old data's. */}
@@ -324,13 +333,7 @@ function timezoneOptions(current: string) {
   return names.map((name) => ({ value: name, label: name.replaceAll("_", " ") }));
 }
 
-function StoreStep({
-  store,
-  onSaved,
-}: {
-  store: WizardData["store"];
-  onSaved: () => void;
-}) {
+function StoreStep({ store, onSaved }: { store: WizardData["store"]; onSaved: () => void }) {
   const [name, setName] = useState(store.name);
   const [email, setEmail] = useState(store.contact_email ?? "");
   const [timezone, setTimezone] = useState(
@@ -374,9 +377,7 @@ function StoreStep({
             variant="primary"
             isLoading={isPending}
             isDisabled={!canSave}
-            onClick={() =>
-              run(() => saveStore({ name, contactEmail: email, timezone, language }))
-            }
+            onClick={() => run(() => saveStore({ name, contactEmail: email, timezone, language }))}
           />
         </HStack>
       </VStack>
@@ -581,9 +582,7 @@ function ShippingStep({
                 isDisabled={!canSave}
                 onClick={() =>
                   currency &&
-                  run(() =>
-                    addShipping({ name, countries: chosen, optionName, price, currency }),
-                  )
+                  run(() => addShipping({ name, countries: chosen, optionName, price, currency }))
                 }
               />
             </HStack>
@@ -606,7 +605,9 @@ function PaymentStep({ data, onSaved }: { data: WizardData; onSaved: () => void 
     <VStack gap={4}>
       <Existing
         title="Your payment methods"
-        lines={data.paymentMethods.map((m) => `${m.name}${m.enabled ? "" : " (off: turn it on in Settings → Payments)"}`)}
+        lines={data.paymentMethods.map(
+          (m) => `${m.name}${m.enabled ? "" : " (off: turn it on in Settings → Payments)"}`,
+        )}
         addLabel="Add another method"
         isAdding={isAdding}
         onAdd={() => setIsAdding(true)}
@@ -692,7 +693,10 @@ function ProductStep({
 
   const currency = data.markets.find((m) => m.id === market)?.currency;
   const canSave =
-    title.trim() !== "" && price.trim() !== "" && Boolean(market) && (!track || stock.trim() !== "");
+    title.trim() !== "" &&
+    price.trim() !== "" &&
+    Boolean(market) &&
+    (!track || stock.trim() !== "");
   const shown = data.products.slice(0, 5);
 
   return (
@@ -820,7 +824,9 @@ function SellStep({
       <Banner
         status="info"
         title="Add an active product first"
-        endContent={<Button label="Go to First product" variant="secondary" onClick={() => goTo(4)} />}
+        endContent={
+          <Button label="Go to First product" variant="secondary" onClick={() => goTo(4)} />
+        }
       />
     );
   }
@@ -841,8 +847,19 @@ function SellStep({
             Publish a product
           </Text>
           {published.error && <Banner status="error" title={published.error} />}
-          <Selector label="Channel" options={channelOptions} value={channel} onChange={setChannel} />
-          <Selector label="Product" options={productOptions} value={product} onChange={setProduct} hasSearch />
+          <Selector
+            label="Channel"
+            options={channelOptions}
+            value={channel}
+            onChange={setChannel}
+          />
+          <Selector
+            label="Product"
+            options={productOptions}
+            value={product}
+            onChange={setProduct}
+            hasSearch
+          />
           <HStack hAlign="end">
             <Button
               label={isPublished ? "Published" : "Publish"}

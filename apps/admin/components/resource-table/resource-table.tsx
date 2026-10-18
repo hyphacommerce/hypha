@@ -172,9 +172,11 @@ function rangeLabel(raw: string): string {
   const [start, end] = raw.split("..");
   const day = (d?: string) =>
     d
-      ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(
-          new Date(`${d}T00:00:00Z`),
-        )
+      ? new Intl.DateTimeFormat("en-GB", {
+          day: "numeric",
+          month: "short",
+          timeZone: "UTC",
+        }).format(new Date(`${d}T00:00:00Z`))
       : "";
   return `${day(start)} – ${day(end)}`;
 }
@@ -225,7 +227,9 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
   const [isPending, startTransition] = useTransition();
 
   const go = (changes: Record<string, string | string[] | undefined>, keepPage = false) => {
-    const reset: Record<string, undefined> = keepPage ? {} : { [CURSOR]: undefined, [PREV]: undefined };
+    const reset: Record<string, undefined> = keepPage
+      ? {}
+      : { [CURSOR]: undefined, [PREV]: undefined };
     // A sort whose filter is being cleared (a total without its currency) goes too.
     const sorted = params.get("sort");
     const needs = sorted ? sortRequires[sorted] : undefined;
@@ -435,7 +439,10 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
         actions={<Button label="Clear filters" onClick={clearFilters} />}
       />
     ) : current ? (
-      <EmptyState title="No more here" actions={<Button label="First page" onClick={() => toPage(1)} />} />
+      <EmptyState
+        title="No more here"
+        actions={<Button label="First page" onClick={() => toPage(1)} />}
+      />
     ) : (
       <EmptyState
         icon={empty.icon}
@@ -625,8 +632,17 @@ type ClientProps<T extends Row> = {
  * sort and filter here, in the browser, in the same card as the paged ones.
  */
 export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
-  const { rows, columns, idKey, rowHref, searchText, searchLabel, compare = {}, empty, toolbarEnd } =
-    props;
+  const {
+    rows,
+    columns,
+    idKey,
+    rowHref,
+    searchText,
+    searchLabel,
+    compare = {},
+    empty,
+    toolbarEnd,
+  } = props;
   const router = useRouter();
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<TableSortState<string>>([]);
@@ -639,7 +655,10 @@ export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const found = needle && searchText ? rows.filter((r) => searchText(r).toLowerCase().includes(needle)) : rows;
+    const found =
+      needle && searchText
+        ? rows.filter((r) => searchText(r).toLowerCase().includes(needle))
+        : rows;
     const entry = sort[0];
     const cmp = entry && compare[entry.sortKey];
     if (!cmp) return found;
@@ -680,9 +699,17 @@ export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
           plugins={{ sort: sortPlugin, links }}
           emptyState={
             q ? (
-              <EmptyState title={`Nothing matches “${q}”`} actions={<Button label="Clear search" onClick={() => setQ("")} />} />
+              <EmptyState
+                title={`Nothing matches “${q}”`}
+                actions={<Button label="Clear search" onClick={() => setQ("")} />}
+              />
             ) : (
-              <EmptyState icon={empty.icon} title={empty.title} description={empty.description} actions={empty.action} />
+              <EmptyState
+                icon={empty.icon}
+                title={empty.title}
+                description={empty.description}
+                actions={empty.action}
+              />
             )
           }
         />

@@ -32,7 +32,8 @@ export async function ask(
   if (fallback !== undefined && (unattended || !process.stdin.isTTY)) {
     return fallback;
   }
-  if (!process.stdin.isTTY) throw new Error("a value is missing and there's no terminal to ask in: pass its flag");
+  if (!process.stdin.isTTY)
+    throw new Error("a value is missing and there's no terminal to ask in: pass its flag");
   const answer = await prompt();
   if (p.isCancel(answer)) {
     p.cancel("Cancelled.");

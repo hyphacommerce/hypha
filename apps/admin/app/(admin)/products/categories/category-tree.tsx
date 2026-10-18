@@ -195,7 +195,5 @@ export function ParentSelector({
       .filter((row) => !exclude?.has(row.id))
       .map((row) => ({ value: row.id, label: row.path })),
   ];
-  return (
-    <Selector label="Parent" options={options} value={value} onChange={onChange} hasSearch />
-  );
+  return <Selector label="Parent" options={options} value={value} onChange={onChange} hasSearch />;
 }

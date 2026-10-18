@@ -23,8 +23,6 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { KeyIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-
-
 import { type ChannelKind, createChannel, createStorefrontKey, renameChannel } from "./actions";
 import { DateTime } from "@/components/date-time";
 
@@ -85,7 +83,9 @@ export function ChannelsCard({ channels }: { channels: Channel[] }) {
                   <Badge label={kindLabel(channel.kind)} />
                 </TableCell>
                 <TableCell>
-                  <Text color="secondary"><DateTime value={channel.created_at} short /></Text>
+                  <Text color="secondary">
+                    <DateTime value={channel.created_at} short />
+                  </Text>
                 </TableCell>
                 <TableCell>
                   <HStack gap={1} hAlign="end">
@@ -133,7 +133,9 @@ function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose: () =>
   const submit = () => {
     if (!isComplete) return;
     startTransition(async () => {
-      const result = channel ? await renameChannel(channel.id, name) : await createChannel(name, kind);
+      const result = channel
+        ? await renameChannel(channel.id, name)
+        : await createChannel(name, kind);
       if (result.error) setError(result.error);
       else onClose();
     });

@@ -132,9 +132,12 @@ function ViewToggle({ view }: { view: "grid" | "table" }) {
       value={view}
       onChange={(next) =>
         startTransition(() =>
-          router.replace(href(pathname, withChanges(params, { view: next === "table" ? next : undefined })), {
-            scroll: false,
-          }),
+          router.replace(
+            href(pathname, withChanges(params, { view: next === "table" ? next : undefined })),
+            {
+              scroll: false,
+            },
+          ),
         )
       }
     >

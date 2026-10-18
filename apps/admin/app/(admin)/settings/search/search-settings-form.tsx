@@ -174,12 +174,12 @@ export function SearchSettingsForm({
           </Text>
           <VStack gap={1}>
             <Text>
-              <strong>Filters</strong> — the checklists shoppers narrow results with (Color,
-              Size, Brand…). Price and availability are always offered.
+              <strong>Filters</strong> — the checklists shoppers narrow results with (Color, Size,
+              Brand…). Price and availability are always offered.
             </Text>
             <Text>
-              <strong>Listings</strong> — whether a product with several colours shows once, or
-              once per colour.
+              <strong>Listings</strong> — whether a product with several colours shows once, or once
+              per colour.
             </Text>
           </VStack>
           <Text type="supporting" color="secondary">
@@ -224,7 +224,10 @@ export function SearchSettingsForm({
                   {facets.map((f, i) => {
                     const c = candidate(f.key);
                     return (
-                      <div key={f.key} className={i > 0 ? "facet-row facet-row-divided" : "facet-row"}>
+                      <div
+                        key={f.key}
+                        className={i > 0 ? "facet-row facet-row-divided" : "facet-row"}
+                      >
                         <VStack gap={0.5}>
                           <HStack gap={2} vAlign="center">
                             <Text weight="medium">{c?.name ?? f.key}</Text>
@@ -265,7 +268,9 @@ export function SearchSettingsForm({
                             icon={<XMarkIcon width={16} />}
                             variant="ghost"
                             size="sm"
-                            onClick={() => setFacets((before) => before.filter((x) => x.key !== f.key))}
+                            onClick={() =>
+                              setFacets((before) => before.filter((x) => x.key !== f.key))
+                            }
                           />
                         </HStack>
                       </div>
@@ -285,13 +290,15 @@ export function SearchSettingsForm({
                             icon={<PlusIcon width={14} />}
                             variant="secondary"
                             size="sm"
-                            onClick={() => setFacets((before) => [...before, { key: c.key, label: "" }])}
+                            onClick={() =>
+                              setFacets((before) => [...before, { key: c.key, label: "" }])
+                            }
                           />
                         ))}
                       </HStack>
                       <Text type="supporting" color="secondary">
-                        The number is how many of the scanned products have it. Leave a label
-                        blank to use the name shown.
+                        The number is how many of the scanned products have it. Leave a label blank
+                        to use the name shown.
                       </Text>
                     </VStack>
                   )}
@@ -307,9 +314,9 @@ export function SearchSettingsForm({
                   Listings
                 </Text>
                 <Text type="supporting" color="secondary">
-                  Pick an option to show each of its values as its own result, with its own
-                  photo and price — like showing a T-shirt once per colour, each with its sizes.
-                  Up to {MAX_SPLIT}. Leave all unticked for one result per product.
+                  Pick an option to show each of its values as its own result, with its own photo
+                  and price — like showing a T-shirt once per colour, each with its sizes. Up to{" "}
+                  {MAX_SPLIT}. Leave all unticked for one result per product.
                 </Text>
               </VStack>
               {options.length === 0 ? (
@@ -401,7 +408,15 @@ function splitExample(name: string, values: Counted[]): string {
 }
 
 /** One group of the mock filter panel: its title and up to 4 values with counts. */
-function PreviewGroup({ title, values, note }: { title: string; values: Counted[]; note?: string }) {
+function PreviewGroup({
+  title,
+  values,
+  note,
+}: {
+  title: string;
+  values: Counted[];
+  note?: string;
+}) {
   return (
     <VStack gap={1}>
       <Text weight="medium">{title}</Text>

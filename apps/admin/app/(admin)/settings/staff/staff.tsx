@@ -19,7 +19,6 @@ import { useState, useTransition } from "react";
 import { DateTime } from "@/components/date-time";
 import { ClientResourceTable, byText } from "@/components/resource-table/resource-table";
 
-
 import { inviteStaff } from "./actions";
 
 type User = AdminSchemas["UserResponse"];
@@ -63,10 +62,18 @@ export function Staff({
       header: "Status",
       width: pixel(110),
       renderCell: (u) => (
-        <Badge label={u.status === "active" ? "Active" : "Disabled"} variant={u.status === "active" ? "success" : "neutral"} />
+        <Badge
+          label={u.status === "active" ? "Active" : "Disabled"}
+          variant={u.status === "active" ? "success" : "neutral"}
+        />
       ),
     },
-    { key: "created_at", header: "Since", width: pixel(190), renderCell: (u) => <DateTime value={u.created_at} short /> },
+    {
+      key: "created_at",
+      header: "Since",
+      width: pixel(190),
+      renderCell: (u) => <DateTime value={u.created_at} short />,
+    },
   ];
   const inviteColumns: TableColumn<Invite>[] = [
     { key: "email", header: "Email" },
@@ -129,7 +136,11 @@ export function Staff({
         <HStack hAlign="between" vAlign="start" gap={3}>
           <Heading title="Staff" description="Everyone who can sign in to this admin." />
           {canInvite && (
-            <Button label="Invite staff" variant="primary" onClick={() => setInviting({ email: "" })} />
+            <Button
+              label="Invite staff"
+              variant="primary"
+              onClick={() => setInviting({ email: "" })}
+            />
           )}
         </HStack>
         <ClientResourceTable<User>
@@ -179,11 +190,7 @@ export function Staff({
       </VStack>
 
       {inviting && (
-        <InviteDialog
-          roles={roles}
-          initial={inviting}
-          onClose={() => setInviting(undefined)}
-        />
+        <InviteDialog roles={roles} initial={inviting} onClose={() => setInviting(undefined)} />
       )}
     </VStack>
   );

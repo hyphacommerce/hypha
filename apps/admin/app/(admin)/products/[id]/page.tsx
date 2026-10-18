@@ -68,10 +68,14 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
                   </Text>
                 </MetadataListItem>
                 <MetadataListItem label="Created">
-                  <Text type="supporting"><DateTime value={product.created_at} /></Text>
+                  <Text type="supporting">
+                    <DateTime value={product.created_at} />
+                  </Text>
                 </MetadataListItem>
                 <MetadataListItem label="Last changed">
-                  <Text type="supporting"><DateTime value={product.updated_at} /></Text>
+                  <Text type="supporting">
+                    <DateTime value={product.updated_at} />
+                  </Text>
                 </MetadataListItem>
               </MetadataList>
             </Card>

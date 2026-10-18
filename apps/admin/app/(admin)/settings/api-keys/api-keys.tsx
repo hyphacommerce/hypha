@@ -23,7 +23,6 @@ import { useState, useTransition } from "react";
 import { DateTime } from "@/components/date-time";
 import { ResourceTable } from "@/components/resource-table/resource-table";
 
-
 import { createApiKey, revokeApiKey } from "./actions";
 
 type ApiKey = AdminSchemas["ApiKeyResponse"];
@@ -86,7 +85,9 @@ export function ApiKeys({
         k.revoked_at ? (
           <Badge label="Revoked" variant="neutral" />
         ) : (
-          canWrite && <Button label="Revoke" size="sm" variant="ghost" onClick={() => setRevoking(k)} />
+          canWrite && (
+            <Button label="Revoke" size="sm" variant="ghost" onClick={() => setRevoking(k)} />
+          )
         ),
     },
   ];
@@ -166,7 +167,11 @@ function CreateKeyDialog({
         {error && <Banner status="error" title={error} />}
         {token ? (
           <>
-            <CodeBlock code={token} title={kind === "secret" ? "Secret key" : "Publishable key"} isWrapped />
+            <CodeBlock
+              code={token}
+              title={kind === "secret" ? "Secret key" : "Publishable key"}
+              isWrapped
+            />
             {kind === "publishable" && (
               <Text type="supporting" color="secondary">
                 For a storefront, it goes in its STOREFRONT_KEY setting (apps/storefront/.dev.vars

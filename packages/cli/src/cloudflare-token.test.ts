@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { checkR2Keys, checkToken, isTokenValue, PERMISSIONS, r2KeysOf, templateUrl } from "./cloudflare-token.ts";
+import {
+  checkR2Keys,
+  checkToken,
+  isTokenValue,
+  PERMISSIONS,
+  r2KeysOf,
+  templateUrl,
+} from "./cloudflare-token.ts";
 
 test("the link fills in every permission deploying needs", () => {
   const link = new URL(templateUrl("Hypha shop"));
@@ -14,13 +21,17 @@ test("the link fills in every permission deploying needs", () => {
 });
 
 /** Cloudflare's API as a fake: `refused` paths answer 403. */
-function cloudflare(options: { accounts?: { id: string; name: string }[]; refused?: string[]; zone?: string } = {}) {
+function cloudflare(
+  options: { accounts?: { id: string; name: string }[]; refused?: string[]; zone?: string } = {},
+) {
   const asked: string[] = [];
   const get = (async (input: RequestInfo | URL) => {
     const path = String(input).replace("https://api.cloudflare.com/client/v4", "");
     asked.push(path);
-    const answer = (result: unknown) => new Response(JSON.stringify({ success: true, result }), { status: 200 });
-    if ((options.refused ?? []).some((r) => path.startsWith(r))) return new Response("{}", { status: 403 });
+    const answer = (result: unknown) =>
+      new Response(JSON.stringify({ success: true, result }), { status: 200 });
+    if ((options.refused ?? []).some((r) => path.startsWith(r)))
+      return new Response("{}", { status: 403 });
     if (path === "/user/tokens/verify") return answer({ status: "active" });
     if (path === "/accounts") return answer(options.accounts ?? [{ id: "acc", name: "Shop" }]);
     if (path.startsWith("/zones?name=")) {
@@ -45,7 +56,10 @@ test("a good token gives the account and the domain's zone, its parent's for a s
 test("a token that can't reach something says which permission to add", async () => {
   const { get } = cloudflare({ refused: ["/accounts/acc/hyperdrive", "/zones/zone1/dns_records"] });
   const { missing } = await checkToken("t", "example.com", { media: false }, get);
-  assert.deepEqual(missing.map((m) => m.split(" ")[0]), ["Hyperdrive", "DNS"]);
+  assert.deepEqual(
+    missing.map((m) => m.split(" ")[0]),
+    ["Hyperdrive", "DNS"],
+  );
 });
 
 test("R2 is tried, and required only when asked", async () => {
@@ -59,7 +73,9 @@ test("R2 is tried, and required only when asked", async () => {
 test("R2's keys from a token: its ID and the SHA-256 of its value, user or account token", async () => {
   const user = (async (input: RequestInfo | URL) =>
     String(input).endsWith("/user/tokens/verify")
-      ? new Response(JSON.stringify({ success: true, result: { id: "f".repeat(32), status: "active" } }))
+      ? new Response(
+          JSON.stringify({ success: true, result: { id: "f".repeat(32), status: "active" } }),
+        )
       : new Response("{}", { status: 403 })) as typeof fetch;
   assert.deepEqual(await r2KeysOf("abc", "acc", user), {
     id: "f".repeat(32),
@@ -67,7 +83,9 @@ test("R2's keys from a token: its ID and the SHA-256 of its value, user or accou
   });
   const account = (async (input: RequestInfo | URL) =>
     String(input).endsWith("/accounts/acc/tokens/verify")
-      ? new Response(JSON.stringify({ success: true, result: { id: "e".repeat(32), status: "active" } }))
+      ? new Response(
+          JSON.stringify({ success: true, result: { id: "e".repeat(32), status: "active" } }),
+        )
       : new Response("{}", { status: 401 })) as typeof fetch;
   assert.equal((await r2KeysOf("cfat_x", "acc", account)).id, "e".repeat(32));
   assert.ok(isTokenValue("cfat_YT29kdVxT40Xs2dgDAuYpEDB0XxeH1g9IVZb6XVJeb269004"));
@@ -75,11 +93,25 @@ test("R2's keys from a token: its ID and the SHA-256 of its value, user or accou
 });
 
 test("several accounts need --account-id; a domain elsewhere is refused", async () => {
-  const two = cloudflare({ accounts: [{ id: "a1", name: "One" }, { id: "a2", name: "Two" }] });
-  await assert.rejects(checkToken("t", "example.com", { media: false }, two.get), /reaches 2 accounts/);
-  assert.equal((await checkToken("t", "example.com", { accountId: "a2", media: false }, two.get)).accountId, "a2");
+  const two = cloudflare({
+    accounts: [
+      { id: "a1", name: "One" },
+      { id: "a2", name: "Two" },
+    ],
+  });
+  await assert.rejects(
+    checkToken("t", "example.com", { media: false }, two.get),
+    /reaches 2 accounts/,
+  );
+  assert.equal(
+    (await checkToken("t", "example.com", { accountId: "a2", media: false }, two.get)).accountId,
+    "a2",
+  );
   const elsewhere = cloudflare({ zone: "other.com" });
-  await assert.rejects(checkToken("t", "example.com", { media: false }, elsewhere.get), /no zone for example\.com/);
+  await assert.rejects(
+    checkToken("t", "example.com", { media: false }, elsewhere.get),
+    /no zone for example\.com/,
+  );
 });
 
 test("an invalid token is refused before anything else", async () => {
@@ -89,7 +121,10 @@ test("an invalid token is refused before anything else", async () => {
 
 test("R2's S3 keys are told apart from a token's value", () => {
   assert.equal(checkR2Keys("0".repeat(32), "f".repeat(64)), undefined);
-  assert.match(checkR2Keys("cfat_YT29kdVxT40Xs2dgDAuYpEDB0XxeH1g9IVZb6XVJeb269004", "x") ?? "", /token's value/);
+  assert.match(
+    checkR2Keys("cfat_YT29kdVxT40Xs2dgDAuYpEDB0XxeH1g9IVZb6XVJeb269004", "x") ?? "",
+    /token's value/,
+  );
   assert.match(checkR2Keys("0".repeat(31), "f".repeat(64)) ?? "", /32 hexadecimal/);
   assert.match(checkR2Keys("0".repeat(32), "f".repeat(63)) ?? "", /64 hexadecimal/);
 });

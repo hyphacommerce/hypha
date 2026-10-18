@@ -125,7 +125,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               <MetadataListItem label="Visibility">
                 {asset.visibility === "public" ? "Public" : "Private"}
               </MetadataListItem>
-              <MetadataListItem label="Uploaded"><DateTime value={asset.created_at} /></MetadataListItem>
+              <MetadataListItem label="Uploaded">
+                <DateTime value={asset.created_at} />
+              </MetadataListItem>
             </MetadataList>
           </VStack>
         </HStack>

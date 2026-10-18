@@ -66,7 +66,8 @@ export async function addMarket(input: {
     body: { market: market.id },
   });
   refresh();
-  if (catalogError) return { error: `The market was added, but not its catalog: ${describe(catalogError)}` };
+  if (catalogError)
+    return { error: `The market was added, but not its catalog: ${describe(catalogError)}` };
   return {};
 }
 
@@ -174,7 +175,8 @@ export async function addProduct(input: {
       body: { variant: variant.id, tracked: true },
     });
     if (e3) return partly("its stock wasn't set", e3);
-    if (!item.id) return { error: `“${input.title}” was created as a draft, but its stock wasn't set.` };
+    if (!item.id)
+      return { error: `“${input.title}” was created as a draft, but its stock wasn't set.` };
     const { error: e4 } = await client.PUT("/admin/inventory-items/{id}/levels/{location_id}", {
       params: { path: { id: item.id, location_id: location.id } },
       body: { on_hand: count },

@@ -29,7 +29,8 @@ export async function uploadFile(file: File): Promise<{ id: string } | { error: 
     headers,
     body: file,
   }).catch(() => undefined);
-  if (!stored?.ok) return { error: "The upload didn't reach storage. Check your connection and retry." };
+  if (!stored?.ok)
+    return { error: "The upload didn't reach storage. Check your connection and retry." };
   const completed = await completeUpload(started.id);
   return completed.error ? { error: completed.error } : { id: started.id };
 }

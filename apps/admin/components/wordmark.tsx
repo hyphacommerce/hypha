@@ -10,7 +10,12 @@ export function Wordmark({ height = 20 }: { height?: number }) {
   const style = { height, width: "auto" };
   return (
     <span style={{ display: "block", padding: height / 2 }}>
-      <img className="hypha-wordmark-light" src="/brand/hypha-wordmark.svg" alt="Hypha" style={style} />
+      <img
+        className="hypha-wordmark-light"
+        src="/brand/hypha-wordmark.svg"
+        alt="Hypha"
+        style={style}
+      />
       <img
         className="hypha-wordmark-dark"
         src="/brand/hypha-wordmark-on-dark.svg"

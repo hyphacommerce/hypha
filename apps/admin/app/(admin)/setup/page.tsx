@@ -31,7 +31,9 @@ export default async function SetupPage({
       client.GET("/admin/shipping-zones").then(loaded),
       client.GET("/admin/locations").then(loaded),
       client.GET("/admin/channels").then(loaded),
-      client.GET("/admin/products", { params: { query: { status: ["active"], limit: 50 } } }).then(loaded),
+      client
+        .GET("/admin/products", { params: { query: { status: ["active"], limit: 50 } } })
+        .then(loaded),
       loadCountries(),
       loadPaymentMethods(),
     ]);

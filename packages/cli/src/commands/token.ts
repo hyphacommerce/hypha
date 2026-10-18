@@ -34,7 +34,10 @@ export async function obtainToken(o: TokenOptions): Promise<{ token: string; che
   }
   const token = (
     await ask(o.given, o.known, () =>
-      p.password({ message: "The API token", validate: (v) => (v?.trim() ? undefined : "paste the token") }),
+      p.password({
+        message: "The API token",
+        validate: (v) => (v?.trim() ? undefined : "paste the token"),
+      }),
     )
   ).trim();
   for (;;) {
@@ -42,7 +45,11 @@ export async function obtainToken(o: TokenOptions): Promise<{ token: string; che
     spin.start("Checking the token");
     let checked: Checked;
     try {
-      checked = await checkToken(token, o.domain, { accountId: o.accountId, zoneId: o.zoneId, media: false });
+      checked = await checkToken(token, o.domain, {
+        accountId: o.accountId,
+        zoneId: o.zoneId,
+        media: false,
+      });
     } catch (e) {
       spin.error("The token won't do");
       throw e;
@@ -58,7 +65,9 @@ export async function obtainToken(o: TokenOptions): Promise<{ token: string; che
       throw new Error(`add these to the token (${where}), then run this again:\n${missing}`);
     }
     // Editing a token keeps its value: check the same one again.
-    const again = await p.confirm({ message: `Add these to the token (${where}), then check again:\n${missing}` });
+    const again = await p.confirm({
+      message: `Add these to the token (${where}), then check again:\n${missing}`,
+    });
     if (p.isCancel(again) || !again) throw new Error("the token lacks permissions");
   }
 }

@@ -59,7 +59,13 @@ export function CartView() {
               digits={digits}
             />
             {cart.fully_available ? (
-              <Button label="Check out" href={`${base}/checkout`} variant="primary" size="lg" width="100%" />
+              <Button
+                label="Check out"
+                href={`${base}/checkout`}
+                variant="primary"
+                size="lg"
+                width="100%"
+              />
             ) : (
               <Banner status="warning" title="Remove what can't be bought to check out." />
             )}

@@ -72,7 +72,9 @@ function FacetList({
         label={facet.key.startsWith("option.") && facet.label ? facet.label : facetName(facet.key)}
         density="compact"
         value={selected.filter((f) => f.startsWith(prefix))}
-        onChange={(values) => onChange([...selected.filter((f) => !f.startsWith(prefix)), ...values])}
+        onChange={(values) =>
+          onChange([...selected.filter((f) => !f.startsWith(prefix)), ...values])
+        }
       >
         {values.map((v) => (
           <CheckboxListItem
@@ -97,7 +99,12 @@ function FacetList({
   );
 }
 
-function PriceRange({ state, priceHint, currency, onApply }: {
+function PriceRange({
+  state,
+  priceHint,
+  currency,
+  onApply,
+}: {
   state: ListingState;
   priceHint?: { min: string; max: string };
   currency?: string;
@@ -144,7 +151,14 @@ function PriceRange({ state, priceHint, currency, onApply }: {
 }
 
 /** The facets and the price range. */
-export function FacetPanel({ base, state, facets, priceHint, currency, onDone }: Props & {
+export function FacetPanel({
+  base,
+  state,
+  facets,
+  priceHint,
+  currency,
+  onDone,
+}: Props & {
   onDone?: () => void;
 }) {
   const { go } = useGo(base);
@@ -198,19 +212,19 @@ export function ListingToolbar(props: Props & { total: number; sort: Sort }) {
       </Text>
       <HStack gap={2} vAlign="center">
         {!isWide && (
-        <>
-          <Button
-            label={active > 0 ? `Filters (${active})` : "Filters"}
-            icon={<Icon icon={AdjustmentsHorizontalIcon} />}
-            clickAction={() => setSheet(true)}
-          />
-          {/* Leaving the listing (a product, another category) closes it; filtering here,
+          <>
+            <Button
+              label={active > 0 ? `Filters (${active})` : "Filters"}
+              icon={<Icon icon={AdjustmentsHorizontalIcon} />}
+              clickAction={() => setSheet(true)}
+            />
+            {/* Leaving the listing (a product, another category) closes it; filtering here,
               which changes only the query, doesn't. */}
-          <CloseOnNavigate pathOnly onNavigate={() => setSheet(false)} />
-          <BottomSheet label="Filters" isOpen={sheet} onOpenChange={setSheet} height="tall">
-            <FacetPanel {...props} onDone={() => setSheet(false)} />
-          </BottomSheet>
-        </>
+            <CloseOnNavigate pathOnly onNavigate={() => setSheet(false)} />
+            <BottomSheet label="Filters" isOpen={sheet} onOpenChange={setSheet} height="tall">
+              <FacetPanel {...props} onDone={() => setSheet(false)} />
+            </BottomSheet>
+          </>
         )}
         <Selector
           label="Sort"

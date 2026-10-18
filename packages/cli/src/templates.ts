@@ -162,13 +162,17 @@ export function newCloudflareEnv(
     )
     .set("HYPHA_SECRET_KEY", secret())
     .comment("")
-    .comment("The Cloudflare API token everything deploys with (revoke it in the dashboard to stop that).")
+    .comment(
+      "The Cloudflare API token everything deploys with (revoke it in the dashboard to stop that).",
+    )
     .set("CLOUDFLARE_API_TOKEN", options.token)
     .comment("")
     .comment("The database's direct URL: `hypha deploy` sets it up and points Hyperdrive at it.")
     .set("DATABASE_URL", databaseUrl)
     .comment("")
-    .comment("R2's S3 keys for files (derived from an R2-capable token: its ID, the SHA-256 of its value); empty: off.")
+    .comment(
+      "R2's S3 keys for files (derived from an R2-capable token: its ID, the SHA-256 of its value); empty: off.",
+    )
     .set("R2_ACCESS_KEY_ID", options.r2.id)
     .set("R2_SECRET_ACCESS_KEY", options.r2.secret)
     .comment("")

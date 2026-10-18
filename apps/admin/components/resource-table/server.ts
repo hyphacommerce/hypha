@@ -73,8 +73,14 @@ export function startOfDay(date: string, timeZone: string): string {
     }).formatToParts(new Date(at));
     const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
     return (
-      Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second")) -
-      at
+      Date.UTC(
+        get("year"),
+        get("month") - 1,
+        get("day"),
+        get("hour"),
+        get("minute"),
+        get("second"),
+      ) - at
     );
   };
   let at = guess - offset(guess);

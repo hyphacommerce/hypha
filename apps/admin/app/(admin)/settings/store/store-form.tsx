@@ -80,7 +80,10 @@ function addressValue(d: AddressDraft): AdminSchemas["PostalAddressRequest"] | n
 function timezoneOptions(current: string | null | undefined) {
   const names = Intl.supportedValuesOf("timeZone");
   if (current && !names.includes(current)) names.push(current);
-  return [{ value: "", label: "None" }, ...names.map((name) => ({ value: name, label: name.replaceAll("_", " ") }))];
+  return [
+    { value: "", label: "None" },
+    ...names.map((name) => ({ value: name, label: name.replaceAll("_", " ") })),
+  ];
 }
 
 /** Blank text is `null` (clears the field). */
@@ -105,7 +108,8 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
   if (description.trim() !== (store.description ?? "")) patch.description = orNull(description);
   if (legalName.trim() !== (store.legal_name ?? "")) patch.legal_name = orNull(legalName);
   const savedAddress = JSON.stringify(addressValue(addressDraft(store.legal_address)));
-  if (JSON.stringify(addressValue(address)) !== savedAddress) patch.legal_address = addressValue(address);
+  if (JSON.stringify(addressValue(address)) !== savedAddress)
+    patch.legal_address = addressValue(address);
   if (timezone !== (store.timezone ?? "")) patch.timezone = orNull(timezone);
   if (language.trim() !== store.default_language) patch.default_language = language;
   const isChanged = Object.keys(patch).length > 0;
@@ -123,7 +127,8 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
     setTimezone(store.timezone ?? "");
     setLanguage(store.default_language);
   };
-  const field = (key: keyof AddressDraft) => (value: string) => setAddress({ ...address, [key]: value });
+  const field = (key: keyof AddressDraft) => (value: string) =>
+    setAddress({ ...address, [key]: value });
 
   return (
     <VStack gap={4}>
@@ -202,7 +207,12 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
               For invoices and legal pages. Leave every address field blank to have none.
             </Text>
           </VStack>
-          <TextInput label="Legal name" placeholder="Acme d.o.o." value={legalName} onChange={setLegalName} />
+          <TextInput
+            label="Legal name"
+            placeholder="Acme d.o.o."
+            value={legalName}
+            onChange={setLegalName}
+          />
           <div className="form-grid">
             {ADDRESS_FIELDS.map((f) => (
               <TextInput

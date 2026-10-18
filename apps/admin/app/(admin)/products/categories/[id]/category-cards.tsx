@@ -196,13 +196,18 @@ export function ImageCard({ id, image }: { id: string; image: Media | null }) {
               Image
             </Text>
             <Text type="supporting" color="secondary">
-              Shown on the category page and in menus. It can't be deleted from the library
-              while it's here.
+              Shown on the category page and in menus. It can't be deleted from the library while
+              it's here.
             </Text>
           </VStack>
           <HStack gap={2}>
             {image && (
-              <Button label="Remove" variant="ghost" isLoading={isPending} onClick={() => set(null)} />
+              <Button
+                label="Remove"
+                variant="ghost"
+                isLoading={isPending}
+                onClick={() => set(null)}
+              />
             )}
             <Button
               label={image ? "Change" : "Pick from library"}
@@ -322,7 +327,12 @@ function ImagePicker({
           )}
           {next && (
             <HStack hAlign="center">
-              <Button label="Load more" variant="ghost" isLoading={isLoading} onClick={() => load(next)} />
+              <Button
+                label="Load more"
+                variant="ghost"
+                isLoading={isLoading}
+                onClick={() => load(next)}
+              />
             </HStack>
           )}
         </VStack>

@@ -23,8 +23,8 @@ const generated = [
 export default defineConfig({
   fmt: {
     printWidth: 100,
-    // The design notes and READMEs wrap and align by hand.
-    ignorePatterns: [...generated, "**/*.md", "pnpm-lock.yaml"],
+    // The design notes and READMEs wrap and align by hand; TOML is the Rust side's.
+    ignorePatterns: [...generated, "**/*.md", "**/*.toml", "pnpm-lock.yaml"],
   },
   lint: {
     ignorePatterns: generated,

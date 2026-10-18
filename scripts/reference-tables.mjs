@@ -35,7 +35,8 @@ function rust(s) {
 
 /** Sorted by code, byte-wise (what Rust's `str` ordering and binary search use). */
 function sorted(rows) {
-  for (const [code] of rows) if (!/^[\x21-\x7e]+$/.test(code)) throw new Error(`non-ASCII code ${code}`);
+  for (const [code] of rows)
+    if (!/^[\x21-\x7e]+$/.test(code)) throw new Error(`non-ASCII code ${code}`);
   rows.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   for (let i = 1; i < rows.length; i++) {
     if (rows[i - 1][0] === rows[i][0]) throw new Error(`${rows[i][0]} twice`);

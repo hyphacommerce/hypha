@@ -219,11 +219,7 @@ export const requireStaff = perRequest(async (): Promise<AdminSchemas["MeRespons
  * session the API no longer accepts never gets here: `sessionClient` redirects);
  * anything else is a bug or an outage, so it throws to the error page.
  */
-export function loaded<T>(result: {
-  data?: T;
-  error?: ApiError;
-  response: Response;
-}): T {
+export function loaded<T>(result: { data?: T; error?: ApiError; response: Response }): T {
   if (result.data !== undefined) return result.data;
   if (result.response.status === 404) notFound();
   throw new Error(

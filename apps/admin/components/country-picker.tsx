@@ -76,7 +76,12 @@ export function CountryPicker({
           label={`All available (${free(countries.map((c) => c.code)).length})`}
           size="sm"
           variant="secondary"
-          onClick={() => add(countries.map((c) => c.code), "every free country")}
+          onClick={() =>
+            add(
+              countries.map((c) => c.code),
+              "every free country",
+            )
+          }
         />
         {REGIONS.map((region) => (
           <Button

@@ -104,7 +104,13 @@ function ZoneDialog({ zone, onClose }: { zone?: Zone; onClose: () => void }) {
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <TextInput label="Name" placeholder="Europe" value={name} onChange={setName} onEnter={submit} />
+        <TextInput
+          label="Name"
+          placeholder="Europe"
+          value={name}
+          onChange={setName}
+          onEnter={submit}
+        />
         <TextInput
           label="Countries"
           description="Two-letter codes, separated by commas. A country is in one zone at most."
@@ -158,7 +164,12 @@ function ZoneCard({ zone, providers }: { zone: Zone; providers: Provider[] }) {
           <HStack gap={1}>
             {isConfirmingDelete ? (
               <>
-                <Button label="Cancel" size="sm" variant="ghost" onClick={() => setIsConfirmingDelete(false)} />
+                <Button
+                  label="Cancel"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIsConfirmingDelete(false)}
+                />
                 <Button
                   label="Delete zone"
                   size="sm"
@@ -175,9 +186,19 @@ function ZoneCard({ zone, providers }: { zone: Zone; providers: Provider[] }) {
               </>
             ) : (
               <>
-                <Button label="Add option" size="sm" variant="secondary" onClick={() => setIsAddingOption(true)} />
+                <Button
+                  label="Add option"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setIsAddingOption(true)}
+                />
                 <Button label="Edit" size="sm" variant="ghost" onClick={() => setIsEditing(true)} />
-                <Button label="Delete" size="sm" variant="ghost" onClick={() => setIsConfirmingDelete(true)} />
+                <Button
+                  label="Delete"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIsConfirmingDelete(true)}
+                />
               </>
             )}
           </HStack>
@@ -281,7 +302,12 @@ function OptionRow({
         <HStack gap={1} hAlign="end" vAlign="center">
           {isConfirmingDelete ? (
             <>
-              <Button label="Cancel" size="sm" variant="ghost" onClick={() => setIsConfirmingDelete(false)} />
+              <Button
+                label="Cancel"
+                size="sm"
+                variant="ghost"
+                onClick={() => setIsConfirmingDelete(false)}
+              />
               <Button
                 label="Delete option"
                 size="sm"
@@ -410,7 +436,13 @@ function OptionDialog({
       <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
         <VStack gap={4} padding={4}>
           <HStack gap={3}>
-            <TextInput label="Name" description="What shoppers see." placeholder="Standard" value={name} onChange={setName} />
+            <TextInput
+              label="Name"
+              description="What shoppers see."
+              placeholder="Standard"
+              value={name}
+              onChange={setName}
+            />
             <TextInput
               label="Code"
               description="Stable, for apps and reports."
@@ -428,13 +460,27 @@ function OptionDialog({
             }))}
             value={draft.kind}
             onChange={(kind) =>
-              setDraft(emptyDraft(kind as RateKind, "prices" in draft ? draft.prices[0].currency : "EUR"))
+              setDraft(
+                emptyDraft(kind as RateKind, "prices" in draft ? draft.prices[0].currency : "EUR"),
+              )
             }
           />
           <RateEditor draft={draft} providers={providers} onChange={setDraft} />
           <HStack gap={3}>
-            <TextInput label="Delivery, days from" placeholder="2" value={minDays} onChange={setMinDays} width={180} />
-            <TextInput label="Days to" placeholder="4" value={maxDays} onChange={setMaxDays} width={180} />
+            <TextInput
+              label="Delivery, days from"
+              placeholder="2"
+              value={minDays}
+              onChange={setMinDays}
+              width={180}
+            />
+            <TextInput
+              label="Days to"
+              placeholder="4"
+              value={maxDays}
+              onChange={setMaxDays}
+              width={180}
+            />
           </HStack>
           <CheckboxInput
             label="Backup"
@@ -494,7 +540,10 @@ function RateEditor({
   }
 
   // Each currency's table; the currencies not used yet can be added.
-  const used = draft.kind === "flat" ? draft.prices.map((p) => p.currency) : draft.tables.map((t) => t.currency);
+  const used =
+    draft.kind === "flat"
+      ? draft.prices.map((p) => p.currency)
+      : draft.tables.map((t) => t.currency);
   const unused = currencyCodes(currencies).filter((c) => !used.includes(c));
   const addCurrency = () => {
     const currency = unused[0];
@@ -526,22 +575,38 @@ function RateEditor({
       {draft.kind === "flat" &&
         draft.prices.map((row, i) => {
           const set = (patch: Partial<typeof row>) =>
-            onChange({ ...draft, prices: draft.prices.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+            onChange({
+              ...draft,
+              prices: draft.prices.map((r, j) => (j === i ? { ...r, ...patch } : r)),
+            });
           return (
             <HStack key={row.currency} gap={2} vAlign="end">
               {currencyPicker(row.currency, (currency) => set({ currency }))}
-              <TextInput label={`Price (${row.currency})`} placeholder="4.90" value={row.price} onChange={(price) => set({ price })} />
+              <TextInput
+                label={`Price (${row.currency})`}
+                placeholder="4.90"
+                value={row.price}
+                onChange={(price) => set({ price })}
+              />
             </HStack>
           );
         })}
       {draft.kind === "free_over" &&
         draft.tables.map((row, i) => {
           const set = (patch: Partial<typeof row>) =>
-            onChange({ ...draft, tables: draft.tables.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+            onChange({
+              ...draft,
+              tables: draft.tables.map((r, j) => (j === i ? { ...r, ...patch } : r)),
+            });
           return (
             <HStack key={row.currency} gap={2} vAlign="end">
               {currencyPicker(row.currency, (currency) => set({ currency }))}
-              <TextInput label={`Price (${row.currency})`} placeholder="4.90" value={row.price} onChange={(price) => set({ price })} />
+              <TextInput
+                label={`Price (${row.currency})`}
+                placeholder="4.90"
+                value={row.price}
+                onChange={(price) => set({ price })}
+              />
               <TextInput
                 label={`Free from (${row.currency})`}
                 placeholder="50"
@@ -554,7 +619,10 @@ function RateEditor({
       {(draft.kind === "subtotal" || draft.kind === "weight") &&
         draft.tables.map((table, i) => {
           const setTable = (patch: Partial<typeof table>) =>
-            onChange({ ...draft, tables: draft.tables.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
+            onChange({
+              ...draft,
+              tables: draft.tables.map((t, j) => (j === i ? { ...t, ...patch } : t)),
+            });
           const unit = draft.kind === "weight" ? "g" : table.currency;
           return (
             <VStack key={table.currency} gap={2}>
@@ -562,7 +630,9 @@ function RateEditor({
               {table.tiers.map((tier, k) => {
                 const isLast = k === table.tiers.length - 1;
                 const setTier = (patch: Partial<typeof tier>) =>
-                  setTable({ tiers: table.tiers.map((t, n) => (n === k ? { ...t, ...patch } : t)) });
+                  setTable({
+                    tiers: table.tiers.map((t, n) => (n === k ? { ...t, ...patch } : t)),
+                  });
                 return (
                   <HStack key={k} gap={2} vAlign="end">
                     {isLast ? (
@@ -600,7 +670,13 @@ function RateEditor({
                   size="sm"
                   variant="ghost"
                   onClick={() =>
-                    setTable({ tiers: [...table.tiers.slice(0, -1), { upTo: "", price: "" }, table.tiers[table.tiers.length - 1]] })
+                    setTable({
+                      tiers: [
+                        ...table.tiers.slice(0, -1),
+                        { upTo: "", price: "" },
+                        table.tiers[table.tiers.length - 1],
+                      ],
+                    })
                   }
                 />
               </HStack>

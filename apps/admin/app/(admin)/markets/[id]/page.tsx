@@ -50,7 +50,9 @@ export default async function MarketPage({
 
   const listId = catalog?.price_list ?? undefined;
   const [list, prices] = await Promise.all([
-    listId ? client.GET("/admin/price-lists/{id}", { params: { path: { id: listId } } }) : undefined,
+    listId
+      ? client.GET("/admin/price-lists/{id}", { params: { path: { id: listId } } })
+      : undefined,
     listId
       ? client.GET("/admin/price-lists/{id}/fixed-prices", {
           params: { path: { id: listId }, query: { cursor: pricesCursor } },

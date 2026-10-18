@@ -52,68 +52,68 @@ export function SiteHeader(props: HeaderProps) {
       {/* A suggestion or "Search for…" goes to another page: the popover closes. */}
       <CloseOnNavigate onNavigate={() => setIsSearching(false)} />
       <TopNav
-      label="Store"
-      heading={<TopNavHeading heading={props.storeName} headingHref={props.homeHref} />}
-      startContent={props.categories.map((c) =>
-        c.children.length > 0 ? (
-          <TopNavMegaMenu
-            // Keyed by the page too: a mega menu takes no open state, so a new page
-            // remounts it closed.
-            key={`${c.id}:${pathname}`}
-            label={c.name}
-            items={[c, ...c.children].map((item) => (
-              <TopNavMegaMenuItem
-                key={item.id}
-                title={item.id === c.id ? `All ${c.name}` : item.name}
-                href={item.href}
-              />
-            ))}
-          />
-        ) : (
-          <TopNavItem
-            key={c.id}
-            label={c.name}
-            href={c.href}
-            isSelected={pathname.startsWith(c.href)}
-          />
-        ),
-      )}
-      endContent={
-        <HStack gap={1} vAlign="center">
-          <Popover
-            isOpen={isSearching}
-            onOpenChange={setIsSearching}
-            label="Search"
-            placement="below"
-            alignment="end"
-            width={420}
-            content={<SearchBox country={props.country} searchHref={props.searchHref} />}
-          >
-            <Button
-              label="Search"
-              variant="ghost"
-              isIconOnly
-              icon={<Icon icon={MagnifyingGlassIcon} />}
+        label="Store"
+        heading={<TopNavHeading heading={props.storeName} headingHref={props.homeHref} />}
+        startContent={props.categories.map((c) =>
+          c.children.length > 0 ? (
+            <TopNavMegaMenu
+              // Keyed by the page too: a mega menu takes no open state, so a new page
+              // remounts it closed.
+              key={`${c.id}:${pathname}`}
+              label={c.name}
+              items={[c, ...c.children].map((item) => (
+                <TopNavMegaMenuItem
+                  key={item.id}
+                  title={item.id === c.id ? `All ${c.name}` : item.name}
+                  href={item.href}
+                />
+              ))}
             />
-          </Popover>
-          <CurrencySwitcher current={props.country} countries={props.countries} />
-          <TopNavItem
-            label="Account"
-            href={props.accountHref}
-            isIconOnly
-            icon={<Icon icon={UserIcon} />}
-          />
-          <Button
-            label="Cart"
-            aria-label={count > 0 ? `Cart, ${count} items` : "Cart"}
-            variant="ghost"
-            icon={<Icon icon={ShoppingBagIcon} />}
-            endContent={count > 0 ? <Badge label={String(count)} /> : undefined}
-            clickAction={open}
-          />
-        </HStack>
-      }
-    />
+          ) : (
+            <TopNavItem
+              key={c.id}
+              label={c.name}
+              href={c.href}
+              isSelected={pathname.startsWith(c.href)}
+            />
+          ),
+        )}
+        endContent={
+          <HStack gap={1} vAlign="center">
+            <Popover
+              isOpen={isSearching}
+              onOpenChange={setIsSearching}
+              label="Search"
+              placement="below"
+              alignment="end"
+              width={420}
+              content={<SearchBox country={props.country} searchHref={props.searchHref} />}
+            >
+              <Button
+                label="Search"
+                variant="ghost"
+                isIconOnly
+                icon={<Icon icon={MagnifyingGlassIcon} />}
+              />
+            </Popover>
+            <CurrencySwitcher current={props.country} countries={props.countries} />
+            <TopNavItem
+              label="Account"
+              href={props.accountHref}
+              isIconOnly
+              icon={<Icon icon={UserIcon} />}
+            />
+            <Button
+              label="Cart"
+              aria-label={count > 0 ? `Cart, ${count} items` : "Cart"}
+              variant="ghost"
+              icon={<Icon icon={ShoppingBagIcon} />}
+              endContent={count > 0 ? <Badge label={String(count)} /> : undefined}
+              clickAction={open}
+            />
+          </HStack>
+        }
+      />
     </>
   );
 }

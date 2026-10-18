@@ -42,7 +42,9 @@ function optional(value: string | undefined): string | null {
 
 /** A new cart in `country`, remembered in the shopper's cookies. */
 async function newCart(country: string): Promise<string> {
-  const { data, error } = await (await shopperApi()).POST("/storefront/carts", { body: { country } });
+  const { data, error } = await (
+    await shopperApi()
+  ).POST("/storefront/carts", { body: { country } });
   if (error) throw new Error(`couldn't create a cart: ${error.code}`);
   await rememberCart(country, data.id);
   return data.id;

@@ -7,7 +7,15 @@ import { type Staff } from "./api.ts";
 import { type Deployment, url } from "./deployment.ts";
 
 /** The events that change what a static page shows. */
-const EVENTS = ["product.*", "inventory_item.*", "price_list.*", "catalog.*", "channel.*", "category.*", "market.*"];
+const EVENTS = [
+  "product.*",
+  "inventory_item.*",
+  "price_list.*",
+  "catalog.*",
+  "channel.*",
+  "category.*",
+  "market.*",
+];
 
 /** `webhookSecret` is `null` without a webhook (on this machine). */
 export type StorefrontKeys = { key: string; webhookSecret: string | null };
@@ -20,7 +28,10 @@ function webhookUrl(d: Deployment): string {
 /** Points the storefront's webhook at its current domain; answers the new URL when it
  * moved, `null` when it was already right. */
 export async function syncWebhook(d: Deployment, staff: Staff): Promise<string | null> {
-  const app = await staff.call<{ webhook: { url: string } | null }>("GET", "/admin/apps/app_storefront");
+  const app = await staff.call<{ webhook: { url: string } | null }>(
+    "GET",
+    "/admin/apps/app_storefront",
+  );
   const target = webhookUrl(d);
   if (app.webhook?.url === target) return null;
   await staff.call("PATCH", "/admin/apps/app_storefront", { webhook: { url: target } });
@@ -36,7 +47,10 @@ export async function syncWebhook(d: Deployment, staff: Staff): Promise<string |
  * their five minutes.
  */
 export async function connectStorefront(d: Deployment, staff: Staff): Promise<StorefrontKeys> {
-  const channels = await staff.call<{ items: { id: string; kind: string }[] }>("GET", "/admin/channels");
+  const channels = await staff.call<{ items: { id: string; kind: string }[] }>(
+    "GET",
+    "/admin/channels",
+  );
   const channel = channels.items.find((c) => c.kind === "online_store");
   if (!channel) throw new Error("the store has no Online Store channel to sell through");
   let webhookSecret: string | null = null;

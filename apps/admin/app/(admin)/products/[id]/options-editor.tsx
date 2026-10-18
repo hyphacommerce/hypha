@@ -103,11 +103,15 @@ export function OptionsEditor({
         {list.length === 0 && (
           <VStack gap={3} hAlign="start">
             <Text color="secondary">
-              This product is sold one way. Add options if it comes in several sizes, colors
-              or materials: each combination becomes a variant with its own price, SKU and
-              stock.
+              This product is sold one way. Add options if it comes in several sizes, colors or
+              materials: each combination becomes a variant with its own price, SKU and stock.
             </Text>
-            <Button label="Add options" variant="secondary" icon={<PlusIcon width={16} />} onClick={add} />
+            <Button
+              label="Add options"
+              variant="secondary"
+              icon={<PlusIcon width={16} />}
+              onClick={add}
+            />
           </VStack>
         )}
 
@@ -144,7 +148,12 @@ export function OptionsEditor({
                     )}
                   </HStack>
                 </VStack>
-                <Button label="Edit" variant="ghost" size="sm" onClick={() => toggle(d.key, true)} />
+                <Button
+                  label="Edit"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => toggle(d.key, true)}
+                />
               </HStack>
             )}
           </VStack>
@@ -160,7 +169,10 @@ function commitTyped(option: OptionDraft): OptionDraft {
   return {
     ...option,
     adding: "",
-    values: [...option.values, ...withoutTaken(option, labels).map((label) => ({ key: newKey(), label }))],
+    values: [
+      ...option.values,
+      ...withoutTaken(option, labels).map((label) => ({ key: newKey(), label })),
+    ],
   };
 }
 
@@ -254,8 +266,8 @@ function OptionForm({
             Values
           </Text>
           <Text type="supporting" color="secondary">
-            Renaming a value keeps its variants. Type several separated by commas, or press
-            Enter after each.
+            Renaming a value keeps its variants. Type several separated by commas, or press Enter
+            after each.
           </Text>
         </VStack>
         {option.values.map((v, i) => (
@@ -318,7 +330,10 @@ function OptionForm({
               ? onChange((d) => {
                   const parts = adding.split(/[,\n]/);
                   const rest = parts.pop() ?? "";
-                  return { ...commitTyped({ ...d, adding: parts.join(",") }), adding: rest.trimStart() };
+                  return {
+                    ...commitTyped({ ...d, adding: parts.join(",") }),
+                    adding: rest.trimStart(),
+                  };
                 })
               : onChange((d) => ({ ...d, adding }))
           }

@@ -59,11 +59,7 @@ const FULFILLMENT: Record<string, { label: string; variant: "success" | "neutral
   fulfilled: { label: "Fulfilled", variant: "success" },
 };
 
-export function FulfillmentBadge({
-  status,
-}: {
-  status: AdminSchemas["FulfillmentStatusDto"];
-}) {
+export function FulfillmentBadge({ status }: { status: AdminSchemas["FulfillmentStatusDto"] }) {
   const { label, variant } = FULFILLMENT[status] ?? { label: status, variant: "neutral" };
   return <Badge label={label} variant={variant} />;
 }

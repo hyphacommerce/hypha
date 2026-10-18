@@ -14,7 +14,12 @@ export type Image = { name: string; tag: string; dockerfile: string; app?: App }
 export function images(apps: App[]): Image[] {
   return [
     { name: "api", tag: "hypha-api:current", dockerfile: "docker/api.Dockerfile" },
-    ...apps.map((app) => ({ name: app, tag: `hypha-${app}:current`, dockerfile: "docker/app.Dockerfile", app })),
+    ...apps.map((app) => ({
+      name: app,
+      tag: `hypha-${app}:current`,
+      dockerfile: "docker/app.Dockerfile",
+      app,
+    })),
   ];
 }
 
@@ -46,7 +51,17 @@ export async function build(d: Deployment, machine: Machine, image: Image): Prom
     await run("docker", ["--host", `ssh://${machine.ssh}`, ...buildArgs(image)]);
   } else {
     const [, ...rest] = buildArgs(image);
-    await run("docker", ["buildx", "build", "--platform", await platform(machine), "--load", ...rest]);
-    await pipe(["docker", ["save", image.tag]], ["ssh", ["-o", "BatchMode=yes", machine.ssh, "docker load"]]);
+    await run("docker", [
+      "buildx",
+      "build",
+      "--platform",
+      await platform(machine),
+      "--load",
+      ...rest,
+    ]);
+    await pipe(
+      ["docker", ["save", image.tag]],
+      ["ssh", ["-o", "BatchMode=yes", machine.ssh, "docker load"]],
+    );
   }
 }

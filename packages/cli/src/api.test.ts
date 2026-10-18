@@ -7,7 +7,11 @@ import { lookupVia } from "./api.ts";
 type Answer = { error: Error | null; address?: unknown; family?: number };
 
 /** Runs `lookup` once and returns what it called back with. */
-function ask(lookup: LookupFunction, host: string, options: { all?: boolean; family?: number } = {}): Promise<Answer> {
+function ask(
+  lookup: LookupFunction,
+  host: string,
+  options: { all?: boolean; family?: number } = {},
+): Promise<Answer> {
   return new Promise((resolve) =>
     lookup(host, options, (error, address, family) => resolve({ error, address, family })),
   );
@@ -21,7 +25,11 @@ const unknown = async (): Promise<string[]> => {
 
 test("a name the public resolvers know is answered by them, IPv4 first, not the local cache", async () => {
   const lookup = lookupVia(known(["104.21.64.70"]), known(["2606:4700:3035::6815:4046"]), system);
-  assert.deepEqual(await ask(lookup, "api.example.com"), { error: null, address: "104.21.64.70", family: 4 });
+  assert.deepEqual(await ask(lookup, "api.example.com"), {
+    error: null,
+    address: "104.21.64.70",
+    family: 4,
+  });
   assert.deepEqual(await ask(lookup, "api.example.com", { all: true }), {
     error: null,
     address: [

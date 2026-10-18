@@ -32,7 +32,9 @@ let token;
 
 class ApiError extends Error {
   constructor(method, path, status, body) {
-    super(`${method} ${path} → ${status} ${body?.code ?? ""}: ${body?.error ?? JSON.stringify(body)}`);
+    super(
+      `${method} ${path} → ${status} ${body?.code ?? ""}: ${body?.error ?? JSON.stringify(body)}`,
+    );
     this.status = status;
     this.code = body?.code;
   }
@@ -120,7 +122,7 @@ function productImage(hex) {
     raw[row] = 0;
     const light = y < 820 ? 1.12 - (y / 820) * 0.2 : 0.78;
     for (let x = 0; x < width; x++) {
-      const vignette = 1 - 0.12 * (((x - width / 2) / (width / 2)) ** 2);
+      const vignette = 1 - 0.12 * ((x - width / 2) / (width / 2)) ** 2;
       const f = light * vignette;
       const i = row + 1 + x * 3;
       raw[i] = Math.min(255, Math.round(r * f));
@@ -288,7 +290,8 @@ const PRODUCTS = [
     type: "Scarf",
     tags: ["wool", "winter", "gift"],
     categories: ["scarves"],
-    description: "<p>Woven in a Scottish mill from lambswool, with hand-twisted fringes. 180 × 30 cm.</p>",
+    description:
+      "<p>Woven in a Scottish mill from lambswool, with hand-twisted fringes. 180 × 30 cm.</p>",
     options: { Color: ["Herringbone", "Charcoal"] },
     price: 79,
     weight: 180,
@@ -300,7 +303,8 @@ const PRODUCTS = [
     type: "Bag",
     tags: ["everyday", "gift"],
     categories: ["bags"],
-    description: "<p>16 oz cotton canvas with leather handles and an inside zip pocket. Fits a laptop.</p>",
+    description:
+      "<p>16 oz cotton canvas with leather handles and an inside zip pocket. Fits a laptop.</p>",
     options: { Color: ["Natural", "Black"] },
     price: 45,
     weight: 450,
@@ -325,7 +329,8 @@ const PRODUCTS = [
     type: "Mug",
     tags: ["ceramics", "gift"],
     categories: ["kitchen"],
-    description: "<p>Wheel-thrown stoneware with a reactive glaze, so no two are alike. 350 ml, dishwasher safe.</p>",
+    description:
+      "<p>Wheel-thrown stoneware with a reactive glaze, so no two are alike. 350 ml, dishwasher safe.</p>",
     options: { Color: ["Speckled", "Ink", "Clay"] },
     price: 22,
     weight: 420,
@@ -337,7 +342,8 @@ const PRODUCTS = [
     type: "Tea towel",
     tags: ["linen", "kitchen"],
     categories: ["kitchen"],
-    description: "<p>Two stonewashed linen tea towels, 50 × 70 cm. Lint-free and very absorbent.</p>",
+    description:
+      "<p>Two stonewashed linen tea towels, 50 × 70 cm. Lint-free and very absorbent.</p>",
     color: "Natural",
     price: 28,
     weight: 260,
@@ -412,7 +418,8 @@ const PRODUCTS = [
     type: "Candle",
     tags: ["home", "gift"],
     categories: ["decor"],
-    description: "<p>Pure beeswax in a reusable ceramic pot. About 40 hours of clean, honey-scented burn.</p>",
+    description:
+      "<p>Pure beeswax in a reusable ceramic pot. About 40 hours of clean, honey-scented burn.</p>",
     color: "Mustard",
     price: 18,
     weight: 300,
@@ -446,21 +453,33 @@ const PRODUCTS = [
 ];
 
 const CATEGORIES = [
-  { name: "Clothing", handle: "clothing", children: [
-    { name: "Tops", handle: "tops" },
-    { name: "Knitwear", handle: "knitwear" },
-    { name: "Outerwear", handle: "outerwear" },
-    { name: "Bottoms", handle: "bottoms" },
-  ] },
-  { name: "Home", handle: "home", children: [
-    { name: "Kitchen", handle: "kitchen" },
-    { name: "Bedding", handle: "bedding" },
-    { name: "Decor", handle: "decor" },
-  ] },
-  { name: "Accessories", handle: "accessories", children: [
-    { name: "Bags", handle: "bags" },
-    { name: "Scarves", handle: "scarves" },
-  ] },
+  {
+    name: "Clothing",
+    handle: "clothing",
+    children: [
+      { name: "Tops", handle: "tops" },
+      { name: "Knitwear", handle: "knitwear" },
+      { name: "Outerwear", handle: "outerwear" },
+      { name: "Bottoms", handle: "bottoms" },
+    ],
+  },
+  {
+    name: "Home",
+    handle: "home",
+    children: [
+      { name: "Kitchen", handle: "kitchen" },
+      { name: "Bedding", handle: "bedding" },
+      { name: "Decor", handle: "decor" },
+    ],
+  },
+  {
+    name: "Accessories",
+    handle: "accessories",
+    children: [
+      { name: "Bags", handle: "bags" },
+      { name: "Scarves", handle: "scarves" },
+    ],
+  },
 ];
 
 const MARKETS = [
@@ -479,7 +498,9 @@ const MARKETS = [
     currency: "GBP",
     countries: ["GB"],
     pricesIncludeTax: true,
-    shipping: [{ name: "Royal Mail Tracked", code: "standard", flat: 595, freeFrom: 6000, days: [2, 4] }],
+    shipping: [
+      { name: "Royal Mail Tracked", code: "standard", flat: 595, freeFrom: 6000, days: [2, 4] },
+    ],
   },
   {
     name: "United States",
@@ -496,12 +517,27 @@ const MARKETS = [
     currency: "RSD",
     countries: ["RS"],
     pricesIncludeTax: true,
-    shipping: [{ name: "Post Express", code: "standard", flat: 45000, freeFrom: 800000, days: [1, 3] }],
+    shipping: [
+      { name: "Post Express", code: "standard", flat: 45000, freeFrom: 800000, days: [1, 3] },
+    ],
   },
 ];
 
 /** Standard VAT, in parts per million. */
-const VAT = { HR: 25, SI: 22, AT: 20, DE: 19, IT: 22, FR: 20, NL: 21, BE: 21, ES: 21, IE: 23, GB: 20, RS: 20 };
+const VAT = {
+  HR: 25,
+  SI: 22,
+  AT: 20,
+  DE: 19,
+  IT: 22,
+  FR: 20,
+  NL: 21,
+  BE: 21,
+  ES: 21,
+  IE: 23,
+  GB: 20,
+  RS: 20,
+};
 
 /** Every combination of `options`, as `{ name: value }`. */
 function combinations(options) {
@@ -516,7 +552,8 @@ function combinations(options) {
 async function main() {
   console.log(`Seeding ${BASE} as ${EMAIL}`);
   const login = await call("POST", "/admin/auth/login", { email: EMAIL, password: PASSWORD });
-  if (login.status !== "authenticated") throw new Error(`login needs ${login.status}: use a store owner without 2FA`);
+  if (login.status !== "authenticated")
+    throw new Error(`login needs ${login.status}: use a store owner without 2FA`);
   token = login.session.token;
 
   const existing = await admin.get("/admin/products?limit=1");
@@ -556,12 +593,17 @@ async function main() {
       countries: market.countries,
       currency: market.currency,
     });
-    await admin.patch(`/admin/markets/${created.id}`, { prices_include_tax: market.pricesIncludeTax });
+    await admin.patch(`/admin/markets/${created.id}`, {
+      prices_include_tax: market.pricesIncludeTax,
+    });
     market.id = created.id;
-    market.catalog = created.catalog ?? (await admin.post("/admin/catalogs", { market: created.id })).id;
+    market.catalog =
+      created.catalog ?? (await admin.post("/admin/catalogs", { market: created.id })).id;
     if (market.currency !== "EUR") {
       market.priceList = (await admin.post("/admin/price-lists", { currency: market.currency })).id;
-      await admin.put(`/admin/catalogs/${market.catalog}/price-list`, { price_list: market.priceList });
+      await admin.put(`/admin/catalogs/${market.catalog}/price-list`, {
+        price_list: market.priceList,
+      });
     }
   }
 
@@ -591,7 +633,11 @@ async function main() {
       await admin.post(`/admin/shipping-zones/${zone.id}/options`, {
         name: option.name,
         code: option.code,
-        rate: { type: "builtin", basis: "subtotal", tables: [{ currency: market.currency, tiers }] },
+        rate: {
+          type: "builtin",
+          basis: "subtotal",
+          tables: [{ currency: market.currency, tiers }],
+        },
         estimate: { min_days: option.days[0], max_days: option.days[1] },
       });
     }
@@ -656,8 +702,17 @@ async function main() {
         product.options.find((o) => o.name === name).values.find((v) => v.label === label).id;
       const sku = (o) =>
         [
-          spec.handle.split("-").map((w) => w[0]).join("").toUpperCase(),
-          ...Object.values(o).map((v) => v.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase()),
+          spec.handle
+            .split("-")
+            .map((w) => w[0])
+            .join("")
+            .toUpperCase(),
+          ...Object.values(o).map((v) =>
+            v
+              .replace(/[^A-Za-z0-9]/g, "")
+              .slice(0, 4)
+              .toUpperCase(),
+          ),
         ].join("-");
       product = await admin.put(`/admin/products/${product.id}/variants`, {
         variants: combos.map((o) => ({
@@ -680,14 +735,20 @@ async function main() {
     // One image per colour (or the product's one colour), the variants pointing at theirs.
     const colourOf = (variant) => {
       const selected = variant.selections?.map((id) =>
-        product.options.flatMap((o) => o.values.map((v) => ({ name: o.name, ...v }))).find((v) => v.id === id),
+        product.options
+          .flatMap((o) => o.values.map((v) => ({ name: o.name, ...v })))
+          .find((v) => v.id === id),
       );
       return selected?.find((v) => v?.name === "Color")?.label ?? spec.color;
     };
     const colours = [...new Set(product.variants.map(colourOf).filter(Boolean))];
     const images = {};
     for (const colour of colours) {
-      const asset = await upload(`${spec.handle}-${colour.toLowerCase().replace(/ /g, "-")}.png`, COLORS[colour], `${spec.title} in ${colour}`);
+      const asset = await upload(
+        `${spec.handle}-${colour.toLowerCase().replace(/ /g, "-")}.png`,
+        COLORS[colour],
+        `${spec.title} in ${colour}`,
+      );
       if (asset) images[colour] = asset;
     }
     if (Object.keys(images).length > 0) {
@@ -695,7 +756,10 @@ async function main() {
       if (colours.length > 1) {
         for (const variant of product.variants) {
           const asset = images[colourOf(variant)];
-          if (asset) await admin.put(`/admin/products/${product.id}/variants/${variant.id}/media`, { asset });
+          if (asset)
+            await admin.put(`/admin/products/${product.id}/variants/${variant.id}/media`, {
+              asset,
+            });
         }
       }
     }
@@ -703,7 +767,10 @@ async function main() {
     // Stock: tracked at both warehouses, a few variants sold out; candles untracked.
     for (const variant of product.variants) {
       if (spec.untracked) continue;
-      const item = await admin.post("/admin/inventory-items", { variant: variant.id, tracked: true });
+      const item = await admin.post("/admin/inventory-items", {
+        variant: variant.id,
+        tracked: true,
+      });
       const soldOut = random() < 0.12;
       await admin.put(`/admin/inventory-items/${item.id}/levels/${zagreb.id}`, {
         on_hand: soldOut ? 0 : 5 + Math.floor(random() * 60),
@@ -724,7 +791,9 @@ async function main() {
     }
 
     for (const handle of spec.categories) {
-      await admin.post(`/admin/categories/${categoryIds[handle]}/products`, { products: [product.id] });
+      await admin.post(`/admin/categories/${categoryIds[handle]}/products`, {
+        products: [product.id],
+      });
     }
     if (!spec.draft) {
       await admin.patch(`/admin/products/${product.id}/status`, { status: "active" });
@@ -734,7 +803,8 @@ async function main() {
   }
 
   const ids = sellable.map((p) => p.id);
-  for (const market of MARKETS) await admin.post(`/admin/catalogs/${market.catalog}/products`, { products: ids });
+  for (const market of MARKETS)
+    await admin.post(`/admin/catalogs/${market.catalog}/products`, { products: ids });
   await admin.post(`/admin/channels/${onlineStore.id}/products`, { products: ids });
 
   console.log("Search");
@@ -760,7 +830,15 @@ async function main() {
     const app = await admin.post("/admin/apps", {
       key: "app_storefront",
       name: "Storefront",
-      subscriptions: ["product.*", "inventory_item.*", "price_list.*", "catalog.*", "channel.*", "category.*", "market.*"],
+      subscriptions: [
+        "product.*",
+        "inventory_item.*",
+        "price_list.*",
+        "catalog.*",
+        "channel.*",
+        "category.*",
+        "market.*",
+      ],
       webhook: { url: `${STOREFRONT_URL}/api/revalidate` },
     });
     webhookSecret = app.secret;
@@ -790,14 +868,79 @@ async function main() {
 
   console.log("Customers and orders");
   const SHOPPERS = [
-    { email: "ana.horvat@example.com", first: "Ana", last: "Horvat", country: "HR", line1: "Vlaška 12", city: "Zagreb", postal: "10000" },
-    { email: "lukas.weber@example.com", first: "Lukas", last: "Weber", country: "DE", line1: "Torstraße 140", city: "Berlin", postal: "10119" },
-    { email: "chloe.martin@example.com", first: "Chloé", last: "Martin", country: "FR", line1: "12 Rue de Bretagne", city: "Paris", postal: "75003" },
-    { email: "oliver.smith@example.com", first: "Oliver", last: "Smith", country: "GB", line1: "21 Columbia Road", city: "London", postal: "E2 7RG" },
-    { email: "emma.johnson@example.com", first: "Emma", last: "Johnson", country: "US", line1: "88 Grand Street", city: "New York", postal: "10013", province: "NY" },
-    { email: "marko.petrovic@example.com", first: "Marko", last: "Petrović", country: "RS", line1: "Knez Mihailova 30", city: "Beograd", postal: "11000" },
-    { email: "sofia.rossi@example.com", first: "Sofia", last: "Rossi", country: "IT", line1: "Via Tortona 27", city: "Milano", postal: "20144" },
-    { email: "jan.devries@example.com", first: "Jan", last: "de Vries", country: "NL", line1: "Prinsengracht 263", city: "Amsterdam", postal: "1016 GV" },
+    {
+      email: "ana.horvat@example.com",
+      first: "Ana",
+      last: "Horvat",
+      country: "HR",
+      line1: "Vlaška 12",
+      city: "Zagreb",
+      postal: "10000",
+    },
+    {
+      email: "lukas.weber@example.com",
+      first: "Lukas",
+      last: "Weber",
+      country: "DE",
+      line1: "Torstraße 140",
+      city: "Berlin",
+      postal: "10119",
+    },
+    {
+      email: "chloe.martin@example.com",
+      first: "Chloé",
+      last: "Martin",
+      country: "FR",
+      line1: "12 Rue de Bretagne",
+      city: "Paris",
+      postal: "75003",
+    },
+    {
+      email: "oliver.smith@example.com",
+      first: "Oliver",
+      last: "Smith",
+      country: "GB",
+      line1: "21 Columbia Road",
+      city: "London",
+      postal: "E2 7RG",
+    },
+    {
+      email: "emma.johnson@example.com",
+      first: "Emma",
+      last: "Johnson",
+      country: "US",
+      line1: "88 Grand Street",
+      city: "New York",
+      postal: "10013",
+      province: "NY",
+    },
+    {
+      email: "marko.petrovic@example.com",
+      first: "Marko",
+      last: "Petrović",
+      country: "RS",
+      line1: "Knez Mihailova 30",
+      city: "Beograd",
+      postal: "11000",
+    },
+    {
+      email: "sofia.rossi@example.com",
+      first: "Sofia",
+      last: "Rossi",
+      country: "IT",
+      line1: "Via Tortona 27",
+      city: "Milano",
+      postal: "20144",
+    },
+    {
+      email: "jan.devries@example.com",
+      first: "Jan",
+      last: "de Vries",
+      country: "NL",
+      line1: "Prinsengracht 263",
+      city: "Amsterdam",
+      postal: "1016 GV",
+    },
   ];
   const orders = [];
   for (const shopper of SHOPPERS) {
@@ -808,7 +951,10 @@ async function main() {
       const product = pick(sellable);
       const variant = pick(product.variants);
       try {
-        await sf("POST", `/storefront/carts/${cart.id}/lines`, { variant: variant.id, quantity: 1 + Math.floor(random() * 2) });
+        await sf("POST", `/storefront/carts/${cart.id}/lines`, {
+          variant: variant.id,
+          quantity: 1 + Math.floor(random() * 2),
+        });
       } catch (e) {
         if (e.code !== "out_of_stock") throw e; // a sold-out pick: skip it
       }
@@ -828,7 +974,10 @@ async function main() {
     const offers = await sf("GET", `/storefront/carts/${cart.id}/shipping-options`);
     for (const group of offers.groups) {
       const offer = group.offers.find((o) => o.option) ?? group.offers[0];
-      if (offer?.option) await sf("PUT", `/storefront/carts/${cart.id}/shipping/${group.group}`, { option: offer.option });
+      if (offer?.option)
+        await sf("PUT", `/storefront/carts/${cart.id}/shipping/${group.group}`, {
+          option: offer.option,
+        });
     }
     let priced = await sf("GET", `/storefront/carts/${cart.id}`);
     if (priced.lines.length === 0) continue;
@@ -839,15 +988,24 @@ async function main() {
       const method =
         methods.items.find((m) => m.id === cashOnDelivery.id) ??
         methods.items.find((m) => m.id === bankTransfer.id);
-      priced = await sf("PUT", `/storefront/carts/${cart.id}/payment-method`, { payment_method: method.id });
+      priced = await sf("PUT", `/storefront/carts/${cart.id}/payment-method`, {
+        payment_method: method.id,
+      });
     }
-    const order = await call("POST", `/storefront/carts/${cart.id}/checkout`, { expected_total: priced.total }, {
-      key: key.token,
-      headers: { "idempotency-key": `seed-${cart.id}` },
-    });
+    const order = await call(
+      "POST",
+      `/storefront/carts/${cart.id}/checkout`,
+      { expected_total: priced.total },
+      {
+        key: key.token,
+        headers: { "idempotency-key": `seed-${cart.id}` },
+      },
+    );
     orders.push({ order, shopper });
     const paying = order.payment?.method_name ? `, ${order.payment.method_name}` : "";
-    console.log(`  #${order.number} ${shopper.first} ${shopper.last} (${shopper.country}) ${(priced.total.amount / 100).toFixed(2)} ${priced.total.currency}${paying}`);
+    console.log(
+      `  #${order.number} ${shopper.first} ${shopper.last} (${shopper.country}) ${(priced.total.amount / 100).toFixed(2)} ${priced.total.currency}${paying}`,
+    );
   }
 
   // Their states: paid, paid and shipped with tracking, one cancelled (its pending
@@ -868,14 +1026,22 @@ async function main() {
       await admin.post(`/admin/orders/${order.id}/fulfillments`, {
         location,
         lines: order.lines.map((l) => ({ line: l.id, quantity: l.quantity })),
-        tracking: [{ carrier: shopper.country === "US" ? "UPS" : "DHL", number: `JD01460000${1000 + i}`, url: null }],
+        tracking: [
+          {
+            carrier: shopper.country === "US" ? "UPS" : "DHL",
+            number: `JD01460000${1000 + i}`,
+            url: null,
+          },
+        ],
         notify: false,
       });
     }
   }
 
   console.log("\nDone: Lumen & Loom is set up.");
-  console.log(`  ${sellable.length} products for sale, 1 draft · ${MARKETS.length} markets · 2 payment methods · ${orders.length} orders`);
+  console.log(
+    `  ${sellable.length} products for sale, 1 draft · ${MARKETS.length} markets · 2 payment methods · ${orders.length} orders`,
+  );
   console.log("\nFor the storefront (apps/storefront/.dev.vars):");
   console.log(`  STOREFRONT_KEY=${key.token}`);
   if (webhookSecret) console.log(`  HYPHA_WEBHOOK_SECRET=${webhookSecret}`);

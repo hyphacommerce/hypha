@@ -37,8 +37,8 @@ export function CategoriesCard({
             Categories
           </Text>
           <Text type="supporting" color="secondary">
-            Where shoppers find it when browsing. A category shows its subcategories'
-            products too. <Link href="/products/categories">Manage categories</Link>
+            Where shoppers find it when browsing. A category shows its subcategories' products too.{" "}
+            <Link href="/products/categories">Manage categories</Link>
           </Text>
         </VStack>
         {options.length === 0 ? (

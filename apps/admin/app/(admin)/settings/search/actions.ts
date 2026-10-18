@@ -8,9 +8,7 @@ import { describe, sessionClient } from "@/lib/hypha";
 export type SearchSettings = AdminSchemas["UpdateSearchSettingsRequest"];
 export type SearchStatus = AdminSchemas["SearchStatusResponse"];
 
-export async function saveSearchSettings(
-  settings: SearchSettings,
-): Promise<{ error?: string }> {
+export async function saveSearchSettings(settings: SearchSettings): Promise<{ error?: string }> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/search/settings", { body: settings });
   if (error) return { error: describe(error) };

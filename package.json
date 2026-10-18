@@ -2,10 +2,6 @@
   "name": "hypha-workspace",
   "private": true,
   "description": "The TypeScript apps and packages of Hypha (design note 0011). The Rust crates are the Cargo workspace.",
-  "packageManager": "pnpm@12.6.0",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
     "sdk:generate": "pnpm --filter @hypha/sdk generate",
     "sdk:check": "pnpm --filter @hypha/sdk check",
@@ -21,5 +17,9 @@
   },
   "devDependencies": {
     "vite-plus": "1.3.0"
-  }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.6.0"
 }

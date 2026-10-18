@@ -11,7 +11,11 @@ import { init } from "./commands/init.ts";
 import { logs, status } from "./commands/ops.ts";
 
 const main = defineCommand({
-  meta: { name: "hypha", version: "0.1.0", description: "Host Hypha: the API, the admin and the storefront" },
+  meta: {
+    name: "hypha",
+    version: "0.1.0",
+    description: "Host Hypha: the API, the admin and the storefront",
+  },
   subCommands: { init, deploy, status, logs },
 });
 

@@ -19,7 +19,10 @@ import { loaded, sessionClient } from "@/lib/hypha";
 /** "−10%" from basis points (−1000); "No adjustment" for 0. */
 function adjustment(bps: number): string {
   if (bps === 0) return "No adjustment";
-  const percent = new Intl.NumberFormat("en-IE", { maximumFractionDigits: 2, signDisplay: "always" });
+  const percent = new Intl.NumberFormat("en-IE", {
+    maximumFractionDigits: 2,
+    signDisplay: "always",
+  });
   return `${percent.format(bps / 100)}%`;
 }
 

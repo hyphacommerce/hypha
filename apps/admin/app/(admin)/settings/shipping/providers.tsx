@@ -23,7 +23,13 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { KeyIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import { createProvider, deleteProvider, rotateSecret, setAppEnabled, testProvider } from "./actions";
+import {
+  createProvider,
+  deleteProvider,
+  rotateSecret,
+  setAppEnabled,
+  testProvider,
+} from "./actions";
 
 /** A provider's rate settings with its app's name and switch (design note 0016, EV11). */
 export type RateApp = AdminSchemas["AppProviderResponse"] & {
@@ -174,7 +180,12 @@ function ProviderRow({
         <HStack gap={1} hAlign="end" vAlign="center">
           {confirming === "delete" ? (
             <>
-              <Button label="Cancel" size="sm" variant="ghost" onClick={() => setConfirming(undefined)} />
+              <Button
+                label="Cancel"
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirming(undefined)}
+              />
               <Button
                 label="Stop using"
                 size="sm"
@@ -193,7 +204,12 @@ function ProviderRow({
               <Text type="supporting" color="secondary">
                 The current secret stops working at once.
               </Text>
-              <Button label="Cancel" size="sm" variant="ghost" onClick={() => setConfirming(undefined)} />
+              <Button
+                label="Cancel"
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirming(undefined)}
+              />
               <Button
                 label="New secret"
                 size="sm"
@@ -256,13 +272,18 @@ function AddProviderDialog({
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   const shownKey =
-    key ?? `app_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
+    key ??
+    `app_${name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")}`;
   const isComplete = name.trim() && shownKey !== "app_" && callbackUrl.trim();
 
   const submit = () => {
     if (!isComplete) return;
     const timeoutMs = Number(timeout);
-    if (!Number.isInteger(timeoutMs)) return setError("Enter the timeout in milliseconds, like 3000.");
+    if (!Number.isInteger(timeoutMs))
+      return setError("Enter the timeout in milliseconds, like 3000.");
     startTransition(async () => {
       const result = await createProvider({ key: shownKey, name, callbackUrl, timeoutMs });
       if (result.error) setError(result.error);

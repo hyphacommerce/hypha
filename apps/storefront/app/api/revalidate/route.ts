@@ -75,7 +75,8 @@ async function verified(secret: string, header: string, body: string): Promise<b
   // The length isn't secret; the comparison of the bytes is constant-time.
   if (given.length !== expected.length) return false;
   let difference = 0;
-  for (let i = 0; i < expected.length; i++) difference |= given.charCodeAt(i) ^ expected.charCodeAt(i);
+  for (let i = 0; i < expected.length; i++)
+    difference |= given.charCodeAt(i) ^ expected.charCodeAt(i);
   return difference === 0;
 }
 
@@ -141,7 +142,10 @@ async function affected(event: Envelope): Promise<{ tags: string[]; paths: strin
       return { tags: [TAGS.prices, TAGS.store], paths: [] };
     case "category.changed":
     case "category.deleted":
-      return { tags: [TAGS.categories, TAGS.listings, ...(await productTags(ids(data.products)))], paths: [] };
+      return {
+        tags: [TAGS.categories, TAGS.listings, ...(await productTags(ids(data.products)))],
+        paths: [],
+      };
     default:
       return { tags: [], paths: [] };
   }
@@ -151,7 +155,10 @@ export async function POST(request: NextRequest) {
   const secret = process.env.HYPHA_WEBHOOK_SECRET;
   if (!secret) {
     console.error("HYPHA_WEBHOOK_SECRET is not set: static pages won't follow changes");
-    return NextResponse.json({ ok: false, error: "HYPHA_WEBHOOK_SECRET is not set" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: "HYPHA_WEBHOOK_SECRET is not set" },
+      { status: 500 },
+    );
   }
   const body = await request.text();
   const signature = request.headers.get("hypha-signature") ?? "";

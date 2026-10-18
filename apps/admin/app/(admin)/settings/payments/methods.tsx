@@ -77,7 +77,9 @@ export function PaymentMethodsCard({
     startMoving(async () => {
       const order = [...methods];
       [order[index], order[index + by]] = [order[index + by], order[index]];
-      setError((await reorderPaymentMethods(order.map(({ id, position }) => ({ id, position })))).error);
+      setError(
+        (await reorderPaymentMethods(order.map(({ id, position }) => ({ id, position })))).error,
+      );
     });
 
   return (
@@ -93,7 +95,11 @@ export function PaymentMethodsCard({
             </Text>
           </VStack>
           {canWrite && (
-            <Button label="Add payment method" variant="secondary" onClick={() => setEditing("new")} />
+            <Button
+              label="Add payment method"
+              variant="secondary"
+              onClick={() => setEditing("new")}
+            />
           )}
         </HStack>
         {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
@@ -134,7 +140,9 @@ export function PaymentMethodsCard({
                   </TableCell>
                   <TableCell>
                     <VStack gap={0.5}>
-                      <Text type="supporting">{where(method.markets, markets, "Every market")}</Text>
+                      <Text type="supporting">
+                        {where(method.markets, markets, "Every market")}
+                      </Text>
                       <Text type="supporting" color="secondary">
                         {where(method.channels, channels, "Every channel")}
                       </Text>
@@ -264,62 +272,62 @@ function MethodDialog({
       {/* The fields scroll on short screens; the buttons stay in view below them. A flex
           item keeps its content's height unless allowed to shrink (`minHeight: 0`). */}
       <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
-      <VStack gap={4} padding={4}>
-        {!method && (
-          <Selector
-            label="Kind"
-            options={PAYMENT_PRESETS.map(({ value, label, description }) => ({
-              value,
-              label,
-              description,
-            }))}
-            value={preset.value}
-            onChange={choosePreset}
+        <VStack gap={4} padding={4}>
+          {!method && (
+            <Selector
+              label="Kind"
+              options={PAYMENT_PRESETS.map(({ value, label, description }) => ({
+                value,
+                label,
+                description,
+              }))}
+              value={preset.value}
+              onChange={choosePreset}
+            />
+          )}
+          <TextInput
+            label="Name"
+            description="What shoppers see at checkout."
+            placeholder="Cash on delivery"
+            value={form.name}
+            onChange={(name) => set({ name })}
           />
-        )}
-        <TextInput
-          label="Name"
-          description="What shoppers see at checkout."
-          placeholder="Cash on delivery"
-          value={form.name}
-          onChange={(name) => set({ name })}
-        />
-        <TextArea
-          label="Instructions"
-          description="Shown to the shopper after checkout and on their order: bank details, what to pay the courier."
-          placeholder={method ? undefined : preset.instructionsPlaceholder}
-          isOptional
-          maxLength={2000}
-          rows={4}
-          value={form.instructions}
-          onChange={(instructions) => set({ instructions })}
-        />
-        <MultiSelector
-          label="Markets"
-          description="None chosen: offered in every market."
-          placeholder="Every market"
-          options={markets}
-          value={form.markets}
-          onChange={(chosen) => set({ markets: chosen })}
-          hasSearch={markets.length > 15}
-          triggerDisplay="labels"
-        />
-        <MultiSelector
-          label="Channels"
-          description="None chosen: offered in every channel."
-          placeholder="Every channel"
-          options={channels}
-          value={form.channels}
-          onChange={(chosen) => set({ channels: chosen })}
-          triggerDisplay="labels"
-        />
-        <Switch
-          label="Enabled"
-          description="Shoppers see it at checkout."
-          value={form.enabled}
-          onChange={(enabled) => set({ enabled })}
-        />
-      </VStack>
+          <TextArea
+            label="Instructions"
+            description="Shown to the shopper after checkout and on their order: bank details, what to pay the courier."
+            placeholder={method ? undefined : preset.instructionsPlaceholder}
+            isOptional
+            maxLength={2000}
+            rows={4}
+            value={form.instructions}
+            onChange={(instructions) => set({ instructions })}
+          />
+          <MultiSelector
+            label="Markets"
+            description="None chosen: offered in every market."
+            placeholder="Every market"
+            options={markets}
+            value={form.markets}
+            onChange={(chosen) => set({ markets: chosen })}
+            hasSearch={markets.length > 15}
+            triggerDisplay="labels"
+          />
+          <MultiSelector
+            label="Channels"
+            description="None chosen: offered in every channel."
+            placeholder="Every channel"
+            options={channels}
+            value={form.channels}
+            onChange={(chosen) => set({ channels: chosen })}
+            triggerDisplay="labels"
+          />
+          <Switch
+            label="Enabled"
+            description="Shoppers see it at checkout."
+            value={form.enabled}
+            onChange={(enabled) => set({ enabled })}
+          />
+        </VStack>
       </div>
       <VStack gap={3} padding={4}>
         {error && <Banner status="error" title={error} />}

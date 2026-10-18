@@ -131,7 +131,9 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                   Addresses
                 </Text>
                 {customer.addresses.length === 0 ? (
-                  <Text color="secondary">No saved addresses. Checkout keeps an order&apos;s address on the order.</Text>
+                  <Text color="secondary">
+                    No saved addresses. Checkout keeps an order&apos;s address on the order.
+                  </Text>
                 ) : (
                   <VStack gap={4}>
                     {customer.addresses.map((address) => (

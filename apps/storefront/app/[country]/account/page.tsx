@@ -23,7 +23,9 @@ export default async function AccountPage({ params }: { params: Promise<{ countr
       <EmptyState
         title="Accounts are coming"
         description="For now you check out as a guest, with your email and address."
-        actions={<Button label="Keep shopping" href={link(country.country, "/")} variant="primary" />}
+        actions={
+          <Button label="Keep shopping" href={link(country.country, "/")} variant="primary" />
+        }
       />
     </VStack>
   );

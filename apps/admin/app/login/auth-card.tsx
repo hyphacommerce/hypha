@@ -27,8 +27,7 @@ const brandPanel: CSSProperties = {
   minHeight: 240,
   borderRadius: "var(--radius-container)",
   padding: "var(--spacing-8)",
-  background:
-    "linear-gradient(135deg, var(--color-accent-muted), var(--color-background-muted))",
+  background: "linear-gradient(135deg, var(--color-accent-muted), var(--color-background-muted))",
 };
 
 // The container query is a plain <style> tag, so it needs no CSS compiler. The grid

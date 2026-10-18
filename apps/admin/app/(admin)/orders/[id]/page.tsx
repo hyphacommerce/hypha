@@ -225,17 +225,30 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
 
             <TimelineCard
               events={[
-                { at: order.placed_at, what: `Placed through ${channelName.get(order.channel) ?? "a channel"}` },
+                {
+                  at: order.placed_at,
+                  what: `Placed through ${channelName.get(order.channel) ?? "a channel"}`,
+                },
                 ...fulfillments.map((f) => ({
                   at: f.created_at,
                   what: `Fulfilled ${items(f.lines.reduce((n, l) => n + l.quantity, 0))}${f.cancelled_at ? " (cancelled since)" : ""}`,
                 })),
                 ...order.payments.flatMap((p) => [
                   ...(p.paid_at
-                    ? [{ at: p.paid_at, what: `Paid ${formatMoney(p.amount, currencies)}${p.method_name ? ` by ${p.method_name}` : ""}` }]
+                    ? [
+                        {
+                          at: p.paid_at,
+                          what: `Paid ${formatMoney(p.amount, currencies)}${p.method_name ? ` by ${p.method_name}` : ""}`,
+                        },
+                      ]
                     : []),
                   ...(p.voided_at
-                    ? [{ at: p.voided_at, what: `Payment voided${p.method_name ? ` (${p.method_name})` : ""}` }]
+                    ? [
+                        {
+                          at: p.voided_at,
+                          what: `Payment voided${p.method_name ? ` (${p.method_name})` : ""}`,
+                        },
+                      ]
                     : []),
                 ]),
                 ...(order.cancelled_at ? [{ at: order.cancelled_at, what: "Cancelled" }] : []),
@@ -296,12 +309,13 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                       .join(", ")}
                   </MetadataListItem>
                   {order.shipping_address.phone && (
-                    <MetadataListItem label="Phone">{order.shipping_address.phone}</MetadataListItem>
+                    <MetadataListItem label="Phone">
+                      {order.shipping_address.phone}
+                    </MetadataListItem>
                   )}
                 </MetadataList>
               </Card>
             )}
-
           </div>
         </div>
       </VStack>
@@ -326,8 +340,8 @@ function PaymentCard({ order, currencies }: { order: Order; currencies: Currenci
         </HStack>
         {order.payments.length === 0 ? (
           <Text color="secondary">
-            No payment method. Mark the order paid when you collect the money, and a manual
-            payment of the total is recorded.
+            No payment method. Mark the order paid when you collect the money, and a manual payment
+            of the total is recorded.
           </Text>
         ) : (
           <VStack gap={4}>
@@ -341,7 +355,9 @@ function PaymentCard({ order, currencies }: { order: Order; currencies: Currenci
                   <Text weight="medium">{formatMoney(payment.amount, currencies)}</Text>
                 </HStack>
                 <MetadataList>
-                  <MetadataListItem label="Provider">{providerLabel(payment.provider)}</MetadataListItem>
+                  <MetadataListItem label="Provider">
+                    {providerLabel(payment.provider)}
+                  </MetadataListItem>
                   {payment.reference && (
                     <MetadataListItem label="Reference">{payment.reference}</MetadataListItem>
                   )}

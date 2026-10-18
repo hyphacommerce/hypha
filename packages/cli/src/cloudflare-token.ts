@@ -75,7 +75,9 @@ const NAMES: Record<string, string> = {
 
 /** The dashboard's create-token page, filled in with `PERMISSIONS`. */
 export function templateUrl(name = "Hypha deploy"): string {
-  const keys = encodeURIComponent(JSON.stringify(PERMISSIONS.map(({ key, type }) => ({ key, type }))));
+  const keys = encodeURIComponent(
+    JSON.stringify(PERMISSIONS.map(({ key, type }) => ({ key, type }))),
+  );
   return (
     "https://dash.cloudflare.com/profile/api-tokens" +
     `?permissionGroupKeys=${keys}&accountId=*&zoneId=all&name=${encodeURIComponent(name)}`
@@ -113,12 +115,18 @@ export type Checked = {
 export async function checkToken(
   token: string,
   domain: string,
-  options: { accountId?: string; zoneId?: string; /** R2 is required, not just tried. */ media: boolean },
+  options: {
+    accountId?: string;
+    zoneId?: string;
+    /** R2 is required, not just tried. */ media: boolean;
+  },
   get: typeof fetch = fetch,
 ): Promise<Checked> {
   const verified = await call<{ status: string }>(get, token, "/user/tokens/verify");
   if (!verified || verified.status !== "active") {
-    throw new Error("the API token isn't valid (or has expired): create one with the link, then paste it");
+    throw new Error(
+      "the API token isn't valid (or has expired): create one with the link, then paste it",
+    );
   }
   const accounts = (await call<{ id: string; name: string }[]>(get, token, "/accounts")) ?? [];
   let accountId = options.accountId;
@@ -138,11 +146,17 @@ export async function checkToken(
   let zoneId = options.zoneId;
   for (let i = 0; i < labels.length - 1 && !zoneId; i++) {
     const name = labels.slice(i).join(".");
-    const zones = await call<{ id: string }[]>(get, token, `/zones?name=${encodeURIComponent(name)}&account.id=${accountId}`);
+    const zones = await call<{ id: string }[]>(
+      get,
+      token,
+      `/zones?name=${encodeURIComponent(name)}&account.id=${accountId}`,
+    );
     zoneId = zones?.[0]?.id;
   }
   if (!zoneId) {
-    throw new Error(`no zone for ${domain} in that account (or the token can't read zones): add the domain to Cloudflare first`);
+    throw new Error(
+      `no zone for ${domain} in that account (or the token can't read zones): add the domain to Cloudflare first`,
+    );
   }
   const probes: [string, string][] = [
     [`/accounts/${accountId}/workers/scripts`, "workers_scripts"],

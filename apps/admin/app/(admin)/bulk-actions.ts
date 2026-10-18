@@ -87,9 +87,7 @@ export async function setProductsInCategory(
 }
 
 /** Marks each pending, uncancelled order paid; the others are left as they are. */
-export async function markOrdersPaid(
-  orders: (Item & { pending: boolean })[],
-): Promise<BulkResult> {
+export async function markOrdersPaid(orders: (Item & { pending: boolean })[]): Promise<BulkResult> {
   const client = await sessionClient();
   const result: BulkResult = { changed: 0, unchanged: 0, failed: [] };
   const todo = orders.filter((o) => o.pending);

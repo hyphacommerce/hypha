@@ -57,9 +57,7 @@ export default async function HomePage() {
         <MetadataList title="Your account">
           <MetadataListItem label="Email">{me.user.email}</MetadataListItem>
           <MetadataListItem label="Role">{me.role.name}</MetadataListItem>
-          <MetadataListItem label="Two-factor">
-            {me.mfa_enabled ? "On" : "Off"}
-          </MetadataListItem>
+          <MetadataListItem label="Two-factor">{me.mfa_enabled ? "On" : "Off"}</MetadataListItem>
         </MetadataList>
 
         <VStack gap={2}>
