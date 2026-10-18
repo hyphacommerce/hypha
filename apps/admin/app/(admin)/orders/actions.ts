@@ -103,3 +103,17 @@ export async function cancelOrder(
   refresh(orderId);
   return {};
 }
+
+/**
+ * Sends one of the order's emails again (design note 0028, §7): a new message with the
+ * template and the order as they are now, to the same recipient.
+ */
+export async function resendNotification(orderId: string, id: string): Promise<ActionResult> {
+  const client = await sessionClient();
+  const { error } = await client.POST("/admin/notifications/{id}/resend", {
+    params: { path: { id } },
+  });
+  if (error) return { error: describe(error) };
+  revalidatePath(`/orders/${orderId}`);
+  return {};
+}

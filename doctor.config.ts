@@ -32,6 +32,12 @@ export default defineConfig({
     files: [".cloudflare/**", "dist/**", "theme/*.js"],
     overrides: [
       {
+        // CodeMirror's setup: this module is itself the dynamic import (`code-editor.tsx`
+        // loads it when an editor mounts), so its static imports load on demand already.
+        files: ["app/*/settings/notifications/*/codemirror-setup.ts"],
+        rules: ["react-doctor/prefer-dynamic-import"],
+      },
+      {
         // The shop's server actions are the shopper's (a cart, a checkout): they run
         // with the publishable key, and the API checks what each may touch.
         files: ["app/[[]country]/actions.ts"],

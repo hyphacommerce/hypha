@@ -13,6 +13,7 @@ import {
   BanknotesIcon,
   BuildingStorefrontIcon,
   CubeIcon,
+  EnvelopeIcon,
   GlobeEuropeAfricaIcon,
   HomeIcon,
   MagnifyingGlassIcon,
@@ -68,6 +69,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { label: "Store", href: "/settings/store", icon: BuildingStorefrontIcon },
       { label: "Channels", href: "/settings/channels", icon: Squares2X2Icon },
       { label: "Payments", href: "/settings/payments", icon: BanknotesIcon },
+      { label: "Notifications", href: "/settings/notifications", icon: EnvelopeIcon },
       { label: "Shipping", href: "/settings/shipping", icon: TruckIcon },
       { label: "Search", href: "/settings/search", icon: MagnifyingGlassIcon },
       {

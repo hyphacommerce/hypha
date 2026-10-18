@@ -9,6 +9,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { referenceLifetime, sessionFetch } from "./api-cache";
 import type { Currencies } from "./format";
+import { describeProblem, problemOf } from "./notifications";
 import type { Country } from "./regions";
 
 const SESSION_COOKIE = "hypha_admin_session";
@@ -74,12 +75,17 @@ export async function sessionClient() {
     async onResponse({ request, response }) {
       if (response.status === 401) await sessionExpired();
       // A write (in a server action) may change what this request already read: the
-      // page it re-renders reads again.
-      if (request.method !== "GET") await forgetRequestReads();
+      // page it re-renders reads again. A template preview is a POST that writes nothing.
+      if (request.method !== "GET" && !isPreview(request.url)) await forgetRequestReads();
       return undefined;
     },
   });
   return client;
+}
+
+/** Whether `url` renders a notification template's preview, which changes nothing. */
+function isPreview(url: string): boolean {
+  return /\/admin\/notification-templates\/[a-z_]+\/preview$/.test(new URL(url).pathname);
 }
 
 /**
@@ -413,6 +419,48 @@ export function describe(error: ApiError): string {
       return `The provider refused its settings: ${error.error}.`;
     case "invalid_payment_transition":
       return "The payment can't change that way any more. Reload the order.";
+    case "template_invalid": {
+      const problem = problemOf(error.details);
+      return problem
+        ? `The template doesn't work. ${describeProblem(problem)}`
+        : "The template doesn't work. Check its variables and tags.";
+    }
+    case "template_too_complex":
+      return "The template takes too long to render: a loop runs too many times.";
+    case "template_required":
+      return "This email can't be turned off: the layout, invites and password resets are always sent.";
+    case "template_too_large":
+      return `${error.error.charAt(0).toUpperCase()}${error.error.slice(1)}. Shorten it.`;
+    case "template_part_required":
+      return "An email needs a subject and an HTML body.";
+    case "template_part_not_allowed":
+      return "The layout only has HTML: leave its subject and plain text empty.";
+    case "template_unknown":
+      return "There's no such email template. Reload the page.";
+    case "invalid_colour":
+      return "The accent colour is six hex digits after a #, like #1a2b3c.";
+    case "invalid_order_url":
+      return "The order link must be an http(s) URL with {order} in it, and no placeholders but {order} and {token}.";
+    case "too_many_recipients":
+      return "At most 10 staff recipients.";
+    case "footer_too_long":
+      return "The footer can be at most 1,000 characters.";
+    case "email_not_configured":
+      return "Emails are only written to the server log, so a test would reach nobody. Set up a sender under [email] in hypha.config.toml.";
+    case "email_unavailable":
+      return `The email provider couldn't be reached. Try again in a moment. (${error.error})`;
+    case "email_refused":
+      return `The email provider refused the message: ${error.error}`;
+    case "notification_not_found":
+      return "That email record no longer exists. Reload the page.";
+    case "notification_not_resendable":
+      return "Invites and password resets can't be resent: send a new invite or reset instead.";
+    case "staff_only":
+      return "Only a signed-in staff member can send a test: it goes to your own address.";
+    case "asset_not_found":
+      return "That file is no longer in the media library.";
+    case "asset_not_public":
+      return "That image is private. Emails can only show public images: change its visibility on the Media page.";
     case "rate_limited": {
       const secs = numberDetail(error.details, "retry_after_secs");
       return secs ? `Too many attempts. Try again in ${secs} seconds.` : "Too many attempts.";
@@ -498,5 +546,19 @@ export const loadPaymentMethods = perRequest(
     const result = await client.GET("/admin/payment-methods");
     if (result.response.status === 403) return null;
     return loaded(result).items;
+  },
+);
+
+/**
+ * The notification settings (`GET /admin/notification-settings`, design note 0028), once
+ * per request: the settings page and a template's editor (whether a test can be sent)
+ * share it. `null` without `notifications:read`.
+ */
+export const loadNotificationSettings = perRequest(
+  async (): Promise<AdminSchemas["NotificationSettingsResponse"] | null> => {
+    const client = await sessionClient();
+    const result = await client.GET("/admin/notification-settings");
+    if (result.response.status === 403) return null;
+    return loaded(result);
   },
 );

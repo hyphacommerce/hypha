@@ -290,3 +290,119 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   padding-inline: 0;
   width: 100%;
 }
+
+/* Settings → Notifications (design note 0028): the accent's colour swatch and the logo. */
+.colour-swatch {
+  width: 36px;
+  height: 36px;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-background-card);
+  cursor: pointer;
+}
+
+.email-logo {
+  max-width: 200px;
+  max-height: 80px;
+  object-fit: contain;
+  align-self: flex-start;
+}
+
+/* A template's editor: the sources on the left, the preview on the right. */
+.template-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .template-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.code-editor .cm-editor {
+  max-height: 70vh;
+}
+
+.email-frame {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--color-background-muted);
+}
+
+.email-frame iframe {
+  height: 720px;
+  max-width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  /* The email draws its own background; white until it does, as mail clients show it. */
+  background: #fff;
+}
+
+.email-text {
+  margin: 0;
+  padding: 12px;
+  max-height: 720px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-family-code);
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-background-muted);
+}
+
+/* The variables panel: one button per path, its sample beside it. */
+.variables-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.variable {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.variable:last-child {
+  border-bottom: none;
+}
+
+.variable:hover,
+.variable:focus-visible {
+  background: var(--color-overlay-hover);
+}
+
+.variable code {
+  flex: none;
+  max-width: 70%;
+  font-family: var(--font-family-code);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.variable-sample {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

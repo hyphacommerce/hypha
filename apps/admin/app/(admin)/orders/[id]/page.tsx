@@ -27,9 +27,17 @@ import {
   PaymentStatusBadge,
 } from "@/components/status";
 import { CANCEL_REASONS, type Currencies, formatMoney } from "@/lib/format";
-import { channelNames, loadCountries, loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
+import {
+  channelNames,
+  loadCountries,
+  loadCurrencies,
+  loaded,
+  requireStaff,
+  sessionClient,
+} from "@/lib/hypha";
 import { canMarkPaid, providerLabel } from "@/lib/payments";
 
+import { EmailsCard } from "./emails";
 import { CancelOrderButton, FulfilButton, type Place, ShipmentsCard } from "./fulfilment";
 import { MarkPaid } from "./mark-paid";
 
@@ -64,14 +72,18 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const client = await sessionClient();
   // All at once; a missing order still goes to the 404 page (`loaded`). Shipments and
   // locations need their own scopes; without them the page shows the order alone.
-  const [found, shipments, locations, channelName, currencies, countries] = await Promise.all([
-    client.GET("/admin/orders/{id}", { params: { path: { id } } }),
-    client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
-    client.GET("/admin/locations"),
-    channelNames(client),
-    loadCurrencies(),
-    loadCountries(),
-  ]);
+  // The emails need `notifications:read`; the staff member is the layout's read too.
+  const [found, shipments, locations, channelName, currencies, countries, emails, me] =
+    await Promise.all([
+      client.GET("/admin/orders/{id}", { params: { path: { id } } }),
+      client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
+      client.GET("/admin/locations"),
+      channelNames(client),
+      loadCurrencies(),
+      loadCountries(),
+      client.GET("/admin/notifications", { params: { query: { order: id } } }),
+      requireStaff(),
+    ]);
   const order = loaded(found);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
   const fulfillments = shipments.data?.items ?? [];
@@ -223,6 +235,14 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
 
             {fulfillments.length > 0 && (
               <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
+            )}
+
+            {emails.data && (
+              <EmailsCard
+                orderId={order.id}
+                messages={emails.data.items}
+                canResend={me.scopes.includes("notifications:write")}
+              />
             )}
 
             <TimelineCard
