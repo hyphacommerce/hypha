@@ -1656,7 +1656,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PaymentMethodId",
-                "description": "One of the cart's `payment-methods`; `null` clears the choice."
+                "description": "One of the cart's `payment-methods`; `null` clears the choice. Required, `null`\nincluded: `{}` is `422 invalid_body`, not a quiet clear."
               },
               {
                 "type": "null"
@@ -1664,6 +1664,9 @@
             ]
           }
         },
+        "required": [
+          "payment_method"
+        ],
         "type": "object"
       },
       "SetQuantityRequest": {

@@ -29,6 +29,19 @@ where
     T::deserialize(d).map(Some)
 }
 
+/// For a field that must be sent, where `null` means "none": `Option<T>` with
+/// `#[serde(deserialize_with = "patch::required")]` (no `default`). serde only calls it
+/// when the field is present, and a field with its own `deserialize_with` and no
+/// default is a "missing field" error when absent, so `{}` is rejected (`invalid_body`)
+/// instead of quietly meaning `null`. Mark the schema `required = true` too.
+pub fn required<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d)
+}
+
 #[cfg(test)]
 mod tests {
     use serde::Deserialize;
@@ -66,5 +79,31 @@ mod tests {
     #[test]
     fn a_misspelled_field_is_an_error() {
         assert!(parse(r#"{"phnoe":"+385"}"#).is_err());
+    }
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    struct Choice {
+        #[serde(deserialize_with = "super::required")]
+        method: Option<u32>,
+    }
+
+    #[test]
+    fn a_required_field_takes_null_or_a_value_but_must_be_sent() {
+        let parse = |json| serde_json::from_str::<Choice>(json);
+        assert_eq!(
+            parse(r#"{"method": 7}"#).unwrap(),
+            Choice { method: Some(7) }
+        );
+        assert_eq!(
+            parse(r#"{"method": null}"#).unwrap(),
+            Choice { method: None }
+        );
+        assert!(
+            parse("{}")
+                .unwrap_err()
+                .to_string()
+                .contains("missing field `method`")
+        );
     }
 }

@@ -931,7 +931,7 @@ export interface components {
             email?: string | null;
         };
         SetPaymentMethodRequest: {
-            payment_method?: components["schemas"]["PaymentMethodId"] | null;
+            payment_method: components["schemas"]["PaymentMethodId"] | null;
         };
         SetQuantityRequest: {
             /**

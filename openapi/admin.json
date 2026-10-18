@@ -16039,7 +16039,7 @@
             "bearer": []
           }
         ],
-        "summary": "Cancels the order: every line's reserved stock is released and its pending payments\nare voided. Refused while fulfilments stand (`order_has_fulfillments`, 409, listing\nthem): cancel those first. A paid order stays paid; refund it outside Hypha for now.\nCancelling it again changes nothing.",
+        "summary": "Cancels the order: every line's reserved stock is released and its pending payments\nare voided. Refused while fulfilments stand (`order_has_fulfillments`, 409, listing\nthem): cancel those first. Refused while a payment is authorized\n(`payment_authorized`, 409, `details.payment`): the held money is its provider's to\nrelease. A paid order stays paid; refund it outside Hypha for now. Cancelling it\nagain changes nothing.",
         "tags": [
           "orders"
         ],
@@ -16431,7 +16431,7 @@
             "bearer": []
           }
         ],
-        "summary": "Records that the order's money arrived (a bank transfer, cash from the courier;\ndesign note 0027, §5): its pending payment becomes `paid`, with the `reference` when\ngiven, and so does the order. An order without a payment gets a `manual` one, paid\non the spot. The body is optional (none, `{}` or `{\"reference\": …}`). Marking a paid order\nagain changes nothing; a cancelled one is refused (409 `order_cancelled`).",
+        "summary": "Records that the order's money arrived (a bank transfer, cash from the courier;\ndesign note 0027, §5): its pending payments become `paid`, with the `reference` when\ngiven, and so does the order. A `pending` order without an open payment gets a\n`manual` one of its total, paid on the spot. The body is optional (none, `{}` or\n`{\"reference\": …}`). Marking a paid order again changes nothing. Refused (409): a\ncancelled order (`order_cancelled`), an authorized payment (`payment_authorized`,\n`details.payment`: only its provider can capture it), and any other payment status\n(`order_not_payable`, `details.financial_status`: partially paid, refunded or\nvoided, where money moved already).",
         "tags": [
           "orders"
         ],
@@ -16699,7 +16699,7 @@
             "bearer": []
           }
         ],
-        "summary": "Deletes a payment method. One a pending payment uses is refused\n(`payment_method_in_use`, 409): disable it instead. Payments it made keep its name.",
+        "summary": "Deletes a payment method. One an open (pending or authorized) payment uses is\nrefused (`payment_method_in_use`, 409): disable it instead. Payments it made keep\nits name.",
         "tags": [
           "payments"
         ],

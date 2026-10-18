@@ -545,6 +545,11 @@ contains "bank transfer, with its instructions" "{\"id\":\"$BANK\",\"name\":\"Ba
 contains "and cash on delivery" "\"id\":\"$COD\""
 step "choose an unknown method" 422 payment_method_not_found -X PUT "$BASE/storefront/carts/$KEYED/payment-method" \
     -H "$JSON" -d '{"payment_method":"pm_00000000000000000000000000000000"}'
+step "choose without the key (null clears; {} is refused)" 422 invalid_body -X PUT \
+    "$BASE/storefront/carts/$KEYED/payment-method" -H "$JSON" -d '{}'
+step "clear the choice with null" 200 - -X PUT "$BASE/storefront/carts/$KEYED/payment-method" \
+    -H "$JSON" -d '{"payment_method":null}'
+contains "no method chosen" '"payment_method":null'
 
 echo "## checkout"
 CHECKOUT="$BASE/storefront/carts/$KEYED/checkout"

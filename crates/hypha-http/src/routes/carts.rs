@@ -653,7 +653,10 @@ pub async fn payment_methods<S: Storage>(
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetPaymentMethodRequest {
-    /// One of the cart's `payment-methods`; `null` clears the choice.
+    /// One of the cart's `payment-methods`; `null` clears the choice. Required, `null`
+    /// included: `{}` is `422 invalid_body`, not a quiet clear.
+    #[serde(deserialize_with = "crate::patch::required")]
+    #[schema(required = true)]
     payment_method: Option<PaymentMethodId>,
 }
 

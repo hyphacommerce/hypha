@@ -1082,8 +1082,10 @@ export interface paths {
         /**
          * Cancels the order: every line's reserved stock is released and its pending payments
          *     are voided. Refused while fulfilments stand (`order_has_fulfillments`, 409, listing
-         *     them): cancel those first. A paid order stays paid; refund it outside Hypha for now.
-         *     Cancelling it again changes nothing.
+         *     them): cancel those first. Refused while a payment is authorized
+         *     (`payment_authorized`, 409, `details.payment`): the held money is its provider's to
+         *     release. A paid order stays paid; refund it outside Hypha for now. Cancelling it
+         *     again changes nothing.
          */
         post: operations["admin.orders.cancel"];
         delete?: never;
@@ -1125,10 +1127,14 @@ export interface paths {
         put?: never;
         /**
          * Records that the order's money arrived (a bank transfer, cash from the courier;
-         *     design note 0027, §5): its pending payment becomes `paid`, with the `reference` when
-         *     given, and so does the order. An order without a payment gets a `manual` one, paid
-         *     on the spot. The body is optional (none, `{}` or `{"reference": …}`). Marking a paid order
-         *     again changes nothing; a cancelled one is refused (409 `order_cancelled`).
+         *     design note 0027, §5): its pending payments become `paid`, with the `reference` when
+         *     given, and so does the order. A `pending` order without an open payment gets a
+         *     `manual` one of its total, paid on the spot. The body is optional (none, `{}` or
+         *     `{"reference": …}`). Marking a paid order again changes nothing. Refused (409): a
+         *     cancelled order (`order_cancelled`), an authorized payment (`payment_authorized`,
+         *     `details.payment`: only its provider can capture it), and any other payment status
+         *     (`order_not_payable`, `details.financial_status`: partially paid, refunded or
+         *     voided, where money moved already).
          */
         post: operations["admin.orders.mark_paid"];
         delete?: never;
@@ -1167,8 +1173,9 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Deletes a payment method. One a pending payment uses is refused
-         *     (`payment_method_in_use`, 409): disable it instead. Payments it made keep its name.
+         * Deletes a payment method. One an open (pending or authorized) payment uses is
+         *     refused (`payment_method_in_use`, 409): disable it instead. Payments it made keep
+         *     its name.
          */
         delete: operations["admin.payments.delete"];
         options?: never;
