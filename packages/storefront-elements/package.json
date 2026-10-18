@@ -1,0 +1,33 @@
+{
+  "name": "@hypha/storefront-elements",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Loading apps' storefront elements (web components) into any storefront (design note 0029, §7; docs/apps/elements.md): a loader, the documented events, and a React wrapper.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/react.ts"
+  },
+  "scripts": {
+    "test": "node --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "happy-dom": "20.14.6",
+    "jiti": "2.7.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "react": ">=19.2.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
+}
