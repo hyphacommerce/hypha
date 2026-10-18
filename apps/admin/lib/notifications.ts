@@ -48,6 +48,7 @@ export const MESSAGE_STATUS: Record<
   string,
   { label: string; variant: "success" | "neutral" | "warning" | "error" | "info" }
 > = {
+  queued: { label: "Queued", variant: "info" },
   sending: { label: "Sending", variant: "info" },
   sent: { label: "Sent", variant: "success" },
   failed: { label: "Failed", variant: "error" },

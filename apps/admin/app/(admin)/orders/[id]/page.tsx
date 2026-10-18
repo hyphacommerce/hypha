@@ -72,7 +72,9 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const client = await sessionClient();
   // All at once; a missing order still goes to the 404 page (`loaded`). Shipments and
   // locations need their own scopes; without them the page shows the order alone.
-  // The emails need `notifications:read`; the staff member is the layout's read too.
+  // The emails need `notifications:read` and `orders:read` (they name the buyer); without
+  // them the request is refused and the card isn't shown. The staff member is the
+  // layout's read too.
   const [found, shipments, locations, channelName, currencies, countries, emails, me] =
     await Promise.all([
       client.GET("/admin/orders/{id}", { params: { path: { id } } }),

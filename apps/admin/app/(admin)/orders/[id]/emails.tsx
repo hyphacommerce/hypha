@@ -1,7 +1,7 @@
 "use client";
 
 // The order's emails (design note 0028, §7): what was sent, to whom, when, and why one
-// failed or was skipped, with Resend.
+// failed or was skipped, with Resend (which queues a new one for the send job).
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -19,6 +19,13 @@ import { MESSAGE_STATUS, templateName } from "@/lib/notifications";
 import { resendNotification } from "../actions";
 
 type Message = AdminSchemas["NotificationResponse"];
+
+/** How a status with an error reads its error. */
+const ERROR_LABEL: Record<string, string> = {
+  failed: "Failed: ",
+  skipped: "Skipped: ",
+  queued: "Retrying: ",
+};
 
 export function EmailsCard({
   orderId,
@@ -39,7 +46,7 @@ export function EmailsCard({
     try {
       const result = await resendNotification(orderId, message.id);
       setError(result.error);
-      if (!result.error) toast({ body: `Sent again to ${message.to}` });
+      if (!result.error) toast({ body: `Queued again for ${message.to}` });
     } finally {
       setResending(undefined);
     }
@@ -73,15 +80,25 @@ export function EmailsCard({
                       <DateTime value={message.sent_at ?? message.created_at} short />
                       {message.attempts > 1 ? ` · ${message.attempts} attempts` : ""}
                     </Text>
-                    {message.error &&
-                      (message.status === "failed" || message.status === "skipped") && (
-                        <Text type="supporting" color="secondary">
-                          {message.status === "failed" ? "Failed: " : "Skipped: "}
-                          {message.error}
-                        </Text>
-                      )}
+                    {message.error && message.status !== "sent" && (
+                      <Text type="supporting" color="secondary">
+                        {ERROR_LABEL[message.status] ?? "Error: "}
+                        {message.error}
+                        {message.status === "queued" && message.next_attempt_at && (
+                          <>
+                            {" "}
+                            · next try <DateTime value={message.next_attempt_at} short />
+                          </>
+                        )}
+                      </Text>
+                    )}
+                    {message.note && (
+                      <Text type="supporting" color="secondary">
+                        {message.note}
+                      </Text>
+                    )}
                   </VStack>
-                  {canResend && message.status !== "sending" && (
+                  {canResend && message.status !== "sending" && message.status !== "queued" && (
                     <Button
                       label="Resend"
                       variant="ghost"
