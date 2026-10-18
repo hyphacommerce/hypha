@@ -44,20 +44,23 @@ export function providerLabel(provider: string): string {
 }
 
 /**
- * Whether staff can mark the order paid: not cancelled, and nothing collected yet
- * (`pending`, or `authorized` by a provider). The API takes the newest open payment, or
- * records a manual one of the total when there's none.
+ * Whether staff can mark the order paid, by the API's rule (design note 0027, §5): not
+ * cancelled, no `authorized` payment (only its provider can capture it), and either a
+ * `pending` payment to record or, with no open payment, a `pending` order (the API then
+ * records a manual payment of the total). Any other status means money moved already
+ * (`order_not_payable`). Without its payments (a list's summary), only `pending` orders.
  */
 export function canMarkPaid(order: {
   financial_status: string;
   cancelled_at?: string | null;
+  payments?: { status: string }[];
 }): boolean {
-  return !order.cancelled_at && MARKABLE.includes(order.financial_status);
+  if (order.cancelled_at) return false;
+  const payments = order.payments ?? [];
+  if (payments.some((p) => p.status === "authorized")) return false;
+  if (payments.some((p) => p.status === "pending")) return true;
+  return order.financial_status === "pending";
 }
-
-/** What `canMarkPaid` allows. A partly paid order isn't: marking it would record the
- * whole total again. */
-const MARKABLE = ["pending", "authorized"];
 
 /** Statuses with money still to collect: the orders list's "Unpaid" view. */
 export const UNPAID = ["pending", "authorized", "partially_paid"];

@@ -104,7 +104,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                 <MarkPaid
                   id={order.id}
                   number={order.number}
-                  hasPayment={order.payments.some((p) => OPEN.includes(p.status))}
+                  hasPayment={order.payments.some((p) => p.status === "pending")}
                 />
               )}
               {canFulfil && <FulfilButton order={order} places={places} />}
@@ -308,9 +308,6 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
     </Section>
   );
 }
-
-/** Payment statuses money could still come in on (the API's "open" ones). */
-const OPEN = ["pending", "authorized"];
 
 type Order = AdminSchemas["AdminOrderResponse"];
 
