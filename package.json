@@ -18,5 +18,8 @@
     "storefront:dev": "pnpm --filter storefront dev",
     "storefront:build": "pnpm --filter storefront build",
     "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "vite-plus": "1.3.0"
   }
 }
