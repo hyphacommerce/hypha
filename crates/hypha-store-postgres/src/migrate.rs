@@ -264,6 +264,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "notifications",
             sql: include_str!("../migrations/0048_notifications.sql"),
         },
+        Migration {
+            version: 49,
+            name: "extension_calls",
+            sql: include_str!("../migrations/0049_extension_calls.sql"),
+        },
     ],
 };
 
