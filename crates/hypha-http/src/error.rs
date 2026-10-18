@@ -64,6 +64,10 @@ pub struct ApiErrorBody {
 ///   25; `GET /admin/assets/{id}/usages` pages through all of them
 /// - `template_invalid`: `{"part", "line", "message"}`: `part` is `subject`, `html`,
 ///   `text` or `layout`, `line` counts from 1 (`null` when unknown)
+/// - `app_unavailable`: `{"app", "point"}`, the app and the extension point that gave no
+///   usable answer (why is in the app's call log)
+/// - `payment_refused`: `{"reason"}`, the payment provider's words
+/// - `order_not_payable`: `{"financial_status"}`
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
 /// a rate limit or locked second factor; 403
@@ -167,6 +171,16 @@ impl ApiError {
             self.status = StatusCode::UNPROCESSABLE_ENTITY;
         }
         self
+    }
+
+    /// The body this error answers with, for an answer that carries an error inside a
+    /// success (checkout's `payment_error`).
+    pub(crate) fn body(&self) -> ApiErrorBody {
+        ApiErrorBody {
+            code: self.code.to_string(),
+            error: self.message.clone(),
+            details: self.details.clone(),
+        }
     }
 
     /// The code, for tests outside this module.
@@ -794,9 +808,13 @@ impl From<hypha_order_actions::CommandError> for ApiError {
         use hypha_order_actions::CommandError as E;
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
-            // The order or fulfilment in the URL; the location comes in the body.
-            E::OrderNotFound(_) | E::FulfillmentNotFound(_) => StatusCode::NOT_FOUND,
-            E::LocationNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            // The order, fulfilment or payment in the URL; the location comes in the body.
+            E::OrderNotFound(_) | E::FulfillmentNotFound(_) | E::PaymentNotFound(_) => {
+                StatusCode::NOT_FOUND
+            }
+            E::LocationNotFound(_) | E::AmountMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            // Another provider's payment: this app may not report on it.
+            E::PaymentNotYours { .. } => StatusCode::FORBIDDEN,
             // The order's or its payments' state.
             E::HasFulfillments { .. } | E::NotPayable { .. } | E::PaymentAuthorized { .. } => {
                 StatusCode::CONFLICT
@@ -838,6 +856,7 @@ impl From<hypha_order_actions::CommandError> for ApiError {
             E::NotPayable { status, .. } => Some(json!({ "financial_status": status.as_str() })),
             E::PaymentAuthorized { payment, .. } => Some(json!({ "payment": payment })),
             E::Order(o) => order_details(o),
+            E::Payment(p) => payment_details(p),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -911,14 +930,26 @@ fn payment_error_status(e: &hypha_payments::PaymentError) -> Option<StatusCode> 
         | P::UnknownProvider(_)
         | P::InvalidSettings { .. }
         | P::InstructionsTooLong => Some(StatusCode::UNPROCESSABLE_ENTITY),
-        // The payment's state, not the request.
-        P::InvalidTransition { .. } => Some(StatusCode::CONFLICT),
+        // The payment's state, not the request; or its provider, which takes no actions.
+        P::InvalidTransition { .. } | P::ActionUnsupported { .. } => Some(StatusCode::CONFLICT),
+        // A refund that doesn't fit what was paid.
+        P::InvalidRefund { .. } => Some(StatusCode::UNPROCESSABLE_ENTITY),
         // A provider that couldn't do what was asked.
-        P::ProviderFailed { .. } => Some(StatusCode::BAD_GATEWAY),
+        P::ProviderFailed { .. } | P::AppUnavailable { .. } => Some(StatusCode::BAD_GATEWAY),
         // An open payment whose method was deleted (only a checkout replay meets it, and
         // logs it): the state of the store, not the request.
         P::MethodUnavailable(_) => Some(StatusCode::CONFLICT),
         P::Money(_) | P::CurrencyMismatch { .. } | P::Inconsistent { .. } => None,
+    }
+}
+
+/// What a client acts on in a payment error: the app and point that failed.
+fn payment_details(e: &hypha_payments::PaymentError) -> Option<Value> {
+    match e {
+        hypha_payments::PaymentError::AppUnavailable { app, point, .. } => {
+            Some(json!({ "app": app.as_str(), "point": point }))
+        }
+        _ => None,
     }
 }
 
@@ -929,7 +960,9 @@ impl From<hypha_payments::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Routes that name the method in their URL say so (`not_found_if`).
             E::PaymentMethodNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            E::PaymentMethodInUse(_) => StatusCode::CONFLICT,
+            // Only routes with the payment in the URL look one up.
+            E::PaymentNotFound(_) => StatusCode::NOT_FOUND,
+            E::PaymentMethodInUse(_) | E::PaymentRefused { .. } => StatusCode::CONFLICT,
             E::Payment(p) => match payment_error_status(p) {
                 Some(status) => status,
                 None => return Self::internal(e),
@@ -939,7 +972,12 @@ impl From<hypha_payments::CommandError> for ApiError {
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::PaymentRefused { reason, .. } => Some(json!({ "reason": reason })),
+            E::Payment(p) => payment_details(p),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -951,14 +989,16 @@ impl From<hypha_checkout::CommandError> for ApiError {
             // Pricing the cart and reserving stock report like their own routes.
             E::Cart(inner) => return Self::from(inner.clone()),
             E::Inventory(inner) => return Self::from(inner.clone()),
+            // Asking to pay for a cancelled order.
+            E::Order(hypha_orders::OrderError::Cancelled(_)) => StatusCode::CONFLICT,
             // Checkout builds the order from a priced cart, so a broken order rule is a bug;
             // likewise the payment, from a stored method.
             E::Order(_) | E::Payment(_) => return Self::internal(e),
             // A method in a body (`PUT …/payment-method`).
             E::PaymentMethodNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            // The cart in the URL.
-            E::CartNotFound(_) => StatusCode::NOT_FOUND,
+            // The cart or the order in the URL.
+            E::CartNotFound(_) | E::OrderNotFound(_) => StatusCode::NOT_FOUND,
             // The cart's or the shop's state right now, not the request, is the problem.
             E::CartCompleted { .. }
             | E::EmptyCart(_)
@@ -969,7 +1009,8 @@ impl From<hypha_checkout::CommandError> for ApiError {
             | E::ShippingOptionRequired(_)
             | E::ShippingUnavailable(_)
             | E::PaymentMethodRequired(_)
-            | E::PaymentMethodUnavailable(_) => StatusCode::CONFLICT,
+            | E::PaymentMethodUnavailable(_)
+            | E::NotPayable { .. } => StatusCode::CONFLICT,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -982,6 +1023,7 @@ impl From<hypha_checkout::CommandError> for ApiError {
             E::TotalChanged { expected, actual } => {
                 Some(json!({ "expected": expected, "actual": actual }))
             }
+            E::NotPayable { status, .. } => Some(json!({ "financial_status": status.as_str() })),
             _ => None,
         };
         Self::domain(status, e).with_details(details)

@@ -44,6 +44,10 @@ pub struct CheckoutRequest {
     /// with `total_changed` (409) instead of placing a different order.
     #[serde(default)]
     expected_total: Option<Money>,
+    /// Where a payment provider's page sends the buyer back (a redirect), passed to the
+    /// payment's app.
+    #[serde(default)]
+    return_url: Option<String>,
 }
 
 /// `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
@@ -372,10 +376,31 @@ pub struct CheckoutResponse {
     #[serde(flatten)]
     placed: PlacedOrderResponse,
     /// From the payment's provider: for cash on delivery and bank transfer, the
-    /// instructions (quote the order number as the reference). `null` when there was
-    /// nothing to pay, or when the provider couldn't start: the order stands, its payment
-    /// pending.
+    /// instructions (quote the order number as the reference); for a payment app, its
+    /// widget or a redirect. `null` when there was nothing to pay, or when the provider
+    /// couldn't start (`payment_error` says why): the order stands, its payment pending.
     next_action: Option<NextActionResponse>,
+    /// Why the payment couldn't start, when it couldn't (an app that's down:
+    /// `app_unavailable`): the order is placed; show "payment couldn't start; try again"
+    /// and start it again with `POST /storefront/orders/{id}/payment`. `null` otherwise.
+    payment_error: Option<ApiErrorBody>,
+}
+
+/// What the shopper must do next and why it's missing, as a placed order's answer
+/// carries them: an error is logged and goes out as `payment_error`.
+fn next_step(
+    order: OrderId,
+    next_action: &Option<Result<hypha_payments::NextAction, hypha_payments::PaymentError>>,
+) -> (Option<NextActionResponse>, Option<ApiErrorBody>) {
+    match next_action {
+        Some(Ok(action)) => (Some(NextActionResponse::from(action)), None),
+        Some(Err(error)) => {
+            tracing::warn!(%order, %error, "the payment didn't start");
+            let body = ApiError::from(hypha_payments::CommandError::from(error.clone())).body();
+            (None, Some(body))
+        }
+        None => (None, None),
+    }
 }
 
 /// Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns
@@ -404,28 +429,22 @@ pub async fn checkout_handler<S: Storage>(
         cart,
         expected_total: req.body.expected_total,
         idempotency: req.idempotency,
+        return_url: req.body.return_url,
     };
     let rates = state.cart_rates(&ports, cart);
-    let providers = state.storage.payment_providers();
+    let providers = state.payments(&ports);
     let placed = checkout(
         &ctx,
         &ports,
         &state.ids,
         &state.clock,
         &rates,
-        providers,
+        &providers,
         input,
     )
     .await?;
     let order = &placed.value.order;
-    let next_action = match &placed.value.next_action {
-        Some(Ok(action)) => Some(NextActionResponse::from(action)),
-        Some(Err(error)) => {
-            tracing::warn!(order = %order.id(), %error, "payment provider didn't start");
-            None
-        }
-        None => None,
-    };
+    let (next_action, payment_error) = next_step(order.id(), &placed.value.next_action);
     Ok(idempotent_response(
         StatusCode::CREATED,
         CheckoutResponse {
@@ -439,6 +458,7 @@ pub async fn checkout_handler<S: Storage>(
                     .map(PlacedPaymentResponse::new),
             },
             next_action,
+            payment_error,
         },
         placed.replayed,
     ))
@@ -479,6 +499,63 @@ pub async fn fetch_placed<S: Storage>(
         order: OrderResponse::with_images(&order, &ports, state.media.as_deref()).await?,
         access_token: token,
         payment: payment.as_ref().map(PlacedPaymentResponse::new),
+    }))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StartPaymentRequest {
+    /// Where a payment provider's page sends the buyer back (a redirect).
+    #[serde(default)]
+    return_url: Option<String>,
+}
+
+/// Starts paying for an order again (design note 0027, §4), with its access token, when
+/// checkout's start failed or the provider declined: a `pending` payment is started
+/// again (its app sees the same idempotency key, the payment's ID); after a `failed`
+/// one, a new payment is made with the same method and started. Answers like checkout,
+/// with `next_action` or `payment_error`. A missing or wrong token, or another
+/// channel's order, is `404 order_not_found`; a cancelled order `409 order_cancelled`;
+/// nothing to start (authorized, paid, refunded, or nothing was due) `409
+/// order_not_payable`; the method no longer offered `409 payment_method_unavailable`.
+#[utoipa::path(
+    post,
+    path = "/storefront/orders/{id}/payment",
+    params(("id" = OrderId, Path), OrderTokenQuery),
+    request_body = StartPaymentRequest,
+    responses((status = 200, description = "OK", body = CheckoutResponse)),
+    extensions(("x-hypha-scopes" = json!(["checkout"]))),
+)]
+pub async fn start_payment<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<OrderId>,
+    query: Query<OrderTokenQuery>,
+    body: JsonBody<StartPaymentRequest>,
+) -> Result<Json<CheckoutResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let token = query.parse()?.token;
+    if !state.env.is_order_token(id, &token) {
+        return Err(hypha_orders::CommandError::OrderNotFound(id).into());
+    }
+    let req = body.parse()?;
+    let input = hypha_checkout::StartPayment {
+        order: id,
+        return_url: req.return_url,
+    };
+    let providers = state.payments(&ports);
+    let placed =
+        hypha_checkout::start_order_payment(&ctx, &ports, &state.ids, &providers, input).await?;
+    let (next_action, payment_error) = next_step(id, &placed.next_action);
+    Ok(Json(CheckoutResponse {
+        placed: PlacedOrderResponse {
+            order: OrderResponse::with_images(&placed.order, &ports, state.media.as_deref())
+                .await?,
+            access_token: token,
+            payment: placed.payment.as_ref().map(PlacedPaymentResponse::new),
+        },
+        next_action,
+        payment_error,
     }))
 }
 

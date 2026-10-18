@@ -153,6 +153,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/apps/{key}/extension-points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Where the app answers extension points: the URLs Hypha calls for a payment method
+         *     it collects (`payments.*`) or the store's searches (`search.query`).
+         */
+        get: operations["admin.apps.extension_points"];
+        /**
+         * Sets where a private app (one without a manifest) answers extension points,
+         *     replacing what it had; an empty list stops every call. Each point once
+         *     (`duplicate_extension_point`), a point and version this Hypha knows
+         *     (`unknown_extension_point`). Calls are signed with the app's secret.
+         */
+        put: operations["admin.apps.set_extension_points"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/apps/{key}/secret": {
         parameters: {
             query?: never;
@@ -1379,6 +1405,97 @@ export interface paths {
         patch: operations["admin.payments.update"];
         trace?: never;
     };
+    "/admin/payments/{id}/capture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asks the payment's app to capture an authorized payment (`payments.capture`). 202:
+         *     the app accepted; the payment becomes `paid` when the app reports it. Refused by the
+         *     provider: `409 payment_refused` with its `reason`. Not authorized: `409
+         *     invalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the
+         *     app gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,
+         *     is passed to the app.
+         */
+        post: operations["admin.payments.capture"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/payments/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a payment's provider reports (design note 0029, §3.1): a payment app tells
+         *     Hypha what its provider did (Stripe's webhook landed on the app). Moves the payment
+         *     and its order's payment status in one batch, recording `payment.authorized`,
+         *     `.paid`, `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the
+         *     status a payment is in already changes nothing. Send an `Idempotency-Key` (the
+         *     provider's event ID): a retry with it answers as the first did, and a refund isn't
+         *     counted twice. A move the payment's status doesn't allow is `409
+         *     invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
+         */
+        post: operations["admin.payments.report_event"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/payments/{id}/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asks the payment's app to refund some or all of a paid payment (`payments.refund`).
+         *     202 and the errors as for a capture; an amount that doesn't fit is `422
+         *     invalid_refund_amount`. Send an `Idempotency-Key`: the app gives back once per key.
+         */
+        post: operations["admin.payments.refund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/payments/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asks the payment's app to void a pending or authorized payment (`payments.void`),
+         *     releasing what it holds. 202 and the errors as for a capture.
+         */
+        post: operations["admin.payments.void"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/price-lists": {
         parameters: {
             query?: never;
@@ -1717,7 +1834,10 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Changes which options split listings and which facets storefronts show. */
+        /**
+         * Changes which options split listings, which facets storefronts show, and the app
+         *     that answers searches.
+         */
         patch: operations["admin.search.update_settings"];
         trace?: never;
     };
@@ -2683,13 +2803,13 @@ export interface components {
              */
             position?: number | null;
             /**
-             * @description `manual`, or a spore's `spore_<name>` this build has (`payment_provider_unknown`
-             *     otherwise).
+             * @description `manual`, or an app's key `app_<name>`: an installed, enabled app answering the
+             *     extension point `payments.start` (`payment_provider_unknown` otherwise).
              */
             provider: string;
             /**
-             * @description The provider's settings, checked by it (`invalid_payment_settings`); `manual`
-             *     takes none (`{}`, the default).
+             * @description The provider's settings, checked by it (`invalid_payment_settings`); `manual` and
+             *     apps take none (`{}`, the default).
              */
             settings?: Record<string, never> | null;
         };
@@ -2949,6 +3069,29 @@ export interface components {
             status?: number | null;
             /** Format: int32 */
             version: number;
+        };
+        ExtensionEndpointDto: {
+            /**
+             * @description A point this Hypha calls apps through: `payments.start`, `payments.capture`,
+             *     `payments.void`, `payments.refund` or `search.query` (`unknown_extension_point`
+             *     otherwise). Shipping rates are registered as a shipping provider's
+             *     `callback_url`.
+             */
+            point: string;
+            /**
+             * @description Where Hypha POSTs the point's request, signed: `https://`, or `http://localhost`
+             *     for development.
+             */
+            url: string;
+            /**
+             * Format: int32
+             * @description The version the app answers (1).
+             */
+            version: number;
+        };
+        ExtensionEndpointsDto: {
+            /** @description By point name. */
+            extension_points: components["schemas"]["ExtensionEndpointDto"][];
         };
         FacetSettingRequest: {
             /** @description `option.<name>`, `vendor`, `product_type` or `tag`. */
@@ -3527,6 +3670,47 @@ export interface components {
             email: string;
         };
         /**
+         * @description The provider took the action. Nothing has moved yet: the payment changes when the
+         *     provider reports what happened (`POST /admin/payments/{id}/events`).
+         */
+        PaymentActionAcceptedResponse: {
+            /** @description The payment as it is still. */
+            payment: components["schemas"]["PaymentResponse"];
+            /** @description The provider's ID for the capture or refund, when it gave one. */
+            reference?: string | null;
+        };
+        PaymentEventRequest: {
+            /**
+             * Format: int64
+             * @description In the payment's minor units. For a refund, how much this one gave back
+             *     (required for `partially_refunded`; for `refunded`, absent is all that was left).
+             *     Otherwise absent or the payment's whole amount (`payment_amount_mismatch`).
+             */
+            amount?: number | null;
+            /** @description When it happened at the provider, RFC 3339; absent is now. */
+            occurred_at?: string | null;
+            /**
+             * @description The provider's ID for the payment (a PaymentIntent's `pi_…`), kept on it. Up to
+             *     255 characters.
+             */
+            reference?: string | null;
+            type: components["schemas"]["PaymentEventTypeDto"];
+        };
+        /** @description A payment after a report, and the payment status of its order. */
+        PaymentEventResponse: {
+            /** @description The order's payment status, derived from its payments. */
+            financial_status: components["schemas"]["FinancialStatusDto"];
+            order: components["schemas"]["OrderId"];
+            payment: components["schemas"]["PaymentResponse"];
+        };
+        /**
+         * @description What a payment's provider reports (`type`): the status the payment is in now.
+         *
+         *     Known values: `authorized`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PaymentEventTypeDto: string;
+        /**
          * @description A PaymentId: `pay_` and 32 hex digits.
          * @example pay_0190f1a2b3c47d8e9f00112233445566
          */
@@ -3562,11 +3746,11 @@ export interface components {
              */
             position: number;
             /**
-             * @description `manual` (cash on delivery, bank transfer: staff record the money), or a spore's
-             *     `spore_<name>`.
+             * @description `manual` (cash on delivery, bank transfer: staff record the money), or the key of
+             *     the app that collects (`app_<name>`).
              */
             provider: string;
-            /** @description The provider's own settings (`{}` for `manual`). */
+            /** @description The provider's own settings (`{}` for `manual` and apps, which keep their own). */
             settings: Record<string, never>;
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
@@ -3584,11 +3768,11 @@ export interface components {
             method_name?: string | null;
             /** @description When the money was collected, RFC 3339 in UTC. */
             paid_at?: string | null;
-            /** @description `manual`, or a spore's key. */
+            /** @description `manual`, or the key of the app that collects it. */
             provider: string;
             /** @description The provider's ID, or for manual payments what staff typed (a bank reference). */
             reference?: string | null;
-            /** @description What was given back; zero until refunds exist. */
+            /** @description What was given back. */
             refunded: components["schemas"]["Money"];
             status: components["schemas"]["PaymentStatusDto"];
             /** @description When it was voided, RFC 3339 in UTC. */
@@ -3814,6 +3998,14 @@ export interface components {
             /** @description Shown only now: each works once if the authenticator is lost. */
             recovery_codes: string[];
         };
+        RefundRequest: {
+            /**
+             * Format: int64
+             * @description In the payment's minor units, more than zero and at most what's left to give back;
+             *     absent for all of it.
+             */
+            amount?: number | null;
+        };
         RemoveFixedPricesRequest: {
             variants: components["schemas"]["VariantId"][];
         };
@@ -3866,6 +4058,11 @@ export interface components {
              *     vendor, the market's most used options, tags).
              */
             facets: components["schemas"]["FacetSettingResponse"][];
+            /**
+             * @description The app that answers storefront searches (`search.query`, design note 0029);
+             *     `null` for the built-in engine, which also answers whenever the app fails.
+             */
+            search_app?: string | null;
             /**
              * @description Option names whose values split listings, in order ("show each Color
              *     separately"). Empty: one listing per product.
@@ -4374,6 +4571,11 @@ export interface components {
             /** @description At most 20, unique; empty for the defaults. */
             facets?: components["schemas"]["FacetSettingRequest"][];
             /**
+             * @description An installed, enabled app answering `search.query` (`app_<name>`;
+             *     `search_app_unavailable` otherwise); `null` for the built-in engine.
+             */
+            search_app?: string | null;
+            /**
              * @description At most 3 option names, unique ignoring case. Changing them rebuilds every
              *     search document in the background.
              */
@@ -4511,6 +4713,8 @@ export interface components {
             /** @description Where Hypha POSTs events: `https://`, or `http://localhost` for development. */
             url: string;
         };
+        /** @description A capture or a void: of the whole payment, so the body is `{}`. */
+        WholePaymentRequest: Record<string, never>;
     };
     responses: never;
     parameters: never;
@@ -5448,6 +5652,182 @@ export interface operations {
                 };
             };
             /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.extension_points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_stripe */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionEndpointsDto"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.set_extension_points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_stripe */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExtensionEndpointsDto"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionEndpointsDto"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -13492,6 +13872,448 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaymentMethodResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.payments.capture": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Passed to the app, so a retried action is done once. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                id: components["schemas"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WholePaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentActionAcceptedResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.payments.report_event": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                id: components["schemas"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentEventRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    /** @description `true` when this answer replays an earlier request with the same `Idempotency-Key`. */
+                    "Idempotent-Replayed"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentEventResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.payments.refund": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Passed to the app, so a retried refund gives back once. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                id: components["schemas"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefundRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentActionAcceptedResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.payments.void": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Passed to the app, so a retried action is done once. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                id: components["schemas"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WholePaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentActionAcceptedResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */

@@ -156,6 +156,11 @@ macro_rules! route_table {
             [admin, GET, "/admin/payment-methods/{id}", payments::fetch],
             [admin, PATCH, "/admin/payment-methods/{id}", payments::update],
             [admin, DELETE, "/admin/payment-methods/{id}", payments::delete],
+            // an app's payments (design note 0029, §3.1)
+            [admin, POST, "/admin/payments/{id}/events", payments::report_event],
+            [admin, POST, "/admin/payments/{id}/capture", payments::capture],
+            [admin, POST, "/admin/payments/{id}/void", payments::void],
+            [admin, POST, "/admin/payments/{id}/refund", payments::refund],
             // fulfilments (design note 0018)
             [admin, POST, "/admin/orders/{id}/fulfillments", fulfillments::create],
             [admin, GET, "/admin/orders/{id}/fulfillments", fulfillments::list],
@@ -205,6 +210,8 @@ macro_rules! route_table {
             [admin, POST, "/admin/apps/{key}/secret", apps::rotate_secret],
             [admin, GET, "/admin/apps/{key}/deliveries", apps::deliveries],
             [admin, GET, "/admin/apps/{key}/extension-calls", apps::extension_calls],
+            [admin, GET, "/admin/apps/{key}/extension-points", apps::extension_points],
+            [admin, PUT, "/admin/apps/{key}/extension-points", apps::set_extension_points],
             [admin, POST, "/admin/apps/{key}/deliveries/{id}/retry", apps::retry],
             [admin, GET, "/admin/events/{id}", apps::event],
             // inventory
@@ -278,6 +285,7 @@ macro_rules! route_table {
             [storefront, GET, "/storefront/carts/{id}/payment-methods", carts::payment_methods],
             [storefront, PUT, "/storefront/carts/{id}/payment-method", carts::set_payment_method],
             [storefront, POST, "/storefront/carts/{id}/checkout", orders::checkout_handler],
+            [storefront, POST, "/storefront/orders/{id}/payment", orders::start_payment],
             [storefront, GET, "/storefront/orders/{id}", orders::fetch_placed],
         }
     };

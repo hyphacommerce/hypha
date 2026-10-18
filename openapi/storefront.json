@@ -62,7 +62,7 @@
             "type": "string"
           },
           "provider": {
-            "description": "`manual` or a spore's key: what the storefront shows after choosing (instructions,\nor a provider's widget).",
+            "description": "`manual` or an app's key: what the storefront shows after choosing (instructions,\nor the app's widget).",
             "type": "string"
           }
         },
@@ -266,6 +266,13 @@
                 "type": "null"
               }
             ]
+          },
+          "return_url": {
+            "description": "Where a payment provider's page sends the buyer back (a redirect), passed to the\npayment's app.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -281,7 +288,18 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/NextActionResponse",
-                    "description": "From the payment's provider: for cash on delivery and bank transfer, the\ninstructions (quote the order number as the reference). `null` when there was\nnothing to pay, or when the provider couldn't start: the order stands, its payment\npending."
+                    "description": "From the payment's provider: for cash on delivery and bank transfer, the\ninstructions (quote the order number as the reference); for a payment app, its\nwidget or a redirect. `null` when there was nothing to pay, or when the provider\ncouldn't start (`payment_error` says why): the order stands, its payment pending."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "payment_error": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Error",
+                    "description": "Why the payment couldn't start, when it couldn't (an app that's down:\n`app_unavailable`): the order is placed; show \"payment couldn't start; try again\"\nand start it again with `POST /storefront/orders/{id}/payment`. `null` otherwise."
                   },
                   {
                     "type": "null"
@@ -662,7 +680,7 @@
         "type": "object"
       },
       "NextActionResponse": {
-        "description": "What the shopper must do next to pay (design note 0027, §3).",
+        "description": "What the shopper must do next to pay (design note 0027, §3; 0029, §7).",
         "oneOf": [
           {
             "description": "Nothing online: show the instructions (cash on delivery, bank transfer). Empty\nwhen the method has none.",
@@ -684,20 +702,24 @@
             "type": "object"
           },
           {
-            "description": "A provider's widget (card fields) takes this secret.",
+            "description": "Mount the payment app's storefront element (a custom element, loaded from\n`GET /storefront/app-extensions?target=checkout.payment`) with these properties\n(a card form's client secret), and wait for its `hypha:payment-confirmed` event.",
             "properties": {
-              "client_secret": {
+              "element": {
                 "type": "string"
+              },
+              "props": {
+                "type": "object"
               },
               "type": {
                 "enum": [
-                  "client_secret"
+                  "client_widget"
                 ],
                 "type": "string"
               }
             },
             "required": [
-              "client_secret",
+              "element",
+              "props",
               "type"
             ],
             "type": "object"
@@ -1768,6 +1790,19 @@
         "required": [
           "groups"
         ],
+        "type": "object"
+      },
+      "StartPaymentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "return_url": {
+            "description": "Where a payment provider's page sends the buyer back (a redirect).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "StorefrontCategoryNode": {
@@ -4089,6 +4124,154 @@
         ]
       }
     },
+    "/storefront/orders/{id}/payment": {
+      "post": {
+        "operationId": "storefront.orders.start_payment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          },
+          {
+            "description": "The order's `access_token`, from checkout's answer.",
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartPaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Starts paying for an order again (design note 0027, §4), with its access token, when\ncheckout's start failed or the provider declined: a `pending` payment is started\nagain (its app sees the same idempotency key, the payment's ID); after a `failed`\none, a new payment is made with the same method and started. Answers like checkout,\nwith `next_action` or `payment_error`. A missing or wrong token, or another\nchannel's order, is `404 order_not_found`; a cancelled order `409 order_cancelled`;\nnothing to start (authorized, paid, refunded, or nothing was due) `409\norder_not_payable`; the method no longer offered `409 payment_method_unavailable`.",
+        "tags": [
+          "orders"
+        ],
+        "x-hypha-scopes": [
+          "checkout"
+        ]
+      }
+    },
     "/storefront/products/by-handle/{handle}": {
       "get": {
         "operationId": "storefront.products.fetch_by_handle",
@@ -4480,7 +4663,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Searches the products the shopper's market sells, priced and stocked there; without\n`q`, the market's product listing. Pages go at most 1,000 results deep.",
+        "summary": "Searches the products the shopper's market sells, priced and stocked there; without\n`q`, the market's product listing. Pages go at most 1,000 results deep. With a search\napp set (`search_app` in the settings), the app chooses and orders the results\n(`search.query`, design note 0029) and Hypha shows its own prices and stock for them;\n`price` is then `null`. When the app fails, the built-in engine answers.",
         "tags": [
           "search"
         ],
