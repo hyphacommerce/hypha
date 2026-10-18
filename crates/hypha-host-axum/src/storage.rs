@@ -151,6 +151,7 @@ impl Storage for PgStorage {
     type Directory<'a> = PgStore<PooledClient>;
     type Search<'p> = &'p PgStore<PooledClient>;
     type Handlers = crate::handlers::Handlers;
+    type Payments = crate::payments::PaymentProviders;
 
     async fn ports(&self, _store: StoreId) -> Result<PgStore<PooledClient>, ApiError> {
         self.store().await
@@ -174,6 +175,10 @@ impl Storage for PgStorage {
 
     fn handlers(&self) -> &crate::handlers::Handlers {
         &crate::handlers::HANDLERS
+    }
+
+    fn payment_providers(&self) -> &crate::payments::PaymentProviders {
+        &crate::payments::PAYMENT_PROVIDERS
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {

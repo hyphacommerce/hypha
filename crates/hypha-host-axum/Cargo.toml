@@ -9,6 +9,7 @@ publish = false
 # The routes, the state and everything but the runtime (design note 0026, W3).
 hypha-http = { path = "../hypha-http" }
 hypha-dispatch = { path = "../hypha-dispatch" }
+hypha-payments = { path = "../hypha-payments" }
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-search = { path = "../hypha-search" }
 hypha-core = { workspace = true, features = ["openapi"] }

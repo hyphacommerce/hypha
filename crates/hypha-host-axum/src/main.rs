@@ -19,6 +19,7 @@ mod handlers;
 #[cfg(test)]
 mod handlers_test;
 mod limiter;
+mod payments;
 mod platform;
 #[cfg(test)]
 mod route_tests;

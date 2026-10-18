@@ -21,6 +21,7 @@ pub mod markets;
 pub mod me;
 pub mod orders;
 pub mod page;
+pub mod payments;
 pub mod products;
 pub mod reference;
 pub mod search;
@@ -148,6 +149,12 @@ macro_rules! route_table {
             [admin, GET, "/admin/orders/{id}", orders::fetch],
             [admin, POST, "/admin/orders/{id}/paid", orders::mark_paid],
             [admin, POST, "/admin/orders/{id}/cancel", orders::cancel],
+            // payment methods (design note 0027)
+            [admin, GET, "/admin/payment-methods", payments::list],
+            [admin, POST, "/admin/payment-methods", payments::create],
+            [admin, GET, "/admin/payment-methods/{id}", payments::fetch],
+            [admin, PATCH, "/admin/payment-methods/{id}", payments::update],
+            [admin, DELETE, "/admin/payment-methods/{id}", payments::delete],
             // fulfilments (design note 0018)
             [admin, POST, "/admin/orders/{id}/fulfillments", fulfillments::create],
             [admin, GET, "/admin/orders/{id}/fulfillments", fulfillments::list],
@@ -253,6 +260,8 @@ macro_rules! route_table {
             [storefront, PUT, "/storefront/carts/{id}/shipping-address", carts::set_address],
             [storefront, GET, "/storefront/carts/{id}/shipping-options", carts::shipping_options],
             [storefront, PUT, "/storefront/carts/{id}/shipping/{group_id}", carts::select],
+            [storefront, GET, "/storefront/carts/{id}/payment-methods", carts::payment_methods],
+            [storefront, PUT, "/storefront/carts/{id}/payment-method", carts::set_payment_method],
             [storefront, POST, "/storefront/carts/{id}/checkout", orders::checkout_handler],
             [storefront, GET, "/storefront/orders/{id}", orders::fetch_placed],
         }

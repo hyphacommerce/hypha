@@ -11,18 +11,22 @@ use hypha_core::{
     TaxClassId, TaxRate, Timestamp, VariantId,
 };
 use hypha_media::{AssetRepo, HasAssets};
-use hypha_order_actions::{BuyerEmail, CancelOrder, OrderView, cancel_order, order_view};
+use hypha_order_actions::{
+    BuyerEmail, CancelOrder, MarkPaid, OrderView, cancel_order, mark_paid as record_paid,
+    order_view,
+};
 use hypha_orders::{
     CancelReason, FinancialStatus, FulfillmentStatus, HasOrders, ListOrders, Order,
     OrderFilterInput, OrderLine, OrderSort, OrderSummary, get_placed_order, list_orders,
-    mark_order_paid,
 };
+use hypha_payments::{HasPayments, Payment, PaymentRepo};
 use hypha_products::{HasProducts, ProductRepo};
 use serde::{Deserialize, Serialize};
 
 use super::{
     address::PostalAddressResponse,
     page::{ListQuery, PageParams, PageResponse, SortedFilters},
+    payments::{NextActionResponse, PaymentResponse, PlacedPaymentResponse},
     products::ProductMediaResponse,
     rfc3339,
     shipping::DeliveryEstimateDto,
@@ -46,18 +50,30 @@ pub struct CheckoutRequest {
 
 /// `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
 /// serde and renaming a variant can't silently change the API.
+/// Derived from the order's payments (design note 0027, PA7): manual payments use
+/// `pending`, `paid` and `voided`; the rest come with providers that move money so.
 #[derive(Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FinancialStatusDto {
     Pending,
+    Authorized,
+    PartiallyPaid,
     Paid,
+    PartiallyRefunded,
+    Refunded,
+    Voided,
 }
 
 impl From<FinancialStatus> for FinancialStatusDto {
     fn from(s: FinancialStatus) -> Self {
         match s {
             FinancialStatus::Pending => FinancialStatusDto::Pending,
+            FinancialStatus::Authorized => FinancialStatusDto::Authorized,
+            FinancialStatus::PartiallyPaid => FinancialStatusDto::PartiallyPaid,
             FinancialStatus::Paid => FinancialStatusDto::Paid,
+            FinancialStatus::PartiallyRefunded => FinancialStatusDto::PartiallyRefunded,
+            FinancialStatus::Refunded => FinancialStatusDto::Refunded,
+            FinancialStatus::Voided => FinancialStatusDto::Voided,
         }
     }
 }
@@ -347,16 +363,33 @@ pub struct PlacedOrderResponse {
     /// Lets whoever holds it read this order: keep it with the buyer (a cookie, the
     /// confirmation email's link), never in a public place. The same for every read.
     access_token: String,
+    /// How the buyer pays (design note 0027): the order's newest payment; `null` when
+    /// there was nothing to pay.
+    payment: Option<PlacedPaymentResponse>,
+}
+
+/// What checkout answers: the placed order and what the shopper must do next to pay.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct CheckoutResponse {
+    #[serde(flatten)]
+    placed: PlacedOrderResponse,
+    /// From the payment's provider: for cash on delivery and bank transfer, the
+    /// instructions (quote the order number as the reference). `null` when there was
+    /// nothing to pay, or when the provider couldn't start: the order stands, its payment
+    /// pending.
+    next_action: Option<NextActionResponse>,
 }
 
 /// Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns
 /// the order the first request placed. The body is `{}` or `{"expected_total": …}`.
+/// Something to pay needs a payment method chosen (`PUT …/payment-method`; 409
+/// `payment_method_required`) and still offered (409 `payment_method_unavailable`).
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/checkout",
     params(("id" = CartId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CheckoutRequest,
-    responses((status = 201, description = "Created", body = PlacedOrderResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 201, description = "Created", body = CheckoutResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub async fn checkout_handler<S: Storage>(
@@ -375,16 +408,55 @@ pub async fn checkout_handler<S: Storage>(
         idempotency: req.idempotency,
     };
     let rates = state.rates(&ports);
-    let placed = checkout(&ctx, &ports, &state.ids, &state.clock, &rates, input).await?;
-    let order = &placed.value;
+    let providers = state.storage.payment_providers();
+    let placed = checkout(
+        &ctx,
+        &ports,
+        &state.ids,
+        &state.clock,
+        &rates,
+        providers,
+        input,
+    )
+    .await?;
+    let order = &placed.value.order;
+    let next_action = match &placed.value.next_action {
+        Some(Ok(action)) => Some(NextActionResponse::from(action)),
+        Some(Err(error)) => {
+            tracing::warn!(order = %order.id(), %error, "payment provider didn't start");
+            None
+        }
+        None => None,
+    };
     Ok(idempotent_response(
         StatusCode::CREATED,
-        PlacedOrderResponse {
-            order: OrderResponse::with_images(order, &ports, state.media.as_ref()).await?,
-            access_token: state.env.order_token(order.id()),
+        CheckoutResponse {
+            placed: PlacedOrderResponse {
+                order: OrderResponse::with_images(order, &ports, state.media.as_ref()).await?,
+                access_token: state.env.order_token(order.id()),
+                payment: placed
+                    .value
+                    .payment
+                    .as_ref()
+                    .map(PlacedPaymentResponse::new),
+            },
+            next_action,
         },
         placed.replayed,
     ))
+}
+
+/// The order's newest payment: what a storefront shows.
+async fn newest_payment<P: HasPayments>(
+    ports: &P,
+    order: OrderId,
+) -> Result<Option<Payment>, ApiError> {
+    Ok(ports
+        .payments()
+        .list_for_order(order)
+        .await?
+        .into_iter()
+        .next())
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -417,9 +489,11 @@ pub async fn fetch_placed<S: Storage>(
         return Err(hypha_orders::CommandError::OrderNotFound(id).into());
     }
     let order = get_placed_order(&ctx, ports.orders(), id).await?;
+    let payment = newest_payment(&ports, id).await?;
     Ok(Json(PlacedOrderResponse {
         order: OrderResponse::with_images(&order, &ports, state.media.as_ref()).await?,
         access_token: token,
+        payment: payment.as_ref().map(PlacedPaymentResponse::new),
     }))
 }
 
@@ -471,7 +545,12 @@ impl From<FinancialStatusDto> for FinancialStatus {
     fn from(s: FinancialStatusDto) -> Self {
         match s {
             FinancialStatusDto::Pending => FinancialStatus::Pending,
+            FinancialStatusDto::Authorized => FinancialStatus::Authorized,
+            FinancialStatusDto::PartiallyPaid => FinancialStatus::PartiallyPaid,
             FinancialStatusDto::Paid => FinancialStatus::Paid,
+            FinancialStatusDto::PartiallyRefunded => FinancialStatus::PartiallyRefunded,
+            FinancialStatusDto::Refunded => FinancialStatus::Refunded,
+            FinancialStatusDto::Voided => FinancialStatus::Voided,
         }
     }
 }
@@ -637,6 +716,9 @@ pub struct AdminOrderResponse {
     /// Per line with anything left, in line order; empty once everything shipped or the
     /// order was cancelled.
     unfulfilled: Vec<UnfulfilledDto>,
+    /// Its payments, newest first (design note 0027): the method, status and
+    /// instructions of each.
+    payments: Vec<PaymentResponse>,
 }
 
 impl AdminOrderResponse {
@@ -656,6 +738,7 @@ impl AdminOrderResponse {
                     quantity: u.quantity,
                 })
                 .collect(),
+            payments: PaymentResponse::all(&view.payments)?,
         })
     }
 }
@@ -688,10 +771,10 @@ pub struct CancelOrderRequest {
     notify: bool,
 }
 
-/// Cancels the order: every line's reserved stock is released. Refused while
-/// fulfilments stand (`order_has_fulfillments`, 409, listing them): cancel those first.
-/// A paid order stays paid; refund it outside Hypha for now. Cancelling it again
-/// changes nothing.
+/// Cancels the order: every line's reserved stock is released and its pending payments
+/// are voided. Refused while fulfilments stand (`order_has_fulfillments`, 409, listing
+/// them): cancel those first. A paid order stays paid; refund it outside Hypha for now.
+/// Cancelling it again changes nothing.
 #[utoipa::path(
     post,
     path = "/admin/orders/{id}/cancel",
@@ -712,40 +795,60 @@ pub async fn cancel<S: Storage>(
         order: id,
         reason: req.reason.into(),
     };
-    let (order, cancelled_now) = cancel_order(&ctx, &ports, &state.clock, input).await?;
+    let (done, cancelled_now) = cancel_order(&ctx, &ports, &state.clock, input).await?;
     // Only the request that cancelled it tells the buyer.
     if req.notify
         && cancelled_now
-        && let Some(email) = BuyerEmail::cancelled(&order)
+        && let Some(email) = BuyerEmail::cancelled(&done.order)
     {
         super::fulfillments::notify_buyer(&state, email);
     }
     // A cancelled order has nothing left to ship.
-    let response = OrderResponse::with_images(&order, &ports, state.media.as_ref()).await?;
+    let response = OrderResponse::with_images(&done.order, &ports, state.media.as_ref()).await?;
     let view = OrderView {
-        order,
+        order: done.order,
         unfulfilled: Vec::new(),
+        payments: done.payments,
     };
     Ok(Json(AdminOrderResponse::new(&view, response)?))
 }
 
-/// Records that the order is paid (e.g. a bank transfer arrived). Marking a paid order
-/// again changes nothing.
+#[derive(Deserialize, Default, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MarkPaidRequest {
+    /// What staff have to show for it (a bank reference, the courier's receipt), up to
+    /// 255 characters; kept on the payment.
+    #[serde(default)]
+    reference: Option<String>,
+}
+
+/// Records that the order's money arrived (a bank transfer, cash from the courier;
+/// design note 0027, §5): its pending payment becomes `paid`, with the `reference` when
+/// given, and so does the order. An order without a payment gets a `manual` one, paid
+/// on the spot. The body is optional (none, `{}` or `{"reference": …}`). Marking a paid order
+/// again changes nothing; a cancelled one is refused (409 `order_cancelled`).
 #[utoipa::path(
     post,
     path = "/admin/orders/{id}/paid",
     params(("id" = OrderId, Path)),
-    responses((status = 200, description = "OK", body = OrderResponse)),
+    request_body(content = Option<MarkPaidRequest>, description = "Optional."),
+    responses((status = 200, description = "OK", body = AdminOrderResponse)),
     extensions(("x-hypha-scopes" = json!(["orders:write"]))),
 )]
 pub async fn mark_paid<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<OrderId>,
-) -> Result<Json<OrderResponse>, ApiError> {
+    body: JsonBody<Option<MarkPaidRequest>>,
+) -> Result<Json<AdminOrderResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let order = mark_order_paid(&ctx, ports.orders(), id).await?;
-    Ok(Json(
-        OrderResponse::with_images(&order, &ports, state.media.as_ref()).await?,
-    ))
+    let req = body.parse_optional()?.flatten().unwrap_or_default();
+    let input = MarkPaid {
+        order: id,
+        reference: req.reference,
+    };
+    record_paid(&ctx, &ports, &state.ids, &state.clock, input).await?;
+    let view = order_view(&ctx, &ports, id).await?;
+    let order = OrderResponse::with_images(&view.order, &ports, state.media.as_ref()).await?;
+    Ok(Json(AdminOrderResponse::new(&view, order)?))
 }

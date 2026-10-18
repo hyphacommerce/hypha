@@ -45,6 +45,9 @@ pub struct SetupChecklistResponse {
     publish: bool,
     /// A publishable key that isn't revoked exists (`api_keys:read`).
     key: bool,
+    /// A payment method is enabled (`payments:read`; design note 0027): without one,
+    /// checkout refuses carts with something to pay.
+    payment: bool,
 }
 
 /// The setup checklist, in one call.
@@ -138,6 +141,12 @@ pub async fn checklist<S: Storage>(
             .iter()
             .any(|k| k.kind() == ApiKeyKind::Publishable && k.revoked_at().is_none());
 
+    let payment = ctx.has_scope(Scope::PaymentsRead)
+        && hypha_payments::list_payment_methods(&ctx, &ports)
+            .await?
+            .iter()
+            .any(|m| m.enabled());
+
     Ok(Json(SetupChecklistResponse {
         store,
         market,
@@ -146,5 +155,6 @@ pub async fn checklist<S: Storage>(
         stock,
         publish,
         key,
+        payment,
     }))
 }

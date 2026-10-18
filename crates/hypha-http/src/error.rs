@@ -9,7 +9,8 @@
 //! of a location, the variant of a new inventory item, and the tax class of a shipping
 //! option (`POST`/`PATCH /admin/shipping-zones/{id}/options…`). An unknown one is stored and
 //! simply never matches. Checking them belongs in a composing layer (like `hypha-cart`),
-//! not in these crates.
+//! not in these crates. Likewise a payment method's markets and channels
+//! (`POST`/`PATCH /admin/payment-methods…`).
 
 use axum::{
     Json,
@@ -798,6 +799,10 @@ impl From<hypha_order_actions::CommandError> for ApiError {
                 None => return Self::internal(e),
             },
             E::Fulfillment(f) => fulfillment_error_status(f),
+            E::Payment(p) => match payment_error_status(p) {
+                Some(status) => status,
+                None => return Self::internal(e),
+            },
             E::Quantity(_) | E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
             // A count that would leave the representable range: the stock's state.
             E::Inventory(I::StockOutOfRange(_)) => StatusCode::CONFLICT,
@@ -886,6 +891,46 @@ impl From<hypha_media::CommandError> for ApiError {
     }
 }
 
+/// A payment rule's status (design note 0027), or `None` for one only a bug or bad stored
+/// data breaks (a 500).
+fn payment_error_status(e: &hypha_payments::PaymentError) -> Option<StatusCode> {
+    use hypha_payments::PaymentError as P;
+    match e {
+        // What staff typed: a method's name, instructions, provider, settings, a reference.
+        P::Text(_)
+        | P::InvalidProviderKey(_)
+        | P::UnknownProvider(_)
+        | P::InvalidSettings { .. }
+        | P::InstructionsTooLong => Some(StatusCode::UNPROCESSABLE_ENTITY),
+        // The payment's state, not the request.
+        P::InvalidTransition { .. } => Some(StatusCode::CONFLICT),
+        // A provider that couldn't do what was asked.
+        P::ProviderFailed { .. } => Some(StatusCode::BAD_GATEWAY),
+        P::Money(_) | P::CurrencyMismatch { .. } | P::Inconsistent { .. } => None,
+    }
+}
+
+impl From<hypha_payments::CommandError> for ApiError {
+    fn from(e: hypha_payments::CommandError) -> Self {
+        use hypha_payments::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Routes that name the method in their URL say so (`not_found_if`).
+            E::PaymentMethodNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::PaymentMethodInUse(_) => StatusCode::CONFLICT,
+            E::Payment(p) => match payment_error_status(p) {
+                Some(status) => status,
+                None => return Self::internal(e),
+            },
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 impl From<hypha_checkout::CommandError> for ApiError {
     fn from(e: hypha_checkout::CommandError) -> Self {
         use hypha_checkout::CommandError as E;
@@ -894,8 +939,11 @@ impl From<hypha_checkout::CommandError> for ApiError {
             // Pricing the cart and reserving stock report like their own routes.
             E::Cart(inner) => return Self::from(inner.clone()),
             E::Inventory(inner) => return Self::from(inner.clone()),
-            // Checkout builds the order from a priced cart, so a broken order rule is a bug.
-            E::Order(_) => return Self::internal(e),
+            // Checkout builds the order from a priced cart, so a broken order rule is a bug;
+            // likewise the payment, from a stored method.
+            E::Order(_) | E::Payment(_) => return Self::internal(e),
+            // A method in a body (`PUT …/payment-method`).
+            E::PaymentMethodNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
             // The cart in the URL.
             E::CartNotFound(_) => StatusCode::NOT_FOUND,
@@ -907,7 +955,9 @@ impl From<hypha_checkout::CommandError> for ApiError {
             | E::TotalChanged { .. }
             | E::ShippingAddressRequired(_)
             | E::ShippingOptionRequired(_)
-            | E::ShippingUnavailable(_) => StatusCode::CONFLICT,
+            | E::ShippingUnavailable(_)
+            | E::PaymentMethodRequired(_)
+            | E::PaymentMethodUnavailable(_) => StatusCode::CONFLICT,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),

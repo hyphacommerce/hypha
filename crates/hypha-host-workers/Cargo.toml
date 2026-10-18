@@ -21,6 +21,7 @@ uuid = { workspace = true }
 # and `worker-build` build it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 hypha-dispatch = { path = "../hypha-dispatch" }
+hypha-payments = { path = "../hypha-payments" }
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-search = { path = "../hypha-search" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }

@@ -27,6 +27,8 @@ mod handlers;
 #[cfg(target_arch = "wasm32")]
 mod log;
 #[cfg(target_arch = "wasm32")]
+mod payments;
+#[cfg(target_arch = "wasm32")]
 mod platform;
 #[cfg(target_arch = "wasm32")]
 mod storage;

@@ -6,7 +6,7 @@ use hypha_cart::{
 };
 use hypha_core::{
     AssetId, CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, OrderId,
-    ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
+    PaymentMethodId, ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_shipping::OfferOutcome;
@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     address::{PostalAddressRequest, PostalAddressResponse},
+    payments::CartPaymentMethodResponse,
     products::ProductMediaResponse,
     rfc3339,
     shipping::DeliveryEstimateDto,
@@ -90,6 +91,9 @@ pub struct CartResponse {
     shipping_groups: Vec<ShippingGroupResponse>,
     /// Whether every group has an option priced now (checkout requires it).
     shipping_ready: bool,
+    /// How the buyer chose to pay (`PUT …/payment-method`); checkout requires one when
+    /// there's something to pay.
+    payment_method: Option<PaymentMethodId>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -221,6 +225,7 @@ impl From<&PricedCart> for CartResponse {
                 .map(PostalAddressResponse::from),
             shipping_groups: cart.shipping_groups.iter().map(Into::into).collect(),
             shipping_ready: cart.is_shipping_ready(),
+            payment_method: cart.payment_method,
             lines: cart
                 .lines
                 .iter()
@@ -613,6 +618,70 @@ pub async fn select<S: Storage>(
     let req = body.parse()?;
     let rates = state.rates(&ports);
     let priced = select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_ref()).await?,
+    ))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct CartPaymentMethodsResponse {
+    /// Enabled, offered in the cart's market and channel, in the order to show them.
+    items: Vec<CartPaymentMethodResponse>,
+}
+
+/// How the buyer can pay for the cart (design note 0027, §4).
+#[utoipa::path(
+    get,
+    path = "/storefront/carts/{id}/payment-methods",
+    params(("id" = CartId, Path)),
+    responses((status = 200, description = "OK", body = CartPaymentMethodsResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:read"]))),
+)]
+pub async fn payment_methods<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<CartId>,
+) -> Result<Json<CartPaymentMethodsResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let providers = state.storage.payment_providers();
+    let methods = hypha_checkout::cart_payment_methods(&ctx, &ports, providers, id).await?;
+    Ok(Json(CartPaymentMethodsResponse {
+        items: methods.iter().map(CartPaymentMethodResponse::new).collect(),
+    }))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPaymentMethodRequest {
+    /// One of the cart's `payment-methods`; `null` clears the choice.
+    payment_method: Option<PaymentMethodId>,
+}
+
+/// Chooses how the buyer pays: a method offered to the cart (422
+/// `payment_method_unavailable` otherwise, `payment_method_not_found` for an unknown
+/// one). Checkout checks it again.
+#[utoipa::path(
+    put,
+    path = "/storefront/carts/{id}/payment-method",
+    params(("id" = CartId, Path)),
+    request_body = SetPaymentMethodRequest,
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
+pub async fn set_payment_method<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<CartId>,
+    body: JsonBody<SetPaymentMethodRequest>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let providers = state.storage.payment_providers();
+    let priced =
+        hypha_checkout::set_payment_method(&ctx, &ports, providers, id, req.payment_method)
+            .await
+            // The method arrives in the body: invalid input, not the cart's state.
+            .map_err(|e| ApiError::from(e).unprocessable_if("payment_method_unavailable"))?;
     Ok(Json(
         cart_response(&priced, &ports, state.media.as_ref()).await?,
     ))

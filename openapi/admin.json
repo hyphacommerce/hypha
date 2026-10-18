@@ -311,6 +311,13 @@
                   "null"
                 ]
               },
+              "payments": {
+                "description": "Its payments, newest first (design note 0027): the method, status and\ninstructions of each.",
+                "items": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                },
+                "type": "array"
+              },
               "unfulfilled": {
                 "description": "Per line with anything left, in line order; empty once everything shipped or the\norder was cancelled.",
                 "items": {
@@ -320,7 +327,8 @@
               }
             },
             "required": [
-              "unfulfilled"
+              "unfulfilled",
+              "payments"
             ],
             "type": "object"
           }
@@ -878,6 +886,17 @@
               {
                 "$ref": "#/components/schemas/OrderId",
                 "description": "The order this cart was checked out as; `null` while it can still change."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_method": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethodId",
+                "description": "How the buyer chose to pay (`PUT …/payment-method`); checkout requires one when\nthere's something to pay."
               },
               {
                 "type": "null"
@@ -1879,6 +1898,65 @@
         ],
         "type": "object"
       },
+      "CreatePaymentMethodRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "channels": {
+            "description": "Sales channels it's offered in (absent or empty: every one); unchecked likewise.",
+            "items": {
+              "$ref": "#/components/schemas/ChannelId"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "description": "`true` if absent.",
+            "type": "boolean"
+          },
+          "instructions": {
+            "description": "Up to 2000 characters, shown after checkout; blank is none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "markets": {
+            "description": "Markets it's offered in (absent or empty: every one). Not checked: an unknown\none never matches.",
+            "items": {
+              "$ref": "#/components/schemas/MarketId"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Up to 255 characters, e.g. \"Cash on delivery\".",
+            "type": "string"
+          },
+          "position": {
+            "description": "Where shoppers see it; absent puts it after every method there is.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "provider": {
+            "description": "`manual`, or a spore's `spore_<name>` this build has (`payment_provider_unknown`\notherwise).",
+            "type": "string"
+          },
+          "settings": {
+            "description": "The provider's settings, checked by it (`invalid_payment_settings`); `manual`\ntakes none (`{}`, the default).",
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "provider",
+          "name"
+        ],
+        "type": "object"
+      },
       "CreatePriceListRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2488,10 +2566,15 @@
         "type": "object"
       },
       "FinancialStatusDto": {
-        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.\n\nKnown values: `pending`, `paid`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.\nDerived from the order's payments (design note 0027, PA7): manual payments use\n`pending`, `paid` and `voided`; the rest come with providers that move money so.\n\nKnown values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "pending",
-          "paid"
+          "authorized",
+          "partially_paid",
+          "paid",
+          "partially_refunded",
+          "refunded",
+          "voided"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -3153,6 +3236,19 @@
             "type": "object"
           }
         ]
+      },
+      "MarkPaidRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reference": {
+            "description": "What staff have to show for it (a bank reference, the courier's receipt), up to\n255 characters; kept on the payment.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       },
       "MarketId": {
         "description": "A MarketId: `mkt_` and 32 hex digits.",
@@ -3819,6 +3915,202 @@
           "email"
         ],
         "type": "object"
+      },
+      "PaymentId": {
+        "description": "A PaymentId: `pay_` and 32 hex digits.",
+        "examples": [
+          "pay_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^pay_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "PaymentMethodId": {
+        "description": "A PaymentMethodId: `pm_` and 32 hex digits.",
+        "examples": [
+          "pm_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^pm_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "PaymentMethodListResponse": {
+        "properties": {
+          "items": {
+            "description": "By position, then ID. A store has a handful, so they come in one list.",
+            "items": {
+              "$ref": "#/components/schemas/PaymentMethodResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "PaymentMethodResponse": {
+        "properties": {
+          "channels": {
+            "description": "The sales channels it's offered in; empty for every channel.",
+            "items": {
+              "$ref": "#/components/schemas/ChannelId"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/PaymentMethodId"
+          },
+          "instructions": {
+            "description": "Shown to the shopper after checkout and on the order (bank details, \"pay the\ncourier\"); `null` for none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "markets": {
+            "description": "The markets it's offered in; empty for every market.",
+            "items": {
+              "$ref": "#/components/schemas/MarketId"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "What shoppers see.",
+            "type": "string"
+          },
+          "position": {
+            "description": "Shoppers see methods by position, then by ID.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "description": "`manual` (cash on delivery, bank transfer: staff record the money), or a spore's\n`spore_<name>`.",
+            "type": "string"
+          },
+          "settings": {
+            "description": "The provider's own settings (`{}` for `manual`).",
+            "type": "object"
+          },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "name",
+          "markets",
+          "channels",
+          "enabled",
+          "position",
+          "settings",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "PaymentResponse": {
+        "description": "A payment as the admin sees it on an order.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/PaymentId"
+          },
+          "instructions": {
+            "description": "The method's instructions at checkout, as the shopper was shown them.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "method": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethodId",
+                "description": "The method it was made with; `null` for money staff recorded on an order placed\nwithout one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "method_name": {
+            "description": "The method's name when the payment was made.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paid_at": {
+            "description": "When the money was collected, RFC 3339 in UTC.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "description": "`manual`, or a spore's key.",
+            "type": "string"
+          },
+          "reference": {
+            "description": "The provider's ID, or for manual payments what staff typed (a bank reference).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refunded": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What was given back; zero until refunds exist."
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentStatusDto"
+          },
+          "voided_at": {
+            "description": "When it was voided, RFC 3339 in UTC.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "amount",
+          "status",
+          "refunded",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PaymentStatusDto": {
+        "description": "`PaymentStatus` on the wire (design note 0027, PA7).\n\nKnown values: `pending`, `authorized`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "pending",
+          "authorized",
+          "paid",
+          "failed",
+          "voided",
+          "partially_refunded",
+          "refunded"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "PostalAddressRequest": {
         "additionalProperties": false,
@@ -4536,7 +4828,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "products:read",
           "products:write",
@@ -4570,7 +4862,9 @@
           "fulfillments:read",
           "fulfillments:write",
           "channels:read",
-          "channels:write"
+          "channels:write",
+          "payments:read",
+          "payments:write"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -4934,6 +5228,10 @@
             "description": "A market exists (`markets:read`).",
             "type": "boolean"
           },
+          "payment": {
+            "description": "A payment method is enabled (`payments:read`; design note 0027): without one,\ncheckout refuses carts with something to pay.",
+            "type": "boolean"
+          },
           "product": {
             "description": "A product is active (`products:read`).",
             "type": "boolean"
@@ -4962,7 +5260,8 @@
           "product",
           "stock",
           "publish",
-          "key"
+          "key",
+          "payment"
         ],
         "type": "object"
       },
@@ -5742,6 +6041,50 @@
                 "type": "null"
               }
             ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdatePaymentMethodRequest": {
+        "additionalProperties": false,
+        "description": "A JSON Merge Patch of a payment method. The provider can't change.",
+        "properties": {
+          "channels": {
+            "description": "Replaces the list; empty for every channel.",
+            "items": {
+              "$ref": "#/components/schemas/ChannelId"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "instructions": {
+            "description": "`null` clears them.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "markets": {
+            "description": "Replaces the list; empty for every market.",
+            "items": {
+              "$ref": "#/components/schemas/MarketId"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "description": "Where shoppers see it: reordering is setting positions.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "settings": {
+            "description": "Replaces the provider's settings, checked by it.",
+            "type": "object"
           }
         },
         "type": "object"
@@ -15696,7 +16039,7 @@
             "bearer": []
           }
         ],
-        "summary": "Cancels the order: every line's reserved stock is released. Refused while\nfulfilments stand (`order_has_fulfillments`, 409, listing them): cancel those first.\nA paid order stays paid; refund it outside Hypha for now. Cancelling it again\nchanges nothing.",
+        "summary": "Cancels the order: every line's reserved stock is released and its pending payments\nare voided. Refused while fulfilments stand (`order_has_fulfillments`, 409, listing\nthem): cancel those first. A paid order stays paid; refund it outside Hypha for now.\nCancelling it again changes nothing.",
         "tags": [
           "orders"
         ],
@@ -15964,16 +16307,331 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/MarkPaidRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "description": "Optional."
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrderResponse"
+                  "$ref": "#/components/schemas/AdminOrderResponse"
                 }
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Records that the order's money arrived (a bank transfer, cash from the courier;\ndesign note 0027, §5): its pending payment becomes `paid`, with the `reference` when\ngiven, and so does the order. An order without a payment gets a `manual` one, paid\non the spot. The body is optional (none, `{}` or `{\"reference\": …}`). Marking a paid order\nagain changes nothing; a cancelled one is refused (409 `order_cancelled`).",
+        "tags": [
+          "orders"
+        ],
+        "x-hypha-scopes": [
+          "orders:write"
+        ]
+      }
+    },
+    "/admin/payment-methods": {
+      "get": {
+        "operationId": "admin.payments.list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethodListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every payment method, in the order shoppers see them.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "payments:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.payments.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaymentMethodRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethodResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Creates a payment method.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "payments:write"
+        ]
+      }
+    },
+    "/admin/payment-methods/{id}": {
+      "delete": {
+        "operationId": "admin.payments.delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentMethodId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
           },
           "400": {
             "content": {
@@ -16041,12 +16699,236 @@
             "bearer": []
           }
         ],
-        "summary": "Records that the order is paid (e.g. a bank transfer arrived). Marking a paid order\nagain changes nothing.",
+        "summary": "Deletes a payment method. One a pending payment uses is refused\n(`payment_method_in_use`, 409): disable it instead. Payments it made keep its name.",
         "tags": [
-          "orders"
+          "payments"
         ],
         "x-hypha-scopes": [
-          "orders:write"
+          "payments:write"
+        ]
+      },
+      "get": {
+        "operationId": "admin.payments.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentMethodId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethodResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A payment method.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "payments:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.payments.update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentMethodId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePaymentMethodRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethodResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes a payment method. Payments already made keep the name and instructions they\ncopied.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "payments:write"
         ]
       }
     },

@@ -65,6 +65,7 @@ impl Storage for WorkersStorage {
     type Directory<'a> = PgStore<Client>;
     type Search<'p> = &'p PgStore<Client>;
     type Handlers = crate::handlers::Handlers;
+    type Payments = crate::payments::PaymentProviders;
 
     /// Each `ports()` is a new connection: a dispatch step opens one, not one per
     /// delivery.
@@ -89,6 +90,10 @@ impl Storage for WorkersStorage {
 
     fn handlers(&self) -> &crate::handlers::Handlers {
         &crate::handlers::HANDLERS
+    }
+
+    fn payment_providers(&self) -> &crate::payments::PaymentProviders {
+        &crate::payments::PAYMENT_PROVIDERS
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {

@@ -802,20 +802,21 @@ async fn the_setup_checklist_says_which_steps_are_done() {
         fresh,
         json!({
             "store": false, "market": false, "shipping": false, "product": false,
-            "stock": false, "publish": false, "key": false,
+            "stock": false, "publish": false, "key": false, "payment": false,
         })
     );
 
     // A market selling an active, published mug (its stock untracked, at the default
-    // location), and a storefront key.
+    // location), a storefront key and a way to pay.
     market_selling_a_mug(&app).await;
     publishable(&app).await;
+    cash_on_delivery(&app).await;
     let (_, now) = send(&app, "GET", "/admin/setup/checklist", None).await;
     assert_eq!(
         now,
         json!({
             "store": false, "market": true, "shipping": false, "product": true,
-            "stock": true, "publish": true, "key": true,
+            "stock": true, "publish": true, "key": true, "payment": true,
         })
     );
 
@@ -1399,7 +1400,7 @@ async fn orders_list_by_filters_and_total() {
             (StatusCode::BAD_REQUEST, "invalid_query"),
         ),
         (
-            "financial_status=refunded",
+            "financial_status=lost",
             (StatusCode::BAD_REQUEST, "invalid_query"),
         ),
     ] {
@@ -1984,6 +1985,24 @@ async fn the_storefront_takes_no_admin_credentials() {
 }
 
 /// A publishable key, made with the admin key.
+/// A "Cash on delivery" method offered everywhere (design note 0027); its ID.
+async fn cash_on_delivery(app: &TestApp) -> String {
+    let body =
+        r#"{"provider":"manual","name":"Cash on delivery","instructions":"Pay the courier."}"#;
+    let (status, method) = send(app, "POST", "/admin/payment-methods", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{method}");
+    method["id"].as_str().unwrap().to_string()
+}
+
+/// Makes the cart at `cart_path` pay by a new cash-on-delivery method, as checkout needs.
+async fn pay_on_delivery(app: &TestApp, pk: &str, cart_path: &str) {
+    let method = cash_on_delivery(app).await;
+    let body = json!({ "payment_method": method }).to_string();
+    let path = format!("{cart_path}/payment-method");
+    let (status, cart) = send_as(app, pk, "PUT", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{cart}");
+}
+
 async fn publishable(app: &TestApp) -> String {
     let body = json!({
         "kind": "publishable",
@@ -3155,6 +3174,7 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
         Some(r#"{"email":"a@example.hr"}"#),
     )
     .await;
+    pay_on_delivery(&app, &pk, &cart_path).await;
     let (status, order) = send_as(
         &app,
         &pk,
@@ -3786,6 +3806,7 @@ async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) 
         Some(r#"{"email":"ana@example.hr"}"#),
     )
     .await;
+    pay_on_delivery(app, &pk, &cart_path).await;
     let (status, order) = send_as(
         app,
         &pk,
@@ -4080,6 +4101,7 @@ async fn a_storefront_never_sees_why_an_order_was_cancelled() {
         Some(r#"{"email":"a@example.hr"}"#),
     )
     .await;
+    pay_on_delivery(&app, &pk, &cart_path).await;
     let checkout = format!("{cart_path}/checkout");
     let auth = format!("Bearer {pk}");
     let headers = [
@@ -4907,4 +4929,126 @@ async fn categories_form_a_tree_storefronts_see_shown_and_search_filters_by() {
     let url = format!("/storefront/search?country=HR&sort=title&category={clothing}");
     let (_, found) = send_as(&app, &pk, "GET", &url, None).await;
     assert_eq!(titles(&found), ["trousers"]);
+}
+
+// ---------- payments (design note 0027) ----------
+
+#[tokio::test]
+async fn payments_are_recorded_and_voided_over_http() {
+    let app = app().await;
+    let (order, _, _) = placed_order_for_three_mugs(&app).await;
+    let path = format!("/admin/orders/{order}");
+    let (status, placed) = send(&app, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{placed}");
+    assert_eq!(placed["financial_status"], "pending");
+    let payment = &placed["payments"][0];
+    assert_eq!(payment["status"], "pending");
+    assert_eq!(payment["method_name"], "Cash on delivery");
+    assert_eq!(payment["instructions"], "Pay the courier.");
+    assert_eq!(payment["provider"], "manual");
+    assert_eq!(payment["amount"], placed["total"]);
+
+    let paid = format!("{path}/paid");
+    let long = json!({ "reference": "x".repeat(256) }).to_string();
+    let (status, json) = send(&app, "POST", &paid, Some(&long)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "field_too_long")
+    );
+    let (status, json) = send(&app, "POST", &paid, Some(r#"{"reference":"R-7"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["financial_status"], "paid");
+    assert_eq!(json["payments"][0]["status"], "paid");
+    assert_eq!(json["payments"][0]["reference"], "R-7");
+    assert!(json["payments"][0]["paid_at"].is_string());
+    // Again, without a body: nothing changes.
+    let (status, again) = send(&app, "POST", &paid, None).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["payments"], json["payments"]);
+
+    // The method can go now that no pending payment uses it; the payment keeps its name.
+    let (_, methods) = send(&app, "GET", "/admin/payment-methods", None).await;
+    let method = methods["items"][0]["id"].as_str().unwrap().to_string();
+    let method_path = format!("/admin/payment-methods/{method}");
+    let (status, _) = send(&app, "DELETE", &method_path, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, json) = send(&app, "GET", &method_path, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "payment_method_not_found")
+    );
+    let (_, after) = send(&app, "GET", &path, None).await;
+    assert_eq!(after["payments"][0]["method_name"], "Cash on delivery");
+}
+
+#[tokio::test]
+async fn payment_methods_are_checked_and_changed_over_http() {
+    let app = app().await;
+    let body = r#"{"provider":"spore_stripe","name":"Card"}"#;
+    let (status, json) = send(&app, "POST", "/admin/payment-methods", Some(body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "payment_provider_unknown")
+    );
+    let body = r#"{"provider":"manual","name":"COD","settings":{"x":1}}"#;
+    let (status, json) = send(&app, "POST", "/admin/payment-methods", Some(body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_payment_settings")
+    );
+    let first = cash_on_delivery(&app).await;
+    let second = cash_on_delivery(&app).await;
+    let (_, listed) = send(&app, "GET", "/admin/payment-methods", None).await;
+    assert_eq!(listed["items"][0]["id"], first.as_str());
+    assert_eq!(listed["items"][1]["position"], 1);
+
+    let patch = r#"{"position":0,"instructions":null,"enabled":false}"#;
+    let path = format!("/admin/payment-methods/{second}");
+    let (status, changed) = send(&app, "PATCH", &path, Some(patch)).await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["instructions"], Value::Null);
+    assert_eq!(changed["enabled"], false);
+    let unknown = format!("/admin/payment-methods/pm_{}", "0".repeat(32));
+    let (status, json) = send(&app, "PATCH", &unknown, Some("{}")).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "payment_method_not_found")
+    );
+
+    // A storefront lists only what's offered, and refuses the rest.
+    market_selling_a_mug(&app).await;
+    let pk = publishable(&app).await;
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let cart_path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let (status, offered) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("{cart_path}/payment-methods"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{offered}");
+    assert_eq!(offered["items"].as_array().unwrap().len(), 1);
+    assert_eq!(offered["items"][0]["id"], first.as_str());
+    let choose = |method: &str| json!({ "payment_method": method }).to_string();
+    let put = format!("{cart_path}/payment-method");
+    let (status, json) = send_as(&app, &pk, "PUT", &put, Some(&choose(&second))).await;
+    assert_eq!(
+        (status, code(&json)),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "payment_method_unavailable"
+        )
+    );
+    let (status, json) = send_as(&app, &pk, "PUT", &put, Some(&choose(&first))).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["payment_method"], first.as_str());
 }

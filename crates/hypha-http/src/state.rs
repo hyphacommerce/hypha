@@ -458,6 +458,10 @@ pub trait Storage: Send + Sync + 'static {
     /// tuple the host lists in its `handlers.rs`, its composition root. The dispatcher
     /// runs whatever is here (`jobs::dispatch`).
     type Handlers: for<'a> hypha_core::EventHandlers<Self::Ports<'a>> + Send + Sync + 'static;
+    /// The payment providers this host was built with (design note 0027, PA5): a tuple
+    /// the host lists in its `payments.rs`, next to `handlers.rs`. Checkout and the
+    /// method commands find one by key.
+    type Payments: hypha_payments::PaymentProviders + Send + Sync + 'static;
 
     /// Whether a dispatch step keeps one set of ports for all its work (`jobs::dispatch`)
     /// rather than getting them for each delivery and letting them go before a webhook
@@ -492,6 +496,10 @@ pub trait Storage: Send + Sync + 'static {
 
     /// The handlers (`Self::Handlers`); usually `&HANDLERS`, a `const`.
     fn handlers(&self) -> &Self::Handlers;
+
+    /// The payment providers (`Self::Payments`); usually `&PAYMENT_PROVIDERS`, a
+    /// `const`.
+    fn payment_providers(&self) -> &Self::Payments;
 
     /// Runs a password reset request as background work (`AppState::background`), so the
     /// response doesn't wait for it (design note 0008, section 5); dropped and logged

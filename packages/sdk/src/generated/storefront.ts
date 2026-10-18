@@ -48,6 +48,8 @@ export interface paths {
         /**
          * Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns
          *     the order the first request placed. The body is `{}` or `{"expected_total": …}`.
+         *     Something to pay needs a payment method chosen (`PUT …/payment-method`; 409
+         *     `payment_method_required`) and still offered (409 `payment_method_unavailable`).
          */
         post: operations["storefront.orders.checkout"];
         delete?: never;
@@ -103,6 +105,44 @@ export interface paths {
         post?: never;
         /** Removes a line. */
         delete: operations["storefront.carts.remove_line"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/carts/{id}/payment-method": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Chooses how the buyer pays: a method offered to the cart (422
+         *     `payment_method_unavailable` otherwise, `payment_method_not_found` for an unknown
+         *     one). Checkout checks it again.
+         */
+        put: operations["storefront.carts.set_payment_method"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/carts/{id}/payment-methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How the buyer can pay for the cart (design note 0027, §4). */
+        get: operations["storefront.carts.payment_methods"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -348,6 +388,22 @@ export interface components {
          * @example cart_0190f1a2b3c47d8e9f00112233445566
          */
         CartId: string;
+        /** @description A payment method as a storefront lists it for a cart. */
+        CartPaymentMethodResponse: {
+            id: components["schemas"]["PaymentMethodId"];
+            /** @description Shown with the choice and after checkout; `null` for none. */
+            instructions?: string | null;
+            name: string;
+            /**
+             * @description `manual` or a spore's key: what the storefront shows after choosing (instructions,
+             *     or a provider's widget).
+             */
+            provider: string;
+        };
+        CartPaymentMethodsResponse: {
+            /** @description Enabled, offered in the cart's market and channel, in the order to show them. */
+            items: components["schemas"]["CartPaymentMethodResponse"][];
+        };
         CartResponse: {
             country: components["schemas"]["CountryCode"];
             /** @description The currency of every amount in the cart. */
@@ -361,6 +417,7 @@ export interface components {
             /** @description Picked from the country when the cart was created; it sets the currency. */
             market: components["schemas"]["MarketId"];
             order?: components["schemas"]["OrderId"] | null;
+            payment_method?: components["schemas"]["PaymentMethodId"] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
             /**
              * @description The groups of lines that ship together, each needing a chosen option before
@@ -401,6 +458,10 @@ export interface components {
         ChannelId: string;
         CheckoutRequest: {
             expected_total?: components["schemas"]["Money"] | null;
+        };
+        /** @description What checkout answers: the placed order and what the shopper must do next to pay. */
+        CheckoutResponse: components["schemas"]["PlacedOrderResponse"] & {
+            next_action?: components["schemas"]["NextActionResponse"] | null;
         };
         /**
          * @description An ISO 3166-1 alpha-2 country code.
@@ -465,8 +526,10 @@ export interface components {
         /**
          * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
          *     serde and renaming a variant can't silently change the API.
+         *     Derived from the order's payments (design note 0027, PA7): manual payments use
+         *     `pending`, `paid` and `voided`; the rest come with providers that move money so.
          *
-         *     Known values: `pending`, `paid`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         FinancialStatusDto: string;
@@ -554,6 +617,20 @@ export interface components {
              * @example EUR
              */
             currency: string;
+        };
+        /** @description What the shopper must do next to pay (design note 0027, §3). */
+        NextActionResponse: {
+            instructions: string;
+            /** @enum {string} */
+            type: "instructions";
+        } | {
+            client_secret: string;
+            /** @enum {string} */
+            type: "client_secret";
+        } | {
+            /** @enum {string} */
+            type: "redirect";
+            url: string;
         };
         OfferResponse: {
             /** @description Before tax if the market's prices exclude it. */
@@ -674,6 +751,18 @@ export interface components {
             tax_class?: components["schemas"]["TaxClassId"] | null;
         };
         /**
+         * @description A PaymentMethodId: `pm_` and 32 hex digits.
+         * @example pm_0190f1a2b3c47d8e9f00112233445566
+         */
+        PaymentMethodId: string;
+        /**
+         * @description `PaymentStatus` on the wire (design note 0027, PA7).
+         *
+         *     Known values: `pending`, `authorized`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PaymentStatusDto: string;
+        /**
          * @description A storefront's view of an order it placed: the order with its access token, the key
          *     to reading it again (`GET /storefront/orders/{id}?token=`; design note 0024, §7).
          */
@@ -683,6 +772,22 @@ export interface components {
              *     confirmation email's link), never in a public place. The same for every read.
              */
             access_token: string;
+            payment?: components["schemas"]["PlacedPaymentResponse"] | null;
+        };
+        /**
+         * @description What a storefront shows of an order's payment: how the shopper chose to pay, where
+         *     it is, and what they were told to do.
+         */
+        PlacedPaymentResponse: {
+            amount: components["schemas"]["Money"];
+            /** @description What the shopper was told at checkout (bank details); `null` for none. */
+            instructions?: string | null;
+            /**
+             * @description The method's name when the order was placed; `null` for a payment staff
+             *     recorded on an order placed without one.
+             */
+            method_name?: string | null;
+            status: components["schemas"]["PaymentStatusDto"];
         };
         /**
          * @description Sent: checked by `Address::new` (last name, first line and city required; text is
@@ -824,6 +929,9 @@ export interface components {
         SetEmailRequest: {
             /** @description `null` clears it. */
             email?: string | null;
+        };
+        SetPaymentMethodRequest: {
+            payment_method?: components["schemas"]["PaymentMethodId"] | null;
         };
         SetQuantityRequest: {
             /**
@@ -1215,7 +1323,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PlacedOrderResponse"];
+                    "application/json": components["schemas"]["CheckoutResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
@@ -1696,6 +1804,180 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.carts.set_payment_method": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CartId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPaymentMethodRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.carts.payment_methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CartId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartPaymentMethodsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

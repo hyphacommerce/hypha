@@ -67,6 +67,15 @@ impl<T: DeserializeOwned> JsonBody<T> {
         let Json(body) = Json::<T>::from_bytes(&self.bytes)?;
         Ok(body)
     }
+
+    /// For routes whose body is optional: no body at all (empty, any content type) is
+    /// `None`; anything else parses like `parse`.
+    pub fn parse_optional(self) -> Result<Option<T>, ApiError> {
+        if self.bytes.is_empty() {
+            return Ok(None);
+        }
+        self.parse().map(Some)
+    }
 }
 
 /// `application/json` or `application/<something>+json`, parameters ignored, as axum's

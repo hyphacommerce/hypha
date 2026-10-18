@@ -129,6 +129,8 @@ token() { sed -E 's/.*"token":"(hypha_[a-z]+_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 shipopt() { sed -E 's/.*"id":"(shipopt_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 # The first shipping group's id of the last cart response.
 shgrp() { sed -E 's/.*"shipping_groups":\[\{"id":"(shgrp_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
+# The top-level id of the last payment method response.
+pm() { sed -E 's/^[^"]*"id":"(pm_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 # The first variant's id of the last product response.
 variant() { sed -E 's/.*"variants":\[[^]]*"id":"(var_[0-9a-f]+)".*/\1/' <<<"$BODY"; }
 
@@ -521,6 +523,29 @@ step "pick standard" 200 - -X PUT "$SHIP/shipping/$SHGRP" -H "$JSON" -d "{\"opti
 contains "shipping is in the total" '"subtotal":{"amount":900,"currency":"EUR"},"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
 contains "and ready" '"shipping_ready":true'
 
+echo "## payment methods (design note 0027)"
+METHODS="$BASE/admin/payment-methods"
+step "a provider this build doesn't have" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
+    -d '{"provider":"spore_stripe","name":"Card"}'
+step "settings the manual provider doesn't take" 422 invalid_payment_settings -X POST "$METHODS" -H "$JSON" \
+    -d '{"provider":"manual","name":"Bank transfer","settings":{"iban":"HR12"}}'
+step "bank transfer" 201 - -X POST "$METHODS" -H "$JSON" \
+    -d '{"provider":"manual","name":"Bank transfer","instructions":"IBAN HR12 3456 7890. Quote the order number."}'
+BANK=$(pm)
+contains "enabled, first" '"enabled":true,"position":0'
+step "cash on delivery, in the market" 201 - -X POST "$METHODS" -H "$JSON" \
+    -d "{\"provider\":\"manual\",\"name\":\"Cash on delivery\",\"instructions\":\"Pay the courier.\",\"markets\":[\"$MARKET\"]}"
+COD=$(pm)
+contains "after it" '"position":1'
+step "list the methods" 200 - "$METHODS"
+contains "both, in position order" "\"items\":[{\"id\":\"$BANK\""
+step "an unknown method" 404 payment_method_not_found "$METHODS/pm_00000000000000000000000000000000"
+step "the cart's methods" 200 - "$BASE/storefront/carts/$KEYED/payment-methods"
+contains "bank transfer, with its instructions" "{\"id\":\"$BANK\",\"name\":\"Bank transfer\",\"provider\":\"manual\",\"instructions\":\"IBAN HR12 3456 7890. Quote the order number.\"}"
+contains "and cash on delivery" "\"id\":\"$COD\""
+step "choose an unknown method" 422 payment_method_not_found -X PUT "$BASE/storefront/carts/$KEYED/payment-method" \
+    -H "$JSON" -d '{"payment_method":"pm_00000000000000000000000000000000"}'
+
 echo "## checkout"
 CHECKOUT="$BASE/storefront/carts/$KEYED/checkout"
 step "checkout an unknown cart" 404 cart_not_found -X POST \
@@ -537,9 +562,14 @@ step "give the cart an email" 200 - -X PUT "$BASE/storefront/carts/$KEYED/email"
 step "checkout at a stale total" 409 total_changed -X POST "$CHECKOUT" -H "$JSON" \
     -d '{"expected_total":{"amount":1700,"currency":"EUR"}}'
 contains "the error names both totals" '"details":{"actual":{"amount":1800,"currency":"EUR"},"expected":{"amount":1700,"currency":"EUR"}}'
+step "pay by bank transfer" 200 - -X PUT "$BASE/storefront/carts/$KEYED/payment-method" -H "$JSON" \
+    -d "{\"payment_method\":\"$BANK\"}"
+contains "the cart has it" "\"payment_method\":\"$BANK\""
 step "checkout" 201 - -X POST "$CHECKOUT" -H "$JSON" -H 'idempotency-key: order-1' \
     -d '{"expected_total":{"amount":1800,"currency":"EUR"}}'
 ORDER=$(id)
+contains "its payment is pending, with the instructions" '"payment":{"status":"pending","method_name":"Bank transfer","instructions":"IBAN HR12 3456 7890. Quote the order number.","amount":{"amount":1800,"currency":"EUR"}}'
+contains "and the next action shows them" '"next_action":{"type":"instructions","instructions":"IBAN HR12 3456 7890. Quote the order number."}'
 contains "the order is #1001" '"number":1001'
 contains "it is pending and unfulfilled" '"financial_status":"pending","fulfillment_status":"unfulfilled"'
 contains "it copies the line" '"product_title":"Mug","variant_title":null,"sku":null,"unit_price":{"amount":900,"currency":"EUR"}'
@@ -547,6 +577,7 @@ contains "its total is 1800" '"total":{"amount":1800,"currency":"EUR"},"lines"'
 ORDER_TOKEN=$(sed -E 's/.*"access_token":"(hypha_ord_[0-9a-f]+)".*/\1/' <<<"$BODY")
 step "the buyer reads the order with its token (design note 0024)" 200 - "$BASE/storefront/orders/$ORDER?token=$ORDER_TOKEN"
 contains "it is the order" "\"id\":\"$ORDER\""
+contains "with its payment" '"payment":{"status":"pending","method_name":"Bank transfer"'
 step "without the right token it isn't there" 404 order_not_found "$BASE/storefront/orders/$ORDER?token=hypha_ord_00"
 step "retry the checkout" 201 - -X POST "$CHECKOUT" -H "$JSON" -H 'idempotency-key: order-1' \
     -d '{"expected_total":{"amount":1800,"currency":"EUR"}}'
@@ -576,16 +607,30 @@ step "a total sort without a currency" 422 sort_needs_currency "$BASE/admin/orde
 step "orders placed before 2000" 200 - "$BASE/admin/orders?placed_before=2000-01-01T00:00:00Z"
 contains "none" '"items":[]'
 step "a date that isn't one" 400 invalid_query "$BASE/admin/orders?placed_from=yesterday"
-step "mark it paid" 200 - -X POST "$BASE/admin/orders/$ORDER/paid"
+step "the admin sees the pending payment" 200 - "$BASE/admin/orders/$ORDER"
+contains "with its method and instructions" '"status":"pending","refunded":{"amount":0,"currency":"EUR"},"reference":null,"instructions":"IBAN HR12 3456 7890. Quote the order number."'
+step "a method a pending payment uses" 409 payment_method_in_use -X DELETE "$METHODS/$BANK"
+LONG_REFERENCE=$(printf 'x%.0s' $(seq 1 256))
+step "a reference too long" 422 field_too_long -X POST "$BASE/admin/orders/$ORDER/paid" -H "$JSON" \
+    -d "{\"reference\":\"$LONG_REFERENCE\"}"
+step "mark it paid, with the bank's reference" 200 - -X POST "$BASE/admin/orders/$ORDER/paid" -H "$JSON" \
+    -d '{"reference":"HR-2026-1001"}'
 contains "it is paid" '"financial_status":"paid"'
+contains "and so is its payment, with the reference" '"status":"paid","refunded":{"amount":0,"currency":"EUR"},"reference":"HR-2026-1001"'
 step "mark it paid again" 200 - -X POST "$BASE/admin/orders/$ORDER/paid"
 contains "still paid" '"financial_status":"paid"'
+contains "the reference stays" '"reference":"HR-2026-1001"'
+step "the buyer sees it paid" 200 - "$BASE/storefront/orders/$ORDER?token=$ORDER_TOKEN"
+contains "paid" '"payment":{"status":"paid"'
 step "an unknown order" 404 order_not_found "$BASE/admin/orders/ord_00000000000000000000000000000000"
 step "an order ID of the wrong kind" 400 invalid_path "$BASE/admin/orders/$CART"
 step "a new cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 contains "an open cart has no order" '"order":null'
 step "checkout an empty cart" 409 cart_empty -X POST "$BASE/storefront/carts/$(id)/checkout" -H "$JSON" -d '{}'
+step "pay the shipping cart on delivery" 200 - -X PUT "$SHIP/payment-method" -H "$JSON" \
+    -d "{\"payment_method\":\"$COD\"}"
 step "checkout the shipping cart" 201 - -X POST "$SHIP/checkout" -H "$JSON" -d '{}'
+contains "told to pay the courier" '"next_action":{"type":"instructions","instructions":"Pay the courier."}'
 contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
 contains "it copies the address" '"shipping_address":{"first_name":"Ana","last_name":"Horvat"'
 contains "and the shipping line" '"code":"standard","name":"Standard","provider":null,"service":null,"reference":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
@@ -760,6 +805,11 @@ step "ship to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/shipping-a
     -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
 step "standard (free)" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/shipping/$(shgrp)" -H "$JSON" \
     -d "{\"option\":\"$STANDARD\"}"
+# (Checkout counts against the cart's quote limit, so this is a cart that's barely used.)
+step "checkout without a payment method" 409 payment_method_required -X POST \
+    "$BASE/storefront/carts/$SHOP_CART/checkout" -H "$JSON" -d '{}'
+step "cash on delivery" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/payment-method" -H "$JSON" \
+    -d "{\"payment_method\":\"$COD\"}"
 step "checkout" 201 - -X POST "$BASE/storefront/carts/$SHOP_CART/checkout" -H "$JSON" -d '{}'
 SHOP_ORDER=$(id)
 GUEST=$(customer)
@@ -788,6 +838,17 @@ step "checkout with too few lamps" 409 cart_unavailable -X POST "$BASE/storefron
 contains "the error lists the lamp" "\"details\":{\"lines\":[\"$LAMP_VAR\"]}"
 step "take 2 lamps instead" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/lines/$LAMP_VAR" -H "$JSON" \
     -d '{"quantity":2}'
+step "cash on delivery again" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/payment-method" -H "$JSON" \
+    -d "{\"payment_method\":\"$COD\"}"
+step "disable cash on delivery" 200 - -X PATCH "$METHODS/$COD" -H "$JSON" -d '{"enabled":false}'
+contains "it's disabled" '"enabled":false'
+step "checkout with a method no longer offered" 409 payment_method_unavailable -X POST \
+    "$BASE/storefront/carts/$AGAIN_CART/checkout" -H "$JSON" -d '{}'
+step "the cart isn't offered it" 200 - "$BASE/storefront/carts/$AGAIN_CART/payment-methods"
+contains "only the bank transfer" "{\"items\":[{\"id\":\"$BANK\""
+step "nor can it choose it" 422 payment_method_unavailable -X PUT "$BASE/storefront/carts/$AGAIN_CART/payment-method" \
+    -H "$JSON" -d "{\"payment_method\":\"$COD\"}"
+step "enable it again, first" 200 - -X PATCH "$METHODS/$COD" -H "$JSON" -d '{"enabled":true,"position":0}'
 step "checkout" 201 - -X POST "$BASE/storefront/carts/$AGAIN_CART/checkout" -H "$JSON" -d '{}'
 contains "the same guest customer" "\"customer\":\"$GUEST\""
 step "every lamp is reserved" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
@@ -895,6 +956,8 @@ step "cancel the order" 200 - -X POST "$BASE/admin/orders/$SHOP_ORDER/cancel" -H
     -d '{"reason":"customer","notify":true}'
 contains "with its reason" '"cancel_reason":"customer"'
 contains "nothing left to ship" '"unfulfilled":[]'
+contains "its cash-on-delivery payment is voided" '"status":"voided"'
+contains "and so is the order's payment status" '"financial_status":"voided"'
 step "its lamps are released" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
 contains "4 on hand, 2 reserved" '"on_hand":4,"reserved":2,"available":2'
 step "fulfil a cancelled order" 409 order_cancelled -X POST "$FULFILS" -H "$JSON" -d "$ONE_LAMP"

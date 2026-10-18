@@ -45,6 +45,49 @@
         "pattern": "^cart_[0-9a-f]{32}$",
         "type": "string"
       },
+      "CartPaymentMethodResponse": {
+        "description": "A payment method as a storefront lists it for a cart.",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/PaymentMethodId"
+          },
+          "instructions": {
+            "description": "Shown with the choice and after checkout; `null` for none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "`manual` or a spore's key: what the storefront shows after choosing (instructions,\nor a provider's widget).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "provider"
+        ],
+        "type": "object"
+      },
+      "CartPaymentMethodsResponse": {
+        "properties": {
+          "items": {
+            "description": "Enabled, offered in the cart's market and channel, in the order to show them.",
+            "items": {
+              "$ref": "#/components/schemas/CartPaymentMethodResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "CartResponse": {
         "properties": {
           "country": {
@@ -97,6 +140,17 @@
               {
                 "$ref": "#/components/schemas/OrderId",
                 "description": "The order this cart was checked out as; `null` while it can still change."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_method": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethodId",
+                "description": "How the buyer chose to pay (`PUT …/payment-method`); checkout requires one when\nthere's something to pay."
               },
               {
                 "type": "null"
@@ -215,6 +269,30 @@
           }
         },
         "type": "object"
+      },
+      "CheckoutResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PlacedOrderResponse"
+          },
+          {
+            "properties": {
+              "next_action": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/NextActionResponse",
+                    "description": "From the payment's provider: for cash on delivery and bank transfer, the\ninstructions (quote the order number as the reference). `null` when there was\nnothing to pay, or when the provider couldn't start: the order stands, its payment\npending."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "What checkout answers: the placed order and what the shopper must do next to pay."
       },
       "CountryCode": {
         "description": "An ISO 3166-1 alpha-2 country code.",
@@ -350,10 +428,15 @@
         "type": "object"
       },
       "FinancialStatusDto": {
-        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.\n\nKnown values: `pending`, `paid`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.\nDerived from the order's payments (design note 0027, PA7): manual payments use\n`pending`, `paid` and `voided`; the rest come with providers that move money so.\n\nKnown values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "pending",
-          "paid"
+          "authorized",
+          "partially_paid",
+          "paid",
+          "partially_refunded",
+          "refunded",
+          "voided"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -577,6 +660,68 @@
           "currency"
         ],
         "type": "object"
+      },
+      "NextActionResponse": {
+        "description": "What the shopper must do next to pay (design note 0027, §3).",
+        "oneOf": [
+          {
+            "description": "Nothing online: show the instructions (cash on delivery, bank transfer). Empty\nwhen the method has none.",
+            "properties": {
+              "instructions": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "instructions"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "instructions",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A provider's widget (card fields) takes this secret.",
+            "properties": {
+              "client_secret": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "client_secret"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "client_secret",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Send the shopper to the provider's page.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "redirect"
+                ],
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "OfferResponse": {
         "properties": {
@@ -982,6 +1127,28 @@
         ],
         "type": "object"
       },
+      "PaymentMethodId": {
+        "description": "A PaymentMethodId: `pm_` and 32 hex digits.",
+        "examples": [
+          "pm_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^pm_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "PaymentStatusDto": {
+        "description": "`PaymentStatus` on the wire (design note 0027, PA7).\n\nKnown values: `pending`, `authorized`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "pending",
+          "authorized",
+          "paid",
+          "failed",
+          "voided",
+          "partially_refunded",
+          "refunded"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "PlacedOrderResponse": {
         "allOf": [
           {
@@ -992,6 +1159,17 @@
               "access_token": {
                 "description": "Lets whoever holds it read this order: keep it with the buyer (a cookie, the\nconfirmation email's link), never in a public place. The same for every read.",
                 "type": "string"
+              },
+              "payment": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PlacedPaymentResponse",
+                    "description": "How the buyer pays (design note 0027): the order's newest payment; `null` when\nthere was nothing to pay."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -1001,6 +1179,36 @@
           }
         ],
         "description": "A storefront's view of an order it placed: the order with its access token, the key\nto reading it again (`GET /storefront/orders/{id}?token=`; design note 0024, §7)."
+      },
+      "PlacedPaymentResponse": {
+        "description": "What a storefront shows of an order's payment: how the shopper chose to pay, where\nit is, and what they were told to do.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "instructions": {
+            "description": "What the shopper was told at checkout (bank details); `null` for none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "method_name": {
+            "description": "The method's name when the order was placed; `null` for a payment staff\nrecorded on an order placed without one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentStatusDto"
+          }
+        },
+        "required": [
+          "status",
+          "amount"
+        ],
+        "type": "object"
       },
       "PostalAddressRequest": {
         "additionalProperties": false,
@@ -1436,6 +1644,23 @@
             "type": [
               "string",
               "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SetPaymentMethodRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "payment_method": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethodId",
+                "description": "One of the cart's `payment-methods`; `null` clears the choice."
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         },
@@ -2251,7 +2476,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlacedOrderResponse"
+                  "$ref": "#/components/schemas/CheckoutResponse"
                 }
               }
             },
@@ -2371,7 +2596,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns\nthe order the first request placed. The body is `{}` or `{\"expected_total\": …}`.",
+        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns\nthe order the first request placed. The body is `{}` or `{\"expected_total\": …}`.\nSomething to pay needs a payment method chosen (`PUT …/payment-method`; 409\n`payment_method_required`) and still offered (409 `payment_method_unavailable`).",
         "tags": [
           "orders"
         ],
@@ -2927,6 +3152,234 @@
         ],
         "x-hypha-scopes": [
           "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/payment-method": {
+      "put": {
+        "operationId": "storefront.carts.set_payment_method",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPaymentMethodRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Chooses how the buyer pays: a method offered to the cart (422\n`payment_method_unavailable` otherwise, `payment_method_not_found` for an unknown\none). Checkout checks it again.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/payment-methods": {
+      "get": {
+        "operationId": "storefront.carts.payment_methods",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartPaymentMethodsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "How the buyer can pay for the cart (design note 0027, §4).",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:read"
         ]
       }
     },
