@@ -14,6 +14,9 @@ pub enum CommandError {
     App(#[from] AppError),
     #[error(transparent)]
     Seal(#[from] SealError),
+    /// Refreshing a manifest that can't be read or isn't valid.
+    #[error(transparent)]
+    Manifest(#[from] FetchError),
     /// The key as the caller sent it (keys only arrive in URLs here).
     #[error("app {0:?} not found")]
     AppNotFound(String),
@@ -40,6 +43,7 @@ impl ErrorCode for CommandError {
             CommandError::Repo(e) => e.code(),
             CommandError::App(e) => e.code(),
             CommandError::Seal(_) => "internal_error",
+            CommandError::Manifest(e) => e.code(),
             CommandError::AppNotFound(_) => "app_not_found",
             CommandError::RequestNotFound(_) => "oauth_request_not_found",
             CommandError::RequestExpired(_) => "oauth_request_expired",

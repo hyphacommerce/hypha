@@ -45,7 +45,9 @@ pub struct AuthorizationRequest {
     manifest: AppManifest,
     redirect_uri: String,
     state: Option<String>,
-    code_challenge: String,
+    /// The app's PKCE challenge; `None` for a request Hypha started itself (a manifest
+    /// refresh asking for new scopes), which approving answers with no code.
+    code_challenge: Option<String>,
     /// What the app asked for, in `Scope::ALL` order.
     scopes: Vec<Scope>,
     /// The app's grant when it asked (`None`: not installed), for the history.
@@ -73,7 +75,7 @@ pub struct NewRequest {
     pub manifest: AppManifest,
     pub redirect_uri: String,
     pub state: Option<String>,
-    pub code_challenge: String,
+    pub code_challenge: Option<String>,
     pub scopes: Vec<Scope>,
     pub previous_scopes: Option<Vec<Scope>>,
     pub created_at: Timestamp,
@@ -142,8 +144,8 @@ impl AuthorizationRequest {
     pub fn state(&self) -> Option<&str> {
         self.state.as_deref()
     }
-    pub fn code_challenge(&self) -> &str {
-        &self.code_challenge
+    pub fn code_challenge(&self) -> Option<&str> {
+        self.code_challenge.as_deref()
     }
     pub fn scopes(&self) -> &[Scope] {
         &self.scopes
@@ -178,7 +180,7 @@ pub struct RequestSnapshot {
     pub manifest: serde_json::Value,
     pub redirect_uri: String,
     pub state: Option<String>,
-    pub code_challenge: String,
+    pub code_challenge: Option<String>,
     pub scopes: Vec<Scope>,
     pub previous_scopes: Option<Vec<Scope>>,
     pub status: RequestStatus,

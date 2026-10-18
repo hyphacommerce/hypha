@@ -30,7 +30,7 @@ fn request(n: u128, app: &str, created: i64) -> AuthorizationRequest {
         manifest: crate::app_manifest(app, "https://app.example"),
         redirect_uri: "https://app.example/callback".to_string(),
         state: Some("xyz".to_string()),
-        code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string(),
+        code_challenge: Some("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string()),
         scopes: vec![Scope::OrdersRead, Scope::CustomerDataEmail],
         previous_scopes: Some(vec![Scope::OrdersRead]),
         created_at: at(created),
@@ -105,8 +105,16 @@ async fn requests<S: OAuthPorts>(store: &S) {
         Err(RepoError::StaleVersion)
     );
 
+    // A request a manifest refresh started has no PKCE challenge, and keeps none.
     let mut second = request(2, "app_shop", 10);
+    second = AuthorizationRequest::restore(hypha_oauth::RequestSnapshot {
+        code_challenge: None,
+        state: None,
+        ..second.snapshot()
+    })
+    .unwrap();
     repo.insert(&mut second).await.unwrap();
+    assert_eq!(repo.get(second.id()).await, Ok(Some(second.clone())));
     repo.insert(&mut request(3, "app_other", 20)).await.unwrap();
     assert_eq!(
         repo.list_for_app(&key("app_shop"), 10).await,

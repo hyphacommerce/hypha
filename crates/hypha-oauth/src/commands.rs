@@ -177,7 +177,7 @@ pub async fn authorize<S: OAuthPorts>(
         manifest: manifest.clone(),
         redirect_uri: redirect_uri.clone(),
         state: state.clone(),
-        code_challenge: challenge,
+        code_challenge: Some(challenge.clone()),
         scopes: scopes.clone(),
         previous_scopes: previous.clone(),
         created_at: now,
@@ -208,7 +208,7 @@ pub async fn authorize<S: OAuthPorts>(
         request
             .decide(true, Actor::App(app.id()), now)
             .map_err(|e| refuse("server_error", e.to_string()))?;
-        let (location, mut code) = new_code(&request, false, env);
+        let (location, mut code) = new_code(&request, &challenge, false, env);
         let mut batch = ports.batch();
         batch.update_app(&mut app);
         batch.insert_oauth_request(&mut request);
@@ -234,9 +234,11 @@ fn with_params(uri: &str, params: &[(&str, String)]) -> String {
     }
 }
 
-/// A code for `request`, and where to send the browser with it.
+/// A code for `request` (bound to its PKCE `challenge`), and where to send the browser
+/// with it.
 fn new_code(
     request: &AuthorizationRequest,
+    challenge: &str,
     first_install: bool,
     env: &(impl Random + IdGenerator + Clock),
 ) -> (String, AuthorizationCode) {
@@ -247,7 +249,7 @@ fn new_code(
         app: request.app().clone(),
         client_id: request.client_id().to_string(),
         redirect_uri: request.redirect_uri().to_string(),
-        code_challenge: request.code_challenge().to_string(),
+        code_challenge: challenge.to_string(),
         scopes: request.scopes().to_vec(),
         first_install,
         family: env.new_uuid(),
@@ -309,8 +311,9 @@ pub fn scope_diff(current: &[Scope], requested: &[Scope]) -> ScopeDiff {
 
 /// Approves a request: installs the app (a new one gets its sealed secret, handed to
 /// it once with its first tokens) or replaces its grant, and returns where to send the
-/// browser: the app's redirect URI with a code. The staff member needs `apps:write`
-/// and every scope requested.
+/// browser: the app's redirect URI with a code (for a request a manifest refresh
+/// started, the app's `app_url`, without one). The staff member needs `apps:write` and
+/// every scope requested.
 pub async fn approve<S: OAuthPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -335,7 +338,23 @@ pub async fn approve<S: OAuthPorts>(
     };
     let grant = Grant::new(request.scopes(), ctx.actor(), now);
     let mut batch = ports.batch();
-    let first_install = match ports.apps().get(request.app()).await? {
+    let app = ports.apps().get(request.app()).await?;
+    // Started by a manifest refresh (`refresh_manifest`): the app has no PKCE verifier
+    // waiting, so it gets no code. The grant changes now; the app learns it from
+    // `app.grant_changed` and asks `/oauth/authorize` for tokens with the new scopes,
+    // which it then gets at once (nothing new to approve).
+    let Some(challenge) = request.code_challenge().map(str::to_string) else {
+        let Some(mut app) = app.filter(|a| a.is_installed()) else {
+            return Err(hypha_apps::AppError::NotInstalled.into());
+        };
+        app.apply_manifest(installed)?;
+        app.set_grant(grant);
+        batch.update_app(&mut app);
+        batch.update_oauth_request(&mut request);
+        ports.commit(batch).await?;
+        return Ok(request.manifest().app_url().as_str().to_string());
+    };
+    let first_install = match app {
         None => {
             let (_, sealed) = new_secret(request.app(), env, env);
             let mut app = App::install(AppId::from_uuid(env.new_uuid()), sealed, installed, grant)?;
@@ -355,7 +374,7 @@ pub async fn approve<S: OAuthPorts>(
             false
         }
     };
-    let (location, mut code) = new_code(&request, first_install, env);
+    let (location, mut code) = new_code(&request, &challenge, first_install, env);
     batch.update_oauth_request(&mut request);
     batch.insert_oauth_code(&mut code);
     ports.commit(batch).await?;
@@ -363,7 +382,7 @@ pub async fn approve<S: OAuthPorts>(
 }
 
 /// Denies a request; returns where to send the browser: the app's redirect URI with
-/// `error=access_denied`.
+/// `error=access_denied` (a refresh's request: the app's `app_url`). The grant stays.
 pub async fn deny<S: HasOAuthRequests>(
     ctx: &Ctx,
     ports: &S,
@@ -378,6 +397,10 @@ pub async fn deny<S: HasOAuthRequests>(
         .ok_or(CommandError::RequestNotFound(id))?;
     request.decide(false, ctx.actor(), clock.now())?;
     ports.oauth_requests().update(&mut request).await?;
+    // A refresh's request: no app is waiting at its redirect URI.
+    if request.code_challenge().is_none() {
+        return Ok(request.manifest().app_url().as_str().to_string());
+    }
     let mut params = vec![
         ("error", "access_denied".to_string()),
         (
@@ -716,6 +739,96 @@ pub async fn uninstall<S: OAuthPorts>(
     batch.revoke_app_tokens(app.key(), now);
     ports.commit(batch).await?;
     Ok(Uninstalled::Uninstalled)
+}
+
+/// What refreshing an app's manifest did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Refreshed {
+    /// Its registrations (webhooks, extension points, UI) are the manifest's now; scopes
+    /// it no longer asks for left the grant at once.
+    Updated(Box<App>),
+    /// As `Updated`, and the manifest asks for scopes the grant lacks: staff approve
+    /// them on the consent page for this request (the grant stays until then).
+    ConsentRequired(Box<App>, Box<AuthorizationRequest>),
+}
+
+/// Fetches an installed app's manifest again from its URL and applies it (design note
+/// 0029, §4.2, `POST /admin/apps/{key}/refresh`). Staff with `apps:write` do it, or
+/// the app itself with its own token. New scopes aren't granted here: they make a
+/// pending authorization request (no code: approving changes the grant, and the app
+/// then asks `/oauth/authorize` for tokens with them, approved at once).
+pub async fn refresh_manifest<S: OAuthPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    fetcher: &impl ManifestFetcher,
+    env: &impl OAuthEnv,
+    key: &str,
+) -> Result<Refreshed, CommandError> {
+    // An app may refresh itself without `apps:write`; anyone else needs it.
+    let is_app = matches!(ctx.actor(), Actor::App(_));
+    if !is_app {
+        ctx.require(Scope::AppsWrite)?;
+    }
+    let mut app = load_app(ports, key).await?;
+    if is_app && ctx.actor() != Actor::App(app.id()) {
+        ctx.require(Scope::AppsWrite)?;
+    }
+    let (Some(installed), true) = (app.manifest().cloned(), app.is_installed()) else {
+        return Err(hypha_apps::AppError::NotInstalled.into());
+    };
+    let manifest = fetch_manifest(fetcher, &installed.url).await?;
+    let grant = app
+        .grant()
+        .cloned()
+        .ok_or(hypha_apps::AppError::NotInstalled)?;
+    let now = env.now();
+    let asked = manifest.scopes().to_vec();
+    let added: Vec<Scope> = asked
+        .iter()
+        .filter(|s| !grant.scopes().contains(s))
+        .copied()
+        .collect();
+    let kept: Vec<Scope> = grant
+        .scopes()
+        .iter()
+        .filter(|s| asked.contains(s))
+        .copied()
+        .collect();
+    app.apply_manifest(InstalledManifest {
+        url: installed.url.clone(),
+        manifest: manifest.clone(),
+        fetched_at: now,
+    })?;
+    // Fewer scopes take effect at once (§4.1); the approver stays who approved them.
+    if kept.len() != grant.scopes().len() {
+        app.set_grant(Grant::new(&kept, grant.approved_by(), grant.approved_at()));
+    }
+    if added.is_empty() {
+        ports.apps().update(&mut app).await?;
+        return Ok(Refreshed::Updated(Box::new(app)));
+    }
+    let redirect_uri = manifest
+        .redirect_uris()
+        .first()
+        .map(|u| u.as_str().to_string())
+        .unwrap_or_default();
+    let mut request = AuthorizationRequest::new(NewRequest {
+        id: OAuthRequestId::from_uuid(env.new_uuid()),
+        client_id: installed.url,
+        manifest,
+        redirect_uri,
+        state: None,
+        code_challenge: None,
+        scopes: asked,
+        previous_scopes: Some(kept),
+        created_at: now,
+        expires_at: now.plus(REQUEST_LIFETIME),
+    });
+    let mut batch = ports.batch();
+    batch.update_app(&mut app);
+    batch.insert_oauth_request(&mut request);
+    ports.commit(batch).await?;
+    Ok(Refreshed::ConsentRequired(Box::new(app), Box::new(request)))
 }
 
 /// Whether `request` is still waiting for an answer at `now`.
