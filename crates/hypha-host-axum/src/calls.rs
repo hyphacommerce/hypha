@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use hypha_http::host::HostCalls;
 use hypha_http::outbound::{
-    CallError, MAX_ANSWER_BYTES, Method, OutboundCall, OutboundPolicy, is_public,
+    CallError, MAX_ANSWER_BYTES, Method, OutboundAnswer, OutboundCall, OutboundPolicy, is_public,
 };
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
@@ -34,9 +34,13 @@ pub fn host_calls(client: reqwest::Client) -> HostCalls {
     })
 }
 
-/// Sends `call` and returns the body of a 2xx answer, read up to `MAX_ANSWER_BYTES`
-/// (empty when `discard_answer`). Doesn't follow redirects.
-pub async fn send(client: &reqwest::Client, call: OutboundCall) -> Result<Vec<u8>, CallError> {
+/// Sends `call` and returns its answer: the status, and the body read up to
+/// `MAX_ANSWER_BYTES` (empty when `discard_answer`; a longer 2xx body is `TooLarge`, a
+/// longer one of another status is left unread). Doesn't follow redirects.
+pub async fn send(
+    client: &reqwest::Client,
+    call: OutboundCall,
+) -> Result<OutboundAnswer, CallError> {
     let method = match call.method {
         Method::Get => reqwest::Method::GET,
         Method::Post => reqwest::Method::POST,
@@ -54,26 +58,27 @@ pub async fn send(client: &reqwest::Client, call: OutboundCall) -> Result<Vec<u8
             CallError::Failed("unreachable".to_string())
         }
     })?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(CallError::Failed(format!(
-            "answered HTTP {}",
-            status.as_u16()
-        )));
-    }
+    let status = response.status().as_u16();
+    let answer = |body| OutboundAnswer { status, body };
     if call.discard_answer {
-        return Ok(Vec::new());
+        return Ok(answer(Vec::new()));
     }
-    // Read chunk by chunk so an endless answer stops at the cap, not at the timeout.
-    let too_big = || CallError::Failed(format!("answered more than {MAX_ANSWER_BYTES} bytes"));
+    let success = (200..300).contains(&status);
+    // Too long: a failure for a 2xx (its body is the answer), nothing to read for any
+    // other (its body only names an error).
+    let too_big = || match success {
+        true => Err(CallError::TooLarge),
+        false => Ok(answer(Vec::new())),
+    };
     if response
         .content_length()
         .is_some_and(|len| len > MAX_ANSWER_BYTES as u64)
     {
-        return Err(too_big());
+        return too_big();
     }
+    // Read chunk by chunk so an endless answer stops at the cap, not at the timeout.
     let mut response = response;
-    let mut answer = Vec::new();
+    let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| {
         if e.is_timeout() {
             CallError::Timeout
@@ -81,12 +86,12 @@ pub async fn send(client: &reqwest::Client, call: OutboundCall) -> Result<Vec<u8
             CallError::Failed("the answer broke off".to_string())
         }
     })? {
-        if answer.len() + chunk.len() > MAX_ANSWER_BYTES {
-            return Err(too_big());
+        if body.len() + chunk.len() > MAX_ANSWER_BYTES {
+            return too_big();
         }
-        answer.extend_from_slice(&chunk);
+        body.extend_from_slice(&chunk);
     }
-    Ok(answer)
+    Ok(answer(body))
 }
 
 /// Resolves with the system resolver and keeps only public addresses; a name with none

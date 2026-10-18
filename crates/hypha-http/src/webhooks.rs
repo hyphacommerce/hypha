@@ -162,7 +162,7 @@ impl WebhookSender for HostWebhooks<'_> {
         let sent = self.calls.send_signed(self.outbound, call).await;
         sent.map(|_| ()).map_err(|e| match e {
             CallError::Timeout => format!("no answer within {} ms", webhook.timeout_ms),
-            CallError::Failed(reason) => reason,
+            other => other.reason(),
         })
     }
 }

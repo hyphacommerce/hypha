@@ -28,8 +28,9 @@ impl OutboundPolicy {
 /// callbacks and webhooks alike.
 pub const SIGNATURE_HEADER: &str = "Hypha-Signature";
 /// The most of an answer read: rates for a cart are a few kilobytes, and a bigger
-/// answer counts as a failure rather than filling memory.
-pub const MAX_ANSWER_BYTES: usize = 256 * 1024;
+/// answer counts as a failure rather than filling memory. Extension points' cap
+/// (design note 0029, §3).
+pub const MAX_ANSWER_BYTES: usize = hypha_extensions::MAX_ANSWER_BYTES;
 
 /// The methods merchant URLs are called with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +63,41 @@ pub struct SignedCall<'a> {
 pub enum CallError {
     Timeout,
     Failed(String),
+    /// A 2xx answer longer than `MAX_ANSWER_BYTES` (the host stopped reading).
+    TooLarge,
+}
+
+impl CallError {
+    /// In words the merchant may see; `Timeout` is the caller's to word (it knows the
+    /// timeout).
+    pub fn reason(&self) -> String {
+        match self {
+            CallError::Timeout => "no answer in time".to_string(),
+            CallError::Failed(reason) => reason.clone(),
+            CallError::TooLarge => format!("answered more than {MAX_ANSWER_BYTES} bytes"),
+        }
+    }
+}
+
+/// What a sent call got back: any status, and the body read up to `MAX_ANSWER_BYTES`
+/// (empty when the call discarded it, and for an answer other than 2xx longer than
+/// the cap, whose body only ever names an error).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboundAnswer {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
+impl OutboundAnswer {
+    /// The body of a 2xx answer, or `Failed("answered HTTP <status>")`: how webhooks
+    /// and rate services take answers (redirects aren't followed, so they fail too).
+    pub fn into_success(self) -> Result<Vec<u8>, CallError> {
+        if (200..300).contains(&self.status) {
+            Ok(self.body)
+        } else {
+            Err(CallError::Failed(format!("answered HTTP {}", self.status)))
+        }
+    }
 }
 
 /// A call ready to send: signed, its URL checked, every header set. What the host's
@@ -334,6 +370,23 @@ mod tests {
             allow_private: true,
         };
         assert!(prepare(allowed, call("http://127.0.0.1:9000/hook", &[])).is_ok());
+    }
+
+    #[test]
+    fn only_a_2xx_answer_is_a_success() {
+        let answer = |status| OutboundAnswer {
+            status,
+            body: b"ok".to_vec(),
+        };
+        assert_eq!(answer(204).into_success(), Ok(b"ok".to_vec()));
+        assert_eq!(
+            answer(302).into_success(),
+            Err(CallError::Failed("answered HTTP 302".to_string()))
+        );
+        assert_eq!(
+            CallError::TooLarge.reason(),
+            format!("answered more than {MAX_ANSWER_BYTES} bytes")
+        );
     }
 
     #[test]

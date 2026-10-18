@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 use futures_util::future::{Either, select};
 use hypha_core::{Clock, IdGenerator, Timestamp};
 use hypha_http::host::{HostCalls, HostClock, HostHttp, HostIds, HostRandom, Offload};
-use hypha_http::outbound::{CallError, MAX_ANSWER_BYTES, Method, OutboundCall};
+use hypha_http::outbound::{CallError, MAX_ANSWER_BYTES, Method, OutboundAnswer, OutboundCall};
 use hypha_http::state::Runtime;
 use hypha_store_s3::{HttpRequest, HttpResponse};
 use uuid::Uuid;
@@ -71,7 +71,7 @@ pub fn host_calls() -> HostCalls {
     HostCalls::new(|call| Box::pin(SendFuture::new(send_call(call))))
 }
 
-async fn send_call(call: OutboundCall) -> Result<Vec<u8>, CallError> {
+async fn send_call(call: OutboundCall) -> Result<OutboundAnswer, CallError> {
     let failed = |what: &str| CallError::Failed(what.to_string());
     let method = match call.method {
         Method::Get => worker::Method::Get,
@@ -103,15 +103,23 @@ async fn send_call(call: OutboundCall) -> Result<Vec<u8>, CallError> {
             failed("unreachable")
         })?;
         let status = response.status_code();
-        if !(200..300).contains(&status) {
-            return Err(CallError::Failed(format!("answered HTTP {status}")));
-        }
         if call.discard_answer {
-            return Ok(Vec::new());
+            return Ok(OutboundAnswer {
+                status,
+                body: Vec::new(),
+            });
         }
-        read_body(&mut response, MAX_ANSWER_BYTES, Overflow::Fail)
+        // One byte past the cap tells a 2xx that's too long; another status's body only
+        // names an error, so it's cut at the cap.
+        let body = read_body(&mut response, MAX_ANSWER_BYTES + 1)
             .await
-            .map_err(CallError::Failed)
+            .map_err(CallError::Failed)?;
+        let body = match body.len() > MAX_ANSWER_BYTES {
+            false => body,
+            true if (200..300).contains(&status) => return Err(CallError::TooLarge),
+            true => Vec::new(),
+        };
+        Ok(OutboundAnswer { status, body })
     };
     // The whole call, answer included, gets `timeout`; then it's aborted.
     match select(pin!(answer), pin!(Delay::from(call.timeout))).await {
@@ -123,27 +131,13 @@ async fn send_call(call: OutboundCall) -> Result<Vec<u8>, CallError> {
     }
 }
 
-/// What happens when a body is longer than its limit.
-pub(crate) enum Overflow {
-    /// It's an error (an app's answer).
-    Fail,
-    /// The rest is left unread (the media storage's reads, `HttpRequest::body_limit`).
-    Cut,
-}
-
-/// Reads `response`'s body chunk by chunk, so an endless one stops at `limit`.
+/// Reads `response`'s body chunk by chunk, so an endless one stops at `limit`: the
+/// rest is left unread (an app's answer reads one byte more to tell it's too long; the
+/// media storage's reads, `HttpRequest::body_limit`).
 pub(crate) async fn read_body(
     response: &mut worker::Response,
     limit: usize,
-    overflow: Overflow,
 ) -> Result<Vec<u8>, String> {
-    let too_big = || format!("answered more than {limit} bytes");
-    if let Overflow::Fail = overflow
-        && let Ok(Some(length)) = response.headers().get("content-length")
-        && length.parse::<usize>().is_ok_and(|length| length > limit)
-    {
-        return Err(too_big());
-    }
     // A response without a body (a HEAD, a 204) has nothing to stream.
     let Ok(mut stream) = response.stream() else {
         return Ok(Vec::new());
@@ -152,13 +146,8 @@ pub(crate) async fn read_body(
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| "the answer broke off".to_string())?;
         if body.len() + chunk.len() > limit {
-            match overflow {
-                Overflow::Fail => return Err(too_big()),
-                Overflow::Cut => {
-                    body.extend_from_slice(&chunk[..limit - body.len()]);
-                    break;
-                }
-            }
+            body.extend_from_slice(&chunk[..limit - body.len()]);
+            break;
         }
         body.extend_from_slice(&chunk);
     }
@@ -215,7 +204,7 @@ async fn send_http(
     let limit = request
         .body_limit
         .map_or(usize::MAX, |l| usize::try_from(l).unwrap_or(usize::MAX));
-    let body = read_body(&mut response, limit, Overflow::Cut).await?;
+    let body = read_body(&mut response, limit).await?;
     Ok(HttpResponse {
         status,
         headers,

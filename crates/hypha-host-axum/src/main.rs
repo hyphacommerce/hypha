@@ -36,11 +36,17 @@ use storage::{PgDatabase, PgStorage};
 /// `openapi`) and exits (design note 0010, S6). Run it after changing routes or DTOs;
 /// a test fails while the committed files are out of date.
 fn write_openapi(dir: &str) -> std::io::Result<()> {
-    use hypha_http::routes::openapi::{Doc, document_json};
+    use hypha_http::routes::openapi::{
+        Doc, EXTENSIONS_FILE, document_json, extensions_document_json,
+    };
     std::fs::create_dir_all(dir)?;
-    for doc in Doc::ALL {
-        let path = std::path::Path::new(dir).join(doc.file_name());
-        std::fs::write(&path, document_json(doc))?;
+    let documents = Doc::ALL
+        .map(|doc| (doc.file_name(), document_json(doc)))
+        .into_iter()
+        .chain([(EXTENSIONS_FILE, extensions_document_json())]);
+    for (file, json) in documents {
+        let path = std::path::Path::new(dir).join(file);
+        std::fs::write(&path, json)?;
         println!("wrote {}", path.display());
     }
     Ok(())

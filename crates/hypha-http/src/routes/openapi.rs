@@ -328,8 +328,13 @@ pub fn document(doc: Doc) -> OpenApi {
 
 /// The document as the committed file holds it: pretty JSON and a final newline.
 pub fn document_json(doc: Doc) -> String {
+    pretty(document(doc))
+}
+
+/// `api` as a committed file: open enums marked, pretty JSON and a final newline.
+fn pretty(api: OpenApi) -> String {
     // A document is plain data; serializing it can't fail.
-    let mut value = serde_json::to_value(document(doc))
+    let mut value = serde_json::to_value(api)
         .unwrap_or_else(|e| panic!("cannot serialize the OpenAPI document: {e}"));
     mark_open_enums(&mut value);
     let mut json = serde_json::to_string_pretty(&value)
@@ -400,6 +405,212 @@ fn mark_open_enums(document: &mut Value) {
     if let Some(paths) = document.get_mut("paths") {
         walk(paths, false, false);
     }
+}
+
+// ---------- the extensions document (design note 0029, AP3) ----------
+
+/// The committed file of the extensions document (`openapi/extensions.json`).
+pub const EXTENSIONS_FILE: &str = "extensions.json";
+
+/// One extension point as the document lists it: what `ExtensionPoint` says, with its
+/// request and response schemas.
+struct PointDoc {
+    name: &'static str,
+    version: u16,
+    timeout: std::time::Duration,
+    on_failure: hypha_extensions::OnFailure,
+    summary: &'static str,
+    request: (String, RefOr<Schema>),
+    response: (String, RefOr<Schema>),
+    schemas: Vec<(String, RefOr<Schema>)>,
+}
+
+impl PointDoc {
+    fn of<P>(summary: &'static str) -> Self
+    where
+        P: hypha_extensions::ExtensionPoint,
+        P::Request: ToSchema,
+        P::Response: ToSchema,
+    {
+        let mut schemas = Vec::new();
+        <P::Request as ToSchema>::schemas(&mut schemas);
+        <P::Response as ToSchema>::schemas(&mut schemas);
+        Self {
+            name: P::NAME,
+            version: P::VERSION,
+            timeout: P::TIMEOUT,
+            on_failure: P::ON_FAILURE,
+            summary,
+            request: (P::Request::name().to_string(), P::Request::schema()),
+            response: (P::Response::name().to_string(), P::Response::schema()),
+            schemas,
+        }
+    }
+}
+
+/// The points this build calls apps through. A new point is a line here.
+fn points() -> Vec<PointDoc> {
+    use hypha_extensions as x;
+    vec![
+        PointDoc::of::<x::ShippingRates>(
+            "Price a cart's shipping group (design note 0015, §5's rate callback).",
+        ),
+        PointDoc::of::<x::PaymentsStart>(
+            "Start a payment for an order at checkout: what the buyer does next.",
+        ),
+        PointDoc::of::<x::PaymentsCapture>("Capture an authorized payment (staff)."),
+        PointDoc::of::<x::PaymentsVoid>("Void a payment that wasn't captured (staff)."),
+        PointDoc::of::<x::PaymentsRefund>("Refund some or all of a captured payment (staff)."),
+        PointDoc::of::<x::SearchQuery>(
+            "Answer a storefront search with product and variant IDs in order.",
+        ),
+    ]
+}
+
+/// A header Hypha sends with every extension call.
+fn header(name: &str, description: &str) -> utoipa::openapi::path::Parameter {
+    use utoipa::openapi::{Required, path::ParameterBuilder};
+    ParameterBuilder::new()
+        .name(name)
+        .parameter_in(ParameterIn::Header)
+        .required(Required::True)
+        .description(Some(description))
+        .schema(Some(String::schema()))
+        .build()
+}
+
+/// One point as an OpenAPI webhook: a request Hypha sends, the answer it expects.
+fn point_operation(point: &PointDoc) -> Operation {
+    use utoipa::openapi::{
+        Required, extensions::ExtensionsBuilder, path::OperationBuilder,
+        request_body::RequestBodyBuilder,
+    };
+    let timeout_ms = u64::try_from(point.timeout.as_millis()).unwrap_or(u64::MAX);
+    let failure = match point.on_failure {
+        hypha_extensions::OnFailure::FailClosed => {
+            "the flow stops with `app_unavailable` (502, `details: {app, point}`)"
+        }
+        hypha_extensions::OnFailure::Fallback => "Hypha falls back to its own default",
+    };
+    let description = format!(
+        "`POST` to the URL the app registered for `{}` v{}. Answer within {timeout_ms} ms \
+         (unless the app's registration sets another timeout), in at most 256 KiB, with a \
+         2xx and the response below. Anything else (no answer, another status, a body that \
+         isn't the response) is a failure: {failure}. Every call is in the app's call log \
+         (`GET /admin/apps/{{key}}/extension-calls`).",
+        point.name, point.version
+    );
+    let json_body = |name: &str| {
+        ContentBuilder::new()
+            .schema(Some(Ref::from_schema_name(name)))
+            .build()
+    };
+    OperationBuilder::new()
+        .operation_id(Some(format!("{}.v{}", point.name, point.version)))
+        .tag(point.name.split('.').next().unwrap_or(point.name))
+        .summary(Some(point.summary))
+        .description(Some(description))
+        .parameters(Some([
+            header(
+                crate::outbound::SIGNATURE_HEADER,
+                "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's \
+                 secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            ),
+            header(
+                hypha_extensions::EXTENSION_HEADER,
+                "The point's name, as this operation's.",
+            ),
+            header(
+                hypha_extensions::EXTENSION_VERSION_HEADER,
+                "The point's version.",
+            ),
+            header(
+                hypha_extensions::IDEMPOTENCY_KEY_HEADER,
+                "The same for every retry of one piece of work: answer a repeat as the \
+                 first.",
+            ),
+            header(
+                hypha_extensions::STORE_HEADER,
+                "The store the call is for (`store_…`).",
+            ),
+        ]))
+        .request_body(Some(
+            RequestBodyBuilder::new()
+                .content("application/json", json_body(&point.request.0))
+                .required(Some(Required::True))
+                .build(),
+        ))
+        .response(
+            "200",
+            ResponseBuilder::new()
+                .description("The answer (any 2xx).")
+                .content("application/json", json_body(&point.response.0))
+                .build(),
+        )
+        .response(
+            "default",
+            ResponseBuilder::new()
+                .description(
+                    "A failure. Apps built on `@hypha/app` answer `{code, error}` \
+                     (`invalid_signature`, `unknown_extension`, `unsupported_version`, \
+                     `invalid_request`, `handler_failed`); the code is kept in the call log.",
+                )
+                .build(),
+        )
+        .extensions(Some(
+            ExtensionsBuilder::new()
+                .add(
+                    "x-hypha-extension",
+                    serde_json::json!({"point": point.name, "version": point.version}),
+                )
+                .add("x-hypha-version", point.version)
+                .add("x-hypha-timeout-ms", timeout_ms)
+                .add("x-hypha-on-failure", point.on_failure.as_str())
+                .build(),
+        ))
+        .build()
+}
+
+/// The extensions document: every point as a webhook (OpenAPI 3.1's section for
+/// requests the server sends), with its request and response schemas.
+pub fn extensions_document() -> OpenApi {
+    use utoipa::openapi::{PathItem, PathsBuilder};
+    let mut schemas: Vec<(String, RefOr<Schema>)> = Vec::new();
+    let mut webhooks = PathsBuilder::new();
+    for point in points() {
+        webhooks = webhooks.path(
+            point.name,
+            PathItem::new(HttpMethod::Post, point_operation(&point)),
+        );
+        schemas.push(point.request);
+        schemas.push(point.response);
+        schemas.extend(point.schemas);
+    }
+    let schemas: BTreeMap<String, RefOr<Schema>> = schemas.into_iter().collect();
+    let mut info = Info::new("Hypha Extension Points", env!("CARGO_PKG_VERSION"));
+    info.description = Some(
+        "The synchronous calls Hypha makes to apps mid-flow (design note 0029): each is a \
+         versioned contract an app implements by registering a URL for it. A reshaped \
+         request or response is a new version."
+            .to_string(),
+    );
+    let mut license = utoipa::openapi::License::new(env!("CARGO_PKG_LICENSE"));
+    license.identifier = Some(env!("CARGO_PKG_LICENSE").to_string());
+    info.license = Some(license);
+    let mut api = OpenApiBuilder::new()
+        .info(info)
+        .webhooks(Some(webhooks.build()))
+        .build();
+    api.components
+        .get_or_insert_with(Default::default)
+        .schemas
+        .extend(schemas);
+    api
+}
+
+/// The extensions document as the committed file holds it.
+pub fn extensions_document_json() -> String {
+    pretty(extensions_document())
 }
 
 /// The document's JSON, built once per process: it only changes with the code.
@@ -495,6 +706,7 @@ mod tests {
             [
                 "get /admin/api-keys",
                 "get /admin/apps/{key}/deliveries",
+                "get /admin/apps/{key}/extension-calls",
                 "get /admin/assets",
                 "get /admin/assets/{id}/usages",
                 "get /admin/catalogs/{id}/products",
@@ -585,16 +797,60 @@ mod tests {
 
     #[test]
     fn the_committed_documents_are_up_to_date() {
-        for doc in Doc::ALL {
+        let documents = Doc::ALL
+            .map(|doc| (doc.file_name(), document_json(doc)))
+            .into_iter()
+            .chain([(EXTENSIONS_FILE, extensions_document_json())]);
+        for (file, json) in documents {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../openapi")
-                .join(doc.file_name());
+                .join(file);
             let committed = std::fs::read_to_string(&path).unwrap_or_default();
             assert!(
-                committed == document_json(doc),
+                committed == json,
                 "{} is out of date: run `cargo run -p hypha-host-axum -- openapi`",
                 path.display()
             );
         }
+    }
+
+    #[test]
+    fn every_extension_point_is_a_webhook_with_its_schemas() {
+        let json = serde_json::to_value(extensions_document()).unwrap();
+        let webhooks = json["webhooks"].as_object().unwrap();
+        assert_eq!(
+            webhooks.keys().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "payments.capture",
+                "payments.refund",
+                "payments.start",
+                "payments.void",
+                "search.query",
+                "shipping.rates"
+            ]
+        );
+        let rates = &webhooks["shipping.rates"]["post"];
+        assert_eq!(rates["operationId"], "shipping.rates.v1");
+        assert_eq!(rates["x-hypha-on-failure"], "fallback");
+        assert_eq!(
+            rates["x-hypha-extension"],
+            serde_json::json!({"point": "shipping.rates", "version": 1})
+        );
+        assert_eq!(
+            webhooks["payments.start"]["post"]["x-hypha-timeout-ms"],
+            15000
+        );
+        let mut found = Vec::new();
+        refs(&json, &mut found);
+        assert!(!found.is_empty());
+        for r in found {
+            let name = r.strip_prefix("#/components/schemas/").unwrap_or(&r);
+            assert!(
+                json["components"]["schemas"].get(name).is_some(),
+                "{r} points nowhere"
+            );
+        }
+        // The address is the APIs' own schema, by the same name.
+        assert!(json["components"]["schemas"]["PostalAddressResponse"].is_object());
     }
 }

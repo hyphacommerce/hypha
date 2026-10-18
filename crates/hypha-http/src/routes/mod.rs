@@ -204,6 +204,7 @@ macro_rules! route_table {
             [admin, DELETE, "/admin/apps/{key}", apps::delete],
             [admin, POST, "/admin/apps/{key}/secret", apps::rotate_secret],
             [admin, GET, "/admin/apps/{key}/deliveries", apps::deliveries],
+            [admin, GET, "/admin/apps/{key}/extension-calls", apps::extension_calls],
             [admin, POST, "/admin/apps/{key}/deliveries/{id}/retry", apps::retry],
             [admin, GET, "/admin/events/{id}", apps::event],
             // inventory

@@ -583,7 +583,7 @@ pub async fn shipping_options<S: Storage>(
     // After the key: a stranger can't use up a cart's quota.
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
-    let rates = state.rates(&ports);
+    let rates = state.cart_rates(&ports, id);
     let groups = shipping_offers(&ctx, &ports, &rates, id).await?;
     Ok(Json(ShippingOptionsResponse {
         groups: groups.iter().map(Into::into).collect(),
@@ -616,7 +616,7 @@ pub async fn select<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let req = body.parse()?;
-    let rates = state.rates(&ports);
+    let rates = state.cart_rates(&ports, id);
     let priced = select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;
     Ok(Json(
         cart_response(&priced, &ports, state.media.as_deref()).await?,

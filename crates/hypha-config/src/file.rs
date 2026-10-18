@@ -10,6 +10,7 @@ use std::time::Duration;
 use hypha_auth::AuthSettings;
 use hypha_categories::CategorySettings;
 use hypha_dispatch::DispatchSettings;
+use hypha_extensions::ExtensionSettings;
 use hypha_media::MediaSettings;
 use hypha_notifications::SendSettings;
 use hypha_search::SyncSettings;
@@ -491,6 +492,8 @@ pub struct PruneJob {
     pub idempotency_keys_after: Dur,
     /// How long a session is kept after it ended (expired or revoked).
     pub sessions_after: Dur,
+    /// How long the log of calls to apps' extension points is kept (design note 0029).
+    pub extension_calls_after: Dur,
 }
 
 impl Default for PruneJob {
@@ -502,6 +505,7 @@ impl Default for PruneJob {
             events_after: Dur(d.keep_events),
             idempotency_keys_after: Dur(d.keep_idempotency_keys),
             sessions_after: Dur(d.keep_ended_sessions),
+            extension_calls_after: Dur(ExtensionSettings::default().keep_calls),
         }
     }
 }

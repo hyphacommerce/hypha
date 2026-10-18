@@ -988,6 +988,31 @@ impl From<hypha_checkout::CommandError> for ApiError {
     }
 }
 
+/// An app's extension point gave no usable answer (design note 0029, §15): 502
+/// `app_unavailable` with the app and point. Why (a timeout, a status, a malformed
+/// answer) is in the call log for staff, not in a response a shopper may see.
+impl From<hypha_extensions::ExtensionError> for ApiError {
+    fn from(e: hypha_extensions::ExtensionError) -> Self {
+        let message = format!("the app {} couldn't answer {}", e.app(), e.point());
+        Self::new(StatusCode::BAD_GATEWAY, e.code(), message)
+            .with_details(Some(json!({ "app": e.app().as_str(), "point": e.point() })))
+    }
+}
+
+impl From<hypha_extensions::CommandError> for ApiError {
+    fn from(e: hypha_extensions::CommandError) -> Self {
+        use hypha_extensions::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 impl From<hypha_apps::CommandError> for ApiError {
     fn from(e: hypha_apps::CommandError) -> Self {
         use hypha_apps::CommandError as E;
@@ -1222,6 +1247,26 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    #[test]
+    fn an_app_that_fails_its_point_is_a_bad_gateway_naming_both() {
+        let e = ApiError::from(hypha_extensions::ExtensionError::Unavailable {
+            app: hypha_core::AppKey::new("app_stripe").unwrap(),
+            point: "payments.start",
+            reason: "answered HTTP 401: invalid_signature".to_string(),
+        });
+        assert_eq!(e.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(e.code, "app_unavailable");
+        assert_eq!(
+            e.details,
+            Some(json!({"app": "app_stripe", "point": "payments.start"}))
+        );
+        // The reason is the call log's, not the shopper's.
+        assert_eq!(
+            e.message,
+            "the app app_stripe couldn't answer payments.start"
+        );
+    }
 
     #[test]
     fn domain_error_keeps_status_code_and_message() {

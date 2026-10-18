@@ -559,6 +559,50 @@ step "the offers" 200 - "$SHIP/shipping-options"
 contains "standard costs 4.90 under 10 EUR" '"code":"standard","name":"Standard","amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
 contains "the courier is down, and express says why" '"name":"Express","reason":"provider_failed"'
 contains "standard is offered, so the backup isn't needed" '"name":"Post","reason":"backup_not_needed"'
+echo "## extension calls (design note 0029)"
+step "the courier's extension calls" 200 - "$BASE/admin/apps/app_courier/extension-calls"
+contains "the failed quote is a shipping.rates call" '"point":"shipping.rates","version":1,'
+contains "failed, unreachable" '"outcome":"failed","status":null,"error":"unreachable"'
+contains "for the cart" "\"correlation\":\"$SHIP_CART\""
+step "an unknown app's calls" 404 app_not_found "$BASE/admin/apps/app_none/extension-calls"
+# A rate app when python3 is here (it is in CI; the host must run with
+# HYPHA_ALLOW_PRIVATE_CALLBACKS=true to reach it): the courier's next quote is `ok`.
+if command -v python3 >/dev/null 2>&1; then
+    RATE_PORT=${E2E_RATE_PORT:-3198}
+    python3 - "$RATE_PORT" <<'PY' &
+import http.server, json, sys
+
+class Rates(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))))
+        currency = body["request"]["currency"]
+        answer = json.dumps({"rates": [{"service": "express", "name": "Courier Express",
+                                        "amount": {"amount": 700, "currency": currency}}]})
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(answer.encode())
+
+    def log_message(self, *args):
+        pass
+
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Rates).serve_forever()
+PY
+    RATES=$!
+    disown "$RATES"
+    sleep 1
+    step "point the courier at a rate app" 200 - -X PATCH "$BASE/admin/shipping-providers/app_courier" \
+        -H "$JSON" -d "{\"callback_url\":\"http://127.0.0.1:$RATE_PORT/rates\"}"
+    step "the offers, with the courier up" 200 - "$SHIP/shipping-options"
+    contains "express costs 7 EUR" '"name":"Express","amount":{"amount":700,"currency":"EUR"}'
+    step "the courier's latest call" 200 - "$BASE/admin/apps/app_courier/extension-calls?limit=1"
+    contains "a shipping.rates call" '"point":"shipping.rates","version":1,'
+    contains "ok, HTTP 200" '"outcome":"ok","status":200,"error":null'
+    contains "for the cart" "\"correlation\":\"$SHIP_CART\""
+    kill "$RATES" 2>/dev/null
+    step "the courier down again" 200 - -X PATCH "$BASE/admin/shipping-providers/app_courier" \
+        -H "$JSON" -d '{"callback_url":"http://127.0.0.1:9/rates"}'
+fi
 step "the backup can't be picked" 409 shipping_option_not_offered -X PUT "$SHIP/shipping/$SHGRP" -H "$JSON" \
     -d "{\"option\":\"$POST_OPTION\"}"
 contains "and says why" '"details":{"reason":"backup_not_needed"}'
