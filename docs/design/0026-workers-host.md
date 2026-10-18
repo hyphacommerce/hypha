@@ -42,7 +42,7 @@ and cut most of it; this note carries that host to Workers.
 | W10 | **Files on R2 through the S3 adapter we have.** `hypha-store-s3` already takes its HTTP through an `HttpClient` port; the Workers host implements it with `worker::Fetch`. Public files are served from the bucket's custom domain, thumbnails by Cloudflare's image transformations (`media.transforms = "cloudflare"`, 0013). *Proposed* |
 | W12 | **The API Worker runs next to the database** (`placement.region`, e.g. `aws:eu-central-1` for a Neon database in Frankfurt), not wherever the request arrives: a read is a dozen sequential queries, and each one crossing Europe cost 20–25 ms (§8). `hypha init` sets it from the database's region. *Proposed* |
 | W13 | **One API token deploys everything** (2026-10-18). wrangler (the API, Hyperdrive, KV, R2) and `cf` (which deploys vinext apps) keep separate logins, which can be different accounts. `hypha init` asks for one Cloudflare API token instead, linking to the dashboard's form with the permissions filled in (no login may create tokens), checks it and finds the account and the zone; `deploy` passes it to both as `CLOUDFLARE_API_TOKEN`. *Accepted* |
-| W14 | **The apps reach the API through Service Bindings, and the API trusts them for the client's address.** A binding call skips the edge, so its `CF-Connecting-IP` is whatever the caller wrote; the binding's props (`{ caller }`), which only the deployment's configuration sets, mark our own Workers, and for them the API reads the caller's `X-Forwarded-For`. *Accepted* |
+| W14 | **The apps reach the API through Service Bindings, and the API trusts them for the client's address.** A binding call skips the edge, so its `CF-Connecting-IP` is whatever the caller wrote; our own Workers send the deployment's caller key (`X-Hypha-Caller`, the secret `HYPHA_CALLER_KEY` that `deploy` makes and gives all three), and for them the API reads the caller's `X-Forwarded-For`. First the binding's props (`{ caller }`); Cloudflare drops them when the called Worker has a placement, as the API's does (W12), so logins through the admin failed. *Accepted* |
 | W11 | **Configuration from Worker variables.** `hypha-config` parses a string and reads the environment through a function it's given (0017, CF3): the Worker passes `HYPHA_CONFIG` (the TOML, if any) and reads `env.var` / `env.secret`. Same keys, same checks. *Proposed* |
 
 ## 1. What changes, piece by piece
@@ -208,7 +208,7 @@ the domains; `hypha deploy` then:
    `deploy` connects the storefront and builds each app with Vite, deploying it with `cf
    deploy --prebuilt --secrets-file`; each app's `cloudflare.config.ts` takes the
    deployment's Worker name, account, domain and API Worker (`HYPHA_CF_*`), and binds the
-   API (`API`, props `{ caller }`, W14), which the apps use through `#api-fetch`.
+   API (`API`, with the caller key, W14), which the apps use through `#api-fetch`.
    Deployed for real (2026-10-18, a test store on Neon):
    - All three Workers came up on their custom domains; a second deploy created nothing
      new.
