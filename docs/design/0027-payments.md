@@ -1,6 +1,7 @@
 # 0027: Payments: the provider port, cash on delivery and bank transfer
 
-- **Status:** Proposed (2026-10-18). Danilo set the frame: a payments port with cash on
+- **Status:** Proposed (2026-10-18). Decided: PA2 (payment records), PA7 (the full set of
+  statuses), Q1 (markets and channels). Danilo set the frame: a payments port with cash on
   delivery and bank transfer built in, as the seam payment spores (Stripe first) plug
   into later.
 - **Scope:** payment methods a store offers (configured as data), the payments an order
@@ -33,10 +34,10 @@ leaves Stripe as "implement the port, add a webhook route", not a redesign of ch
 | PA1 | **A new leaf crate `hypha-payments`** holds payment methods, payments, the provider port and its errors. Checkout (workflow) composes it; orders don't depend on it. *Hard to reverse (crate edges)* |
 | PA2 | **A `Payment` aggregate** (`pay_…`), one per attempt to collect an order's money: order, method, amount and currency, status, the provider's reference. Not fields on the order: a card payment can fail and be retried, a later order edit may need a second payment, and refunds attach to a payment. *Hard to reverse (storage, API)* |
 | PA3 | **The order's `financial_status` is derived from its payments and stored**, as `fulfillment_status` is from fulfilments (0018 FU3). Only payments move it; `POST /admin/orders/{id}/paid` stays, as "record the pending manual payment as received" |
-| PA4 | **Payment methods are data** (`pm_…`): a provider key (`manual` built in; `spore_stripe` later), a name shoppers see, instructions (bank details), the markets it's offered in, enabled or not. A store can have several manual ones (cash on delivery, bank transfer, pay at pickup). *Hard to reverse (API)* |
+| PA4 | **Payment methods are data** (`pm_…`): a provider key (`manual` built in; `spore_stripe` later), a name shoppers see, instructions (bank details), the markets and sales channels it's offered in (Q1, *Decided*), enabled or not. A store can have several manual ones (cash on delivery, bank transfer, pay at pickup). *Hard to reverse (API)* |
 | PA5 | **The port is one trait, `PaymentProvider`, keyed by provider name**, listed by the host like event handlers (0019 §5.1): a tuple, static dispatch. `manual` is core's; a spore adds its own. Checkout asks the method's provider to start a payment and gets back what the shopper must do next |
 | PA6 | **A cart chooses a payment method** (`PUT /storefront/carts/{id}/payment-method`), checked at checkout like shipping: offered in the cart's market and enabled. Checkout writes the order and its payment in **one batch**. When the store has no enabled method at all, checkout works as today (no payment, order `pending`), so existing stores and scripts keep working |
-| PA7 | **`financial_status` gains `voided`** now, the rest when a provider needs them (`authorized`, `partially_paid`, `refunded`, `partially_refunded`). Clients must treat an unknown status as "not paid"; the OpenAPI docs say so. *Hard to reverse (contract)* |
+| PA7 | **The full set of statuses now**, so the contract is fixed before clients depend on it: the order's `financial_status` is `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded` or `voided`; a payment's status is `pending`, `authorized`, `paid`, `failed`, `voided`, `partially_refunded` or `refunded`. Manual payments use `pending`, `paid` and `voided`; the rest wait for providers that move money that way. *Decided; hard to reverse (contract)* |
 | PA8 | **Cancelling an order voids its pending payments** (COD never collected, transfer never sent); a paid one stays paid, as 0018 Q3 decided |
 | PA9 | **New scopes `payments:read` and `payments:write`**: methods are settings (`payments:write`); recording money received stays `orders:write`, like today's `/paid`, since it's what staff do on an order |
 
@@ -66,8 +67,8 @@ provider interface with a do-nothing built-in, and Medusa's per-region availabil
   providers the host lists when created;
 - `name` (shown to shoppers, "Cash on delivery"), `instructions` (plain text, shown after
   checkout and on the order: bank details, "pay the courier");
-- `markets: Vec<MarketId>` (empty = every market), `enabled: bool`, `position` (the
-  order shoppers see them in);
+- `markets: Vec<MarketId>` and `channels: Vec<ChannelId>` (empty = every one), `enabled:
+  bool`, `position` (the order shoppers see them in);
 - `settings: serde_json::Value`, the provider's own settings, checked by the provider
   (none for `manual`; a spore's keys live in its secrets, not here).
 
@@ -75,17 +76,22 @@ provider interface with a do-nothing built-in, and Medusa's per-region availabil
 - `order: OrderId`, `method: PaymentMethodId`, `provider: ProviderKey` (copied, so a
   deleted method can't orphan it);
 - `amount: Money` in the order's currency, the whole total for now;
-- `status: PaymentStatus`: `pending` → `paid` | `voided` | `failed` (a provider's
-  decline); terminal states don't change;
+- `status: PaymentStatus` (PA7): `pending` → `authorized` → `paid` →
+  `partially_refunded` → `refunded`, or `voided` (cancelled before money moved) or
+  `failed` (a provider's decline) from `pending` or `authorized`; the domain refuses any
+  other move;
+- `refunded: Money`, what was given back (zero until refunds exist);
 - `reference: Option<String>` (the provider's ID; for manual, what staff typed: a bank
   reference, the courier's receipt);
 - `instructions: Option<String>`, copied from the method at checkout, so later edits to
   the method don't change what a shopper was told;
 - `paid_at`, `voided_at`.
 
-**The order** keeps `financial_status`, now computed from its payments when one changes
-(`pending` while any is pending and none paid; `paid` once paid ones cover the total;
-`voided` when all were voided). Orders don't store payments; the batch that changes a
+**The order** keeps `financial_status`, now computed from its payments when one changes:
+`paid` once paid amounts (less refunds) cover the total, `partially_paid` when some but
+not all, `authorized` when authorizations cover it and nothing is captured yet,
+`refunded` / `partially_refunded` from the refunds, `voided` when every payment was
+voided, else `pending`. Orders don't store payments; the batch that changes a
 payment updates the order in the same commit, so the two never disagree.
 
 ## 3. The port
@@ -171,7 +177,7 @@ fail.
 
 1. `hypha-payments`: methods, payments, statuses, the port and `ManualProvider`;
    repository traits and the contract (in-memory, then Postgres, migration).
-2. Orders: `financial_status` gains `voided`, set from payments; `order-actions`'s
+2. Orders: `financial_status` gains the full set (PA7), set from payments; `order-actions`'s
    cancel voids.
 3. Checkout: cart's `payment_method`, the checks, the payment in the batch, the next
    action.
@@ -181,13 +187,17 @@ fail.
 
 ## 9. Open decisions
 
-**Q1. Methods per market or per channel?** Recommended: markets (who buys, in what
-currency), like Medusa's regions; a channel filter can come later if a marketplace
-channel needs its own.
+**Q1. Methods per market or per channel?** *Decided:* both. A method lists the markets
+and the sales channels it's offered in (empty = all), so cash on delivery can be for
+Serbia only and kept off the agentic channel.
 
-**Q2. Must a store have a method?** Recommended: no (PA6): without an enabled method,
-checkout works as today. The setup guide asks for one, and the admin's order page says
-"no payment method" for such orders.
+**Q2. Must a store have a method?** Shopify and Medusa v2 both refuse checkout without
+one (Shopify: the store "can't accept payments right now"; Medusa: no payment session),
+except for orders that total zero, which need no payment. Both make a manual method the
+easy default (Medusa's `pp_system_default`). PA6 proposed the opposite (checkout as
+today without a method). Recommended now: follow them: `payment_method_required`
+unless the total is zero; the setup guide and the seed add cash on delivery and bank
+transfer, and the admin warns while no method is enabled.
 
 **Q3. Partial payments by hand?** Recommended: not now: "mark as paid" covers the whole
 total. A deposit flow (pay 30% now) needs `partially_paid` and amounts per payment,
