@@ -30,7 +30,7 @@ migrations. But each is filled by editing core: a host file, a `hypha-config` en
 match in `hypha-http`. Nothing says what a spore *is*, so the first one (Stripe, which
 blocks card payments) would be wired by hand across a dozen files, and the second would
 copy that. This note fixes the shape once, before Stripe and Meilisearch are written,
-so they are "a crate, a feature, a line in `hypha.json`".
+so they are "a repository, a line in `hypha.json`".
 
 ## Decisions
 
@@ -45,7 +45,7 @@ so they are "a crate, a feature, a line in `hypha.json`".
 | SP7 | **Outbound HTTP through one core port**, `hypha_core::http::HttpClient` (method, URL, headers, body → status, headers, body), provided by each host for operator-configured services (no public-address rule: these aren't merchant URLs). `hypha-mail-resend`'s and `hypha-store-s3`'s local ports fold into it |
 | SP8 | **Scopes become open**: `Scope` gains a spore case written `spore_<name>:<action>` (`spore_stripe:read`), declared by the spore; a stored scope this binary doesn't know (a spore removed) is ignored when a role loads, not an error. The owner role holds every declared scope. *Hard to reverse (stored scopes, the API's scope strings)* |
 | SP9 | **Storage**: a spore that needs tables ships a `MigrationSet` (module `spore_<name>`, tables `spore_<name>_*`, no foreign keys into core), run by the native `setup` like core's; its repositories use a **spore storage kit** that `hypha-store-postgres` exports (the request's `Queries`, column helpers, error mapping, a boxed `SporeWrite` slot in `PgBatch` so its rows commit with core aggregates). Built when the first spore needs a table; neither reference spore does (§7, §8) |
-| SP10 | **Admin UI: schema forms first.** The admin lists installed spores under Settings → Spores, each with its merchant settings form (from SP5's schema) and status; a payment method of a spore's provider shows that provider's per-method form. Custom spore UI (zones, pages) waits for a spore that needs it. The storefront gets a spore's client parts as an npm package next to the crate (`spores/stripe/storefront`), imported when the feature is on |
+| SP10 | **Admin UI: schema forms first.** The admin lists installed spores under Settings → Spores, each with its merchant settings form (from SP5's schema) and status; a payment method of a spore's provider shows that provider's per-method form. Custom spore UI (zones, pages) waits for a spore that needs it. The storefront gets a spore's client parts as an npm package in its repository (`storefront/`), installed by the staged build |
 | SP11 | **Spores and apps stay separate tiers** (0002 §1): apps are external, any language, untrusted, reached over signed webhooks and calls; spores are trusted Rust inside the process, for what must run in a request or transaction or needs a port (payments, search engines, tax, senders). A capability may get both (an app payment provider over synchronous webhooks, like Saleor's, later) |
 
 ## 1. What others do
@@ -231,7 +231,7 @@ never renamed.
 - `POST /storefront/orders/{id}/payment` (0027 §4): start again after a failed or
   abandoned attempt, with the order's access token.
 
-**The spore** (`spores/stripe`):
+**The spore** (`hypha-spore-stripe`):
 - Merchant settings: secret key, publishable key, webhook signing secret (secrets
   sealed), capture mode (`automatic` | `manual`), statement descriptor. A method of
   provider `spore_stripe` per payment method set (cards, wallets via Payment Element).
@@ -245,7 +245,7 @@ never renamed.
 - `capture` / `refund` (admin buttons on the payment card, with `orders:write`).
 - No tables: the payment holds Stripe's intent ID as its `reference`; the inbox
   dedupes events.
-- Storefront: `spores/stripe/storefront` (Stripe.js Payment Element) mounted in the
+- Storefront: the repository's `storefront/` package (Stripe.js Payment Element) mounted in the
   payment step when the chosen method's provider is `spore_stripe`, confirming with the
   client secret and returning to the confirmation page, which polls the payment status.
 - Tests: the provider against a fake `HttpClient` with recorded Stripe responses; the
@@ -262,7 +262,7 @@ spore (`Engine::Postgres(&PgStore)`, `Engine::Meilisearch(&MeiliEngine)`), picke
 held to `reference::search`'s meaning; where Meilisearch ranks differently, the
 contract's ranking checks say what is allowed to differ (Q6).
 
-**The spore** (`spores/meilisearch`):
+**The spore** (`hypha-spore-meilisearch`):
 - Operator settings: URL, index prefix; admin key as `HYPHA_SPORE_MEILISEARCH_KEY`.
 - `SearchIndex` over `HttpClient`: `replace` → documents API (per market index, filters
   and facets configured from the search settings), `search` → the search API, mapping
