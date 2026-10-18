@@ -8,6 +8,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { MultiSelector } from "@astryxdesign/core/MultiSelector";
 import { Selector } from "@astryxdesign/core/Selector";
 import { type TableColumn, pixel } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
@@ -19,8 +20,9 @@ import { useState, useTransition } from "react";
 import { DateTime } from "@/components/date-time";
 import { ClientResourceTable, byText } from "@/components/resource-table/resource-table";
 
-import { inviteStaff } from "./actions";
+import { inviteStaff, saveRole, updateStaff } from "./actions";
 
+type Scope = AdminSchemas["Scope"];
 type User = AdminSchemas["UserResponse"];
 type Invite = AdminSchemas["InviteResponse"];
 type Role = AdminSchemas["RoleResponse"];
@@ -41,16 +43,24 @@ export function Staff({
   invites,
   roles,
   canInvite,
+  myId,
+  myScopes,
   now,
 }: {
   users: User[];
   invites: Invite[];
   roles: Role[];
+  /** Whether the signed-in member holds `users:write`: inviting, managing, roles. */
   canInvite: boolean;
+  myId: string;
+  /** What the signed-in member may give away to a role. */
+  myScopes: Scope[];
   /** When the page was read (ms since the epoch), for which invites have expired. */
   now: number;
 }) {
   const [inviting, setInviting] = useState<{ email: string; role?: string }>();
+  const [managing, setManaging] = useState<User>();
+  const [editingRole, setEditingRole] = useState<Role | "new">();
   const roleName = new Map(roles.map((r) => [r.id, r.name]));
   const memberCount = new Map<string, number>();
   for (const u of users) memberCount.set(u.role, (memberCount.get(u.role) ?? 0) + 1);
@@ -75,6 +85,20 @@ export function Staff({
       header: "Since",
       width: pixel(190),
       renderCell: (u) => <DateTime value={u.created_at} short />,
+    },
+    {
+      key: "actions",
+      header: "",
+      width: pixel(110),
+      align: "end",
+      renderCell: (u) =>
+        u.id === myId ? (
+          <Button label="You" size="sm" variant="ghost" href="/account" />
+        ) : (
+          canInvite && (
+            <Button label="Manage" size="sm" variant="ghost" onClick={() => setManaging(u)} />
+          )
+        ),
     },
   ];
   const inviteColumns: TableColumn<Invite>[] = [
@@ -130,6 +154,17 @@ export function Staff({
       align: "end",
       renderCell: (r) => memberCount.get(r.id) ?? 0,
     },
+    {
+      key: "actions",
+      header: "",
+      width: pixel(90),
+      align: "end",
+      renderCell: (r) =>
+        canInvite &&
+        !r.owner && (
+          <Button label="Edit" size="sm" variant="ghost" onClick={() => setEditingRole(r)} />
+        ),
+    },
   ];
 
   return (
@@ -178,10 +213,15 @@ export function Staff({
       </VStack>
 
       <VStack gap={4}>
-        <Heading
-          title="Roles"
-          description="What each role may do. Nobody grants a scope they don't hold themselves."
-        />
+        <HStack hAlign="between" vAlign="start" gap={3}>
+          <Heading
+            title="Roles"
+            description="What each role may do. Nobody grants a scope they don't hold themselves."
+          />
+          {canInvite && (
+            <Button label="New role" variant="secondary" onClick={() => setEditingRole("new")} />
+          )}
+        </HStack>
         <ClientResourceTable<Role>
           rows={roles}
           columns={roleColumns}
@@ -194,7 +234,139 @@ export function Staff({
       {inviting && (
         <InviteDialog roles={roles} initial={inviting} onClose={() => setInviting(undefined)} />
       )}
+      {managing && (
+        <ManageDialog user={managing} roles={roles} onClose={() => setManaging(undefined)} />
+      )}
+      {editingRole && (
+        <RoleDialog
+          role={editingRole === "new" ? undefined : editingRole}
+          scopes={myScopes}
+          onClose={() => setEditingRole(undefined)}
+        />
+      )}
     </VStack>
+  );
+}
+
+/** A staff member's role, and whether they may sign in. */
+function ManageDialog({
+  user,
+  roles,
+  onClose,
+}: {
+  user: User;
+  roles: Role[];
+  onClose: () => void;
+}) {
+  const [role, setRole] = useState(user.role);
+  const [error, setError] = useState<string>();
+  const [isPending, startTransition] = useTransition();
+  const isActive = user.status === "active";
+  const onOpenChange = (isOpen: boolean) => !isOpen && onClose();
+
+  const apply = (change: Parameters<typeof updateStaff>[1]) =>
+    startTransition(async () => {
+      const result = await updateStaff(user.id, change);
+      if (result.error) setError(result.error);
+      else onClose();
+    });
+
+  return (
+    <Dialog isOpen onOpenChange={onOpenChange} width={480} purpose="form">
+      <DialogHeader title={user.name} subtitle={user.email} onOpenChange={onOpenChange} />
+      <VStack gap={4} padding={4}>
+        {error && <Banner status="error" title={error} />}
+        <Selector
+          label="Role"
+          options={roles.map((r) => ({ value: r.id, label: r.name }))}
+          value={role}
+          onChange={setRole}
+        />
+        <HStack gap={2} hAlign="between" wrap="wrap">
+          <Button
+            label={isActive ? "Disable" : "Enable"}
+            variant={isActive ? "destructive" : "secondary"}
+            isDisabled={isPending}
+            onClick={() => apply({ status: isActive ? "disabled" : "active" })}
+          />
+          <HStack gap={2}>
+            <Button label="Cancel" variant="ghost" onClick={onClose} />
+            <Button
+              label="Save role"
+              variant="primary"
+              isLoading={isPending}
+              isDisabled={role === user.role}
+              onClick={() => apply({ role })}
+            />
+          </HStack>
+        </HStack>
+        <Text type="supporting" color="secondary">
+          Disabling signs them out everywhere and stops them signing in, until enabled again.
+        </Text>
+      </VStack>
+    </Dialog>
+  );
+}
+
+/** A new role, or an existing one's name and scopes. */
+function RoleDialog({
+  role,
+  scopes,
+  onClose,
+}: {
+  role?: Role;
+  scopes: Scope[];
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(role?.name ?? "");
+  const [chosen, setChosen] = useState<string[]>(role?.scopes ?? []);
+  const [error, setError] = useState<string>();
+  const [isPending, startTransition] = useTransition();
+  const onOpenChange = (isOpen: boolean) => !isOpen && onClose();
+  // Scopes a role already has stay listed, so editing never drops one silently.
+  const options = [...new Set<string>([...scopes, ...(role?.scopes ?? [])])];
+  const isComplete = name.trim() !== "" && chosen.length > 0;
+
+  const save = () =>
+    startTransition(async () => {
+      const picked = options.filter((s): s is Scope => chosen.includes(s));
+      const result = await saveRole(role?.id, { name: name.trim(), scopes: picked });
+      if (result.error) setError(result.error);
+      else onClose();
+    });
+
+  return (
+    <Dialog isOpen onOpenChange={onOpenChange} width={520} purpose="form">
+      <DialogHeader
+        title={role ? `Edit ${role.name}` : "New role"}
+        subtitle="Staff with the role may do what its scopes allow. A write scope includes its read."
+        onOpenChange={onOpenChange}
+      />
+      <VStack gap={4} padding={4}>
+        {error && <Banner status="error" title={error} />}
+        <TextInput label="Name" placeholder="Fulfilment" value={name} onChange={setName} />
+        <MultiSelector
+          label="Scopes"
+          description="Only scopes your own role has."
+          options={options.map((s) => ({ value: s, label: s }))}
+          value={chosen}
+          onChange={setChosen}
+          hasSearch
+          hasSelectAll
+          triggerDisplay="count"
+        />
+        <HStack gap={2} hAlign="end">
+          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button
+            label={role ? "Save role" : "Create role"}
+            variant="primary"
+            isLoading={isPending}
+            isDisabled={!isComplete}
+            onClick={save}
+          />
+        </HStack>
+      </VStack>
+    </Dialog>
   );
 }
 
