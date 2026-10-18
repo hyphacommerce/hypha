@@ -7,7 +7,7 @@
 //! Each test gets a schema of its own, named after it, so they run in parallel and a
 //! rerun starts clean.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::{
     Router,
@@ -29,12 +29,14 @@ use std::net::SocketAddr;
 
 use axum::extract::connect_info::MockConnectInfo;
 
-use hypha_http::host::AfterWrites;
+use hypha_http::host::{AfterWrites, HostMail};
+use hypha_http::mail::{MailHost, MailParts};
 use hypha_http::media::Media;
-use hypha_http::state::{AppState, HostEnv, HostParts, Storage};
+use hypha_http::state::{AppState, HostEnv, HostParts};
+use hypha_notifications::{OutgoingEmail, Sent};
 
 use crate::platform::{Background, UuidV7Ids};
-use crate::storage::PgStorage;
+use crate::storage::{PgDatabase, PgStorage};
 
 const OWNER_EMAIL: &str = "owner@example.com";
 const OWNER_PASSWORD: &str = "owner password";
@@ -46,6 +48,21 @@ struct TestApp {
     admin_key: String,
     /// The app's state, for checks the API doesn't expose (the outbox).
     state: hypha_http::state::SharedState<PgStorage>,
+    /// What the app's email sender was given (a recording sender, never SMTP, whatever
+    /// `.cargo/config.toml` says), oldest first.
+    emails: Arc<Mutex<Vec<OutgoingEmail>>>,
+}
+
+/// A sender that keeps what it's given, named `test` (so test sends aren't refused as
+/// they are with the `log` sender).
+fn recording_sender() -> (HostMail, Arc<Mutex<Vec<OutgoingEmail>>>) {
+    let emails: Arc<Mutex<Vec<OutgoingEmail>>> = Arc::default();
+    let kept = Arc::clone(&emails);
+    let sender = HostMail::new("test", move |email| {
+        kept.lock().unwrap().push(email);
+        Box::pin(async { Ok(Sent::default()) })
+    });
+    (sender, emails)
 }
 
 /// The app without file storage: most routes don't need it, so their tests don't need
@@ -138,7 +155,17 @@ async fn test_media(config: &Config) -> Media {
 
 /// Everything from `config`, the one source of settings, as in `serve`; file storage
 /// with `media`.
-async fn app_from(mut config: Config, media: bool) -> TestApp {
+async fn app_from(config: Config, media: bool) -> TestApp {
+    app_sending_with(config, media, None).await
+}
+
+/// The app with the `log` sender, as a host without an email provider.
+async fn app_logging_emails() -> TestApp {
+    app_sending_with(Config::defaults(), false, Some(HostMail::log())).await
+}
+
+/// `app_from`, sending with `sender` (`None`: the recording one, `TestApp::emails`).
+async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMail>) -> TestApp {
     // Warnings and errors (a 500's cause is only logged) go to the test's output, which
     // a failing test prints: in CI, that's the only place to see them.
     let _ = tracing_subscriber::fmt()
@@ -148,11 +175,11 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
     // The tests' rate apps and webhook receivers listen on localhost.
     config.allow_private_callbacks = true;
     let media = match media {
-        true => Some(test_media(&config).await),
+        true => Some(Arc::new(test_media(&config).await)),
         false => None,
     };
     let runtime = crate::platform::runtime();
-    let storage = PgStorage::connect(
+    let db = PgDatabase::connect(
         &fresh_schema().await,
         &config.database,
         runtime.clock.clone(),
@@ -161,14 +188,27 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
     .unwrap();
     let store = ensure_single_store(
         &Ctx::system(),
-        &storage.directory().await.unwrap(),
+        &db.store().await.unwrap(),
         &UuidV7Ids,
         "Test",
     )
     .await
     .unwrap();
-    let env = HostEnv::new([7; 32], None, config.auth, runtime.clone())
-        .with_hasher(Argon2id::new(8, 1, 1));
+    let env =
+        HostEnv::new([7; 32], config.auth, runtime.clone()).with_hasher(Argon2id::new(8, 1, 1));
+    let (recording, emails) = recording_sender();
+    let mail = Arc::new(MailHost::new(
+        MailParts {
+            sender: sender.unwrap_or(recording),
+            from: config.email.from.clone(),
+            store: store.id(),
+            admin_url: config.server.admin_url.clone(),
+            order_tokens: env.order_tokens().clone(),
+            media: media.clone(),
+        },
+        &runtime,
+    ));
+    let storage = PgStorage::new(db, crate::handlers::handlers(Arc::clone(&mail)));
     let client = crate::calls::client(hypha_http::outbound::OutboundPolicy {
         allow_private: config.allow_private_callbacks,
     })
@@ -182,6 +222,7 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
         after_writes: AfterWrites::none(),
         calls: crate::calls::host_calls(client),
         media,
+        mail,
         publishable_keys: Default::default(),
     };
     let state = Arc::new(AppState::new(
@@ -224,6 +265,7 @@ async fn app_from(mut config: Config, media: bool) -> TestApp {
             .layer(MockConnectInfo(SocketAddr::from(PEER))),
         admin_key: token.expose().to_string(),
         state,
+        emails,
     }
 }
 
@@ -1315,13 +1357,7 @@ async fn a_storefront_reads_its_order_with_the_access_token_only() {
     let app = app().await;
     let (order, _, _) = placed_order_for_three_mugs(&app).await;
     let pk = publishable(&app).await;
-    let token = hypha_http::state::HostEnv::new(
-        [7; 32],
-        None,
-        hypha_auth::AuthSettings::default(),
-        crate::platform::runtime(),
-    )
-    .order_token(order.parse().unwrap());
+    let token = hypha_http::state::OrderTokens::new([7; 32]).token(order.parse().unwrap());
     let uri = format!("/storefront/orders/{order}?token={token}");
     let (status, read) = send_as(&app, &pk, "GET", &uri, None).await;
     assert_eq!(status, StatusCode::OK, "{read}");
@@ -5051,4 +5087,426 @@ async fn payment_methods_are_checked_and_changed_over_http() {
     let (status, json) = send_as(&app, &pk, "PUT", &put, Some(&choose(&first))).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["payment_method"], first.as_str());
+}
+
+// ---------- notifications (design note 0028) ----------
+
+#[tokio::test]
+async fn notification_settings_round_trip_as_merge_patch() {
+    let app = app().await;
+    let (status, settings) = send(&app, "GET", "/admin/notification-settings", None).await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["accent"], "#111827");
+    assert_eq!(settings["sender"], "test");
+    assert_eq!(settings["from"], hypha_config::EmailConfig::LOG_FROM);
+    assert_eq!(settings["updated_at"], Value::Null, "the defaults, unsaved");
+
+    let body = json!({
+        "accent": "#ff6600",
+        "footer": "Ilica 1, Zagreb",
+        "sender_name": "Kafa",
+        "reply_to": "help@example.hr",
+        "staff_recipients": ["orders@example.hr"],
+        "order_url": "https://shop.example.hr/order/{order}/confirmed?token={token}",
+    })
+    .to_string();
+    let (status, saved) = send(&app, "PATCH", "/admin/notification-settings", Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["accent"], "#ff6600");
+    assert_eq!(saved["staff_recipients"], json!(["orders@example.hr"]));
+    assert!(saved["updated_at"].is_string());
+
+    let (status, cleared) = send(
+        &app,
+        "PATCH",
+        "/admin/notification-settings",
+        Some(r#"{"footer":null}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(cleared["footer"], Value::Null);
+    assert_eq!(cleared["sender_name"], "Kafa", "absent keeps");
+    let (_, read) = send(&app, "GET", "/admin/notification-settings", None).await;
+    assert_eq!(read, cleared);
+
+    for (body, status_code, error) in [
+        (
+            r#"{"accent":null}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_body",
+        ),
+        (
+            r#"{"accent":"red"}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_colour",
+        ),
+        (
+            r#"{"order_url":"https://x.example/"}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_order_url",
+        ),
+        (
+            r#"{"logo":"asset_00000000000000000000000000000063"}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "asset_not_found",
+        ),
+    ] {
+        let (status, json) = send(&app, "PATCH", "/admin/notification-settings", Some(body)).await;
+        assert_eq!((status, code(&json)), (status_code, error), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn templates_are_listed_read_saved_checked_and_reverted() {
+    let app = app().await;
+    let (status, list) = send(&app, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let items = list["items"].as_array().unwrap();
+    assert_eq!(items.len(), 8);
+    assert_eq!(
+        (
+            &items[0]["key"],
+            &items[0]["audience"],
+            &items[0]["can_disable"]
+        ),
+        (&json!("layout"), &Value::Null, &json!(false))
+    );
+
+    let path = "/admin/notification-templates/order_confirmation";
+    let (status, template) = send(&app, "GET", path, None).await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    assert_eq!(
+        (
+            &template["customized"],
+            &template["enabled"],
+            &template["audience"]
+        ),
+        (&json!(false), &json!(true), &json!("buyer"))
+    );
+    assert!(template["html"].as_str().unwrap().contains("extends"));
+    assert!(
+        template["variables"]["order"]["number"].is_string(),
+        "{template}"
+    );
+    assert_eq!(
+        template["variables"]["shop"]["name"], "Test",
+        "the store's branding"
+    );
+
+    let (status, json) = send(&app, "GET", "/admin/notification-templates/nope", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "template_unknown")
+    );
+
+    // A variable the context lacks: refused with where it is.
+    let broken = json!({
+        "subject": "Order {{ order.number }}",
+        "html": "{% extends \"layout\" %}{% block content %}\n<p>{{ order.nope }}</p>{% endblock %}",
+    })
+    .to_string();
+    let (status, json) = send(&app, "PUT", path, Some(&broken)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "template_invalid"),
+        "{json}"
+    );
+    assert_eq!(json["details"]["part"], "html");
+    assert_eq!(json["details"]["line"], 2);
+    assert!(json["details"]["message"].is_string());
+    let (status, json) = send(&app, "POST", &format!("{path}/preview"), Some(&broken)).await;
+    assert_eq!(
+        (status, code(&json), &json["details"]["line"]),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "template_invalid",
+            &json!(2)
+        )
+    );
+    // One that doesn't parse at all.
+    let (status, json) = send(
+        &app,
+        "PUT",
+        path,
+        Some(r#"{"subject":"{% if %}","html":"<p>hi</p>"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json), &json["details"]["part"]),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "template_invalid",
+            &json!("subject")
+        )
+    );
+
+    let mut good = json!({
+        "subject": "Thanks, {{ customer.name }}: {{ order.number }}",
+        "html": "{% extends \"layout\" %}{% block content %}<a href=\"{{ order.url }}\">{{ order.number }}</a>{% endblock %}",
+    });
+    let unsaved = good.to_string();
+    good["enabled"] = json!(false);
+    let (status, saved) = send(&app, "PUT", path, Some(&good.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        (&saved["customized"], &saved["enabled"], &saved["text"]),
+        (&json!(true), &json!(false), &Value::Null)
+    );
+    let (status, preview) = send(&app, "POST", &format!("{path}/preview"), Some(&unsaved)).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert!(
+        preview["subject"].as_str().unwrap().starts_with("Thanks, "),
+        "{preview}"
+    );
+    assert!(preview["text"].is_string());
+
+    let (status, json) = send(
+        &app,
+        "PUT",
+        "/admin/notification-templates/staff_invite",
+        Some(r#"{"subject":"Hi","html":"{% extends \"layout\" %}","enabled":false}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "template_required")
+    );
+
+    let (status, reverted) = send(&app, "DELETE", path, None).await;
+    assert_eq!(status, StatusCode::OK, "{reverted}");
+    assert_eq!(
+        (&reverted["customized"], &reverted["enabled"]),
+        (&json!(false), &json!(false)),
+        "reverting keeps whether it's on"
+    );
+    assert_eq!(reverted["html"], template["html"]);
+    let (_, list) = send(&app, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(list["items"][1]["enabled"], false);
+}
+
+#[tokio::test]
+async fn a_test_send_goes_to_the_calling_staff_member_only() {
+    let app = app().await;
+    let path = "/admin/notification-templates/order_shipped/test";
+    let (status, json) = send(&app, "POST", path, Some(r#"{"subject":"x","html":"y"}"#)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::FORBIDDEN, "staff_only"),
+        "a key has no address"
+    );
+    let session = owner_session(&app).await;
+    let (_, template) = send(
+        &app,
+        "GET",
+        "/admin/notification-templates/order_shipped",
+        None,
+    )
+    .await;
+    let body = json!({ "subject": template["subject"], "html": template["html"] }).to_string();
+    let (status, sent) = send_as(&app, &session, "POST", path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert_eq!(sent["sent_to"], OWNER_EMAIL);
+    let emails = app.emails.lock().unwrap().clone();
+    assert_eq!(emails.len(), 1);
+    assert_eq!(emails[0].to.as_str(), OWNER_EMAIL);
+    assert!(
+        emails[0].subject.starts_with("[Test] "),
+        "{}",
+        emails[0].subject
+    );
+
+    let logging = app_logging_emails().await;
+    let session = owner_session(&logging).await;
+    let (status, json) = send_as(&logging, &session, "POST", path, Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "email_not_configured")
+    );
+}
+
+#[tokio::test]
+async fn a_placed_order_is_emailed_listed_and_resent() {
+    let app = app().await;
+    let body = json!({ "staff_recipients": ["orders@example.hr"] }).to_string();
+    let (status, _) = send(&app, "PATCH", "/admin/notification-settings", Some(&body)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (order, _, _) = placed_order_for_three_mugs(&app).await;
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+
+    let (status, page) = send(
+        &app,
+        "GET",
+        &format!("/admin/notifications?order={order}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let items = page["items"].as_array().unwrap();
+    let templates: Vec<&Value> = items.iter().map(|n| &n["template"]).collect();
+    assert_eq!(templates.len(), 2, "{page}");
+    assert!(templates.contains(&&json!("order_confirmation")));
+    assert!(templates.contains(&&json!("staff_new_order")));
+    for n in items {
+        assert_eq!(
+            (&n["status"], &n["provider"], &n["order_id"]),
+            (&json!("sent"), &json!("test"), &json!(order))
+        );
+        assert!(n["event_id"].is_string() && n["sent_at"].is_string(), "{n}");
+    }
+    let to: Vec<String> = app
+        .emails
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| e.to.to_string())
+        .collect();
+    assert_eq!(to.len(), 2);
+    assert!(
+        to.contains(&"ana@example.hr".to_string()) && to.contains(&"orders@example.hr".to_string())
+    );
+
+    let (_, staff) = send(
+        &app,
+        "GET",
+        "/admin/notifications?template=staff_new_order",
+        None,
+    )
+    .await;
+    assert_eq!(staff["items"].as_array().unwrap().len(), 1);
+    let (status, json) = send(&app, "GET", "/admin/notifications?template=nope", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+
+    let confirmation = items
+        .iter()
+        .find(|n| n["template"] == "order_confirmation")
+        .unwrap();
+    let id = confirmation["id"].as_str().unwrap();
+    let (status, one) = send(&app, "GET", &format!("/admin/notifications/{id}"), None).await;
+    assert_eq!((status, &one), (StatusCode::OK, confirmation));
+
+    let (status, resent) = send(
+        &app,
+        "POST",
+        &format!("/admin/notifications/{id}/resend"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{resent}");
+    assert_ne!(resent["id"], confirmation["id"]);
+    assert_eq!(
+        (&resent["status"], &resent["event_id"], &resent["to"]),
+        (&json!("sent"), &Value::Null, &json!("ana@example.hr"))
+    );
+    assert_eq!(app.emails.lock().unwrap().len(), 3);
+    let (_, page) = send(
+        &app,
+        "GET",
+        &format!("/admin/notifications?order={order}&limit=1"),
+        None,
+    )
+    .await;
+    assert_eq!(ids(&page), [resent["id"].as_str().unwrap()], "newest first");
+    assert_eq!(page["has_more"], true);
+
+    let unknown = "ntf_00000000000000000000000000000063";
+    for (method, uri) in [
+        ("GET", format!("/admin/notifications/{unknown}")),
+        ("POST", format!("/admin/notifications/{unknown}/resend")),
+    ] {
+        let (status, json) = send(&app, method, &uri, None).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::NOT_FOUND, "notification_not_found"),
+            "{method} {uri}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_invite_is_emailed_with_its_token_and_cant_be_resent() {
+    let app = app().await;
+    let (_, roles) = send(&app, "GET", "/admin/roles", None).await;
+    let owner_role = roles["items"][0]["id"].as_str().unwrap();
+    let invite = json!({ "email": "bob@example.com", "role": owner_role }).to_string();
+    let (status, json) = send(&app, "POST", "/admin/invites", Some(&invite)).await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+    let email = app.emails.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(email.to.as_str(), "bob@example.com");
+    let token = email
+        .text
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .find(|w| w.starts_with("hypha_inv_"))
+        .unwrap_or_else(|| panic!("no token in {}", email.text))
+        .to_string();
+    let accept = json!({ "token": token, "name": "Bob", "password": "bob password" }).to_string();
+    let (status, json) = send_with(&app, &[], "POST", "/admin/invites/accept", Some(&accept)).await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+
+    let (_, page) = send(
+        &app,
+        "GET",
+        "/admin/notifications?template=staff_invite",
+        None,
+    )
+    .await;
+    let record = &page["items"][0];
+    assert_eq!(
+        (&record["status"], &record["event_id"]),
+        (&json!("sent"), &Value::Null)
+    );
+    let (status, json) = send(
+        &app,
+        "POST",
+        &format!(
+            "/admin/notifications/{}/resend",
+            record["id"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "notification_not_resendable")
+    );
+}
+
+#[tokio::test]
+async fn notifications_need_their_scopes() {
+    let app = app().await;
+    let reader = key(
+        &app,
+        json!({ "kind": "secret", "name": "Reader", "scopes": ["notifications:read"] }),
+    )
+    .await;
+    let (status, _) = send_as(&app, &reader, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, json) = send_as(
+        &app,
+        &reader,
+        "PATCH",
+        "/admin/notification-settings",
+        Some(r##"{"accent":"#000000"}"##),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+    let body = r#"{"subject":"x","html":"y","order":"ord_00000000000000000000000000000063"}"#;
+    let (status, json) = send_as(
+        &app,
+        &reader,
+        "POST",
+        "/admin/notification-templates/order_confirmation/preview",
+        Some(body),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::FORBIDDEN, "missing_scope"),
+        "an order's data needs orders:read"
+    );
 }

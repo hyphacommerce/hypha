@@ -351,6 +351,6 @@ pub async fn invite_handler<S: Storage>(
         email: req.email,
         role: req.role,
     };
-    let invite = invite_user(&ctx, &ports, &state.env, input).await?;
+    let invite = invite_user(&ctx, &ports, &state.staff_env(&ports), input).await?;
     Ok((StatusCode::CREATED, Json(InviteResponse::new(&invite)?)))
 }

@@ -430,7 +430,7 @@ pub async fn checkout_handler<S: Storage>(
         StatusCode::CREATED,
         CheckoutResponse {
             placed: PlacedOrderResponse {
-                order: OrderResponse::with_images(order, &ports, state.media.as_ref()).await?,
+                order: OrderResponse::with_images(order, &ports, state.media.as_deref()).await?,
                 access_token: state.env.order_token(order.id()),
                 payment: placed
                     .value
@@ -476,7 +476,7 @@ pub async fn fetch_placed<S: Storage>(
     let order = get_placed_order(&ctx, ports.orders(), id).await?;
     let payment = hypha_payments::newest_payment(&ports, id).await?;
     Ok(Json(PlacedOrderResponse {
-        order: OrderResponse::with_images(&order, &ports, state.media.as_ref()).await?,
+        order: OrderResponse::with_images(&order, &ports, state.media.as_deref()).await?,
         access_token: token,
         payment: payment.as_ref().map(PlacedPaymentResponse::new),
     }))
@@ -743,7 +743,7 @@ pub async fn fetch<S: Storage>(
 ) -> Result<Json<AdminOrderResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let view = order_view(&ctx, &ports, id).await?;
-    let order = OrderResponse::with_images(&view.order, &ports, state.media.as_ref()).await?;
+    let order = OrderResponse::with_images(&view.order, &ports, state.media.as_deref()).await?;
     Ok(Json(AdminOrderResponse::new(&view, order)?))
 }
 
@@ -787,7 +787,7 @@ pub async fn cancel<S: Storage>(
     };
     let (done, _cancelled_now) = cancel_order(&ctx, &ports, &state.clock, input).await?;
     // A cancelled order has nothing left to ship.
-    let response = OrderResponse::with_images(&done.order, &ports, state.media.as_ref()).await?;
+    let response = OrderResponse::with_images(&done.order, &ports, state.media.as_deref()).await?;
     let view = OrderView {
         order: done.order,
         unfulfilled: Vec::new(),
@@ -836,6 +836,6 @@ pub async fn mark_paid<S: Storage>(
     };
     let done = record_paid(&ctx, &ports, &state.ids, &state.clock, input).await?;
     let view = view_of(&ports, done.order, done.payments).await?;
-    let order = OrderResponse::with_images(&view.order, &ports, state.media.as_ref()).await?;
+    let order = OrderResponse::with_images(&view.order, &ports, state.media.as_deref()).await?;
     Ok(Json(AdminOrderResponse::new(&view, order)?))
 }

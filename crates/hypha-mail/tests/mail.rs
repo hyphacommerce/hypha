@@ -813,9 +813,9 @@ fn the_logo_is_in_every_email() {
     let env = TestEnv::new();
     block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
     let html = &env.sender.sent()[0].html;
-    // Escaped as HTML escapes it (minijinja writes `/` as `&#x2f;`); clients decode it.
+    // As it is: only `& < > " '` are escaped (`render::format_value`).
     let url = format!(
-        "src=\"https:&#x2f;&#x2f;cdn.example.com&#x2f;{}\"",
+        "src=\"https://cdn.example.com/{}\"",
         AssetId::from_uuid(uuid(1))
     );
     assert!(html.contains(&url), "{html}");

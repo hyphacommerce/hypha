@@ -21,6 +21,7 @@ hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-users = { path = "../hypha-users" }
 hypha-notifications = { path = "../hypha-notifications" }
+hypha-mail = { path = "../hypha-mail" }
 hypha-mail-resend = { path = "../hypha-mail-resend" }
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }

@@ -28,6 +28,7 @@ hypha-store-postgres = { path = "../hypha-store-postgres" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-notifications = { path = "../hypha-notifications" }
+hypha-mail = { path = "../hypha-mail" }
 hypha-mail-resend = { path = "../hypha-mail-resend" }
 worker = { version = "=0.8.7", features = ["http", "axum", "tokio-postgres"] }
 axum = { version = "0.8", default-features = false, features = ["json", "query", "form", "matched-path", "original-uri"] }

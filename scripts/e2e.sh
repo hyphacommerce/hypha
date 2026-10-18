@@ -9,6 +9,11 @@
 # The script logs in as that owner (E2E_OWNER_EMAIL / E2E_OWNER_PASSWORD if you chose
 # others) and sends the session with every step; the "auth" section checks the rest.
 #
+# Emails (design note 0028): with the host sending over SMTP (`cargo run` does, to the
+# compose Mailpit) and Mailpit's API at MAILPIT_URL (default http://localhost:8025), the
+# script checks that the order and invite emails arrived, then deletes them. With
+# another sender (the log, as on Workers) or E2E_MAILPIT=0 it skips those checks.
+#
 # Every step asserts the HTTP status and, for errors, the stable error code.
 # Exits non-zero if any step fails. Uses only curl, grep, sed and head (no jq).
 # Restart the server between runs: product handles must be unique.
@@ -115,6 +120,39 @@ wait_for() {
     FAILED=$((FAILED + 1))
 }
 
+# The email checks (design note 0028): on when the host sends over SMTP and Mailpit is
+# reachable (decided after logging in), unless E2E_MAILPIT=0.
+MAILPIT="${MAILPIT_URL:-http://localhost:8025}"
+MAIL_CHECKS=0
+
+# mailpit_query TO SUBJECT: Mailpit's search for messages to TO with SUBJECT (words).
+mailpit_query() { echo "to:$1 subject:\"$2\""; }
+
+# mail NAME TO SUBJECT: waits up to 20 s for an email to TO whose subject has SUBJECT
+# in Mailpit, then deletes what matched. Skipped without the email checks.
+mail() {
+    local name=$1 query n found
+    ((MAIL_CHECKS)) || return 0
+    query=$(mailpit_query "$2" "$3")
+    for n in $(seq 1 20); do
+        found=$(curl -s -G "$MAILPIT/api/v1/search" --data-urlencode "query=$query")
+        if [[ $found == *'"messages_count":'[1-9]* ]]; then
+            echo "ok   $name"
+            curl -s -o /dev/null -X DELETE -G "$MAILPIT/api/v1/search" --data-urlencode "query=$query"
+            return
+        fi
+        sleep 1
+    done
+    echo "FAIL $name: no email to $2 with \"$3\" in Mailpit within 20 s: $found"
+    FAILED=$((FAILED + 1))
+}
+
+# forget_mail TO: deletes what an earlier run left in Mailpit for TO.
+forget_mail() {
+    ((MAIL_CHECKS)) || return 0
+    curl -s -o /dev/null -X DELETE -G "$MAILPIT/api/v1/search" --data-urlencode "query=to:$1"
+}
+
 # The top-level "id" of the last response (always the first "id" key).
 id() { sed -E 's/^[^"]*"id":"([^"]+)".*/\1/' <<<"$BODY"; }
 # The first address id of the last customer response.
@@ -155,6 +193,17 @@ if [[ $BODY != *'"status":"authenticated"'* ]]; then
 fi
 SESSION=$(token)
 AUTH=(-H "authorization: Bearer $SESSION")
+step "the email settings (design note 0028)" 200 - "$BASE/admin/notification-settings"
+SENDER=$(sed -E 's/.*"sender":"([a-z]+)".*/\1/' <<<"$BODY")
+if [[ ${E2E_MAILPIT:-1} != 0 && $SENDER == smtp ]] && curl -sf -o /dev/null "$MAILPIT/api/v1/info"; then
+    MAIL_CHECKS=1
+    echo "     emails: checked in Mailpit at $MAILPIT"
+else
+    echo "     emails: not checked (sender $SENDER; E2E_MAILPIT=${E2E_MAILPIT:-1})"
+fi
+for to in guest@example.hr support@example.com "$OWNER_EMAIL"; do
+    forget_mail "$to"
+done
 step "the Online Store channel (design note 0020)" 200 - "$BASE/admin/channels"
 contains "every store starts with one" '"name":"Online Store","kind":"online_store"'
 ONLINE_STORE=$(sed -E 's/.*"items":\[\{"id":"([^"]+)".*/\1/' <<<"$BODY")
@@ -976,6 +1025,61 @@ step "fulfilments of an unknown order" 404 order_not_found \
 step "stop tracking lamps again" 200 - -X PATCH "$BASE/admin/inventory-items/$LAMP_ITEM" -H "$JSON" \
     -d '{"tracked":false}'
 
+echo "## notifications (design note 0028)"
+# The shop order's buyer was told at each step the fulfilment section asked for.
+mail "the guest's order confirmation arrived" guest@example.hr "confirmed"
+mail "and that it shipped" guest@example.hr "on its way"
+mail "and the new tracking" guest@example.hr "Tracking updated"
+mail "and the cancellation" guest@example.hr "cancelled"
+NOTIFICATIONS="$BASE/admin/notifications?order=$SHOP_ORDER"
+wait_for "the order's emails are recorded" "$NOTIFICATIONS" '"template":"order_cancelled"'
+contains "the confirmation too" '"template":"order_confirmation"'
+contains "sent" '"status":"sent"'
+step "the order's confirmation" 200 - "$NOTIFICATIONS&template=order_confirmation"
+CONFIRMATION=$(sed -E 's/.*"id":"(ntf_[0-9a-f]+)".*/\1/' <<<"$BODY")
+step "resend it" 201 - -X POST "$BASE/admin/notifications/$CONFIRMATION/resend"
+contains "a new message, about no event" '"event_id":null'
+mail "the resent confirmation arrived" guest@example.hr "confirmed"
+step "one message" 200 - "$BASE/admin/notifications/$CONFIRMATION"
+step "an unknown message" 404 notification_not_found \
+    "$BASE/admin/notifications/ntf_00000000000000000000000000000063"
+step "an unknown filter" 400 invalid_query "$BASE/admin/notifications?template=nope"
+step "the templates" 200 - "$BASE/admin/notification-templates"
+contains "the layout first" '"items":[{"key":"layout"'
+step "one template" 200 - "$BASE/admin/notification-templates/order_shipped"
+contains "with its variables" '"variables":{'
+step "an unknown template" 404 template_unknown "$BASE/admin/notification-templates/nope"
+TEMPLATES="$BASE/admin/notification-templates/order_shipped"
+BROKEN='{"subject":"Shipped","html":"{% extends \"layout\" %}{% block content %}{{ order.nope }}{% endblock %}"}'
+GOOD='{"subject":"Shipped: {{ order.number }}","html":"{% extends \"layout\" %}{% block content %}<p>{{ order.number }}</p>{% endblock %}"}'
+step "save a template that doesn't render" 422 template_invalid -X PUT "$TEMPLATES" -H "$JSON" -d "$BROKEN"
+contains "saying where" '"part":"html"'
+step "preview it" 422 template_invalid -X POST "$TEMPLATES/preview" -H "$JSON" -d "$BROKEN"
+step "preview one that does" 200 - -X POST "$TEMPLATES/preview" -H "$JSON" -d "$GOOD"
+contains "rendered against the sample" '"subject":"Shipped: '
+step "save it" 200 - -X PUT "$TEMPLATES" -H "$JSON" -d "$GOOD"
+contains "customized" '"customized":true'
+step "turn off an invite" 422 template_required -X PUT \
+    "$BASE/admin/notification-templates/staff_invite" -H "$JSON" \
+    -d '{"subject":"Hi","html":"{% extends \"layout\" %}","enabled":false}'
+step "revert it" 200 - -X DELETE "$TEMPLATES"
+contains "the default again" '"customized":false'
+if [[ $SENDER == log ]]; then
+    step "a test send with the log sender" 409 email_not_configured -X POST "$TEMPLATES/test" \
+        -H "$JSON" -d "$GOOD"
+else
+    step "a test send" 200 - -X POST "$TEMPLATES/test" -H "$JSON" -d "$GOOD"
+    contains "to the owner" "\"sent_to\":\"$OWNER_EMAIL\""
+    mail "the test arrived" "$OWNER_EMAIL" "Test"
+fi
+step "branding" 200 - -X PATCH "$BASE/admin/notification-settings" -H "$JSON" \
+    -d '{"accent":"#0a7d3b","footer":"Ilica 1, Zagreb","sender_name":"Hypha e2e"}'
+contains "saved" '"accent":"#0a7d3b"'
+step "clear the footer" 200 - -X PATCH "$BASE/admin/notification-settings" -H "$JSON" -d '{"footer":null}'
+contains "cleared" '"footer":null'
+step "a colour that isn't one" 422 invalid_colour -X PATCH "$BASE/admin/notification-settings" \
+    -H "$JSON" -d '{"accent":"green"}'
+
 echo "## apps and webhooks (design note 0016)"
 # A webhook receiver when python3 is here (it is in CI): the host must run with
 # HYPHA_ALLOW_PRIVATE_CALLBACKS=true to reach it. Without one, the delivery fails and the
@@ -1234,6 +1338,7 @@ step "the owner role can't change" 409 owner_role_fixed -X PATCH \
     -H "$JSON" -d '{"name":"Boss"}'
 step "invite someone" 201 - -X POST "$BASE/admin/invites" -H "$JSON" \
     -d "{\"email\":\"support@example.com\",\"role\":\"$ROLE\"}"
+mail "the invite arrived" support@example.com "invited"
 step "staff can't be invited" 409 user_exists -X POST "$BASE/admin/invites" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"role\":\"$ROLE\"}"
 step "pending invites (design note 0024)" 200 - "$BASE/admin/invites"

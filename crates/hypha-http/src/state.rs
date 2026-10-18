@@ -6,9 +6,9 @@ use hypha_auth::{
 };
 use hypha_checkout::CheckoutPorts;
 use hypha_core::HasBatch;
-use hypha_core::{Clock, IdGenerator, Notifier, NotifyError, OrderId, Random, StoreId, Timestamp};
+use hypha_core::{Clock, IdGenerator, OrderId, Random, StoreId, Timestamp};
 use hypha_stores::StoreRepo;
-use hypha_users::{StaffEmail, StaffPorts};
+use hypha_users::StaffPorts;
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -42,18 +42,77 @@ pub struct Runtime {
     pub offload: Offload,
 }
 
-/// The non-storage ports auth commands use (`hypha_auth::AuthEnv`) and the staff
-/// emails' `Notifier`, for real.
+/// Orders' access tokens (design note 0024, §7): `hypha_ord_` and a hex HMAC-SHA256 of
+/// the order's ID under a key derived from `HYPHA_SECRET_KEY`. Shared by `HostEnv` (the
+/// routes) and `MailHost` (the links in emails), so both make the same tokens.
+#[derive(Clone)]
+pub struct OrderTokens {
+    key: [u8; 32],
+}
+
+impl OrderTokens {
+    /// From `HYPHA_SECRET_KEY`: the same key gives the same tokens across restarts.
+    pub fn new(secret_key: [u8; 32]) -> Self {
+        use sha2::Digest;
+        let key = sha2::Sha256::new()
+            .chain_update(b"hypha order access token\0")
+            .chain_update(secret_key)
+            .finalize()
+            .into();
+        Self { key }
+    }
+
+    /// The token that lets a buyer read the order they placed. Derived rather than
+    /// stored, so a replayed checkout answers with the same token, and nothing needs
+    /// migrating; a new `HYPHA_SECRET_KEY` makes old tokens stop working.
+    pub fn token(&self, order: OrderId) -> String {
+        use hmac::Mac;
+        let hex: String = self
+            .mac(order)
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        format!("{ORDER_TOKEN_PREFIX}{hex}")
+    }
+
+    /// Whether `token` is `order`'s access token, compared in constant time.
+    pub fn verify(&self, order: OrderId, token: &str) -> bool {
+        use hmac::Mac;
+        let Some(hex) = token.strip_prefix(ORDER_TOKEN_PREFIX) else {
+            return false;
+        };
+        let bytes: Option<Vec<u8>> = (0..hex.len())
+            .step_by(2)
+            .map(|i| {
+                hex.get(i..i + 2)
+                    .and_then(|b| u8::from_str_radix(b, 16).ok())
+            })
+            .collect();
+        match bytes {
+            Some(bytes) if hex.len() == 64 => self.mac(order).verify_slice(&bytes).is_ok(),
+            _ => false,
+        }
+    }
+
+    fn mac(&self, order: OrderId) -> hmac::Hmac<sha2::Sha256> {
+        use hmac::{KeyInit, Mac};
+        let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(&self.key)
+            .unwrap_or_else(|_| unreachable!("HMAC accepts every key length"));
+        mac.update(order.to_string().as_bytes());
+        mac
+    }
+}
+
+/// The non-storage ports auth commands use (`hypha_auth::AuthEnv`), for real. The staff
+/// flows' emails go through `crate::mail::StaffEnv`, which adds the `Notifier`.
 pub struct HostEnv {
     runtime: Runtime,
     secret_box: XChaChaBox,
-    /// Signs orders' access tokens (`order_token`): derived from `HYPHA_SECRET_KEY`, so
-    /// the same key gives the same tokens across restarts.
-    order_key: [u8; 32],
+    /// Signs orders' access tokens (`order_token`).
+    order_tokens: OrderTokens,
     hasher: Argon2id,
-    /// Where the admin panel lives, for links in emails. Unset: the email shows the
-    /// bare token.
-    admin_url: Option<String>,
     /// Session, second-factor, reset and invite lifetimes (`[auth]`, design note 0017).
     auth: AuthSettings,
 }
@@ -61,25 +120,12 @@ pub struct HostEnv {
 impl HostEnv {
     /// `secret_key` seals TOTP secrets (`HYPHA_SECRET_KEY`); losing it makes every
     /// authenticator unreadable, so it must stay the same across restarts.
-    /// `admin_url` is without a trailing `/`, as `hypha-config` gives it.
-    pub fn new(
-        secret_key: [u8; 32],
-        admin_url: Option<String>,
-        auth: AuthSettings,
-        runtime: Runtime,
-    ) -> Self {
-        use sha2::Digest;
-        let order_key = sha2::Sha256::new()
-            .chain_update(b"hypha order access token\0")
-            .chain_update(secret_key)
-            .finalize()
-            .into();
+    pub fn new(secret_key: [u8; 32], auth: AuthSettings, runtime: Runtime) -> Self {
         Self {
             runtime,
             secret_box: XChaChaBox::new(secret_key),
-            order_key,
+            order_tokens: OrderTokens::new(secret_key),
             hasher: Argon2id::OWASP,
-            admin_url,
             auth,
         }
     }
@@ -95,54 +141,19 @@ impl HostEnv {
         self
     }
 
-    /// The token that lets a buyer read the order they placed (design note 0024, §7):
-    /// `hypha_ord_` and a hex HMAC-SHA256 of the order's ID. Derived rather than stored,
-    /// so a replayed checkout answers with the same token, and nothing needs migrating;
-    /// a new `HYPHA_SECRET_KEY` makes old tokens stop working.
+    /// What signs orders' access tokens, for the emails' links (`MailHost`).
+    pub fn order_tokens(&self) -> &OrderTokens {
+        &self.order_tokens
+    }
+
+    /// The token that lets a buyer read the order they placed (`OrderTokens::token`).
     pub fn order_token(&self, order: OrderId) -> String {
-        use hmac::Mac;
-        let hex: String = self
-            .order_mac(order)
-            .finalize()
-            .into_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        format!("{ORDER_TOKEN_PREFIX}{hex}")
+        self.order_tokens.token(order)
     }
 
-    /// Whether `token` is `order`'s access token, compared in constant time.
+    /// Whether `token` is `order`'s access token (`OrderTokens::verify`).
     pub fn is_order_token(&self, order: OrderId, token: &str) -> bool {
-        use hmac::Mac;
-        let Some(hex) = token.strip_prefix(ORDER_TOKEN_PREFIX) else {
-            return false;
-        };
-        let bytes: Option<Vec<u8>> = (0..hex.len())
-            .step_by(2)
-            .map(|i| {
-                hex.get(i..i + 2)
-                    .and_then(|b| u8::from_str_radix(b, 16).ok())
-            })
-            .collect();
-        match bytes {
-            Some(bytes) if hex.len() == 64 => self.order_mac(order).verify_slice(&bytes).is_ok(),
-            _ => false,
-        }
-    }
-
-    fn order_mac(&self, order: OrderId) -> hmac::Hmac<sha2::Sha256> {
-        use hmac::{KeyInit, Mac};
-        let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(&self.order_key)
-            .unwrap_or_else(|_| unreachable!("HMAC accepts every key length"));
-        mac.update(order.to_string().as_bytes());
-        mac
-    }
-
-    fn link(&self, path: &str, token: &str) -> String {
-        match &self.admin_url {
-            Some(base) => format!("{base}{path}?token={token}"),
-            None => format!("token {token} (set HYPHA_ADMIN_URL for a link)"),
-        }
+        self.order_tokens.verify(order, token)
     }
 }
 
@@ -211,28 +222,6 @@ impl SecretBox for HostEnv {
     }
 }
 
-/// No email provider yet (design note 0008, A10): the rendered email goes to the log.
-/// That puts invite and reset tokens in the log, which is fine for development only;
-/// startup warns about it.
-impl Notifier<StaffEmail> for HostEnv {
-    async fn notify(&self, message: StaffEmail) -> Result<(), NotifyError> {
-        let (to, subject, body) = match &message {
-            StaffEmail::Invite { to, token, .. } => (
-                to,
-                "You're invited to run the store",
-                self.link("/invite", token),
-            ),
-            StaffEmail::PasswordReset { to, token, .. } => (
-                to,
-                "Reset your password",
-                self.link("/reset-password", token),
-            ),
-        };
-        tracing::info!(%to, subject, body, "email (logged, not sent)");
-        Ok(())
-    }
-}
-
 /// One deployment's state: its storage, the host's capabilities (`host.rs`) and the
 /// settings, shared by every request.
 pub struct AppState<S> {
@@ -255,8 +244,12 @@ pub struct AppState<S> {
     /// authenticator app). A rename shows there after a restart.
     pub store_name: String,
     /// File storage and asset URLs (design note 0013); `None` without
-    /// `media.s3.endpoint`, and the asset routes then answer 503.
-    pub media: Option<crate::media::Media>,
+    /// `media.s3.endpoint`, and the asset routes then answer 503. Shared with `mail`,
+    /// for the logo's URL.
+    pub media: Option<Arc<crate::media::Media>>,
+    /// Sending email (design note 0028): the sender, the from address and the links,
+    /// the same one the host's `Mailer` handler holds.
+    pub mail: Arc<crate::mail::MailHost>,
     /// Calls to merchant-configured URLs (rate apps, webhooks; design notes 0015, 0016),
     /// signed by `outbound::prepare`; each call sets its own timeout.
     pub calls: HostCalls,
@@ -274,7 +267,11 @@ pub struct HostParts {
     pub limiter: HostLimiter,
     pub after_writes: AfterWrites,
     pub calls: HostCalls,
-    pub media: Option<crate::media::Media>,
+    /// Shared with `mail` (`MailHost::new`).
+    pub media: Option<Arc<crate::media::Media>>,
+    /// What the host's `Mailer` holds too (it builds its handlers with it, before the
+    /// state).
+    pub mail: Arc<crate::mail::MailHost>,
     /// Publishable keys authenticated recently (`key_cache.rs`): one for the process
     /// natively, one per isolate on Workers.
     pub publishable_keys: crate::key_cache::KeyCache,
@@ -304,6 +301,7 @@ impl<S> AppState<S> {
             store,
             store_name,
             media: host.media,
+            mail: host.mail,
             calls: host.calls,
             config,
         }
@@ -353,6 +351,14 @@ impl<S> AppState<S> {
 }
 
 impl<S> AppState<S> {
+    /// The staff flows' environment for a request's `ports` (`crate::mail::StaffEnv`):
+    /// the auth ports, and emails sent with the store's templates and recorded there.
+    pub fn staff_env<'a, P>(&'a self, ports: &'a P) -> crate::mail::StaffEnv<'a, P> {
+        crate::mail::StaffEnv::new(&self.env, &self.mail, ports)
+    }
+}
+
+impl<S> AppState<S> {
     /// The webhook sender the dispatcher delivers to apps with (design note 0016).
     pub fn webhooks(&self) -> crate::webhooks::HostWebhooks<'_> {
         crate::webhooks::HostWebhooks {
@@ -394,13 +400,15 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_channels::HasChannels
         + hypha_categories::HasCategories
         + hypha_auth::ChannelDirectory
+        + hypha_mail::MailPorts
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts
                        + hypha_markets::StageFixedPrices
                        + hypha_tax::StageTaxAssignments
                        + hypha_channels::StagePublications
-                       + hypha_categories::StageCategories,
+                       + hypha_categories::StageCategories
+                       + hypha_notifications::StageNotificationSettings,
         >
     where
         Self: 'a;
@@ -451,7 +459,8 @@ pub trait Storage: Send + Sync + 'static {
     /// will be held by the storage and picked by configuration here.
     fn search<'p>(&'p self, ports: &'p Self::Ports<'_>) -> Self::Search<'p>;
 
-    /// The handlers (`Self::Handlers`); usually `&HANDLERS`, a `const`.
+    /// The handlers (`Self::Handlers`), which the host built at startup (some hold its
+    /// environment: the `Mailer` its `MailHost`) and keeps in its storage.
     fn handlers(&self) -> &Self::Handlers;
 
     /// The payment providers (`Self::Payments`); usually `&PAYMENT_PROVIDERS`, a
@@ -507,13 +516,13 @@ mod tests {
 
     #[test]
     fn an_order_token_opens_its_own_order_only() {
-        let env = HostEnv::new([7; 32], None, AuthSettings::default(), runtime());
+        let env = HostEnv::new([7; 32], AuthSettings::default(), runtime());
         let token = env.order_token(order(1));
         assert!(token.starts_with("hypha_ord_") && token.len() == "hypha_ord_".len() + 64);
         assert_eq!(env.order_token(order(1)), token, "the same every time");
         assert!(env.is_order_token(order(1), &token));
         assert!(!env.is_order_token(order(2), &token), "another order's");
-        let other_key = HostEnv::new([8; 32], None, AuthSettings::default(), runtime());
+        let other_key = HostEnv::new([8; 32], AuthSettings::default(), runtime());
         assert!(
             !other_key.is_order_token(order(1), &token),
             "under another secret key"

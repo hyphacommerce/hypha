@@ -15,6 +15,7 @@ pub mod extract;
 pub mod host;
 pub mod jobs;
 pub mod key_cache;
+pub mod mail;
 pub mod media;
 pub mod outbound;
 pub mod patch;

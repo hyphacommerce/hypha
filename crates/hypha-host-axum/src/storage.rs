@@ -85,13 +85,15 @@ fn postgres_tls() -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
     Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
 }
 
-pub struct PgStorage {
+/// The connection pool, migrated: what `PgStorage` serves from, and what startup reads
+/// the store from before the handlers (which need it) exist.
+pub struct PgDatabase {
     pool: deadpool::managed::Pool<PgManager>,
     /// What the stores stamp writes with (design note 0016, Q3).
     clock: HostClock,
 }
 
-impl PgStorage {
+impl PgDatabase {
     /// Opens a connection pool (`[database]`) and applies pending migrations.
     /// `clock` stamps what the stores write (design note 0016, Q3).
     pub async fn connect(
@@ -139,10 +141,28 @@ impl PgStorage {
     }
 }
 
-impl PgStorage {
-    async fn store(&self) -> Result<PgStore<PooledClient>, ApiError> {
+impl PgDatabase {
+    /// A store on a pooled connection.
+    pub async fn store(&self) -> Result<PgStore<PooledClient>, ApiError> {
         let conn = self.pool.get().await.map_err(ApiError::internal)?;
         Ok(PgStore::new(PooledClient(conn), self.clock.shared()))
+    }
+}
+
+pub struct PgStorage {
+    db: PgDatabase,
+    /// Built at startup (`handlers::handlers`): the `Mailer` holds the host's mail
+    /// environment.
+    handlers: crate::handlers::Handlers,
+}
+
+impl PgStorage {
+    pub fn new(db: PgDatabase, handlers: crate::handlers::Handlers) -> Self {
+        Self { db, handlers }
+    }
+
+    async fn store(&self) -> Result<PgStore<PooledClient>, ApiError> {
+        self.db.store().await
     }
 }
 
@@ -174,7 +194,7 @@ impl Storage for PgStorage {
     }
 
     fn handlers(&self) -> &crate::handlers::Handlers {
-        &crate::handlers::HANDLERS
+        &self.handlers
     }
 
     fn payment_providers(&self) -> &crate::payments::PaymentProviders {

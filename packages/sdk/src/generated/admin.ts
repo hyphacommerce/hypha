@@ -1033,6 +1033,173 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/notification-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The store's email settings: branding, the sender's name, reply-to, staff recipients
+         *     and the order link; the defaults until first saved.
+         */
+        get: operations["admin.notifications.fetch_settings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Changes the email settings. */
+        patch: operations["admin.notifications.update_settings"];
+        trace?: never;
+    };
+    "/admin/notification-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every template, customized or default. */
+        get: operations["admin.notifications.list_templates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/notification-templates/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One template: its sources in effect, whether it's customized and on, and its
+         *     variables.
+         */
+        get: operations["admin.notifications.fetch_template"];
+        /**
+         * Saves a template. The sources must parse and render against the template's sample
+         *     in the layout in effect (`template_invalid` with `details: {part, line, message}`);
+         *     saving the layout renders every message in it. Turning off one that can't be is
+         *     `template_required`.
+         */
+        put: operations["admin.notifications.save_template"];
+        post?: never;
+        /** Goes back to the default's sources, keeping whether it's on. */
+        delete: operations["admin.notifications.revert_template"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/notification-templates/{key}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Renders unsaved sources as they'd be sent: against the sample with the store's
+         *     branding, or a real `order`. The layout previews as an order confirmation in it.
+         *     `template_invalid` with `details: {part, line, message}` when they don't render.
+         */
+        post: operations["admin.notifications.preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/notification-templates/{key}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sends the preview to the calling staff member's own address, its subject marked
+         *     `[Test]`; not recorded. A staff session only (`staff_only` for API keys); refused
+         *     with the `log` sender (`email_not_configured`).
+         */
+        post: operations["admin.notifications.send_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The emails sent, newest first: an order's (`order`), or every one of a template or
+         *     status.
+         */
+        get: operations["admin.notifications.list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/notifications/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One email's record. */
+        get: operations["admin.notifications.fetch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/notifications/{id}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sends an order's email again ("the customer didn't get it"), rendered from the order
+         *     as it is now with the templates in effect, even if the template is off: a new record
+         *     (201), `sent`, or `failed` when the provider refused it. Invites and resets can't be
+         *     resent (`notification_not_resendable`: their token isn't kept). A provider that
+         *     can't be reached is `502 email_unavailable` (the new record says `failed`).
+         */
+        post: operations["admin.notifications.resend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/orders": {
         parameters: {
             query?: never;
@@ -3000,6 +3167,132 @@ export interface components {
             currency: string;
         };
         /**
+         * @description Who a template's messages go to.
+         *
+         *     Known values: `buyer`, `staff`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        NotificationAudience: string;
+        /**
+         * @description A NotificationId: `ntf_` and 32 hex digits.
+         * @example ntf_0190f1a2b3c47d8e9f00112233445566
+         */
+        NotificationId: string;
+        /** @description A page of a list, newest first (design note 0012). */
+        NotificationPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["NotificationResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /**
+         * @description One email's record. Bodies aren't kept: `POST /admin/notification-templates/{key}/
+         *     preview` with the `order` shows what it looks like now.
+         */
+        NotificationResponse: {
+            /**
+             * Format: int32
+             * @description Sends tried so far.
+             */
+            attempts: number;
+            created_at: string;
+            /** @description Why the last attempt failed, or why it was skipped. */
+            error?: string | null;
+            event_id?: components["schemas"]["EventId"] | null;
+            id: components["schemas"]["NotificationId"];
+            order_id?: components["schemas"]["OrderId"] | null;
+            /** @description The sender that handled it: `log`, `smtp`, `resend`. */
+            provider?: string | null;
+            /** @description The provider's ID for it, when it gives one. */
+            provider_message_id?: string | null;
+            sent_at?: string | null;
+            status: components["schemas"]["NotificationStatus"];
+            subject: string;
+            template: components["schemas"]["NotificationTemplateKey"];
+            to: string;
+            updated_at: string;
+        };
+        NotificationSettingsResponse: {
+            /** @description `#rrggbb`: buttons and links. */
+            accent: string;
+            /** @description Plain text under every email (the address, legal lines). */
+            footer?: string | null;
+            /** @description The operator's from address (`email.from`); `sender_name` goes with it. */
+            from: string;
+            logo?: components["schemas"]["AssetId"] | null;
+            /** @description The logo's URL as emails use it; `null` without one or without media storage. */
+            logo_url?: string | null;
+            /**
+             * @description The buyer's order page, with `{order}` (and optionally `{token}`, the order's
+             *     access token) for links in emails; `null`: emails link to no order.
+             */
+            order_url?: string | null;
+            reply_to?: string | null;
+            /**
+             * @description The configured sender: `log` (emails are written to the log, not sent; test
+             *     sends are refused), `smtp` or `resend`.
+             */
+            sender: string;
+            /** @description The name emails come from; `null`: the store's name. */
+            sender_name?: string | null;
+            /** @description Who gets `staff_new_order`. */
+            staff_recipients: string[];
+            /** @description `null` until the settings are first saved (the defaults). */
+            updated_at?: string | null;
+        };
+        /**
+         * @description Where a message is.
+         *
+         *     Known values: `sending`, `sent`, `failed`, `skipped`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        NotificationStatus: string;
+        /**
+         * @description One of the store's templates. The names are stable.
+         *
+         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        NotificationTemplateKey: string;
+        NotificationTemplateList: {
+            /** @description Every template: the layout, the buyer's, then the staff's. */
+            items: components["schemas"]["NotificationTemplateSummary"][];
+        };
+        /** @description A template with the sources in effect and the variables it can use. */
+        NotificationTemplateResponse: components["schemas"]["NotificationTemplateSummary"] & {
+            /**
+             * @description Jinja HTML. A message starts with `{% extends "layout" %}` and fills
+             *     `{% block preheader %}` and `{% block content %}`.
+             */
+            html: string;
+            /** @description Jinja; empty for the layout. The merchant's when `customized`, else the default. */
+            subject: string;
+            /** @description Jinja plain text; `null`: the text is made from the HTML. */
+            text?: string | null;
+            /**
+             * @description The template's context, filled with a made-up order and the store's branding:
+             *     every variable it can print (money as `{amount, currency, formatted}`, times as
+             *     `{iso, formatted}`), for the editor's variable list.
+             */
+            variables: Record<string, never>;
+        };
+        /** @description A template in the list. */
+        NotificationTemplateSummary: {
+            audience?: components["schemas"]["NotificationAudience"] | null;
+            /** @description The layout, invites and password resets can't be turned off. */
+            can_disable: boolean;
+            /** @description Whether the sources are the merchant's (else the build's default). */
+            customized: boolean;
+            /**
+             * @description Whether its messages are sent. A template that's off records each message as
+             *     `skipped`.
+             */
+            enabled: boolean;
+            key: components["schemas"]["NotificationTemplateKey"];
+            problem?: components["schemas"]["TemplateProblemResponse"] | null;
+        };
+        /**
          * @description A OptionId: `opt_` and 32 hex digits.
          * @example opt_0190f1a2b3c47d8e9f00112233445566
          */
@@ -3260,6 +3553,14 @@ export interface components {
             postal_code?: string | null;
             province?: string | null;
         };
+        /** @description Unsaved sources to render. */
+        PreviewNotificationRequest: {
+            html: string;
+            order?: components["schemas"]["OrderId"] | null;
+            /** @description Empty for the layout. */
+            subject?: string;
+            text?: string | null;
+        };
         /**
          * @description A PriceListId: `pl_` and 32 hex digits.
          * @example pl_0190f1a2b3c47d8e9f00112233445566
@@ -3435,6 +3736,11 @@ export interface components {
         RemoveFixedPricesRequest: {
             variants: components["schemas"]["VariantId"][];
         };
+        RenderedNotificationResponse: {
+            html: string;
+            subject: string;
+            text: string;
+        };
         ReorderOptionsRequest: {
             /** @description Every option of the zone, once, in the new order. */
             options: components["schemas"]["ShippingOptionId"][];
@@ -3457,6 +3763,16 @@ export interface components {
             /** @description The owner role has every scope, including future ones. */
             owner: boolean;
             scopes: components["schemas"]["Scope"][];
+        };
+        /** @description A template's sources (all of them: this replaces the stored ones). */
+        SaveNotificationTemplateRequest: {
+            /** @description Absent keeps whether it's on. */
+            enabled?: boolean;
+            html: string;
+            /** @description Jinja, one line; required for a message, absent (or empty) for the layout. */
+            subject?: string;
+            /** @description Absent or `null`: the text is made from the HTML. */
+            text?: string | null;
         };
         /**
          * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
@@ -3752,6 +4068,25 @@ export interface components {
             default_rate_ppm: components["schemas"]["TaxRate"];
             id: components["schemas"]["TaxRegionId"];
         };
+        /**
+         * @description Which source of a template a problem is in; `layout` when rendering found it in the
+         *     shared frame.
+         *
+         *     Known values: `subject`, `html`, `text`, `layout`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        TemplatePart: string;
+        /** @description What the template engine reported, as `template_invalid`'s `details` has it too. */
+        TemplateProblemResponse: {
+            /** @description Counted from 1, when known. */
+            line?: number | null;
+            message: string;
+            part: components["schemas"]["TemplatePart"];
+        };
+        TestNotificationResponse: {
+            /** @description The calling staff member's address, the only one a test goes to. */
+            sent_to: string;
+        };
         TierDto: {
             /**
              * Format: int64
@@ -3868,6 +4203,26 @@ export interface components {
             /** @description 1 to 255 characters, trimmed. */
             name?: string;
             prices_include_tax?: boolean;
+        };
+        /**
+         * @description JSON Merge Patch: absent keeps, `null` clears (`accent` and `staff_recipients` take
+         *     no `null`).
+         */
+        UpdateNotificationSettingsRequest: {
+            /** @description `#rrggbb`. */
+            accent?: string;
+            /** @description At most 1000 characters. */
+            footer?: string | null;
+            logo?: components["schemas"]["AssetId"] | null;
+            /**
+             * @description An http(s) URL with `{order}`, and optionally `{token}`, e.g.
+             *     `https://shop.example.com/order/{order}/confirmed?token={token}`.
+             */
+            order_url?: string | null;
+            reply_to?: string | null;
+            sender_name?: string | null;
+            /** @description At most 10 addresses; the whole list. */
+            staff_recipients?: string[];
         };
         /** @description An option's fields (JSON Merge Patch; `estimate` and `tax_class` take `null`). */
         UpdateOptionRequest: {
@@ -11107,6 +11462,884 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.fetch_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationSettingsResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.update_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNotificationSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationSettingsResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.list_templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationTemplateList"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.fetch_template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example order_confirmation */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationTemplateResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.save_template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example order_confirmation */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveNotificationTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationTemplateResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.revert_template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example order_confirmation */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationTemplateResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example order_confirmation */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewNotificationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderedNotificationResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.send_test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example order_confirmation */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewNotificationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestNotificationResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.list": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /** @description Only this order's emails. */
+                order?: components["schemas"]["OrderId"];
+                /** @description Only messages of this template. */
+                template?: "layout" | "order_confirmation" | "order_shipped" | "order_tracking_updated" | "order_cancelled" | "staff_new_order" | "staff_invite" | "staff_password_reset";
+                /** @description Only messages in this status. */
+                status?: "sending" | "sent" | "failed" | "skipped";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NotificationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.notifications.resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NotificationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

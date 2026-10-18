@@ -10,7 +10,8 @@ use hypha_inventory::{HasLocations, ensure_default_location};
 use hypha_stores::ensure_single_store;
 use hypha_users::{HasUsers, NewOwner, UserRepo, bootstrap_owner};
 
-use hypha_http::host::HostLimiter;
+use hypha_http::host::{HostLimiter, HostMail};
+use hypha_http::mail::{MailHost, MailParts};
 use hypha_http::rate_limit::{RateLimiter, Rule};
 use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, SharedState, Storage};
 
@@ -29,7 +30,7 @@ mod storage;
 
 use limiter::MemoryRateLimiter;
 use platform::Background;
-use storage::PgStorage;
+use storage::{PgDatabase, PgStorage};
 
 /// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
 /// `openapi`) and exits (design note 0010, S6). Run it after changing routes or DTOs;
@@ -161,9 +162,8 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    // Built now so a missing key or password stops startup; the next stage (design note
-    // 0028) passes it to the state.
-    let _mail = match email::email_sender(&config.email, |name| std::env::var(name).ok()) {
+    // Built now so a missing key or password stops startup.
+    let mail_sender = match email::email_sender(&config.email, |name| std::env::var(name).ok()) {
         Ok(mail) => mail,
         Err(e) => {
             tracing::error!("{e}");
@@ -200,21 +200,16 @@ async fn main() {
         std::process::exit(1);
     };
     let runtime = platform::runtime();
-    let storage = match PgStorage::connect(&url, &config.database, runtime.clock.clone()).await {
-        Ok(storage) => storage,
+    let db = match PgDatabase::connect(&url, &config.database, runtime.clock.clone()).await {
+        Ok(db) => db,
         Err(e) => {
             tracing::error!("{e}");
             std::process::exit(1);
         }
     };
     tracing::info!("storage: Postgres (migrations applied)");
-    let env = HostEnv::new(
-        secret_key,
-        config.server.admin_url.clone(),
-        config.auth,
-        runtime.clone(),
-    );
-    let prepared = prepare(storage, env, runtime, config).await;
+    let env = HostEnv::new(secret_key, config.auth, runtime.clone());
+    let prepared = prepare(db, env, mail_sender, runtime, config).await;
     if setup_only {
         tracing::info!("setup done: migrations, the store, the owner, the location, search");
         return;
@@ -308,12 +303,19 @@ struct Prepared {
 
 /// Everything a start does before listening, which `setup` does alone: the store (one per
 /// deployment), the media bucket if asked for, the owner, the default location and the
-/// search index. Migrations ran in `PgStorage::connect`. Exits on failure.
-async fn prepare(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Config) -> Prepared {
+/// search index; then the handlers, whose `Mailer` needs the store. Migrations ran in
+/// `PgDatabase::connect`. Exits on failure.
+async fn prepare(
+    db: PgDatabase,
+    env: HostEnv,
+    mail_sender: HostMail,
+    runtime: Runtime,
+    config: Config,
+) -> Prepared {
     let ids = runtime.ids.clone();
     // One store per deployment (design note 0006, model A): created on first start.
     let name = std::env::var("HYPHA_STORE_NAME").unwrap_or_else(|_| "My store".to_string());
-    let store = match storage.directory().await {
+    let store = match db.store().await {
         Ok(directory) => ensure_single_store(&Ctx::system(), &directory, &ids, &name)
             .await
             .map_err(|e| e.to_string()),
@@ -334,7 +336,7 @@ async fn prepare(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Con
         platform::host_http,
         runtime.clock.clone(),
     ) {
-        Ok(media) => media,
+        Ok(media) => media.map(Arc::new),
         Err(e) => {
             tracing::error!("{e}");
             std::process::exit(1);
@@ -375,6 +377,18 @@ async fn prepare(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Con
             std::process::exit(1);
         }
     };
+    let mail = Arc::new(MailHost::new(
+        MailParts {
+            sender: mail_sender,
+            from: config.email.from.clone(),
+            store: store.id(),
+            admin_url: config.server.admin_url.clone(),
+            order_tokens: env.order_tokens().clone(),
+            media: media.clone(),
+        },
+        &runtime,
+    ));
+    let storage = PgStorage::new(db, handlers::handlers(Arc::clone(&mail)));
     let host = HostParts {
         env,
         background: background.host(),
@@ -382,6 +396,7 @@ async fn prepare(storage: PgStorage, env: HostEnv, runtime: Runtime, config: Con
         after_writes: wake.after_writes(),
         calls: calls::host_calls(client),
         media,
+        mail,
         publishable_keys: Default::default(),
     };
     let state = Arc::new(AppState::new(

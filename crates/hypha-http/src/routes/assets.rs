@@ -197,7 +197,7 @@ pub struct CreateAssetResponse {
 fn media<S>(state: &SharedState<S>) -> Result<&Media, ApiError> {
     state
         .media
-        .as_ref()
+        .as_deref()
         .ok_or_else(ApiError::media_not_configured)
 }
 

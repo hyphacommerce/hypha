@@ -288,7 +288,7 @@ async fn respond_view<S: Storage>(
         .remove(&id)
         .unwrap_or_default();
     Ok(Json(
-        ProductResponse::new(view, channels, categories, state.media.as_ref()).await?,
+        ProductResponse::new(view, channels, categories, state.media.as_deref()).await?,
     ))
 }
 
@@ -473,7 +473,7 @@ pub async fn list<S: Storage>(
         let of = channels.remove(&id).unwrap_or_default();
         let in_categories = categories.remove(&id).unwrap_or_default();
         items.push(
-            ProductSummaryResponse::new(view, of, in_categories, state.media.as_ref()).await?,
+            ProductSummaryResponse::new(view, of, in_categories, state.media.as_deref()).await?,
         );
     }
     Ok(Json(PageResponse::sorted(
@@ -666,7 +666,7 @@ where
         None => None,
     };
     Ok(Json(
-        StorefrontProductResponse::new(&view, offer.as_ref(), state.media.as_ref()).await?,
+        StorefrontProductResponse::new(&view, offer.as_ref(), state.media.as_deref()).await?,
     ))
 }
 

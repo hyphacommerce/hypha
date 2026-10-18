@@ -62,6 +62,8 @@ pub struct ApiErrorBody {
 ///   first
 /// - `asset_in_use`: `{"usages": [{"owner": {"kind", "id"}, "role"}], "has_more"}`, the first
 ///   25; `GET /admin/assets/{id}/usages` pages through all of them
+/// - `template_invalid`: `{"part", "line", "message"}`: `part` is `subject`, `html`,
+///   `text` or `layout`, `line` counts from 1 (`null` when unknown)
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
 /// a rate limit or locked second factor; 403
@@ -70,7 +72,9 @@ pub struct ApiErrorBody {
 /// 409 conflicts with existing data, the current state of the resource in the URL, or a
 /// concurrent change (`concurrent_modification`); 422 invalid input, including IDs in the
 /// body that don't exist; 500 storage failures (message hidden, logged instead); 502 an
-/// email that could not be handed over (the write before it stands).
+/// email that could not be handed over (the write before it stands): the staff flows'
+/// `notification_failed`, and for test sends and resends the provider's own words,
+/// `email_unavailable` (unreachable, try again) or `email_refused` (refused for good).
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
@@ -1036,6 +1040,102 @@ impl From<hypha_shipping::CommandError> for ApiError {
     }
 }
 
+/// A template problem's place and words (`template_invalid`'s `details`).
+fn template_problem(problem: Option<&hypha_notifications::TemplateProblem>) -> Option<Value> {
+    problem.map(|p| json!({ "part": p.part.as_str(), "line": p.line, "message": p.message }))
+}
+
+fn template_error_status(e: &hypha_notifications::TemplateError) -> StatusCode {
+    use hypha_notifications::TemplateError as T;
+    match e {
+        // Template keys only ever arrive in URLs (a list's filter is parsed as a query).
+        T::UnknownKey(_) => StatusCode::NOT_FOUND,
+        // Never allowed for that template, whatever its state: invalid input.
+        T::Invalid(_) | T::TooLarge { .. } | T::Missing(_) | T::NotInLayout(_) | T::Required(_) => {
+            StatusCode::UNPROCESSABLE_ENTITY
+        }
+    }
+}
+
+/// A message's record: a move its status doesn't allow is the state of the message;
+/// stored data that breaks its rules is the server's.
+fn notification_error_status(e: &hypha_notifications::NotificationError) -> Option<StatusCode> {
+    use hypha_notifications::NotificationError as N;
+    match e {
+        N::Text(_) => Some(StatusCode::UNPROCESSABLE_ENTITY),
+        N::InvalidTransition { .. } => Some(StatusCode::CONFLICT),
+        N::Inconsistent { .. } => None,
+    }
+}
+
+impl From<hypha_notifications::CommandError> for ApiError {
+    fn from(e: hypha_notifications::CommandError) -> Self {
+        use hypha_notifications::{CommandError as E, TemplateError as T};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            E::Template(t) => template_error_status(t),
+            E::Settings(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Notification(n) => match notification_error_status(n) {
+                Some(status) => status,
+                None => return Self::internal(e),
+            },
+            // Message IDs only ever arrive in URLs.
+            E::NotificationNotFound(_) => StatusCode::NOT_FOUND,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = match &e {
+            E::Template(T::Invalid(problem)) => template_problem(Some(problem)),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
+    }
+}
+
+impl From<hypha_mail::CommandError> for ApiError {
+    fn from(e: hypha_mail::CommandError) -> Self {
+        use hypha_mail::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // A test send by an API key: only a staff member has an address of their own.
+            E::StaffOnly => StatusCode::FORBIDDEN,
+            E::Template(t) => template_error_status(t),
+            E::Render(_) | E::Settings(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Notification(n) => match notification_error_status(n) {
+                Some(status) => status,
+                None => return Self::internal(e),
+            },
+            // The provider didn't take it (unreachable, or refused it for good): like
+            // the staff flows' `notification_failed`, the upstream's answer.
+            E::Send(_) => StatusCode::BAD_GATEWAY,
+            // A preview's order (and its fulfilments), and the logo, arrive in the body.
+            E::OrderNotFound(_)
+            | E::FulfillmentNotFound(_)
+            | E::NoFulfillment(_)
+            | E::AssetNotFound(_)
+            | E::AssetNotReady(_)
+            | E::AssetNotPublic(_)
+            | E::AssetKindNotAllowed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            // Message IDs only ever arrive in URLs.
+            E::NotificationNotFound(_) => StatusCode::NOT_FOUND,
+            // The deployment, not the request: a test send with the `log` sender.
+            E::EmailNotConfigured => StatusCode::CONFLICT,
+            // The message in the URL is an invite or a reset.
+            E::NotResendable { .. } => StatusCode::CONFLICT,
+            // A host set up wrongly, or an event the store wrote itself.
+            E::StoreNotFound(_) | E::BadEvent { .. } => return Self::internal(e),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = template_problem(e.problem());
+        Self::domain(status, e).with_details(details)
+    }
+}
+
 impl From<hypha_auth::CommandError> for ApiError {
     fn from(e: hypha_auth::CommandError) -> Self {
         use hypha_auth::{ApiKeyError as K, CommandError as E, IdentityError as I};
@@ -1291,6 +1391,49 @@ mod tests {
         );
         let e = ApiError::from(hypha_customers::CommandError::CustomerNotFound(id));
         assert_eq!(e.status, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn an_invalid_template_says_where_in_details() {
+        use hypha_notifications::{RenderError, TemplatePart, TemplateProblem};
+        let e = ApiError::from(hypha_mail::CommandError::Render(RenderError::Invalid(
+            TemplateProblem {
+                part: TemplatePart::Html,
+                line: Some(3),
+                message: "undefined value".to_string(),
+            },
+        )));
+        assert_eq!(
+            (e.status, e.code),
+            (StatusCode::UNPROCESSABLE_ENTITY, "template_invalid")
+        );
+        assert_eq!(
+            e.details,
+            Some(json!({ "part": "html", "line": 3, "message": "undefined value" }))
+        );
+    }
+
+    #[test]
+    fn an_email_the_provider_didnt_take_is_a_bad_gateway() {
+        use hypha_notifications::SendError;
+        for (error, code) in [
+            (
+                SendError::Transient("timeout".to_string()),
+                "email_unavailable",
+            ),
+            (
+                SendError::Permanent("no such domain".to_string()),
+                "email_refused",
+            ),
+        ] {
+            let e = ApiError::from(hypha_mail::CommandError::Send(error));
+            assert_eq!((e.status, e.code), (StatusCode::BAD_GATEWAY, code));
+        }
+        let e = ApiError::from(hypha_mail::CommandError::EmailNotConfigured);
+        assert_eq!(
+            (e.status, e.code),
+            (StatusCode::CONFLICT, "email_not_configured")
+        );
     }
 
     #[test]

@@ -307,7 +307,7 @@ pub async fn create<S: Storage>(
     let created = create_cart(&ctx, &ports, &state.ids, &state.clock, input).await?;
     Ok(idempotent_response(
         StatusCode::CREATED,
-        cart_response(&created.value, &ports, state.media.as_ref()).await?,
+        cart_response(&created.value, &ports, state.media.as_deref()).await?,
         created.replayed,
     ))
 }
@@ -328,7 +328,7 @@ pub async fn fetch<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let priced = hypha_checkout::view_cart(&ctx, &ports, id).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_ref()).await?,
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))
 }
 
@@ -358,7 +358,7 @@ pub async fn add<S: Storage>(
     let added = add_line(&ctx, &ports, &state.clock, input).await?;
     Ok(idempotent_response(
         StatusCode::OK,
-        cart_response(&added.value, &ports, state.media.as_ref()).await?,
+        cart_response(&added.value, &ports, state.media.as_deref()).await?,
         added.replayed,
     ))
 }
@@ -382,7 +382,7 @@ pub async fn set_email<S: Storage>(
     let req = body.parse()?;
     let priced = set_cart_email(&ctx, &ports, id, req.email).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_ref()).await?,
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))
 }
 
@@ -405,7 +405,7 @@ pub async fn set_customer<S: Storage>(
     let req = body.parse()?;
     let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_ref()).await?,
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))
 }
 
@@ -442,7 +442,7 @@ pub async fn set_quantity<S: Storage>(
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_ref()).await?,
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))
 }
 
@@ -464,7 +464,7 @@ pub async fn remove_line<S: Storage>(
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_ref()).await?,
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))
 }
 
@@ -496,7 +496,7 @@ pub async fn set_address<S: Storage>(
     let req = body.parse()?;
     let priced = set_shipping_address(&ctx, &ports, id, req.address.map(Into::into)).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_ref()).await?,
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))
 }
 
@@ -619,7 +619,7 @@ pub async fn select<S: Storage>(
     let rates = state.rates(&ports);
     let priced = select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_ref()).await?,
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))
 }
 
@@ -686,6 +686,6 @@ pub async fn set_payment_method<S: Storage>(
             // The method arrives in the body: invalid input, not the cart's state.
             .map_err(|e| ApiError::from(e).unprocessable_if("payment_method_unavailable"))?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_ref()).await?,
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))
 }

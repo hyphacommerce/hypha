@@ -18,19 +18,32 @@ pub struct WorkersStorage {
     env: Env,
     /// What the stores stamp writes with (design note 0016, Q3).
     clock: HostClock,
+    /// Built at setup (`handlers::handlers`): the `Mailer` holds the host's mail
+    /// environment.
+    handlers: crate::handlers::Handlers,
 }
 
 impl WorkersStorage {
-    pub fn new(env: Env, clock: HostClock) -> Self {
-        Self { env, clock }
+    pub fn new(env: Env, clock: HostClock, handlers: crate::handlers::Handlers) -> Self {
+        Self {
+            env,
+            clock,
+            handlers,
+        }
     }
 
     async fn store(&self) -> Result<PgStore<Client>, ApiError> {
-        let client = SendFuture::new(connect(&self.env))
-            .await
-            .map_err(ApiError::internal)?;
-        Ok(PgStore::new(client, self.clock.shared()))
+        store(&self.env, &self.clock).await
     }
+}
+
+/// A store on a new connection: what `WorkersStorage` serves from, and what setup reads
+/// the store from before the handlers (which need it) exist.
+pub async fn store(env: &Env, clock: &HostClock) -> Result<PgStore<Client>, ApiError> {
+    let client = SendFuture::new(connect(env))
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(PgStore::new(client, clock.shared()))
 }
 
 /// A connection over the binding's socket, in plain text: Hyperdrive ends TLS to the
@@ -89,7 +102,7 @@ impl Storage for WorkersStorage {
     }
 
     fn handlers(&self) -> &crate::handlers::Handlers {
-        &crate::handlers::HANDLERS
+        &self.handlers
     }
 
     fn payment_providers(&self) -> &crate::payments::PaymentProviders {

@@ -500,6 +500,7 @@ mod tests {
                 "get /admin/catalogs/{id}/products",
                 "get /admin/categories/{id}/products",
                 "get /admin/customers",
+                "get /admin/notifications",
                 "get /admin/orders",
                 "get /admin/price-lists/{id}/fixed-prices",
                 "get /admin/products"

@@ -164,7 +164,7 @@ async fn respond<S: Storage>(
         .await
         .map_err(|e| ApiError::from(e).not_found_if("category_not_found"))?;
     let image = category_image(ctx, ports, &view.category).await?;
-    CategoryResponse::new(&view, image, state.media.as_ref()).await
+    CategoryResponse::new(&view, image, state.media.as_deref()).await
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -577,7 +577,7 @@ pub async fn fetch_by_handle_storefront<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let view = get_shown_category_by_handle(&ctx, &ports, &handle).await?;
     let image = match category_image(&ctx, &ports, &view.category).await? {
-        Some(asset) => media_items(std::slice::from_ref(&asset), state.media.as_ref())
+        Some(asset) => media_items(std::slice::from_ref(&asset), state.media.as_deref())
             .await?
             .pop(),
         None => None,

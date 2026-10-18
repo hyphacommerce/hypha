@@ -52,8 +52,9 @@ mod worker_main {
     use hypha_core::{Clock, Timestamp};
     use hypha_http::host::{AfterWrites, BoxFuture, HostBackground, HostLimiter};
     use hypha_http::jobs::{self, Ran, Step};
+    use hypha_http::mail::{MailHost, MailParts};
     use hypha_http::rate_limit::{Decision, Rule};
-    use hypha_http::state::{AppState, HostEnv, HostParts, SharedState, Storage};
+    use hypha_http::state::{AppState, HostEnv, HostParts, SharedState};
     use hypha_stores::StoreRepo;
     use tower_service::Service;
     use worker::{
@@ -193,15 +194,11 @@ mod worker_main {
         )?;
         let secret_key = hypha_http::state::parse_secret_key(&secret_key)
             .map_err(|e| format!("HYPHA_SECRET_KEY: {e}"))?;
-        // Built now so a missing key (or `smtp`) stops setup; the next stage (design note
-        // 0028) passes it to the state.
-        let _mail = email::email_sender(&config.email, |name| env_string(&env, name))?;
+        // Built now so a missing key (or `smtp`) stops setup.
+        let mail_sender = email::email_sender(&config.email, |name| env_string(&env, name))?;
         let runtime = platform::runtime();
-        // An isolate's `env` is the same bindings for every event, so one is kept.
-        let storage = WorkersStorage::new(env.clone(), runtime.clock.clone());
         // One store per deployment (design note 0006, model A), made by setup.
-        let stores = storage
-            .directory()
+        let stores = crate::storage::store(&env, &runtime.clock)
             .await
             .map_err(|_| "cannot reach the database".to_string())?
             .list_all()
@@ -218,17 +215,31 @@ mod worker_main {
             |name| env_string(&env, name),
             || Ok(platform::host_http()),
             runtime.clock.clone(),
-        )?;
+        )?
+        .map(Arc::new);
+        let env_ports = HostEnv::new(secret_key, config.auth, runtime.clone());
+        let mail = Arc::new(MailHost::new(
+            MailParts {
+                sender: mail_sender,
+                from: config.email.from.clone(),
+                store: store.id(),
+                admin_url: config.server.admin_url.clone(),
+                order_tokens: env_ports.order_tokens().clone(),
+                media: media.clone(),
+            },
+            &runtime,
+        ));
+        // An isolate's `env` is the same bindings for every event, so one is kept.
+        let storage = WorkersStorage::new(
+            env.clone(),
+            runtime.clock.clone(),
+            crate::handlers::handlers(Arc::clone(&mail)),
+        );
         let limiter = Arc::new(IsolateLimiter::new(&config.rate_limits));
         let bindings = Arc::new(rate_limit_bindings(&env));
         let clock = runtime.clock.clone();
         let host = HostParts {
-            env: HostEnv::new(
-                secret_key,
-                config.server.admin_url.clone(),
-                config.auth,
-                runtime,
-            ),
+            env: env_ports,
             // Kept alive by the current event; outside one (never, in practice) it's
             // dropped and logged by the caller, like a full slot natively.
             background: HostBackground::new(|work| {
@@ -261,6 +272,7 @@ mod worker_main {
             }),
             calls: platform::host_calls(),
             media,
+            mail,
             publishable_keys: Default::default(),
         };
         let state = Arc::new(AppState::new(

@@ -225,7 +225,7 @@ pub async fn storefront_search<S: Storage>(
     wanted.dedup();
     let assets = ports.assets().get_many(&wanted).await?;
     let mut images: BTreeMap<AssetId, ProductMediaResponse> = BTreeMap::new();
-    for item in media_items(&assets, state.media.as_ref()).await? {
+    for item in media_items(&assets, state.media.as_deref()).await? {
         images.insert(item.asset_id(), item);
     }
 

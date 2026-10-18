@@ -2,7 +2,10 @@
 //! Workers. One `Environment` per render, holding the layout and the template's
 //! sources, so a template can only reach the layout and itself (no files, no I/O).
 
-use minijinja::{AutoEscape, Environment, ErrorKind, UndefinedBehavior, value::Value};
+use minijinja::{
+    AutoEscape, Environment, ErrorKind, Output, State, UndefinedBehavior, escape_formatter,
+    value::Value,
+};
 use serde::Serialize;
 
 use crate::{RenderError, TemplatePart, TemplateProblem, TemplateSources};
@@ -80,7 +83,44 @@ fn environment<'source>() -> Environment<'source> {
             AutoEscape::None
         }
     });
+    env.set_formatter(format_value);
     env
+}
+
+/// How a value is printed: in HTML, with `&`, `<`, `>`, `"` and `'` escaped, which is
+/// all an element's text or a quoted attribute needs. minijinja's own HTML escaping also
+/// writes `/` as `&#x2f;`, which leaves every link in an email reading
+/// `https:&#x2f;&#x2f;…` in its source (browsers decode it, but people read the source in
+/// the editor and the preview). Strings only: numbers, booleans, safe values (`|safe`,
+/// the blocks a template fills) and everything outside HTML print as minijinja would.
+fn format_value(
+    out: &mut Output,
+    state: &mut State,
+    value: &Value,
+) -> Result<(), minijinja::Error> {
+    match value.as_str() {
+        Some(text) if *state.auto_escape() == AutoEscape::Html && !value.is_safe() => {
+            write_html_escaped(out, text).map_err(minijinja::Error::from)
+        }
+        _ => escape_formatter(out, state, value),
+    }
+}
+
+/// `text` with the five characters HTML gives meaning to written as entities.
+fn write_html_escaped(out: &mut impl std::fmt::Write, text: &str) -> std::fmt::Result {
+    let mut rest = text;
+    while let Some(at) = rest.find(['&', '<', '>', '"', '\'']) {
+        out.write_str(&rest[..at])?;
+        out.write_str(match rest.as_bytes()[at] {
+            b'&' => "&amp;",
+            b'<' => "&lt;",
+            b'>' => "&gt;",
+            b'"' => "&quot;",
+            _ => "&#x27;",
+        })?;
+        rest = &rest[at + 1..];
+    }
+    out.write_str(rest)
 }
 
 /// The part an error happened in: the template minijinja names (a block of the HTML
@@ -537,6 +577,31 @@ mod tests {
         assert_eq!(rendered.subject, "Hi Tom & <Jerry>");
         assert_eq!(rendered.html, "<p>Tom &amp; &lt;Jerry&gt;</p>");
         assert_eq!(rendered.text, "Hi Tom & <Jerry>");
+    }
+
+    #[test]
+    fn a_url_in_an_attribute_keeps_its_slashes() {
+        let rendered = render(
+            LAYOUT,
+            &sources("Hi", r#"<a href="{{ url }}">{{ label }}</a>"#, None),
+            &json!({"url": "https://shop.example/orders/1?a=1&b='2'", "label": "\"Go\" / see"}),
+        )
+        .unwrap();
+        assert_eq!(
+            rendered.html,
+            r#"<a href="https://shop.example/orders/1?a=1&amp;b=&#x27;2&#x27;">&quot;Go&quot; / see</a>"#
+        );
+    }
+
+    #[test]
+    fn numbers_and_safe_values_print_as_they_are() {
+        let rendered = render(
+            LAYOUT,
+            &sources("Hi", "{{ n }} {{ yes }} {{ html|safe }}", None),
+            &json!({"n": 12, "yes": true, "html": "<b>/</b>"}),
+        )
+        .unwrap();
+        assert_eq!(rendered.html, "12 True <b>/</b>");
     }
 
     #[test]

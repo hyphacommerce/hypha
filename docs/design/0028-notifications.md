@@ -146,7 +146,7 @@ refuses `template_invalid` with the error's line (`details.line`).
    error) and returns `Err` so the dispatcher retries on its schedule. On a retry it
    finds the record: `sent` is done, otherwise it sends again. A permanent refusal
    (the provider rejects the address) is `failed` and not retried.
-2. **Direct.** `Notifier<StaffEmail>` in `HostEnv` renders the staff template and sends
+2. **Direct.** `Notifier<StaffEmail>` (`hypha-http`'s `StaffEnv`, around `HostEnv`) renders the staff template and sends
    at once, recording a `Notification` with no event. A failure is the flow's
    `notification_failed`, as today.
 3. **Resend.** `POST /admin/notifications/{id}/resend` renders the template again from

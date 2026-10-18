@@ -19,6 +19,7 @@ pub mod health;
 pub mod inventory;
 pub mod markets;
 pub mod me;
+pub mod notifications;
 pub mod orders;
 pub mod page;
 pub mod payments;
@@ -242,6 +243,18 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/search/settings", search::update_settings],
             [admin, GET, "/admin/search/status", search::status],
             [admin, POST, "/admin/search/reindex", search::start_reindex],
+            // notifications (design note 0028)
+            [admin, GET, "/admin/notification-settings", notifications::fetch_settings],
+            [admin, PATCH, "/admin/notification-settings", notifications::update_settings],
+            [admin, GET, "/admin/notification-templates", notifications::list_templates],
+            [admin, GET, "/admin/notification-templates/{key}", notifications::fetch_template],
+            [admin, PUT, "/admin/notification-templates/{key}", notifications::save_template],
+            [admin, DELETE, "/admin/notification-templates/{key}", notifications::revert_template],
+            [admin, POST, "/admin/notification-templates/{key}/preview", notifications::preview],
+            [admin, POST, "/admin/notification-templates/{key}/test", notifications::send_test],
+            [admin, GET, "/admin/notifications", notifications::list],
+            [admin, GET, "/admin/notifications/{id}", notifications::fetch],
+            [admin, POST, "/admin/notifications/{id}/resend", notifications::resend],
 
             // ---------- storefront ----------
             [storefront, GET, "/storefront/store", stores::fetch_storefront],
