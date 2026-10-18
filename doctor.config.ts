@@ -1,13 +1,13 @@
 // React Doctor (`pnpm lint:react`): React-specific checks Oxlint doesn't have (effects that
 // mirror props, derived state, refs read in render, sequential independent awaits in
-// server code), on the two apps. Nothing leaves the machine: no score upload, share link,
-// crash reports or Socket.dev supply-chain lookups (`pnpm lint:react` also passes
-// `--no-telemetry`).
+// server code), on the two apps and the React packages for app UI (design note 0029).
+// Nothing leaves the machine: no score upload, share link, crash reports or Socket.dev
+// supply-chain lookups (`pnpm lint:react` also passes `--no-telemetry`).
 
 import { defineConfig } from "react-doctor/api";
 
 export default defineConfig({
-  projects: ["admin", "storefront"],
+  projects: ["admin", "storefront", "@hypha/app-blocks", "@hypha/storefront-elements"],
   noScore: true,
   share: false,
   supplyChain: { enabled: false },

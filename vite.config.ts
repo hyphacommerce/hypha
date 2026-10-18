@@ -71,10 +71,53 @@ export default defineConfig({
           "packages/emails/**",
           "scripts/**",
           "packages/sdk/scripts/**",
+          "packages/app/scripts/**",
           "apps/*/scripts/**",
         ],
         plugins: ["node"],
         env: { node: true },
+      },
+      {
+        // The app packages of design note 0029 run in browsers (the bridge, blocks and
+        // elements) and on Workers (the SDK): Web APIs only.
+        files: [
+          "packages/app/src/**",
+          "packages/app-bridge/src/**",
+          "packages/app-bridge-host/src/**",
+          "packages/app-blocks/src/**",
+          "packages/storefront-elements/src/**",
+        ],
+        plugins: ["react", "jsx-a11y"],
+        env: { browser: true },
+        rules: {
+          // The automatic JSX runtime needs no `React` in scope.
+          "react/react-in-jsx-scope": "off",
+          // Node's built-ins would tie them to Node; the tests may use them.
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  group: ["node:*"],
+                  message: "Web APIs only: these packages run in browsers and on Workers.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        files: [
+          "packages/app*/src/**/*.test.ts",
+          "packages/app-bridge/src/testing.ts",
+          "packages/storefront-elements/src/**/*.test.ts",
+        ],
+        rules: {
+          "no-restricted-imports": "off",
+          // Tests stand in fakes for DOM types (windows, events, elements, registries) and
+          // read JSON fixtures and responses whose shape is what they assert.
+          "typescript/no-unsafe-type-assertion": "off",
+        },
       },
       {
         // `node:test`'s `test()` returns a promise the runner awaits.

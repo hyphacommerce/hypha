@@ -1,0 +1,21 @@
+{
+  "name": "@hypha/app-bridge-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The admin's side of Hypha's app bridge (design note 0029, §6.3; docs/apps/bridge.md): answers an embedded app page's messages. No framework, so any admin can use it.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hypha/app-bridge": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "5.9.3"
+  }
+}

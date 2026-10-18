@@ -1,0 +1,402 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hypha.dev/schemas/app-block/1.json",
+  "title": "Hypha app block, version 1",
+  "description": "A declarative UI tree an app answers for an admin target (design note 0029, §6.2). Hosts render it with their own components. Elements of a type this version doesn't know are allowed and render nothing, so newer elements don't break older hosts. Hosts also refuse trees nested deeper than 16 elements.",
+  "type": "object",
+  "required": ["version", "root"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "root": { "$ref": "#/$defs/element" }
+  },
+  "$defs": {
+    "text": { "type": "string", "maxLength": 2000 },
+    "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "https": { "type": "string", "pattern": "^https://", "maxLength": 2048 },
+    "path": {
+      "description": "A path within the app's admin page, as the bridge's navigate takes it.",
+      "type": "string",
+      "pattern": "^/(?!/)",
+      "maxLength": 2048
+    },
+    "actionId": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$" },
+    "gap": { "enum": [0, 1, 2, 3, 4] },
+    "tone": { "enum": ["neutral", "info", "success", "warning", "error"] },
+    "children": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/element" }
+    },
+    "element": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "type": "string", "minLength": 1 } },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "card" } } },
+          "then": { "$ref": "#/$defs/card" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "stack" } } },
+          "then": { "$ref": "#/$defs/stack" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "row" } } },
+          "then": { "$ref": "#/$defs/row" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "text" } } },
+          "then": { "$ref": "#/$defs/textElement" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "heading" } } },
+          "then": { "$ref": "#/$defs/heading" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "badge" } } },
+          "then": { "$ref": "#/$defs/badge" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "link" } } },
+          "then": { "$ref": "#/$defs/link" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "button" } } },
+          "then": { "$ref": "#/$defs/button" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "divider" } } },
+          "then": { "$ref": "#/$defs/divider" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "image" } } },
+          "then": { "$ref": "#/$defs/image" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "list" } } },
+          "then": { "$ref": "#/$defs/list" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "table" } } },
+          "then": { "$ref": "#/$defs/table" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "keyvalue" } } },
+          "then": { "$ref": "#/$defs/keyvalue" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "form" } } },
+          "then": { "$ref": "#/$defs/form" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "banner" } } },
+          "then": { "$ref": "#/$defs/banner" }
+        },
+        { "if": { "properties": { "type": { "const": "field" } } }, "then": false }
+      ]
+    },
+    "card": {
+      "type": "object",
+      "required": ["type", "children"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "card" },
+        "title": { "$ref": "#/$defs/label" },
+        "children": { "$ref": "#/$defs/children" }
+      }
+    },
+    "stack": {
+      "description": "Children one above the other.",
+      "type": "object",
+      "required": ["type", "children"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "stack" },
+        "gap": { "$ref": "#/$defs/gap" },
+        "children": { "$ref": "#/$defs/children" }
+      }
+    },
+    "row": {
+      "description": "Children side by side, wrapping on narrow screens.",
+      "type": "object",
+      "required": ["type", "children"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "row" },
+        "gap": { "$ref": "#/$defs/gap" },
+        "align": { "enum": ["start", "center", "end", "between"] },
+        "children": { "$ref": "#/$defs/children" }
+      }
+    },
+    "textElement": {
+      "type": "object",
+      "required": ["type", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "text" },
+        "value": { "$ref": "#/$defs/text" },
+        "variant": { "enum": ["body", "supporting", "code"] },
+        "weight": { "enum": ["normal", "semibold"] }
+      }
+    },
+    "heading": {
+      "type": "object",
+      "required": ["type", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "heading" },
+        "value": { "$ref": "#/$defs/label" },
+        "level": { "enum": [2, 3, 4] }
+      }
+    },
+    "badge": {
+      "type": "object",
+      "required": ["type", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "badge" },
+        "value": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "tone": { "$ref": "#/$defs/tone" }
+      }
+    },
+    "link": {
+      "description": "A link to an https URL; external links open in a new tab.",
+      "type": "object",
+      "required": ["type", "label", "href"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "link" },
+        "label": { "$ref": "#/$defs/label" },
+        "href": { "$ref": "#/$defs/https" },
+        "external": { "type": "boolean" }
+      }
+    },
+    "button": {
+      "description": "Runs an action (design note 0029, §6.1) or navigates within the app's page: exactly one of action and navigate.",
+      "type": "object",
+      "required": ["type", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "button" },
+        "label": { "$ref": "#/$defs/label" },
+        "action": { "$ref": "#/$defs/actionId" },
+        "navigate": { "$ref": "#/$defs/path" },
+        "variant": { "enum": ["primary", "secondary", "destructive"] }
+      },
+      "oneOf": [{ "required": ["action"] }, { "required": ["navigate"] }]
+    },
+    "divider": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "divider" } }
+    },
+    "image": {
+      "type": "object",
+      "required": ["type", "src", "alt"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "image" },
+        "src": { "$ref": "#/$defs/https" },
+        "alt": { "type": "string", "maxLength": 300 },
+        "width": { "type": "integer", "minimum": 1, "maximum": 2000 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 2000 }
+      }
+    },
+    "list": {
+      "type": "object",
+      "required": ["type", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "list" },
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": ["label"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "$ref": "#/$defs/label" },
+              "description": { "$ref": "#/$defs/text" }
+            }
+          }
+        }
+      }
+    },
+    "table": {
+      "type": "object",
+      "required": ["type", "columns", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "table" },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "required": ["key", "header"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "pattern": "^[A-Za-z0-9_]{1,64}$" },
+              "header": { "$ref": "#/$defs/label" },
+              "align": { "enum": ["start", "end"] }
+            }
+          }
+        },
+        "rows": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": { "type": ["string", "number", "null"] }
+          }
+        }
+      }
+    },
+    "keyvalue": {
+      "description": "Labelled values, like a details panel.",
+      "type": "object",
+      "required": ["type", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "keyvalue" },
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": ["label", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "$ref": "#/$defs/label" },
+              "value": { "$ref": "#/$defs/text" }
+            }
+          }
+        }
+      }
+    },
+    "form": {
+      "description": "Fields whose values are submitted to an action, as {name: value}.",
+      "type": "object",
+      "required": ["type", "action", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "form" },
+        "action": { "$ref": "#/$defs/actionId" },
+        "submit_label": { "$ref": "#/$defs/label" },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": { "$ref": "#/$defs/field" }
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": ["type", "input", "name", "label"],
+      "properties": {
+        "type": { "const": "field" },
+        "input": { "enum": ["text", "number", "select", "checkbox"] },
+        "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$" },
+        "label": { "$ref": "#/$defs/label" },
+        "description": { "$ref": "#/$defs/text" },
+        "required": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "input": { "const": "text" } } },
+          "then": {
+            "properties": {
+              "type": true,
+              "input": true,
+              "name": true,
+              "label": true,
+              "description": true,
+              "required": true,
+              "value": { "$ref": "#/$defs/text" },
+              "placeholder": { "$ref": "#/$defs/label" }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "input": { "const": "number" } } },
+          "then": {
+            "properties": {
+              "type": true,
+              "input": true,
+              "name": true,
+              "label": true,
+              "description": true,
+              "required": true,
+              "value": { "type": "number" },
+              "min": { "type": "number" },
+              "max": { "type": "number" }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "input": { "const": "select" } } },
+          "then": {
+            "required": ["options"],
+            "properties": {
+              "type": true,
+              "input": true,
+              "name": true,
+              "label": true,
+              "description": true,
+              "required": true,
+              "value": { "type": "string" },
+              "options": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "required": ["value", "label"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": { "type": "string", "maxLength": 200 },
+                    "label": { "$ref": "#/$defs/label" }
+                  }
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "input": { "const": "checkbox" } } },
+          "then": {
+            "properties": {
+              "type": true,
+              "input": true,
+              "name": true,
+              "label": true,
+              "description": true,
+              "required": true,
+              "value": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    "banner": {
+      "type": "object",
+      "required": ["type", "tone", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "banner" },
+        "tone": { "enum": ["info", "success", "warning", "error"] },
+        "title": { "$ref": "#/$defs/label" },
+        "description": { "$ref": "#/$defs/text" }
+      }
+    }
+  }
+}
