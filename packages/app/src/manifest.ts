@@ -76,7 +76,7 @@ export interface ManifestAdminPage {
 export interface ManifestAdminBlock {
   id: string;
   target: Target;
-  /** Answers a declarative block (§6.2), fetched through the proxy. */
+  /** Answers a declarative block (§6.2): Hypha fetches it, signed, and checks it. */
   url: string;
 }
 
@@ -95,6 +95,8 @@ export interface ManifestAdmin {
   pages?: ManifestAdminPage[];
   blocks?: ManifestAdminBlock[];
   actions?: ManifestAdminAction[];
+  /** The app proxy's base for admins, behind `/admin/apps/{app}/proxy/…` (§8). */
+  proxy?: string;
 }
 
 export interface ManifestStorefrontElement {

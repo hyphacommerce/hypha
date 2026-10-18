@@ -30,6 +30,25 @@ pub enum CommandError {
     /// Not kept (pruned after 30 days) or never written.
     #[error("event {0} not found")]
     EventNotFound(EventId),
+    /// The app has no action, block or other UI contribution `id` in a target this
+    /// Hypha knows (design note 0029, §6).
+    #[error("app {app} has no UI extension {id:?}")]
+    ExtensionNotFound { app: AppKey, id: String },
+    /// The app's manifest names no proxy URL for the surface asked (§8).
+    #[error("app {0} has no proxy here")]
+    ProxyNotFound(AppKey),
+    /// The objects passed don't fit the contribution's target (`order.details needs
+    /// order_id`).
+    #[error("{0}")]
+    InvalidContext(String),
+    /// The action names an extension point (`payments.capture`): it runs through that
+    /// point's own route (capturing the payment), not as an app action.
+    #[error("action {id:?} of {app} runs through {point}, not as an app action")]
+    ActionHasPoint {
+        app: AppKey,
+        id: String,
+        point: String,
+    },
 }
 
 impl ErrorCode for CommandError {
@@ -42,6 +61,10 @@ impl ErrorCode for CommandError {
             CommandError::AppExists(_) => "app_exists",
             CommandError::DeliveryNotFound { .. } => "delivery_not_found",
             CommandError::EventNotFound(_) => "event_not_found",
+            CommandError::ExtensionNotFound { .. } => "app_extension_not_found",
+            CommandError::ProxyNotFound(_) => "app_proxy_not_found",
+            CommandError::InvalidContext(_) => "invalid_extension_context",
+            CommandError::ActionHasPoint { .. } => "app_action_has_point",
         }
     }
 }

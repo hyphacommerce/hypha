@@ -125,6 +125,10 @@ pub struct ManifestAdmin {
     /// Buttons (`payment`, …) that call the app.
     #[serde(default)]
     pub actions: Vec<AdminAction>,
+    /// The app's endpoint behind `/admin/apps/{app}/proxy/…`: what an admin's settings
+    /// form saves to, and anything else an admin calls the app for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -163,6 +167,14 @@ pub struct AdminAction {
     /// The app's own URL the action calls; this or `point`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// A JSON Schema (an object) for the action's input: a frontend shows a form made
+    /// from it before running the action. The app checks the input it gets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        test,
+        schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")
+    )]
+    pub input_schema: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -539,6 +551,12 @@ impl AppManifest {
                     }
                     _ => c.add(&path, "names either a `point` or a `url`"),
                 }
+                if action.input_schema.as_ref().is_some_and(|s| !s.is_object()) {
+                    c.add(&format!("{path}.input_schema"), "is a JSON Schema object");
+                }
+            }
+            if let Some(proxy) = &mut admin.proxy {
+                resolve(&mut c, "admin.proxy", proxy);
             }
         }
 
@@ -692,7 +710,8 @@ mod tests {
                 "pages": [{ "id": "dashboard", "title": "Stripe", "url": "/admin", "nav": "apps" }],
                 "blocks": [{ "id": "payment", "target": "order.payment", "url": "/hypha/blocks/payment" }],
                 "actions": [{ "id": "capture", "target": "payment", "label": "Capture",
-                              "point": "payments.capture" }]
+                              "point": "payments.capture" }],
+                "proxy": "/hypha/admin-api"
             },
             "storefront": {
                 "elements": [{ "id": "payment-element", "target": "checkout.payment",
@@ -747,6 +766,10 @@ mod tests {
         assert_eq!(
             doc.storefront.as_ref().unwrap().elements[0].module,
             "https://stripe-app.example.com/elements/payment.js"
+        );
+        assert_eq!(
+            doc.admin.as_ref().unwrap().proxy.as_deref(),
+            Some("https://stripe-app.example.com/hypha/admin-api")
         );
         assert_eq!(
             manifest.reason(Scope::CustomerDataEmail),

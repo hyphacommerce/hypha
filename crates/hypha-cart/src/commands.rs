@@ -571,6 +571,18 @@ async fn load_open_cart<S: HasCarts>(
     Ok(cart)
 }
 
+/// The cart as stored, if the caller may use it (another channel's reads as missing),
+/// without pricing it: for passing who and where a shopper is on to an app (design
+/// note 0029, §8).
+pub async fn find_cart<S: HasCarts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+) -> Result<Cart, CommandError> {
+    ctx.require(Scope::CartsRead)?;
+    load_cart(ctx, ports, id).await
+}
+
 /// The cart at current prices, tax rates and stock. Stale lines are marked unavailable,
 /// not errors.
 pub async fn get_cart<S: HasCarts + PricingPorts>(

@@ -11,7 +11,7 @@ pub use cart::{
 };
 pub use commands::{
     ADD_LINE, AddLine, CREATE_CART, CartPorts, CartReading, CommandError, CreateCart, GroupOffers,
-    IdempotentCartPorts, PricingPorts, SetLineQuantity, add_line, create_cart, get_cart,
+    IdempotentCartPorts, PricingPorts, SetLineQuantity, add_line, create_cart, find_cart, get_cart,
     group_offers, price_for_checkout, read_cart, remove_cart_line, select_shipping,
     set_cart_customer, set_cart_email, set_line_quantity, set_shipping_address, shipping_offers,
 };

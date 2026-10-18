@@ -2,9 +2,14 @@
 //! point is a type implementing `ExtensionPoint` here, with its request and response,
 //! and a line in the extensions document's list (`hypha-http`'s `openapi.rs`).
 
+pub mod admin;
 pub mod payments;
 pub mod search;
 pub mod shipping;
+
+pub use admin::{
+    ActionContext, AdminActionRequest, AdminActionResponse, MAX_ACTION_MESSAGE, RunAdminAction,
+};
 
 pub use payments::{
     NextAction, PaymentActionRequest, PaymentActionResponse, PaymentStartRequest,

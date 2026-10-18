@@ -8,6 +8,7 @@
 //! A leaf domain: it depends on core only.
 
 pub mod app;
+pub mod blocks;
 pub mod commands;
 pub mod endpoints;
 pub mod error;
@@ -15,6 +16,15 @@ pub mod events;
 pub mod fetch;
 pub mod manifest;
 pub mod repo;
+pub mod targets;
+pub mod ui;
+
+pub use blocks::{BlockCheck, BlockProblem, MAX_BLOCK_DEPTH, check_block};
+pub use targets::{ContextKey, ExtensionContext, Surface, Target};
+pub use ui::{
+    AdminContributions, PageContribution, StorefrontContributions, admin_contributions,
+    find_action, find_block, find_proxy, scopes_for, session_app, storefront_contributions,
+};
 
 pub use app::{
     App, AppSnapshot, EventPattern, Grant, GrantSnapshot, InstalledManifest, NewApp, Webhook,
