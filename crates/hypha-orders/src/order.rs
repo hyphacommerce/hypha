@@ -458,7 +458,14 @@ impl Order {
     /// Cancels the order; returns whether that changed anything (a cancelled order
     /// stays as it was, with its first reason). Refused while anything is fulfilled:
     /// those fulfilments are cancelled first. Payment is untouched (FU7).
-    pub fn cancel(&mut self, at: Timestamp, reason: CancelReason) -> Result<bool, OrderError> {
+    /// `notify_customer` travels in `order.cancelled`: whether the buyer is emailed
+    /// (design note 0028, NT7).
+    pub fn cancel(
+        &mut self,
+        at: Timestamp,
+        reason: CancelReason,
+        notify_customer: bool,
+    ) -> Result<bool, OrderError> {
         if self.cancelled.is_some() {
             return Ok(false);
         }
@@ -469,6 +476,7 @@ impl Order {
         let cancelled = OrderCancelled {
             order: self.id,
             reason: reason.as_str(),
+            notify_customer,
         };
         self.events.record(self.subject(), &cancelled);
         Ok(true)
@@ -1031,7 +1039,7 @@ mod tests {
     #[test]
     fn cancelling_records_when_and_why() {
         let mut order = placed();
-        assert_eq!(order.cancel(at(), CancelReason::Customer), Ok(true));
+        assert_eq!(order.cancel(at(), CancelReason::Customer, false), Ok(true));
         assert_eq!(
             order.cancelled(),
             Some(Cancellation {
@@ -1045,9 +1053,9 @@ mod tests {
     #[test]
     fn cancelling_again_keeps_the_first_reason() {
         let mut order = placed();
-        order.cancel(at(), CancelReason::Customer).unwrap();
+        order.cancel(at(), CancelReason::Customer, false).unwrap();
         order.take_events();
-        assert_eq!(order.cancel(at(), CancelReason::Fraud), Ok(false));
+        assert_eq!(order.cancel(at(), CancelReason::Fraud, false), Ok(false));
         assert_eq!(
             order.cancelled().map(|c| c.reason),
             Some(CancelReason::Customer)
@@ -1060,7 +1068,7 @@ mod tests {
         let mut order = placed();
         order.fulfil(&[(line_id(2), q(1))]).unwrap();
         assert_eq!(
-            order.cancel(at(), CancelReason::Staff),
+            order.cancel(at(), CancelReason::Staff, false),
             Err(OrderError::HasFulfillments(order.id()))
         );
         assert_eq!(order.cancelled(), None);
@@ -1069,7 +1077,7 @@ mod tests {
     #[test]
     fn a_cancelled_order_cant_be_fulfilled_unfulfilled_or_paid_by_hand() {
         let mut order = placed();
-        order.cancel(at(), CancelReason::Inventory).unwrap();
+        order.cancel(at(), CancelReason::Inventory, false).unwrap();
         let cancelled = Err(OrderError::Cancelled(order.id()));
         assert_eq!(order.fulfil(&[(line_id(1), q(1))]), cancelled);
         assert_eq!(order.unfulfil(&[(line_id(1), q(1))]), cancelled);
@@ -1081,7 +1089,7 @@ mod tests {
         // Refunds come with payment spores (FU7, Q3).
         let mut order = placed();
         order.set_financial_status(FinancialStatus::Paid);
-        assert_eq!(order.cancel(at(), CancelReason::Customer), Ok(true));
+        assert_eq!(order.cancel(at(), CancelReason::Customer, false), Ok(true));
         assert_eq!(order.financial_status(), FinancialStatus::Paid);
         assert!(!order.set_financial_status(FinancialStatus::Paid));
     }

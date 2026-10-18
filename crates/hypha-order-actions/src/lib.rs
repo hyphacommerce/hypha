@@ -7,12 +7,10 @@
 //! `hypha-checkout`).
 
 pub mod commands;
-pub mod email;
 pub mod view;
 
 pub use commands::{
     CancelOrder, CommandError, FULFILL, Fulfil, FulfilLine, Fulfilled, MarkPaid, OrderActionPorts,
     OrderPayments, cancel_fulfillment, cancel_order, fulfill, mark_paid,
 };
-pub use email::BuyerEmail;
 pub use view::{OrderView, Unfulfilled, order_view, view_of};

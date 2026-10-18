@@ -416,6 +416,7 @@ fn fulfillment(n: u128, order: &Order) -> Fulfillment {
             stock_taken: true,
         }],
         tracking: vec![Tracking::new(Some("DHL"), "1", None).unwrap()],
+        notify_customer: false,
     })
     .unwrap()
 }
@@ -507,7 +508,7 @@ where
     ports.fulfillments().update(&mut rival).await.unwrap();
 
     let (mut stale, mut changed) = (f, o.clone());
-    stale.set_tracking(vec![]).unwrap();
+    stale.set_tracking(vec![], false).unwrap();
     changed.set_financial_status(hypha_core::FinancialStatus::Paid);
     let mut batch = ports.batch();
     batch.update_order(&mut changed);

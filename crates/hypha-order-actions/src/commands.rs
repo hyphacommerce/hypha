@@ -138,12 +138,14 @@ pub struct Fulfil {
     pub location: LocationId,
     pub lines: Vec<FulfilLine>,
     pub tracking: Vec<TrackingInput>,
+    /// Email the buyer a shipping confirmation: carried in `fulfillment.created`, which
+    /// the `Mailer` answers (design note 0028, NT7).
+    pub notify_customer: bool,
     /// A retry with the same key returns the fulfilment the first request recorded.
     pub idempotency: Option<IdempotencyRequest>,
 }
 
-/// A fulfilment and its order, as they are after the action: what a response shows and
-/// what the buyer's email is made from.
+/// A fulfilment and its order, as they are after the action: what a response shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fulfilled {
     pub fulfillment: Fulfillment,
@@ -242,6 +244,7 @@ impl Attempt<'_> {
                 })
                 .collect(),
             tracking: self.tracking.to_vec(),
+            notify_customer: self.input.notify_customer,
         })?;
         order.fulfil(self.lines)?;
 
@@ -332,6 +335,9 @@ async fn cancel_fulfillment_once<S: OrderActionPorts>(
 pub struct CancelOrder {
     pub order: OrderId,
     pub reason: CancelReason,
+    /// Email the buyer that it's cancelled: carried in `order.cancelled`, which the
+    /// `Mailer` answers (design note 0028, NT7).
+    pub notify_customer: bool,
 }
 
 /// An order and its payments, newest first, as they are after an action.
@@ -347,8 +353,9 @@ pub struct OrderPayments {
 /// (`voided` once every payment is). Refused while fulfilments stand
 /// (`order_has_fulfillments`, listing them), and while a payment is authorized
 /// (`payment_authorized`: the held money is its provider's to release, which no
-/// provider can yet). A paid payment stays paid until refunds exist. Cancelling it again changes nothing, and says so (`false`), so only the
-/// request that cancelled it tells the buyer.
+/// provider can yet). A paid payment stays paid until refunds exist. Cancelling it
+/// again changes nothing, and says so (`false`): no second `order.cancelled`, so the
+/// buyer is told once.
 pub async fn cancel_order<S: OrderActionPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -372,7 +379,7 @@ async fn cancel_order_once<S: OrderActionPorts>(
 ) -> Result<(OrderPayments, bool), CommandError> {
     let mut order = load_order(ports, input.order).await?;
     let now = clock.now();
-    match order.cancel(now, input.reason) {
+    match order.cancel(now, input.reason, input.notify_customer) {
         Ok(true) => {}
         Ok(false) => {
             let payments = ports.payments().list_for_order(order.id()).await?;

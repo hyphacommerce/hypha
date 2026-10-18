@@ -267,6 +267,7 @@ async fn list_pages<R: OrderRepo>(repo: &R) {
         .cancel(
             Timestamp::from_unix_micros(1_767_312_000_000_001),
             CancelReason::Fraud,
+            false,
         )
         .unwrap();
     repo.insert(&mut cancelled).await.unwrap();
@@ -431,6 +432,7 @@ async fn list_filtered<R: OrderRepo>(repo: &R) {
     ivo.cancel(
         Timestamp::from_unix_micros(1_767_400_000_000_000),
         CancelReason::Fraud,
+        false,
     )
     .unwrap();
     let mut usd = varied(3, 500, Currency::USD, "ana@example.hr", "HR", 3);
@@ -648,6 +650,7 @@ async fn fulfilment_round_trips<R: OrderRepo>(repo: &R) {
         .cancel(
             Timestamp::from_unix_micros(1_767_312_000_000_001),
             CancelReason::Declined,
+            false,
         )
         .unwrap();
     repo.update(&mut other).await.unwrap();

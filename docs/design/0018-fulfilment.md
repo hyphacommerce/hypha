@@ -158,14 +158,16 @@ a cancelled order changes nothing (a retried request is harmless).
 
 | Type | Payload (subject and what changed) | Recorded by |
 | --- | --- | --- |
-| `fulfillment.created` | fulfilment, order, location, lines (line, quantity), tracking | `fulfill` |
-| `fulfillment.updated` | fulfilment, order, tracking | tracking changed |
+| `fulfillment.created` | fulfilment, order, location, lines (line, quantity), tracking, notify_customer (0028) | `fulfill` |
+| `fulfillment.updated` | fulfilment, order, tracking, notify_customer (0028) | tracking changed |
 | `fulfillment.cancelled` | fulfilment, order | `cancel_fulfillment` |
 | `order.fulfillment_status_changed` | order, status (from, to) | order, when its status moves |
-| `order.cancelled` | order, reason | `cancel_order` |
+| `order.cancelled` | order, reason, notify_customer (0028) | `cancel_order` |
 
 Inventory items already record `inventory_item.changed` (and `.deleted`) on every write.
-Each payload is a contract type in its crate's `events.rs`, version 1.
+Each payload is a contract type in its crate's `events.rs`, version 1. `notify_customer`
+(design note 0028, NT7) was added later, still version 1: the request's `notify`, which
+the mailer reads instead of the buyer emails this note sent after the commit.
 
 ## 5. Changes to existing crates
 

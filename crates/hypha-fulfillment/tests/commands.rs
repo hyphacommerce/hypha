@@ -32,6 +32,7 @@ fn repo() -> InMemoryFulfillmentRepo {
                 stock_taken: true,
             }],
             tracking: vec![Tracking::new(None, "1", None).unwrap()],
+            notify_customer: false,
         })
         .unwrap();
         block_on(repo.insert(&mut f)).unwrap();
@@ -99,6 +100,7 @@ fn updating_tracking_stores_it() {
         &repo,
         fid(1),
         &[input("2", Some("https://gls.example/2"))],
+        true,
     ))
     .unwrap();
     assert!(changed);
@@ -112,6 +114,9 @@ fn updating_tracking_stores_it() {
             "fulfillment.updated"
         ]
     );
+    let events = repo.outbox().events();
+    assert_eq!(events[2].data["notify_customer"], true);
+    assert_eq!(events[0].data["notify_customer"], false);
 }
 
 #[test]
@@ -122,7 +127,14 @@ fn the_same_tracking_writes_nothing() {
         number: "1".to_string(),
         url: None,
     }];
-    let (f, changed) = block_on(update_tracking(&Ctx::system(), &repo, fid(1), &tracking)).unwrap();
+    let (f, changed) = block_on(update_tracking(
+        &Ctx::system(),
+        &repo,
+        fid(1),
+        &tracking,
+        false,
+    ))
+    .unwrap();
     assert!(!changed);
     assert_eq!(f.version(), Version::new(1));
 }
@@ -134,7 +146,8 @@ fn bad_tracking_is_refused_before_anything_loads() {
             &Ctx::system(),
             &repo(),
             fid(9),
-            &[input("2", Some("gls.example/2"))]
+            &[input("2", Some("gls.example/2"))],
+            false
         )),
         Err(CommandError::Fulfillment(
             FulfillmentError::InvalidTrackingUrl("gls.example/2".to_string())
@@ -153,7 +166,8 @@ fn a_cancelled_fulfilments_tracking_cant_change() {
             &Ctx::system(),
             &repo,
             fid(1),
-            &[input("2", None)]
+            &[input("2", None)],
+            false
         )),
         Err(CommandError::Fulfillment(FulfillmentError::Cancelled(fid(
             1
@@ -165,7 +179,7 @@ fn a_cancelled_fulfilments_tracking_cant_change() {
 fn updating_tracking_needs_fulfillments_write() {
     let ctx = user_with(vec![Scope::FulfillmentsRead]);
     assert_eq!(
-        block_on(update_tracking(&ctx, &repo(), fid(1), &[])),
+        block_on(update_tracking(&ctx, &repo(), fid(1), &[], false)),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::FulfillmentsWrite
         )))

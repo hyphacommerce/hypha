@@ -94,6 +94,9 @@ pub struct NewFulfillment {
     pub location: LocationId,
     pub lines: Vec<FulfillmentLine>,
     pub tracking: Vec<Tracking>,
+    /// Whether the buyer is emailed a shipping confirmation: carried in
+    /// `fulfillment.created` (design note 0028, NT7), not stored.
+    pub notify_customer: bool,
 }
 
 /// What left one location for one order (design note 0018, FU1): its lines, how many
@@ -171,6 +174,7 @@ impl Fulfillment {
                 })
                 .collect(),
             tracking: fulfillment.tracking.iter().map(Tracking::data).collect(),
+            notify_customer: new.notify_customer,
         };
         fulfillment.events.record(fulfillment.subject(), &created);
         Ok(fulfillment)
@@ -187,9 +191,14 @@ impl Fulfillment {
         }
     }
 
-    /// Replaces the tracking; returns whether it changed (`fulfillment.updated` then).
+    /// Replaces the tracking; returns whether it changed (`fulfillment.updated` then,
+    /// carrying `notify_customer`: whether the buyer is emailed, design note 0028).
     /// A cancelled fulfilment keeps what it had.
-    pub fn set_tracking(&mut self, tracking: Vec<Tracking>) -> Result<bool, FulfillmentError> {
+    pub fn set_tracking(
+        &mut self,
+        tracking: Vec<Tracking>,
+        notify_customer: bool,
+    ) -> Result<bool, FulfillmentError> {
         self.refuse_cancelled()?;
         check_tracking(&tracking)?;
         if tracking == self.tracking {
@@ -200,6 +209,7 @@ impl Fulfillment {
             fulfillment: self.id,
             order: self.order,
             tracking: self.tracking.iter().map(Tracking::data).collect(),
+            notify_customer,
         };
         self.events.record(self.subject(), &updated);
         Ok(true)
@@ -339,6 +349,7 @@ mod tests {
             location: LocationId::from_uuid(Uuid::from_u128(3)),
             lines,
             tracking: vec![tracking("123")],
+            notify_customer: false,
         }
     }
 
@@ -386,11 +397,11 @@ mod tests {
         let mut f = shipped();
         let eleven = (0..11).map(|n| tracking(&n.to_string())).collect();
         assert_eq!(
-            f.set_tracking(eleven),
+            f.set_tracking(eleven, false),
             Err(FulfillmentError::TooMuchTracking { count: 11 })
         );
         let ten = (0..10).map(|n| tracking(&n.to_string())).collect();
-        assert_eq!(f.set_tracking(ten), Ok(true));
+        assert_eq!(f.set_tracking(ten, false), Ok(true));
     }
 
     #[test]
@@ -428,7 +439,7 @@ mod tests {
     #[test]
     fn changing_tracking_records_an_update() {
         let mut f = shipped();
-        assert_eq!(f.set_tracking(vec![tracking("456")]), Ok(true));
+        assert_eq!(f.set_tracking(vec![tracking("456")], false), Ok(true));
         assert_eq!(types(&mut f), ["fulfillment.updated"]);
         assert_eq!(f.tracking()[0].number(), "456");
     }
@@ -436,7 +447,7 @@ mod tests {
     #[test]
     fn the_same_tracking_changes_nothing() {
         let mut f = shipped();
-        assert_eq!(f.set_tracking(vec![tracking("123")]), Ok(false));
+        assert_eq!(f.set_tracking(vec![tracking("123")], false), Ok(false));
         assert_eq!(types(&mut f), Vec::<&str>::new());
     }
 
@@ -458,7 +469,7 @@ mod tests {
         let mut f = shipped();
         f.cancel(Timestamp::UNIX_EPOCH);
         assert_eq!(
-            f.set_tracking(vec![]),
+            f.set_tracking(vec![], false),
             Err(FulfillmentError::Cancelled(f.id()))
         );
     }

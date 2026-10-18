@@ -7,7 +7,7 @@ use hypha_fulfillment::{
     Fulfillment, FulfillmentState, HasFulfillments, TrackingInput, get_fulfillment,
     list_order_fulfillments, update_tracking,
 };
-use hypha_order_actions::{BuyerEmail, Fulfil, FulfilLine, cancel_fulfillment, fulfill};
+use hypha_order_actions::{Fulfil, FulfilLine, cancel_fulfillment, fulfill};
 use hypha_orders::{HasOrders, get_order};
 use serde::{Deserialize, Serialize};
 
@@ -139,20 +139,6 @@ pub struct FulfillmentList {
     items: Vec<FulfillmentResponse>,
 }
 
-/// Emails the buyer from a `Background` slot, so the response doesn't wait for it;
-/// dropped and logged when every slot is busy.
-pub(super) fn notify_buyer<S: Storage>(state: &SharedState<S>, email: BuyerEmail) {
-    let sender = std::sync::Arc::clone(state);
-    let work = async move {
-        if let Err(error) = hypha_core::Notifier::notify(&sender.env, email).await {
-            tracing::error!(%error, "buyer email failed");
-        }
-    };
-    if !state.background.spawn(work) {
-        tracing::warn!("buyer email dropped: every background slot is busy");
-    }
-}
-
 /// Records that lines of the order left a location: the order counts them as
 /// fulfilled, and their units come out of the location's stock. Takes an
 /// `Idempotency-Key` header: a retry returns the fulfilment the first request recorded.
@@ -185,16 +171,12 @@ pub async fn create<S: Storage>(
             })
             .collect(),
         tracking: TrackingDto::input(body.tracking),
+        // The event carries it; the mailer answers `fulfillment.created` (design note
+        // 0028, NT7). A replay records no second event, so the buyer is told once.
+        notify_customer: body.notify,
         idempotency: req.idempotency,
     };
     let done = fulfill(&ctx, &ports, &state.ids, &state.clock, input).await?;
-    // A replay already told the buyer, the first time.
-    if body.notify && !done.replayed {
-        notify_buyer(
-            &state,
-            BuyerEmail::shipped(&done.value.order, &done.value.fulfillment),
-        );
-    }
     Ok(idempotent_response(
         StatusCode::CREATED,
         FulfillmentResponse::new(&done.value.fulfillment)?,
@@ -285,14 +267,9 @@ pub async fn update<S: Storage>(
     let fulfillment = match req.tracking {
         Some(tracking) => {
             let tracking = TrackingDto::input(tracking);
-            let (after, changed) =
-                update_tracking(&ctx, ports.fulfillments(), id, &tracking).await?;
-            if req.notify && changed {
-                // The buyer's address is the order's: read for the email, not shown.
-                let system = hypha_core::Ctx::system();
-                let order = get_order(&system, ports.orders(), after.order()).await?;
-                notify_buyer(&state, BuyerEmail::tracking_updated(&order, &after));
-            }
+            // Unchanged tracking records no event, so the buyer isn't told.
+            let (after, _changed) =
+                update_tracking(&ctx, ports.fulfillments(), id, &tracking, req.notify).await?;
             after
         }
         // Nothing to change: still the caller's to read.

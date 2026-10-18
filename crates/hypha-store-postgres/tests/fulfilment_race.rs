@@ -133,6 +133,7 @@ fn one_mug() -> Fulfil {
             quantity: 1,
         }],
         tracking: vec![],
+        notify_customer: false,
         idempotency: None,
     }
 }
@@ -217,6 +218,7 @@ async fn a_fulfilment_racing_a_cancellation_leaves_one_or_the_other() {
         let cancel = CancelOrder {
             order: order_id(),
             reason: CancelReason::Customer,
+            notify_customer: false,
         };
         let (shipped, cancelled) = tokio::join!(
             fulfill(&ctx, &stores[0], &ids, &clock, one_mug()),

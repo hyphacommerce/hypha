@@ -56,6 +56,9 @@ impl Event for OrderFulfillmentStatusChanged {
 pub struct OrderCancelled {
     pub order: OrderId,
     pub reason: &'static str,
+    /// Whether staff chose to email the buyer about it (design note 0028, NT7): the
+    /// `Mailer` sends `order_cancelled` only then. An added field, so still version 1.
+    pub notify_customer: bool,
 }
 
 impl Event for OrderCancelled {

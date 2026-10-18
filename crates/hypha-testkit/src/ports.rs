@@ -73,6 +73,9 @@ pub struct InMemoryPorts {
     pub notification_templates: crate::InMemoryNotificationTemplateRepo,
     pub notification_settings: crate::InMemoryNotificationSettingsRepo,
     pub notifications: crate::InMemoryNotificationRepo,
+    // The store itself (design note 0006, model A: its row is in its own database), so
+    // the ports are its directory too, as a host's are.
+    pub stores: crate::InMemoryStoreRepo,
 }
 
 impl Default for InMemoryPorts {
@@ -116,6 +119,7 @@ impl Default for InMemoryPorts {
             notification_templates: crate::InMemoryNotificationTemplateRepo::sharing(&outbox),
             notification_settings: crate::InMemoryNotificationSettingsRepo::sharing(&outbox),
             notifications: crate::InMemoryNotificationRepo::sharing(&outbox),
+            stores: crate::InMemoryStoreRepo::sharing(&outbox),
             outbox,
         }
     }
@@ -139,6 +143,25 @@ impl hypha_notifications::HasNotifications for InMemoryPorts {
     type Notifications = crate::InMemoryNotificationRepo;
     fn notifications(&self) -> &crate::InMemoryNotificationRepo {
         &self.notifications
+    }
+}
+
+/// The store's directory through its ports, as a host's (`Storage::directory_in`).
+impl hypha_stores::StoreRepo for InMemoryPorts {
+    async fn get(&self, id: hypha_core::StoreId) -> Result<Option<hypha_stores::Store>, RepoError> {
+        self.stores.get(id).await
+    }
+
+    async fn list_all(&self) -> Result<Vec<hypha_stores::Store>, RepoError> {
+        self.stores.list_all().await
+    }
+
+    async fn insert(&self, store: &mut hypha_stores::Store) -> Result<(), RepoError> {
+        self.stores.insert(store).await
+    }
+
+    async fn update(&self, store: &mut hypha_stores::Store) -> Result<(), RepoError> {
+        self.stores.update(store).await
     }
 }
 

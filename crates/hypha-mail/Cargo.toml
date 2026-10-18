@@ -1,0 +1,29 @@
+[package]
+name = "hypha-mail"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+hypha-notifications = { path = "../hypha-notifications" }
+hypha-orders = { path = "../hypha-orders" }
+hypha-fulfillment = { path = "../hypha-fulfillment" }
+hypha-payments = { path = "../hypha-payments" }
+hypha-stores = { path = "../hypha-stores" }
+hypha-media = { path = "../hypha-media" }
+hypha-users = { path = "../hypha-users" }
+# Times in the store's zone (design note 0028, §11). The bundled time zone database, not
+# the system's, so a time formats the same natively and on Workers (which has none).
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "0.4"
+
+[lints]
+workspace = true

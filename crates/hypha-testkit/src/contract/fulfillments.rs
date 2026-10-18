@@ -66,6 +66,7 @@ fn with(n: u128, order: u128, lines: Vec<FulfillmentLine>, tracking: Vec<Trackin
         location: LocationId::from_uuid(Uuid::from_u128(2000 + n)),
         lines,
         tracking,
+        notify_customer: false,
     })
     .unwrap()
 }
@@ -100,7 +101,7 @@ async fn updates<R: FulfillmentRepo>(repo: &R) {
     repo.insert(&mut f).await.unwrap();
     let stale = f.clone();
 
-    f.set_tracking(vec![full_tracking("2"), full_tracking("3")])
+    f.set_tracking(vec![full_tracking("2"), full_tracking("3")], false)
         .unwrap();
     repo.update(&mut f).await.unwrap();
     assert_eq!(f.version(), Version::new(2));

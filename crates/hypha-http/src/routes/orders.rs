@@ -12,8 +12,7 @@ use hypha_core::{
 };
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_order_actions::{
-    BuyerEmail, CancelOrder, MarkPaid, OrderView, cancel_order, mark_paid as record_paid,
-    order_view, view_of,
+    CancelOrder, MarkPaid, OrderView, cancel_order, mark_paid as record_paid, order_view, view_of,
 };
 use hypha_orders::{
     CancelReason, FinancialStatus, FulfillmentStatus, HasOrders, ListOrders, Order,
@@ -782,15 +781,11 @@ pub async fn cancel<S: Storage>(
     let input = CancelOrder {
         order: id,
         reason: req.reason.into(),
+        // The event carries it; the mailer answers `order.cancelled` (design note 0028,
+        // NT7). Cancelling again records no event, so the buyer is told once.
+        notify_customer: req.notify,
     };
-    let (done, cancelled_now) = cancel_order(&ctx, &ports, &state.clock, input).await?;
-    // Only the request that cancelled it tells the buyer.
-    if req.notify
-        && cancelled_now
-        && let Some(email) = BuyerEmail::cancelled(&done.order)
-    {
-        super::fulfillments::notify_buyer(&state, email);
-    }
+    let (done, _cancelled_now) = cancel_order(&ctx, &ports, &state.clock, input).await?;
     // A cancelled order has nothing left to ship.
     let response = OrderResponse::with_images(&done.order, &ports, state.media.as_ref()).await?;
     let view = OrderView {

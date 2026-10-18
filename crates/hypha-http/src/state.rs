@@ -233,49 +233,6 @@ impl Notifier<StaffEmail> for HostEnv {
     }
 }
 
-impl Notifier<hypha_order_actions::BuyerEmail> for HostEnv {
-    async fn notify(&self, message: hypha_order_actions::BuyerEmail) -> Result<(), NotifyError> {
-        use hypha_order_actions::BuyerEmail as B;
-        let tracked = |tracking: &[hypha_fulfillment::Tracking]| {
-            tracking
-                .iter()
-                .map(|t| {
-                    let link = t.url().map(|u| format!(" ({u})")).unwrap_or_default();
-                    format!("{} {}{link}", t.carrier().unwrap_or("tracking"), t.number())
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let (to, subject, body) = match &message {
-            B::Shipped {
-                to,
-                order,
-                tracking,
-            } => (
-                to,
-                format!("Order {order} is on its way"),
-                tracked(tracking),
-            ),
-            B::TrackingUpdated {
-                to,
-                order,
-                tracking,
-            } => (
-                to,
-                format!("New tracking for order {order}"),
-                tracked(tracking),
-            ),
-            B::Cancelled { to, order, reason } => (
-                to,
-                format!("Order {order} is cancelled"),
-                format!("reason: {reason}"),
-            ),
-        };
-        tracing::info!(%to, subject, body, "email (logged, not sent)");
-        Ok(())
-    }
-}
-
 /// One deployment's state: its storage, the host's capabilities (`host.rs`) and the
 /// settings, shared by every request.
 pub struct AppState<S> {
@@ -283,7 +240,7 @@ pub struct AppState<S> {
     pub ids: HostIds,
     pub clock: HostClock,
     pub env: HostEnv,
-    /// Work after the response (a password reset, a buyer's email).
+    /// Work after the response (a password reset).
     pub background: HostBackground,
     /// Limits on the public routes (design note 0009).
     pub limiter: HostLimiter,

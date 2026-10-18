@@ -161,6 +161,7 @@ impl World {
                 number: "JD0001".to_string(),
                 url: Some("https://dhl.example/JD0001".to_string()),
             }],
+            notify_customer: false,
             idempotency,
         };
         block_on(fulfill(ctx, &self.ports, &self.ids, &self.clock, input))
@@ -174,6 +175,7 @@ impl World {
         let input = CancelOrder {
             order: order_id(),
             reason,
+            notify_customer: false,
         };
         block_on(cancel_order(
             &Ctx::system(),
@@ -351,6 +353,7 @@ fn an_unknown_order_is_reported() {
             quantity: 1,
         }],
         tracking: vec![],
+        notify_customer: false,
         idempotency: None,
     };
     assert_eq!(
@@ -365,6 +368,59 @@ fn an_unknown_order_is_reported() {
             Uuid::from_u128(9999)
         )))
     );
+}
+
+#[test]
+fn whether_to_tell_the_buyer_travels_in_the_events() {
+    let world = World::new();
+    let input = Fulfil {
+        order: order_id(),
+        location: warehouse(),
+        lines: vec![FulfilLine {
+            line: mugs(),
+            quantity: 1,
+        }],
+        tracking: vec![],
+        notify_customer: true,
+        idempotency: None,
+    };
+    block_on(fulfill(
+        &Ctx::system(),
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        input,
+    ))
+    .unwrap();
+    let created = world
+        .outbox
+        .events()
+        .into_iter()
+        .find(|e| e.event_type == "fulfillment.created")
+        .unwrap();
+    assert_eq!(created.data["notify_customer"], true);
+
+    let world = World::new();
+    let input = CancelOrder {
+        order: order_id(),
+        reason: CancelReason::Customer,
+        notify_customer: true,
+    };
+    block_on(cancel_order(
+        &Ctx::system(),
+        &world.ports,
+        &world.clock,
+        input,
+    ))
+    .unwrap();
+    let cancelled = world
+        .outbox
+        .events()
+        .into_iter()
+        .find(|e| e.event_type == "order.cancelled")
+        .unwrap();
+    assert_eq!(cancelled.data["notify_customer"], true);
+    assert_eq!(cancelled.data["reason"], "customer");
 }
 
 #[test]
@@ -620,6 +676,7 @@ fn cancelling_an_order_needs_orders_write() {
     let input = CancelOrder {
         order: order_id(),
         reason: CancelReason::Staff,
+        notify_customer: false,
     };
     assert_eq!(
         block_on(cancel_order(&ctx, &world.ports, &world.clock, input)),
