@@ -1,11 +1,13 @@
 # 0029: Spores: compiled-in extensions, with Stripe and Meilisearch as the first two
 
-- **Status:** Proposed (2026-10-18). Danilo set the frame (2026-10-18): a spore API with
-  Stripe and Meilisearch as reference spores, installation compiled in and chosen in
-  `hypha.json`, admin settings as schema-driven forms. The decisions marked *hard to
-  reverse* and the open questions (§11) are his.
+- **Status:** Accepted (2026-10-18). Danilo set the frame: a spore API with Stripe and
+  Meilisearch as reference spores, installation compiled in and chosen in `hypha.json`,
+  admin settings as schema-driven forms. Decided: Q1 (Stripe's keys are the merchant's,
+  sealed in the database), Q2 (**every spore in its own repository from day one**, which
+  reshapes SP1, SP3 and SP4 below), Q3 (no spore routes in v1), Meilisearch first; the
+  rest as recommended.
 - **Scope:** what a spore is and what it may contribute; how one is written (the
-  `hypha-spore` crate), installed (Cargo features from `hypha.json`) and composed into
+  `hypha-spore` crate), installed (from its own repository, pinned in `hypha.json`) and composed into
   both hosts; its settings, secrets, HTTP, storage, scopes, events, webhooks and admin
   UI; the line between spores and apps; the two reference spores and the core changes
   each needs (payment webhooks and capture for Stripe, a configurable search engine for
@@ -18,7 +20,7 @@
   handlers; §10 asks for open scopes and a spore slot in batches), 0019 (search engines;
   SE2 names Meilisearch, §5.1 handlers), 0027 (payment providers; PA5 the tuple), 0028
   (senders), 0015 (shipping provider kinds), 0017 (configuration), 0025/0026 (builds on
-  a VPS and Workers), 0011 (`spores/*` in the workspace).
+  a VPS and Workers), 0011 (which assumed `spores/*` in the workspace; Q2 moved spores out).
 
 ## Why
 
@@ -34,10 +36,10 @@ so they are "a crate, a feature, a line in `hypha.json`".
 
 | | Decision |
 | --- | --- |
-| SP1 | **A spore is a Rust crate under `spores/<name>` (package `hypha-spore-<name>`, key `spore_<name>`), compiled into both hosts behind a Cargo feature (`spore-<name>`).** No runtime loading, no registration magic (`inventory`/`linkme` don't hold on Workers). Spores are trusted code: they run in-process, inside requests and transactions. *Hard to reverse (the trust model)* |
+| SP1 | **A spore is a Rust crate in its own repository (package `hypha-spore-<name>`, key `spore_<name>`), compiled into both hosts.** It depends on Hypha's crates by git; a build maps those to the Hypha checkout being built (§4), so one copy of each type exists. No runtime loading, no registration magic (`inventory`/`linkme` don't hold on Workers). Spores are trusted code: they run in-process, inside requests and transactions. *Decided (Q2); hard to reverse (the trust model)* |
 | SP2 | **One descriptor per spore**: the crate's `Spore` value (trait in the new `hypha-spore` crate) names it, declares its settings (operator and merchant), scopes, events, migrations, and builds the parts it contributes. The contributions are typed into existing seams (`PaymentProvider`, `SearchIndex`, `EventHandler`, job steps, `ShippingRates`, `EmailSender`), never `dyn` collections: a host composes them with static dispatch, like `handlers.rs` today. *Hard to reverse (the API spores are written against)* |
-| SP3 | **Hosts compose spores in one generated place**: a `spores!` macro (in `hypha-spore`) lists each spore once with the seams it fills; every entry is behind its feature, and it expands to the hosts' handler, payment, engine, sender and job types. The two hosts share one list (`hypha-http/src/spores.rs`), ending today's "keep the two in step by hand" |
-| SP4 | **Installation is `hypha.json`'s `"spores": ["stripe", "meilisearch"]`**: the CLI builds both binaries with those features, asks for their operator settings and secrets on `init`, writes `[spores.<name>]` into `hypha.config.toml` and secrets into `.env`, and passes them on deploy. A deployment's spores are visible at `GET /admin/spores` |
+| SP3 | **Hosts compose spores in one generated crate, `hypha-spores`**: its list is a `spores!` macro call (macro in `hypha-spore`) naming each spore once with the seams it fills, expanding to the hosts' handler, payment, engine, sender and job types. The committed crate has the empty list (today's sets exactly); builds generate it (§4). Both hosts depend on it, ending today's "keep the two in step by hand" |
+| SP4 | **Installation is `hypha.json`'s `"spores": [{ "name": "stripe", "git": "git@github.com:invocation97/hypha-spore-stripe.git", "rev": "<sha>" }]`**: the CLI clones each spore at its pinned revision on the operator's machine (their git credentials, so private repositories work), stages a build copy with the generated `hypha-spores`, builds both binaries from it, asks for operator settings and secrets on `init`, writes `[spores.<name>]` and `.env`, and passes them on deploy. A deployment's spores (and their revisions) are visible at `GET /admin/spores` |
 | SP5 | **Two settings tiers.** Operator settings: `[spores.<name>]` in `hypha.config.toml`, secrets as `HYPHA_SPORE_<NAME>_<KEY>` environment variables (what the deployment needs to start). Merchant settings: in the database, one document per spore (`spore_settings`), edited in the admin through a form generated from the settings type's JSON Schema (`schemars`); fields marked secret are sealed with `SecretBox`, write-only, never returned. A payment method's own `settings` (0027) stay per method. *Hard to reverse (where secrets live)* |
 | SP6 | **Spores add no arbitrary routes.** Core owns one inbound route per spore, `POST /hooks/spore_<name>/{endpoint}`, unauthenticated, rate-limited: it hands the raw body and headers to the spore's `verify`, records the verified delivery in a core inbox (deduplicated by the provider's event ID) and answers 200; the spore's `handle` runs from the inbox like an event handler, with retries. Everything else a spore needs from the API (a payment's next action, a search) goes through core routes and its ports. *Hard to reverse (route surface)* |
 | SP7 | **Outbound HTTP through one core port**, `hypha_core::http::HttpClient` (method, URL, headers, body → status, headers, body), provided by each host for operator-configured services (no public-address rule: these aren't merchant URLs). `hypha-mail-resend`'s and `hypha-store-s3`'s local ports fold into it |
@@ -83,7 +85,7 @@ ports it names; hosts and spores depend on it), holds what spores are written ag
 ```rust
 /// What a spore is: its name, its settings, what it declares. Built once at startup.
 pub trait Spore: Sized + Send + Sync + 'static {
-    /// "stripe": the key is `spore_stripe`, the feature `spore-stripe`, the config
+    /// "stripe": the key is `spore_stripe`, the config
     /// section `[spores.stripe]`, tables `spore_stripe_*`, scopes `spore_stripe:*`.
     const NAME: SporeName;
     /// `[spores.<name>]` plus its `HYPHA_SPORE_<NAME>_*` secrets; checked at startup.
@@ -125,11 +127,9 @@ pub trait SporeWebhook {
 ## 3. Composition in the hosts
 
 ```rust
-// hypha-http/src/spores.rs: the one list (SP3).
+// crates/hypha-spores/src/lib.rs, as a build generates it (committed: an empty list).
 hypha_spore::spores! {
-    #[cfg(feature = "spore-stripe")]
     stripe: hypha_spore_stripe::Stripe => [payments, webhooks, handlers],
-    #[cfg(feature = "spore-meilisearch")]
     meilisearch: hypha_spore_meilisearch::Meilisearch => [search, jobs],
 }
 ```
@@ -137,9 +137,14 @@ hypha_spore::spores! {
 The macro expands to the types today's hosts write by hand: `PaymentProviders =
 (ManualProvider, StripeProvider)`, the handler tuple, the engine choice (§8), the job
 steps, the webhook dispatch by key, the scope and event catalogs, the migration sets,
-and `GET /admin/spores`. Without features it expands to today's sets exactly. What this
-asks of core, once:
+and `GET /admin/spores`. It also checks each spore's declared `hypha_spore::API`
+version against this build's at compile time, so a spore written for another version
+of the spore API fails with that message rather than with type errors. What this asks
+of core, once:
 
+- **Hypha's crates the spore API names are its public surface**: `hypha-spore`,
+  `hypha-core` and the leaf crates whose ports spores implement. A breaking change to
+  them bumps `hypha_spore::API`, noted in the changelog spores read.
 - **Payment providers and the search engine are built at startup, not `const`** (as
   handlers became for the `Mailer`), since a provider holds its HTTP client and
   operator settings.
@@ -151,23 +156,38 @@ asks of core, once:
   its own; an installed spore's missing required key is a startup error naming it; a
   section for a spore not in this build is a warning, so a config file can outlive a
   build).
-- **The wasm build list and CI** cover `spores/*`, and CI builds once with every spore
-  feature on (so a spore can't rot unseen) and once with none.
+- **The wasm build list and CI** cover `hypha-spore` and `hypha-spores`; Hypha's CI
+  builds the empty list, and each spore's repository runs its own CI against a Hypha
+  revision (a template workflow: clone Hypha at the pinned revision, generate the list
+  with just that spore, `cargo test`, the wasm build, the size check).
 
 ## 4. Installation and deployment
 
-- `hypha.json` gains `"spores": ["stripe"]`. `hypha init --spores stripe,meilisearch`
-  (and a multiselect prompt) asks each spore's operator settings (from its `Operator`
-  type's schema, printed by `hypha-host-axum -- spores schema`) and secrets.
-- **VPS:** the API image builds with `--features spore-stripe,…` (a build argument in
-  `docker/api.Dockerfile`); **Cloudflare:** `worker-build --release --features …` and
-  the native `setup` binary with the same features (so it runs the spores' migrations).
+- `hypha.json` gains `"spores"`, each `{ name, git, rev }` (`hypha spores add <git>
+  [--rev]` pins the current head; `hypha spores update <name>` moves it). `hypha init`
+  asks each spore's operator settings (from its `Operator` type's schema) and secrets.
+- **The staged build** (the CLI, before any compile): copy the Hypha checkout (tracked
+  files, no `target/`) to `<deployment>/.build/hypha`; clone each spore at its `rev`
+  into `.build/spores/<name>`; write `.build/hypha/crates/hypha-spores/` (its
+  `Cargo.toml` with the spores as path dependencies, its `spores!` list); append a
+  `[patch."<Hypha's git URL>"]` table mapping every Hypha crate to its path, so the
+  spores' git dependencies resolve to the same crates; update `Cargo.lock` for the new
+  packages only (`cargo update -p` each spore, so core's pins stay). The working tree is
+  never touched, and a deployment without spores builds exactly as today.
+- **VPS:** the image builds from the staged copy (it's the Docker context, so the
+  server never needs access to the spore repositories); **Cloudflare:** `worker-build`
+  and the native `setup` binary build from it (so `setup` runs the spores' migrations).
   Secrets go into the container's environment and the Worker's `--secrets-file`.
-- The storefront and admin need no rebuild for a spore with no client part; Stripe's
-  storefront package is imported behind a build-time flag (`STOREFRONT_SPORES`) that
-  the CLI sets from the same list.
+- **Developing a spore:** its repository has Hypha as a git dependency like any
+  consumer; `hypha spores dev <path>` generates a git-ignored `hypha-spores.local/`
+  composition and points the workspace at it through `.cargo/config.toml`'s `[patch]`
+  (git-ignored as well), so `pnpm dev` and `cargo test` include a local spore without
+  changing a tracked file; `hypha spores dev --off` removes it.
+- The storefront and admin need no rebuild for a spore with no client part; a spore's
+  storefront package lives in its repository (`storefront/`) and is installed into the
+  staged storefront build by the same step, behind `STOREFRONT_SPORES`.
 - **Size budget (Workers):** each spore states its compressed wasm cost in its README;
-  CI fails the all-features Worker over 8 MB compressed (the paid limit is 10).
+  a spore's CI fails if its Worker (Hypha plus that spore) is over 8 MB compressed, and `hypha deploy` warns when a deployment's spores together pass it (the paid limit is 10).
 
 ## 5. Settings and secrets (SP5)
 
@@ -269,8 +289,9 @@ contract's ranking checks say what is allowed to differ (Q6).
 - **Loadable spores** (no rebuild): WASM components don't run inside a Worker; a
   Worker Loader or an interpreter (`wasmi`) could host *sandboxed* merchant logic with a
   typed JSON contract (Shopify Functions), a different tier from trusted spores.
-- **Third-party spores** from crates.io or git: a generated composition crate from
-  `hypha.json` instead of features on this workspace (Q2).
+- **Publishing Hypha's crates** (crates.io or a registry): spores would then depend on
+  versions instead of git, and the `[patch]` step would go; worth it once the spore API
+  is stable.
 - **Custom admin pages and zones** for spores (SP10).
 
 ## 11. Open decisions
@@ -281,19 +302,19 @@ so a store connects Stripe without a redeploy and keys can be rotated in the adm
 operator can still pin them with `HYPHA_SPORE_STRIPE_*`, which then wins and greys the
 fields out.
 
-**Q2. Where spores live.** Recommended: first-party spores in this repo
-(`spores/stripe`, `spores/meilisearch`), built by features; third-party spores (other
-repos) later, through a composition crate the CLI generates from `hypha.json`'s
-`{ "name", "git", "rev" }` entries. The `Spore` API is the same either way.
+**Q2. Where spores live.** *Decided:* each in its own repository from day one
+(`invocation97/hypha-spore-meilisearch`, `invocation97/hypha-spore-stripe`), pinned by
+revision in `hypha.json` and composed by the staged build (§4). Hypha's repository
+being private is why the CLI clones on the operator's machine rather than letting Cargo
+fetch git dependencies inside a Docker build.
 
 **Q3. May spores add API routes?** Recommended: not in v1 (SP6): only the webhook
 inbox and core routes. A spore that needs its own admin endpoints later gets a
 `spore_<name>` route surface with its scopes and its own OpenAPI document, appended to
 the admin's.
 
-**Q4. Features or always-on?** Recommended: features (SP1). Every spore compiled in
-always would grow the Worker toward its size limit and ship code (and supply-chain
-surface) a store doesn't use.
+**Q4. Features or always-on?** Superseded by Q2: a build contains exactly the spores
+its `hypha.json` lists, so nothing unused is compiled in.
 
 **Q5. A key-value store for spores without tables?** A generic `spore_records` table
 (Saleor's metadata) would cover small state without migrations. Recommended: not yet;
@@ -309,12 +330,14 @@ engine.
 
 1. `hypha-spore`: the descriptor, `SporeEnv`, settings tiers (`[spores.*]`,
    `spore_settings`, sealed secrets, JSON Schema), open scopes, the `HttpClient` port
-   (folding in Resend's and S3's), the `spores!` macro with an empty list reproducing
-   today's sets; `GET /admin/spores`, the settings routes.
+   (folding in Resend's and S3's), the `spores!` macro; the committed `hypha-spores`
+   with the empty list reproducing today's sets; `GET /admin/spores`, the settings
+   routes; the CLI's staged build, `hypha spores add/update/dev`, and a spore template
+   repository with its CI workflow.
 2. Startup-built payment providers and engine; the webhook inbox (route, table, dispatch
    step, admin view).
-3. Meilisearch: the engine choice, the spore, the contract against a Meilisearch in
-   compose (behind a flag in CI), the CLI's install path end to end.
+3. Meilisearch (its repository): the engine choice in core, the spore, the contract
+   against a Meilisearch in compose, the CLI's install path end to end on both hosts.
 4. Stripe: the port's additions, `record_provider_event`, the retry route, the spore,
    the storefront package and payment step, admin capture/refund; Stripe test mode.
 5. Admin: Settings → Spores (status, schema forms, deliveries); payment method forms
