@@ -29,6 +29,7 @@ hypha-stores = { path = "../hypha-stores" }
 worker = { version = "=0.8.7", features = ["http", "axum", "tokio-postgres"] }
 axum = { version = "0.8", default-features = false, features = ["json", "query", "form", "matched-path", "original-uri"] }
 tower-service = "0.3"
+serde = { workspace = true }
 tokio-postgres = { version = "0.7.18", default-features = false, features = ["js", "with-uuid-1"] }
 wasm-bindgen-futures = "0.4"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

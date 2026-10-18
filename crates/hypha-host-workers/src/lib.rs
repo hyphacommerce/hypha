@@ -18,6 +18,7 @@
 pub mod ids;
 pub mod limiter;
 pub mod marks;
+pub mod peer;
 pub mod schedule;
 
 #[cfg(target_arch = "wasm32")]
@@ -293,6 +294,13 @@ mod worker_main {
         }
     }
 
+    /// What a Service Binding from one of our Workers carries (`props`, set by the
+    /// deployment's configuration: `{ caller = "storefront" }`).
+    #[derive(serde::Deserialize)]
+    struct CallerProps {
+        caller: Option<String>,
+    }
+
     /// The API's error shape (`{"code", "error", "details"}`) for a Worker that can't
     /// serve: its configuration or database isn't ready. The reason is logged.
     fn unavailable(reason: &str) -> Response<Body> {
@@ -316,13 +324,15 @@ mod worker_main {
             let ctx = Rc::clone(&ctx);
             Event::new(move |work| ctx.wait_until(work))
         };
-        // Cloudflare sets `CF-Connecting-IP` to the client's address; clients can't.
-        if let Some(ip) = req
-            .headers()
-            .get("cf-connecting-ip")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse().ok())
-        {
+        // From the internet, `CF-Connecting-IP`; through one of our bindings, the
+        // caller's `X-Forwarded-For` (`peer`).
+        let caller = ctx.props::<CallerProps>().ok().and_then(|p| p.caller);
+        let header = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok());
+        if let Some(ip) = crate::peer::client_address(
+            caller.as_deref(),
+            header("cf-connecting-ip"),
+            header("x-forwarded-for"),
+        ) {
             req.extensions_mut()
                 .insert(hypha_http::client_ip::PeerAddr(ip));
         }

@@ -1121,6 +1121,7 @@ dependencies = [
  "hypha-store-postgres",
  "hypha-store-s3",
  "hypha-stores",
+ "serde",
  "tokio-postgres",
  "toml",
  "tower-service",
