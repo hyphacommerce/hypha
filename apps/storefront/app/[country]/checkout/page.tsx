@@ -1,3 +1,4 @@
+import { Banner } from "@astryxdesign/core/Banner";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Card } from "@astryxdesign/core/Card";
 import { Divider } from "@astryxdesign/core/Divider";
@@ -13,7 +14,7 @@ import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { cartId, link } from "@/lib/site";
 
-import { DetailsForm, PlaceOrder, ShippingChoice } from "./checkout-forms";
+import { DetailsForm, PAYMENT_STEP, PaymentChoice, PlaceOrder, ShippingChoice } from "./checkout-forms";
 
 /** Per request: it reads the shopper's cart or query (design note 0024, §7). */
 export const dynamic = "force-dynamic";
@@ -22,8 +23,8 @@ export const metadata: Metadata = { title: "Checkout" };
 
 /**
  * Checkout (design notes 0023, §3, and 0024, §7) on one page: contact and shipping
- * address, a shipping option per group (0015), and a summary with "Place order",
- * unpaid (0021, SU8).
+ * address, a shipping option per group (0015), how the shopper pays when there's
+ * something to pay (0027, §4), and a summary with "Place order".
  */
 export default async function CheckoutPage({ params }: { params: Promise<{ country: string }> }) {
   const country = await countryOf((await params).country);
@@ -34,9 +35,10 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
   const client = api();
   // The options alongside the cart, not after it: they only count once the cart has an
   // address and something to ship, and otherwise the API refuses them (unused here).
-  const [{ data: cart }, options] = await Promise.all([
+  const [{ data: cart }, options, payment] = await Promise.all([
     client.GET("/storefront/carts/{id}", { params: { path: { id } } }),
     client.GET("/storefront/carts/{id}/shipping-options", { params: { path: { id } } }),
+    client.GET("/storefront/carts/{id}/payment-methods", { params: { path: { id } } }),
   ]);
   if (!cart || cart.order || cart.lines.length === 0) redirect(link(code, "/cart"));
 
@@ -44,12 +46,23 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
   const ships = cart.shipping_groups.length > 0;
   const offers = ships && address ? (options.data?.groups ?? []) : [];
   const detailsDone = Boolean(cart.email) && (!ships || Boolean(address));
-  const ready = detailsDone && cart.fully_available && (!ships || cart.shipping_ready);
+  const shippingDone = !ships || cart.shipping_ready;
+  // A free order has nothing to pay, so no payment step (design note 0027, Q2).
+  const pays = cart.total.amount > 0;
+  const methods = payment.data?.items ?? [];
+  // The cart's choice counts only while it's still offered.
+  const method = methods.find((m) => m.id === cart.payment_method);
+  const paymentDone = !pays || Boolean(method);
+  // Nothing to pay with: the store can't take this order (as Shopify says it).
+  const closed = pays && payment.data !== undefined && methods.length === 0;
+  const ready = detailsDone && cart.fully_available && shippingDone && paymentDone;
   const missing = !detailsDone
     ? "Enter your details first."
     : !cart.fully_available
       ? "Something in your cart can't be bought: check your cart."
-      : "Choose how your order ships.";
+      : !shippingDone
+        ? "Choose how your order ships."
+        : "Choose how you'll pay.";
 
   return (
     <VStack gap={6}>
@@ -107,6 +120,34 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
               )}
             </VStack>
           )}
+          {pays && (
+            <div id={PAYMENT_STEP}>
+              <VStack gap={3}>
+                <Divider />
+                <Text type="large" weight="bold">
+                  Payment
+                </Text>
+                {closed ? (
+                  <Text color="secondary">This store can't take orders right now.</Text>
+                ) : !detailsDone || !shippingDone ? (
+                  <Text color="secondary">
+                    {detailsDone ? "Choose how your order ships first." : "Enter your details first."}
+                  </Text>
+                ) : (
+                  <PaymentChoice
+                    country={code}
+                    methods={methods.map((m) => ({
+                      id: m.id,
+                      name: m.name,
+                      instructions: m.instructions ?? null,
+                    }))}
+                    selected={method?.id}
+                    problem={Boolean(cart.payment_method) && !method}
+                  />
+                )}
+              </VStack>
+            </div>
+          )}
         </VStack>
 
         <div className="shop-sticky">
@@ -132,13 +173,21 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
                 taxesIncluded={cart.taxes_included}
                 digits={digits}
               />
-              <PlaceOrder
-                country={code}
-                total={{ amount: cart.total.amount, currency: cart.total.currency }}
-                attempt={crypto.randomUUID()}
-                ready={ready}
-                missing={missing}
-              />
+              {closed ? (
+                <Banner
+                  status="warning"
+                  title="This store can't take orders right now"
+                  description="There's no way to pay for this order yet. Please try again later."
+                />
+              ) : (
+                <PlaceOrder
+                  country={code}
+                  total={{ amount: cart.total.amount, currency: cart.total.currency }}
+                  attempt={crypto.randomUUID()}
+                  ready={ready}
+                  missing={missing}
+                />
+              )}
             </VStack>
           </Card>
         </div>

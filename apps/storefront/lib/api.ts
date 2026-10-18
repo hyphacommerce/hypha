@@ -161,6 +161,11 @@ export function describe(error: { code: string; error: string }): string {
       return "Choose how your order ships.";
     case "address_country_mismatch":
       return "The address must be in the country you're shopping in.";
+    case "payment_method_required":
+      return "Choose how you'll pay.";
+    case "payment_method_unavailable":
+    case "payment_method_not_found":
+      return "That payment method can't be used for this order now. Choose another.";
     default:
       return error.error;
   }

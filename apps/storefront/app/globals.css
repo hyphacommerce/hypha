@@ -132,3 +132,8 @@ body {
   padding-inline-start: var(--spacing-3);
   color: var(--color-text-secondary);
 }
+
+/* Text the merchant wrote with line breaks (a payment method's bank details). */
+.shop-pre-line {
+  white-space: pre-line;
+}

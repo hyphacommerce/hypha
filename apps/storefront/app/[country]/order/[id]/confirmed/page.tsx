@@ -10,6 +10,8 @@ import { Text } from "@astryxdesign/core/Text";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 
+import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+
 import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
 import { api, countryOf } from "@/lib/api";
@@ -20,6 +22,30 @@ import { link, orderTokenCookie } from "@/lib/site";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Order confirmed" };
+
+type PaymentStatus = StorefrontSchemas["PaymentStatusDto"];
+
+/** A payment's status for the buyer (an unknown one shows as it is: the enum is open). */
+function paymentStatus(status: PaymentStatus): { label: string; variant: "success" | "warning" | "error" | "neutral" } {
+  switch (status) {
+    case "pending":
+      return { label: "Awaiting payment", variant: "warning" };
+    case "authorized":
+      return { label: "Authorized", variant: "neutral" };
+    case "paid":
+      return { label: "Paid", variant: "success" };
+    case "failed":
+      return { label: "Payment failed", variant: "error" };
+    case "voided":
+      return { label: "Cancelled", variant: "neutral" };
+    case "partially_refunded":
+      return { label: "Partly refunded", variant: "neutral" };
+    case "refunded":
+      return { label: "Refunded", variant: "neutral" };
+    default:
+      return { label: String(status), variant: "neutral" };
+  }
+}
 
 type Props = {
   params: Promise<{ country: string; id: string }>;
@@ -61,6 +87,8 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
   }
 
   const to = order.shipping_address;
+  const payment = order.payment ?? null;
+  const status = payment ? paymentStatus(payment.status) : undefined;
   const placed = new Intl.DateTimeFormat("en-GB", { dateStyle: "long" }).format(
     new Date(order.placed_at),
   );
@@ -107,15 +135,39 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
             <VStack gap={2}>
               <Heading level={2}>Details</Heading>
               <Text color="secondary">Placed {placed}</Text>
-              <Text color="secondary">
-                {order.financial_status === "paid" ? "Paid" : "Payment on delivery"}
-              </Text>
               {order.shipping_lines.map((s) => (
                 <Text key={s.group} color="secondary">
                   {s.name}
                   {s.estimate ? `, ${s.estimate.min_days}–${s.estimate.max_days} days` : ""}
                 </Text>
               ))}
+            </VStack>
+          </Card>
+          <Card padding={5}>
+            <VStack gap={3}>
+              <HStack gap={3} vAlign="center" wrap="wrap">
+                <Heading level={2}>Payment</Heading>
+                {status && <Badge label={status.label} variant={status.variant} />}
+              </HStack>
+              {!payment ? (
+                <Text color="secondary">
+                  {order.financial_status === "paid" ? "Paid" : "Nothing to pay for this order."}
+                </Text>
+              ) : (
+                <>
+                  <Text>
+                    {payment.method_name ?? "Payment"}: {formatMoney(payment.amount, digits)}
+                  </Text>
+                  {payment.instructions && payment.status === "pending" && (
+                    <VStack gap={2}>
+                      <Text color="secondary">
+                        <span className="shop-pre-line">{payment.instructions}</span>
+                      </Text>
+                      <Text weight="medium">Use order #{order.number} as the payment reference.</Text>
+                    </VStack>
+                  )}
+                </>
+              )}
             </VStack>
           </Card>
           {to && (

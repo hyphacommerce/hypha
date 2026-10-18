@@ -177,22 +177,47 @@ export async function selectShipping(input: {
   refresh();
 }
 
+/** Checkout's third step, when there's something to pay: how the shopper pays (design
+ * note 0027, §4). */
+export async function selectPaymentMethod(input: {
+  country: string;
+  method: string;
+}): Promise<ActionResult> {
+  const id = await currentCart(input.country);
+  const { error } = await api().PUT("/storefront/carts/{id}/payment-method", {
+    params: { path: { id } },
+    body: { payment_method: input.method },
+  });
+  if (error) return refused(error);
+  refresh();
+}
+
+/** What a refused "Place order" tells the form, and the step to go back to. */
+export type PlaceOrderResult = { error: string; step?: "payment" } | undefined;
+
 /**
- * Places the order, unpaid (0021, SU8), at the total the shopper saw: a total that moved
- * since is refused (`total_changed`) rather than charged. The idempotency key (one per
- * render of the checkout) makes a double click place one order.
+ * Places the order at the total the shopper saw, with the payment method they chose: a
+ * total that moved since is refused (`total_changed`) rather than charged. The
+ * idempotency key (one per render of the checkout) makes a double click place one order.
  */
 export async function placeOrder(input: {
   country: string;
   total: { amount: number; currency: string };
   attempt: string;
-}): Promise<ActionResult> {
+}): Promise<PlaceOrderResult> {
   const id = await currentCart(input.country);
   const { data, error } = await api().POST("/storefront/carts/{id}/checkout", {
     params: { path: { id }, header: { "Idempotency-Key": input.attempt } },
     body: { expected_total: input.total },
   });
-  if (error) return refused(error);
+  if (error) {
+    if (error.code === "payment_method_required" || error.code === "payment_method_unavailable") {
+      // Back to the payment step, re-rendered with the methods offered now.
+      refresh();
+      return { error: describe(error), step: "payment" };
+    }
+    return refused(error);
+  }
   // The confirmation reads the order with its access token, kept here for this buyer:
   // the order's ID alone reads nothing (design note 0024, §7).
   (await cookies()).set(orderTokenCookie(data.id), data.access_token, {
@@ -203,6 +228,12 @@ export async function placeOrder(input: {
     maxAge: 60 * 60 * 24 * 30,
   });
   await forgetCart(input.country);
+  // A provider that pays on its own page sends the shopper there (design note 0027, §3);
+  // instructions (cash on delivery, bank transfer) are on the confirmation, read from
+  // the order's payment. A card widget (`client_secret`) needs a payment spore's
+  // component, which this shop doesn't have yet.
+  const next = data.next_action;
+  if (next?.type === "redirect" && /^https?:\/\//.test(next.url)) redirect(next.url);
   redirect(link(input.country, `/order/${data.id}/confirmed`));
 }
 

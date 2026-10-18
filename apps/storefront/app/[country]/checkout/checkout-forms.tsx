@@ -1,9 +1,10 @@
 "use client";
 
 // Checkout's forms (design note 0024, §7; the `payment-form` template without its card
-// section, since orders are placed unpaid, 0021 SU8): contact and address, a shipping
-// option per group, and "Place order". Each saves through its server action, which
-// answers with the page re-rendered from the cart (`refresh()`).
+// section: the store's methods are manual ones, design note 0027): contact and address,
+// a shipping option per group, how the shopper pays, and "Place order". Each saves
+// through its server action, which answers with the page re-rendered from the cart
+// (`refresh()`).
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -18,6 +19,7 @@ import {
   type Details,
   placeOrder,
   saveDetails,
+  selectPaymentMethod,
   selectShipping,
 } from "@/app/[country]/actions";
 
@@ -177,6 +179,61 @@ export function ShippingChoice({
   );
 }
 
+export type Method = { id: string; name: string; instructions: string | null };
+
+/** The payment step's id, for "Place order" to go back to. */
+export const PAYMENT_STEP = "payment";
+
+/** How the shopper pays: one of the cart's methods; choosing one saves it. The chosen
+ * method's instructions (bank details) show under it. */
+export function PaymentChoice({
+  country,
+  methods,
+  selected,
+  problem,
+}: {
+  country: string;
+  methods: Method[];
+  selected?: string;
+  /** The cart's method isn't offered any more (disabled, or not in this market). */
+  problem?: boolean;
+}) {
+  const [value, setValue] = useState(selected ?? "");
+  const [error, setError] = useState<string>();
+  const [pending, start] = useTransition();
+  const choose = (method: string) => {
+    setValue(method);
+    start(async () => {
+      const result = await selectPaymentMethod({ country, method });
+      setError(result?.error);
+      if (result) setValue(selected ?? "");
+    });
+  };
+
+  return (
+    <VStack gap={2}>
+      {problem && (
+        <Banner status="warning" title="The payment method you chose can't be used now: choose again." />
+      )}
+      <RadioList label="Payment method" isLabelHidden value={value} onChange={choose} isDisabled={pending}>
+        {methods.map((m) => (
+          <RadioListItem
+            key={m.id}
+            value={m.id}
+            label={m.name}
+            description={
+              m.id === value && m.instructions ? (
+                <span className="shop-pre-line">{m.instructions}</span>
+              ) : undefined
+            }
+          />
+        ))}
+      </RadioList>
+      {error && <Banner status="error" title={error} />}
+    </VStack>
+  );
+}
+
 /** "Place order", at the total the shopper sees. */
 export function PlaceOrder({
   country,
@@ -208,12 +265,14 @@ export function PlaceOrder({
           start(async () => {
             const result = await placeOrder({ country, total, attempt });
             if (result) setError(result.error);
+            if (result?.step === "payment") {
+              document.getElementById(PAYMENT_STEP)?.scrollIntoView({ behavior: "smooth" });
+            }
           })
         }
       />
       {!ready && missing && <Text type="supporting">{missing}</Text>}
       {error && <Banner status="error" title={error} />}
-      <Text type="supporting">You pay on delivery: no payment is taken online.</Text>
     </VStack>
   );
 }
