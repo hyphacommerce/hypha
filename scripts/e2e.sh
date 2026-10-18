@@ -148,6 +148,24 @@ mail() {
     FAILED=$((FAILED + 1))
 }
 
+# mail_token TO SUBJECT PREFIX: prints the first token starting with PREFIX (like
+# hypha_inv_) in the latest email to TO whose subject has SUBJECT, waiting up to 20 s;
+# nothing without the email checks. The email stays for `mail` to find.
+mail_token() {
+    local query n found message
+    ((MAIL_CHECKS)) || return 0
+    query=$(mailpit_query "$1" "$2")
+    for n in $(seq 1 20); do
+        found=$(curl -s -G "$MAILPIT/api/v1/search" --data-urlencode "query=$query")
+        message=$(grep -o '"ID":"[^"]*"' <<<"$found" | head -1 | sed -E 's/"ID":"([^"]+)"/\1/')
+        if [[ -n $message ]]; then
+            curl -s "$MAILPIT/api/v1/message/$message" | grep -o "$3[0-9a-f]*" | head -1
+            return
+        fi
+        sleep 1
+    done
+}
+
 # forget_mail TO: deletes what an earlier run left in Mailpit for TO.
 forget_mail() {
     ((MAIL_CHECKS)) || return 0
@@ -1790,11 +1808,53 @@ step "the owner role can't change" 409 owner_role_fixed -X PATCH \
     -H "$JSON" -d '{"name":"Boss"}'
 step "invite someone" 201 - -X POST "$BASE/admin/invites" -H "$JSON" \
     -d "{\"email\":\"support@example.com\",\"role\":\"$ROLE\"}"
+INVITE=$(id)
+INVITE_TOKEN=$(mail_token support@example.com "invited" hypha_inv_)
 mail "the invite arrived" support@example.com "invited"
 step "staff can't be invited" 409 user_exists -X POST "$BASE/admin/invites" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"role\":\"$ROLE\"}"
 step "pending invites (design note 0024)" 200 - "$BASE/admin/invites"
 contains "lists the invite" '"email":"support@example.com"'
+SAVED_AUTH=("${AUTH[@]}")
+AUTH=()
+if [[ -n ${INVITE_TOKEN:-} ]]; then
+    step "the invite's link shows what it is" 200 - -X POST "$BASE/admin/invites/lookup" \
+        -H "$JSON" -d "{\"token\":\"$INVITE_TOKEN\"}"
+    contains "its email, role and sender" '"email":"support@example.com","role":"Support","invited_by":"Owner"'
+fi
+step "a made-up token looks up nothing" 401 invalid_token -X POST "$BASE/admin/invites/lookup" \
+    -H "$JSON" -d '{"token":"hypha_inv_nope"}'
+AUTH=("${SAVED_AUTH[@]}")
+step "revoke the invite" 204 - -X DELETE "$BASE/admin/invites/$INVITE"
+step "revoking it again" 404 invite_not_found -X DELETE "$BASE/admin/invites/$INVITE"
+step "no invites pending" 200 - "$BASE/admin/invites"
+contains "the list is empty" '"items":[]'
+if [[ -n ${INVITE_TOKEN:-} ]]; then
+    AUTH=()
+    step "a revoked invite's link stops working" 401 invalid_token -X POST \
+        "$BASE/admin/invites/accept" -H "$JSON" \
+        -d "{\"token\":\"$INVITE_TOKEN\",\"name\":\"Sam\",\"password\":\"sam password\"}"
+    AUTH=("${SAVED_AUTH[@]}")
+fi
+step "rename myself, no users:write needed" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"name":"Owner Two"}'
+contains "the new name" '"name":"Owner Two"'
+step "and back" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" -d '{"name":"Owner"}'
+step "sign in on a second device" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
+    -H "user-agent: E2E second device" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
+SECOND=$(token)
+step "my sessions" 200 - "$BASE/admin/me/sessions"
+contains "this one is marked" '"current":true'
+contains "the second device is listed" '"user_agent":"E2E second device"'
+SECOND_ID=$(sed -E 's/^[^"]*"items":\[\{"id":"(sess_[0-9a-f]+)".*/\1/' <<<"$BODY")
+step "sign the second device out" 204 - -X DELETE "$BASE/admin/me/sessions/$SECOND_ID"
+step "it's signed out already" 404 session_not_found -X DELETE "$BASE/admin/me/sessions/$SECOND_ID"
+AUTH=(-H "authorization: Bearer $SECOND")
+step "the second device's session is over" 401 invalid_token "$BASE/admin/me"
+AUTH=("${SAVED_AUTH[@]}")
+step "sign out everywhere else" 204 - -X POST "$BASE/admin/me/sessions/revoke-others"
+step "this session still works" 200 - "$BASE/admin/me"
 step "every role" 200 - "$BASE/admin/roles"
 step "every staff user" 200 - "$BASE/admin/users"
 contains "the owner is staff" "\"email\":\"$OWNER_EMAIL\""

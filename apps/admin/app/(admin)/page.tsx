@@ -35,6 +35,7 @@ export default async function HomePage() {
             status="warning"
             title="Two-factor authentication is off"
             description="Turn it on to protect your account; it takes a minute with any authenticator app."
+            endContent={<Button label="Set it up" variant="secondary" href="/account#two-factor" />}
           />
         )}
 
@@ -59,6 +60,9 @@ export default async function HomePage() {
           <MetadataListItem label="Role">{me.role.name}</MetadataListItem>
           <MetadataListItem label="Two-factor">{me.mfa_enabled ? "On" : "Off"}</MetadataListItem>
         </MetadataList>
+        <Link href="/account" weight="medium">
+          Manage your account
+        </Link>
 
         <VStack gap={2}>
           <Text type="display-3" as="h2">

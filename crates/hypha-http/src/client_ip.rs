@@ -94,6 +94,19 @@ pub struct PeerAddr(pub IpAddr);
 /// record each request's `PeerAddr`.
 pub struct ClientIp(pub String);
 
+/// The calling client's whole address (IPv4 written as IPv6 shown as IPv4), for
+/// recording where a login came from. Rate limits key on `ClientIp` instead.
+pub struct ClientAddr(pub IpAddr);
+
+/// The client's address: the peer, or what a trusted proxy says it forwarded for.
+fn client_of<S: Storage>(parts: &Parts, state: &SharedState<S>) -> Result<IpAddr, ApiError> {
+    let PeerAddr(peer) = *parts
+        .extensions
+        .get::<PeerAddr>()
+        .ok_or_else(|| ApiError::internal("the host records no peer addresses"))?;
+    Ok(TrustedProxies::new(&state.config.server.trusted_proxies).client(peer, &parts.headers))
+}
+
 impl<S: Storage> FromRequestParts<SharedState<S>> for ClientIp {
     type Rejection = ApiError;
 
@@ -101,13 +114,18 @@ impl<S: Storage> FromRequestParts<SharedState<S>> for ClientIp {
         parts: &mut Parts,
         state: &SharedState<S>,
     ) -> Result<Self, ApiError> {
-        let PeerAddr(peer) = *parts
-            .extensions
-            .get::<PeerAddr>()
-            .ok_or_else(|| ApiError::internal("the host records no peer addresses"))?;
-        let ip =
-            TrustedProxies::new(&state.config.server.trusted_proxies).client(peer, &parts.headers);
-        Ok(ClientIp(limit_key(ip)))
+        Ok(ClientIp(limit_key(client_of(parts, state)?)))
+    }
+}
+
+impl<S: Storage> FromRequestParts<SharedState<S>> for ClientAddr {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &SharedState<S>,
+    ) -> Result<Self, ApiError> {
+        Ok(ClientAddr(canonical(client_of(parts, state)?)))
     }
 }
 

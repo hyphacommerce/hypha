@@ -11,10 +11,10 @@ pub mod role;
 pub mod user;
 
 pub use commands::{
-    AcceptInvite, CommandError, InviteUser, NewOwner, StaffEmail, StaffPorts, StaffSession,
-    UpdateRole, UpdateUser, accept_invite, authenticate_staff, bootstrap_owner, create_role,
-    get_role, get_user, invite_user, list_invites, list_roles, list_users, login,
-    request_password_reset, update_role, update_user,
+    AcceptInvite, CommandError, InviteDetails, InviteUser, NewOwner, StaffEmail, StaffPorts,
+    StaffSession, UpdateRole, UpdateUser, accept_invite, authenticate_staff, bootstrap_owner,
+    create_role, get_role, get_user, invite_user, list_invites, list_roles, list_users, login,
+    lookup_invite, rename_me, request_password_reset, revoke_invite, update_role, update_user,
 };
 pub use error::{RoleError, UserError};
 pub use invite::{Invite, InviteSnapshot};

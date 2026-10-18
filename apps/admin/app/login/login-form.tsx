@@ -2,14 +2,15 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { VStack } from "@astryxdesign/core/Layout";
+import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { Link } from "@astryxdesign/core/Link";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { type FormEvent, useActionState, useState, startTransition } from "react";
 
 import { login } from "./actions";
 import { AuthCard } from "./auth-card";
 
-export function LoginForm() {
+export function LoginForm({ notice }: { notice?: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isIncomplete, setIsIncomplete] = useState(false);
@@ -43,8 +44,10 @@ export function LoginForm() {
     <AuthCard title="Welcome back" subtitle="Sign in to your store's admin">
       {isIncomplete ? (
         <Banner status="error" title="Enter your email and password." />
+      ) : state.error ? (
+        <Banner status="error" title={state.error} />
       ) : (
-        state.error && <Banner status="error" title={state.error} />
+        notice && <Banner status="success" title={notice} />
       )}
       <form onSubmit={submit} noValidate>
         <VStack gap={4}>
@@ -70,6 +73,11 @@ export function LoginForm() {
               onChange={setPassword}
               size="lg"
             />
+            <HStack hAlign="end">
+              <Link href="/forgot-password" size="sm" type="supporting">
+                Forgot password?
+              </Link>
+            </HStack>
           </VStack>
           <Button label="Sign in" type="submit" variant="primary" size="lg" isLoading={isPending} />
         </VStack>

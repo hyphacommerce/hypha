@@ -122,7 +122,7 @@ function AppRow({
     <TableRow>
       <TableCell>
         <VStack gap={0}>
-          <Link href={`/settings/apps/${app.key}`} weight="medium">
+          <Link href={`/apps/${app.key}`} weight="medium">
             {app.name}
           </Link>
           <Text type="supporting" color="secondary">

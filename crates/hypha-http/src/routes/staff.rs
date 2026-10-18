@@ -5,7 +5,7 @@ use hypha_core::{Email, InviteId, RoleId, Scope, UserId};
 use hypha_users::{
     HasInvites, HasRoles, HasUsers, Invite, InviteUser, Role, RoleScopes, UpdateRole, UpdateUser,
     User, UserStatus, create_role, get_role, get_user, invite_user, list_invites, list_roles,
-    list_users, update_role, update_user,
+    list_users, revoke_invite, update_role, update_user,
 };
 use serde::{Deserialize, Serialize};
 
@@ -353,4 +353,23 @@ pub async fn invite_handler<S: Storage>(
     };
     let invite = invite_user(&ctx, &ports, &state.staff_env(&ports), input).await?;
     Ok((StatusCode::CREATED, Json(InviteResponse::new(&invite)?)))
+}
+
+/// Withdraws a pending invite: its link stops working. Needs every scope its role
+/// grants, like inviting.
+#[utoipa::path(
+    delete,
+    path = "/admin/invites/{id}",
+    params(("id" = InviteId, Path)),
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-scopes" = json!(["users:write"]))),
+)]
+pub async fn revoke_invite_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<InviteId>,
+) -> Result<StatusCode, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    revoke_invite(&ctx, &ports, id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

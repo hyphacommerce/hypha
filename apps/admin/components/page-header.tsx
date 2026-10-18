@@ -3,6 +3,9 @@ import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import type { ReactNode } from "react";
 
+/** A page above this one, shown as a breadcrumb. */
+export type Crumb = { label: string; href: string };
+
 /** A page's title, with the way back above it and its actions on the right. */
 export function PageHeader({
   title,
@@ -13,16 +16,21 @@ export function PageHeader({
 }: {
   title: string;
   description?: ReactNode;
-  /** The parent page, shown as a breadcrumb. */
-  back?: { label: string; href: string };
+  /** The parent page, or the pages above this one from the top, shown as breadcrumbs. */
+  back?: Crumb | Crumb[];
   badges?: ReactNode;
   actions?: ReactNode;
 }) {
+  const trail = back === undefined ? [] : Array.isArray(back) ? back : [back];
   return (
     <VStack gap={2}>
-      {back && (
+      {trail.length > 0 && (
         <Breadcrumbs variant="supporting">
-          <BreadcrumbItem href={back.href}>{back.label}</BreadcrumbItem>
+          {trail.map((crumb) => (
+            <BreadcrumbItem key={crumb.href} href={crumb.href}>
+              {crumb.label}
+            </BreadcrumbItem>
+          ))}
           <BreadcrumbItem>{title}</BreadcrumbItem>
         </Breadcrumbs>
       )}

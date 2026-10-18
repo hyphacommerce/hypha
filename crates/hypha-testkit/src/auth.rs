@@ -114,7 +114,38 @@ impl SessionRepo for InMemorySessionRepo {
     }
 
     async fn update(&self, session: &mut Session) -> Result<(), RepoError> {
+        keep_recorded_use(&self.sessions.lock(), session);
         self.sessions.update(session.id(), session, &unique_session)
+    }
+
+    async fn live_for_identity(
+        &self,
+        identity: IdentityId,
+        now: Timestamp,
+    ) -> Result<Vec<Session>, RepoError> {
+        let mut live = self.sessions.all();
+        live.retain(|s| s.identity() == identity && s.is_live(now));
+        // Newest first; IDs are UUIDv7, so creation order breaks ties.
+        live.sort_by_key(|s| core::cmp::Reverse((s.created_at(), s.id())));
+        Ok(live)
+    }
+
+    async fn record_use(&self, id: SessionId, at: Timestamp) -> Result<(), RepoError> {
+        if let Some(stored) = self.sessions.lock().get_mut(&id) {
+            stored.record_use(at);
+        }
+        Ok(())
+    }
+}
+
+/// What a database's `GREATEST` does on update: a use recorded since `session` was
+/// loaded stays (`SessionRepo::update`).
+pub(crate) fn keep_recorded_use(
+    stored: &std::collections::HashMap<SessionId, Session>,
+    session: &mut Session,
+) {
+    if let Some(stored) = stored.get(&session.id()) {
+        session.record_use(stored.last_used_at());
     }
 }
 

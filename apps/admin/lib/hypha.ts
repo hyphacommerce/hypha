@@ -5,7 +5,7 @@
 import { apiFetch } from "#api-fetch";
 import { type AdminSchemas, type ApiError, createAdminClient } from "@hypha/sdk/admin";
 import { cookies, headers } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { forbidden, notFound, redirect } from "next/navigation";
 
 import { referenceLifetime, sessionFetch } from "./api-cache";
 import type { Currencies } from "./format";
@@ -46,9 +46,19 @@ async function forwardedFor(): Promise<Record<string, string>> {
   return ip ? { "x-forwarded-for": ip } : {};
 }
 
+/**
+ * The browser's `User-Agent`, passed on so a session opened by a login or an invite
+ * shows which browser it is (`GET /admin/me/sessions`), not the admin server's.
+ */
+async function forwardedUserAgent(): Promise<Record<string, string>> {
+  const agent = (await headers()).get("user-agent")?.trim();
+  return agent ? { "user-agent": agent } : {};
+}
+
 /** A client for the routes that need no credentials (login and its second step). */
 export async function publicClient() {
-  return createAdminClient(apiUrl(), undefined, await forwardedFor(), apiFetch());
+  const passedOn = { ...(await forwardedFor()), ...(await forwardedUserAgent()) };
+  return createAdminClient(apiUrl(), undefined, passedOn, apiFetch());
 }
 
 /**
@@ -149,6 +159,15 @@ async function sessionExpired(): Promise<never> {
   redirect(`/session-expired?next=${encodeURIComponent(safeNext(back))}`);
 }
 
+/** The pages outside the login, which make no sense to come back to after it. */
+const PUBLIC_PAGES = [
+  "/login",
+  "/session-expired",
+  "/invite",
+  "/forgot-password",
+  "/reset-password",
+];
+
 /**
  * A path on this admin to go to after signing in, or "/". Only plain local paths: never
  * another origin (`//evil.example`, `/\\evil.example`), nor the login pages themselves.
@@ -157,7 +176,13 @@ export function safeNext(path: string | null | undefined): string {
   if (!path || !path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\")) {
     return "/";
   }
-  if (path.startsWith("/login") || path.startsWith("/session-expired")) return "/";
+  if (
+    PUBLIC_PAGES.some(
+      (page) => path === page || path.startsWith(`${page}/`) || path.startsWith(`${page}?`),
+    )
+  ) {
+    return "/";
+  }
   return path;
 }
 
@@ -230,13 +255,24 @@ export const requireStaff = perRequest(async (): Promise<AdminSchemas["MeRespons
 });
 
 /**
- * The data of an API call a page needs. A missing resource goes to the 404 page (a
- * session the API no longer accepts never gets here: `sessionClient` redirects);
- * anything else is a bug or an outage, so it throws to the error page.
+ * Whether an API answer is a `403 missing_scope`: the user's role lacks what the call
+ * needs, which pages show as a notice rather than an error.
+ */
+export function isMissingScope(result: { error?: ApiError; response: Response }): boolean {
+  return result.response.status === 403 && result.error?.code === "missing_scope";
+}
+
+/**
+ * The data of an API call a page needs. A missing resource goes to the 404 page, and a
+ * read the user's role doesn't allow to the no-access notice (`(admin)/forbidden.tsx`)
+ * inside the frame, so the rest of the admin stays usable (a session the API no longer
+ * accepts never gets here: `sessionClient` redirects); anything else is a bug or an
+ * outage, so it throws to the error page.
  */
 export function loaded<T>(result: { data?: T; error?: ApiError; response: Response }): T {
   if (result.data !== undefined) return result.data;
   if (result.response.status === 404) notFound();
+  if (isMissingScope(result)) forbidden();
   throw new Error(
     `${result.response.url} failed with ${result.response.status} ${result.error?.code ?? ""}`,
   );
@@ -260,6 +296,46 @@ export function describe(error: ApiError): string {
       return "Too many wrong codes. Try again in a few minutes.";
     case "invalid_token":
       return "That sign-in expired. Start again.";
+    case "wrong_password":
+      return "That isn't your current password.";
+    case "password_too_short":
+      return "Use at least 8 characters for the password.";
+    case "password_too_long":
+      return "The password can be at most 128 characters.";
+    case "mfa_enabled":
+      return "Two-factor authentication is already on.";
+    case "mfa_not_enabled":
+      return "Two-factor authentication is off.";
+    case "mfa_setup_not_started":
+      return "That setup expired. Start setting up the authenticator again.";
+    case "session_required":
+      return "Only a signed-in staff member can do this.";
+    case "user_exists":
+      return "Someone with that email is already on the team.";
+    case "user_not_found":
+      return "That staff member no longer exists. Reload the page.";
+    case "role_not_found":
+      return "That role no longer exists. Reload the page.";
+    case "invite_not_found":
+      return "That invite was already accepted or withdrawn. Reload the page.";
+    case "session_not_found":
+      return "That device is already signed out. Reload the page.";
+    case "grant_not_narrower":
+      return "Access can only be reduced here. To add a scope, the app asks again and staff approve it.";
+    case "app_not_installed":
+      return "This app isn't installed, so it has no access to reduce.";
+    case "role_name_taken":
+      return "Another role already has that name.";
+    case "role_scopes_required":
+      return "A role needs at least one scope.";
+    case "owner_role_fixed":
+      return "The owner role always has every scope; it can't be changed.";
+    case "last_owner":
+      return "The store keeps at least one active owner. Make someone else an owner first.";
+    case "not_allowed_to_grant":
+      return "You can only give away scopes your own role has.";
+    case "notification_failed":
+      return "The email couldn't be sent. Check the email settings under Notifications, then try again.";
     case "handle_taken":
       return "Another product already uses that handle. Pick a different one.";
     case "channel_name_taken":
@@ -496,14 +572,15 @@ export const loadCurrencies = perRequest(async (): Promise<Currencies> => {
  */
 export const loadStore = perRequest(async (): Promise<AdminSchemas["StoreResponse"] | null> => {
   const client = await sessionClient();
-  const { data } = await client.GET("/admin/store");
-  return data ?? null;
+  const result = await client.GET("/admin/store");
+  if (isMissingScope(result)) return null;
+  return loaded(result);
 });
 
-/** The store, for pages about it: one the staff member can't read is an error there. */
+/** The store, for pages about it: one the staff member can't read is the no-access notice. */
 export async function requireStore(): Promise<AdminSchemas["StoreResponse"]> {
   const store = await loadStore();
-  if (!store) throw new Error("GET /admin/store failed");
+  if (!store) forbidden();
   return store;
 }
 

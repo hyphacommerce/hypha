@@ -214,6 +214,40 @@ pub async fn invite_repo<R: InviteRepo>(make: impl AsyncFn() -> R) {
     invite_keys(&make().await).await;
     scenario("invite: pending is every invite not accepted, oldest first");
     invite_pending(&make().await).await;
+    scenario("invite: get by ID; delete at the loaded version frees the email and token");
+    invite_delete(&make().await).await;
+}
+
+async fn invite_delete<R: InviteRepo>(repo: &R) {
+    let mut i = invite(1, "bob@example.com", 1);
+    repo.insert(&mut i).await.unwrap();
+    assert_eq!(repo.get(i.id()).await, Ok(Some(i.clone())));
+    assert_eq!(
+        repo.get(InviteId::from_uuid(Uuid::from_u128(9))).await,
+        Ok(None)
+    );
+    // From a copy loaded before a renewal: stale, and the invite stays.
+    let old = i.clone();
+    i.renew(
+        TokenHash::from_bytes([2; 32]),
+        role_id(1),
+        Actor::System,
+        Timestamp::from_unix_micros(5),
+        AuthSettings::default().invite_lifetime,
+    );
+    repo.update(&mut i).await.unwrap();
+    assert_eq!(repo.delete(&old).await, Err(RepoError::StaleVersion));
+    assert_eq!(repo.delete(&i).await, Ok(()));
+    assert_eq!(repo.get(i.id()).await, Ok(None));
+    assert_eq!(
+        repo.get_by_token(TokenHash::from_bytes([2; 32])).await,
+        Ok(None)
+    );
+    assert_eq!(repo.delete(&i).await, Err(RepoError::StaleVersion));
+    // The email and token can be used again.
+    repo.insert(&mut invite(2, "bob@example.com", 2))
+        .await
+        .unwrap();
 }
 
 async fn invite_pending<R: InviteRepo>(repo: &R) {

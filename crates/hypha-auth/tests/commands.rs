@@ -3,8 +3,9 @@ use hypha_auth::{
     LoginStep, MfaMethod, Password, PasswordError, Principal, PrincipalKind, SessionRepo,
     TokenHash, authenticate_api_key, authenticate_session, change_password, check_password,
     confirm_totp, create_api_key, disable_mfa, finish_login, get_api_key, hash_new_password,
-    logout, open_session, regenerate_recovery_codes, reset_password, revoke_api_key,
-    start_password_reset, start_totp, totp,
+    list_sessions, logout, open_session, record_session_use, regenerate_recovery_codes,
+    reset_password, revoke_api_key, revoke_other_sessions, revoke_session, start_password_reset,
+    start_totp, totp,
 };
 use hypha_core::{
     Actor, ApiKeyId, AuthError, ChannelId, Clock, Ctx, Email, IdentityId, Scope, Timestamp, UserId,
@@ -1096,4 +1097,156 @@ fn only_hashes_are_stored() {
         .unwrap()
         .unwrap();
     assert_eq!(session.created_at(), env.clock.now());
+}
+
+// ---------- a staff member's own sessions ----------
+
+fn session_of(step: &LoginStep) -> hypha_auth::Session {
+    match step {
+        LoginStep::Authenticated { session, .. } | LoginStep::MfaRequired { session, .. } => {
+            session.clone()
+        }
+    }
+}
+
+/// Another identity's active session.
+fn strangers_session(ports: &InMemoryPorts, env: &TestEnv) -> hypha_auth::Session {
+    let mut s = hypha_auth::Session::active(
+        hypha_core::SessionId::from_uuid(Uuid::from_u128(900)),
+        IdentityId::from_uuid(Uuid::from_u128(901)),
+        Principal::Staff(UserId::from_uuid(Uuid::from_u128(902))),
+        TokenHash::from_bytes([9; 32]),
+        env.now(),
+        None,
+        hypha_auth::AuthSettings::default().session_lifetime,
+    );
+    block_on(ports.sessions.insert(&mut s)).unwrap();
+    s
+}
+
+#[test]
+fn listing_sessions_shows_the_identitys_logged_in_ones_newest_first() {
+    let (ports, env) = world();
+    let first = session_of(&login(&ports, &env));
+    env.advance(1);
+    let second = session_of(&login(&ports, &env));
+    env.advance(1);
+    let ended = session_of(&login(&ports, &env));
+    block_on(logout(&ports.sessions, &env, ended)).unwrap();
+    strangers_session(&ports, &env);
+    let listed = block_on(list_sessions(&ports.sessions, &env, &first)).unwrap();
+    assert_eq!(
+        listed.iter().map(|s| s.id()).collect::<Vec<_>>(),
+        vec![second.id(), first.id()]
+    );
+}
+
+#[test]
+fn a_pending_login_is_not_listed() {
+    let (ports, env) = world();
+    let current = session_of(&login(&ports, &env));
+    enable_mfa(&ports, &env);
+    let pending = login(&ports, &env);
+    assert!(matches!(pending, LoginStep::MfaRequired { .. }));
+    let listed = block_on(list_sessions(&ports.sessions, &env, &current)).unwrap();
+    assert_eq!(
+        listed.iter().map(|s| s.id()).collect::<Vec<_>>(),
+        vec![current.id()]
+    );
+}
+
+#[test]
+fn revoking_one_of_my_sessions_signs_it_out() {
+    let (ports, env) = world();
+    let current = session_of(&login(&ports, &env));
+    let other_step = login(&ports, &env);
+    let other = session_of(&other_step);
+    assert_eq!(
+        block_on(revoke_session(&ports.sessions, &env, &current, other.id())),
+        Ok(())
+    );
+    assert_eq!(
+        block_on(authenticate_session(
+            &ports.sessions,
+            &env,
+            &token_of(&other_step)
+        ))
+        .map(|s| s.id()),
+        Err(CommandError::InvalidToken)
+    );
+    // Gone now, so a second revoke finds nothing.
+    assert_eq!(
+        block_on(revoke_session(&ports.sessions, &env, &current, other.id())),
+        Err(CommandError::SessionNotFound(other.id()))
+    );
+}
+
+#[test]
+fn someone_elses_session_is_not_found() {
+    let (ports, env) = world();
+    let current = session_of(&login(&ports, &env));
+    let theirs = strangers_session(&ports, &env);
+    assert_eq!(
+        block_on(revoke_session(&ports.sessions, &env, &current, theirs.id())),
+        Err(CommandError::SessionNotFound(theirs.id()))
+    );
+    assert_eq!(
+        block_on(ports.sessions.get(theirs.id())).map(|s| s.and_then(|s| s.revoked_at())),
+        Ok(None)
+    );
+}
+
+#[test]
+fn revoking_the_others_keeps_mine_and_spares_other_identities() {
+    let (ports, env) = world();
+    let current_step = login(&ports, &env);
+    let current = session_of(&current_step);
+    let other_step = login(&ports, &env);
+    let theirs = strangers_session(&ports, &env);
+    assert_eq!(
+        block_on(revoke_other_sessions(&ports, &env, &current)),
+        Ok(())
+    );
+    assert!(
+        block_on(authenticate_session(
+            &ports.sessions,
+            &env,
+            &token_of(&current_step)
+        ))
+        .is_ok()
+    );
+    assert_eq!(
+        block_on(authenticate_session(
+            &ports.sessions,
+            &env,
+            &token_of(&other_step)
+        ))
+        .map(|s| s.id()),
+        Err(CommandError::InvalidToken)
+    );
+    assert_eq!(
+        block_on(ports.sessions.get(theirs.id())).map(|s| s.and_then(|s| s.revoked_at())),
+        Ok(None)
+    );
+}
+
+#[test]
+fn a_sessions_use_is_recorded_once_per_resolution() {
+    let (ports, env) = world();
+    let mut session = session_of(&login(&ports, &env));
+    let created = session.created_at();
+    env.advance_by(hypha_auth::Session::USE_RESOLUTION);
+    env.advance(-1);
+    block_on(record_session_use(&ports.sessions, &env, &mut session)).unwrap();
+    let stored = |id| {
+        block_on(ports.sessions.get(id))
+            .unwrap()
+            .unwrap()
+            .last_used_at()
+    };
+    assert_eq!(stored(session.id()), created);
+    env.advance(1);
+    block_on(record_session_use(&ports.sessions, &env, &mut session)).unwrap();
+    assert_eq!(stored(session.id()), env.now());
+    assert_eq!(session.last_used_at(), env.now());
 }

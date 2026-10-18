@@ -2,9 +2,9 @@
 // (design note 0024, AU7). Never import this from a "use client" file.
 
 import type { ApiError } from "@hypha/sdk/admin";
-import { redirect } from "next/navigation";
+import { forbidden, redirect } from "next/navigation";
 
-import { describe } from "@/lib/hypha";
+import { describe, isMissingScope } from "@/lib/hypha";
 
 import { CURSOR, PREV, type SearchParams, href, one, withChanges } from "./params";
 
@@ -25,7 +25,8 @@ export type ListPage<T> = {
  * The page of a list call. A cursor the API doesn't take any more (`400`: from before a
  * filter changed, an old version, a hand-edited URL) starts the list again with the
  * same filters; any other `400` (an unknown filter value) starts it with none. A
- * refused filter (`422`) shows its reason with an empty table.
+ * refused filter (`422`) shows its reason with an empty table, and a list the user's
+ * role can't read (`403 missing_scope`) the no-access notice.
  */
 export function listPage<T>(
   result: {
@@ -49,6 +50,8 @@ export function listPage<T>(
   if (status === 422 && result.error) {
     return { items: [], next_cursor: null, error: describe(result.error) };
   }
+  // The user's role can't read the list: the no-access notice, as `loaded` does.
+  if (isMissingScope(result)) forbidden();
   throw new Error(`${result.response.url} failed with ${status} ${result.error?.code ?? ""}`);
 }
 

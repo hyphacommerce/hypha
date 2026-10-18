@@ -76,6 +76,9 @@ pub enum CommandError {
     CannotGrant(Scope),
     #[error("channel {0} not found")]
     ChannelNotFound(ChannelId),
+    /// Not one of the caller's live sessions (someone else's reads the same).
+    #[error("session {0} not found")]
+    SessionNotFound(SessionId),
 }
 
 impl ErrorCode for CommandError {
@@ -97,6 +100,7 @@ impl ErrorCode for CommandError {
             CommandError::IdentityNotFound(_) => "identity_not_found",
             CommandError::CannotGrant(_) => "not_allowed_to_grant",
             CommandError::ChannelNotFound(_) => "channel_not_found",
+            CommandError::SessionNotFound(_) => "session_not_found",
         }
     }
 }
@@ -445,6 +449,72 @@ pub async fn logout<R: SessionRepo>(
 ) -> Result<(), CommandError> {
     session.revoke(clock.now());
     sessions.update(&mut session).await?;
+    Ok(())
+}
+
+// ---------- a staff member's own sessions ----------
+
+/// The logged-in sessions of `current`'s identity (its own included), newest first.
+/// Pending logins aren't listed: they can't do anything but finish.
+pub async fn list_sessions<R: SessionRepo>(
+    sessions: &R,
+    clock: &impl Clock,
+    current: &Session,
+) -> Result<Vec<Session>, CommandError> {
+    let now = clock.now();
+    let mut live = sessions.live_for_identity(current.identity(), now).await?;
+    live.retain(|s| s.is_active(now));
+    Ok(live)
+}
+
+/// Ends session `id`, one of `current`'s identity's (`current` itself is a logout). Any
+/// other session, ended or not, is `SessionNotFound`: nobody learns whether another
+/// account's session exists.
+pub async fn revoke_session<R: SessionRepo>(
+    sessions: &R,
+    clock: &impl Clock,
+    current: &Session,
+    id: SessionId,
+) -> Result<(), CommandError> {
+    let now = clock.now();
+    let mut session = sessions
+        .get(id)
+        .await?
+        .filter(|s| s.identity() == current.identity() && s.is_live(now))
+        .ok_or(CommandError::SessionNotFound(id))?;
+    session.revoke(now);
+    sessions.update(&mut session).await?;
+    Ok(())
+}
+
+/// Ends every session of `current`'s identity but `current` ("sign out everywhere
+/// else").
+pub async fn revoke_other_sessions<S>(
+    ports: &S,
+    clock: &impl Clock,
+    current: &Session,
+) -> Result<(), CommandError>
+where
+    S: HasBatch<Batch: StageSessions>,
+{
+    let mut batch = ports.batch();
+    batch.revoke_sessions(current.identity(), Some(current.id()), clock.now());
+    ports.commit(batch).await?;
+    Ok(())
+}
+
+/// Records that a request used `session`, at most once per `Session::USE_RESOLUTION`,
+/// so listing sessions can say when each was last active without a write per request.
+pub async fn record_session_use<R: SessionRepo>(
+    sessions: &R,
+    clock: &impl Clock,
+    session: &mut Session,
+) -> Result<(), CommandError> {
+    let now = clock.now();
+    if session.use_is_stale(now) {
+        sessions.record_use(session.id(), now).await?;
+        session.record_use(now);
+    }
     Ok(())
 }
 

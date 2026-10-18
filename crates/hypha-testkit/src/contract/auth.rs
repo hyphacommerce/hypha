@@ -1,7 +1,7 @@
 use hypha_auth::{
     ApiKey, ApiKeyKind, ApiKeyParts, ApiKeyRepo, AuthSettings, CredentialKind, Identity,
     IdentityRepo, PasswordHash, PasswordReset, PasswordResetRepo, Principal, PrincipalKind, Sealed,
-    Session, SessionRepo, TokenHash, keys,
+    Session, SessionClient, SessionRepo, TokenHash, keys,
 };
 use hypha_core::{
     Actor, ApiKeyId, ChannelId, Email, IdentityId, PasswordResetId, RepoError, Scope, SessionId,
@@ -214,6 +214,106 @@ pub async fn session_repo<R: SessionRepo>(make: impl AsyncFn() -> R) {
     session_stale(&make().await).await;
     scenario("session: prune deletes sessions that ended before a time");
     session_prune(&make().await).await;
+    scenario("session: the client and last use round trip");
+    session_client(&make().await).await;
+    scenario("session: live_for_identity is the identity's unended sessions, newest first");
+    session_live_for_identity(&make().await).await;
+    scenario("session: record_use moves last_used_at forward only, keeping the version");
+    session_record_use(&make().await).await;
+}
+
+async fn session_client<R: SessionRepo>(repo: &R) {
+    let mut s = session(1, 1, 1);
+    s.set_client(SessionClient::new(
+        Some("2001:db8::1"),
+        Some("Mozilla/5.0 (Macintosh) Firefox/140.0"),
+    ));
+    repo.insert(&mut s).await.unwrap();
+    assert_eq!(repo.get(s.id()).await, Ok(Some(s.clone())));
+    let mut bare = session(2, 1, 2);
+    repo.insert(&mut bare).await.unwrap();
+    assert_eq!(
+        repo.get(bare.id())
+            .await
+            .map(|s| s.map(|s| s.client().clone())),
+        Ok(Some(SessionClient::default()))
+    );
+}
+
+async fn session_live_for_identity<R: SessionRepo>(repo: &R) {
+    let created = Timestamp::from_unix_micros(1_700_000_000_000_001);
+    let now = created.plus_secs(60);
+    let mut older = session(1, 1, 1);
+    let mut newer = Session::active(
+        SessionId::from_uuid(Uuid::from_u128(2)),
+        identity_id(1),
+        staff(1),
+        hash(2),
+        created.plus_secs(1),
+        None,
+        settings().session_lifetime,
+    );
+    let mut revoked = session(3, 1, 3);
+    revoked.revoke(created);
+    let mut expired = Session::pending(
+        SessionId::from_uuid(Uuid::from_u128(4)),
+        identity_id(1),
+        staff(1),
+        hash(4),
+        created,
+        core::time::Duration::from_secs(30),
+    );
+    let mut pending = Session::pending(
+        SessionId::from_uuid(Uuid::from_u128(5)),
+        identity_id(1),
+        staff(1),
+        hash(5),
+        now,
+        settings().second_factor_window,
+    );
+    let mut other = session(6, 2, 6);
+    for s in [
+        &mut older,
+        &mut newer,
+        &mut revoked,
+        &mut expired,
+        &mut pending,
+        &mut other,
+    ] {
+        repo.insert(s).await.unwrap();
+    }
+    assert_eq!(
+        repo.live_for_identity(identity_id(1), now).await,
+        Ok(vec![pending, newer, older])
+    );
+    assert_eq!(
+        repo.live_for_identity(identity_id(9), now).await,
+        Ok(vec![])
+    );
+}
+
+async fn session_record_use<R: SessionRepo>(repo: &R) {
+    let mut s = session(1, 1, 1);
+    repo.insert(&mut s).await.unwrap();
+    let later = s.created_at().plus_secs(3600);
+    repo.record_use(s.id(), later).await.unwrap();
+    let stored = repo.get(s.id()).await.unwrap().unwrap();
+    assert_eq!(stored.last_used_at(), later);
+    assert_eq!(stored.version(), Version::new(1));
+    // Never back.
+    repo.record_use(s.id(), s.created_at()).await.unwrap();
+    assert_eq!(
+        repo.get(s.id()).await.map(|s| s.map(|s| s.last_used_at())),
+        Ok(Some(later))
+    );
+    // An update from a copy loaded before the use keeps it, and the copy learns it.
+    s.revoke(later);
+    repo.update(&mut s).await.unwrap();
+    assert_eq!(s.last_used_at(), later);
+    assert_eq!(repo.get(s.id()).await, Ok(Some(s)));
+    // A session that's gone is no error.
+    let missing = SessionId::from_uuid(Uuid::from_u128(99));
+    assert_eq!(repo.record_use(missing, later).await, Ok(()));
 }
 
 async fn session_prune<R: SessionRepo>(repo: &R) {

@@ -31,7 +31,7 @@ use hypha_users::{Invite, Role, StageInvites, StageRoles, StageUsers, User, keys
 
 use crate::{
     InMemoryPorts,
-    auth::{unique_identity, unique_reset, unique_session},
+    auth::{keep_recorded_use, unique_identity, unique_reset, unique_session},
     categories::{check_parent, unique as unique_category},
     customers::unique as unique_customer,
     idempotency::insert_record,
@@ -570,6 +570,7 @@ impl HasBatch for InMemoryPorts {
                         &unique_session,
                     )?,
                     Staged::Session(mut session) => {
+                        keep_recorded_use(&sessions, &mut session);
                         update_row(&mut sessions, session.id(), &mut session, &unique_session)?
                     }
                     Staged::SessionRevocation(identity, keep, at) => {

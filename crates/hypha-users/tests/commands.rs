@@ -1,11 +1,14 @@
-use hypha_auth::{LoginStep, PasswordError};
-use hypha_core::{Actor, AuthError, Ctx, Email, NotifyError, RoleId, Scope, UserId, Versioned};
+use hypha_auth::SessionRepo;
+use hypha_auth::{LoginStep, PasswordError, SessionClient};
+use hypha_core::{
+    Actor, AuthError, Ctx, Email, InviteId, NotifyError, RoleId, Scope, UserId, Versioned,
+};
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use hypha_users::{
-    AcceptInvite, CommandError, InviteUser, NewOwner, Role, RoleError, RoleRepo, StaffEmail,
-    UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite, authenticate_staff,
-    bootstrap_owner, create_role, get_user, invite_user, login, request_password_reset,
-    update_role, update_user,
+    AcceptInvite, CommandError, Invite, InviteUser, NewOwner, Role, RoleError, RoleRepo,
+    StaffEmail, UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite,
+    authenticate_staff, bootstrap_owner, create_role, get_user, invite_user, login, lookup_invite,
+    rename_me, request_password_reset, revoke_invite, update_role, update_user,
 };
 use pollster::block_on;
 use uuid::Uuid;
@@ -64,6 +67,7 @@ fn join(ports: &InMemoryPorts, env: &TestEnv, owner: &User, role: RoleId) -> (Us
         token: env.last_token().unwrap(),
         name: "Bob".to_string(),
         password: "bob password".to_string(),
+        client: SessionClient::default(),
     };
     let (user, _, token) = block_on(accept_invite(ports, env, accepted)).unwrap();
     (user, token.expose().to_string())
@@ -76,8 +80,16 @@ fn the_first_start_creates_the_owner_who_can_log_in() {
     let (ports, env, owner) = world();
     let role = block_on(ports.roles.get(owner.role())).unwrap().unwrap();
     assert!(role.is_owner());
-    let token =
-        session_token(block_on(login(&ports, &env, "ana@example.com", OWNER_PASSWORD)).unwrap());
+    let token = session_token(
+        block_on(login(
+            &ports,
+            &env,
+            "ana@example.com",
+            OWNER_PASSWORD,
+            &SessionClient::default(),
+        ))
+        .unwrap(),
+    );
     let staff = block_on(authenticate_staff(&ports, &env, &token)).unwrap();
     assert_eq!(staff.user.id(), owner.id());
     assert_eq!(staff.ctx.actor(), Actor::User(owner.id()));
@@ -143,7 +155,14 @@ fn the_owner_password_follows_the_rules() {
 fn a_wrong_password_is_invalid_credentials() {
     let (ports, env, _) = world();
     assert_eq!(
-        block_on(login(&ports, &env, "ana@example.com", "wrong password")).map(|_| ()),
+        block_on(login(
+            &ports,
+            &env,
+            "ana@example.com",
+            "wrong password",
+            &SessionClient::default()
+        ))
+        .map(|_| ()),
         Err(CommandError::Login(
             hypha_auth::CommandError::InvalidCredentials
         ))
@@ -174,7 +193,14 @@ fn a_disabled_user_can_neither_log_in_nor_use_a_session() {
         Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
     );
     assert_eq!(
-        block_on(login(&ports, &env, "bob@example.com", "bob password")).map(|_| ()),
+        block_on(login(
+            &ports,
+            &env,
+            "bob@example.com",
+            "bob password",
+            &SessionClient::default()
+        ))
+        .map(|_| ()),
         Err(CommandError::Login(
             hypha_auth::CommandError::InvalidCredentials
         ))
@@ -211,7 +237,16 @@ fn enabling_a_disabled_user_again_does_not_bring_back_old_sessions() {
         Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
     );
     // Logging in again works.
-    assert!(block_on(login(&ports, &env, "bob@example.com", "bob password")).is_ok());
+    assert!(
+        block_on(login(
+            &ports,
+            &env,
+            "bob@example.com",
+            "bob password",
+            &SessionClient::default()
+        ))
+        .is_ok()
+    );
 }
 
 #[test]
@@ -324,12 +359,22 @@ fn an_invite_emails_a_token_that_creates_the_user_and_logs_them_in() {
         token: token.clone(),
         name: "Bob".to_string(),
         password: "bob password".to_string(),
+        client: SessionClient::default(),
     };
     let (user, session, session_token) = block_on(accept_invite(&ports, &env, accepted)).unwrap();
     assert_eq!(user.role(), support.id());
     let staff = block_on(authenticate_staff(&ports, &env, session_token.expose())).unwrap();
     assert_eq!(staff.session.id(), session.id());
-    assert!(block_on(login(&ports, &env, "bob@example.com", "bob password")).is_ok());
+    assert!(
+        block_on(login(
+            &ports,
+            &env,
+            "bob@example.com",
+            "bob password",
+            &SessionClient::default()
+        ))
+        .is_ok()
+    );
 }
 
 #[test]
@@ -341,6 +386,7 @@ fn an_invite_token_works_once() {
         token: env.last_token().unwrap(),
         name: "Bob".to_string(),
         password: "bob password".to_string(),
+        client: SessionClient::default(),
     };
     assert_eq!(
         block_on(accept_invite(&ports, &env, again)).map(|(u, ..)| u.id()),
@@ -379,6 +425,7 @@ fn inviting_again_replaces_the_token() {
         token: old_token,
         name: "Bob".to_string(),
         password: "bob password".to_string(),
+        client: SessionClient::default(),
     };
     assert_eq!(
         block_on(accept_invite(&ports, &env, stale)).map(|(u, ..)| u.id()),
@@ -404,6 +451,7 @@ fn losing_the_race_to_invite_renews_the_winner() {
         token: env.last_token().unwrap(),
         name: "Bob".to_string(),
         password: "bob password".to_string(),
+        client: SessionClient::default(),
     };
     assert!(block_on(accept_invite(&ports, &env, accepted)).is_ok());
 }
@@ -422,6 +470,7 @@ fn an_invite_expires_after_a_week() {
         token: env.last_token().unwrap(),
         name: "Bob".to_string(),
         password: "bob password".to_string(),
+        client: SessionClient::default(),
     };
     assert_eq!(
         block_on(accept_invite(&ports, &env, accepted)).map(|(u, ..)| u.id()),
@@ -492,6 +541,7 @@ fn accepting_follows_the_password_and_name_rules() {
         token: env.last_token().unwrap(),
         name: "Bob".to_string(),
         password: "short".to_string(),
+        client: SessionClient::default(),
     };
     assert_eq!(
         block_on(accept_invite(&ports, &env, accepted)).map(|(u, ..)| u.id()),
@@ -717,7 +767,16 @@ fn a_reset_is_emailed_to_staff_only() {
         "brand new pass",
     ))
     .unwrap();
-    assert!(block_on(login(&ports, &env, "ana@example.com", "brand new pass")).is_ok());
+    assert!(
+        block_on(login(
+            &ports,
+            &env,
+            "ana@example.com",
+            "brand new pass",
+            &SessionClient::default()
+        ))
+        .is_ok()
+    );
 }
 
 #[test]
@@ -897,7 +956,14 @@ fn a_disable_during_login_leaves_no_session_to_revive() {
         },
     };
     assert_eq!(
-        block_on(login(&racing, &env, "ana@example.com", OWNER_PASSWORD)).map(|_| ()),
+        block_on(login(
+            &racing,
+            &env,
+            "ana@example.com",
+            OWNER_PASSWORD,
+            &SessionClient::default()
+        ))
+        .map(|_| ()),
         Err(CommandError::Login(
             hypha_auth::CommandError::InvalidCredentials
         ))
@@ -973,4 +1039,182 @@ fn a_request_reads_the_role_scopes_as_they_are_now() {
     let staff = block_on(authenticate_staff(&ports, &env, &token)).unwrap();
     assert!(staff.ctx.has_scope(Scope::ProductsRead));
     assert!(!staff.ctx.has_scope(Scope::OrdersWrite));
+}
+
+// ---------- invite lookup and revocation ----------
+
+fn invite_bob(ports: &InMemoryPorts, env: &TestEnv, owner: &User, role: RoleId) -> Invite {
+    let input = InviteUser {
+        email: "bob@example.com".to_string(),
+        role,
+    };
+    block_on(invite_user(&owner_ctx(owner), ports, env, input)).unwrap()
+}
+
+#[test]
+fn an_invites_link_shows_its_email_role_and_sender() {
+    let (ports, env, owner) = world();
+    let role = support_role(&ports, &env, &owner);
+    let invite = invite_bob(&ports, &env, &owner, role.id());
+    let token = env.last_token().unwrap();
+    let details = block_on(lookup_invite(&ports, &env, &token)).unwrap();
+    assert_eq!(details.invite, invite);
+    assert_eq!(details.role.name(), "Support");
+    assert_eq!(details.inviter.map(|u| u.id()), Some(owner.id()));
+}
+
+#[test]
+fn an_unusable_invite_token_looks_up_nothing() {
+    let (ports, env, owner) = world();
+    let role = support_role(&ports, &env, &owner);
+    invite_bob(&ports, &env, &owner, role.id());
+    let token = env.last_token().unwrap();
+    let invalid = Err(CommandError::Login(hypha_auth::CommandError::InvalidToken));
+    assert_eq!(
+        block_on(lookup_invite(&ports, &env, "hypha_inv_00")).map(|d| d.invite.id()),
+        invalid.clone()
+    );
+    assert_eq!(
+        block_on(lookup_invite(&ports, &env, "hypha_sess_00")).map(|d| d.invite.id()),
+        invalid.clone()
+    );
+    env.advance_by(hypha_auth::AuthSettings::default().invite_lifetime);
+    assert_eq!(
+        block_on(lookup_invite(&ports, &env, &token)).map(|d| d.invite.id()),
+        invalid
+    );
+}
+
+#[test]
+fn a_revoked_invite_can_no_longer_be_accepted() {
+    let (ports, env, owner) = world();
+    let role = support_role(&ports, &env, &owner);
+    let invite = invite_bob(&ports, &env, &owner, role.id());
+    let token = env.last_token().unwrap();
+    assert_eq!(
+        block_on(revoke_invite(&owner_ctx(&owner), &ports, invite.id())),
+        Ok(())
+    );
+    let accepted = AcceptInvite {
+        token: token.clone(),
+        name: "Bob".to_string(),
+        password: "bob password".to_string(),
+        client: SessionClient::default(),
+    };
+    assert_eq!(
+        block_on(accept_invite(&ports, &env, accepted)).map(|(u, ..)| u.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
+    );
+    assert!(block_on(lookup_invite(&ports, &env, &token)).is_err());
+    // Inviting the email again works.
+    invite_bob(&ports, &env, &owner, role.id());
+}
+
+#[test]
+fn revoking_an_invite_needs_users_write_and_its_roles_scopes() {
+    let (ports, env, owner) = world();
+    let owner_role = block_on(ports.roles.get(owner.role())).unwrap().unwrap();
+    let invite = invite_bob(&ports, &env, &owner, owner_role.id());
+    let reader = Ctx::new(Actor::User(owner.id()), vec![Scope::UsersRead]);
+    assert_eq!(
+        block_on(revoke_invite(&reader, &ports, invite.id())),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::UsersWrite
+        )))
+    );
+    let limited = Ctx::new(Actor::User(owner.id()), vec![Scope::UsersWrite]);
+    assert!(matches!(
+        block_on(revoke_invite(&limited, &ports, invite.id())),
+        Err(CommandError::Login(hypha_auth::CommandError::CannotGrant(
+            _
+        )))
+    ));
+}
+
+#[test]
+fn an_accepted_or_unknown_invite_is_not_found() {
+    let (ports, env, owner) = world();
+    let role = support_role(&ports, &env, &owner);
+    let invite = invite_bob(&ports, &env, &owner, role.id());
+    let accepted = AcceptInvite {
+        token: env.last_token().unwrap(),
+        name: "Bob".to_string(),
+        password: "bob password".to_string(),
+        client: SessionClient::default(),
+    };
+    block_on(accept_invite(&ports, &env, accepted)).unwrap();
+    assert_eq!(
+        block_on(revoke_invite(&owner_ctx(&owner), &ports, invite.id())),
+        Err(CommandError::InviteNotFound(invite.id()))
+    );
+    let unknown = InviteId::from_uuid(Uuid::from_u128(999));
+    assert_eq!(
+        block_on(revoke_invite(&owner_ctx(&owner), &ports, unknown)),
+        Err(CommandError::InviteNotFound(unknown))
+    );
+}
+
+// ---------- my profile and sessions ----------
+
+#[test]
+fn anyone_may_rename_themselves() {
+    let (ports, env, owner) = world();
+    let role = support_role(&ports, &env, &owner);
+    let (bob, _) = join(&ports, &env, &owner, role.id());
+    let renamed = block_on(rename_me(&ports.users, bob.id(), "  Robert ")).unwrap();
+    assert_eq!(renamed.name(), "Robert");
+    assert_eq!(
+        block_on(ports.users.get(bob.id())).map(|u| u.map(|u| u.name().to_string())),
+        Ok(Some("Robert".to_string()))
+    );
+    assert!(matches!(
+        block_on(rename_me(&ports.users, bob.id(), " ")),
+        Err(CommandError::User(_))
+    ));
+}
+
+#[test]
+fn a_login_keeps_where_it_came_from() {
+    let (ports, env, _) = world();
+    let client = SessionClient::new(Some("203.0.113.9"), Some("Firefox"));
+    let step = block_on(login(
+        &ports,
+        &env,
+        "ana@example.com",
+        OWNER_PASSWORD,
+        &client,
+    ))
+    .unwrap();
+    let LoginStep::Authenticated { session, .. } = step else {
+        panic!("no MFA in these tests");
+    };
+    let stored = block_on(ports.sessions.get(session.id())).unwrap().unwrap();
+    assert_eq!(stored.client(), &client);
+}
+
+#[test]
+fn a_staff_request_records_the_sessions_use_now_and_then() {
+    let (ports, env, _) = world();
+    let token = session_token(
+        block_on(login(
+            &ports,
+            &env,
+            "ana@example.com",
+            OWNER_PASSWORD,
+            &SessionClient::default(),
+        ))
+        .unwrap(),
+    );
+    let created = block_on(authenticate_staff(&ports, &env, &token))
+        .unwrap()
+        .session
+        .created_at();
+    env.advance_by(hypha_auth::Session::USE_RESOLUTION);
+    let staff = block_on(authenticate_staff(&ports, &env, &token)).unwrap();
+    assert_eq!(staff.session.last_used_at(), env.now());
+    assert!(staff.session.last_used_at() > created);
+    let stored = block_on(ports.sessions.get(staff.session.id()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.last_used_at(), env.now());
 }

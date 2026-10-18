@@ -1,5 +1,5 @@
 use hypha_auth::{Session, TokenHash};
-use hypha_core::{Email, RepoError, RoleId, UserId};
+use hypha_core::{Email, InviteId, RepoError, RoleId, UserId};
 
 use crate::{Invite, Role, User};
 
@@ -50,6 +50,7 @@ pub trait RoleRepo {
 
 #[allow(async_fn_in_trait)]
 pub trait InviteRepo {
+    async fn get(&self, id: InviteId) -> Result<Option<Invite>, RepoError>;
     async fn get_by_email(&self, email: &Email) -> Result<Option<Invite>, RepoError>;
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<Invite>, RepoError>;
     /// Every invite not yet accepted (expired ones too), oldest first.
@@ -58,6 +59,9 @@ pub trait InviteRepo {
     async fn insert(&self, invite: &mut Invite) -> Result<(), RepoError>;
     /// Enforces `INVITE_TOKEN`.
     async fn update(&self, invite: &mut Invite) -> Result<(), RepoError>;
+    /// Removes `invite` at the version it was loaded at, or fails with `StaleVersion`
+    /// (accepted, renewed or gone since).
+    async fn delete(&self, invite: &Invite) -> Result<(), RepoError>;
 }
 
 /// A session found by its token, with its staff user and that user's role when they

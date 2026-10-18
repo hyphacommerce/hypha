@@ -6086,3 +6086,192 @@ async fn extension_points_are_checked_when_registered() {
         (StatusCode::NOT_FOUND, "app_not_found")
     );
 }
+
+// ---------- my sessions, my profile, invite lookup and revocation ----------
+
+/// Logs the owner in with `user_agent`; returns the session token.
+async fn owner_session_from(app: &TestApp, user_agent: &str) -> String {
+    let body = json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string();
+    let (status, login) = send_with(
+        app,
+        &[("user-agent", user_agent)],
+        "POST",
+        "/admin/auth/login",
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    login["session"]["token"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn my_sessions_are_listed_and_signed_out() {
+    let app = app().await;
+    let laptop = owner_session_from(&app, "Laptop Firefox").await;
+    let phone = owner_session_from(&app, "Phone Safari").await;
+
+    let (status, list) = send_as(&app, &laptop, "GET", "/admin/me/sessions", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let items = list["items"].as_array().unwrap();
+    let agents: Vec<(&Value, &Value)> = items
+        .iter()
+        .map(|s| (&s["user_agent"], &s["current"]))
+        .collect();
+    assert_eq!(
+        agents,
+        [
+            (&json!("Phone Safari"), &json!(false)),
+            (&json!("Laptop Firefox"), &json!(true))
+        ],
+        "newest first"
+    );
+    assert!(items[0]["ip"].is_string());
+    assert!(items[0]["last_used_at"].is_string());
+    let phone_id = items[0]["id"].as_str().unwrap();
+
+    let uri = format!("/admin/me/sessions/{phone_id}");
+    let (status, _) = send_as(&app, &laptop, "DELETE", &uri, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, json) = send_as(&app, &phone, "GET", "/admin/me", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_token")
+    );
+    let (status, json) = send_as(&app, &laptop, "DELETE", &uri, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "session_not_found"),
+        "signed out already"
+    );
+
+    let tablet = owner_session_from(&app, "Tablet").await;
+    let (status, _) = send_as(
+        &app,
+        &laptop,
+        "POST",
+        "/admin/me/sessions/revoke-others",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        send_as(&app, &tablet, "GET", "/admin/me", None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (_, list) = send_as(&app, &laptop, "GET", "/admin/me/sessions", None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+
+    // An API key has no sessions.
+    let (status, json) = send(&app, "GET", "/admin/me/sessions", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "session_required")
+    );
+}
+
+/// The `hypha_inv_…` token in the last email sent.
+fn last_invite_token(app: &TestApp) -> String {
+    let email = app.emails.lock().unwrap().last().cloned().unwrap();
+    email
+        .text
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .find(|w| w.starts_with("hypha_inv_"))
+        .unwrap_or_else(|| panic!("no token in {}", email.text))
+        .to_string()
+}
+
+#[tokio::test]
+async fn an_invite_is_looked_up_by_its_token_and_can_be_revoked() {
+    let app = app().await;
+    let session = owner_session(&app).await;
+    let (_, roles) = send(&app, "GET", "/admin/roles", None).await;
+    let owner_role = roles["items"][0]["id"].as_str().unwrap();
+    let invite = json!({ "email": "bob@example.com", "role": owner_role }).to_string();
+    let (status, invited) = send_as(&app, &session, "POST", "/admin/invites", Some(&invite)).await;
+    assert_eq!(status, StatusCode::CREATED, "{invited}");
+    let token = last_invite_token(&app);
+
+    let lookup = json!({ "token": token }).to_string();
+    let (status, found) =
+        send_with(&app, &[], "POST", "/admin/invites/lookup", Some(&lookup)).await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["email"], "bob@example.com");
+    assert_eq!(found["role"], "Owner");
+    assert_eq!(found["invited_by"], "Owner");
+    assert!(found["store_name"].is_string());
+    assert_eq!(found["expires_at"], invited["expires_at"]);
+
+    let id = invited["id"].as_str().unwrap();
+    let (status, _) = send(&app, "DELETE", &format!("/admin/invites/{id}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, json) = send_with(&app, &[], "POST", "/admin/invites/lookup", Some(&lookup)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_token")
+    );
+    let accept = json!({ "token": token, "name": "Bob", "password": "bob password" }).to_string();
+    let (status, json) = send_with(&app, &[], "POST", "/admin/invites/accept", Some(&accept)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_token")
+    );
+    let (status, json) = send(&app, "DELETE", &format!("/admin/invites/{id}"), None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "invite_not_found")
+    );
+    let (_, invites) = send(&app, "GET", "/admin/invites", None).await;
+    assert_eq!(invites["items"], json!([]));
+}
+
+#[tokio::test]
+async fn anyone_renames_themselves_but_only_users_write_renames_others() {
+    let app = app().await;
+    let (_, role) = send(
+        &app,
+        "POST",
+        "/admin/roles",
+        Some(r#"{"name":"Packer","scopes":["orders:read"]}"#),
+    )
+    .await;
+    let invite = json!({ "email": "bob@example.com", "role": role["id"] }).to_string();
+    send(&app, "POST", "/admin/invites", Some(&invite)).await;
+    let accept = json!({
+        "token": last_invite_token(&app),
+        "name": "Bob",
+        "password": "bob password",
+    })
+    .to_string();
+    let (status, accepted) =
+        send_with(&app, &[], "POST", "/admin/invites/accept", Some(&accept)).await;
+    assert_eq!(status, StatusCode::CREATED, "{accepted}");
+    let bob = accepted["session"]["token"].as_str().unwrap();
+
+    let (status, me) = send_as(
+        &app,
+        bob,
+        "PATCH",
+        "/admin/me",
+        Some(r#"{"name":"Robert"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["user"]["name"], "Robert");
+    assert_eq!(me["role"]["name"], "Packer");
+    let (status, json) = send_as(&app, bob, "PATCH", "/admin/me", Some(r#"{"name":" "}"#)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
+
+    let id = me["user"]["id"].as_str().unwrap();
+    let (status, json) = send_as(
+        &app,
+        bob,
+        "PATCH",
+        &format!("/admin/users/{id}"),
+        Some(r#"{"name":"Bobby"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+}

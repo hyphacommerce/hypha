@@ -46,6 +46,60 @@ export async function finishLogin(_previous: FormState, code: string): Promise<F
   redirect(await landing(data.session.token, await takeNext()));
 }
 
+/**
+ * Asks for a password reset link (design note 0008, section 5). The API answers the same
+ * whether or not the email has an account, so this says the same too.
+ */
+export async function requestPasswordReset(
+  _previous: FormState & { sentTo?: string },
+  email: string,
+): Promise<FormState & { sentTo?: string }> {
+  const client = await publicClient();
+  const { error } = await client.POST("/admin/auth/password-reset", { body: { email } });
+  if (error) return { error: describe(error) };
+  return { sentTo: email };
+}
+
+/** Sets a new password with a reset link's token; every session of the account ends. */
+export async function confirmPasswordReset(
+  _previous: FormState,
+  input: { token: string; password: string },
+): Promise<FormState> {
+  const client = await publicClient();
+  const { error } = await client.POST("/admin/auth/password-reset/confirm", { body: input });
+  if (error) {
+    return {
+      error:
+        error.code === "invalid_token"
+          ? "This reset link expired or was already used. Ask for a new one."
+          : describe(error),
+    };
+  }
+  redirect("/login?reset=done");
+}
+
+/**
+ * Joins the store with an invite's token: the API makes the user and answers with a
+ * session, so accepting signs the new staff member in.
+ */
+export async function acceptInvite(
+  _previous: FormState,
+  input: { token: string; name: string; password: string },
+): Promise<FormState> {
+  const client = await publicClient();
+  const { data, error } = await client.POST("/admin/invites/accept", { body: input });
+  if (error) {
+    return {
+      error:
+        error.code === "invalid_token"
+          ? "This invite expired or was already used. Ask the person who invited you for a new one."
+          : describe(error),
+    };
+  }
+  await startSession(data.session);
+  redirect(await landing(data.session.token, "/"));
+}
+
 /** Ends the session on the API and forgets it here. */
 export async function logout(): Promise<void> {
   const client = await sessionClient();

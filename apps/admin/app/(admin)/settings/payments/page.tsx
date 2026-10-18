@@ -3,6 +3,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 
 import { PageHeader } from "@/components/page-header";
+import { SETTINGS_CRUMB } from "@/lib/navigation";
 import { channelNames, loadPaymentMethods, requireStaff, sessionClient } from "@/lib/hypha";
 
 import { PaymentMethodsCard } from "./methods";
@@ -22,6 +23,7 @@ export default async function PaymentsSettingsPage() {
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
+          back={SETTINGS_CRUMB}
           title="Payments"
           description="How shoppers pay at checkout. With manual methods, like cash on delivery or a bank transfer, you collect the money yourself and mark the order paid."
         />

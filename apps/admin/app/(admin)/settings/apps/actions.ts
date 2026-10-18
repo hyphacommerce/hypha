@@ -88,16 +88,6 @@ export async function deleteApp(key: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/apps/{key}", { params: { path: { key } } });
   if (error) return { error: describe(error) };
   revalidatePath(PAGE);
-  return {};
-}
-
-/** Sends a delivery again on the dispatcher's next run. */
-export async function retryDelivery(key: string, id: string): Promise<Result> {
-  const client = await sessionClient();
-  const { error } = await client.POST("/admin/apps/{key}/deliveries/{id}/retry", {
-    params: { path: { key, id } },
-  });
-  if (error) return { error: describe(error) };
-  revalidatePath(`${PAGE}/${key}`);
+  revalidatePath("/apps");
   return {};
 }

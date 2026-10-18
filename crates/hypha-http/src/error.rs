@@ -1315,8 +1315,8 @@ impl From<hypha_auth::CommandError> for ApiError {
             E::MfaLocked { .. } => StatusCode::TOO_MANY_REQUESTS,
             // Only on `/me` routes, by someone logged in.
             E::WrongPassword => StatusCode::UNPROCESSABLE_ENTITY,
-            // Key IDs only ever arrive in URLs.
-            E::ApiKeyNotFound(_) => StatusCode::NOT_FOUND,
+            // Key and session IDs only ever arrive in URLs.
+            E::ApiKeyNotFound(_) | E::SessionNotFound(_) => StatusCode::NOT_FOUND,
             E::ApiKeyRevoked(_)
             | E::Identity(
                 I::MfaAlreadyEnabled | I::MfaNotEnabled | I::MfaSetupNotStarted | I::NoPassword,
@@ -1357,8 +1357,9 @@ impl From<hypha_users::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::NotStaff => StatusCode::UNAUTHORIZED,
             // User IDs only ever arrive in URLs; role IDs arrive in either, so routes
-            // naming a role in the URL turn its 422 into a 404 (`not_found_if`).
-            E::UserNotFound(_) => StatusCode::NOT_FOUND,
+            // naming a role in the URL turn its 422 into a 404 (`not_found_if`). Invite
+            // IDs only arrive in URLs.
+            E::UserNotFound(_) | E::InviteNotFound(_) => StatusCode::NOT_FOUND,
             E::RoleNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::UserExists(_) | E::RoleNameTaken(_) | E::LastOwner | E::Role(R::OwnerRoleFixed) => {
                 StatusCode::CONFLICT

@@ -284,6 +284,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "oauth_refresh_requests",
             sql: include_str!("../migrations/0052_oauth_refresh_requests.sql"),
         },
+        Migration {
+            version: 53,
+            name: "session_details",
+            sql: include_str!("../migrations/0053_session_details.sql"),
+        },
     ],
 };
 

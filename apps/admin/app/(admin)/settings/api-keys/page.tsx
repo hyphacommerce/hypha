@@ -2,6 +2,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 
 import { PageHeader } from "@/components/page-header";
+import { SETTINGS_CRUMB } from "@/lib/navigation";
 import type { SearchParams } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { channelNames, requireStaff, sessionClient } from "@/lib/hypha";
@@ -26,6 +27,7 @@ export default async function ApiKeysPage({
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
+          back={SETTINGS_CRUMB}
           title="API keys"
           description="Keys for your own systems (secret) and your storefronts (publishable)."
         />
