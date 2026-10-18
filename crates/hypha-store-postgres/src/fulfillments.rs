@@ -40,11 +40,11 @@ impl<C: PgConnection> FulfillmentRepo for PgStore<C> {
         stamp_insert(fulfillment, self.now());
         let s = fulfillment.snapshot();
         let events = fulfillment.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_fulfillment(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         fulfillment.set_version(version);
         Ok(())
@@ -54,10 +54,10 @@ impl<C: PgConnection> FulfillmentRepo for PgStore<C> {
         stamp_update(fulfillment, self.now());
         let s = fulfillment.snapshot();
         let events = fulfillment.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_fulfillment(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         fulfillment.set_version(version);

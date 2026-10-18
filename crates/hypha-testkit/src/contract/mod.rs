@@ -63,7 +63,7 @@ pub use staff_batch::staff_batch;
 pub use stores::store_repo;
 pub use tax::{tax_class_repo, tax_region_repo};
 pub use usages::asset_usages;
-pub use users::{invite_repo, role_repo, user_repo};
+pub use users::{invite_repo, role_repo, staff_sessions, user_repo};
 
 fn scenario(name: &str) {
     eprintln!("contract scenario: {name}");

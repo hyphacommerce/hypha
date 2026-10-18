@@ -35,8 +35,9 @@ pub use description::{Description, DescriptionError};
 pub use email::{Email, EmailError};
 pub use error_code::ErrorCode;
 pub use events::{
-    ActingAs, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, Event, HasOutbox,
-    OutboxRepo, Outcome, PendingEvent, Recorded, Recorder, StageEvents, StoredEvent, Subject,
+    ActingAs, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, DispatchHook, Event,
+    HasOutbox, OutboxRepo, Outcome, PendingEvent, Recorded, Recorder, SignalsDispatch, StageEvents,
+    StoredEvent, Subject,
 };
 pub use handle::{Handle, HandleError};
 pub use handlers::{EventHandler, EventHandlers};

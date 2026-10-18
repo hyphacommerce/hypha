@@ -290,6 +290,14 @@ impl OutboxRepo for InMemoryOutbox {
         Ok(pruned.len() as u32)
     }
 
+    async fn has_unfanned(&self) -> Result<bool, RepoError> {
+        let state = self.inner.lock().unwrap();
+        Ok(state
+            .events
+            .iter()
+            .any(|e| !state.fanned_out.contains(&e.seq)))
+    }
+
     async fn next_due(&self) -> Result<Option<Timestamp>, RepoError> {
         let state = self.inner.lock().unwrap();
         let events = state

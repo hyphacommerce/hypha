@@ -300,8 +300,9 @@ impl From<&OrderLine> for OrderLineResponse {
 }
 
 /// Each line's image as its product is now: the variant's, else the product's first
-/// media item, loaded in two queries for the order. Lines whose product is gone, or has
-/// no media, get none; so does every line without file storage.
+/// media item, read in two queries for the order (`ProductRepo::images_of`, then the
+/// assets). Lines whose product is gone, or has no media, get none; so does every line
+/// without file storage.
 async fn line_images<P: HasProducts + HasAssets>(
     order: &Order,
     ports: &P,
@@ -310,22 +311,22 @@ async fn line_images<P: HasProducts + HasAssets>(
     let Some(media) = media else {
         return Ok(HashMap::new());
     };
-    let mut ids: Vec<ProductId> = order.lines().iter().map(|l| l.product).collect();
-    ids.sort();
-    ids.dedup();
-    let products = ports.products().get_many(&ids).await?;
+    let mut asked: Vec<(ProductId, VariantId)> = order
+        .lines()
+        .iter()
+        .map(|l| (l.product, l.variant))
+        .collect();
+    asked.sort();
+    asked.dedup();
+    let images = ports.products().images_of(&asked).await?;
     let wanted: Vec<(OrderLineId, AssetId)> = order
         .lines()
         .iter()
-        .filter_map(|line| {
-            let product = products.iter().find(|p| p.id() == line.product)?;
-            let variant = product.variants().iter().find(|v| v.id() == line.variant);
-            let asset = variant
-                .and_then(|v| v.media())
-                .or_else(|| product.media().first().copied())?;
-            Some((line.id, asset))
-        })
+        .filter_map(|line| Some((line.id, *images.get(&(line.product, line.variant))?)))
         .collect();
+    if wanted.is_empty() {
+        return Ok(HashMap::new());
+    }
     let assets: Vec<AssetId> = wanted.iter().map(|(_, a)| *a).collect();
     let found = ports.assets().get_many(&assets).await?;
     let mut images = HashMap::new();

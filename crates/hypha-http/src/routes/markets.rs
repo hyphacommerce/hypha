@@ -11,8 +11,8 @@ use hypha_markets::{
     HasMarkets, HasPriceLists, Market, MarketView, PriceList, UpdateMarket, add_catalog_products,
     add_market_country, assign_price_list, create_catalog, create_market, create_price_list,
     get_catalog, get_market, get_price_list, list_catalog_products, list_fixed_prices,
-    list_markets, list_price_lists, remove_catalog_products, remove_fixed_prices,
-    remove_market_country, set_fixed_prices, update_market, update_price_list,
+    list_markets, list_markets_only, list_price_lists, remove_catalog_products,
+    remove_fixed_prices, remove_market_country, set_fixed_prices, update_market, update_price_list,
 };
 use hypha_products::{HasProducts, get_products, products_of_variants};
 use serde::{Deserialize, Serialize};
@@ -757,11 +757,10 @@ pub async fn storefront_countries<S: Storage>(
     caller: Caller<Storefront>,
 ) -> Result<Json<StorefrontCountryListResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let views = list_markets(&ctx, &ports).await?;
-    let mut items: Vec<StorefrontCountryResponse> = views
+    let markets = list_markets_only(&ctx, ports.markets()).await?;
+    let mut items: Vec<StorefrontCountryResponse> = markets
         .iter()
-        .flat_map(|v| {
-            let m = &v.market;
+        .flat_map(|m| {
             m.countries().iter().map(|c| StorefrontCountryResponse {
                 country: *c,
                 name: c.name(),

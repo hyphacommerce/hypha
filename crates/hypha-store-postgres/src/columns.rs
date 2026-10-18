@@ -114,6 +114,43 @@ pub(crate) fn micros(column: &str) -> String {
     )
 }
 
+/// A SELECT list for one table of a join: `table`'s `plain` columns and its
+/// `timestamps` (read as `micros`), each named `{prefix}{column}` so the tables' columns
+/// don't clash; `Prefixed` reads them back.
+pub(crate) fn prefixed_columns(
+    table: &str,
+    prefix: &str,
+    plain: &[&str],
+    timestamps: &[&str],
+) -> String {
+    let plain = plain.iter().map(|c| format!("{table}.{c} AS {prefix}{c}"));
+    let timestamps = timestamps
+        .iter()
+        .map(|c| format!("(extract(epoch FROM {table}.{c}) * 1000000)::bigint AS {prefix}{c}"));
+    plain.chain(timestamps).collect::<Vec<_>>().join(", ")
+}
+
+/// A row's columns under a prefix (`prefixed_columns`), or plain names with `""`.
+#[derive(Clone, Copy)]
+pub(crate) struct Prefixed<'a> {
+    pub row: &'a Row,
+    pub prefix: &'a str,
+}
+
+impl<'a> Prefixed<'a> {
+    pub fn plain(row: &'a Row) -> Self {
+        Prefixed { row, prefix: "" }
+    }
+
+    pub fn col<T: FromSql<'a>>(&self, name: &str) -> Result<T, RepoError> {
+        if self.prefix.is_empty() {
+            col(self.row, name)
+        } else {
+            col(self.row, &format!("{}{name}", self.prefix))
+        }
+    }
+}
+
 /// `placed_at` for `o.placed_at`.
 fn unqualified(column: &str) -> &str {
     column.rsplit_once('.').map_or(column, |(_, name)| name)

@@ -36,6 +36,8 @@ where
     set_based_writes(&make().await).await;
     scenario("outbox: fan_out makes a delivery per destination, once");
     fan_out_once(&make().await).await;
+    scenario("outbox: has_unfanned says whether fan_out has an event to claim");
+    has_unfanned(&make().await).await;
     scenario("outbox: lease_due hands a due delivery out once until its lease ends");
     leases(&make().await).await;
     scenario("outbox: outcomes are final or due again, with the attempts counted");
@@ -351,6 +353,18 @@ async fn fan_out_once<S: HasProducts + HasOutbox>(store: &S) {
             .iter()
             .all(|d| d.event.event_type == "product.created")
     );
+}
+
+async fn has_unfanned<S: HasProducts + HasOutbox>(store: &S) {
+    let outbox = store.outbox();
+    assert_eq!(outbox.has_unfanned().await, Ok(false));
+    three_products(store).await;
+    assert_eq!(outbox.has_unfanned().await, Ok(true));
+    outbox.fan_out(2, at(0), &routes).await.unwrap();
+    assert_eq!(outbox.has_unfanned().await, Ok(true));
+    outbox.fan_out(10, at(0), &routes).await.unwrap();
+    // Their deliveries are pending, but no event waits to be fanned out.
+    assert_eq!(outbox.has_unfanned().await, Ok(false));
 }
 
 async fn leases<S: HasProducts + HasOutbox>(store: &S) {

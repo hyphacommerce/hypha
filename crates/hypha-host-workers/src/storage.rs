@@ -66,12 +66,21 @@ impl Storage for WorkersStorage {
     type Search<'p> = &'p PgStore<Client>;
     type Handlers = crate::handlers::Handlers;
 
+    /// Each `ports()` is a new connection: a dispatch step opens one, not one per
+    /// delivery.
+    const KEEPS_PORTS_ACROSS_DELIVERIES: bool = true;
+
     async fn ports(&self, _store: StoreId) -> Result<PgStore<Client>, ApiError> {
         self.store().await
     }
 
     async fn directory(&self) -> Result<PgStore<Client>, ApiError> {
         self.store().await
+    }
+
+    /// The stores table is in the store's database (model A).
+    fn directory_in<'p>(&'p self, ports: &'p PgStore<Client>) -> Option<&'p PgStore<Client>> {
+        Some(ports)
     }
 
     fn search<'p>(&'p self, ports: &'p PgStore<Client>) -> &'p PgStore<Client> {

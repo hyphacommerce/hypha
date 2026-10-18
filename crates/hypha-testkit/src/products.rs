@@ -1,11 +1,11 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
 use hypha_core::{
-    Keyset, Page, PageRequest, ProductId, Recorded, RepoError, VariantId, Versioned, stamp_insert,
-    stamp_update,
+    AssetId, Keyset, Page, PageRequest, ProductId, Recorded, RepoError, VariantId, Versioned,
+    stamp_insert, stamp_update,
 };
 use hypha_products::{
     Handle, Product, ProductFilter, ProductSort, ProductSummary,
@@ -163,6 +163,24 @@ impl ProductRepo for InMemoryProductRepo {
             .collect();
         ids.sort();
         Ok(ids)
+    }
+
+    async fn images_of(
+        &self,
+        lines: &[(ProductId, VariantId)],
+    ) -> Result<HashMap<(ProductId, VariantId), AssetId>, RepoError> {
+        let products = self.products.all();
+        Ok(lines
+            .iter()
+            .filter_map(|&(product, variant)| {
+                let p = products.iter().find(|p| p.id() == product)?;
+                let image = p
+                    .variant(variant)
+                    .and_then(|v| v.media())
+                    .or_else(|| p.media().first().copied())?;
+                Some(((product, variant), image))
+            })
+            .collect())
     }
 
     async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError> {

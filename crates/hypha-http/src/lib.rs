@@ -22,4 +22,3 @@ pub mod routes;
 pub mod shipping;
 pub mod state;
 pub mod webhooks;
-pub mod writes;

@@ -4,8 +4,8 @@
 //!
 //! An idle job looks less and less often (design note 0025, §6): each round that finds
 //! nothing doubles the wait, up to `jobs.idle_interval`, and finding work brings it back
-//! to the interval. Work doesn't wait for that: a successful write wakes the dispatcher
-//! (`AfterWrites`, through `Wake`), and a dispatch step that did something wakes search
+//! to the interval. Work doesn't wait for that: a write that commits events (or retries
+//! a delivery) wakes the dispatcher (`AfterWrites`, through `Wake`), and a dispatch step that did something wakes search
 //! sync. So a quiet store costs the database a query a minute, not several a second.
 
 use std::{future::Future, sync::Arc, time::Duration};
@@ -51,7 +51,7 @@ pub struct Wake {
 }
 
 impl Wake {
-    /// The host's `AfterWrites`: a write wakes the dispatcher. A wake while it works
+    /// The host's `AfterWrites`: a write that gave it work wakes the dispatcher. A wake while it works
     /// isn't lost: `Notify` keeps it for its next wait.
     pub fn after_writes(&self) -> AfterWrites {
         let dispatch = Arc::clone(&self.dispatch);

@@ -1,11 +1,15 @@
 use hypha_auth::{AuthSettings, TokenHash};
+use hypha_auth::{HasSessions, SessionRepo};
 use hypha_core::{
     Actor, Email, InviteId, RepoError, RoleId, Scope, Timestamp, UserId, Version, Versioned,
 };
-use hypha_users::{Invite, InviteRepo, Role, RoleRepo, User, UserRepo, UserStatus, keys};
+use hypha_users::{
+    HasRoles, HasStaffSessions, HasUsers, Invite, InviteRepo, Role, RoleRepo, StaffSessionRecord,
+    StaffSessionRepo, User, UserRepo, UserStatus, keys,
+};
 use uuid::Uuid;
 
-use super::scenario;
+use super::{auth::session, scenario};
 
 pub(super) fn role_id(n: u128) -> RoleId {
     RoleId::from_uuid(Uuid::from_u128(n))
@@ -273,5 +277,132 @@ async fn invite_keys<R: InviteRepo>(repo: &R) {
     assert_eq!(
         repo.insert(&mut invite(3, "eve@example.com", 1)).await,
         Err(RepoError::Duplicate(keys::INVITE_TOKEN))
+    );
+}
+
+// ---------- staff sessions ----------
+
+/// Runs every `StaffSessionRepo` scenario, each on fresh ports from `make`.
+pub async fn staff_sessions<S>(make: impl AsyncFn() -> S)
+where
+    S: HasStaffSessions + HasSessions + HasUsers + HasRoles,
+{
+    scenario("staff session: a token's session comes with its user and their role");
+    staff_session_found(&make().await).await;
+    scenario("staff session: an unknown token is none");
+    staff_session_unknown(&make().await).await;
+    scenario("staff session: revoked sessions and disabled users come back as stored");
+    staff_session_unfiltered(&make().await).await;
+    scenario("staff session: a missing user or role is none, the session still found");
+    staff_session_missing_parts(&make().await).await;
+}
+
+async fn lookup<S: HasStaffSessions>(ports: &S, token: u8) -> Option<StaffSessionRecord> {
+    ports
+        .staff_sessions()
+        .staff_session_by_token(TokenHash::from_bytes([token; 32]))
+        .await
+        .unwrap()
+}
+
+async fn staff_session_found<S>(ports: &S)
+where
+    S: HasStaffSessions + HasSessions + HasUsers + HasRoles,
+{
+    let mut r = role(5, "Support");
+    ports.roles().insert(&mut r).await.unwrap();
+    ports.roles().insert(&mut role(6, "Other")).await.unwrap();
+    let mut u = user(1, "ana@example.com", 5);
+    ports.users().insert(&mut u).await.unwrap();
+    ports
+        .users()
+        .insert(&mut user(2, "bob@example.com", 6))
+        .await
+        .unwrap();
+    let mut s = session(10, 1, 1);
+    ports.sessions().insert(&mut s).await.unwrap();
+    ports
+        .sessions()
+        .insert(&mut session(11, 2, 2))
+        .await
+        .unwrap();
+    assert_eq!(
+        lookup(ports, 1).await,
+        Some(StaffSessionRecord {
+            session: s,
+            user: Some(u),
+            role: Some(r.clone()),
+        })
+    );
+    // The role as it is now: scopes are read fresh on every request.
+    r.set_scopes(&[Scope::ProductsRead]).unwrap();
+    ports.roles().update(&mut r).await.unwrap();
+    assert_eq!(lookup(ports, 1).await.and_then(|found| found.role), Some(r));
+}
+
+async fn staff_session_unknown<S>(ports: &S)
+where
+    S: HasStaffSessions + HasSessions + HasUsers + HasRoles,
+{
+    assert_eq!(lookup(ports, 1).await, None);
+    ports
+        .sessions()
+        .insert(&mut session(10, 1, 1))
+        .await
+        .unwrap();
+    assert_eq!(lookup(ports, 2).await, None);
+}
+
+async fn staff_session_unfiltered<S>(ports: &S)
+where
+    S: HasStaffSessions + HasSessions + HasUsers + HasRoles,
+{
+    let mut r = role(5, "Support");
+    ports.roles().insert(&mut r).await.unwrap();
+    let mut u = user(1, "ana@example.com", 5);
+    ports.users().insert(&mut u).await.unwrap();
+    u.set_status(UserStatus::Disabled);
+    ports.users().update(&mut u).await.unwrap();
+    let mut s = session(10, 1, 1);
+    ports.sessions().insert(&mut s).await.unwrap();
+    s.revoke(Timestamp::from_unix_micros(1_700_000_000_000_002));
+    ports.sessions().update(&mut s).await.unwrap();
+    assert_eq!(
+        lookup(ports, 1).await,
+        Some(StaffSessionRecord {
+            session: s,
+            user: Some(u),
+            role: Some(r),
+        })
+    );
+}
+
+async fn staff_session_missing_parts<S>(ports: &S)
+where
+    S: HasStaffSessions + HasSessions + HasUsers + HasRoles,
+{
+    // No user 1 at all.
+    let mut orphan = session(10, 1, 1);
+    ports.sessions().insert(&mut orphan).await.unwrap();
+    assert_eq!(
+        lookup(ports, 1).await,
+        Some(StaffSessionRecord {
+            session: orphan,
+            user: None,
+            role: None,
+        })
+    );
+    // User 2's role 9 doesn't exist.
+    let mut u = user(2, "bob@example.com", 9);
+    ports.users().insert(&mut u).await.unwrap();
+    let mut s = session(11, 2, 2);
+    ports.sessions().insert(&mut s).await.unwrap();
+    assert_eq!(
+        lookup(ports, 2).await,
+        Some(StaffSessionRecord {
+            session: s,
+            user: Some(u),
+            role: None,
+        })
     );
 }

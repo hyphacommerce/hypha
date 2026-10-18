@@ -61,11 +61,14 @@ pub async fn checklist<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
 
     let store = if ctx.has_scope(Scope::StoresRead) {
-        let directory = state.storage.directory().await?;
-        get_store(&ctx, &directory, state.store)
-            .await?
-            .contact_email()
-            .is_some()
+        let store = match state.storage.directory_in(&ports) {
+            Some(directory) => get_store(&ctx, directory, state.store).await?,
+            None => {
+                let directory = state.storage.directory().await?;
+                get_store(&ctx, &directory, state.store).await?
+            }
+        };
+        store.contact_email().is_some()
     } else {
         false
     };

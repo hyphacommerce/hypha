@@ -66,11 +66,11 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
         stamp_insert(zone, self.now());
         let s = zone.snapshot();
         let events = zone.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_zone(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         zone.set_version(version);
         Ok(())
@@ -80,10 +80,10 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
         stamp_update(zone, self.now());
         let s = zone.snapshot();
         let events = zone.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_zone(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         zone.set_version(version);
@@ -93,11 +93,11 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
     async fn delete(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
         let id = zone.id();
         let events = zone.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         in_transaction!(self, |tx| {
             delete_zone(tx, id).await?;
             // No version: the zone is gone.
-            insert_events(tx, &events, None, actor).await
+            insert_events(tx, &events, None, stamp).await
         })
     }
 }

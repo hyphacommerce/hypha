@@ -130,6 +130,26 @@ impl<T: ActingAs + ?Sized> ActingAs for &T {
     }
 }
 
+/// What a host is told when a write gives the dispatcher work: events committed to the
+/// outbox, or a delivery made due again (`OutboxRepo::retry_delivery`). Natively it
+/// wakes the dispatcher; on Workers it runs one after the response (design note 0026,
+/// W6).
+pub type DispatchHook = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+/// Ports that tell the host when a write has given the dispatcher work (`DispatchHook`),
+/// once the write has committed, so the dispatcher finds it. Writes that record no
+/// events (a cart's, a session's) don't, so the host runs no dispatcher after them.
+/// Like `ActingAs`, set by the host when it builds the ports.
+pub trait SignalsDispatch {
+    fn on_dispatch_work(&self, hook: DispatchHook);
+}
+
+impl<T: SignalsDispatch + ?Sized> SignalsDispatch for &T {
+    fn on_dispatch_work(&self, hook: DispatchHook) {
+        (**self).on_dispatch_work(hook)
+    }
+}
+
 /// An event as the outbox holds it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredEvent {
@@ -266,6 +286,11 @@ pub trait OutboxRepo {
         now: Timestamp,
         destinations: &(dyn Fn(&str) -> Vec<String> + Sync),
     ) -> Result<u32, RepoError>;
+
+    /// Whether an event is waiting to be fanned out (`fan_out` would find one to claim,
+    /// unless another claim holds it): one cheap read, so a dispatcher with nothing new
+    /// reads nothing else (the apps it would fan out to).
+    async fn has_unfanned(&self) -> Result<bool, RepoError>;
 
     /// Up to `limit` pending deliveries due by `now` whose lease is free (none, or
     /// expired), oldest due first, leased until `lease_until`: another call won't hand

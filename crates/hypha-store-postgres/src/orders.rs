@@ -23,7 +23,7 @@ use crate::{
     error::{corrupt, repo_error},
     outbox::insert_events,
     store::Queries,
-    store::{PgConnection, PgStore, consistent_read, end_transaction, in_transaction},
+    store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
 
 impl<C: PgConnection> OrderRepo for PgStore<C> {
@@ -165,11 +165,11 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         stamp_insert(order, self.now());
         let s = order.snapshot();
         let events = order.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_order(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         order.set_version(version);
         Ok(())
@@ -179,10 +179,10 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         stamp_update(order, self.now());
         let s = order.snapshot();
         let events = order.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_order(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         order.set_version(version);
@@ -191,14 +191,15 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
 
     async fn next_number(&self) -> Result<OrderNumber, RepoError> {
         let mut conn = self.conn().await;
-        // In a transaction so no query cache (Hyperdrive's) can hand two checkouts the
-        // same number; read-write, because `nextval` writes the sequence.
-        let tx = conn.client().transaction().await.map_err(repo_error)?;
-        let row = tx
+        // `nextval` is atomic across sessions and never rolled back, so it needs no
+        // transaction: two checkouts can't get the same number. Nor may a cache answer
+        // it, and none does: Hyperdrive's query cache is always off (design note 0026,
+        // §6, step 4).
+        let row = conn
+            .db()
             .query_typed_one("SELECT nextval('order_numbers') AS number", &[])
             .await
-            .map_err(repo_error);
-        let row = end_transaction(tx, row).await?;
+            .map_err(repo_error)?;
         OrderNumber::new(col(&row, "number")?).map_err(corrupt)
     }
 }

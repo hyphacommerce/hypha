@@ -1,6 +1,8 @@
-use hypha_auth::{HasApiKeys, HasIdentities, HasPasswordResets, HasSessions};
+use hypha_auth::{
+    HasApiKeys, HasIdentities, HasPasswordResets, HasSessions, Principal, SessionRepo, TokenHash,
+};
 use hypha_cart::HasCarts;
-use hypha_core::{ActingAs, Actor, HasIdempotency, HasOutbox};
+use hypha_core::{ActingAs, Actor, HasIdempotency, HasOutbox, RepoError};
 use hypha_customers::HasCustomers;
 use hypha_fulfillment::HasFulfillments;
 use hypha_inventory::{HasInventoryItems, HasLocations};
@@ -10,7 +12,10 @@ use hypha_orders::HasOrders;
 use hypha_products::HasProducts;
 use hypha_shipping::{HasAppProviders, HasShippingZones};
 use hypha_tax::{HasTaxClasses, HasTaxRegions};
-use hypha_users::{HasInvites, HasRoles, HasUsers};
+use hypha_users::{
+    HasInvites, HasRoles, HasStaffSessions, HasUsers, RoleRepo, StaffSessionRecord,
+    StaffSessionRepo, UserRepo,
+};
 
 use crate::{
     InMemoryApiKeyRepo, InMemoryAppProviderRepo, InMemoryAppRepo, InMemoryAssetRepo,
@@ -274,6 +279,36 @@ impl HasRoles for InMemoryPorts {
     type Roles = InMemoryRoleRepo;
     fn roles(&self) -> &InMemoryRoleRepo {
         &self.roles
+    }
+}
+
+impl HasStaffSessions for InMemoryPorts {
+    type StaffSessions = Self;
+    fn staff_sessions(&self) -> &Self {
+        self
+    }
+}
+
+/// Three lookups in memory; one query in SQL adapters.
+impl StaffSessionRepo for InMemoryPorts {
+    async fn staff_session_by_token(
+        &self,
+        hash: TokenHash,
+    ) -> Result<Option<StaffSessionRecord>, RepoError> {
+        let Some(session) = self.sessions.get_by_token(hash).await? else {
+            return Ok(None);
+        };
+        let Principal::Staff(user_id) = session.principal();
+        let user = self.users.get(user_id).await?;
+        let role = match &user {
+            Some(user) => self.roles.get(user.role()).await?,
+            None => None,
+        };
+        Ok(Some(StaffSessionRecord {
+            session,
+            user,
+            role,
+        }))
     }
 }
 

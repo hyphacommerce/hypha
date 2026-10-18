@@ -216,15 +216,52 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
             .collect()
     }
 
+    async fn images_of(
+        &self,
+        lines: &[(ProductId, VariantId)],
+    ) -> Result<HashMap<(ProductId, VariantId), AssetId>, RepoError> {
+        if lines.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let products: Vec<Uuid> = lines.iter().map(|(p, _)| p.as_uuid()).collect();
+        let variants: Vec<Uuid> = lines.iter().map(|(_, v)| v.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                "SELECT t.p, t.v, COALESCE(
+                     (SELECT v.media_asset_id FROM variants v
+                      WHERE v.id = t.v AND v.product_id = t.p),
+                     (SELECT m.asset_id FROM product_media m
+                      WHERE m.product_id = t.p ORDER BY m.position LIMIT 1)
+                 ) AS asset_id
+                 FROM unnest($1::uuid[], $2::uuid[]) AS t (p, v)",
+                &[(&products, Type::UUID_ARRAY), (&variants, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        let mut images = HashMap::with_capacity(rows.len());
+        for row in &rows {
+            if let Some(asset) = col::<Option<Uuid>>(row, "asset_id")? {
+                let line = (
+                    ProductId::from_uuid(col(row, "p")?),
+                    VariantId::from_uuid(col(row, "v")?),
+                );
+                images.insert(line, AssetId::from_uuid(asset));
+            }
+        }
+        Ok(images)
+    }
+
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError> {
         stamp_insert(product, self.now());
         let s = product.snapshot();
         let events = product.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_product(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         product.set_version(version);
         Ok(())
@@ -234,10 +271,10 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         stamp_update(product, self.now());
         let s = product.snapshot();
         let events = product.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_product(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         product.set_version(version);

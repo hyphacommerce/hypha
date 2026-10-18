@@ -289,7 +289,8 @@ pub struct AppState<S> {
     pub limiter: HostLimiter,
     /// Publishable keys authenticated in the last half minute (`key_cache.rs`).
     pub publishable_keys: crate::key_cache::KeyCache,
-    /// Runs after each successful write request (`writes.rs`): wakes the jobs.
+    /// Told when a write gives the dispatcher work (`hypha_core::SignalsDispatch`):
+    /// wakes the jobs.
     pub after_writes: AfterWrites,
     /// The one store this deployment serves (design note 0006, model A), set at startup.
     pub store: StoreId,
@@ -367,8 +368,13 @@ impl<S: Storage> AppState<S> {
     /// With one store per deployment the store is always `self.store`; a multi-store
     /// host would resolve it from the request (API key, hostname) here, and nothing else
     /// would change.
+    ///
+    /// The ports tell `after_writes` when a write gives the dispatcher work (events
+    /// committed, a delivery retried), so writes without events don't wake the jobs.
     pub async fn public_ports(&self) -> Result<S::Ports<'_>, ApiError> {
-        self.storage.ports(self.store).await
+        let ports = self.storage.ports(self.store).await?;
+        hypha_core::SignalsDispatch::on_dispatch_work(&ports, self.after_writes.hook());
+        Ok(ports)
     }
 }
 
@@ -415,6 +421,7 @@ pub trait Storage: Send + Sync + 'static {
     type Ports<'a>: CheckoutPorts
         + hypha_order_actions::OrderActionPorts
         + StaffPorts
+        + hypha_users::HasStaffSessions
         + HasApiKeys
         + hypha_media::HasAssets
         + hypha_media::HasAssetUsages
@@ -423,6 +430,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_shipping::HasAppProviders
         + hypha_core::HasOutbox
         + hypha_core::ActingAs
+        + hypha_core::SignalsDispatch
         + hypha_apps::HasApps
         + hypha_search_index::HasSearchQueue
         + hypha_search_index::HasSearchSettings
@@ -451,6 +459,15 @@ pub trait Storage: Send + Sync + 'static {
     /// runs whatever is here (`jobs::dispatch`).
     type Handlers: for<'a> hypha_core::EventHandlers<Self::Ports<'a>> + Send + Sync + 'static;
 
+    /// Whether a dispatch step keeps one set of ports for all its work (`jobs::dispatch`)
+    /// rather than getting them for each delivery and letting them go before a webhook
+    /// is sent (design note 0016, EV9). `false`, the default, for a pool: a connection
+    /// held while another server answers is one the requests can't have. A host whose
+    /// every `ports()` opens a new connection that nothing else shares (Workers through
+    /// Hyperdrive, design note 0026, W4) says `true`: there, holding one idle costs
+    /// nothing, and opening one per delivery costs a connection's setup each time.
+    const KEEPS_PORTS_ACROSS_DELIVERIES: bool = false;
+
     /// Repositories that only see `store`'s data (design note 0006). With one store per
     /// deployment (model A) the database *is* the store, so implementations ignore it;
     /// shared tables (B) would filter by it, a database per store (C) would pick by it.
@@ -458,6 +475,15 @@ pub trait Storage: Send + Sync + 'static {
 
     /// The stores this deployment knows (in model C, a control plane).
     async fn directory(&self) -> Result<Self::Directory<'_>, ApiError>;
+
+    /// The directory through a request's own `ports`, when the store's database holds
+    /// it too (one store per deployment, model A: both hosts today), which saves a
+    /// second connection. `None`, the default, when it lives elsewhere (model C's
+    /// control plane): callers then take `directory()`.
+    fn directory_in<'p>(&'p self, ports: &'p Self::Ports<'_>) -> Option<&'p Self::Directory<'p>> {
+        let _ = ports;
+        None
+    }
 
     /// The search engine, borrowing `ports` when the engine is the database (the
     /// built-in Postgres one). An external engine (Meilisearch, design note 0019 step 7)

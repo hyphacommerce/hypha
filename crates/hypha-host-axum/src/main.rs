@@ -430,10 +430,6 @@ async fn serve(prepared: Prepared) {
     let router: Router<_> = hypha_http::router!(PgStorage);
     let app = router
         .layer(axum::middleware::from_fn(record_peer))
-        .layer(axum::middleware::from_fn_with_state(
-            state.after_writes.clone(),
-            hypha_http::writes::after_writes,
-        ))
         .layer(TraceLayer::new_for_http())
         .with_state(Arc::clone(&state));
 

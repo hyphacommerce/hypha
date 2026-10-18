@@ -3,15 +3,17 @@
 use hypha_auth::TokenHash;
 use hypha_core::{Email, InviteId, RepoError, RoleId, Timestamp, UserId, Version, Versioned};
 use hypha_users::{
-    Invite, InviteRepo, InviteSnapshot, Role, RoleRepo, RoleScopes, RoleSnapshot, User, UserRepo,
-    UserSnapshot, UserStatus,
+    Invite, InviteRepo, InviteSnapshot, Role, RoleRepo, RoleScopes, RoleSnapshot,
+    StaffSessionRecord, StaffSessionRepo, User, UserRepo, UserSnapshot, UserStatus,
 };
 use tokio_postgres::{Row, types::Type};
+use uuid::Uuid;
 
 use crate::{
+    auth::{session_columns_as, session_from},
     columns::{
-        actor_from_db, actor_to_db, col, micros, scopes_from_db, scopes_to_db, token_hash_from_db,
-        ts, version_from_db, version_to_db,
+        Prefixed, actor_from_db, actor_to_db, col, micros, prefixed_columns, scopes_from_db,
+        scopes_to_db, token_hash_from_db, ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::Queries,
@@ -20,25 +22,29 @@ use crate::{
 
 // ---------- users ----------
 
+const USER_PLAIN: &[&str] = &["id", "version", "email", "name", "role_id", "status"];
+const USER_TIMESTAMPS: &[&str] = &["created_at"];
+
 fn user_columns() -> String {
-    format!(
-        "id, version, email, name, role_id, status, {}",
-        micros("created_at")
-    )
+    prefixed_columns("users", "", USER_PLAIN, USER_TIMESTAMPS)
 }
 
 fn user_from_row(row: &Row) -> Result<User, RepoError> {
-    let email: String = col(row, "email")?;
-    let status: String = col(row, "status")?;
+    user_from(Prefixed::plain(row))
+}
+
+fn user_from(row: Prefixed<'_>) -> Result<User, RepoError> {
+    let email: String = row.col("email")?;
+    let status: String = row.col("status")?;
     User::restore(UserSnapshot {
-        id: UserId::from_uuid(col(row, "id")?),
-        version: version_from_db(col(row, "version")?)?,
+        id: UserId::from_uuid(row.col("id")?),
+        version: version_from_db(row.col("version")?)?,
         email: Email::new(&email).map_err(corrupt)?,
-        name: col(row, "name")?,
-        role: RoleId::from_uuid(col(row, "role_id")?),
+        name: row.col("name")?,
+        role: RoleId::from_uuid(row.col("role_id")?),
         status: UserStatus::parse(&status)
             .ok_or_else(|| corrupt(format!("unknown user status {status:?}")))?,
-        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
+        created_at: Timestamp::from_unix_micros(row.col("created_at")?),
     })
     .map_err(corrupt)
 }
@@ -171,21 +177,80 @@ pub(crate) async fn insert_user(client: &impl Queries, s: &UserSnapshot) -> Resu
     Ok(())
 }
 
+// ---------- staff sessions ----------
+
+/// One query: the session by token, its user and their role, left-joined so a missing
+/// user or role comes back as `None` for `authenticate_staff` to judge.
+impl<C: PgConnection> StaffSessionRepo for PgStore<C> {
+    async fn staff_session_by_token(
+        &self,
+        hash: TokenHash,
+    ) -> Result<Option<StaffSessionRecord>, RepoError> {
+        let mut conn = self.conn().await;
+        let bytes = hash.as_bytes().as_slice();
+        let sql = format!(
+            "SELECT {}, {}, {} FROM sessions s
+             LEFT JOIN users u ON s.principal_kind = 'staff' AND u.id = s.principal_id
+             LEFT JOIN roles r ON r.id = u.role_id
+             WHERE s.token_hash = $1",
+            session_columns_as("s", "s_"),
+            prefixed_columns("u", "u_", USER_PLAIN, USER_TIMESTAMPS),
+            prefixed_columns("r", "r_", ROLE_PLAIN, &[]),
+        );
+        let Some(row) = conn
+            .db()
+            .query_typed_opt(&sql, &[(&bytes, Type::BYTEA)])
+            .await
+            .map_err(repo_error)?
+        else {
+            return Ok(None);
+        };
+        let session = session_from(Prefixed {
+            row: &row,
+            prefix: "s_",
+        })?;
+        let user = match col::<Option<Uuid>>(&row, "u_id")? {
+            Some(_) => Some(user_from(Prefixed {
+                row: &row,
+                prefix: "u_",
+            })?),
+            None => None,
+        };
+        let role = match col::<Option<Uuid>>(&row, "r_id")? {
+            Some(_) => Some(role_from(Prefixed {
+                row: &row,
+                prefix: "r_",
+            })?),
+            None => None,
+        };
+        Ok(Some(StaffSessionRecord {
+            session,
+            user,
+            role,
+        }))
+    }
+}
+
 // ---------- roles ----------
 
+const ROLE_PLAIN: &[&str] = &["id", "version", "name", "is_owner", "scopes"];
 const ROLE_COLUMNS: &str = "id, version, name, is_owner, scopes";
 
 fn role_from_row(row: &Row) -> Result<Role, RepoError> {
-    let is_owner: bool = col(row, "is_owner")?;
+    role_from(Prefixed::plain(row))
+}
+
+fn role_from(row: Prefixed<'_>) -> Result<Role, RepoError> {
+    let is_owner: bool = row.col("is_owner")?;
     let scopes = if is_owner {
         RoleScopes::All
     } else {
-        RoleScopes::Only(scopes_from_db(col(row, "scopes")?)?)
+        RoleScopes::Only(scopes_from_db(row.col("scopes")?)?)
     };
     Role::restore(RoleSnapshot {
-        id: RoleId::from_uuid(col(row, "id")?),
-        version: version_from_db(col(row, "version")?)?,
-        name: col(row, "name")?,
+        id: RoleId::from_uuid(row.col("id")?),
+        version: version_from_db(row.col("version")?)?,
+        name: row.col("name")?,
         scopes,
     })
     .map_err(corrupt)

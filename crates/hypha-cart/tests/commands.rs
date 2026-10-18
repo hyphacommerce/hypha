@@ -290,6 +290,54 @@ fn create_cart_picks_the_market_of_its_country() {
     assert_eq!(world.get(cart.id), Ok(cart));
 }
 
+/// What an empty cart in the Croatian market prices to, whatever else is set up.
+fn empty_in_croatia(id: CartId, taxes_included: bool) -> PricedCart {
+    PricedCart {
+        id,
+        market: market_id(),
+        currency: Currency::EUR,
+        country: hr(),
+        email: None,
+        customer: None,
+        order: None,
+        lines: vec![],
+        taxes_included,
+        subtotal: eur(0),
+        shipping_address: None,
+        shipping_groups: vec![],
+        shipping_total: eur(0),
+        tax_total: eur(0),
+        total: eur(0),
+    }
+}
+
+#[test]
+fn a_new_cart_is_priced_from_its_market() {
+    let world = World::new();
+    world.tax_croatia();
+    world.stock("mug", 2);
+    world.set_prices_include_tax();
+    let cart = world.create_cart_in("HR").unwrap();
+    assert_eq!(cart, empty_in_croatia(cart.id, true));
+    assert_eq!(world.get(cart.id), Ok(cart));
+}
+
+#[test]
+fn an_emptied_cart_prices_like_a_new_one() {
+    let world = World::new();
+    world.tax_croatia();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 1).unwrap();
+    let emptied = block_on(remove_cart_line(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        vid("mug"),
+    ));
+    assert_eq!(emptied, Ok(empty_in_croatia(cart, false)));
+    assert_eq!(world.get(cart), Ok(empty_in_croatia(cart, false)));
+}
+
 #[test]
 fn create_cart_rejects_country_without_market() {
     let world = World::new();

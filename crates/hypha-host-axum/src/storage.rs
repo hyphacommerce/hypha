@@ -160,6 +160,14 @@ impl Storage for PgStorage {
         self.store().await
     }
 
+    /// The stores table is in the store's database (model A).
+    fn directory_in<'p>(
+        &'p self,
+        ports: &'p PgStore<PooledClient>,
+    ) -> Option<&'p PgStore<PooledClient>> {
+        Some(ports)
+    }
+
     fn search<'p>(&'p self, ports: &'p PgStore<PooledClient>) -> &'p PgStore<PooledClient> {
         ports
     }

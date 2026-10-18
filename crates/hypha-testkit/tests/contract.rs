@@ -167,6 +167,11 @@ fn invite_repo() {
 }
 
 #[test]
+fn staff_sessions() {
+    block_on(contract::staff_sessions(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn staff_batch() {
     block_on(contract::staff_batch(async || InMemoryPorts::default()));
 }

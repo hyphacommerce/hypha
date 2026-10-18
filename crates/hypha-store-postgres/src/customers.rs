@@ -130,11 +130,11 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
         stamp_insert(customer, self.now());
         let s = customer.snapshot();
         let events = customer.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_customer(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         customer.set_version(version);
         Ok(())
@@ -144,10 +144,10 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
         stamp_update(customer, self.now());
         let s = customer.snapshot();
         let events = customer.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_customer(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         customer.set_version(version);

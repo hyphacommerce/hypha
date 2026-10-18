@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use hypha_categories::{Category, CategoryRepo, HasCategories, NewCategory};
 use hypha_channels::{Channel, ChannelKind, ChannelRepo, HasChannels};
 use hypha_core::{
@@ -42,6 +44,8 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     list_by_details(&make().await).await;
     scenario("product: media and variant media round trip, in order");
     media_round_trips(&make().await).await;
+    scenario("product: images_of is each variant's image, else its product's first item");
+    images_of(&make().await).await;
     scenario("product: variant weight and requires_shipping round trip");
     shipping_facts_round_trip(&make().await).await;
     scenario("product: description, vendor, product type and tags round trip");
@@ -816,6 +820,37 @@ async fn media_round_trips<R: ProductRepo>(repo: &R) {
     other.set_media(vec![aid(2)]).unwrap();
     repo.insert(&mut other).await.unwrap();
     assert_eq!(repo.get(other.id()).await, Ok(Some(other)));
+}
+
+async fn images_of<R: ProductRepo>(repo: &R) {
+    let mut p = shirt(1, "shirt");
+    p.set_media(vec![aid(3), aid(1)]).unwrap();
+    p.set_variant_media(vid(101), Some(aid(1))).unwrap();
+    repo.insert(&mut p).await.unwrap();
+    // No media at all.
+    repo.insert(&mut simple(2, "mug")).await.unwrap();
+    assert_eq!(repo.images_of(&[]).await, Ok(HashMap::new()));
+    let asked = [
+        // Its own image.
+        (pid(1), vid(101)),
+        // None of its own: the product's first item.
+        (pid(1), vid(102)),
+        // Not the product's (another product's, or gone): the product's first item too.
+        (pid(1), vid(201)),
+        (pid(1), vid(999)),
+        // A product without media, and one that's gone: left out.
+        (pid(2), vid(201)),
+        (pid(9), vid(901)),
+    ];
+    assert_eq!(
+        repo.images_of(&asked).await,
+        Ok(HashMap::from([
+            ((pid(1), vid(101)), aid(1)),
+            ((pid(1), vid(102)), aid(3)),
+            ((pid(1), vid(201)), aid(3)),
+            ((pid(1), vid(999)), aid(3)),
+        ]))
+    );
 }
 
 async fn sku_lookup<R: ProductRepo>(repo: &R) {

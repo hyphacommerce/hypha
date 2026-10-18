@@ -1,4 +1,6 @@
-use hypha_core::{Keyset, Page, PageRequest, ProductId, RepoError, VariantId};
+use std::collections::HashMap;
+
+use hypha_core::{AssetId, Keyset, Page, PageRequest, ProductId, RepoError, VariantId};
 
 use crate::{Handle, Product, ProductFilter, ProductSort, ProductSummary};
 
@@ -29,6 +31,15 @@ pub trait ProductRepo {
     /// variants no product has are skipped. One query however many (search's sync
     /// resolves a batch of stock and price changes with it).
     async fn ids_of_variants(&self, variants: &[VariantId]) -> Result<Vec<ProductId>, RepoError>;
+    /// What to show for each `(product, variant)` asked: the variant's image, else the
+    /// product's first media item, as the stored product reads (`Product::media`,
+    /// `Variant::media`; a variant the product doesn't have gets the product's item).
+    /// Pairs whose product is gone or shows nothing are left out. One query however many
+    /// pairs, without loading the products (an order's line images).
+    async fn images_of(
+        &self,
+        lines: &[(ProductId, VariantId)],
+    ) -> Result<HashMap<(ProductId, VariantId), AssetId>, RepoError>;
     /// The product with a variant whose SKU is exactly `sku`.
     async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError>;
     /// A page of product summaries in `sort`'s order (design notes 0012 and 0024): the

@@ -234,7 +234,8 @@ pub async fn create_cart<S: IdempotentCartPorts, I: IdGenerator, C: Clock>(
         country,
         channel,
     );
-    let priced = reprice(ports, &cart).await?;
+    // A new cart is empty: priced from the market just read, without reading it again.
+    let priced = empty_reading(&cart, market).priced;
     match write_cart(
         ctx,
         ports,
@@ -610,10 +611,19 @@ pub struct CartReading {
 }
 
 /// Prices `cart` in a fixed number of queries (see `load_pricing`), its shipping too.
+/// An empty cart reads only its market (`empty_reading`).
 pub async fn read_cart<S: PricingPorts>(
     ports: &S,
     cart: &Cart,
 ) -> Result<CartReading, CommandError> {
+    if cart.lines().is_empty() {
+        let market = ports
+            .markets()
+            .get(cart.market())
+            .await?
+            .ok_or(CommandError::MarketNotFound(cart.market()))?;
+        return Ok(empty_reading(cart, market));
+    }
     let pricing = load_pricing(ports, cart).await?;
     let tax = load_tax(ports, cart, &pricing.market).await?;
     let stock = load_stock(ports, cart).await?;
@@ -636,6 +646,38 @@ pub async fn read_cart<S: PricingPorts>(
     })
 }
 
+/// `cart`, which has no lines, priced from its `market` alone. Without lines nothing
+/// else can change the result: the market gives the currency and whether prices include
+/// tax, and the catalog, price list, tax rates, stock, products, publications and
+/// shipping zone only ever apply to lines (no line needs shipping, so there's no group
+/// to offer options for). Saves a new or emptied cart the dozen or so reads of a full
+/// `read_cart`.
+fn empty_reading(cart: &Cart, market: Market) -> CartReading {
+    debug_assert!(cart.lines().is_empty());
+    let pricing = PricingContext {
+        catalog: None,
+        price_list: None,
+        included_products: Default::default(),
+        fixed_prices: Default::default(),
+        market,
+    };
+    let tax = TaxContext {
+        region: None,
+        prices_include_tax: pricing.market.prices_include_tax(),
+        product_classes: Default::default(),
+    };
+    let stock = StockContext::default();
+    let shipping = ShippingContext::default();
+    let published = Publication::new(Default::default());
+    let priced = price_cart_with_shipping(cart, &[], &pricing, &tax, &stock, &shipping, &published);
+    CartReading {
+        priced,
+        stock,
+        products: Vec::new(),
+        shipping,
+    }
+}
+
 /// Which of the cart's products its channel sells, in one query (design note 0020).
 async fn load_publication<S: HasChannels>(
     ports: &S,
@@ -656,7 +698,8 @@ async fn load_publication<S: HasChannels>(
 /// Everything needed to price the cart's lines (`hypha_pricing::load_pricing`).
 /// With `load_tax`, `load_stock` and `load_products`, pricing a cart takes the same
 /// number of round trips for 1 line or 100 (on Postgres about 20, counting the
-/// BEGIN/COMMIT of each multi-query load); an empty cart skips the batch lookups.
+/// BEGIN/COMMIT of each multi-query load); an empty cart reads only its market
+/// (`empty_reading`).
 async fn load_pricing<S: HasMarkets + HasCatalogs + HasPriceLists>(
     ports: &S,
     cart: &Cart,

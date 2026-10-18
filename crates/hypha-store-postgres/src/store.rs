@@ -1,8 +1,9 @@
 use futures_util::lock::{Mutex, MutexGuard};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use hypha_core::{Actor, Clock, RepoError, Timestamp};
+use hypha_core::{Actor, Clock, DispatchHook, RepoError, Timestamp};
 use tokio_postgres::{
     Client, Error, GenericClient, IsolationLevel, Row, Statement, Transaction,
     types::{ToSql, Type},
@@ -234,6 +235,13 @@ pub struct PgStore<C> {
     /// What aggregates are stamped with when written (design note 0016, Q3): the host's
     /// clock, so a batch's aggregates carry their stamps before it commits.
     clock: Arc<dyn Clock + Send + Sync>,
+    /// Whether the open transaction has given the dispatcher work (`insert_events`, a
+    /// retried delivery): when it commits, the dispatch hook is told. Transactions don't overlap on one store (the
+    /// connection's mutex), so one flag is enough.
+    events_pending: AtomicBool,
+    /// Told after a write gives the dispatcher work (`SignalsDispatch`); none until the
+    /// host sets one. A plain mutex, held only to clone the `Arc`.
+    dispatch_hook: std::sync::Mutex<Option<DispatchHook>>,
 }
 
 impl<C: PgConnection> PgStore<C> {
@@ -242,6 +250,8 @@ impl<C: PgConnection> PgStore<C> {
             conn: Mutex::new(conn),
             actor: std::sync::Mutex::new(Actor::System),
             clock,
+            events_pending: AtomicBool::new(false),
+            dispatch_hook: std::sync::Mutex::new(None),
         }
     }
 
@@ -252,6 +262,35 @@ impl<C: PgConnection> PgStore<C> {
 
     pub(crate) async fn conn(&self) -> MutexGuard<'_, C> {
         self.conn.lock().await
+    }
+
+    /// What `insert_events` needs from the store: the actor to stamp events with, and
+    /// the flag that tells the dispatch hook once their transaction commits.
+    pub(crate) fn event_stamp(&self) -> EventStamp<'_> {
+        EventStamp {
+            actor: self.actor(),
+            pending: &self.events_pending,
+        }
+    }
+
+    /// Ends a write transaction's bookkeeping: if it `committed` events, the dispatch
+    /// hook is told now (after the COMMIT, so the dispatcher finds them).
+    pub(crate) fn transaction_ended(&self, committed: bool) {
+        if self.events_pending.swap(false, Ordering::Relaxed) && committed {
+            self.dispatch_work();
+        }
+    }
+
+    /// Tells the dispatch hook, if there is one, that the dispatcher has work.
+    pub(crate) fn dispatch_work(&self) {
+        let hook = self
+            .dispatch_hook
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(hook) = hook {
+            hook();
+        }
     }
 
     /// The actor events are stamped with now.
@@ -268,6 +307,30 @@ impl<C: PgConnection> PgStore<C> {
             .actor
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = actor;
+    }
+}
+
+impl<C: PgConnection> hypha_core::SignalsDispatch for PgStore<C> {
+    fn on_dispatch_work(&self, hook: DispatchHook) {
+        *self
+            .dispatch_hook
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(hook);
+    }
+}
+
+/// The actor `insert_events` stamps events with, and where it notes that it wrote some
+/// (`PgStore::event_stamp`).
+#[derive(Clone, Copy)]
+pub(crate) struct EventStamp<'a> {
+    pub actor: Actor,
+    pending: &'a AtomicBool,
+}
+
+impl EventStamp<'_> {
+    /// The open transaction gave the dispatcher work: events, or a delivery due again.
+    pub(crate) fn wrote(&self) {
+        self.pending.store(true, Ordering::Relaxed);
     }
 }
 
@@ -305,6 +368,7 @@ accessors! {
     hypha_users::HasUsers => Users, users;
     hypha_users::HasRoles => Roles, roles;
     hypha_users::HasInvites => Invites, invites;
+    hypha_users::HasStaffSessions => StaffSessions, staff_sessions;
     hypha_media::HasAssets => Assets, assets;
     hypha_media::HasAssetUsages => AssetUsages, asset_usages;
     hypha_shipping::HasShippingZones => ShippingZones, shipping_zones;
@@ -358,7 +422,8 @@ pub(crate) async fn begin_consistent_read(
 /// `insert_x` / `update_x` functions `PgBatch::commit` does, then the transaction
 /// commits. On an error it's rolled back (`end_transaction`, awaited: never by dropping
 /// it), so a write that fails half-way (a stale version after some child rows) leaves
-/// nothing behind.
+/// nothing behind. A commit that wrote events tells the dispatch hook
+/// (`PgStore::transaction_ended`).
 /// A macro for the same reason as `consistent_read!`.
 ///
 /// `in_transaction!(store, |tx| body)`.
@@ -373,7 +438,9 @@ macro_rules! in_transaction {
         let db = $crate::store::Db::new(&transaction, statements);
         let $tx = &db;
         let value: Result<_, hypha_core::RepoError> = async { $body }.await;
-        $crate::store::end_transaction(transaction, value).await
+        let ended = $crate::store::end_transaction(transaction, value).await;
+        $store.transaction_ended(ended.is_ok());
+        ended
     }};
 }
 pub(crate) use in_transaction;

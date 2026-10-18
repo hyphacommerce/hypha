@@ -415,17 +415,23 @@ async fn with_second_factor<R: IdentityRepo, T>(
     Err(RepoError::StaleVersion.into())
 }
 
+/// The hash a session `token` is stored under, or `InvalidToken` if it isn't a session
+/// token: checked before any lookup.
+pub fn session_token_hash(token: &str) -> Result<TokenHash, CommandError> {
+    if TokenKind::of(token) != Some(TokenKind::Session) {
+        return Err(CommandError::InvalidToken);
+    }
+    Ok(TokenHash::of(token))
+}
+
 /// The active session behind `token`, or `InvalidToken`.
 pub async fn authenticate_session<R: SessionRepo>(
     sessions: &R,
     clock: &impl Clock,
     token: &str,
 ) -> Result<Session, CommandError> {
-    if TokenKind::of(token) != Some(TokenKind::Session) {
-        return Err(CommandError::InvalidToken);
-    }
     sessions
-        .get_by_token(TokenHash::of(token))
+        .get_by_token(session_token_hash(token)?)
         .await?
         .filter(|s| s.is_active(clock.now()))
         .ok_or(CommandError::InvalidToken)

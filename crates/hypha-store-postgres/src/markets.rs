@@ -54,11 +54,11 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
         stamp_insert(market, self.now());
         let s = market.snapshot();
         let events = market.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_market(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         market.set_version(version);
         Ok(())
@@ -68,10 +68,10 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
         stamp_update(market, self.now());
         let s = market.snapshot();
         let events = market.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_market(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         market.set_version(version);
@@ -314,11 +314,11 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
         stamp_insert(catalog, self.now());
         let s = catalog.snapshot();
         let events = catalog.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_catalog(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         catalog.set_version(version);
         Ok(())
@@ -328,10 +328,10 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
         stamp_update(catalog, self.now());
         let s = catalog.snapshot();
         let events = catalog.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_catalog(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         catalog.set_version(version);
@@ -528,11 +528,11 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         stamp_insert(price_list, self.now());
         let s = price_list.snapshot();
         let events = price_list.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_price_list(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         price_list.set_version(version);
         Ok(())
@@ -542,10 +542,10 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         stamp_update(price_list, self.now());
         let s = price_list.snapshot();
         let events = price_list.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_price_list(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         price_list.set_version(version);

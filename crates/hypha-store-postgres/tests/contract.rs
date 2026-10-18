@@ -183,6 +183,12 @@ async fn invite_repo() {
 }
 
 #[tokio::test]
+async fn staff_sessions() {
+    let Some(url) = database_url() else { return };
+    contract::staff_sessions(async || fresh_store(&url, "contract_staff_sessions").await).await;
+}
+
+#[tokio::test]
 async fn staff_batch() {
     let Some(url) = database_url() else { return };
     contract::staff_batch(async || fresh_store(&url, "contract_staff_batch").await).await;

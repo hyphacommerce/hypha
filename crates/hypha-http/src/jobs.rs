@@ -41,7 +41,8 @@ pub type Step = Result<Ran, String>;
 /// Fans out new events, then runs the due deliveries. The lease and the outcomes each
 /// take a connection briefly; each delivery gets ports to load its app or run its
 /// handler, and lets them go before a webhook is sent, so no connection waits on another
-/// server (design note 0016, EV9). Deliveries the lease can't cover any more are left
+/// server (design note 0016, EV9). A host whose connections aren't pooled keeps one for
+/// the step instead (`Storage::KEEPS_PORTS_ACROSS_DELIVERIES`). Deliveries the lease can't cover any more are left
 /// for the next lease (`has_time`).
 pub async fn dispatch<S: Storage>(state: &AppState<S>) -> Step {
     dispatch_within(state, None).await
@@ -65,17 +66,30 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
         deadline.is_none_or(|by| state.clock.now().plus(takes + RECORD_MARGIN) <= by)
     };
     let no_connection = |_| "no connection".to_string();
+    // Kept for the whole step where the host says that's cheaper (`Storage::
+    // KEEPS_PORTS_ACROSS_DELIVERIES`); otherwise each part gets its own and lets it go.
+    let held = match S::KEEPS_PORTS_ACROSS_DELIVERIES {
+        true => Some(state.public_ports().await.map_err(no_connection)?),
+        false => None,
+    };
     let (fanned, leased) = {
-        let ports = state.public_ports().await.map_err(no_connection)?;
+        let fresh;
+        let ports = match &held {
+            Some(ports) => ports,
+            None => {
+                fresh = state.public_ports().await.map_err(no_connection)?;
+                &fresh
+            }
+        };
         let fanned = fan_out(
-            &ports,
+            ports,
             &state.clock,
             &state.config.dispatch,
             state.storage.handlers(),
         )
         .await
         .map_err(|e| e.to_string())?;
-        let leased = lease_due(&ports, &state.clock, &state.config.dispatch)
+        let leased = lease_due(ports, &state.clock, &state.config.dispatch)
             .await
             .map_err(|e| e.to_string())?;
         (fanned, leased)
@@ -86,11 +100,18 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
         .take_while(|d| has_time(d, &state.clock) && fits(Duration::ZERO))
     {
         let prepared = {
-            let ports = state.public_ports().await.map_err(no_connection)?;
-            match prepare(&ports, &state.clock, &state.config.dispatch, delivery).await {
+            let fresh;
+            let ports = match &held {
+                Some(ports) => ports,
+                None => {
+                    fresh = state.public_ports().await.map_err(no_connection)?;
+                    &fresh
+                }
+            };
+            match prepare(ports, &state.clock, &state.config.dispatch, delivery).await {
                 Prepared::Handler => Prepared::Done(
                     handle(
-                        &ports,
+                        ports,
                         &state.clock,
                         &state.config.dispatch,
                         state.storage.handlers(),
@@ -141,8 +162,15 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
         .map(|d| d.leased_until);
     let retry_at = retries.chain(unstarted).min();
     if !outcomes.is_empty() {
-        let ports = state.public_ports().await.map_err(no_connection)?;
-        record(&ports, &outcomes).await.map_err(|e| e.to_string())?;
+        let fresh;
+        let ports = match &held {
+            Some(ports) => ports,
+            None => {
+                fresh = state.public_ports().await.map_err(no_connection)?;
+                &fresh
+            }
+        };
+        record(ports, &outcomes).await.map_err(|e| e.to_string())?;
     }
     // A step that did work may have marked products for search (its handlers): the
     // runner wakes search sync then.

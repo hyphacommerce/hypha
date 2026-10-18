@@ -916,3 +916,61 @@ fn a_disable_during_login_leaves_no_session_to_revive() {
     let live = ports.sessions.live_for(identity.id(), env.now());
     assert_eq!(live, 0, "a session from the login survived");
 }
+
+// ---------- authenticating a request ----------
+
+#[test]
+fn a_token_that_is_not_a_session_token_is_invalid() {
+    let (ports, env, _) = world();
+    assert_eq!(
+        block_on(authenticate_staff(&ports, &env, "hypha_sk_nope")).map(|s| s.user.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
+    );
+    assert_eq!(
+        block_on(authenticate_staff(&ports, &env, "hypha_sess_unknown")).map(|s| s.user.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::InvalidToken))
+    );
+}
+
+#[test]
+fn a_live_session_of_a_disabled_user_is_not_staff() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let (mut bob, token) = join(&ports, &env, &owner, support.id());
+    // Disabled behind the commands' back, so the session stays live.
+    bob.set_status(UserStatus::Disabled);
+    block_on(ports.users.update(&mut bob)).unwrap();
+    assert_eq!(
+        block_on(authenticate_staff(&ports, &env, &token)).map(|s| s.user.id()),
+        Err(CommandError::NotStaff)
+    );
+}
+
+#[test]
+fn a_user_whose_role_is_gone_is_role_not_found() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let (mut bob, token) = join(&ports, &env, &owner, support.id());
+    let gone = RoleId::from_uuid(Uuid::from_u128(999));
+    bob.set_role(gone);
+    block_on(ports.users.update(&mut bob)).unwrap();
+    assert_eq!(
+        block_on(authenticate_staff(&ports, &env, &token)).map(|s| s.user.id()),
+        Err(CommandError::RoleNotFound(gone))
+    );
+}
+
+#[test]
+fn a_request_reads_the_role_scopes_as_they_are_now() {
+    let (ports, env, owner) = world();
+    let support = support_role(&ports, &env, &owner);
+    let (_, token) = join(&ports, &env, &owner, support.id());
+    let staff = block_on(authenticate_staff(&ports, &env, &token)).unwrap();
+    assert!(!staff.ctx.has_scope(Scope::ProductsRead));
+    let mut role = block_on(ports.roles.get(support.id())).unwrap().unwrap();
+    role.set_scopes(&[Scope::ProductsRead]).unwrap();
+    block_on(ports.roles.update(&mut role)).unwrap();
+    let staff = block_on(authenticate_staff(&ports, &env, &token)).unwrap();
+    assert!(staff.ctx.has_scope(Scope::ProductsRead));
+    assert!(!staff.ctx.has_scope(Scope::OrdersWrite));
+}

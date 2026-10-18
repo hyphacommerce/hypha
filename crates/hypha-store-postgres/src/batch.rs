@@ -525,7 +525,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         }
                     }
                     Staged::Events(events, version) => {
-                        insert_events(&db, &events, version, self.actor()).await?
+                        insert_events(&db, &events, version, self.event_stamp()).await?
                     }
                 }
             }
@@ -542,7 +542,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
             Ok(())
         }
         .await;
-        end_transaction(tx, written).await
+        let ended = end_transaction(tx, written).await;
+        self.transaction_ended(ended.is_ok());
+        ended
     }
 }
 

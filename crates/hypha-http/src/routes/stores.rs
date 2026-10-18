@@ -1,5 +1,5 @@
 use axum::{Json, extract::State};
-use hypha_core::{Email, Language, StoreId, Timezone};
+use hypha_core::{Ctx, Email, Language, StoreId, Timezone};
 use hypha_stores::{Store, UpdateStore, get_store, update_store};
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, Storefront},
     patch,
-    state::{SharedState, Storage},
+    state::{AppState, SharedState, Storage},
 };
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -86,11 +86,8 @@ pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<StoreResponse>, ApiError> {
-    // The ports are only needed to authenticate; `_` drops them (and their pooled
-    // connection) at the end of this statement, before the directory takes one.
-    let (_, ctx) = caller.authenticate(&state).await?;
-    let directory = state.storage.directory().await?;
-    let store = get_store(&ctx, &directory, state.store).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let store = read_store(&state, &ctx, ports).await?;
     Ok(Json(StoreResponse::new(&store)?))
 }
 
@@ -152,10 +149,8 @@ pub async fn update<S: Storage>(
     caller: Caller,
     body: JsonBody<UpdateStoreRequest>,
 ) -> Result<Json<StoreResponse>, ApiError> {
-    // As in `fetch`: the ports go before the directory takes a connection.
-    let (_, ctx) = caller.authenticate(&state).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    let directory = state.storage.directory().await?;
     let input = UpdateStore {
         name: req.name,
         contact_email: req.contact_email,
@@ -167,7 +162,15 @@ pub async fn update<S: Storage>(
         setup_step: req.setup_step,
         setup_finished: req.setup_finished,
     };
-    let store = update_store(&ctx, &directory, &state.clock, state.store, input).await?;
+    // Through the request's ports when they hold the directory (`read_store`).
+    let store = match state.storage.directory_in(&ports) {
+        Some(directory) => update_store(&ctx, directory, &state.clock, state.store, input).await?,
+        None => {
+            drop(ports);
+            let directory = state.storage.directory().await?;
+            update_store(&ctx, &directory, &state.clock, state.store, input).await?
+        }
+    };
     Ok(Json(StoreResponse::new(&store)?))
 }
 
@@ -194,15 +197,28 @@ pub async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
 ) -> Result<Json<StorefrontStoreResponse>, ApiError> {
-    // The ports are only needed to authenticate; `_` drops them before the directory
-    // takes a connection.
-    let (_, ctx) = caller.authenticate(&state).await?;
-    let directory = state.storage.directory().await?;
-    let store = get_store(&ctx, &directory, state.store).await?;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let store = read_store(&state, &ctx, ports).await?;
     Ok(Json(StorefrontStoreResponse {
         name: store.name().to_string(),
         description: store.description().map(str::to_string),
         contact_email: store.contact_email().cloned(),
         default_language: store.default_language().clone(),
     }))
+}
+
+/// The store's details: through the request's `ports` when the storage keeps the
+/// directory there (`Storage::directory_in`), else through the directory, once `ports`
+/// (and their connection) are let go.
+pub(crate) async fn read_store<S: Storage>(
+    state: &AppState<S>,
+    ctx: &Ctx,
+    ports: S::Ports<'_>,
+) -> Result<Store, ApiError> {
+    if let Some(directory) = state.storage.directory_in(&ports) {
+        return Ok(get_store(ctx, directory, state.store).await?);
+    }
+    drop(ports);
+    let directory = state.storage.directory().await?;
+    Ok(get_store(ctx, &directory, state.store).await?)
 }

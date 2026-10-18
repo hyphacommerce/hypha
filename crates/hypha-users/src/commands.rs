@@ -15,8 +15,8 @@ use thiserror::Error;
 use crate::{
     Invite, Role, RoleError, User, UserError, UserStatus,
     repo::{
-        HasInvites, HasRoles, HasUsers, InviteRepo, RoleRepo, StageInvites, StageRoles, StageUsers,
-        UserRepo, keys,
+        HasInvites, HasRoles, HasStaffSessions, HasUsers, InviteRepo, RoleRepo, StaffSessionRecord,
+        StaffSessionRepo, StageInvites, StageRoles, StageUsers, UserRepo, keys,
     },
 };
 
@@ -578,20 +578,28 @@ pub struct StaffSession {
 
 /// Who `token` belongs to. Unknown, expired, revoked or pending sessions and disabled
 /// users are all `invalid_token`.
-pub async fn authenticate_staff<S: HasUsers + HasRoles + HasSessions>(
+///
+/// One read: the session, its user and their role come together
+/// (`StaffSessionRepo::staff_session_by_token`), so every staff request costs one round
+/// trip before its own work.
+pub async fn authenticate_staff<S: HasStaffSessions>(
     ports: &S,
     clock: &impl Clock,
     token: &str,
 ) -> Result<StaffSession, CommandError> {
-    let session = hypha_auth::authenticate_session(ports.sessions(), clock, token).await?;
-    let Principal::Staff(user_id) = session.principal();
-    let user = ports
-        .users()
-        .get(user_id)
+    let hash = hypha_auth::session_token_hash(token)?;
+    let StaffSessionRecord {
+        session,
+        user,
+        role,
+    } = ports
+        .staff_sessions()
+        .staff_session_by_token(hash)
         .await?
-        .filter(User::is_active)
-        .ok_or(CommandError::NotStaff)?;
-    let role = load_role(ports.roles(), user.role()).await?;
+        .filter(|found| found.session.is_active(clock.now()))
+        .ok_or(hypha_auth::CommandError::InvalidToken)?;
+    let user = user.filter(User::is_active).ok_or(CommandError::NotStaff)?;
+    let role = role.ok_or(CommandError::RoleNotFound(user.role()))?;
     let ctx = Ctx::new(Actor::User(user.id()), role.granted());
     Ok(StaffSession {
         ctx,

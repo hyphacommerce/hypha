@@ -41,12 +41,16 @@ pub const LONGEST_RUN: Duration = Duration::from_secs(Webhook::MAX_TIMEOUT_MS as
 /// wants them, the `handlers` (`handler:<name>`) and every app subscribed to the event's
 /// type (`app:<key>`, `App::wants`) as the apps are now. `handlers` are `Sync` because
 /// the outbox may hold their routing across an await (a host's futures must be `Send`).
+/// With no event waiting (`has_unfanned`), that one read is all: the apps aren't read.
 pub async fn fan_out<S: HasOutbox + HasApps>(
     ports: &S,
     clock: &impl Clock,
     settings: &DispatchSettings,
     handlers: &(impl EventHandlers<S> + Sync),
 ) -> Result<Progress, RepoError> {
+    if !ports.outbox().has_unfanned().await? {
+        return Ok(Progress::of(0, settings.batch));
+    }
     let apps = ports.apps().list().await?;
     let destinations = |event_type: &str| {
         let mut to: Vec<String> = handlers

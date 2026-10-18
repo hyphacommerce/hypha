@@ -9,7 +9,8 @@
 //! `waitUntil`, whether it wrote) reaches the shared state through `Scoped`, which makes
 //! the event current while its future is polled.
 //!
-//! Jobs run after each write (W6) and on a cron tick that touches the database only when
+//! Jobs run after each write that gave them work (W6: events committed, a delivery
+//! retried; the ports say so through `AfterWrites`) and on a cron tick that touches the database only when
 //! KV's marks say there's work (W7, `marks`), so an idle serverless database can sleep.
 //!
 //! The portable parts (`ids`, `limiter`, `marks`, `schedule`) build natively, so their
@@ -99,7 +100,8 @@ mod worker_main {
     /// jobs.
     const JOBS_KV: &str = "JOBS";
 
-    /// What belongs to one event: its `waitUntil`, and whether it wrote.
+    /// What belongs to one event: its `waitUntil`, and whether a write in it gave the
+    /// dispatcher work (`AfterWrites`: events committed, a delivery retried).
     struct Event {
         wait_until: Box<dyn Fn(BoxFuture<()>)>,
         wrote: Cell<bool>,
@@ -260,12 +262,7 @@ mod worker_main {
             host,
             config,
         ));
-        let app = hypha_http::router!(WorkersStorage)
-            .layer(axum::middleware::from_fn_with_state(
-                state.after_writes.clone(),
-                hypha_http::writes::after_writes,
-            ))
-            .with_state(Arc::clone(&state));
+        let app = hypha_http::router!(WorkersStorage).with_state(Arc::clone(&state));
         Ok(Rc::new(Isolate {
             state,
             app,
@@ -348,7 +345,10 @@ mod worker_main {
         }
         let mut app = isolate.app.clone();
         let response = Scoped::new(&event, app.call(req)).await?;
-        // A write's events go out after its response (W6), as the VPS's runner wakes.
+        // A write's events go out after its response (W6), as the VPS's runner wakes. A
+        // request whose writes recorded none (a cart's) runs nothing: its run would find
+        // nothing and write no marks (`marks::after`), and what others left is the
+        // ticks' to find.
         if event.wrote.get() {
             let state = Arc::clone(&isolate.state);
             let deadline = state.clock.now().plus(AFTER_RESPONSE);

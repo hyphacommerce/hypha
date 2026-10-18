@@ -485,6 +485,16 @@ pub struct MarketView {
     pub catalog: Option<CatalogId>,
 }
 
+/// Every market, oldest first, without their catalogs: what a storefront's country list
+/// needs (design note 0021, SU6), in one read.
+pub async fn list_markets_only<M: MarketRepo>(
+    ctx: &Ctx,
+    markets: &M,
+) -> Result<Vec<Market>, CommandError> {
+    ctx.require(Scope::MarketsRead)?;
+    Ok(markets.list_all().await?)
+}
+
 /// Every market, oldest first, each with its catalog.
 pub async fn list_markets<S: HasMarkets + HasCatalogs>(
     ctx: &Ctx,

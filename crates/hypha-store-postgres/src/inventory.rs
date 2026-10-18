@@ -52,11 +52,11 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
         stamp_insert(location, self.now());
         let s = location.snapshot();
         let events = location.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_location(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         location.set_version(version);
         Ok(())
@@ -66,10 +66,10 @@ impl<C: PgConnection> LocationRepo for PgStore<C> {
         stamp_update(location, self.now());
         let s = location.snapshot();
         let events = location.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_location(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         location.set_version(version);
@@ -266,11 +266,11 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         stamp_insert(item, self.now());
         let s = item.snapshot();
         let events = item.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_item(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         item.set_version(version);
         Ok(())
@@ -279,7 +279,7 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
     async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         let id = item.id().as_uuid();
         let events = item.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         in_transaction!(self, |tx| {
             // Levels and reservations go with it (ON DELETE CASCADE).
             tx.query_typed(
@@ -288,7 +288,7 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
             )
             .await
             .map_err(repo_error)?;
-            insert_events(tx, &events, None, actor).await
+            insert_events(tx, &events, None, stamp).await
         })
     }
 
@@ -311,11 +311,11 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
             .iter_mut()
             .map(|i| (i.id().as_uuid(), i.take_events()))
             .collect();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let new_versions = in_transaction!(self, |tx| {
             let versions = update_items(tx, snapshots).await?;
             for (id, events) in &events {
-                insert_events(tx, events, versions.get(id).copied(), actor).await?;
+                insert_events(tx, events, versions.get(id).copied(), stamp).await?;
             }
             Ok(versions)
         })?;

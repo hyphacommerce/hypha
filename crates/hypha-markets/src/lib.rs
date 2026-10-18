@@ -15,7 +15,7 @@ pub use commands::{
 };
 pub use commands::{
     MarketView, UpdatePriceList, get_catalog, get_market, get_price_list, list_catalog_products,
-    list_fixed_prices, list_markets, list_price_lists, update_price_list,
+    list_fixed_prices, list_markets, list_markets_only, list_price_lists, update_price_list,
 };
 pub use error::{MarketError, MismatchedPrice, PriceListError};
 pub use events::{

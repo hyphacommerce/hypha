@@ -217,11 +217,11 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
         stamp_insert(category, self.now());
         let s = category.snapshot();
         let events = category.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_category(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         category.set_version(version);
         Ok(())
@@ -231,10 +231,10 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
         stamp_update(category, self.now());
         let s = category.snapshot();
         let events = category.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_category(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         category.set_version(version);

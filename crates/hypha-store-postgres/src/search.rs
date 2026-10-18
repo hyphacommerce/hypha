@@ -920,7 +920,7 @@ impl<C: PgConnection> SearchSettingsRepo for PgStore<C> {
         stamp_insert(settings, self.now());
         let s = settings.snapshot();
         let events = hypha_core::Recorded::take_events(settings);
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         let (keys, labels) = facet_columns(&s);
         in_transaction!(self, |tx| {
@@ -936,7 +936,7 @@ impl<C: PgConnection> SearchSettingsRepo for PgStore<C> {
             .await
             .map_err(repo_error)?;
             write_stamps(tx, "search_settings", "id", &true, Type::BOOL, s.stamps).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         settings.set_version(version);
         Ok(())
@@ -946,7 +946,7 @@ impl<C: PgConnection> SearchSettingsRepo for PgStore<C> {
         stamp_update(settings, self.now());
         let s = settings.snapshot();
         let events = hypha_core::Recorded::take_events(settings);
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let (keys, labels) = facet_columns(&s);
         let version = in_transaction!(self, |tx| {
             let row = tx
@@ -967,7 +967,7 @@ impl<C: PgConnection> SearchSettingsRepo for PgStore<C> {
                 .ok_or(RepoError::StaleVersion)?;
             let version = version_from_db(col(&row, "version")?)?;
             write_stamps(tx, "search_settings", "id", &true, Type::BOOL, s.stamps).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         settings.set_version(version);

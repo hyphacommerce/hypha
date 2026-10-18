@@ -79,11 +79,11 @@ impl<C: PgConnection> TaxClassRepo for PgStore<C> {
         stamp_insert(class, self.now());
         let s = class.snapshot();
         let events = class.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_tax_class(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         class.set_version(version);
         Ok(())
@@ -204,11 +204,11 @@ impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
         stamp_insert(region, self.now());
         let s = region.snapshot();
         let events = region.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_tax_region(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await
+            insert_events(tx, &events, Some(version), stamp).await
         })?;
         region.set_version(version);
         Ok(())
@@ -218,10 +218,10 @@ impl<C: PgConnection> TaxRegionRepo for PgStore<C> {
         stamp_update(region, self.now());
         let s = region.snapshot();
         let events = region.take_events();
-        let actor = self.actor();
+        let stamp = self.event_stamp();
         let version = in_transaction!(self, |tx| {
             let version = update_tax_region(tx, &s).await?;
-            insert_events(tx, &events, Some(version), actor).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         region.set_version(version);

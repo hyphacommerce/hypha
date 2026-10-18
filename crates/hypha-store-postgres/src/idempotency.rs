@@ -6,7 +6,7 @@ use crate::{
     columns::{actor_to_db, col, micros, ts},
     error::{corrupt, repo_error},
     store::Queries,
-    store::{PgConnection, PgStore, consistent_read, in_transaction},
+    store::{PgConnection, PgStore, in_transaction},
 };
 
 impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
@@ -17,9 +17,12 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
     ) -> Result<Option<IdempotencyRecord>, RepoError> {
         let (kind, id) = actor_to_db(actor);
         let mut conn = self.conn().await;
-        // One query, but inside a transaction anyway: a cached answer here (Hyperdrive's
-        // query cache) would miss a key committed seconds ago and run the command twice.
-        let row = consistent_read!(conn, |tx| tx
+        // One query, outside a transaction: consistent on its own. It must not be served
+        // from a cache (a cached miss would run the command twice), which is why
+        // Hyperdrive is always created with its query cache off (design note 0026, §6,
+        // step 4), as session and key lookups need too.
+        let row = conn
+            .db()
             .query_typed_opt(
                 &format!(
                     "SELECT operation, fingerprint, result, {}
@@ -34,7 +37,7 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
                 ],
             )
             .await
-            .map_err(repo_error))?;
+            .map_err(repo_error)?;
         let Some(row) = row else { return Ok(None) };
         let fingerprint: Vec<u8> = col(&row, "fingerprint")?;
         Ok(Some(IdempotencyRecord {

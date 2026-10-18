@@ -12,22 +12,22 @@ use crate::{
     columns::{actor_from_db, actor_to_db, col, micros, ts, version_from_db, version_to_db},
     error::{corrupt, repo_error},
     store::Queries,
-    store::{PgConnection, PgStore, in_transaction},
+    store::{EventStamp, PgConnection, PgStore, in_transaction},
 };
 
 /// Writes `events` in one statement, inside the caller's transaction, stamped with
-/// `actor`. `subject_version` is the version the write gives the aggregate the events are
+/// `stamp`'s actor; the store's dispatch hook is told once the transaction commits. `subject_version` is the version the write gives the aggregate the events are
 /// about (`None` for events without one). ID and time come from the database.
 pub(crate) async fn insert_events(
     tx: &impl Queries,
     events: &[PendingEvent],
     subject_version: Option<Version>,
-    actor: Actor,
+    stamp: EventStamp<'_>,
 ) -> Result<(), RepoError> {
     if events.is_empty() {
         return Ok(());
     }
-    let (actor_kind, actor_id) = actor_to_db(actor);
+    let (actor_kind, actor_id) = actor_to_db(stamp.actor);
     let types: Vec<&str> = events.iter().map(|e| e.event_type).collect();
     let versions: Vec<i16> = events
         .iter()
@@ -59,6 +59,7 @@ pub(crate) async fn insert_events(
     )
     .await
     .map_err(repo_error)?;
+    stamp.wrote();
     Ok(())
 }
 
@@ -307,8 +308,10 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
                 _ => None,
             })
             .collect();
-        in_transaction!(self, |tx| {
-            tx.query_typed(
+        // One statement, atomic on its own: no transaction (and its BEGIN and COMMIT).
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
                 "UPDATE event_deliveries d
                  SET attempts = d.attempts + 1, leased_until = NULL, status = t.status,
                      last_error = t.error,
@@ -330,8 +333,7 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
             )
             .await
             .map_err(repo_error)?;
-            Ok(())
-        })
+        Ok(())
     }
 
     async fn prune_events(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError> {
@@ -353,6 +355,20 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
                 .map_err(repo_error)?;
             u32::try_from(deleted).map_err(corrupt)
         })
+    }
+
+    async fn has_unfanned(&self) -> Result<bool, RepoError> {
+        let mut conn = self.conn().await;
+        // On the partial index `outbox_events_pending`.
+        let row = conn
+            .db()
+            .query_typed_one(
+                "SELECT EXISTS (SELECT 1 FROM outbox_events WHERE fanned_out_at IS NULL) AS found",
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        col(&row, "found")
     }
 
     async fn next_due(&self) -> Result<Option<Timestamp>, RepoError> {
@@ -438,26 +454,32 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
         now: Timestamp,
     ) -> Result<Option<DeliveryRecord>, RepoError> {
         let now = now.unix_micros();
+        let stamp = self.event_stamp();
         in_transaction!(self, |tx| {
             // A running delivery (leased past `now`) is left alone. An expired lease is
             // free: runners stop starting deliveries they can't finish within the lease,
             // and `record_outcomes` ignores an outcome under a lease that's gone.
-            tx.execute_typed(
-                &format!(
-                    "UPDATE event_deliveries
+            let made_due = tx
+                .execute_typed(
+                    &format!(
+                        "UPDATE event_deliveries
                      SET status = 'pending', next_attempt_at = {now}, leased_until = NULL
                      WHERE id = $2 AND destination = $3
                        AND (leased_until IS NULL OR leased_until <= {now})",
-                    now = ts(1)
-                ),
-                &[
-                    (&now, Type::INT8),
-                    (&id, Type::UUID),
-                    (&destination, Type::TEXT),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
+                        now = ts(1)
+                    ),
+                    &[
+                        (&now, Type::INT8),
+                        (&id, Type::UUID),
+                        (&destination, Type::TEXT),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
+            // Work for the dispatcher, like a new event: the hook hears of it on commit.
+            if made_due > 0 {
+                stamp.wrote();
+            }
             let row = tx
                 .query_typed(
                     &format!(

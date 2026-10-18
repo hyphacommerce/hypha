@@ -7,7 +7,7 @@ use hypha_core::{
 use hypha_markets::{
     Catalog, CatalogContext, CatalogRepo, CommandError, Market, MarketRepo, MarketView, PriceList,
     PriceListRepo, get_catalog, get_market, list_catalog_products, list_fixed_prices, list_markets,
-    list_price_lists,
+    list_markets_only, list_price_lists,
 };
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_testkit::InMemoryPorts;
@@ -83,6 +83,24 @@ fn markets_list_oldest_first_with_their_catalogs() {
     let summary: Vec<(MarketId, Option<CatalogId>)> =
         views.iter().map(|v| (v.market.id(), v.catalog)).collect();
     assert_eq!(summary, vec![(mid(1), Some(cid(10))), (mid(2), None)]);
+}
+
+#[test]
+fn markets_list_alone_oldest_first() {
+    let ports = world();
+    let markets = block_on(list_markets_only(
+        &ctx(vec![Scope::MarketsRead]),
+        ports.markets(),
+    ))
+    .unwrap();
+    let ids: Vec<MarketId> = markets.iter().map(|m| m.id()).collect();
+    assert_eq!(ids, vec![mid(1), mid(2)]);
+    assert_eq!(
+        block_on(list_markets_only(&ctx(vec![]), ports.markets())),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::MarketsRead
+        )))
+    );
 }
 
 #[test]

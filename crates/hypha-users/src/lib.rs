@@ -19,8 +19,8 @@ pub use commands::{
 pub use error::{RoleError, UserError};
 pub use invite::{Invite, InviteSnapshot};
 pub use repo::{
-    HasInvites, HasRoles, HasUsers, InviteRepo, RoleRepo, StageInvites, StageRoles, StageUsers,
-    UserRepo, keys,
+    HasInvites, HasRoles, HasStaffSessions, HasUsers, InviteRepo, RoleRepo, StaffSessionRecord,
+    StaffSessionRepo, StageInvites, StageRoles, StageUsers, UserRepo, keys,
 };
 pub use role::{Role, RoleScopes, RoleSnapshot};
 pub use user::{User, UserSnapshot, UserStatus};

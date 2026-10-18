@@ -22,7 +22,7 @@ use axum::{
 use hypha_auth::{HasApiKeys, TokenKind, authenticate_api_key};
 use hypha_core::ActingAs;
 use hypha_core::{Clock, Ctx, IdempotencyRequest};
-use hypha_users::{StaffPorts, StaffSession, authenticate_staff};
+use hypha_users::{HasStaffSessions, StaffSession, authenticate_staff};
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 
@@ -187,7 +187,7 @@ fn credential(parts: &Parts) -> Result<Credential, ApiError> {
 }
 
 impl Credential {
-    async fn authenticate<P: StaffPorts + HasApiKeys>(
+    async fn authenticate<P: HasStaffSessions + HasApiKeys>(
         &self,
         ports: &P,
         clock: &impl Clock,

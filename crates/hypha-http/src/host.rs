@@ -240,11 +240,13 @@ impl HttpClient for HostHttp {
     }
 }
 
-/// Called after every successful write request (`writes::after_writes`): natively it
-/// wakes the dispatcher (design note 0025, §6); on Workers it runs a dispatch step in
-/// `waitUntil` (0026, W6).
+/// Called when a write gives the dispatcher work: the request's ports call it after
+/// committing events or retrying a delivery (`hypha_core::SignalsDispatch`, set by
+/// `AppState::public_ports`), so a write that recorded none (a cart's) wakes nothing.
+/// Natively it wakes the dispatcher (design note 0025, §6); on Workers it marks the
+/// event, whose dispatch step then runs in `waitUntil` after the response (0026, W6).
 #[derive(Clone)]
-pub struct AfterWrites(Arc<dyn Fn() + Send + Sync>);
+pub struct AfterWrites(hypha_core::DispatchHook);
 
 impl AfterWrites {
     pub fn new(notify: impl Fn() + Send + Sync + 'static) -> Self {
@@ -258,6 +260,11 @@ impl AfterWrites {
 
     pub fn notify(&self) {
         (self.0)();
+    }
+
+    /// The hook, for the ports (`hypha_core::SignalsDispatch`).
+    pub fn hook(&self) -> hypha_core::DispatchHook {
+        Arc::clone(&self.0)
     }
 }
 

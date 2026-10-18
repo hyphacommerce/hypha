@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        actor_from_db, actor_to_db, col, micros, opt_micros, opt_ts, scopes_from_db, scopes_to_db,
-        token_hash_from_db, ts, version_from_db, version_to_db,
+        Prefixed, actor_from_db, actor_to_db, col, micros, opt_micros, opt_ts, prefixed_columns,
+        scopes_from_db, scopes_to_db, token_hash_from_db, ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::Queries,
@@ -216,40 +216,54 @@ async fn write_credentials(tx: &impl Queries, s: &IdentitySnapshot) -> Result<()
 
 // ---------- sessions ----------
 
+const SESSION_PLAIN: &[&str] = &[
+    "id",
+    "version",
+    "identity_id",
+    "principal_kind",
+    "principal_id",
+    "token_hash",
+    "state",
+    "failed_attempts",
+];
+const SESSION_TIMESTAMPS: &[&str] = &["mfa_at", "created_at", "expires_at", "revoked_at"];
+
 fn session_columns() -> String {
-    format!(
-        "id, version, identity_id, principal_kind, principal_id, token_hash, state,
-         failed_attempts, {}, {}, {}, {}",
-        micros("mfa_at"),
-        micros("created_at"),
-        micros("expires_at"),
-        micros("revoked_at"),
-    )
+    prefixed_columns("sessions", "", SESSION_PLAIN, SESSION_TIMESTAMPS)
+}
+
+/// A session's columns read from `table` under `prefix`, for a join.
+pub(crate) fn session_columns_as(table: &str, prefix: &str) -> String {
+    prefixed_columns(table, prefix, SESSION_PLAIN, SESSION_TIMESTAMPS)
 }
 
 fn session_from_row(row: &Row) -> Result<Session, RepoError> {
-    let principal_kind: String = col(row, "principal_kind")?;
-    let state: String = col(row, "state")?;
-    let failed: i32 = col(row, "failed_attempts")?;
+    session_from(Prefixed::plain(row))
+}
+
+pub(crate) fn session_from(row: Prefixed<'_>) -> Result<Session, RepoError> {
+    let principal_kind: String = row.col("principal_kind")?;
+    let state: String = row.col("state")?;
+    let failed: i32 = row.col("failed_attempts")?;
     let state = match state.as_str() {
         "pending" => SessionState::Pending {
             failed_attempts: u32::try_from(failed).map_err(corrupt)?,
         },
         "active" => SessionState::Active {
-            mfa_at: opt_ts(col(row, "mfa_at")?),
+            mfa_at: opt_ts(row.col("mfa_at")?),
         },
         other => return Err(corrupt(format!("unknown session state {other:?}"))),
     };
     Ok(Session::restore(SessionSnapshot {
-        id: SessionId::from_uuid(col(row, "id")?),
-        version: version_from_db(col(row, "version")?)?,
-        identity: IdentityId::from_uuid(col(row, "identity_id")?),
-        principal: principal_from_db(&principal_kind, col(row, "principal_id")?)?,
-        token_hash: token_hash_from_db(col(row, "token_hash")?)?,
+        id: SessionId::from_uuid(row.col("id")?),
+        version: version_from_db(row.col("version")?)?,
+        identity: IdentityId::from_uuid(row.col("identity_id")?),
+        principal: principal_from_db(&principal_kind, row.col("principal_id")?)?,
+        token_hash: token_hash_from_db(row.col("token_hash")?)?,
         state,
-        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
-        expires_at: Timestamp::from_unix_micros(col(row, "expires_at")?),
-        revoked_at: opt_ts(col(row, "revoked_at")?),
+        created_at: Timestamp::from_unix_micros(row.col("created_at")?),
+        expires_at: Timestamp::from_unix_micros(row.col("expires_at")?),
+        revoked_at: opt_ts(row.col("revoked_at")?),
     }))
 }
 

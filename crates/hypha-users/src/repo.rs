@@ -1,4 +1,4 @@
-use hypha_auth::TokenHash;
+use hypha_auth::{Session, TokenHash};
 use hypha_core::{Email, RepoError, RoleId, UserId};
 
 use crate::{Invite, Role, User};
@@ -60,6 +60,29 @@ pub trait InviteRepo {
     async fn update(&self, invite: &mut Invite) -> Result<(), RepoError>;
 }
 
+/// A session found by its token, with its staff user and that user's role when they
+/// exist: what every staff request reads (design note 0008, A3).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaffSessionRecord {
+    pub session: Session,
+    /// The session's user; `None` if there's no such user.
+    pub user: Option<User>,
+    /// The user's role; `None` without a user or if there's no such role.
+    pub role: Option<Role>,
+}
+
+#[allow(async_fn_in_trait)]
+pub trait StaffSessionRepo {
+    /// The session whose token hashes to `hash`, with its user and the user's role, in
+    /// one read (a join in SQL adapters), so authenticating a staff request costs one
+    /// round trip. Nothing is filtered: expired, revoked and pending sessions and
+    /// disabled users come back as stored, and `authenticate_staff` judges them.
+    async fn staff_session_by_token(
+        &self,
+        hash: TokenHash,
+    ) -> Result<Option<StaffSessionRecord>, RepoError>;
+}
+
 /// Stages user writes in a `hypha_core::HasBatch` batch.
 pub trait StageUsers {
     /// What `UserRepo::insert` would write; same keys on commit.
@@ -97,6 +120,11 @@ pub trait HasInvites {
     fn invites(&self) -> &Self::Invites;
 }
 
+pub trait HasStaffSessions {
+    type StaffSessions: StaffSessionRepo;
+    fn staff_sessions(&self) -> &Self::StaffSessions;
+}
+
 /// Borrowed ports are ports too, so a host can lend them out per request.
 impl<T: HasUsers + ?Sized> HasUsers for &T {
     type Users = T::Users;
@@ -116,5 +144,12 @@ impl<T: HasInvites + ?Sized> HasInvites for &T {
     type Invites = T::Invites;
     fn invites(&self) -> &Self::Invites {
         (**self).invites()
+    }
+}
+
+impl<T: HasStaffSessions + ?Sized> HasStaffSessions for &T {
+    type StaffSessions = T::StaffSessions;
+    fn staff_sessions(&self) -> &Self::StaffSessions {
+        (**self).staff_sessions()
     }
 }
