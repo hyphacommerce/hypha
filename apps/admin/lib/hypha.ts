@@ -2,6 +2,7 @@
 // P4). The staff session lives in an httpOnly cookie that page scripts can't read; only
 // code here sends it to the API. Never import this from a "use client" file.
 
+import { apiFetch } from "#api-fetch";
 import { type AdminSchemas, type ApiError, createAdminClient } from "@hypha/sdk/admin";
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
@@ -47,7 +48,7 @@ async function forwardedFor(): Promise<Record<string, string>> {
 
 /** A client for the routes that need no credentials (login and its second step). */
 export async function publicClient() {
-  return createAdminClient(apiUrl(), undefined, await forwardedFor());
+  return createAdminClient(apiUrl(), undefined, await forwardedFor(), apiFetch());
 }
 
 /**
@@ -59,7 +60,11 @@ export async function publicClient() {
 export async function sessionClient() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) redirect("/login");
-  const client = createAdminClient(apiUrl(), token, {}, sessionFetch(token));
+  // On Workers (through the API's binding) reads aren't cached across requests: an
+  // isolate that didn't see a write would keep serving the old read (design note 0025,
+  // §4). Elsewhere one server sees every write, so its cache stays right.
+  const bound = apiFetch();
+  const client = createAdminClient(apiUrl(), token, {}, bound ?? sessionFetch(token));
   client.use({
     async onResponse({ response }) {
       if (response.status === 401) await sessionExpired();
@@ -108,7 +113,7 @@ export function safeNext(path: string | null | undefined): string {
  */
 export async function landing(token: string, next: string): Promise<string> {
   if (next !== "/") return next;
-  const client = createAdminClient(apiUrl(), token);
+  const client = createAdminClient(apiUrl(), token, {}, apiFetch());
   const { data } = await client.GET("/admin/store");
   return data && !data.setup.finished_at ? "/setup" : next;
 }

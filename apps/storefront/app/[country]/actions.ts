@@ -12,7 +12,7 @@ import { redirect } from "next/navigation";
 
 import type { StorefrontSchemas } from "@hypha/sdk/storefront";
 
-import { api, describe, loadCountries } from "@/lib/api";
+import { api, describe, loadCountries, shopperApi } from "@/lib/api";
 import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
@@ -49,7 +49,7 @@ async function openCart(country: string): Promise<string> {
     });
     if (data && !data.order) return existing;
   }
-  const { data, error } = await client.POST("/storefront/carts", { body: { country } });
+  const { data, error } = await (await shopperApi()).POST("/storefront/carts", { body: { country } });
   if (error) throw new Error(`couldn't create a cart: ${error.code}`);
   await rememberCart(country, data.id);
   return data.id;

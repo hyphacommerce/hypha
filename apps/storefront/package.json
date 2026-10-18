@@ -4,6 +4,12 @@
   "private": true,
   "description": "Hypha's storefront: a server-rendered shop on Next.js, vinext and Astryx (design notes 0023, 0024).",
   "type": "module",
+  "imports": {
+    "#api-fetch": {
+      "workerd": "./lib/api-fetch.workerd.ts",
+      "default": "./lib/api-fetch.ts"
+    }
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",

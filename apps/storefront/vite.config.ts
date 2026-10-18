@@ -1,4 +1,6 @@
 import { cloudflare } from "@cloudflare/vite-plugin";
+import { kvDataAdapter } from "@vinext/cloudflare/cache/kv-data-adapter";
+import { workersCacheCdnAdapter } from "@vinext/cloudflare/cache/workers-cache-cdn-adapter";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 
@@ -12,7 +14,10 @@ export default defineConfig({
   server: { port: 3002 },
   preview: { port: 3002 },
   plugins: [
-    vinext(),
+    // On Workers, ISR pages in the Workers Cache and `unstable_cache` data in KV, shared
+    // by every isolate (cloudflare.config.ts binds them; design note 0026, §2). On Node
+    // one process holds them in memory.
+    vinext(node ? {} : { cache: { cdn: workersCacheCdnAdapter(), data: kvDataAdapter() } }),
     !node &&
       cloudflare({
         // The admin's worker debugger takes the default, 9229, so both can run (`pnpm dev`).

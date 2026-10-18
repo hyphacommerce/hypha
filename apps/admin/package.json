@@ -4,6 +4,12 @@
   "private": true,
   "description": "The Hypha admin panel: Next.js on vinext, Astryx (design note 0011).",
   "type": "module",
+  "imports": {
+    "#api-fetch": {
+      "workerd": "./lib/api-fetch.workerd.ts",
+      "default": "./lib/api-fetch.ts"
+    }
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",

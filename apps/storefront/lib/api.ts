@@ -3,8 +3,10 @@
 // through server actions, so the browser never needs it. Never import this from a
 // "use client" file.
 
+import { apiFetch } from "#api-fetch";
 import { type StorefrontSchemas, createStorefrontClient } from "@hypha/sdk/storefront";
 import { unstable_cache } from "next/cache";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
@@ -18,9 +20,25 @@ function env(name: string): string {
   return value;
 }
 
-/** A client with the storefront's publishable key. */
-export function api() {
-  return createStorefrontClient(env("HYPHA_API_URL"), env("STOREFRONT_KEY"));
+/** A client with the storefront's publishable key (through the API's Service Binding
+ * on Workers). */
+export function api(extra: Record<string, string> = {}) {
+  return createStorefrontClient(env("HYPHA_API_URL"), env("STOREFRONT_KEY"), {
+    fetch: apiFetch(),
+    headers: extra,
+  });
+}
+
+/**
+ * A client that passes the shopper's address on, for the calls Hypha limits per address
+ * (creating a cart; design note 0009), so the limit counts the shopper, not this server.
+ * Only from Cloudflare's `cf-connecting-ip`, which the browser can't forge; the API
+ * believes it only through its own Service Binding (design note 0026). Server actions
+ * only: it reads the request's headers.
+ */
+export async function shopperApi() {
+  const ip = (await headers()).get("cf-connecting-ip")?.trim();
+  return api(ip ? { "x-forwarded-for": ip } : {});
 }
 
 /**
