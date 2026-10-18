@@ -464,3 +464,66 @@ admin target, as the reference for custom admins.
    Stripe app (its own repository) end to end on both deployments.
 5. `search.query` and the Meilisearch app.
 6. Metafields (their own note).
+
+## 15. Implementation contract
+
+What the parts built in parallel agree on; where this differs from the sections above,
+this wins.
+
+**Crates.**
+- `hypha-extensions` (leaf, new): the `ExtensionPoint` trait, `OnFailure`, the catalog
+  of points (`shipping.rates` v1, `payments.start`/`capture`/`void`/`refund` v1,
+  `search.query` v1) with their request/response DTOs, the `ExtensionCall` record and
+  its repo (`extension_calls`), the `ExtensionCaller` port the host implements (sign,
+  send over the outbound client or a binding, cap and parse), and `call::<P>` that
+  validates, records and applies the failure policy.
+- `hypha-apps` (leaf, extended): the manifest (`AppManifest`, parsed and validated from
+  JSON, its published JSON Schema), registrations derived from it, the grant (scopes,
+  approved by, at), authorization requests.
+- `hypha-oauth` (composing, new; depends on `hypha-apps`, `hypha-auth`, core): authorize,
+  approve/deny, token (authorization code + PKCE S256, refresh with rotation and reuse
+  detection), revoke, grant changes. Tokens are `hypha-auth` tokens (stored as SHA-256)
+  of new kinds: access `hypha_at_` (1 h), refresh `hypha_rt_` (30 days, rotating),
+  authorization code `hypha_ac_` (60 s, single use).
+- Redaction (AP10) lives in `hypha-http` (`redact.rs`): one function per DTO family
+  over the caller's scopes, used by routes, webhook envelopes (dispatch asks the app's
+  grant), extension requests and proxy headers.
+
+**Actors and scopes.** `Actor::App(AppKey)` for app tokens. New scopes
+`customer_data:name`, `customer_data:email`, `customer_data:phone`,
+`customer_data:address`; staff sessions (`Actor::User`) are never redacted; every other
+actor (keys, apps, agents) is.
+
+**Tables.** `0049_extension_calls.sql` (`extension_calls`: id, app, point, version,
+started_at, duration_ms, outcome `ok|failed|timeout|invalid`, status code, error,
+correlation (order/cart/payment id), pruned like deliveries); `0050_oauth.sql`
+(`app_grants`, `oauth_requests`, `oauth_codes`, `oauth_refresh_tokens` with a family id
+for reuse detection; `apps` gains `manifest_url`, `manifest jsonb`, `manifest_fetched_at`,
+`publisher`, `privacy_url`).
+
+**Wire formats.**
+- Extension calls: `POST <url>`, JSON body = the point's request, headers
+  `Hypha-Signature` (as 0015 §5: `t=<unix>,v1=<hex hmac-sha256 of "<t>.<body>">` with
+  the app secret), `Hypha-Extension: payments.start`, `Hypha-Extension-Version: 1`,
+  `Idempotency-Key`, `Hypha-Store`. A 2xx with a body matching the response schema is
+  success.
+- OAuth endpoints: `GET /oauth/authorize`, `POST /oauth/token` (form-encoded, RFC 6749
+  errors `{error, error_description}`), `POST /oauth/revoke`; discovery at
+  `/.well-known/oauth-authorization-server` (RFC 8414). The consent page URL is
+  `{server.admin_url}/apps/consent?request=<id>`.
+- Admin routes: `GET /admin/oauth/requests/{id}`, `POST …/approve`, `POST …/deny`;
+  `GET /admin/apps/{key}` gains `grant`, `manifest`, `registrations`;
+  `PATCH /admin/apps/{key}/grant` (narrow); `DELETE /admin/apps/{key}` (uninstall);
+  `GET /admin/apps/{key}/extension-calls`.
+- Error codes: `app_unavailable` (502, `details: {app, point}`), `app_not_authorized`
+  (403: an app's token lacks a scope), `oauth_request_not_found` (404),
+  `oauth_request_expired` (409), `manifest_unreachable` / `manifest_invalid` (422 with
+  `details.errors`).
+
+**Packages** (pnpm workspace): `packages/app` (`@hypha/app`: manifest types, signature
+verification, OAuth client with PKCE, extension handler types generated from
+`openapi/extensions.json`, session-token verification), `packages/app-bridge` and
+`packages/app-bridge-host` (the postMessage protocol, documented in
+`docs/apps/bridge.md`), `packages/app-blocks` (the block JSON Schema, version 1, and a
+React renderer on Astryx), `packages/storefront-elements` (the element loader and
+events, `docs/apps/elements.md`).
