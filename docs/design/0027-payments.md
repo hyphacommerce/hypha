@@ -131,7 +131,7 @@ one by key.
 2. The shopper chooses one: `PUT /storefront/carts/{id}/payment-method` stores
    `payment_method` on the cart (one more field).
 3. `POST /storefront/carts/{id}/checkout` checks the method again (`payment_method_required`
-   when the store has enabled methods and none is chosen, `payment_method_unavailable`
+   when none is chosen and the total is above zero (Q2), `payment_method_unavailable`
    when it's no longer offered), then in the same batch as the order: a `Payment`
    (`pending`, the order's total, instructions copied). After the commit it calls the
    provider's `start` and answers with the order **and the next action**.
