@@ -388,6 +388,19 @@ export function describe(error: ApiError): string {
       return "That isn't a valid email address.";
     case "invalid_address":
       return "An address needs a last name, a first line and a city, each up to 255 characters.";
+    case "payment_method_in_use":
+      return "An order is still waiting for a payment by this method. Turn the method off instead, so shoppers stop seeing it.";
+    case "payment_method_not_found":
+      return "That payment method no longer exists. Reload the page.";
+    case "instructions_too_long":
+      return "Instructions can be at most 2,000 characters.";
+    case "invalid_payment_provider":
+    case "payment_provider_unknown":
+      return "This build of Hypha doesn't have that payment provider.";
+    case "invalid_payment_settings":
+      return `The provider refused its settings: ${error.error}.`;
+    case "invalid_payment_transition":
+      return "The payment can't change that way any more. Reload the order.";
     case "rate_limited": {
       const secs = (error.details as { retry_after_secs?: number } | null)?.retry_after_secs;
       return secs ? `Too many attempts. Try again in ${secs} seconds.` : "Too many attempts.";
@@ -461,3 +474,17 @@ export const loadCountries = perRequest(async (): Promise<Country[]> => {
   const client = await sessionClient();
   return loaded(await client.GET("/admin/countries")).items;
 });
+
+/**
+ * The store's payment methods in the order shoppers see them (`GET /admin/payment-methods`,
+ * design note 0027), once per request. `null` when the staff member lacks
+ * `payments:read`, so pages that only mention payments still show.
+ */
+export const loadPaymentMethods = perRequest(
+  async (): Promise<AdminSchemas["PaymentMethodResponse"][] | null> => {
+    const client = await sessionClient();
+    const result = await client.GET("/admin/payment-methods");
+    if (result.response.status === 403) return null;
+    return loaded(result).items;
+  },
+);

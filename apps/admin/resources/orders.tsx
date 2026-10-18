@@ -20,6 +20,7 @@ import {
 } from "@/components/resource-table/resource-table";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { type Currencies, formatMoney } from "@/lib/format";
+import { UNPAID } from "@/lib/payments";
 
 import { type BulkOutcome, BulkOutcomeBanner, OrderBulkActions } from "./bulk";
 
@@ -35,7 +36,7 @@ const SORT_OPTIONS: SortOption[] = [
 const VIEWS: View[] = [
   { label: "All", params: {} },
   { label: "Unfulfilled", params: { fulfillment_status: ["unfulfilled", "partially_fulfilled"], cancelled: ["false"] } },
-  { label: "Unpaid", params: { financial_status: ["pending"], cancelled: ["false"] } },
+  { label: "Unpaid", params: { financial_status: UNPAID, cancelled: ["false"] } },
   { label: "Cancelled", params: { cancelled: ["true"] } },
 ];
 
@@ -69,7 +70,12 @@ export function OrdersTable({
       label: "Payment",
       options: [
         { value: "pending", label: "Pending" },
+        { value: "authorized", label: "Authorized" },
+        { value: "partially_paid", label: "Partly paid" },
         { value: "paid", label: "Paid" },
+        { value: "partially_refunded", label: "Partly refunded" },
+        { value: "refunded", label: "Refunded" },
+        { value: "voided", label: "Voided" },
       ],
     },
     {

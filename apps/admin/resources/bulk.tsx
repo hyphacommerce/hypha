@@ -24,6 +24,7 @@ import {
   setProductsPublished,
   setProductsStatus,
 } from "@/app/(admin)/bulk-actions";
+import { canMarkPaid } from "@/lib/payments";
 
 type Product = AdminSchemas["ProductSummaryResponse"];
 type Order = AdminSchemas["OrderSummaryResponse"];
@@ -276,7 +277,7 @@ function CategoryDialog({
   );
 }
 
-/** The selection bar's actions for orders: mark the pending ones paid. */
+/** The selection bar's actions for orders: mark the unpaid ones paid. */
 export function OrderBulkActions({
   selected,
   clear,
@@ -289,7 +290,7 @@ export function OrderBulkActions({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isConfirming, setIsConfirming] = useState(false);
-  const pending = selected.filter((o) => !o.cancelled_at && o.financial_status === "pending");
+  const pending = selected.filter(canMarkPaid);
   return (
     <>
       <Button
@@ -305,7 +306,7 @@ export function OrderBulkActions({
           isOpen
           onOpenChange={(open) => !open && setIsConfirming(false)}
           title={`Mark ${count(pending.length, "order")} as paid?`}
-          description="Use this for payments taken outside Hypha. Paid, cancelled and other orders in the selection are left as they are."
+          description="Use this for money you collected yourself: cash on delivery, a bank transfer. Paid, cancelled and other orders in the selection are left as they are."
           actionLabel="Mark as paid"
           actionVariant="primary"
           isActionLoading={isPending}
@@ -315,7 +316,7 @@ export function OrderBulkActions({
                 selected.map((o) => ({
                   id: o.id,
                   label: `#${o.number}`,
-                  pending: !o.cancelled_at && o.financial_status === "pending",
+                  pending: canMarkPaid(o),
                 })),
               );
               setIsConfirming(false);

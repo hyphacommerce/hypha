@@ -5,7 +5,15 @@
 import { sessionClient } from "@/lib/hypha";
 
 /** Which step: the setup wizard (design note 0024, AU11) groups them by these. */
-export type SetupKey = "store" | "market" | "shipping" | "product" | "stock" | "publish" | "key";
+export type SetupKey =
+  | "store"
+  | "market"
+  | "shipping"
+  | "payment"
+  | "product"
+  | "stock"
+  | "publish"
+  | "key";
 
 export type SetupStep = {
   key: SetupKey;
@@ -23,6 +31,7 @@ export async function setupSteps(): Promise<SetupStep[]> {
     store: false,
     market: false,
     shipping: false,
+    payment: false,
     product: false,
     stock: false,
     publish: false,
@@ -50,6 +59,13 @@ export async function setupSteps(): Promise<SetupStep[]> {
       description: "A zone with a rate, so physical products can be delivered.",
       href: "/settings/shipping",
       isDone: done.shipping,
+    },
+    {
+      key: "payment",
+      label: "Turn on a payment method",
+      description: "Cash on delivery or a bank transfer: checkout is refused without one.",
+      href: "/settings/payments",
+      isDone: done.payment,
     },
     {
       key: "product",

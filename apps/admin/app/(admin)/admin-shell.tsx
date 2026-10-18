@@ -10,6 +10,7 @@ import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav
 import { TopNav } from "@astryxdesign/core/TopNav";
 import {
   ArrowRightStartOnRectangleIcon,
+  BanknotesIcon,
   BuildingStorefrontIcon,
   CubeIcon,
   GlobeEuropeAfricaIcon,
@@ -66,6 +67,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     items: [
       { label: "Store", href: "/settings/store", icon: BuildingStorefrontIcon },
       { label: "Channels", href: "/settings/channels", icon: Squares2X2Icon },
+      { label: "Payments", href: "/settings/payments", icon: BanknotesIcon },
       { label: "Shipping", href: "/settings/shipping", icon: TruckIcon },
       { label: "Search", href: "/settings/search", icon: MagnifyingGlassIcon },
       {

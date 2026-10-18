@@ -1,6 +1,12 @@
 import { Section } from "@astryxdesign/core/Section";
 
-import { loadCountries, loaded, requireStore, sessionClient } from "@/lib/hypha";
+import {
+  loadCountries,
+  loadPaymentMethods,
+  loaded,
+  requireStore,
+  sessionClient,
+} from "@/lib/hypha";
 
 import { setupSteps } from "../setup-checklist";
 import { type WizardData, SetupWizard } from "./setup-wizard";
@@ -17,7 +23,7 @@ export default async function SetupPage({
 }) {
   const params = await searchParams;
   const client = await sessionClient();
-  const [steps, store, markets, zones, locations, channels, products, countries] =
+  const [steps, store, markets, zones, locations, channels, products, countries, methods] =
     await Promise.all([
       setupSteps(),
       requireStore(),
@@ -27,6 +33,7 @@ export default async function SetupPage({
       client.GET("/admin/channels").then(loaded),
       client.GET("/admin/products", { params: { query: { status: ["active"], limit: 50 } } }).then(loaded),
       loadCountries(),
+      loadPaymentMethods(),
     ]);
 
   const data: WizardData = {
@@ -36,6 +43,7 @@ export default async function SetupPage({
     zones: zones.items,
     locations: locations.items,
     channels: channels.items,
+    paymentMethods: methods ?? [],
     products: products.items,
     countries,
   };

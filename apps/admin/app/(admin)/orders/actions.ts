@@ -7,11 +7,16 @@ import { type TrackingInput, trackingBody, trackingProblem } from "@/lib/trackin
 
 export type ActionResult = { error?: string };
 
-/** Records that the order was paid outside Hypha (no payment spores yet, 0007 §10). */
-export async function markOrderPaid(id: string): Promise<ActionResult> {
+/**
+ * Records money staff collected themselves (design note 0027, §5): the order's open
+ * payment becomes paid with the `reference`, or the API records a manual one of the
+ * total when the order has none.
+ */
+export async function markOrderPaid(id: string, reference: string): Promise<ActionResult> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/orders/{id}/paid", {
     params: { path: { id } },
+    body: { reference: reference.trim() === "" ? null : reference.trim() },
   });
   if (error) return { error: describe(error) };
   revalidatePath(`/orders/${id}`);

@@ -10,6 +10,7 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Step, Stepper } from "@astryxdesign/core/Stepper";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Text } from "@astryxdesign/core/Text";
+import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { CheckIcon } from "@heroicons/react/24/solid";
 import type { AdminSchemas } from "@hypha/sdk/admin";
@@ -21,6 +22,9 @@ import { useCurrencies } from "@/components/currencies";
 import { currencyCodes } from "@/lib/format";
 import { type Country, countryLabel, currencyOptions, takenCountries } from "@/lib/regions";
 
+import { PAYMENT_PRESETS } from "@/lib/payments";
+
+import { createPaymentMethod } from "../settings/payments/actions";
 import type { SetupKey } from "../setup-checklist";
 import {
   addMarket,
@@ -45,6 +49,8 @@ export type WizardData = {
   zones: Zone[];
   locations: AdminSchemas["LocationResponse"][];
   channels: AdminSchemas["ChannelResponse"][];
+  /** Payment methods; empty without `payments:read`. */
+  paymentMethods: AdminSchemas["PaymentMethodResponse"][];
   /** Active products, newest first (up to 50). */
   products: AdminSchemas["ProductSummaryResponse"][];
   countries: Country[];
@@ -91,6 +97,17 @@ const STEPS: StepDef[] = [
     why: [
       "Checkout offers the options of the zone the address is in.",
       "Start with one flat rate; tiers by weight or order value, and carrier rates, are in Settings → Shipping.",
+    ],
+  },
+  {
+    key: "payment",
+    label: "Payment",
+    description: "How shoppers pay you",
+    isDone: (d) => d.payment,
+    why: [
+      "Checkout refuses carts with something to pay until a payment method is enabled.",
+      "With cash on delivery or a bank transfer you collect the money yourself, then mark the order paid.",
+      "Instructions (bank details, what to pay the courier) are shown to the shopper after checkout.",
     ],
   },
   {
@@ -170,6 +187,9 @@ export function SetupWizard({
       form = <ShippingStep data={data} onSaved={onSaved} goTo={setActive} />;
       break;
     case 3:
+      form = <PaymentStep data={data} onSaved={onSaved} />;
+      break;
+    case 4:
       form = <ProductStep data={data} onSaved={onSaved} goTo={setActive} />;
       break;
     default:
@@ -184,7 +204,7 @@ export function SetupWizard({
             Set up your store
           </Text>
           <Text color="secondary">
-            Five steps to a storefront that can take orders. Each saves as you go; leave and
+            Six steps to a storefront that can take orders. Each saves as you go; leave and
             come back, and it opens where you were.
           </Text>
         </VStack>
@@ -238,7 +258,9 @@ export function SetupWizard({
           )}
           {/* Starts the form again once a save's refresh brings what it made, so its
               defaults (countries without a zone, a new market) aren't the old data's. */}
-          <Fragment key={`${data.markets.length}/${data.zones.length}/${data.products.length}`}>
+          <Fragment
+            key={`${data.markets.length}/${data.zones.length}/${data.paymentMethods.length}/${data.products.length}`}
+          >
             {form}
           </Fragment>
           <HStack gap={2} hAlign="between">
@@ -572,6 +594,83 @@ function ShippingStep({
   );
 }
 
+function PaymentStep({ data, onSaved }: { data: WizardData; onSaved: () => void }) {
+  const [isAdding, setIsAdding] = useState(data.paymentMethods.length === 0);
+  const [presetValue, setPresetValue] = useState<string>(PAYMENT_PRESETS[0].value);
+  const preset = PAYMENT_PRESETS.find((p) => p.value === presetValue) ?? PAYMENT_PRESETS[0];
+  const [name, setName] = useState(preset.name);
+  const [instructions, setInstructions] = useState("");
+  const { error, isPending, run } = useSave(onSaved);
+
+  return (
+    <VStack gap={4}>
+      <Existing
+        title="Your payment methods"
+        lines={data.paymentMethods.map((m) => `${m.name}${m.enabled ? "" : " (off: turn it on in Settings → Payments)"}`)}
+        addLabel="Add another method"
+        isAdding={isAdding}
+        onAdd={() => setIsAdding(true)}
+      />
+      {isAdding && (
+        <Card>
+          <VStack gap={4}>
+            {error && <Banner status="error" title={error} />}
+            <Selector
+              label="Kind"
+              options={PAYMENT_PRESETS.map(({ value, label, description }) => ({
+                value,
+                label,
+                description,
+              }))}
+              value={presetValue}
+              onChange={(value) => {
+                const next = PAYMENT_PRESETS.find((p) => p.value === value) ?? PAYMENT_PRESETS[0];
+                if (name === preset.name) setName(next.name);
+                setPresetValue(next.value);
+              }}
+            />
+            <TextInput
+              label="Name"
+              description="What shoppers see at checkout."
+              value={name}
+              onChange={setName}
+            />
+            <TextArea
+              label="Instructions"
+              description="Shown to the shopper after checkout."
+              placeholder={preset.instructionsPlaceholder}
+              isOptional
+              maxLength={2000}
+              rows={3}
+              value={instructions}
+              onChange={setInstructions}
+            />
+            <HStack hAlign="end">
+              <Button
+                label="Add payment method"
+                variant="primary"
+                isLoading={isPending}
+                isDisabled={name.trim() === ""}
+                onClick={() =>
+                  run(() =>
+                    createPaymentMethod({
+                      name,
+                      instructions,
+                      markets: [],
+                      channels: [],
+                      enabled: true,
+                    }),
+                  )
+                }
+              />
+            </HStack>
+          </VStack>
+        </Card>
+      )}
+    </VStack>
+  );
+}
+
 function ProductStep({
   data,
   onSaved,
@@ -721,7 +820,7 @@ function SellStep({
       <Banner
         status="info"
         title="Add an active product first"
-        endContent={<Button label="Go to First product" variant="secondary" onClick={() => goTo(3)} />}
+        endContent={<Button label="Go to First product" variant="secondary" onClick={() => goTo(4)} />}
       />
     );
   }

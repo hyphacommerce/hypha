@@ -38,6 +38,20 @@ export default async function HomePage() {
           />
         )}
 
+        {/* Only for staff who can see methods: without payments:read the checklist's
+            step reads as not done whatever the store has. */}
+        {(me.scopes.includes("payments:read") || me.scopes.includes("payments:write")) &&
+          steps.some((step) => step.key === "payment" && !step.isDone) && (
+            <Banner
+              status="warning"
+              title="Checkout is refused until a payment method is enabled"
+              description="Shoppers can't place orders with something to pay."
+              endContent={
+                <Button label="Set up payments" variant="secondary" href="/settings/payments" />
+              }
+            />
+          )}
+
         {setup && !setup.isFinished && <SetupChecklist steps={steps} />}
 
         <MetadataList title="Your account">

@@ -20,6 +20,7 @@ import { useState, useTransition } from "react";
 import { DateTime } from "@/components/date-time";
 import { ShipmentBadge } from "@/components/status";
 import { CANCEL_REASONS } from "@/lib/format";
+import { COLLECTED } from "@/lib/payments";
 
 import { MAX_TRACKING, NO_TRACKING, type TrackingInput, trackingProblem } from "@/lib/tracking";
 
@@ -416,9 +417,11 @@ function CancelOrderDialog({ order, onClose }: { order: Order; onClose: () => vo
       <DialogHeader
         title={`Cancel order #${order.number}?`}
         subtitle={
-          order.financial_status === "paid"
-            ? "Its stock is released. It stays paid: refund the customer outside Hypha."
-            : "Its stock is released. This can't be undone."
+          COLLECTED.includes(order.financial_status)
+            ? "Its stock is released. What was paid stays paid: refund the customer outside Hypha."
+            : order.payments.some((p) => p.status === "pending")
+              ? "Its stock is released and its pending payment voided. This can't be undone."
+              : "Its stock is released. This can't be undone."
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />

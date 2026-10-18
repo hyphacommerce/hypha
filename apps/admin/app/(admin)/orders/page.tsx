@@ -14,7 +14,15 @@ import {
 } from "@/lib/hypha";
 import { OrdersTable } from "@/resources/orders";
 
-const PAYMENT: AdminSchemas["FinancialStatusDto"][] = ["pending", "paid"];
+const PAYMENT: AdminSchemas["FinancialStatusDto"][] = [
+  "pending",
+  "authorized",
+  "partially_paid",
+  "paid",
+  "partially_refunded",
+  "refunded",
+  "voided",
+];
 const FULFILMENT: AdminSchemas["FulfillmentStatusDto"][] = [
   "unfulfilled",
   "partially_fulfilled",

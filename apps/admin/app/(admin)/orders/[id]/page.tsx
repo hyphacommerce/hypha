@@ -13,15 +13,22 @@ import {
   TableRow,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
+import type { AdminSchemas } from "@hypha/sdk/admin";
 import type { ReactNode } from "react";
 
 import { Link } from "@astryxdesign/core/Link";
 
 import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
-import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
-import { CANCEL_REASONS, formatMoney } from "@/lib/format";
+import {
+  CancelledBadge,
+  FulfillmentBadge,
+  PaymentBadge,
+  PaymentStatusBadge,
+} from "@/components/status";
+import { CANCEL_REASONS, type Currencies, formatMoney } from "@/lib/format";
 import { channelNames, loadCountries, loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
+import { canMarkPaid, providerLabel } from "@/lib/payments";
 
 import { CancelOrderButton, FulfilButton, type Place, ShipmentsCard } from "./fulfilment";
 import { MarkPaid } from "./mark-paid";
@@ -93,7 +100,13 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           actions={
             <>
               {!cancelled && <CancelOrderButton order={order} />}
-              {!cancelled && order.financial_status === "pending" && <MarkPaid id={order.id} />}
+              {canMarkPaid(order) && (
+                <MarkPaid
+                  id={order.id}
+                  number={order.number}
+                  hasPayment={order.payments.some((p) => OPEN.includes(p.status))}
+                />
+              )}
               {canFulfil && <FulfilButton order={order} places={places} />}
             </>
           }
@@ -204,6 +217,8 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
               </VStack>
             </Card>
 
+            <PaymentCard order={order} currencies={currencies} />
+
             {fulfillments.length > 0 && (
               <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
             )}
@@ -215,6 +230,14 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                   at: f.created_at,
                   what: `Fulfilled ${items(f.lines.reduce((n, l) => n + l.quantity, 0))}${f.cancelled_at ? " (cancelled since)" : ""}`,
                 })),
+                ...order.payments.flatMap((p) => [
+                  ...(p.paid_at
+                    ? [{ at: p.paid_at, what: `Paid ${formatMoney(p.amount, currencies)}${p.method_name ? ` by ${p.method_name}` : ""}` }]
+                    : []),
+                  ...(p.voided_at
+                    ? [{ at: p.voided_at, what: `Payment voided${p.method_name ? ` (${p.method_name})` : ""}` }]
+                    : []),
+                ]),
                 ...(order.cancelled_at ? [{ at: order.cancelled_at, what: "Cancelled" }] : []),
               ]}
             />
@@ -283,6 +306,78 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
         </div>
       </VStack>
     </Section>
+  );
+}
+
+/** Payment statuses money could still come in on (the API's "open" ones). */
+const OPEN = ["pending", "authorized"];
+
+type Order = AdminSchemas["AdminOrderResponse"];
+
+/** How the order is paid for (design note 0027): each payment, newest first. */
+function PaymentCard({ order, currencies }: { order: Order; currencies: Currencies }) {
+  return (
+    <Card>
+      <VStack gap={3}>
+        <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
+          <HStack gap={2} vAlign="center">
+            <Text type="display-3" as="h2">
+              Payment
+            </Text>
+            <PaymentBadge status={order.financial_status} />
+          </HStack>
+        </HStack>
+        {order.payments.length === 0 ? (
+          <Text color="secondary">
+            No payment method. Mark the order paid when you collect the money, and a manual
+            payment of the total is recorded.
+          </Text>
+        ) : (
+          <VStack gap={4}>
+            {order.payments.map((payment) => (
+              <VStack key={payment.id} gap={2}>
+                <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
+                  <HStack gap={2} vAlign="center">
+                    <Text weight="medium">{payment.method_name ?? "Recorded by staff"}</Text>
+                    <PaymentStatusBadge status={payment.status} />
+                  </HStack>
+                  <Text weight="medium">{formatMoney(payment.amount, currencies)}</Text>
+                </HStack>
+                <MetadataList>
+                  <MetadataListItem label="Provider">{providerLabel(payment.provider)}</MetadataListItem>
+                  {payment.reference && (
+                    <MetadataListItem label="Reference">{payment.reference}</MetadataListItem>
+                  )}
+                  {payment.paid_at && (
+                    <MetadataListItem label="Paid">
+                      <DateTime value={payment.paid_at} />
+                    </MetadataListItem>
+                  )}
+                  {payment.voided_at && (
+                    <MetadataListItem label="Voided">
+                      <DateTime value={payment.voided_at} />
+                    </MetadataListItem>
+                  )}
+                  {payment.refunded.amount > 0 && (
+                    <MetadataListItem label="Refunded">
+                      {formatMoney(payment.refunded, currencies)}
+                    </MetadataListItem>
+                  )}
+                </MetadataList>
+                {payment.instructions && (
+                  <VStack gap={1}>
+                    <Text type="label">Instructions the shopper saw</Text>
+                    <Text type="supporting" color="secondary">
+                      <span style={{ whiteSpace: "pre-wrap" }}>{payment.instructions}</span>
+                    </Text>
+                  </VStack>
+                )}
+              </VStack>
+            ))}
+          </VStack>
+        )}
+      </VStack>
+    </Card>
   );
 }
 
