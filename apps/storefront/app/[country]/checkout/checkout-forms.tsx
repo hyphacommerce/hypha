@@ -23,6 +23,9 @@ import {
   selectShipping,
 } from "@/app/[country]/actions";
 
+/** The fields the form won't save without (marked required below). */
+const REQUIRED: (keyof Details)[] = ["email", "last_name", "line1", "city"];
+
 /** Contact and shipping address, saved together. */
 export function DetailsForm({
   country,
@@ -50,11 +53,7 @@ export function DetailsForm({
 
   const submit = () => {
     setTried(true);
-    if (
-      ["email", "last_name", "line1", "city"].some((k) => details[k as keyof Details].trim() === "")
-    ) {
-      return;
-    }
+    if (REQUIRED.some((k) => details[k].trim() === "")) return;
     start(async () => {
       // A save answers with the page re-rendered (`refresh` in the action).
       const result = await saveDetails(country, details);

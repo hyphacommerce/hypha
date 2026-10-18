@@ -6,19 +6,20 @@
 // the next page.
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useEffectEvent, useRef } from "react";
 
 function Watch({ onNavigate, pathOnly }: { onNavigate: () => void; pathOnly: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams().toString();
   const where = pathOnly ? pathname : `${pathname}?${search}`;
+  // The page it was on: the first run (and a remount) is not a navigation.
   const last = useRef(where);
-  const callback = useRef(onNavigate);
-  callback.current = onNavigate;
+  // The latest `onNavigate`, without re-running the effect when a parent passes a new one.
+  const navigated = useEffectEvent(onNavigate);
   useEffect(() => {
     if (last.current === where) return;
     last.current = where;
-    callback.current();
+    navigated();
   }, [where]);
   return null;
 }

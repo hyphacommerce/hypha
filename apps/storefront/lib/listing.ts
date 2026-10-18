@@ -44,7 +44,7 @@ function one(value: string | string[] | undefined): string | undefined {
   return v?.trim() || undefined;
 }
 
-function isSort(value: string | undefined): value is Sort {
+export function isSort(value: string | undefined): value is Sort {
   return SORTS.some((s) => s.value === value);
 }
 

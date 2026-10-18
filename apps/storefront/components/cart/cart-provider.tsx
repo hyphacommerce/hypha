@@ -42,8 +42,11 @@ type CartContext = {
   change: (variant: string, quantity: number) => void;
   /** Reads the cart again from the cookies: after something outside the provider
    * changed it (placing the order forgets the cart, `ReloadCart`). */
-  reload: () => void;
+  reload: () => Promise<void>;
 };
+
+/** Where the change queue starts: nothing to wait for. */
+const SETTLED: Promise<unknown> = Promise.resolve();
 
 const Context = createContext<CartContext | null>(null);
 
@@ -66,23 +69,27 @@ export function CartProvider({
 
   // Which read is the latest: an older one answering late is dropped.
   const reads = useRef(0);
-  const reload = useCallback(() => {
+  const reload = useCallback(async () => {
     const read = ++reads.current;
-    // No cart in this country (the flag cookie says so): nothing to read.
-    if (!hasCartFlag(country)) {
-      setCart(null);
-      setIsLoading(false);
-      return;
+    let found: Cart | null | undefined = null;
+    try {
+      // No cart in this country (the flag cookie says so): nothing to read.
+      if (hasCartFlag(country)) found = await loadCart(country);
+    } catch {
+      // The shop's server didn't answer: keep the cart shown (none, on the first read)
+      // rather than the cart page's skeleton for good.
+      found = undefined;
     }
-    loadCart(country).then((found) => {
-      if (read !== reads.current) return;
-      setCart(found);
-      setIsLoading(false);
-    });
+    if (read !== reads.current) return;
+    if (found !== undefined) setCart(found);
+    setIsLoading(false);
   }, [country]);
 
   useEffect(() => {
-    reload();
+    // Only the browser knows the cart (the flag cookie, then the server), and a static
+    // page can't: with no cart, this sets it at once, one render after hydration.
+    // oxlint-disable-next-line react/set-state-in-effect -- reading the browser's cookie
+    void reload();
     return () => {
       // Unmounted or another country: whatever is in flight is stale.
       reads.current += 1;
@@ -101,7 +108,7 @@ export function CartProvider({
   );
 
   // Changes go one at a time: each writes the cart, so two at once would race.
-  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const queue = useRef(SETTLED);
   const change = useCallback(
     (variant: string, quantity: number) =>
       startTransition(async () => {
@@ -150,7 +157,9 @@ export function CartProvider({
  */
 export function ReloadCart() {
   const { reload } = useCart();
-  useEffect(() => reload(), [reload]);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
   return null;
 }
 

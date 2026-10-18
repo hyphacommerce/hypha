@@ -37,6 +37,9 @@ function listingQuery(params: URLSearchParams): string {
  */
 function QueryWatch({ onQuery }: { onQuery: (query: string) => void }) {
   const query = listingQuery(useSearchParams());
+  // Up to the parent on purpose: the parent can't read the query itself without leaving
+  // the static HTML.
+  // react-doctor-disable-next-line react-doctor/no-pass-data-to-parent
   useEffect(() => onQuery(query), [query, onQuery]);
   return null;
 }
@@ -76,21 +79,23 @@ export function Listing({
   const isWide = useMediaQuery("(min-width: 900px)", true);
   const [shown, setShown] = useState({ query: initialQuery, page: initial });
   const [isLoading, startLoading] = useTransition();
+  // Back to the server's query: its page is here already (adjusting state while
+  // rendering, so React re-renders before showing the stale results).
+  if (query === initialQuery && shown.query !== initialQuery) {
+    setShown({ query, page: initial });
+  }
+
   // From the URL changing until its results are here, the old results stay, dimmed: a
   // grid of skeletons on every filter click makes the page jump.
   const isBusy = isLoading || query !== shown.query;
 
   useEffect(() => {
-    if (query === shown.query) return;
-    if (query === initialQuery) {
-      setShown({ query, page: initial });
-      return;
-    }
+    if (query === shown.query || query === initialQuery) return;
     startLoading(async () => {
       const page = await listingPage({ country, category, query });
       setShown({ query, page });
     });
-  }, [query, shown.query, initialQuery, initial, country, category]);
+  }, [query, shown.query, initialQuery, country, category]);
 
   const page = shown.page;
   const { state } = page;

@@ -44,7 +44,7 @@ export default async function CategoryPage({ params }: Props) {
   const { country: folder, handle } = await params;
   const [country, category] = await Promise.all([countryOf(folder), load(handle)]);
   const code = country.country;
-  const ancestors = [...category.ancestors].reverse();
+  const ancestors = category.ancestors.toReversed();
   const first = await readListingPage({
     country: code,
     digits: country.minor_units,

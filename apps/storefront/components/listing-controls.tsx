@@ -24,6 +24,7 @@ import {
   type Sort,
   changed,
   facetName,
+  isSort,
   listingHref,
 } from "@/lib/listing";
 
@@ -72,8 +73,8 @@ function FacetList({
         label={facet.key.startsWith("option.") && facet.label ? facet.label : facetName(facet.key)}
         density="compact"
         value={selected.filter((f) => f.startsWith(prefix))}
-        onChange={(values) =>
-          onChange([...selected.filter((f) => !f.startsWith(prefix)), ...values])
+        onChange={(picked) =>
+          onChange([...selected.filter((f) => !f.startsWith(prefix)), ...picked])
         }
       >
         {values.map((v) => (
@@ -99,6 +100,11 @@ function FacetList({
   );
 }
 
+/** Whether a price field holds an amount, or nothing. */
+function isPrice(v: string): boolean {
+  return v.trim() === "" || /^\d+(\.\d+)?$/.test(v.trim());
+}
+
 function PriceRange({
   state,
   priceHint,
@@ -112,8 +118,7 @@ function PriceRange({
 }) {
   const [min, setMin] = useState(state.min ?? "");
   const [max, setMax] = useState(state.max ?? "");
-  const valid = (v: string) => v.trim() === "" || /^\d+(\.\d+)?$/.test(v.trim());
-  const ok = valid(min) && valid(max);
+  const ok = isPrice(min) && isPrice(max);
   return (
     <VStack gap={2}>
       <Text type="label">Price{currency ? ` (${currency})` : ""}</Text>
@@ -236,7 +241,9 @@ export function ListingToolbar(props: Props & { total: number; sort: Sort }) {
             value: s.value,
             label: s.label,
           }))}
-          onChange={(sort) => go(changed(props.state, { sort: sort as Sort }))}
+          onChange={(sort) => {
+            if (isSort(sort)) go(changed(props.state, { sort }));
+          }}
         />
       </HStack>
     </HStack>

@@ -48,15 +48,7 @@ function offered(product: Product, selections: string[], index: number, value: s
   );
 }
 
-export function ProductForm({
-  product,
-  country,
-  digits,
-}: {
-  product: Product;
-  country: string;
-  digits: number;
-}) {
+export function ProductForm({ product, digits }: { product: Product; digits: number }) {
   // Start on the first variant that can be bought, else the first.
   const start = product.variants.find((v) => v.available) ?? product.variants[0];
   const cart = useCart();
@@ -73,8 +65,13 @@ export function ProductForm({
   const quantity = Math.max(1, Math.min(wanted, room));
 
   const images = product.media.filter((m) => m.kind === "image");
-  const variantImage = images.findIndex((m) => m.asset_id === variant?.media_asset_id);
-  const [shown, setShown] = useState(Math.max(0, variantImage));
+  // Start on the variant's image, if it has one; picking a variant moves to its image.
+  const [shown, setShown] = useState(() =>
+    Math.max(
+      0,
+      images.findIndex((m) => m.asset_id === variant?.media_asset_id),
+    ),
+  );
   const hero = images[shown] ?? images[0];
 
   const pick = (index: number, value: string) => {

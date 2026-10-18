@@ -235,6 +235,8 @@ export async function placeOrder(input: {
   // the order's payment. A card widget (`client_secret`) needs a payment spore's
   // component, which this shop doesn't have yet.
   const next = data.next_action;
+  // The URL is the API's answer (the provider's page), not the shopper's input.
+  // react-doctor-disable-next-line react-doctor/clickjacking-redirect-risk
   if (next?.type === "redirect" && /^https?:\/\//.test(next.url)) redirect(next.url);
   redirect(link(input.country, `/order/${data.id}/confirmed`));
 }
@@ -245,7 +247,10 @@ export async function placeOrder(input: {
  */
 export async function setCountry(input: { country: string; path: string }) {
   const country = input.country.toUpperCase();
-  const path = input.path || "/";
+  // A path on this site only: `//host` or `/\host` would leave it, and so would a
+  // "country" that isn't one (it becomes the folder).
+  const path = /^\/(?![/\\])/.test(input.path) ? input.path : "/";
+  if (!/^[A-Z]{2}$/.test(country)) redirect(path);
   (await cookies()).set(COUNTRY_COOKIE, country, {
     sameSite: "lax",
     path: "/",

@@ -66,7 +66,7 @@ export default async function ProductPage({ params }: Props) {
           />
         </VStack>
       ) : (
-        <ProductForm product={product} country={code} digits={country.minor_units} />
+        <ProductForm product={product} digits={country.minor_units} />
       )}
     </VStack>
   );

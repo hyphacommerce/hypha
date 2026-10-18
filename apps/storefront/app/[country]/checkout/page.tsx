@@ -69,6 +69,9 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
       : !shippingDone
         ? "Choose how your order ships."
         : "Choose how you'll pay.";
+  // The "Place order" key, one per render of this page (`PlaceOrder`): made here on the
+  // server, per request, and sent down as a prop, so the browser never makes its own.
+  const attempt = crypto.randomUUID();
 
   return (
     <VStack gap={6}>
@@ -191,7 +194,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
                 <PlaceOrder
                   country={code}
                   total={{ amount: cart.total.amount, currency: cart.total.currency }}
-                  attempt={crypto.randomUUID()}
+                  attempt={attempt}
                   ready={ready}
                   missing={missing}
                 />

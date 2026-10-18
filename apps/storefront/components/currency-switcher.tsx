@@ -23,7 +23,7 @@ export function CurrencySwitcher({
   const path = usePathname();
   const [pending, start] = useTransition();
   const currency = countries.find((c) => c.code === current)?.currency;
-  const currencies = [...new Set(countries.map((c) => c.currency))].sort();
+  const currencies = [...new Set(countries.map((c) => c.currency))].toSorted();
   if (currencies.length < 2) return null;
   return (
     <Selector

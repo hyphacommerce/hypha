@@ -47,9 +47,12 @@ function paymentStatus(status: PaymentStatus): {
     case "refunded":
       return { label: "Refunded", variant: "neutral" };
     default:
-      return { label: String(status), variant: "neutral" };
+      return { label: status, variant: "neutral" };
   }
 }
+
+/** When the order was placed: "18 October 2026". */
+const PLACED_DATE = new Intl.DateTimeFormat("en-GB", { dateStyle: "long" });
 
 type Props = {
   params: Promise<{ country: string; id: string }>;
@@ -93,9 +96,7 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
   const to = order.shipping_address;
   const payment = order.payment ?? null;
   const status = payment ? paymentStatus(payment.status) : undefined;
-  const placed = new Intl.DateTimeFormat("en-GB", { dateStyle: "long" }).format(
-    new Date(order.placed_at),
-  );
+  const placed = PLACED_DATE.format(new Date(order.placed_at));
   return (
     <VStack gap={8} maxWidth={960}>
       {/* The order was placed from the cart the header still counts: read it again. */}

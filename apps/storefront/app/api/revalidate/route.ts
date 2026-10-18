@@ -101,7 +101,8 @@ async function productTags(products: string[]): Promise<string[]> {
       return data?.handle;
     }),
   );
-  return handles.every(Boolean) ? handles.map((h) => TAGS.product(h as string)) : [TAGS.products];
+  const found = handles.filter((h): h is string => Boolean(h));
+  return found.length === handles.length ? found.map((h) => TAGS.product(h)) : [TAGS.products];
 }
 
 /** What an event changes, as tags (and paths, for a page that may be cached as a 404). */
