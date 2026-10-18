@@ -6,8 +6,9 @@
 //!
 //! - `written`: a run (after a write, or a tick's) ended with work left;
 //! - `checked`: the start of the last tick whose run left nothing;
-//! - `due`: when the dispatcher next has work (`OutboxRepo::next_due`: a retry, the end
-//!   of a lease), as the last run that did something found it.
+//! - `due`: when work is next due: the dispatcher's (`OutboxRepo::next_due`: a retry,
+//!   the end of a lease) or a failed search rebuild's (its lease's end), as the last run
+//!   that did something found it.
 //!
 //! A tick runs the jobs when a run left work since the last clean check, when `due` came
 //! between that check and now, or when nothing was ever checked (a new namespace: setup
@@ -67,6 +68,9 @@ pub struct Run {
     pub left: bool,
     /// A step found something to do.
     pub worked: bool,
+    /// The earliest time work a step couldn't finish is due again (a failed search
+    /// rebuild, when its lease ends), in milliseconds; the outbox says its own.
+    pub retry_at: Option<u64>,
 }
 
 impl Run {
@@ -74,7 +78,16 @@ impl Run {
         Run {
             left: self.left || other.left,
             worked: self.worked || other.worked,
+            retry_at: earliest(self.retry_at, other.retry_at),
         }
+    }
+}
+
+/// The earlier of two times, either maybe unset.
+pub fn earliest(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
     }
 }
 
@@ -86,8 +99,9 @@ pub struct After {
     pub written: bool,
     /// Write `checked` with this time.
     pub checked: Option<u64>,
-    /// Read the next due time and write it as `due`.
+    /// Write `due`: the earlier of the outbox's next due time and `retry_at`.
     pub due: bool,
+    pub retry_at: Option<u64>,
 }
 
 pub fn after(run: Run, started: Option<u64>) -> After {
@@ -95,7 +109,8 @@ pub fn after(run: Run, started: Option<u64>) -> After {
         written: run.left,
         checked: started.filter(|_| !run.left),
         // A tick's run checks it each time: it's the one that keeps it right.
-        due: run.left || run.worked || started.is_some(),
+        due: run.left || run.worked || run.retry_at.is_some() || started.is_some(),
+        retry_at: run.retry_at,
     }
 }
 
@@ -166,7 +181,8 @@ mod tests {
             After {
                 written: false,
                 checked: None,
-                due: false
+                due: false,
+                retry_at: None,
             }
         );
     }
@@ -174,8 +190,8 @@ mod tests {
     #[test]
     fn a_run_that_worked_after_a_write_reads_the_due_time() {
         let run = Run {
-            left: false,
             worked: true,
+            ..Run::default()
         };
         assert!(after(run, None).due);
         assert!(!after(run, None).written);
@@ -186,15 +202,40 @@ mod tests {
         let run = Run {
             left: true,
             worked: true,
+            retry_at: None,
         };
         assert_eq!(
             after(run, Some(NOW)),
             After {
                 written: true,
                 checked: None,
-                due: true
+                due: true,
+                retry_at: None,
             }
         );
+    }
+
+    #[test]
+    fn a_failed_rebuild_writes_when_it_is_due_again() {
+        let run = Run {
+            worked: true,
+            retry_at: Some(NOW + 2 * MIN),
+            ..Run::default()
+        };
+        let after = after(run, None);
+        assert!(after.due && !after.written);
+        assert_eq!(after.retry_at, Some(NOW + 2 * MIN));
+    }
+
+    #[test]
+    fn runs_together_keep_the_earliest_retry() {
+        let at = |t| Run {
+            retry_at: t,
+            ..Run::default()
+        };
+        assert_eq!(at(Some(5)).and(at(Some(3))).retry_at, Some(3));
+        assert_eq!(at(None).and(at(Some(3))).retry_at, Some(3));
+        assert_eq!(at(None).and(at(None)).retry_at, None);
     }
 
     #[test]

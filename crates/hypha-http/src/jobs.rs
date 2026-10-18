@@ -14,12 +14,15 @@ use hypha_dispatch::{
 
 use crate::state::{AppState, Storage};
 
-/// What a step did: whether there's more to do right away, and whether it found
-/// anything at all (an idle step makes the job wait longer).
+/// What a step did: whether there's more to do right away, whether it found anything
+/// at all (an idle step makes the job wait longer), and when work it couldn't finish is
+/// due again (a failed search rebuild, under its lease): a host that runs jobs only
+/// when there's work records it (design note 0026, W7). Timers ignore it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ran {
     pub more: bool,
     pub idle: bool,
+    pub retry_at: Option<Timestamp>,
 }
 
 impl Ran {
@@ -27,6 +30,7 @@ impl Ran {
         Self {
             more: progress.more,
             idle: progress.done == 0,
+            retry_at: None,
         }
     }
 }
@@ -98,7 +102,9 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
             }
         };
         let outcome = match prepared {
-            Prepared::Webhook(app) if !fits(webhook_time(&app)) => break,
+            // Too slow to send before the deadline: left under its lease for a later run
+            // (whose lease it ends up in), while the deliveries behind it still go.
+            Prepared::Webhook(app) if !fits(webhook_time(&app)) => continue,
             Prepared::Webhook(app) => {
                 send(
                     &state.webhooks(),
@@ -122,14 +128,18 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
         }
         outcomes.push(Outcome::of(delivery, outcome));
     }
-    let ports = state.public_ports().await.map_err(no_connection)?;
-    record(&ports, &outcomes).await.map_err(|e| e.to_string())?;
+    if !outcomes.is_empty() {
+        let ports = state.public_ports().await.map_err(no_connection)?;
+        record(&ports, &outcomes).await.map_err(|e| e.to_string())?;
+    }
     // A step that did work may have marked products for search (its handlers): the
     // runner wakes search sync then.
     let idle = fanned.done == 0 && leased.is_empty();
     Ok(Ran {
         more: fanned.more || leased.len() >= state.config.dispatch.batch as usize,
         idle,
+        // Deliveries left under their lease are the outbox's to say (`next_due`).
+        retry_at: None,
     })
 }
 
@@ -147,6 +157,7 @@ pub async fn search_sync<S: Storage>(state: &AppState<S>) -> Step {
         .public_ports()
         .await
         .map_err(|_| "no connection".to_string())?;
+    let now = state.clock.now();
     let synced = hypha_search::sync(
         &ports,
         &state.storage.search(&ports),
@@ -158,7 +169,13 @@ pub async fn search_sync<S: Storage>(state: &AppState<S>) -> Step {
     for (product, error) in &synced.failed {
         tracing::warn!(%product, "search: rebuilding a product failed, retried later: {error}");
     }
-    Ok(Ran::of(synced.progress))
+    // A failed product's mark stays queued under this step's lease, free again when it
+    // ends.
+    let retry_at = (!synced.failed.is_empty()).then(|| now.plus(state.config.search_sync.lease));
+    Ok(Ran {
+        retry_at,
+        ..Ran::of(synced.progress)
+    })
 }
 
 /// Deletes uploads abandoned for over `media.abandoned_after` (design note 0013,
@@ -168,6 +185,7 @@ pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
         return Ok(Ran {
             more: false,
             idle: true,
+            retry_at: None,
         });
     };
     let ports = state
@@ -189,6 +207,7 @@ pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
     Ok(Ran {
         more: false,
         idle: swept == 0,
+        retry_at: None,
     })
 }
 
@@ -219,6 +238,7 @@ pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     Ok(Ran {
         more: events.more || keys.more || sessions.more,
         idle: events.done + keys.done + sessions.done == 0,
+        retry_at: None,
     })
 }
 

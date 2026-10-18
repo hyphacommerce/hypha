@@ -69,6 +69,10 @@ mod worker_main {
     /// (`jobs::dispatch_by`).
     const AFTER_RESPONSE: Duration = Duration::from_secs(25);
 
+    /// The time left before a deadline under which no step starts: one that ran past
+    /// `waitUntil`'s end would be cut off before its work or marks are written.
+    const STEP_TIME: Duration = Duration::from_secs(5);
+
     /// What an isolate builds once and keeps.
     struct Isolate {
         state: SharedState<WorkersStorage>,
@@ -420,9 +424,13 @@ mod worker_main {
     ) -> Run {
         let mut run = Run::default();
         for _ in 0..MAX_STEPS {
+            if deadline.is_some_and(|by| state.clock.now().plus(STEP_TIME) > by) {
+                break;
+            }
             match step().await {
                 Ok(ran) => {
                     run.worked |= !ran.idle;
+                    run.retry_at = marks::earliest(run.retry_at, ran.retry_at.map(millis));
                     if !ran.more {
                         return run;
                     }
@@ -433,11 +441,8 @@ mod worker_main {
                     return run;
                 }
             }
-            if deadline.is_some_and(|by| state.clock.now() >= by) {
-                break;
-            }
         }
-        // Stopped with more to do.
+        // Stopped with more to do (or with no time to find out).
         run.left = true;
         run
     }
@@ -498,13 +503,16 @@ mod worker_main {
             put(kv, marks::CHECKED, at).await;
         }
         if after.due {
-            match jobs::next_due(state).await {
-                Ok(Some(due)) if Some(millis(due)) != known => {
-                    put(kv, marks::DUE, millis(due)).await;
-                    LAST_DUE.set(Some(millis(due)));
+            let due = match jobs::next_due(state).await {
+                Ok(due) => marks::earliest(due.map(millis), after.retry_at),
+                Err(e) => {
+                    tracing::warn!(error = %e, "jobs: cannot read when work is next due");
+                    after.retry_at
                 }
-                Ok(_) => {}
-                Err(e) => tracing::warn!(error = %e, "jobs: cannot read when work is next due"),
+            };
+            if let Some(due) = due.filter(|due| Some(*due) != known) {
+                put(kv, marks::DUE, due).await;
+                LAST_DUE.set(Some(due));
             }
         }
     }

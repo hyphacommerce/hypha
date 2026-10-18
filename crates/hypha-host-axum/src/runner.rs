@@ -151,6 +151,7 @@ pub fn start(state: SharedState<PgStorage>, wake: Wake, limiter: Arc<MemoryRateL
                 Ok(Ran {
                     more: false,
                     idle: false,
+                    retry_at: None,
                 })
             }
         },

@@ -178,14 +178,17 @@ the domains; `hypha deploy` then:
 5. **Jobs** (W6, W7; done, 2026-10-18). A tick reads three marks from KV (`JOBS`), each
    a time, so no write undoes another's (KV has no compare-and-set): `written` when a
    run ended with work left, `checked` when a tick's run left none (its start), and
-   `due`, when the dispatcher next has work (`OutboxRepo::next_due`: an event not fanned
-   out, a retry, a lease's end), written by a run that did something. It runs dispatch
+   `due`, when work is next due (`OutboxRepo::next_due`: an event not fanned out, a
+   retry, a lease's end; or a failed search rebuild's lease end), written by a run that
+   did something. It runs dispatch
    and search sync when a run left work since the last clean check, when `due` came
    between that check and now, or when nothing was ever checked; otherwise it doesn't
    touch the database. After a write its own run usually does the work, so most writes
    set no mark. What a lost mark could hide (two runs racing to write `due`, a run killed
-   before it marked, a search rebuild that failed) waits for the safety net: every hour's
-   first tick runs the jobs regardless.
+   before it marked) waits for the safety net: every hour's first tick runs the jobs
+   regardless. Reviewed (2026-10-18): a webhook too slow for what's left of `waitUntil`
+   is skipped, not the end of the run; no step starts within five seconds of the
+   deadline; dispatch opens no connection to record nothing.
 6. **CLI**: `--target cloudflare` (§5; the API, 2026-10-18). `hypha init` asks for the
    database's direct URL (any provider: nothing reads a provider off the hostname), the
    domains, a name for the resources, and optionally the media domain's zone and an R2
