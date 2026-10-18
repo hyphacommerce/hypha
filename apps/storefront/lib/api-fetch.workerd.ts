@@ -11,16 +11,29 @@ import { env } from "cloudflare:workers";
 
 type Binding = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
 
+/** One of the Worker's bindings, read without trusting its (absent) types. */
+function binding(name: string): unknown {
+  const bindings: unknown = env;
+  return typeof bindings === "object" && bindings !== null
+    ? Reflect.get(bindings, name)
+    : undefined;
+}
+
+function isBinding(value: unknown): value is Binding {
+  return (
+    typeof value === "object" && value !== null && typeof Reflect.get(value, "fetch") === "function"
+  );
+}
+
 /** The API's Service Binding as a `fetch`, when the deployment bound one. */
 export function apiFetch(): typeof fetch | undefined {
-  const { API: binding, HYPHA_CALLER_KEY: key } = env as {
-    API?: Binding;
-    HYPHA_CALLER_KEY?: string;
-  };
-  if (!binding) return undefined;
+  const api = binding("API");
+  const callerKey = binding("HYPHA_CALLER_KEY");
+  const key = typeof callerKey === "string" ? callerKey : undefined;
+  if (!isBinding(api)) return undefined;
   return (input, init) => {
     const request = new Request(input, init);
     if (key) request.headers.set("x-hypha-caller", key);
-    return binding.fetch(request);
+    return api.fetch(request);
   };
 }
