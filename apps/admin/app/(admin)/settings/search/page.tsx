@@ -2,6 +2,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { VStack } from "@astryxdesign/core/Layout";
 
 import { PageHeader } from "@/components/page-header";
+import { SETTINGS_CRUMB } from "@/lib/navigation";
 import { loaded, sessionClient } from "@/lib/hypha";
 
 import { loadSearchCatalog } from "./catalog";
@@ -25,6 +26,7 @@ export default async function SearchSettingsPage() {
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
         <PageHeader
+          back={SETTINGS_CRUMB}
           title="Search"
           description="The filters and listings shoppers get on your storefront's search and category pages."
         />

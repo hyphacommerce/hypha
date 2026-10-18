@@ -5,6 +5,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 
 import { PageHeader } from "@/components/page-header";
+import { SETTINGS_CRUMB } from "@/lib/navigation";
 import { loadCountries, requireStore } from "@/lib/hypha";
 
 import { SetupGuideCard } from "./setup-guide-card";
@@ -18,7 +19,11 @@ export default async function StoreSettingsPage() {
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={640}>
-        <PageHeader title="Store" description="The store this deployment serves." />
+        <PageHeader
+          back={SETTINGS_CRUMB}
+          title="Store details"
+          description="The store this deployment serves."
+        />
         <StoreForm store={store} countries={countries} />
         {store.setup.finished_at && <SetupGuideCard />}
         <Card>

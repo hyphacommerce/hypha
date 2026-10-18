@@ -2,6 +2,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { VStack } from "@astryxdesign/core/Layout";
 
 import { PageHeader } from "@/components/page-header";
+import { SETTINGS_CRUMB } from "@/lib/navigation";
 import { loadNotificationSettings, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { TEMPLATES, templateName } from "@/lib/notifications";
 
@@ -39,7 +40,7 @@ export default async function TemplatePage({ params }: { params: Promise<{ key: 
         <PageHeader
           title={name}
           description={TEMPLATES[template.key]?.description}
-          back={{ label: "Notifications", href: "/settings/notifications" }}
+          back={[SETTINGS_CRUMB, { label: "Notifications", href: "/settings/notifications" }]}
         />
         <TemplateEditor
           template={template}

@@ -3,6 +3,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 
 import { PageHeader } from "@/components/page-header";
+import { SETTINGS_CRUMB } from "@/lib/navigation";
 import { loadNotificationSettings, requireStaff, sessionClient } from "@/lib/hypha";
 
 import { SenderBanner } from "./sender-banner";
@@ -23,6 +24,7 @@ export default async function NotificationsSettingsPage() {
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
+          back={SETTINGS_CRUMB}
           title="Notifications"
           description="The emails your store sends: order confirmations and shipping updates to customers, new orders to staff, and staff account emails."
         />

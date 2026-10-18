@@ -5,7 +5,7 @@ import { HStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { useState, useTransition } from "react";
 
-import { retryDelivery } from "../actions";
+import { retryDelivery } from "../../actions";
 
 /** Sends a delivery again on the dispatcher's next run (within seconds). */
 export function RetryButton({ appKey, id }: { appKey: string; id: string }) {

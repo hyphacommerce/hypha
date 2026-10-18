@@ -2,6 +2,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 
 import { PageHeader } from "@/components/page-header";
+import { SETTINGS_CRUMB } from "@/lib/navigation";
 import { loaded, sessionClient } from "@/lib/hypha";
 
 import { ProvidersCard, type RateApp } from "./providers";
@@ -30,6 +31,7 @@ export default async function ShippingSettingsPage() {
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
+          back={SETTINGS_CRUMB}
           title="Shipping"
           description="Zones are the countries you ship to; each offers its options at checkout."
         />

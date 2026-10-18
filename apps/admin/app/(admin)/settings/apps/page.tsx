@@ -2,6 +2,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 
 import { PageHeader } from "@/components/page-header";
+import { SETTINGS_CRUMB } from "@/lib/navigation";
 import { loaded, sessionClient } from "@/lib/hypha";
 
 import { AppsCard } from "./apps";
@@ -16,7 +17,8 @@ export default async function AppsSettingsPage() {
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
-          title="Apps"
+          back={SETTINGS_CRUMB}
+          title="Webhooks and custom apps"
           description="Services Hypha calls, signed with each app's secret: webhooks for the events they subscribe to, and live shipping rates."
         />
         <AppsCard apps={apps.items} />
