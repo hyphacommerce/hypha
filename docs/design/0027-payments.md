@@ -220,14 +220,23 @@ note left open:
   through `Order::set_financial_status`, which records `order.paid` when it becomes
   `paid`; `Order::mark_paid` and `hypha_orders::mark_order_paid` are gone.
 - **Recording money is `hypha_order_actions::mark_paid`** (a workflow, since it writes a
-  payment and its order): the newest open payment becomes `paid` with the optional
-  `reference`, or, for an order without one, a `manual` payment of the total is created
-  and paid, in one batch, retried on a lost race. `cancel_order` voids `pending`
-  payments in its batch (an `authorized` one would need its provider, so it waits for
-  one that authorizes) and moves the status only when it voided something, so an
-  order without payments keeps its own. New crate edges: `hypha-checkout` →
-  `hypha-payments`, `hypha-order-actions` → `hypha-payments`; `hypha-cart` doesn't
-  depend on payments.
+  payment and its order), in one batch, retried on a lost race. The rule: a `paid` order
+  is a no-op (so two requests at once both succeed and one payment is recorded); a
+  cancelled one is refused (`order_cancelled`); an `authorized` payment is refused
+  (409 `payment_authorized`, `details.payment`: only its provider can capture it);
+  otherwise every `pending` payment becomes `paid` with the optional `reference`; with
+  no open payment, a `pending` order (placed before payments, with nothing to pay, or
+  whose attempts all failed) gets a `manual` payment of its total, created and paid;
+  any other status (partially paid without a pending payment, partially refunded,
+  refunded, voided) is refused (409 `order_not_payable`, `details.financial_status`),
+  since money moved already and recording the whole total again would be wrong. The
+  admin's `canMarkPaid` follows the same rule.
+- **Cancelling** voids `pending` payments in its batch and moves the status only when it
+  voided something, so an order without payments keeps its own. **An order with an
+  `authorized` payment can't be cancelled** (409 `payment_authorized`) until providers
+  can release a hold: voiding it here would strand the held money. New crate edges:
+  `hypha-checkout` → `hypha-payments`, `hypha-order-actions` → `hypha-payments`;
+  `hypha-cart` doesn't depend on payments.
 - **The cart keeps only the method's ID.** Choosing (`set_payment_method`) and listing
   (`cart_payment_methods`) are in `hypha-checkout`, which can read methods. "Offered"
   means enabled, in the cart's market and channel, and of a provider this build has.
@@ -243,7 +252,10 @@ note left open:
 - **Migration 0047** creates `payment_methods` and `payments`, adds
   `carts.payment_method_id`, widens the orders' `financial_status` check to the seven
   statuses, and gives every order already `paid` the payment that marking stands for
-  (`manual`, the total, paid when the order last changed).
+  (`manual`, the total, made and paid when the order last changed). Its ID is a UUIDv7
+  of that moment, built in SQL (a random UUID with the time's 48 bits laid over its
+  first six bytes and the version nibble set to 7), so an order's payments still sort
+  newest first by ID; its `created_at`, `updated_at` and `paid_at` are that moment too.
 - **Providers:** `PaymentProviders` is implemented for tuples of `PaymentProvider`s and
   found by key, like event handlers; each host lists `(ManualProvider,)` in
   `payments.rs` and names it as `Storage::Payments` (`payment_providers()`). Keys are
@@ -267,7 +279,12 @@ note left open:
   admin order (a superset of what it returned). The setup checklist gains `payment`.
 - **Codes:** `payment_method_required` and `payment_method_unavailable` are 409 at
   checkout; choosing a method answers 422 `payment_method_unavailable` or
-  `payment_method_not_found`; deleting a method a pending payment uses is 409
-  `payment_method_in_use`; `invalid_payment_provider`, `payment_provider_unknown`,
+  `payment_method_not_found`; deleting a method an open (pending or authorized) payment
+  uses is 409 `payment_method_in_use`, checked in the delete's own statement
+  (`RepoError::Reference(keys::OPEN_PAYMENT_METHOD)`), so a checkout racing it can't
+  strand a payment; a replayed checkout whose open payment's method is gone answers
+  `next_action: null` for a provider other than `manual` (logged as
+  `payment_method_unavailable`) rather than asking it without its settings;
+  `order_not_payable` and `payment_authorized` are 409 (above); `invalid_payment_provider`, `payment_provider_unknown`,
   `invalid_payment_settings` and `instructions_too_long` are 422;
   `invalid_payment_transition` is 409.
