@@ -11,6 +11,7 @@
 pub mod client_ip;
 pub mod email;
 pub mod error;
+pub mod extensions;
 pub mod extract;
 pub mod host;
 pub mod jobs;

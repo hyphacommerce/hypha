@@ -405,7 +405,7 @@ pub async fn checkout_handler<S: Storage>(
         expected_total: req.body.expected_total,
         idempotency: req.idempotency,
     };
-    let rates = state.rates(&ports);
+    let rates = state.cart_rates(&ports, cart);
     let providers = state.storage.payment_providers();
     let placed = checkout(
         &ctx,

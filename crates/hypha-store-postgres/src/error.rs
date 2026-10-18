@@ -7,6 +7,7 @@ use hypha_categories::keys as category_keys;
 use hypha_channels::keys as channel_keys;
 use hypha_core::{RepoError, idempotency::keys as idempotency_keys};
 use hypha_customers::repo::keys as customer_keys;
+use hypha_extensions::keys as extension_keys;
 use hypha_fulfillment::keys as fulfillment_keys;
 use hypha_inventory::repo::keys as inventory_keys;
 use hypha_markets::repo::keys as market_keys;
@@ -76,6 +77,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ),
     ("notification_settings_pkey", notification_keys::SETTINGS),
     ("notifications_pkey", notification_keys::NOTIFICATION_ID),
+    ("extension_calls_pkey", extension_keys::EXTENSION_CALL_ID),
     (
         "notification_message",
         notification_keys::NOTIFICATION_MESSAGE,

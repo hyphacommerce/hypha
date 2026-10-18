@@ -11,11 +11,12 @@ pub mod commands;
 pub mod error;
 pub mod repo;
 
-pub use app::{App, AppKey, AppSnapshot, EventPattern, NewApp, Webhook};
+pub use app::{App, AppSnapshot, EventPattern, NewApp, Webhook};
 pub use commands::{
     CommandError, CreateApp, SECRET_PREFIX, UpdateApp, WebhookInput, create_app, delete_app,
     get_app, get_event, list_apps, list_deliveries, open_secret, retry_delivery, rotate_app_secret,
     update_app,
 };
 pub use error::AppError;
+pub use hypha_core::{AppKey, AppKeyError};
 pub use repo::{AppRepo, HasApps, keys};

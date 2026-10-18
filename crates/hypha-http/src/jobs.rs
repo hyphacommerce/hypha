@@ -357,8 +357,8 @@ pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
     })
 }
 
-/// Deletes what's past keeping (`[jobs.prune]`): events, idempotency keys, and sessions
-/// that ended.
+/// Deletes what's past keeping (`[jobs.prune]`): events, idempotency keys, sessions
+/// that ended, and the extension call log (design note 0029).
 pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     let ports = state
         .public_ports()
@@ -373,17 +373,27 @@ pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     let sessions = prune_sessions(&ports, &state.clock, &state.config.dispatch)
         .await
         .map_err(|e| e.to_string())?;
-    if events.done + keys.done + sessions.done > 0 {
+    let calls = hypha_extensions::prune_calls(
+        &ports,
+        &state.clock,
+        &state.config.extensions,
+        state.config.dispatch.batch,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let done = events.done + keys.done + sessions.done + calls.done;
+    if done > 0 {
         tracing::info!(
             events = events.done,
             idempotency_keys = keys.done,
             sessions = sessions.done,
+            extension_calls = calls.done,
             "jobs: pruned"
         );
     }
     Ok(Ran {
-        more: events.more || keys.more || sessions.more,
-        idle: events.done + keys.done + sessions.done == 0,
+        more: events.more || keys.more || sessions.more || calls.more,
+        idle: done == 0,
         retry_at: None,
     })
 }

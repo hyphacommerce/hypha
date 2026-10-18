@@ -1,0 +1,1378 @@
+{
+  "components": {
+    "schemas": {
+      "CategoryId": {
+        "description": "A CategoryId: `pcat_` and 32 hex digits.",
+        "examples": [
+          "pcat_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^pcat_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "ChannelId": {
+        "description": "A ChannelId: `chan_` and 32 hex digits.",
+        "examples": [
+          "chan_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^chan_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "CountryCode": {
+        "description": "An ISO 3166-1 alpha-2 country code.",
+        "examples": [
+          "HR"
+        ],
+        "pattern": "^[A-Z]{2}$",
+        "type": "string"
+      },
+      "Currency": {
+        "description": "An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.",
+        "examples": [
+          "EUR"
+        ],
+        "pattern": "^[A-Z]{3}$",
+        "type": "string"
+      },
+      "Email": {
+        "description": "An email address; stored trimmed and lowercased, so responses show it that way.",
+        "examples": [
+          "ana@example.com"
+        ],
+        "format": "email",
+        "maxLength": 254,
+        "type": "string"
+      },
+      "MarketId": {
+        "description": "A MarketId: `mkt_` and 32 hex digits.",
+        "examples": [
+          "mkt_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^mkt_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "Money": {
+        "description": "An amount of money in one currency.",
+        "examples": [
+          {
+            "amount": 1050,
+            "currency": "EUR"
+          }
+        ],
+        "properties": {
+          "amount": {
+            "description": "In minor units (1050 is 10.50). At most 2^53 - 1 either way, so every amount is exact in JSON.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "currency": {
+            "description": "An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.",
+            "examples": [
+              "EUR"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "type": "object"
+      },
+      "NextAction": {
+        "description": "What a storefront does after starting a payment.",
+        "oneOf": [
+          {
+            "description": "Send the buyer to the provider's page.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "redirect"
+                ],
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Mount the app's storefront element (a custom element, design note 0029, §7)\nwith these properties (a Stripe client secret, …), and wait for its\n`hypha:payment-confirmed` event.",
+            "properties": {
+              "element": {
+                "type": "string"
+              },
+              "props": {
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "client_widget"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "element",
+              "props",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Show these words (a bank transfer's details); the money comes later.",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "instructions"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "OrderId": {
+        "description": "A OrderId: `ord_` and 32 hex digits.",
+        "examples": [
+          "ord_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^ord_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "PaymentActionRequest": {
+        "description": "What Hypha sends to capture, void or refund a payment.",
+        "properties": {
+          "amount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "How much: for a capture or refund, at most what's left; absent for the whole\n(a void never has one)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order": {
+            "$ref": "#/components/schemas/OrderId"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/PaymentId",
+            "description": "The payment (`pay_…`)."
+          },
+          "reference": {
+            "description": "The provider's ID for the payment, as the app gave it on start.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "payment",
+          "order"
+        ],
+        "type": "object"
+      },
+      "PaymentActionResponse": {
+        "description": "Whether the provider took the action. Accepted isn't done: the payment moves when\nthe app reports the result (`POST /admin/payments/{id}/events`).",
+        "oneOf": [
+          {
+            "properties": {
+              "reference": {
+                "description": "The provider's ID for this capture or refund, when it has one.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "accepted"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The provider said no; `reason` is shown to staff.",
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "status"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "PaymentId": {
+        "description": "A PaymentId: `pay_` and 32 hex digits.",
+        "examples": [
+          "pay_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^pay_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "PaymentMethodId": {
+        "description": "A PaymentMethodId: `pm_` and 32 hex digits.",
+        "examples": [
+          "pm_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^pm_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "PaymentStartRequest": {
+        "description": "What Hypha sends to start a payment. Settings for the method stay with the app (it\nkeeps its own, design note 0029, §4.2): the method's ID is enough to find them.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What to collect: the order's total, in its currency."
+          },
+          "channel": {
+            "$ref": "#/components/schemas/ChannelId",
+            "description": "Where the order was placed (its sales channel), to whom (its market) and\nshipped to (its country)."
+          },
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "customer_email": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Email",
+                "description": "The buyer's email (for the provider's receipt). Personal data (design note 0029,\nAP10): absent unless the app's grant has `customer_data:email`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "market": {
+            "$ref": "#/components/schemas/MarketId"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethodId",
+            "description": "The payment method the buyer chose (`pm_…`), whose provider is this app."
+          },
+          "order": {
+            "$ref": "#/components/schemas/OrderId"
+          },
+          "order_number": {
+            "description": "The order's human number (`1001`), for the provider's statement.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/PaymentId",
+            "description": "The payment Hypha created for this attempt (`pay_…`), also the call's\n`Idempotency-Key`: a retried start must not charge twice."
+          },
+          "return_url": {
+            "description": "Where the storefront wants the buyer back after a redirect, when it said.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "payment",
+          "order",
+          "order_number",
+          "method",
+          "amount",
+          "channel",
+          "market",
+          "country"
+        ],
+        "type": "object"
+      },
+      "PaymentStartResponse": {
+        "description": "The app's answer to a start: what the buyer does next.",
+        "properties": {
+          "next_action": {
+            "$ref": "#/components/schemas/NextAction"
+          },
+          "reference": {
+            "description": "The provider's ID for the payment (a PaymentIntent's `pi_…`), kept on it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "next_action"
+        ],
+        "type": "object"
+      },
+      "PostalAddressResponse": {
+        "description": "A postal address as the API writes it. The Admin and Storefront APIs' address\nresponses are this type too, so every channel spells addresses one way.",
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "last_name",
+          "line1",
+          "city",
+          "country"
+        ],
+        "type": "object"
+      },
+      "ProductId": {
+        "description": "A ProductId: `prod_` and 32 hex digits.",
+        "examples": [
+          "prod_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^prod_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "QuotedRate": {
+        "description": "One rate the app quotes.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Not negative, in the request's currency."
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RateEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "reference": {
+            "description": "The app's quote reference, copied to the order's shipping line.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service": {
+            "description": "The service code a shipping option names (`express`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "name",
+          "amount"
+        ],
+        "type": "object"
+      },
+      "RateCallbackRequest": {
+        "description": "What Hypha sends: `POST <callback_url>` with this body.",
+        "properties": {
+          "id": {
+            "description": "`rreq_…`, also sent as `Hypha-Request-Id` and `Idempotency-Key`: for the app's\nlogs and de-duplication.",
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/RateRequestBody"
+          },
+          "sent_at": {
+            "description": "When Hypha sent it (RFC 3339, UTC).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sent_at",
+          "request"
+        ],
+        "type": "object"
+      },
+      "RateEstimate": {
+        "description": "Business days from shipping to delivery.",
+        "properties": {
+          "max_days": {
+            "description": "At least `min_days`.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_days": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min_days",
+          "max_days"
+        ],
+        "type": "object"
+      },
+      "RateItemBody": {
+        "description": "One line of the group.",
+        "properties": {
+          "quantity": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId"
+          },
+          "weight_grams": {
+            "description": "One unit's weight, when the variant has one.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "variant",
+          "quantity",
+          "unit_price"
+        ],
+        "type": "object"
+      },
+      "RateRequestBody": {
+        "description": "One shipping group to price.",
+        "properties": {
+          "currency": {
+            "$ref": "#/components/schemas/Currency",
+            "description": "The cart's currency: every rate must be in it."
+          },
+          "destination": {
+            "$ref": "#/components/schemas/PostalAddressResponse"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RateItemBody"
+            },
+            "type": "array"
+          },
+          "origin": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressResponse",
+                "description": "The address of the location that would ship the group, when it has one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The group's lines, as priced."
+          }
+        },
+        "required": [
+          "currency",
+          "destination",
+          "items",
+          "subtotal"
+        ],
+        "type": "object"
+      },
+      "RatesResponse": {
+        "description": "What the app answers with a 2xx.",
+        "properties": {
+          "rates": {
+            "description": "The services it can ship the group with; empty when none.",
+            "items": {
+              "$ref": "#/components/schemas/QuotedRate"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rates"
+        ],
+        "type": "object"
+      },
+      "SearchFacetCounts": {
+        "description": "A facet's values with how many hits have each, most first.",
+        "properties": {
+          "facet": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/SearchFacetValue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "facet",
+          "values"
+        ],
+        "type": "object"
+      },
+      "SearchFacetValue": {
+        "properties": {
+          "count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "count"
+        ],
+        "type": "object"
+      },
+      "SearchFilter": {
+        "description": "A facet's accepted values.",
+        "properties": {
+          "facet": {
+            "description": "`vendor`, `product_type`, `tag` or `option.<name>` (name lowercased).",
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "facet",
+          "values"
+        ],
+        "type": "object"
+      },
+      "SearchGroup": {
+        "description": "What one hit stands for.\n\nKnown values: `listing`, `product`, `variant`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "listing",
+          "product",
+          "variant"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "SearchHit": {
+        "description": "One hit: a product, and the variant that stands for it when the group is a variant\nor a listing split by options.",
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "variant": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VariantId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "product"
+        ],
+        "type": "object"
+      },
+      "SearchPriceRange": {
+        "description": "Inclusive bounds on a price, in minor units.",
+        "properties": {
+          "max": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "min": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SearchQueryRequest": {
+        "description": "What the shopper searched for, in one market and channel.",
+        "properties": {
+          "available": {
+            "description": "Only what's in stock (`true`), out of stock (`false`), or either (absent).",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "category": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CategoryId",
+                "description": "Only products in this category or one below it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "channel": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ChannelId",
+                "description": "The storefront's sales channel: only products published to it. Absent for a\nstaff search, which sees every channel."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency",
+            "description": "The market's currency, which `price` bounds are in."
+          },
+          "facets": {
+            "description": "The facets to count (`vendor`, `product_type`, `tag`, `option.<name>`), in the\norder to answer them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "filters": {
+            "description": "Products with any of each filter's values; filters on different facets must all\nmatch.",
+            "items": {
+              "$ref": "#/components/schemas/SearchFilter"
+            },
+            "type": "array"
+          },
+          "group": {
+            "$ref": "#/components/schemas/SearchGroup",
+            "description": "What one hit stands for."
+          },
+          "limit": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "market": {
+            "$ref": "#/components/schemas/MarketId",
+            "description": "The shopper's market: what's sold to them, at its prices."
+          },
+          "offset": {
+            "description": "Hits to skip, then at most `limit` (1 to 100) to answer.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "price": {
+            "$ref": "#/components/schemas/SearchPriceRange",
+            "description": "Inclusive price bounds, in the currency's minor units."
+          },
+          "query": {
+            "description": "The words as the shopper typed them; empty lists everything that matches the\nfilters.",
+            "type": "string"
+          },
+          "sort": {
+            "$ref": "#/components/schemas/SearchSort"
+          }
+        },
+        "required": [
+          "query",
+          "market",
+          "currency",
+          "sort",
+          "group",
+          "offset",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "SearchQueryResponse": {
+        "description": "The app's answer: one page of hits, in order.",
+        "properties": {
+          "facets": {
+            "description": "One per asked-for facet, in the asked order; a facet left out counts nothing.",
+            "items": {
+              "$ref": "#/components/schemas/SearchFacetCounts"
+            },
+            "type": "array"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Hits over every page.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hits",
+          "total"
+        ],
+        "type": "object"
+      },
+      "SearchSort": {
+        "description": "The order of the hits.\n\nKnown values: `relevance`, `newest`, `price_asc`, `price_desc`, `title`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "relevance",
+          "newest",
+          "price_asc",
+          "price_desc",
+          "title"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "VariantId": {
+        "description": "A VariantId: `var_` and 32 hex digits.",
+        "examples": [
+          "var_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^var_[0-9a-f]{32}$",
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "description": "The synchronous calls Hypha makes to apps mid-flow (design note 0029): each is a versioned contract an app implements by registering a URL for it. A reshaped request or response is a new version.",
+    "license": {
+      "identifier": "MIT OR Apache-2.0",
+      "name": "MIT OR Apache-2.0"
+    },
+    "title": "Hypha Extension Points",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {},
+  "webhooks": {
+    "payments.capture": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `payments.capture` v1. Answer within 15000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "payments.capture.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentActionResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Capture an authorized payment (staff).",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-extension": {
+          "point": "payments.capture",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fail_closed",
+        "x-hypha-timeout-ms": 15000,
+        "x-hypha-version": 1
+      }
+    },
+    "payments.refund": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `payments.refund` v1. Answer within 15000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "payments.refund.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentActionResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Refund some or all of a captured payment (staff).",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-extension": {
+          "point": "payments.refund",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fail_closed",
+        "x-hypha-timeout-ms": 15000,
+        "x-hypha-version": 1
+      }
+    },
+    "payments.start": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `payments.start` v1. Answer within 15000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "payments.start.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentStartResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Start a payment for an order at checkout: what the buyer does next.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-extension": {
+          "point": "payments.start",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fail_closed",
+        "x-hypha-timeout-ms": 15000,
+        "x-hypha-version": 1
+      }
+    },
+    "payments.void": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `payments.void` v1. Answer within 15000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "payments.void.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentActionResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Void a payment that wasn't captured (staff).",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-extension": {
+          "point": "payments.void",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fail_closed",
+        "x-hypha-timeout-ms": 15000,
+        "x-hypha-version": 1
+      }
+    },
+    "search.query": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `search.query` v1. Answer within 3000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "search.query.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchQueryResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Answer a storefront search with product and variant IDs in order.",
+        "tags": [
+          "search"
+        ],
+        "x-hypha-extension": {
+          "point": "search.query",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fallback",
+        "x-hypha-timeout-ms": 3000,
+        "x-hypha-version": 1
+      }
+    },
+    "shipping.rates": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `shipping.rates` v1. Answer within 5000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "shipping.rates.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateCallbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatesResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Price a cart's shipping group (design note 0015, §5's rate callback).",
+        "tags": [
+          "shipping"
+        ],
+        "x-hypha-extension": {
+          "point": "shipping.rates",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fallback",
+        "x-hypha-timeout-ms": 5000,
+        "x-hypha-version": 1
+      }
+    }
+  }
+}

@@ -334,11 +334,14 @@ impl<S: Storage> AppState<S> {
 }
 
 impl<S> AppState<S> {
-    /// The shipping rate providers for a request's ports (design note 0015).
-    pub fn rates<'a, P: hypha_shipping::HasAppProviders + hypha_apps::HasApps>(
-        &'a self,
-        ports: &'a P,
-    ) -> crate::shipping::HostRates<'a, P> {
+    /// The shipping rate providers for a request's ports (design note 0015), whose
+    /// calls to rate apps are recorded in the call log (design note 0029).
+    pub fn rates<'a, P>(&'a self, ports: &'a P) -> crate::shipping::HostRates<'a, P>
+    where
+        P: hypha_shipping::HasAppProviders
+            + hypha_apps::HasApps
+            + hypha_extensions::HasExtensionCalls,
+    {
         crate::shipping::HostRates {
             ports,
             calls: &self.calls,
@@ -346,6 +349,35 @@ impl<S> AppState<S> {
             env: &self.env,
             clock: &self.clock,
             ids: &self.ids,
+            store: self.store,
+            cart: None,
+        }
+    }
+
+    /// `rates` for a cart's shipping: each call is recorded with the cart.
+    pub fn cart_rates<'a, P>(
+        &'a self,
+        ports: &'a P,
+        cart: hypha_core::CartId,
+    ) -> crate::shipping::HostRates<'a, P>
+    where
+        P: hypha_shipping::HasAppProviders
+            + hypha_apps::HasApps
+            + hypha_extensions::HasExtensionCalls,
+    {
+        crate::shipping::HostRates {
+            cart: Some(cart),
+            ..self.rates(ports)
+        }
+    }
+
+    /// The caller of apps' extension points (design note 0029) for this store.
+    pub fn extensions(&self) -> crate::extensions::HostExtensions<'_> {
+        crate::extensions::HostExtensions {
+            calls: &self.calls,
+            outbound: self.outbound(),
+            clock: &self.clock,
+            store: self.store,
         }
     }
 }
@@ -395,6 +427,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_core::ActingAs
         + hypha_core::SignalsDispatch
         + hypha_apps::HasApps
+        + hypha_extensions::HasExtensionCalls
         + hypha_search_index::HasSearchQueue
         + hypha_search_index::HasSearchSettings
         + hypha_channels::HasChannels

@@ -1,44 +1,6 @@
-use hypha_core::{CallbackUrl, Sealed, Stamped, Stamps, Version, Versioned, required_text};
+use hypha_core::{AppKey, CallbackUrl, Sealed, Stamped, Stamps, Version, Versioned, required_text};
 
 use crate::AppError;
-
-/// An app's key: `app_` and lowercase letters, digits and underscores, at most 64
-/// characters. It names the app everywhere: deliveries (`app:<key>`), shipping's rate
-/// settings, and later its OAuth client.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct AppKey(String);
-
-impl AppKey {
-    pub const MAX_LEN: usize = 64;
-
-    pub fn new(key: &str) -> Result<Self, AppError> {
-        let valid = key.len() <= Self::MAX_LEN
-            && key.strip_prefix("app_").is_some_and(|name| {
-                let mut chars = name.chars();
-                chars.next().is_some_and(|c| c.is_ascii_lowercase())
-                    && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-            });
-        if !valid {
-            return Err(AppError::InvalidKey(key.to_string()));
-        }
-        Ok(Self(key.to_string()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Its webhook deliveries' destination in the outbox: `app:<key>`.
-    pub fn destination(&self) -> String {
-        format!("app:{}", self.0)
-    }
-}
-
-impl std::fmt::Display for AppKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
 
 /// Which events an app wants: an exact type (`order.paid`), every type of a kind
 /// (`product.*`), or everything (`*`). Types aren't checked against a catalog here
@@ -249,7 +211,7 @@ pub struct AppSnapshot {
 impl App {
     pub fn snapshot(&self) -> AppSnapshot {
         AppSnapshot {
-            key: self.key.0.clone(),
+            key: self.key.as_str().to_string(),
             version: self.version,
             stamps: self.stamps,
             name: self.name.clone(),
@@ -289,21 +251,6 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn keys_are_app_and_a_lowercase_name() {
-        assert!(AppKey::new("app_erp_2").is_ok());
-        for bad in [
-            "erp",
-            "app_",
-            "app_Erp",
-            "app_1erp",
-            "spore_erp",
-            "app_e-rp",
-        ] {
-            assert_eq!(AppKey::new(bad), Err(AppError::InvalidKey(bad.to_string())));
-        }
-    }
 
     #[test]
     fn patterns_match_a_type_a_kind_or_everything() {

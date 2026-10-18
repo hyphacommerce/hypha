@@ -3185,6 +3185,21 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
         assert_eq!(sent["id"], request_id.as_str());
     }
 
+    // Each quote is in the app's call log (design note 0029), for this cart.
+    let (status, calls) = send(&app, "GET", "/admin/apps/app_courier/extension-calls", None).await;
+    assert_eq!(status, StatusCode::OK, "{calls}");
+    let items = calls["items"].as_array().unwrap();
+    assert_eq!(items.len(), seen.lock().unwrap().len());
+    let last = &items[0];
+    assert_eq!(last["point"], "shipping.rates");
+    assert_eq!(last["version"], 1);
+    assert_eq!(last["outcome"], "ok");
+    assert_eq!(last["status"], 200);
+    assert_eq!(last["error"], Value::Null);
+    assert_eq!(last["correlation"], cart["id"]);
+    assert!(last["id"].as_str().unwrap().starts_with("xcall_"));
+    assert!(last["started_at"].is_string() && last["duration_ms"].is_u64());
+
     let select = format!("{cart_path}/shipping/{group}");
     let unknown = json!({"option": format!("shipopt_{}", "0".repeat(32))}).to_string();
     let (status, json) = send_as(&app, &pk, "PUT", &select, Some(&unknown)).await;
@@ -3311,6 +3326,42 @@ async fn a_failing_provider_brings_out_the_backup() {
     let group = &offers["groups"][0];
     assert_eq!(group["offers"][0]["code"], "post");
     assert_eq!(group["unavailable"][0]["reason"], "provider_failed");
+
+    // The failed quote is logged without the transport's details.
+    let (status, calls) = send(&app, "GET", "/admin/apps/app_down/extension-calls", None).await;
+    assert_eq!(status, StatusCode::OK, "{calls}");
+    let call = &calls["items"][0];
+    assert_eq!(
+        (&call["point"], &call["outcome"], &call["status"]),
+        (&json!("shipping.rates"), &json!("failed"), &Value::Null)
+    );
+    assert_eq!(call["error"], "unreachable");
+}
+
+#[tokio::test]
+async fn an_apps_extension_calls_are_listed_for_that_app_only() {
+    let app = app().await;
+    create_app(&app, json!({"key": "app_quiet", "name": "Quiet"})).await;
+    let (status, calls) = send(&app, "GET", "/admin/apps/app_quiet/extension-calls", None).await;
+    assert_eq!(status, StatusCode::OK, "{calls}");
+    assert_eq!(calls["items"], json!([]));
+    assert_eq!(calls["has_more"], false);
+    let (status, json) = send(&app, "GET", "/admin/apps/app_none/extension-calls", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::NOT_FOUND, "app_not_found")
+    );
+    let (status, json) = send(
+        &app,
+        "GET",
+        "/admin/apps/app_quiet/extension-calls?limit=0",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_limit")
+    );
 }
 
 #[tokio::test]

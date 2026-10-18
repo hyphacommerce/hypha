@@ -1273,6 +1273,7 @@
         "type": "object"
       },
       "PostalAddressResponse": {
+        "description": "A postal address as the API writes it. The Admin and Storefront APIs' address\nresponses are this type too, so every channel spells addresses one way.",
         "properties": {
           "city": {
             "type": "string"

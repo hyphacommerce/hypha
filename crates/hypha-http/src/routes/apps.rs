@@ -7,6 +7,7 @@ use hypha_apps::{
     list_apps, list_deliveries, retry_delivery, rotate_app_secret, update_app,
 };
 use hypha_core::{DeliveryId, DeliveryRecord, DeliveryStatus, EventId, HasOutbox, Stamped};
+use hypha_extensions::list_extension_calls;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -367,6 +368,105 @@ pub async fn deliveries<S: Storage>(
         &scope,
         |d| d.event_seq,
         |d| DeliveryResponse::new(&d),
+    )?))
+}
+
+// ---------- extension calls (design note 0029) ----------
+
+/// How an extension call ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[schema(as = ExtensionCallOutcome)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtensionCallOutcomeDto {
+    /// A 2xx whose body was the point's response.
+    Ok,
+    /// No answer (refused, unreachable) or a status other than 2xx.
+    Failed,
+    /// No answer within the timeout.
+    Timeout,
+    /// A 2xx whose body wasn't the point's response, broke its rules, or was too big.
+    Invalid,
+}
+
+impl From<hypha_extensions::CallOutcome> for ExtensionCallOutcomeDto {
+    fn from(o: hypha_extensions::CallOutcome) -> Self {
+        use hypha_extensions::CallOutcome as O;
+        match o {
+            O::Ok => Self::Ok,
+            O::Failed => Self::Failed,
+            O::Timeout => Self::Timeout,
+            O::Invalid => Self::Invalid,
+        }
+    }
+}
+
+/// One call Hypha made to the app's extension point.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ExtensionCallResponse {
+    id: hypha_core::ExtensionCallId,
+    /// The point (`shipping.rates`, `payments.start`, …); `openapi/extensions.json`
+    /// documents each.
+    point: String,
+    version: u16,
+    started_at: String,
+    duration_ms: u32,
+    outcome: ExtensionCallOutcomeDto,
+    /// The answer's HTTP status, when one came.
+    status: Option<u16>,
+    /// Why it wasn't `ok`: the app's own error `code` when it sent one.
+    error: Option<String>,
+    /// What the call was for: the cart, order or payment ID.
+    correlation: Option<String>,
+}
+
+impl ExtensionCallResponse {
+    fn new(c: &hypha_extensions::ExtensionCall) -> Result<Self, ApiError> {
+        Ok(Self {
+            id: c.id,
+            point: c.point.clone(),
+            version: c.version,
+            started_at: rfc3339(c.started_at)?,
+            duration_ms: c.duration_ms,
+            outcome: c.outcome.into(),
+            status: c.status,
+            error: c.error.clone(),
+            correlation: c.correlation.clone(),
+        })
+    }
+}
+
+/// A page of extension calls.
+type ExtensionCallPage = PageResponse<ExtensionCallResponse>;
+
+/// The calls Hypha made to the app's extension points, newest first: what each was for,
+/// how long it took and how it ended. Kept for 30 days unless configured
+/// (`jobs.prune.extension_calls_after`).
+#[utoipa::path(
+    get,
+    path = "/admin/apps/{key}/extension-calls",
+    params(
+        ("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp"),
+        PageParams,
+    ),
+    responses((status = 200, description = "OK", body = ExtensionCallPage)),
+    extensions(("x-hypha-scopes" = json!(["apps:read"]))),
+)]
+pub async fn extension_calls<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(key): PathId<String>,
+    query: ListQuery,
+) -> Result<Json<ExtensionCallPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, _, scope) = query.parse()?;
+    // The app first: an unknown one is `404 app_not_found`, not an empty list.
+    let app = get_app(&ctx, ports.apps(), &key).await?;
+    let page = list_extension_calls(&ctx, &ports, app.key(), page).await?;
+    Ok(Json(PageResponse::new(
+        page,
+        &scope,
+        |c| c.id,
+        |c| ExtensionCallResponse::new(&c),
     )?))
 }
 

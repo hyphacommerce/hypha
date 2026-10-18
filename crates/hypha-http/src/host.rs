@@ -20,7 +20,9 @@ use hypha_notifications::{EmailSender, OutgoingEmail, SendError, Sent};
 use hypha_store_s3::{HttpClient, HttpRequest, HttpResponse};
 use uuid::Uuid;
 
-use crate::outbound::{CallError, OutboundCall, OutboundPolicy, SignedCall, prepare};
+use crate::outbound::{
+    CallError, OutboundAnswer, OutboundCall, OutboundPolicy, SignedCall, prepare,
+};
 use crate::rate_limit::{Decision, RateLimiter, Rule};
 
 /// A boxed future that can move between threads, which a host's capability returns.
@@ -196,27 +198,41 @@ impl RateLimiter for HostLimiter {
 #[derive(Clone)]
 pub struct HostCalls(Arc<SendCall>);
 
-/// How a host sends a call.
-type SendCall = dyn Fn(OutboundCall) -> BoxFuture<Result<Vec<u8>, CallError>> + Send + Sync;
+/// How a host sends a call: the answer whatever its status, or why there's none.
+type SendCall = dyn Fn(OutboundCall) -> BoxFuture<Result<OutboundAnswer, CallError>> + Send + Sync;
 
 impl HostCalls {
     pub fn new(
-        send: impl Fn(OutboundCall) -> BoxFuture<Result<Vec<u8>, CallError>> + Send + Sync + 'static,
+        send: impl Fn(OutboundCall) -> BoxFuture<Result<OutboundAnswer, CallError>>
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self(Arc::new(send))
     }
 
-    pub async fn send(&self, call: OutboundCall) -> Result<Vec<u8>, CallError> {
+    pub async fn send(&self, call: OutboundCall) -> Result<OutboundAnswer, CallError> {
         (self.0)(call).await
     }
 
     /// Signs `call` and checks its URL under `policy` (`outbound::prepare`), then sends
-    /// it: how rate requests and webhooks go out.
+    /// it; the body of a 2xx answer (`OutboundAnswer::into_success`): how webhooks and
+    /// rate services go out.
     pub async fn send_signed(
         &self,
         policy: OutboundPolicy,
         call: SignedCall<'_>,
     ) -> Result<Vec<u8>, CallError> {
+        self.exchange_signed(policy, call).await?.into_success()
+    }
+
+    /// `send_signed`, giving back the answer whatever its status: for extension points,
+    /// which record the status (design note 0029).
+    pub async fn exchange_signed(
+        &self,
+        policy: OutboundPolicy,
+        call: SignedCall<'_>,
+    ) -> Result<OutboundAnswer, CallError> {
         self.send(prepare(policy, call)?).await
     }
 }

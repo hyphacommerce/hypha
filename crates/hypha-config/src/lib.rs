@@ -18,6 +18,7 @@ use hypha_auth::AuthSettings;
 use hypha_categories::CategorySettings;
 use hypha_core::ErrorCode;
 use hypha_dispatch::{DispatchSettings, LONGEST_RUN, RetrySchedule};
+use hypha_extensions::ExtensionSettings;
 use hypha_media::MediaSettings;
 use hypha_notifications::{LONGEST_SEND, SendSettings};
 use hypha_search::SyncSettings;
@@ -46,6 +47,8 @@ pub struct Config {
     pub search_sync: SyncSettings,
     /// The send job's batch, lease and retries (design note 0028, §4).
     pub send_notifications: SendSettings,
+    /// How long the extension call log is kept (design note 0029).
+    pub extensions: ExtensionSettings,
     pub jobs: JobsConfig,
     pub rate_limits: RateLimits,
     /// The file with the environment applied, for `Config::to_toml`.
@@ -690,6 +693,10 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             jobs.send_notifications.interval,
         ),
         ("jobs.prune.sessions_after", jobs.prune.sessions_after),
+        (
+            "jobs.prune.extension_calls_after",
+            jobs.prune.extension_calls_after,
+        ),
         ("jobs.idle_interval", jobs.idle_interval),
     ] {
         p.at_least(key, value, Duration::from_millis(1));
@@ -854,6 +861,9 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             batch: jobs.send_notifications.batch,
             lease: jobs.send_notifications.lease.0,
             retry: jobs.send_notifications.retry.iter().map(|d| d.0).collect(),
+        },
+        extensions: ExtensionSettings {
+            keep_calls: jobs.prune.extension_calls_after.0,
         },
         jobs: JobsConfig {
             idle_interval: jobs.idle_interval.0,

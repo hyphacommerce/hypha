@@ -1,4 +1,4 @@
-use hypha_core::{CallbackUrlError, ErrorCode, TextError};
+use hypha_core::{AppKeyError, CallbackUrlError, ErrorCode, TextError};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -7,8 +7,8 @@ pub enum AppError {
     Text(#[from] TextError),
     #[error(transparent)]
     Url(#[from] CallbackUrlError),
-    #[error("{0:?} is not an app key: \"app_\" and lowercase letters, digits and underscores")]
-    InvalidKey(String),
+    #[error(transparent)]
+    Key(#[from] AppKeyError),
     #[error("a webhook's timeout is {min} to {max} ms")]
     InvalidTimeout { min: u32, max: u32 },
     #[error("{0:?} is not an event type, \"kind.*\" or \"*\"")]
@@ -22,7 +22,7 @@ impl ErrorCode for AppError {
         match self {
             AppError::Text(e) => e.code(),
             AppError::Url(e) => e.code(),
-            AppError::InvalidKey(_) => "invalid_app_key",
+            AppError::Key(e) => e.code(),
             AppError::InvalidTimeout { .. } => "invalid_timeout",
             AppError::InvalidSubscription(_) => "invalid_subscription",
             AppError::TooManySubscriptions { .. } => "too_many_subscriptions",

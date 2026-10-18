@@ -2,8 +2,8 @@
 //! address, a cart's shipping address, the address an order snapshots. The customer
 //! address book has its own DTOs (an ID and default flags beside these fields).
 
-use hypha_core::{Address, AddressParts, CountryCode};
-use serde::{Deserialize, Serialize};
+use hypha_core::AddressParts;
+use serde::Deserialize;
 
 /// Sent: checked by `Address::new` (last name, first line and city required; text is
 /// trimmed, at most 255 characters per field).
@@ -46,34 +46,6 @@ impl From<PostalAddressRequest> for AddressParts {
     }
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct PostalAddressResponse {
-    first_name: Option<String>,
-    last_name: String,
-    company: Option<String>,
-    line1: String,
-    line2: Option<String>,
-    city: String,
-    province: Option<String>,
-    postal_code: Option<String>,
-    country: CountryCode,
-    phone: Option<String>,
-}
-
-impl From<&Address> for PostalAddressResponse {
-    fn from(a: &Address) -> Self {
-        let p = a.parts();
-        Self {
-            first_name: p.first_name.clone(),
-            last_name: p.last_name.clone(),
-            company: p.company.clone(),
-            line1: p.line1.clone(),
-            line2: p.line2.clone(),
-            city: p.city.clone(),
-            province: p.province.clone(),
-            postal_code: p.postal_code.clone(),
-            country: a.country(),
-            phone: p.phone.clone(),
-        }
-    }
-}
+/// Received: the extension points' postal address (`shipping.rates` sends it too), so
+/// the APIs and the calls to apps spell an address one way. Built `From<&Address>`.
+pub type PostalAddressResponse = hypha_extensions::PostalAddress;

@@ -13,7 +13,7 @@ use hypha_notifications::EmailSender;
 use worker::send::SendFuture;
 use worker::{AbortController, Delay, Fetch, Headers, Request, RequestInit};
 
-use crate::platform::{Overflow, read_body};
+use crate::platform::read_body;
 
 /// Builds the sender `config` names, its key read through `env`
 /// (`HYPHA_RESEND_API_KEY`, a Worker secret).
@@ -89,6 +89,6 @@ async fn send(request: HttpRequest, signal: &worker::AbortSignal) -> Result<Http
             .await
             .map_err(|e| e.to_string())?;
     let status = response.status_code();
-    let body = read_body(&mut response, MAX_ANSWER_BYTES, Overflow::Cut).await?;
+    let body = read_body(&mut response, MAX_ANSWER_BYTES).await?;
     Ok(HttpResponse { status, body })
 }

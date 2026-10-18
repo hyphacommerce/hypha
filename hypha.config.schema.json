@@ -57,6 +57,7 @@
         "prune": {
           "enabled": true,
           "events_after": "30d",
+          "extension_calls_after": "30d",
           "idempotency_keys_after": "1d",
           "interval": "1h",
           "sessions_after": "30d"
@@ -385,6 +386,7 @@
           "default": {
             "enabled": true,
             "events_after": "30d",
+            "extension_calls_after": "30d",
             "idempotency_keys_after": "1d",
             "interval": "1h",
             "sessions_after": "30d"
@@ -481,6 +483,11 @@
         },
         "events_after": {
           "description": "How long events, and their deliveries, are kept. At least a day longer than\n`webhooks.give_up_after`, so no delivery is deleted while it's still due.",
+          "$ref": "#/$defs/Duration",
+          "default": "30d"
+        },
+        "extension_calls_after": {
+          "description": "How long the log of calls to apps' extension points is kept (design note 0029).",
           "$ref": "#/$defs/Duration",
           "default": "30d"
         },

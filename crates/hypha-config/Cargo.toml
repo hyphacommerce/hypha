@@ -12,6 +12,7 @@ hypha-dispatch = { path = "../hypha-dispatch" }
 hypha-media = { path = "../hypha-media" }
 hypha-search = { path = "../hypha-search" }
 hypha-notifications = { path = "../hypha-notifications" }
+hypha-extensions = { path = "../hypha-extensions" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

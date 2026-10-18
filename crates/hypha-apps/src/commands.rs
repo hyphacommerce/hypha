@@ -71,7 +71,7 @@ pub async fn create_app<R: AppRepo>(
     input: CreateApp,
 ) -> Result<(App, String), CommandError> {
     ctx.require(Scope::AppsWrite)?;
-    let key = AppKey::new(&input.key)?;
+    let key = AppKey::new(&input.key).map_err(AppError::from)?;
     let webhook = input
         .webhook
         .map(|w| Webhook::new(&w.url, w.timeout_ms))

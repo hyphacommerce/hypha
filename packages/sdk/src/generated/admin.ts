@@ -132,6 +132,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/apps/{key}/extension-calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The calls Hypha made to the app's extension points, newest first: what each was for,
+         *     how long it took and how it ended. Kept for 30 days unless configured
+         *     (`jobs.prune.extension_calls_after`).
+         */
+        get: operations["admin.apps.extension_calls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/apps/{key}/secret": {
         parameters: {
             query?: never;
@@ -2885,6 +2906,50 @@ export interface components {
              */
             version?: number | null;
         };
+        /**
+         * @description A ExtensionCallId: `xcall_` and 32 hex digits.
+         * @example xcall_0190f1a2b3c47d8e9f00112233445566
+         */
+        ExtensionCallId: string;
+        /**
+         * @description How an extension call ended.
+         *
+         *     Known values: `ok`, `failed`, `timeout`, `invalid`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        ExtensionCallOutcome: string;
+        /** @description A page of a list, newest first (design note 0012). */
+        ExtensionCallPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["ExtensionCallResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /** @description One call Hypha made to the app's extension point. */
+        ExtensionCallResponse: {
+            /** @description What the call was for: the cart, order or payment ID. */
+            correlation?: string | null;
+            /** Format: int32 */
+            duration_ms: number;
+            /** @description Why it wasn't `ok`: the app's own error `code` when it sent one. */
+            error?: string | null;
+            id: components["schemas"]["ExtensionCallId"];
+            outcome: components["schemas"]["ExtensionCallOutcome"];
+            /**
+             * @description The point (`shipping.rates`, `payments.start`, …); `openapi/extensions.json`
+             *     documents each.
+             */
+            point: string;
+            started_at: string;
+            /**
+             * Format: int32
+             * @description The answer's HTTP status, when one came.
+             */
+            status?: number | null;
+            /** Format: int32 */
+            version: number;
+        };
         FacetSettingRequest: {
             /** @description `option.<name>`, `vendor`, `product_type` or `tag`. */
             key: string;
@@ -3553,6 +3618,10 @@ export interface components {
             postal_code?: string | null;
             province?: string | null;
         };
+        /**
+         * @description A postal address as the API writes it. The Admin and Storefront APIs' address
+         *     responses are this type too, so every channel spells addresses one way.
+         */
         PostalAddressResponse: {
             city: string;
             company?: string | null;
@@ -5298,6 +5367,88 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.extension_calls": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @example app_erp */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCallPage"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

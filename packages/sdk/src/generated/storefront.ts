@@ -806,6 +806,10 @@ export interface components {
             postal_code?: string | null;
             province?: string | null;
         };
+        /**
+         * @description A postal address as the API writes it. The Admin and Storefront APIs' address
+         *     responses are this type too, so every channel spells addresses one way.
+         */
         PostalAddressResponse: {
             city: string;
             company?: string | null;
