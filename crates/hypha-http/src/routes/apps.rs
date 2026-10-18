@@ -91,7 +91,7 @@ pub struct AppResponse {
 }
 
 impl AppResponse {
-    fn new(app: &App) -> Result<Self, ApiError> {
+    pub(crate) fn new(app: &App) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(app.stamps())?;
         Ok(Self {
             key: app.key().to_string(),

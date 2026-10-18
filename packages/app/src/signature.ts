@@ -79,6 +79,66 @@ export function parseSignatureHeader(
   return { timestamp, signatures };
 }
 
+/**
+ * The header of a forwarded call's context signature (the app proxy and admin blocks,
+ * design note 0029, §8): signed like `Hypha-Signature`, over `contextSigningInput`
+ * instead of the body, so the context (`Hypha-Store`, `Hypha-Staff`, `Hypha-Cart`, …)
+ * can't be changed in transit.
+ */
+export const CONTEXT_SIGNATURE_HEADER = "Hypha-Context-Signature";
+
+/**
+ * What the context signature signs: `"<METHOD>\n"`, then `"<name>:<value>\n"` for every
+ * `Hypha-*` header except the two signatures, names lowercased, sorted by name.
+ */
+export function contextSigningInput(method: string, headers: Headers): string {
+  const lines: [string, string][] = [];
+  headers.forEach((value, name) => {
+    const lower = name.toLowerCase();
+    if (
+      lower.startsWith("hypha-") &&
+      lower !== SIGNATURE_HEADER.toLowerCase() &&
+      lower !== CONTEXT_SIGNATURE_HEADER.toLowerCase()
+    )
+      lines.push([lower, value]);
+  });
+  lines.sort(([a, x], [b, y]) => (a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0));
+  return `${method.toUpperCase()}\n${lines.map(([n, v]) => `${n}:${v}\n`).join("")}`;
+}
+
+/** Whether a forwarded call's `Hypha-Context-Signature` signs its method and context. */
+export async function verifyContextSignature(
+  secret: string,
+  method: string,
+  headers: Headers,
+  options: VerifyOptions = {},
+): Promise<boolean> {
+  return verifySignature(
+    secret,
+    headers.get(CONTEXT_SIGNATURE_HEADER),
+    contextSigningInput(method, headers),
+    options,
+  );
+}
+
+/**
+ * Whether a call Hypha forwarded (through the app proxy, or a block fetch) is signed:
+ * the body by `Hypha-Signature`, the context by `Hypha-Context-Signature`. Pass the
+ * body exactly as received.
+ */
+export async function verifyForwardedRequest(
+  secret: string,
+  request: { method: string; headers: Headers },
+  rawBody: Body,
+  options: VerifyOptions = {},
+): Promise<boolean> {
+  const [body, context] = await Promise.all([
+    verifySignature(secret, request.headers.get(SIGNATURE_HEADER), rawBody, options),
+    verifyContextSignature(secret, request.method, request.headers, options),
+  ]);
+  return body && context;
+}
+
 async function digest(secret: string, timestamp: number, body: Body): Promise<string> {
   return toHex(await hmacSha256(secret, concat(utf8(`${timestamp}.`), bodyBytes(body))));
 }

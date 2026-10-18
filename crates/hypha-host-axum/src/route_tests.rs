@@ -39,6 +39,7 @@ use crate::platform::{Background, UuidV7Ids};
 use crate::storage::{PgDatabase, PgStorage};
 
 // Apps installed through OAuth, and personal data (design note 0029).
+mod app_extensions;
 mod oauth;
 
 const OWNER_EMAIL: &str = "owner@example.com";

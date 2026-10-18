@@ -68,12 +68,12 @@ async fn local_app(scopes: &[&str]) -> (String, Received) {
     (base, received)
 }
 
-async fn oauth_app() -> TestApp {
+pub(super) async fn oauth_app() -> TestApp {
     app_configured("[server]\nadmin_url = \"http://admin.test\"").await
 }
 
 /// A request with no credentials; the status, the `Location` and the JSON body.
-async fn raw(
+pub(super) async fn raw(
     app: &TestApp,
     method: &str,
     uri: &str,
@@ -101,7 +101,7 @@ async fn raw(
     )
 }
 
-fn query_param(url: &str, name: &str) -> Option<String> {
+pub(super) fn query_param(url: &str, name: &str) -> Option<String> {
     url::Url::parse(url)
         .unwrap()
         .query_pairs()
@@ -109,7 +109,7 @@ fn query_param(url: &str, name: &str) -> Option<String> {
         .map(|(_, v)| v.into_owned())
 }
 
-fn encode(pairs: &[(&str, &str)]) -> String {
+pub(super) fn encode(pairs: &[(&str, &str)]) -> String {
     url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(pairs)
         .finish()
@@ -133,7 +133,7 @@ fn authorize_uri(base: &str, scope: Option<&str>) -> String {
 
 /// `/oauth/authorize`, the consent (approved by the owner) and the code exchange:
 /// the token response.
-async fn install(app: &TestApp, base: &str, scope: Option<&str>) -> Value {
+pub(super) async fn install(app: &TestApp, base: &str, scope: Option<&str>) -> Value {
     let (status, location, body) = raw(app, "GET", &authorize_uri(base, scope), None).await;
     assert_eq!(status, StatusCode::FOUND, "{body}");
     let location = location.unwrap();

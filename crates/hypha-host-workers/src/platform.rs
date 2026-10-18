@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 use futures_util::future::{Either, select};
 use hypha_core::{Clock, IdGenerator, Timestamp};
 use hypha_http::host::{HostCalls, HostClock, HostHttp, HostIds, HostRandom, Offload};
-use hypha_http::outbound::{CallError, MAX_ANSWER_BYTES, Method, OutboundAnswer, OutboundCall};
+use hypha_http::outbound::{CallError, Method, OutboundAnswer, OutboundCall};
 use hypha_http::state::Runtime;
 use hypha_store_s3::{HttpRequest, HttpResponse};
 use uuid::Uuid;
@@ -76,6 +76,9 @@ async fn send_call(call: OutboundCall) -> Result<OutboundAnswer, CallError> {
     let method = match call.method {
         Method::Get => worker::Method::Get,
         Method::Post => worker::Method::Post,
+        Method::Put => worker::Method::Put,
+        Method::Patch => worker::Method::Patch,
+        Method::Delete => worker::Method::Delete,
     };
     let headers = Headers::new();
     for (name, value) in &call.headers {
@@ -103,23 +106,30 @@ async fn send_call(call: OutboundCall) -> Result<OutboundAnswer, CallError> {
             failed("unreachable")
         })?;
         let status = response.status_code();
+        let content_type = response.headers().get("content-type").ok().flatten();
         if call.discard_answer {
             return Ok(OutboundAnswer {
                 status,
                 body: Vec::new(),
+                content_type,
             });
         }
         // One byte past the cap tells a 2xx that's too long; another status's body only
         // names an error, so it's cut at the cap.
-        let body = read_body(&mut response, MAX_ANSWER_BYTES + 1)
+        let max = call.max_answer;
+        let body = read_body(&mut response, max + 1)
             .await
             .map_err(CallError::Failed)?;
-        let body = match body.len() > MAX_ANSWER_BYTES {
+        let body = match body.len() > max {
             false => body,
             true if (200..300).contains(&status) => return Err(CallError::TooLarge),
             true => Vec::new(),
         };
-        Ok(OutboundAnswer { status, body })
+        Ok(OutboundAnswer {
+            status,
+            body,
+            content_type,
+        })
     };
     // The whole call, answer included, gets `timeout`; then it's aborted.
     match select(pin!(answer), pin!(Delay::from(call.timeout))).await {

@@ -312,7 +312,9 @@ pub fn document(doc: Doc) -> OpenApi {
         }
         add_standard_errors(&mut op, &row, secured);
         (row.schemas)(&mut schemas);
-        paths.add_path_operation(row.path, vec![http_method(row.method)], op);
+        // A catch-all (`{*path}`, the app proxy) is a plain parameter in OpenAPI.
+        let path = row.path.replace("{*", "{");
+        paths.add_path_operation(path, vec![http_method(row.method)], op);
     }
     // One schema per name; `tests::schema_names_are_unique` checks two types never
     // share one.
@@ -466,6 +468,9 @@ fn points() -> Vec<PointDoc> {
         PointDoc::of::<x::PaymentsRefund>("Refund some or all of a captured payment (staff)."),
         PointDoc::of::<x::SearchQuery>(
             "Answer a storefront search with product and variant IDs in order.",
+        ),
+        PointDoc::of::<x::RunAdminAction>(
+            "Run one of the app's admin actions, pressed by staff (design note 0029, §6.1).",
         ),
     ]
 }
@@ -824,6 +829,7 @@ mod tests {
         assert_eq!(
             webhooks.keys().map(String::as_str).collect::<Vec<_>>(),
             [
+                "admin.action",
                 "payments.capture",
                 "payments.refund",
                 "payments.start",

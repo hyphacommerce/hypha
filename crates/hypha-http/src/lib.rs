@@ -27,6 +27,7 @@ pub mod rate_limit;
 pub mod redact;
 pub mod routes;
 pub mod search_app;
+pub mod session_token;
 pub mod shipping;
 pub mod state;
 pub mod webhooks;

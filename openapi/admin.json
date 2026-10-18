@@ -36,6 +36,71 @@
         ],
         "type": "object"
       },
+      "ActionExtension": {
+        "description": "A button: run it with `POST /admin/app-extensions/actions/{app}/{id}`.",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_schema": {
+            "description": "A JSON Schema for a form to show before running it, when it takes input.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "point": {
+            "description": "The extension point it stands for (`payments.capture`), when it names one\ninstead of a URL: run it through that point's route (capturing the payment),\nnot the actions route.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/AdminTarget"
+          }
+        },
+        "required": [
+          "app",
+          "id",
+          "label",
+          "target"
+        ],
+        "type": "object"
+      },
+      "ActionResultResponse": {
+        "description": "What the app answered.",
+        "properties": {
+          "message": {
+            "description": "Plain text to show (a toast).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "navigate": {
+            "description": "A path within the app's page to go to.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refresh": {
+            "description": "Reload what the action was pressed on.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "refresh"
+        ],
+        "type": "object"
+      },
       "AddCountryRequest": {
         "additionalProperties": false,
         "properties": {
@@ -296,6 +361,50 @@
         ],
         "type": "object"
       },
+      "AdminExtensionsResponse": {
+        "description": "Every installed app's admin contributions to a target.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ActionExtension"
+            },
+            "type": "array"
+          },
+          "apps": {
+            "description": "The apps below, by key.",
+            "items": {
+              "$ref": "#/components/schemas/ExtensionApp"
+            },
+            "type": "array"
+          },
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/BlockExtension"
+            },
+            "type": "array"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/PageExtension"
+            },
+            "type": "array"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/SettingsExtension"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "apps",
+          "pages",
+          "blocks",
+          "actions",
+          "settings"
+        ],
+        "type": "object"
+      },
       "AdminOrderResponse": {
         "allOf": [
           {
@@ -344,6 +453,21 @@
           }
         ],
         "description": "An order as the admin sees it: with its cancellation and what's left to ship, by\nlocation. A storefront's `OrderResponse` has neither: why staff cancelled an order\n(`fraud`) is theirs to know."
+      },
+      "AdminTarget": {
+        "description": "An admin target (design note 0029, §5): a slot any admin may implement.\n\nKnown values: `apps.page`, `settings.app`, `order.details`, `order.payment`, `order.fulfillment`, `product.details`, `customer.details`, `payment`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "apps.page",
+          "settings.app",
+          "order.details",
+          "order.payment",
+          "order.fulfillment",
+          "product.details",
+          "customer.details",
+          "payment"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "ApiKeyId": {
         "description": "A ApiKeyId: `key_` and 32 hex digits.",
@@ -887,6 +1011,56 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "BlockExtension": {
+        "description": "A declarative block: fetch its tree from\n`GET /admin/app-extensions/blocks/{app}/{id}` with the target's context.",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/AdminTarget"
+          },
+          "url": {
+            "description": "The app's own URL for it (Hypha fetches it; frontends use the blocks route).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "id",
+          "target",
+          "url"
+        ],
+        "type": "object"
+      },
+      "BlockResponse": {
+        "description": "A block's UI tree, checked against the block format v1\n(`packages/app-blocks/schema/block.v1.json`).",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/AdminTarget"
+          },
+          "tree": {
+            "description": "`{version: 1, root}`: render it with your own components (`@hypha/app-blocks`\nfor React). Elements of types newer than v1 may appear: skip them.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "app",
+          "id",
+          "target",
+          "tree"
+        ],
+        "type": "object"
       },
       "CancelOrderRequest": {
         "additionalProperties": false,
@@ -2778,6 +2952,30 @@
         ],
         "type": "object"
       },
+      "ExtensionApp": {
+        "description": "An app that contributes, for labels.",
+        "properties": {
+          "icon": {
+            "description": "A square image's URL.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "description": "`app_<name>`.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ],
+        "type": "object"
+      },
       "ExtensionCallId": {
         "description": "A ExtensionCallId: `xcall_` and 32 hex digits.",
         "examples": [
@@ -2882,6 +3080,73 @@
           "duration_ms",
           "outcome"
         ],
+        "type": "object"
+      },
+      "ExtensionContextDto": {
+        "additionalProperties": false,
+        "description": "The objects a block or action is used on (checked against its target: an order\nblock needs `order_id`, and takes no `product_id`).",
+        "properties": {
+          "cart_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CartId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customer_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomerId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fulfillment_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FulfillmentId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "product_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "type": "object"
       },
       "ExtensionEndpointDto": {
@@ -4830,6 +5095,58 @@
         ],
         "type": "object"
       },
+      "OriginsResponse": {
+        "description": "The origins an app's embedded pages may be framed by.",
+        "properties": {
+          "origins": {
+            "description": "`scheme://host[:port]`: set `Content-Security-Policy: frame-ancestors` to these.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "origins"
+        ],
+        "type": "object"
+      },
+      "PageExtension": {
+        "description": "An embedded page: load `url` in a sandboxed iframe with the bridge\n(`docs/apps/bridge.md`).",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "nav": {
+            "description": "Where an admin lists it (`apps`, `settings`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/AdminTarget"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "description": "Absolute: the iframe's `src`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "id",
+          "title",
+          "url",
+          "target"
+        ],
+        "type": "object"
+      },
       "PasswordResetRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5821,6 +6138,48 @@
         ],
         "type": "object"
       },
+      "RefreshResponse": {
+        "properties": {
+          "app": {
+            "$ref": "#/components/schemas/AppResponse"
+          },
+          "consent_url": {
+            "description": "With `consent_required`: the admin's consent page for it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OAuthRequestId",
+                "description": "With `consent_required`: the authorization request staff answer."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/RefreshStatus"
+          }
+        },
+        "required": [
+          "status",
+          "app"
+        ],
+        "type": "object"
+      },
+      "RefreshStatus": {
+        "description": "Whether a refresh needs staff.\n\nKnown values: `updated`, `consent_required`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "updated",
+          "consent_required"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "RefundRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5970,6 +6329,23 @@
           "owner",
           "scopes"
         ],
+        "type": "object"
+      },
+      "RunActionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ExtensionContextDto",
+            "description": "The objects it was pressed on."
+          },
+          "input": {
+            "description": "The form's values when the action has an `input_schema`: an object, passed to\nthe app as is (the app checks it).",
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "SaveNotificationTemplateRequest": {
@@ -6245,6 +6621,24 @@
         ],
         "type": "object"
       },
+      "SessionTokenResponse": {
+        "description": "A session token for an app's embedded page.",
+        "properties": {
+          "expires_at": {
+            "description": "A minute from now (RFC 3339): ask for a new one per call.",
+            "type": "string"
+          },
+          "token": {
+            "description": "A JWT (HS256, the app's secret): pass it to the app through the bridge's\n`session_token` answer. The app verifies it with `@hypha/app`'s\n`verifySessionToken` (`docs/apps/bridge.md`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "SetClassRateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6462,6 +6856,35 @@
         },
         "required": [
           "variants"
+        ],
+        "type": "object"
+      },
+      "SettingsExtension": {
+        "description": "An app's settings form (§6.1): render the JSON Schema, save through the admin proxy.",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "proxy": {
+            "description": "Whether the app has an admin proxy to save to.",
+            "type": "boolean"
+          },
+          "schema": {
+            "type": "object"
+          },
+          "secret_fields": {
+            "description": "Fields to show masked and never echo back.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "app",
+          "schema",
+          "secret_fields",
+          "proxy"
         ],
         "type": "object"
       },
@@ -8316,6 +8739,542 @@
         ]
       }
     },
+    "/admin/app-extensions": {
+      "get": {
+        "operationId": "admin.app_extensions.list_admin",
+        "parameters": [
+          {
+            "description": "Only this target's contributions; every admin target's when absent.",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/AdminTarget"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminExtensionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What installed apps add to an admin (design note 0029, §6), for `target` or every\nadmin target: embedded pages, declarative blocks, actions and settings forms. Only\napps installed through OAuth and enabled contribute, and only where their grant\nreads the target's object (`orders:read` for order targets, …).",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      }
+    },
+    "/admin/app-extensions/actions/{app}/{id}": {
+      "post": {
+        "operationId": "admin.app_extensions.run_action",
+        "parameters": [
+          {
+            "example": "app_stripe",
+            "in": "path",
+            "name": "app",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "example": "capture",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionResultResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Runs an app's admin action (design note 0029, §6.1): Hypha calls the action's URL\n(`admin.action` v1, `openapi/extensions.json`; in the app's call log) and returns\nthe app's answer. 502 `app_unavailable` when the app fails or answers something\nelse. The caller needs `apps:read` and to read the target's object; an action that\nnames an extension point is `409 app_action_has_point`.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      }
+    },
+    "/admin/app-extensions/blocks/{app}/{id}": {
+      "get": {
+        "operationId": "admin.app_extensions.fetch_block",
+        "parameters": [
+          {
+            "example": "app_stripe",
+            "in": "path",
+            "name": "app",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "example": "payment",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order_id",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "payment_id",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fulfillment_id",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/FulfillmentId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "product_id",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customer_id",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cart_id",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "An app's block for the objects in the query (design note 0029, §6.2): Hypha fetches\nthe block's URL from the app (a signed `GET` with the context in the query and in\n`Hypha-*` headers, and a session token in `Authorization` for staff), checks the\ntree, and returns it; nothing is cached. 502 `app_unavailable` when the app fails or\nanswers something that isn't a v1 tree (the call log says which).",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      }
+    },
+    "/admin/app-extensions/origins": {
+      "get": {
+        "operationId": "admin.app_extensions.origins",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OriginsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The store's admin origins, from configuration (`server.admin_url`), for an app's\n`frame-ancestors` (design note 0029, §6.3). Any admin caller, an app's token\nincluded.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": []
+      }
+    },
+    "/admin/app-extensions/{app}/session": {
+      "post": {
+        "operationId": "admin.app_extensions.session",
+        "parameters": [
+          {
+            "example": "app_stripe",
+            "in": "path",
+            "name": "app",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokenResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A staff member's session token for an installed app (design note 0029, §6.3): its\nclaims are the API's base URL (`iss`), the app (`aud`), the staff member (`sub`), the\nstore, and the app's scopes as far as the staff member holds them (`scope`). Staff\nsessions only (API keys: `401 session_required`).",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      }
+    },
     "/admin/apps": {
       "get": {
         "operationId": "admin.apps.list",
@@ -9541,6 +10500,659 @@
         "summary": "Narrows an installed app's grant (design note 0029, §4.1): the scopes left out stop\nworking at once, for tokens held already too, and the app is sent\n`app.grant_changed`. Adding a scope takes a new authorization staff approve\n(`grant_not_narrower`, 422); an app that isn't installed is `app_not_installed`, 409.",
         "tags": [
           "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      }
+    },
+    "/admin/apps/{key}/proxy/{path}": {
+      "delete": {
+        "operationId": "admin.app_extensions.admin_proxy_delete",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Forwards a `DELETE` to the app's admin proxy, as `POST` does.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      },
+      "get": {
+        "operationId": "admin.app_extensions.admin_proxy_get",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Forwards a `GET` to the app's admin proxy (design note 0029, §8), signed, with `Hypha-Store`, `Hypha-Staff` (staff sessions), `Hypha-Scopes`, `Hypha-Path` and a session token in `Authorization` for staff.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.app_extensions.admin_proxy_patch",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Forwards a `PATCH` to the app's admin proxy, as `POST` does.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.app_extensions.admin_proxy_post",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Forwards a `POST` (any content type, at most 1 MiB) to the app's admin proxy, as `GET` does.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      },
+      "put": {
+        "operationId": "admin.app_extensions.admin_proxy_put",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Forwards a `PUT` to the app's admin proxy, as `POST` does.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      }
+    },
+    "/admin/apps/{key}/refresh": {
+      "post": {
+        "operationId": "admin.app_extensions.refresh",
+        "parameters": [
+          {
+            "example": "app_erp",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Fetches an installed app's manifest again (design note 0029, §4.2) and applies its\nregistrations (webhooks, UI). Scopes it no longer asks for leave the grant at once;\nnew ones make an authorization request staff approve (`consent_required`): approving\nwidens the grant, and the app then gets tokens with them from `/oauth/authorize`\nwithout asking again. Staff with `apps:write`, or the app itself with its token.\n`manifest_unreachable` / `manifest_invalid` (422) when the manifest can't be used;\n`app_not_installed` (409) for an app not installed through OAuth.",
+        "tags": [
+          "app_extensions"
         ],
         "x-hypha-scopes": [
           "apps:write"

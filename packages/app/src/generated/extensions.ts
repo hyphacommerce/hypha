@@ -3,6 +3,26 @@
 
 export type paths = Record<string, never>;
 export interface webhooks {
+    "admin.action": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run one of the app's admin actions, pressed by staff (design note 0029, §6.1).
+         * @description `POST` to the URL the app registered for `admin.action` v1. Answer within 10000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         */
+        post: operations["admin.action.v1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "payments.capture": {
         parameters: {
             query?: never;
@@ -127,6 +147,54 @@ export interface webhooks {
 export interface components {
     schemas: {
         /**
+         * @description The objects the action was pressed on, as the admin passed them (checked against
+         *     the action's target).
+         */
+        AdminActionContext: {
+            cart_id?: components["schemas"]["CartId"] | null;
+            customer_id?: components["schemas"]["CustomerId"] | null;
+            fulfillment_id?: components["schemas"]["FulfillmentId"] | null;
+            order_id?: components["schemas"]["OrderId"] | null;
+            payment_id?: components["schemas"]["PaymentId"] | null;
+            product_id?: components["schemas"]["ProductId"] | null;
+        };
+        /** @description What Hypha sends: `POST <the action's url>`. */
+        AdminActionRequest: {
+            /** @description The action's `id` in the manifest. */
+            action: string;
+            context: components["schemas"]["AdminActionContext"];
+            /**
+             * @description The form's values when the action has an `input_schema` (an object), as the
+             *     admin sent them: check them against the schema.
+             */
+            input?: Record<string, never> | null;
+            /**
+             * @description The app's scopes as far as the caller holds them, space-separated: what the
+             *     caller may have the app do for them.
+             */
+            scope: string;
+            staff?: components["schemas"]["UserId"] | null;
+            /** @description Where it was pressed (`order.payment`, `payment`, …). */
+            target: string;
+        };
+        /**
+         * @description What the app answers: what the admin shows next. Every field is optional; `{}` is
+         *     a plain success.
+         */
+        AdminActionResponse: {
+            /** @description Plain text to show (a toast), 1 to 500 characters. */
+            message?: string | null;
+            /** @description A path within the app's page to go to (`/orders/ord_…`). */
+            navigate?: string | null;
+            /** @description Whether the admin should reload what the action was pressed on. */
+            refresh?: boolean;
+        };
+        /**
+         * @description A CartId: `cart_` and 32 hex digits.
+         * @example cart_0190f1a2b3c47d8e9f00112233445566
+         */
+        CartId: string;
+        /**
          * @description A CategoryId: `pcat_` and 32 hex digits.
          * @example pcat_0190f1a2b3c47d8e9f00112233445566
          */
@@ -147,11 +215,21 @@ export interface components {
          */
         Currency: string;
         /**
+         * @description A CustomerId: `cus_` and 32 hex digits.
+         * @example cus_0190f1a2b3c47d8e9f00112233445566
+         */
+        CustomerId: string;
+        /**
          * Format: email
          * @description An email address; stored trimmed and lowercased, so responses show it that way.
          * @example ana@example.com
          */
         Email: string;
+        /**
+         * @description A FulfillmentId: `ful_` and 32 hex digits.
+         * @example ful_0190f1a2b3c47d8e9f00112233445566
+         */
+        FulfillmentId: string;
         /**
          * @description A MarketId: `mkt_` and 32 hex digits.
          * @example mkt_0190f1a2b3c47d8e9f00112233445566
@@ -450,6 +528,11 @@ export interface components {
          */
         SearchSort: "relevance" | "newest" | "price_asc" | "price_desc" | "title";
         /**
+         * @description A UserId: `user_` and 32 hex digits.
+         * @example user_0190f1a2b3c47d8e9f00112233445566
+         */
+        UserId: string;
+        /**
          * @description A VariantId: `var_` and 32 hex digits.
          * @example var_0190f1a2b3c47d8e9f00112233445566
          */
@@ -463,6 +546,48 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "admin.action.v1": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old. */
+                "Hypha-Signature": string;
+                /** @description The point's name, as this operation's. */
+                "Hypha-Extension": string;
+                /** @description The point's version. */
+                "Hypha-Extension-Version": string;
+                /** @description The same for every retry of one piece of work: answer a repeat as the first. */
+                "Idempotency-Key": string;
+                /** @description The store the call is for (`store_…`). */
+                "Hypha-Store": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminActionRequest"];
+            };
+        };
+        responses: {
+            /** @description The answer (any 2xx). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminActionResponse"];
+                };
+            };
+            /** @description A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     "payments.capture.v1": {
         parameters: {
             query?: never;
@@ -719,6 +844,11 @@ export interface operations {
 
 /** Each point's newest version and bodies. */
 export interface ExtensionPoints {
+  "admin.action": {
+    version: 1;
+    request: NonNullable<webhooks["admin.action"]["post"]["requestBody"]>["content"]["application/json"];
+    response: webhooks["admin.action"]["post"]["responses"][200]["content"]["application/json"];
+  };
   "payments.capture": {
     version: 1;
     request: NonNullable<webhooks["payments.capture"]["post"]["requestBody"]>["content"]["application/json"];

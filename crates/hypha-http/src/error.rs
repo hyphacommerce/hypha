@@ -199,6 +199,25 @@ impl ApiError {
         self.code
     }
 
+    /// An app proxy path with a segment that would climb out of the app's proxy URL
+    /// (`.`, `..`, in any encoding) or a backslash (design note 0029, §8).
+    pub fn invalid_proxy_path() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_proxy_path",
+            "the proxied path has a `.` or `..` segment or a backslash",
+        )
+    }
+
+    /// `X-Hypha-Cart` that isn't a cart ID (the app proxy, design note 0029, §8).
+    pub fn invalid_cart_header() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cart_header",
+            "X-Hypha-Cart is a cart ID (`cart_…`)",
+        )
+    }
+
     /// A query string that doesn't parse, or has parameters the route doesn't take.
     pub fn invalid_query(message: impl std::fmt::Display) -> Self {
         Self::new(
@@ -1073,10 +1092,13 @@ impl From<hypha_apps::CommandError> for ApiError {
             // Apps, deliveries and events only ever arrive in URLs (a malformed key in
             // one is `AppNotFound` too); a new app's key in a body is a conflict when
             // taken, and malformed is `App(Key(_))`, 422.
-            E::AppNotFound(_) | E::DeliveryNotFound { .. } | E::EventNotFound(_) => {
-                StatusCode::NOT_FOUND
-            }
-            E::AppExists(_) => StatusCode::CONFLICT,
+            E::AppNotFound(_)
+            | E::DeliveryNotFound { .. }
+            | E::EventNotFound(_)
+            | E::ExtensionNotFound { .. }
+            | E::ProxyNotFound(_) => StatusCode::NOT_FOUND,
+            E::AppExists(_) | E::ActionHasPoint { .. } => StatusCode::CONFLICT,
+            E::InvalidContext(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::App(inner) => return Self::from_app(inner.clone()),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
@@ -1141,6 +1163,10 @@ impl From<hypha_oauth::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) | E::CannotGrant(_) => StatusCode::FORBIDDEN,
             E::App(inner) => return Self::from_app(inner.clone()),
+            // Refreshing (§15: 422 with `details.errors` when invalid).
+            E::Manifest(inner) => {
+                return Self::manifest(StatusCode::UNPROCESSABLE_ENTITY, inner.clone());
+            }
             E::InvalidToken => return hypha_auth::CommandError::InvalidToken.into(),
             // Requests and apps only arrive in URLs.
             E::AppNotFound(_) | E::RequestNotFound(_) => StatusCode::NOT_FOUND,

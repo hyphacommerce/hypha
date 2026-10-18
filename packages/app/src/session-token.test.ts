@@ -29,6 +29,15 @@ test("verifies a token and splits its scopes", async () => {
   });
 });
 
+test("agrees byte for byte with the token Hypha signs for these claims", async () => {
+  // The vector of crates/hypha-http/src/session_token.rs's tests.
+  const fromHypha =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2FwaS5zaG9wLmV4YW1wbGUiLCJhdWQiOiJhcHBfc3RyaXBlIiwic3ViIjoidXNlcl8xIiwic3RvcmUiOiJzdG9yZV8xIiwic2NvcGUiOiJwYXltZW50czp3cml0ZSBvcmRlcnM6cmVhZCIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAwMDYwLCJqdGkiOiJqMSJ9.yFiKBURN3H-Uakt1ODF8mCu9C-ZMY30pFXFeflc0pv4";
+  assert.equal(await signSessionToken(claims, SECRET), fromHypha);
+  const verified = await verifySessionToken(fromHypha, SECRET, { audience: "app_stripe", now });
+  assert.deepEqual(verified.scopes, ["payments:write", "orders:read"]);
+});
+
 test("matches an HS256 JWT made elsewhere", async () => {
   // Built by hand the way any JWT library does: base64url(header).base64url(payload).
   const header = toBase64Url(utf8('{"typ":"JWT","alg":"HS256"}'));

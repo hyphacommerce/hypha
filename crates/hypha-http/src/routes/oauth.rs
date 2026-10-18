@@ -397,7 +397,7 @@ pub struct ServerMetadata {
 
 /// The API's own base URL, as the request reached it: `X-Forwarded-Proto` (from a proxy
 /// that ends TLS) or `https`, except `http` for a local host.
-fn issuer(headers: &HeaderMap) -> String {
+pub(crate) fn issuer(headers: &HeaderMap) -> String {
     let host = headers
         .get("x-forwarded-host")
         .or_else(|| headers.get(HOST))

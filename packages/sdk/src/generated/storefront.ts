@@ -2,6 +2,47 @@
 // run `pnpm sdk:generate` after `cargo run -p hypha-host-axum -- openapi`.
 
 export interface paths {
+    "/storefront/app-extensions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What installed apps add to a storefront (design note 0029, §7): elements for
+         *     `target` (or every storefront target), and which apps have a proxy.
+         */
+        get: operations["storefront.app_extensions.list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/apps/{key}/proxy/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Forwards a `GET` to the app's storefront proxy (design note 0029, §8), signed, with `Hypha-Store`, `Hypha-Channel` and `Hypha-Path`; with an `X-Hypha-Cart: cart_…` header (a cart of the key's channel), also `Hypha-Cart`, `Hypha-Country` and `Hypha-Customer` (when the cart has one). No personal data is forwarded. */
+        get: operations["storefront.app_extensions.storefront_proxy_get"];
+        /** Forwards a `PUT` to the app's storefront proxy, as `POST` does. */
+        put: operations["storefront.app_extensions.storefront_proxy_put"];
+        /** Forwards a `POST` (any content type, at most 1 MiB) to the app's storefront proxy, as `GET` does. */
+        post: operations["storefront.app_extensions.storefront_proxy_post"];
+        /** Forwards a `DELETE` to the app's storefront proxy, as `POST` does. */
+        delete: operations["storefront.app_extensions.storefront_proxy_delete"];
+        options?: never;
+        head?: never;
+        /** Forwards a `PATCH` to the app's storefront proxy, as `POST` does. */
+        patch: operations["storefront.app_extensions.storefront_proxy_patch"];
+        trace?: never;
+    };
     "/storefront/carts": {
         parameters: {
             query?: never;
@@ -530,6 +571,19 @@ export interface components {
             /** Format: int32 */
             min_days: number;
         };
+        /** @description A web component an app adds to a storefront (`docs/apps/elements.md`). */
+        ElementExtension: {
+            app: string;
+            id: string;
+            /**
+             * @description The ES module that defines it: an absolute URL (`https://`, or `http://localhost`
+             *     in development). List its origin in the storefront's `script-src`.
+             */
+            module: string;
+            /** @description The custom element's tag (`stripe-payment`). */
+            tag: string;
+            target: components["schemas"]["StorefrontTarget"];
+        };
         /**
          * Format: email
          * @description An email address; stored trimmed and lowercased, so responses show it that way.
@@ -907,6 +961,10 @@ export interface components {
             /** Format: int32 */
             width?: number | null;
         };
+        /** @description An app with a storefront proxy (`/storefront/apps/{app}/proxy/…`). */
+        ProxyExtension: {
+            app: string;
+        };
         /**
          * @description One result: a listing, a product or a variant (the request's `group`), shown by
          *     its best match.
@@ -1072,6 +1130,11 @@ export interface components {
             name: string;
             prices_include_tax: boolean;
         };
+        StorefrontExtensionsResponse: {
+            elements: components["schemas"]["ElementExtension"][];
+            /** @description The apps a storefront may call through the app proxy. */
+            proxies: components["schemas"]["ProxyExtension"][];
+        };
         /**
          * @description A product as a storefront sees it (design note 0010, S5): active products only, without
          *     admin fields. A draft or archived product is `404 product_not_found`, the same as one
@@ -1118,6 +1181,13 @@ export interface components {
             description?: string | null;
             name: string;
         };
+        /**
+         * @description A storefront target (design note 0029, §5).
+         *
+         *     Known values: `checkout.payment`, `product.block`, `cart.block`, `order.confirmation`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        StorefrontTarget: string;
         StorefrontVariantResponse: {
             /**
              * @description Whether one can be bought now (in stock, or stock isn't tracked); `null` where
@@ -1178,6 +1248,501 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "storefront.app_extensions.list": {
+        parameters: {
+            query?: {
+                /** @description Only this target's elements; every storefront target's when absent. */
+                target?: components["schemas"]["StorefrontTarget"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorefrontExtensionsResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.app_extensions.storefront_proxy_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_reviews */
+                key: string;
+                /**
+                 * @description The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.
+                 * @example settings
+                 */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: "proxy"}`) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.app_extensions.storefront_proxy_put": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_reviews */
+                key: string;
+                /**
+                 * @description The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.
+                 * @example settings
+                 */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: "proxy"}`) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.app_extensions.storefront_proxy_post": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_reviews */
+                key: string;
+                /**
+                 * @description The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.
+                 * @example settings
+                 */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: "proxy"}`) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.app_extensions.storefront_proxy_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_reviews */
+                key: string;
+                /**
+                 * @description The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.
+                 * @example settings
+                 */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: "proxy"}`) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.app_extensions.storefront_proxy_patch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_reviews */
+                key: string;
+                /**
+                 * @description The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.
+                 * @example settings
+                 */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: "proxy"}`) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "storefront.carts.create": {
         parameters: {
             query?: never;

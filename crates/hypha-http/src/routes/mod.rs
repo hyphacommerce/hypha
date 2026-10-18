@@ -5,6 +5,7 @@ pub(crate) mod address;
 // Handlers and their request and response types are `pub` so a host's router (`router!`,
 // expanded in its crate) can name them; the types' fields stay private.
 pub mod api_keys;
+pub mod app_extensions;
 pub mod apps;
 pub mod assets;
 pub mod auth;
@@ -225,6 +226,18 @@ macro_rules! route_table {
             [admin, GET, "/admin/oauth/requests/{id}", oauth::fetch_request],
             [admin, POST, "/admin/oauth/requests/{id}/approve", oauth::approve_request],
             [admin, POST, "/admin/oauth/requests/{id}/deny", oauth::deny_request],
+            [admin, POST, "/admin/apps/{key}/refresh", app_extensions::refresh],
+            // app UI in any admin and storefront, the app proxy (design note 0029, §5-§8)
+            [admin, GET, "/admin/app-extensions", app_extensions::list_admin],
+            [admin, GET, "/admin/app-extensions/origins", app_extensions::origins],
+            [admin, POST, "/admin/app-extensions/{app}/session", app_extensions::session],
+            [admin, POST, "/admin/app-extensions/actions/{app}/{id}", app_extensions::run_action],
+            [admin, GET, "/admin/app-extensions/blocks/{app}/{id}", app_extensions::fetch_block],
+            [admin, GET, "/admin/apps/{key}/proxy/{*path}", app_extensions::admin_proxy_get],
+            [admin, POST, "/admin/apps/{key}/proxy/{*path}", app_extensions::admin_proxy_post],
+            [admin, PUT, "/admin/apps/{key}/proxy/{*path}", app_extensions::admin_proxy_put],
+            [admin, PATCH, "/admin/apps/{key}/proxy/{*path}", app_extensions::admin_proxy_patch],
+            [admin, DELETE, "/admin/apps/{key}/proxy/{*path}", app_extensions::admin_proxy_delete],
             // inventory
             [admin, GET, "/admin/locations", inventory::list_locations_handler],
             [admin, POST, "/admin/locations", inventory::create_location_handler],
@@ -298,6 +311,12 @@ macro_rules! route_table {
             [storefront, POST, "/storefront/carts/{id}/checkout", orders::checkout_handler],
             [storefront, POST, "/storefront/orders/{id}/payment", orders::start_payment],
             [storefront, GET, "/storefront/orders/{id}", orders::fetch_placed],
+            [storefront, GET, "/storefront/app-extensions", app_extensions::list_storefront],
+            [storefront, GET, "/storefront/apps/{key}/proxy/{*path}", app_extensions::storefront_proxy_get],
+            [storefront, POST, "/storefront/apps/{key}/proxy/{*path}", app_extensions::storefront_proxy_post],
+            [storefront, PUT, "/storefront/apps/{key}/proxy/{*path}", app_extensions::storefront_proxy_put],
+            [storefront, PATCH, "/storefront/apps/{key}/proxy/{*path}", app_extensions::storefront_proxy_patch],
+            [storefront, DELETE, "/storefront/apps/{key}/proxy/{*path}", app_extensions::storefront_proxy_delete],
         }
     };
 }

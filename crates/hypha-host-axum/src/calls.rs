@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use hypha_http::host::HostCalls;
 use hypha_http::outbound::{
-    CallError, MAX_ANSWER_BYTES, Method, OutboundAnswer, OutboundCall, OutboundPolicy, is_public,
+    CallError, Method, OutboundAnswer, OutboundCall, OutboundPolicy, is_public,
 };
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
@@ -35,7 +35,7 @@ pub fn host_calls(client: reqwest::Client) -> HostCalls {
 }
 
 /// Sends `call` and returns its answer: the status, and the body read up to
-/// `MAX_ANSWER_BYTES` (empty when `discard_answer`; a longer 2xx body is `TooLarge`, a
+/// `call.max_answer` (empty when `discard_answer`; a longer 2xx body is `TooLarge`, a
 /// longer one of another status is left unread). Doesn't follow redirects.
 pub async fn send(
     client: &reqwest::Client,
@@ -44,6 +44,9 @@ pub async fn send(
     let method = match call.method {
         Method::Get => reqwest::Method::GET,
         Method::Post => reqwest::Method::POST,
+        Method::Put => reqwest::Method::PUT,
+        Method::Patch => reqwest::Method::PATCH,
+        Method::Delete => reqwest::Method::DELETE,
     };
     let mut request = client.request(method, &call.url).timeout(call.timeout);
     for (name, value) in &call.headers {
@@ -59,7 +62,17 @@ pub async fn send(
         }
     })?;
     let status = response.status().as_u16();
-    let answer = |body| OutboundAnswer { status, body };
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let answer = |body| OutboundAnswer {
+        status,
+        body,
+        content_type: content_type.clone(),
+    };
+    let max = call.max_answer;
     if call.discard_answer {
         return Ok(answer(Vec::new()));
     }
@@ -72,7 +85,7 @@ pub async fn send(
     };
     if response
         .content_length()
-        .is_some_and(|len| len > MAX_ANSWER_BYTES as u64)
+        .is_some_and(|len| len > max as u64)
     {
         return too_big();
     }
@@ -86,7 +99,7 @@ pub async fn send(
             CallError::Failed("the answer broke off".to_string())
         }
     })? {
-        if body.len() + chunk.len() > MAX_ANSWER_BYTES {
+        if body.len() + chunk.len() > max {
             return too_big();
         }
         body.extend_from_slice(&chunk);

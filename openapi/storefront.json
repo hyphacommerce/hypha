@@ -380,6 +380,36 @@
         ],
         "type": "object"
       },
+      "ElementExtension": {
+        "description": "A web component an app adds to a storefront (`docs/apps/elements.md`).",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "module": {
+            "description": "The ES module that defines it: an absolute URL (`https://`, or `http://localhost`\nin development). List its origin in the storefront's `script-src`.",
+            "type": "string"
+          },
+          "tag": {
+            "description": "The custom element's tag (`stripe-payment`).",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/StorefrontTarget"
+          }
+        },
+        "required": [
+          "app",
+          "id",
+          "target",
+          "tag",
+          "module"
+        ],
+        "type": "object"
+      },
       "Email": {
         "description": "An email address; stored trimmed and lowercased, so responses show it that way.",
         "examples": [
@@ -1447,6 +1477,18 @@
         ],
         "type": "object"
       },
+      "ProxyExtension": {
+        "description": "An app with a storefront proxy (`/storefront/apps/{app}/proxy/…`).",
+        "properties": {
+          "app": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app"
+        ],
+        "type": "object"
+      },
       "SearchHitResponse": {
         "description": "One result: a listing, a product or a variant (the request's `group`), shown by\nits best match.",
         "properties": {
@@ -1980,6 +2022,28 @@
         ],
         "type": "object"
       },
+      "StorefrontExtensionsResponse": {
+        "properties": {
+          "elements": {
+            "items": {
+              "$ref": "#/components/schemas/ElementExtension"
+            },
+            "type": "array"
+          },
+          "proxies": {
+            "description": "The apps a storefront may call through the app proxy.",
+            "items": {
+              "$ref": "#/components/schemas/ProxyExtension"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "elements",
+          "proxies"
+        ],
+        "type": "object"
+      },
       "StorefrontProductResponse": {
         "description": "A product as a storefront sees it (design note 0010, S5): active products only, without\nadmin fields. A draft or archived product is `404 product_not_found`, the same as one\nthat doesn't exist, so a storefront can't tell them apart.\n\nPrices and stock are the shopper's: with `country`, each variant carries its price\nin that country's market and whether it can be bought now (design note 0021, SU7),\npriced as a cart prices it. Without `country`, there are none: a product's base price\nisn't what any shopper pays.",
         "properties": {
@@ -2108,6 +2172,17 @@
           "default_language"
         ],
         "type": "object"
+      },
+      "StorefrontTarget": {
+        "description": "A storefront target (design note 0029, §5).\n\nKnown values: `checkout.payment`, `product.block`, `cart.block`, `order.confirmation`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "checkout.payment",
+          "product.block",
+          "cart.block",
+          "order.confirmation"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "StorefrontVariantResponse": {
         "properties": {
@@ -2264,6 +2339,638 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/storefront/app-extensions": {
+      "get": {
+        "operationId": "storefront.app_extensions.list",
+        "parameters": [
+          {
+            "description": "Only this target's elements; every storefront target's when absent.",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/StorefrontTarget"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorefrontExtensionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "What installed apps add to a storefront (design note 0029, §7): elements for\n`target` (or every storefront target), and which apps have a proxy.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "stores:read"
+        ]
+      }
+    },
+    "/storefront/apps/{key}/proxy/{path}": {
+      "delete": {
+        "operationId": "storefront.app_extensions.storefront_proxy_delete",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Forwards a `DELETE` to the app's storefront proxy, as `POST` does.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "stores:read"
+        ]
+      },
+      "get": {
+        "operationId": "storefront.app_extensions.storefront_proxy_get",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Forwards a `GET` to the app's storefront proxy (design note 0029, §8), signed, with `Hypha-Store`, `Hypha-Channel` and `Hypha-Path`; with an `X-Hypha-Cart: cart_…` header (a cart of the key's channel), also `Hypha-Cart`, `Hypha-Country` and `Hypha-Customer` (when the cart has one). No personal data is forwarded.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "stores:read"
+        ]
+      },
+      "patch": {
+        "operationId": "storefront.app_extensions.storefront_proxy_patch",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Forwards a `PATCH` to the app's storefront proxy, as `POST` does.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "stores:read"
+        ]
+      },
+      "post": {
+        "operationId": "storefront.app_extensions.storefront_proxy_post",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Forwards a `POST` (any content type, at most 1 MiB) to the app's storefront proxy, as `GET` does.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "stores:read"
+        ]
+      },
+      "put": {
+        "operationId": "storefront.app_extensions.storefront_proxy_put",
+        "parameters": [
+          {
+            "example": "app_reviews",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes.",
+            "example": "settings",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app's answer: its status, `Content-Type` and body (at most 1 MiB), nothing else"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: \"proxy\"}`)"
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Forwards a `PUT` to the app's storefront proxy, as `POST` does.",
+        "tags": [
+          "app_extensions"
+        ],
+        "x-hypha-scopes": [
+          "stores:read"
+        ]
+      }
+    },
     "/storefront/carts": {
       "post": {
         "operationId": "storefront.carts.create",

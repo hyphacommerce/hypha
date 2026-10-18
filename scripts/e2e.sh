@@ -1464,6 +1464,152 @@ else
 fi
 
 echo
+echo "## app UI in any admin and storefront (design note 0029, §5-§8)"
+# A second local app (python3, like the receiver above) with pages, blocks, actions,
+# settings, both proxies and a storefront element; installed through OAuth.
+UI_PORT=${E2E_UI_PORT:-3198}
+UI_BASE="http://127.0.0.1:$UI_PORT"
+UI_MANIFEST=$(mktemp)
+write_ui_manifest() {
+    cat >"$UI_MANIFEST" <<JSON
+{"key":"app_e2e_ui","name":"E2E UI","version":"1.0.0","app_url":"$UI_BASE",
+ "redirect_uris":["/callback"],"scopes":$1,"privacy_url":"/privacy",
+ "settings":{"schema":{"type":"object"},"secret_fields":["api_key"]},
+ "admin":{"pages":[{"id":"dashboard","title":"Dashboard","url":"/admin","nav":"apps"}],
+  "blocks":[{"id":"payment","target":"order.payment","url":"/blocks/payment"},
+            {"id":"bad","target":"order.details","url":"/blocks/bad"}],
+  "actions":[{"id":"capture","target":"payment","label":"Capture","url":"/actions/capture"},
+             {"id":"refund","target":"payment","label":"Refund","point":"payments.refund"}],
+  "proxy":"/admin-api"},
+ "storefront":{"elements":[{"id":"pay","target":"checkout.payment","module":"/el.js","tag":"e2e-pay"}],
+  "proxy":"/sf"}}
+JSON
+}
+write_ui_manifest '["orders:read","products:read"]'
+UI_APP=''
+if command -v python3 >/dev/null 2>&1 && [[ -n $HOOKS ]]; then
+    python3 - "$UI_PORT" "$UI_MANIFEST" <<'PY' &
+import http.server, json, sys
+
+port, manifest = int(sys.argv[1]), sys.argv[2]
+
+class App(http.server.BaseHTTPRequestHandler):
+    def answer(self, status, body, kind="application/json"):
+        data = body if isinstance(body, bytes) else json.dumps(body, separators=(",", ":")).encode()
+        self.send_response(status)
+        self.send_header("content-type", kind)
+        self.send_header("set-cookie", "app=1")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def echo(self, status):
+        length = int(self.headers.get("content-length", 0))
+        body = self.rfile.read(length).decode() if length else ""
+        hypha = {k.lower(): v for k, v in self.headers.items() if k.lower().startswith("hypha-")}
+        self.answer(status, {"method": self.command, "path": self.path, "headers": hypha, "body": body})
+
+    def route(self):
+        if self.path == "/hypha-app.json":
+            with open(manifest, "rb") as f:
+                return self.answer(200, f.read())
+        if self.path.startswith("/blocks/payment"):
+            return self.answer(200, {"version": 1, "root": {"type": "card", "title": "Paid",
+                "children": [{"type": "badge", "value": "captured", "tone": "success"}]}})
+        if self.path.startswith("/blocks/bad"):
+            return self.answer(200, {"version": 2, "root": {"type": "divider"}})
+        if self.path == "/actions/capture":
+            self.rfile.read(int(self.headers.get("content-length", 0)))
+            return self.answer(200, {"message": "Captured", "refresh": True})
+        if self.path.startswith("/admin-api/") or self.path.startswith("/sf/"):
+            return self.echo(201 if self.command == "POST" else 200)
+        self.answer(404, {"code": "not_found"})
+
+    do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = route
+
+    def log_message(self, *args):
+        pass
+
+http.server.HTTPServer(("127.0.0.1", port), App).serve_forever()
+PY
+    UI_APP=$!
+    disown "$UI_APP"
+    trap 'kill $HOOKS $UI_APP 2>/dev/null; rm -f "$HOOKS_FILE" "$MANIFEST_FILE" "$UI_MANIFEST"' EXIT
+    sleep 1
+fi
+if [[ -n $UI_APP ]]; then
+    UI_CLIENT="$UI_BASE/hypha-app.json"
+    UI_VERIFIER=$(openssl rand -hex 32)
+    UI_CHALLENGE=$(printf %s "$UI_VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+    out=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --get "$BASE/oauth/authorize" \
+        --data-urlencode response_type=code --data-urlencode "client_id=$UI_CLIENT" \
+        --data-urlencode "redirect_uri=$UI_BASE/callback" --data-urlencode "code_challenge=$UI_CHALLENGE" \
+        --data-urlencode code_challenge_method=S256)
+    UI_REQUEST=$(sed -E 's/.*request=(oareq_[0-9a-f]+).*/\1/' <<<"$out")
+    step "the UI app's consent" 200 - -X POST "$BASE/admin/oauth/requests/$UI_REQUEST/approve"
+    UI_CODE=$(sed -E 's/.*[?&]code=(hypha_ac_[0-9a-f]+).*/\1/' <<<"$BODY")
+    oauth_step "the UI app's tokens" 200 "$(curl -s -w '\n%{http_code}' -X POST "$BASE/oauth/token" \
+        --data-urlencode grant_type=authorization_code --data-urlencode "code=$UI_CODE" \
+        --data-urlencode "code_verifier=$UI_VERIFIER" --data-urlencode "client_id=$UI_CLIENT" \
+        --data-urlencode "redirect_uri=$UI_BASE/callback")"
+    UI_TOKEN=$(sed -E 's/.*"access_token":"(hypha_at_[0-9a-f]+)".*/\1/' <<<"$BODY")
+
+    step "what apps add to an admin" 200 - "$BASE/admin/app-extensions"
+    contains "its page, absolute" "\"id\":\"dashboard\",\"title\":\"Dashboard\",\"url\":\"$UI_BASE/admin\""
+    contains "its point action, to run elsewhere" '"id":"refund","label":"Refund","target":"payment","input_schema":null,"point":"payments.refund"'
+    step "for one target" 200 - "$BASE/admin/app-extensions?target=order.payment"
+    contains "only its block" '"pages":[],"blocks":[{"app":"app_e2e_ui","id":"payment","target":"order.payment"'
+    step "a target that isn't one" 400 invalid_query "$BASE/admin/app-extensions?target=order.paymnet"
+    step "a session token for its page" 200 - -X POST "$BASE/admin/app-extensions/app_e2e_ui/session"
+    contains "a JWT" '"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.'
+    step "the admin's origins" 200 - "$BASE/admin/app-extensions/origins"
+    E2E_PAY="pay_0190f1a2b3c47d8e9f00112233445566"
+    E2E_ORD="ord_0190f1a2b3c47d8e9f00112233445566"
+    step "run its action" 200 - -X POST "$BASE/admin/app-extensions/actions/app_e2e_ui/capture" -H "$JSON" \
+        -d "{\"context\":{\"payment_id\":\"$E2E_PAY\"}}"
+    contains "with its answer" '{"message":"Captured","refresh":true,"navigate":null}'
+    step "an action without its context" 422 invalid_extension_context \
+        -X POST "$BASE/admin/app-extensions/actions/app_e2e_ui/capture" -H "$JSON" -d '{}'
+    step "an action that is a point" 409 app_action_has_point \
+        -X POST "$BASE/admin/app-extensions/actions/app_e2e_ui/refund" -H "$JSON" \
+        -d "{\"context\":{\"payment_id\":\"$E2E_PAY\"}}"
+    step "fetch its block" 200 - "$BASE/admin/app-extensions/blocks/app_e2e_ui/payment?order_id=$E2E_ORD&payment_id=$E2E_PAY"
+    contains "the checked tree" '"title":"Paid"'
+    step "a block that isn't v1" 502 app_unavailable "$BASE/admin/app-extensions/blocks/app_e2e_ui/bad?order_id=$E2E_ORD"
+    step "both calls are logged" 200 - "$BASE/admin/apps/app_e2e_ui/extension-calls"
+    contains "the block's" '"point":"admin.block","version":1'
+    contains "the action's" '"point":"admin.action","version":1'
+    step "the admin proxy" 201 - -X POST "$BASE/admin/apps/app_e2e_ui/proxy/settings?x=1" -H "$JSON" -d '{"a":1}'
+    contains "forwards the path and the body" '"method":"POST","path":"/admin-api/settings?x=1"'
+    contains "with the context, signed" '"hypha-path":"/settings?x=1"'
+    step "a path that climbs out" 400 invalid_proxy_path "$BASE/admin/apps/app_e2e_ui/proxy/a/%2e%2e/b"
+
+    step "what apps add to a storefront" 200 - "$BASE/storefront/app-extensions"
+    contains "its element, absolute" "\"tag\":\"e2e-pay\",\"module\":\"$UI_BASE/el.js\""
+    step "a cart for the storefront proxy" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+    UI_CART=$(sed -E 's/.*"id":"(cart_[0-9a-f]+)".*/\1/' <<<"$BODY")
+    step "the storefront proxy" 200 - -H "x-hypha-cart: $UI_CART" "$BASE/storefront/apps/app_e2e_ui/proxy/reviews?page=2"
+    contains "with the shopper's cart" "\"hypha-cart\":\"$UI_CART\""
+    step "a cart header that isn't one" 400 invalid_cart_header -H "x-hypha-cart: nope" \
+        "$BASE/storefront/apps/app_e2e_ui/proxy/reviews"
+
+    write_ui_manifest '["orders:read","products:read","customers:read"]'
+    step "a refresh asking for more" 200 - -X POST "$BASE/admin/apps/app_e2e_ui/refresh"
+    contains "waits for consent" '"status":"consent_required"'
+    write_ui_manifest '["orders:read"]'
+    OWNER_AUTH=("${AUTH[@]}")
+    AUTH=(-H "authorization: Bearer $UI_TOKEN")
+    step "the app refreshes itself with fewer" 200 - -X POST "$BASE/admin/apps/app_e2e_ui/refresh"
+    contains "which apply at once" '"grant":{"scopes":["orders:read"]'
+    AUTH=("${OWNER_AUTH[@]}")
+    step "uninstall the UI app" 204 - -X DELETE "$BASE/admin/apps/app_e2e_ui"
+    step "an uninstalled app adds nothing" 409 app_not_installed -X POST "$BASE/admin/app-extensions/app_e2e_ui/session"
+    step "delete the UI app" 204 - -X DELETE "$BASE/admin/apps/app_e2e_ui"
+else
+    echo "skip app UI steps: no python3 for the app's site"
+fi
+
+echo
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
 step "wrong method" 405 method_not_allowed -X DELETE "$BASE/admin/products/$MUG"

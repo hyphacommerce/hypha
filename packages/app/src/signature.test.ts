@@ -1,7 +1,47 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseSignatureHeader, signRequest, verifySignature } from "./signature.ts";
+import {
+  contextSigningInput,
+  parseSignatureHeader,
+  signRequest,
+  verifyContextSignature,
+  verifyForwardedRequest,
+  verifySignature,
+} from "./signature.ts";
+
+// The same vector as hypha-http's `a_context_signature_is_the_shared_vector`.
+const CONTEXT_VECTOR =
+  "t=1700000000,v1=5030bb394419b2ce94b7ed9a9f91e6165d0dedbc34e6af9c0da11c3c38a87e6f";
+
+test("a context signature signs the method and the Hypha-* headers, sorted", async () => {
+  const headers = new Headers({
+    "Hypha-Store": "store_1",
+    "Hypha-Staff": "user_1",
+    "Hypha-Signature": "t=1,v1=00",
+    "Content-Type": "application/json",
+    "Hypha-Context-Signature": CONTEXT_VECTOR,
+  });
+  assert.equal(
+    contextSigningInput("get", headers),
+    "GET\nhypha-staff:user_1\nhypha-store:store_1\n",
+  );
+  const at = { now: 1_700_000_000 };
+  assert.equal(await verifyContextSignature("hypha_as_test", "GET", headers, at), true);
+  assert.equal(await verifyContextSignature("hypha_as_test", "POST", headers, at), false);
+  headers.set("Hypha-Staff", "user_2");
+  assert.equal(await verifyContextSignature("hypha_as_test", "GET", headers, at), false);
+});
+
+test("a forwarded request needs both signatures", async () => {
+  const at = 1_700_000_000;
+  const headers = new Headers({ "Hypha-Store": "store_1", "Hypha-Staff": "user_1" });
+  headers.set("Hypha-Context-Signature", CONTEXT_VECTOR);
+  headers.set("Hypha-Signature", await signRequest("hypha_as_test", "", { timestamp: at }));
+  const request = { method: "GET", headers };
+  assert.equal(await verifyForwardedRequest("hypha_as_test", request, "", { now: at }), true);
+  assert.equal(await verifyForwardedRequest("hypha_as_test", request, "x", { now: at }), false);
+});
 
 // The same vector as hypha-http's `a_signature_is_the_hmac_of_time_dot_body`
 // (`printf '1700000000.{}' | openssl dgst -sha256 -hmac 'hypha_shs_test'`).

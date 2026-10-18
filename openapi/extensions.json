@@ -1,6 +1,149 @@
 {
   "components": {
     "schemas": {
+      "AdminActionContext": {
+        "description": "The objects the action was pressed on, as the admin passed them (checked against\nthe action's target).",
+        "properties": {
+          "cart_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CartId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customer_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomerId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fulfillment_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FulfillmentId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "product_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "AdminActionRequest": {
+        "description": "What Hypha sends: `POST <the action's url>`.",
+        "properties": {
+          "action": {
+            "description": "The action's `id` in the manifest.",
+            "type": "string"
+          },
+          "context": {
+            "$ref": "#/components/schemas/AdminActionContext"
+          },
+          "input": {
+            "description": "The form's values when the action has an `input_schema` (an object), as the\nadmin sent them: check them against the schema.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "scope": {
+            "description": "The app's scopes as far as the caller holds them, space-separated: what the\ncaller may have the app do for them.",
+            "type": "string"
+          },
+          "staff": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "The staff member who pressed it (`user_…`); absent for an API key."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "description": "Where it was pressed (`order.payment`, `payment`, …).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "target",
+          "context",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "AdminActionResponse": {
+        "description": "What the app answers: what the admin shows next. Every field is optional; `{}` is\na plain success.",
+        "properties": {
+          "message": {
+            "description": "Plain text to show (a toast), 1 to 500 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "navigate": {
+            "description": "A path within the app's page to go to (`/orders/ord_…`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refresh": {
+            "description": "Whether the admin should reload what the action was pressed on.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "CartId": {
+        "description": "A CartId: `cart_` and 32 hex digits.",
+        "examples": [
+          "cart_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^cart_[0-9a-f]{32}$",
+        "type": "string"
+      },
       "CategoryId": {
         "description": "A CategoryId: `pcat_` and 32 hex digits.",
         "examples": [
@@ -33,6 +176,14 @@
         "pattern": "^[A-Z]{3}$",
         "type": "string"
       },
+      "CustomerId": {
+        "description": "A CustomerId: `cus_` and 32 hex digits.",
+        "examples": [
+          "cus_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^cus_[0-9a-f]{32}$",
+        "type": "string"
+      },
       "Email": {
         "description": "An email address; stored trimmed and lowercased, so responses show it that way.",
         "examples": [
@@ -40,6 +191,14 @@
         ],
         "format": "email",
         "maxLength": 254,
+        "type": "string"
+      },
+      "FulfillmentId": {
+        "description": "A FulfillmentId: `ful_` and 32 hex digits.",
+        "examples": [
+          "ful_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^ful_[0-9a-f]{32}$",
         "type": "string"
       },
       "MarketId": {
@@ -839,6 +998,14 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "UserId": {
+        "description": "A UserId: `user_` and 32 hex digits.",
+        "examples": [
+          "user_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^user_[0-9a-f]{32}$",
+        "type": "string"
+      },
       "VariantId": {
         "description": "A VariantId: `var_` and 32 hex digits.",
         "examples": [
@@ -861,6 +1028,95 @@
   "openapi": "3.1.0",
   "paths": {},
   "webhooks": {
+    "admin.action": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `admin.action` v1. Answer within 10000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "admin.action.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminActionResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Run one of the app's admin actions, pressed by staff (design note 0029, §6.1).",
+        "tags": [
+          "admin"
+        ],
+        "x-hypha-extension": {
+          "point": "admin.action",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fail_closed",
+        "x-hypha-timeout-ms": 10000,
+        "x-hypha-version": 1
+      }
+    },
     "payments.capture": {
       "post": {
         "description": "`POST` to the URL the app registered for `payments.capture` v1. Answer within 15000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",

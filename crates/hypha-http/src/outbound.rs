@@ -37,6 +37,23 @@ pub const MAX_ANSWER_BYTES: usize = hypha_extensions::MAX_ANSWER_BYTES;
 pub enum Method {
     Get,
     Post,
+    /// The rest only for the app proxy (design note 0029, §8), which forwards a
+    /// frontend's method.
+    Put,
+    Patch,
+    Delete,
+}
+
+impl Method {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Method::Get => "GET",
+            Method::Post => "POST",
+            Method::Put => "PUT",
+            Method::Patch => "PATCH",
+            Method::Delete => "DELETE",
+        }
+    }
 }
 
 /// A signed call to a merchant-configured URL.
@@ -86,6 +103,8 @@ impl CallError {
 pub struct OutboundAnswer {
     pub status: u16,
     pub body: Vec<u8>,
+    /// The answer's `Content-Type`, when it had one (the app proxy passes it on).
+    pub content_type: Option<String>,
 }
 
 impl OutboundAnswer {
@@ -113,6 +132,9 @@ pub struct OutboundCall {
     pub body: Vec<u8>,
     /// The answer's body isn't read: a 2xx is success.
     pub discard_answer: bool,
+    /// The most of the answer's body read (`MAX_ANSWER_BYTES` unless the app proxy's
+    /// larger cap).
+    pub max_answer: usize,
 }
 
 /// Signs `call` and checks its URL: an IP literal that isn't public under `policy` is
@@ -143,6 +165,95 @@ pub fn prepare(policy: OutboundPolicy, call: SignedCall<'_>) -> Result<OutboundC
         headers,
         body: call.body,
         discard_answer: call.discard_answer,
+        max_answer: MAX_ANSWER_BYTES,
+    })
+}
+
+/// The header carrying the context signature of a forwarded call (the app proxy, admin
+/// blocks; design note 0029, §8): `t=<unix seconds>,v1=<hex HMAC-SHA256 of
+/// "<t>.<METHOD>\n" followed by "<name>:<value>\n" for every other `Hypha-*` header,
+/// names lowercased and sorted>`. `Hypha-Signature` signs the body as on every call;
+/// this signs who and what the call is about, so neither can be changed in transit.
+pub const CONTEXT_SIGNATURE_HEADER: &str = "Hypha-Context-Signature";
+
+/// The context signature of a call with `method` and `headers` (see
+/// `CONTEXT_SIGNATURE_HEADER`): only the `Hypha-*` headers count, the two signatures'
+/// aside.
+pub fn context_signature(
+    secret: &str,
+    at: i64,
+    method: Method,
+    headers: &[(String, String)],
+) -> String {
+    let mut lines: Vec<(String, &str)> = headers
+        .iter()
+        .map(|(n, v)| (n.to_ascii_lowercase(), v.as_str()))
+        .filter(|(n, _)| {
+            n.starts_with("hypha-")
+                && *n != SIGNATURE_HEADER.to_ascii_lowercase()
+                && *n != CONTEXT_SIGNATURE_HEADER.to_ascii_lowercase()
+        })
+        .collect();
+    lines.sort();
+    let mut signed = format!("{}\n", method.as_str());
+    for (name, value) in lines {
+        signed.push_str(&name);
+        signed.push(':');
+        signed.push_str(value);
+        signed.push('\n');
+    }
+    sign(secret, at, signed.as_bytes())
+}
+
+/// A call Hypha forwards to an app on a frontend's behalf (the app proxy, a block):
+/// any method, the frontend's content type, the context in `Hypha-*` headers.
+pub struct ForwardCall<'a> {
+    pub method: Method,
+    pub url: &'a str,
+    pub timeout: std::time::Duration,
+    /// The app's secret, in plain text.
+    pub secret: &'a str,
+    pub at: i64,
+    /// The body's type as the frontend sent it.
+    pub content_type: Option<&'a str>,
+    /// The context (`Hypha-Store`, `Hypha-Staff`, …) and anything else to send.
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+    /// The most of the answer read.
+    pub max_answer: usize,
+}
+
+/// Signs a forwarded call twice (`Hypha-Signature` over the body,
+/// `Hypha-Context-Signature` over the context) and checks its URL like `prepare`.
+pub fn prepare_forward(
+    policy: OutboundPolicy,
+    call: ForwardCall<'_>,
+) -> Result<OutboundCall, CallError> {
+    let literal = literal_ip(call.url)?;
+    if literal.is_some_and(|ip| !policy.allows(ip)) {
+        return Err(CallError::Failed(
+            "the URL is not a public address".to_string(),
+        ));
+    }
+    let context = context_signature(call.secret, call.at, call.method, &call.headers);
+    let mut headers = Vec::with_capacity(call.headers.len() + 3);
+    if let Some(content_type) = call.content_type {
+        headers.push(("content-type".to_string(), content_type.to_string()));
+    }
+    headers.push((
+        SIGNATURE_HEADER.to_string(),
+        sign(call.secret, call.at, &call.body),
+    ));
+    headers.push((CONTEXT_SIGNATURE_HEADER.to_string(), context));
+    headers.extend(call.headers);
+    Ok(OutboundCall {
+        method: call.method,
+        url: call.url.to_string(),
+        timeout: call.timeout,
+        headers,
+        body: call.body,
+        discard_answer: false,
+        max_answer: call.max_answer,
     })
 }
 
@@ -166,6 +277,7 @@ pub fn prepare_get(
         headers: vec![("accept".to_string(), "application/json".to_string())],
         body: Vec::new(),
         discard_answer: false,
+        max_answer: MAX_ANSWER_BYTES,
     })
 }
 
@@ -400,6 +512,7 @@ mod tests {
         let answer = |status| OutboundAnswer {
             status,
             body: b"ok".to_vec(),
+            content_type: None,
         };
         assert_eq!(answer(204).into_success(), Ok(b"ok".to_vec()));
         assert_eq!(
@@ -422,5 +535,58 @@ mod tests {
             }
             .allows(ip)
         );
+    }
+
+    fn header(name: &str, value: &str) -> (String, String) {
+        (name.to_string(), value.to_string())
+    }
+
+    /// The vector `packages/app/src/signature.test.ts` verifies too.
+    #[test]
+    fn a_context_signature_is_the_shared_vector() {
+        let headers = [
+            header("Hypha-Store", "store_1"),
+            header("content-type", "application/json"),
+            header("Hypha-Staff", "user_1"),
+        ];
+        assert_eq!(
+            context_signature("hypha_as_test", 1_700_000_000, Method::Get, &headers),
+            "t=1700000000,v1=5030bb394419b2ce94b7ed9a9f91e6165d0dedbc34e6af9c0da11c3c38a87e6f"
+        );
+    }
+
+    #[test]
+    fn a_forwarded_call_carries_both_signatures_and_its_context() {
+        let prepared = prepare_forward(
+            OutboundPolicy::default(),
+            ForwardCall {
+                method: Method::Patch,
+                url: "https://app.example/proxy/settings",
+                timeout: std::time::Duration::from_secs(10),
+                secret: "s3cret",
+                at: 1_700_000_000,
+                content_type: Some("text/plain"),
+                headers: vec![header("Hypha-Store", "store_1")],
+                body: b"hi".to_vec(),
+                max_answer: 1024,
+            },
+        )
+        .unwrap();
+        let context = context_signature(
+            "s3cret",
+            1_700_000_000,
+            Method::Patch,
+            &[header("Hypha-Store", "store_1")],
+        );
+        assert_eq!(
+            prepared.headers,
+            vec![
+                header("content-type", "text/plain"),
+                header(SIGNATURE_HEADER, &sign("s3cret", 1_700_000_000, b"hi")),
+                header(CONTEXT_SIGNATURE_HEADER, &context),
+                header("Hypha-Store", "store_1"),
+            ]
+        );
+        assert_eq!(prepared.max_answer, 1024);
     }
 }

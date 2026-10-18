@@ -99,6 +99,7 @@ mod tests {
         let (calls, sent) = calls(Ok(OutboundAnswer {
             status: 200,
             body: b"{}".to_vec(),
+            content_type: None,
         }));
         assert_eq!(
             send(&calls, "https://app.example/x"),
@@ -129,6 +130,7 @@ mod tests {
         let (calls, _) = calls(Ok(OutboundAnswer {
             status: 500,
             body: b"{\"code\":\"handler_failed\"}".to_vec(),
+            content_type: None,
         }));
         assert_eq!(
             send(&calls, "https://app.example/x").map(|a| a.status),
@@ -156,6 +158,7 @@ mod tests {
         let (calls, sent) = calls(Ok(OutboundAnswer {
             status: 200,
             body: Vec::new(),
+            content_type: None,
         }));
         assert_eq!(
             send(&calls, "http://169.254.169.254/latest"),
