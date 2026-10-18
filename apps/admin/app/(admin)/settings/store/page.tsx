@@ -5,18 +5,15 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 
 import { PageHeader } from "@/components/page-header";
-import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
+import { loadCountries, requireStore } from "@/lib/hypha";
 
 import { SetupGuideCard } from "./setup-guide-card";
 import { StoreForm } from "./store-form";
 
 /** Settings → Store (design note 0021, SU4): the store's name and details. */
 export default async function StoreSettingsPage() {
-  const client = await sessionClient();
-  const [store, countries] = await Promise.all([
-    client.GET("/admin/store").then(loaded),
-    loadCountries(),
-  ]);
+  // The store is the layout's read too (`loadStore`): one call for both.
+  const [store, countries] = await Promise.all([requireStore(), loadCountries()]);
 
   return (
     <Section padding={6}>

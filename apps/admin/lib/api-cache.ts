@@ -19,6 +19,15 @@ function lifetime(path: string): number | null {
   return 30;
 }
 
+/**
+ * The reads kept across requests on Workers, where an isolate doesn't see the writes
+ * other isolates make (design note 0025, §4): only the API's reference tables
+ * (currencies, countries), which no write changes. Everything else is read fresh.
+ */
+export function referenceLifetime(path: string): number | null {
+  return /^\/admin\/(currencies|countries)$/.test(path) ? 3600 : null;
+}
+
 /** A cached answer: what a Response needs to be rebuilt. */
 type Stored = { status: number; body: string; contentType: string | null };
 
@@ -52,26 +61,31 @@ function expire(tag: string) {
 }
 
 /**
- * A `fetch` for the session holding `token`: GETs come from its cache while fresh (only
- * successful answers are kept), and any successful write expires that cache.
+ * A `fetch` for the session holding `token`, sending through `send`: GETs come from its
+ * cache while fresh (only successful answers are kept, for `lifetimeOf` their path), and
+ * any successful write expires that cache.
  */
-export function sessionFetch(token: string): typeof fetch {
+export function sessionFetch(
+  token: string,
+  send: typeof fetch = fetch,
+  lifetimeOf: (path: string) => number | null = lifetime,
+): typeof fetch {
   const tagged = sha256(token).then((hash) => `admin-session:${hash}`);
   return async (input, init) => {
     const request = new Request(input, init);
     const tag = await tagged;
     if (request.method !== "GET") {
-      const response = await fetch(request);
+      const response = await send(request);
       if (response.ok) expire(tag);
       return response;
     }
     const url = new URL(request.url);
-    const seconds = lifetime(url.pathname);
-    if (seconds === null) return fetch(request);
+    const seconds = lifetimeOf(url.pathname);
+    if (seconds === null) return send(request);
     const headers = Object.fromEntries(request.headers);
     const read = unstable_cache(
       async (): Promise<Stored> => {
-        const response = await fetch(url, { headers });
+        const response = await send(url, { headers });
         const stored = {
           status: response.status,
           body: await response.text(),

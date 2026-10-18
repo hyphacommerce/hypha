@@ -53,16 +53,17 @@ function TotalRow({ label, children }: { label: ReactNode; children: ReactNode }
 export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const order = loaded(await client.GET("/admin/orders/{id}", { params: { path: { id } } }));
-  // Shipments and locations need their own scopes; without them the page shows the
-  // order alone.
-  const [shipments, locations, channelName, currencies, countries] = await Promise.all([
+  // All at once; a missing order still goes to the 404 page (`loaded`). Shipments and
+  // locations need their own scopes; without them the page shows the order alone.
+  const [found, shipments, locations, channelName, currencies, countries] = await Promise.all([
+    client.GET("/admin/orders/{id}", { params: { path: { id } } }),
     client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
     client.GET("/admin/locations"),
     channelNames(client),
     loadCurrencies(),
     loadCountries(),
   ]);
+  const order = loaded(found);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
   const fulfillments = shipments.data?.items ?? [];
   const places: Place[] = (locations.data?.items ?? []).map(({ id, name }) => ({ id, name }));

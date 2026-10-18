@@ -5,7 +5,13 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { PageHeader } from "@/components/page-header";
 import { type SearchParams, dateRange, manyOf, one, oneOf } from "@/components/resource-table/params";
 import { listPage, nextDay, pageQuery, startOfDay } from "@/components/resource-table/server";
-import { channelNames, loadCountries, loadCurrencies, sessionClient } from "@/lib/hypha";
+import {
+  channelNames,
+  loadCountries,
+  loadCurrencies,
+  loadTimeZone,
+  sessionClient,
+} from "@/lib/hypha";
 import { OrdersTable } from "@/resources/orders";
 
 const PAYMENT: AdminSchemas["FinancialStatusDto"][] = ["pending", "paid"];
@@ -23,15 +29,13 @@ export default async function OrdersPage({
 }) {
   const params = await searchParams;
   const client = await sessionClient();
-  // Days of the store's calendar: the placed range starts and ends at its midnights.
-  const [store, markets] = await Promise.all([
-    client.GET("/admin/store"),
-    client.GET("/admin/markets"),
-  ]);
-  const timeZone = store.data?.timezone ?? "UTC";
   const placed = dateRange(params, "placed");
   const cancelled = one(params, "cancelled");
-  const [result, channelName, currencies, countries] = await Promise.all([
+  // Days of the store's calendar: the placed range starts and ends at its midnights, so
+  // only a placed filter waits for the store's time zone (read once per request, shared
+  // with the layout).
+  const timeZone = placed ? await loadTimeZone() : "UTC";
+  const [result, markets, channelName, currencies, countries] = await Promise.all([
     client.GET("/admin/orders", {
       params: {
         query: {
@@ -49,6 +53,7 @@ export default async function OrdersPage({
         },
       },
     }),
+    client.GET("/admin/markets"),
     channelNames(client),
     loadCurrencies(),
     loadCountries(),

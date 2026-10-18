@@ -64,17 +64,24 @@ function refresh(id: string) {
 export type SaveResult = {
   error?: string;
   options?: AdminSchemas["OptionResponse"][];
-  /** The product as the last step stored it, after a save that succeeded. */
+  /** The product as the last of its own steps (details, options, variants) stored it,
+   * after a save that succeeded; without its categories and channels when the save
+   * changed those (they're below). */
   product?: AdminSchemas["ProductResponse"];
+  /** The product's categories as stored, when the save set them. */
+  categories?: string[];
+  /** The product's channels as stored, when the save set them. */
+  channels?: string[];
 };
 
 /**
  * Saves the product editor's draft (design note 0021, section 8): the product's PATCH,
  * then its options, then its whole variant list (`PUT …/variants`), then its categories
  * (`PUT …/categories`, design note 0022), then its channels (`PUT …/channels`, design
- * note 0020), each only when its part changed. Values created by the options step are found by option name and label
- * for the variants that select them. Stops at the first failure: what came before it
- * stays saved.
+ * note 0020), each only when its part changed; categories and channels together, after
+ * the rest. Values created by the options step are found by option name and label for
+ * the variants that select them. Stops at the first failure: what came before it stays
+ * saved.
  */
 export async function saveProduct(id: string, plan: SavePlan): Promise<SaveResult> {
   const client = await sessionClient();
@@ -110,26 +117,30 @@ export async function saveProduct(id: string, plan: SavePlan): Promise<SaveResul
       if (error) return { error: describe(error), options };
       product = data;
     }
-    if (plan.categories) {
-      const { error } = await client.PUT("/admin/products/{id}/categories", {
-        params: { path: { id } },
-        body: { categories: plan.categories },
-      });
-      if (error) return { error: describe(error), options };
-    }
-    if (plan.channels) {
-      const { error } = await client.PUT("/admin/products/{id}/channels", {
-        params: { path: { id } },
-        body: { channels: plan.channels },
-      });
-      if (error) return { error: describe(error), options };
-    }
-    if (plan.categories || plan.channels) {
-      // The product as it is now, its categories and channels included.
-      const { data } = await client.GET("/admin/products/{id}", { params: { path: { id } } });
-      product = data;
-    }
-    return { product };
+    // Categories and channels are memberships, apart from the product and each other:
+    // both at once. The editor takes what they stored into the product it holds (the
+    // page's refresh brings the same), so no read of the product follows.
+    const [categories, channels] = await Promise.all([
+      plan.categories
+        ? client.PUT("/admin/products/{id}/categories", {
+            params: { path: { id } },
+            body: { categories: plan.categories },
+          })
+        : undefined,
+      plan.channels
+        ? client.PUT("/admin/products/{id}/channels", {
+            params: { path: { id } },
+            body: { channels: plan.channels },
+          })
+        : undefined,
+    ]);
+    const failure = categories?.error ?? channels?.error;
+    if (failure) return { error: describe(failure), options };
+    return {
+      product,
+      categories: categories?.data?.categories,
+      channels: channels?.data?.channels,
+    };
   } finally {
     refresh(id);
   }

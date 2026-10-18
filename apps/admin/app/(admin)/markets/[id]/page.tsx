@@ -28,10 +28,12 @@ export default async function MarketPage({
   const pricesCursor = typeof query.prices === "string" ? query.prices : undefined;
 
   const client = await sessionClient();
-  const [market, countries, markets] = await Promise.all([
+  // Price lists need `pricing:read`; without it the card says so instead.
+  const [market, countries, markets, lists] = await Promise.all([
     client.GET("/admin/markets/{id}", { params: { path: { id } } }).then(loaded),
     loadCountries(),
     client.GET("/admin/markets").then(loaded),
+    client.GET("/admin/price-lists"),
   ]);
 
   const catalogId = market.catalog;
@@ -46,10 +48,8 @@ export default async function MarketPage({
   // An old or foreign cursor (a hand-edited URL): start the lists again.
   if (products?.response.status === 400) redirect(`/markets/${id}`);
 
-  // Price lists need `pricing:read`; without it the card says so instead.
   const listId = catalog?.price_list ?? undefined;
-  const [lists, list, prices] = await Promise.all([
-    client.GET("/admin/price-lists"),
+  const [list, prices] = await Promise.all([
     listId ? client.GET("/admin/price-lists/{id}", { params: { path: { id: listId } } }) : undefined,
     listId
       ? client.GET("/admin/price-lists/{id}/fixed-prices", {

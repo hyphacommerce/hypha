@@ -6,9 +6,8 @@ import { apiFetch } from "#api-fetch";
 import { type AdminSchemas, type ApiError, createAdminClient } from "@hypha/sdk/admin";
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { cache } from "react";
 
-import { sessionFetch } from "./api-cache";
+import { referenceLifetime, sessionFetch } from "./api-cache";
 import type { Currencies } from "./format";
 import type { Country } from "./regions";
 
@@ -60,18 +59,60 @@ export async function publicClient() {
 export async function sessionClient() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) redirect("/login");
-  // On Workers (through the API's binding) reads aren't cached across requests: an
-  // isolate that didn't see a write would keep serving the old read (design note 0025,
-  // §4). Elsewhere one server sees every write, so its cache stays right.
+  // On Workers (through the API's binding) only reference data that no write changes is
+  // cached across requests: an isolate that didn't see a write would keep serving the
+  // old read (design note 0025, §4). Elsewhere one server sees every write, so its cache
+  // stays right.
   const bound = apiFetch();
-  const client = createAdminClient(apiUrl(), token, {}, bound ?? sessionFetch(token));
+  const client = createAdminClient(
+    apiUrl(),
+    token,
+    {},
+    bound ? sessionFetch(token, bound, referenceLifetime) : sessionFetch(token),
+  );
   client.use({
-    async onResponse({ response }) {
+    async onResponse({ request, response }) {
       if (response.status === 401) await sessionExpired();
+      // A write (in a server action) may change what this request already read: the
+      // page it re-renders reads again.
+      if (request.method !== "GET") await forgetRequestReads();
       return undefined;
     },
   });
   return client;
+}
+
+/** Reads made once per request, by loader (`perRequest`). */
+const requestReads = new WeakMap<object, Map<object, Promise<unknown>>>();
+
+/**
+ * `load`, run at most once per request: the layout's parts, the page and its parts
+ * share one answer. React's `cache` can't do this here: vinext renders the layout in
+ * more than one pass, each with a cache of its own, so the same read went to the API
+ * two or three times per page. The request's headers object (one per request, in Next.js
+ * and vinext alike) keys the memo instead, so nothing outlives the request.
+ */
+function perRequest<T>(load: () => Promise<T>): () => Promise<T> {
+  const slot = {};
+  return async () => {
+    const scope = await headers();
+    let reads = requestReads.get(scope);
+    if (!reads) {
+      reads = new Map();
+      requestReads.set(scope, reads);
+    }
+    let read = reads.get(slot) as Promise<T> | undefined;
+    if (!read) {
+      read = load();
+      reads.set(slot, read);
+    }
+    return read;
+  };
+}
+
+/** Forgets this request's `perRequest` reads, after a write. */
+async function forgetRequestReads() {
+  requestReads.delete(await headers());
 }
 
 /**
@@ -166,7 +207,7 @@ export async function heldChallenge(): Promise<string | undefined> {
  * user menu and providers and the page share it). A session the API no longer accepts
  * goes to `/session-expired` (`sessionClient`).
  */
-export const requireStaff = cache(async (): Promise<AdminSchemas["MeResponse"]> => {
+export const requireStaff = perRequest(async (): Promise<AdminSchemas["MeResponse"]> => {
   const client = await sessionClient();
   const { data, response } = await client.GET("/admin/me");
   if (data) return data;
@@ -367,44 +408,56 @@ export async function channelNames(
 
 /**
  * Minor units by currency (`GET /admin/currencies`, design note 0021), fetched once per
- * request: React's `cache` shares one result between the layout, which provides it to
- * client components (`useCurrencies`), and the page's own server code.
+ * request: the layout, which provides it to client components (`useCurrencies`), and the
+ * page's own server code share one result.
  */
-export const loadCurrencies = cache(async (): Promise<Currencies> => {
+export const loadCurrencies = perRequest(async (): Promise<Currencies> => {
   const client = await sessionClient();
   const { items } = loaded(await client.GET("/admin/currencies"));
   return Object.fromEntries(items.map((c) => [c.code, c.minor_units]));
 });
 
 /**
- * The store's time zone (IANA, from `GET /admin/store`), once per request: times show in
- * it. UTC when the staff member can't read the store or it has none.
+ * The store (`GET /admin/store`), once per request: the layout's time zone and setup
+ * guide and the page share it. `null` when the staff member can't read it.
  */
-export const loadTimeZone = cache(async (): Promise<string> => {
+export const loadStore = perRequest(async (): Promise<AdminSchemas["StoreResponse"] | null> => {
   const client = await sessionClient();
   const { data } = await client.GET("/admin/store");
-  return data?.timezone ?? "UTC";
+  return data ?? null;
 });
 
+/** The store, for pages about it: one the staff member can't read is an error there. */
+export async function requireStore(): Promise<AdminSchemas["StoreResponse"]> {
+  const store = await loadStore();
+  if (!store) throw new Error("GET /admin/store failed");
+  return store;
+}
+
 /**
- * How far the setup guide got (design note 0024, AU11), once per request: the guide, its
- * nav item and the home page's checklist show only until it's finished. `null` when the
- * staff member can't read the store: then nothing about the guide shows.
+ * The store's time zone (IANA, from the store): times show in it. UTC when the staff
+ * member can't read the store or it has none.
  */
-export const loadSetup = cache(
-  async (): Promise<{ step: string | null; isFinished: boolean } | null> => {
-    const client = await sessionClient();
-    const { data } = await client.GET("/admin/store");
-    if (!data) return null;
-    return { step: data.setup.step ?? null, isFinished: Boolean(data.setup.finished_at) };
-  },
-);
+export async function loadTimeZone(): Promise<string> {
+  return (await loadStore())?.timezone ?? "UTC";
+}
+
+/**
+ * How far the setup guide got (design note 0024, AU11): the guide, its nav item and the
+ * home page's checklist show only until it's finished. `null` when the staff member
+ * can't read the store: then nothing about the guide shows.
+ */
+export async function loadSetup(): Promise<{ step: string | null; isFinished: boolean } | null> {
+  const store = await loadStore();
+  if (!store) return null;
+  return { step: store.setup.step ?? null, isFinished: Boolean(store.setup.finished_at) };
+}
 
 /**
  * Every country an address or market can name (`GET /admin/countries`), once per
  * request, for pickers.
  */
-export const loadCountries = cache(async (): Promise<Country[]> => {
+export const loadCountries = perRequest(async (): Promise<Country[]> => {
   const client = await sessionClient();
   return loaded(await client.GET("/admin/countries")).items;
 });

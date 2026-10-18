@@ -1,6 +1,6 @@
 import { Section } from "@astryxdesign/core/Section";
 
-import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
+import { loadCountries, loaded, requireStore, sessionClient } from "@/lib/hypha";
 
 import { setupSteps } from "../setup-checklist";
 import { type WizardData, SetupWizard } from "./setup-wizard";
@@ -20,7 +20,7 @@ export default async function SetupPage({
   const [steps, store, markets, zones, locations, channels, products, countries] =
     await Promise.all([
       setupSteps(),
-      client.GET("/admin/store").then(loaded),
+      requireStore(),
       client.GET("/admin/markets").then(loaded),
       client.GET("/admin/shipping-zones").then(loaded),
       client.GET("/admin/locations").then(loaded),

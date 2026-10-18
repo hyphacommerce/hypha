@@ -30,16 +30,19 @@ const STOCK_PRELOAD = 500;
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const [product, channels, categories, locations, currencies] = await Promise.all([
+  const [product, channels, categories, locations, inventory, currencies] = await Promise.all([
     client.GET("/admin/products/{id}", { params: { path: { id } } }).then(loaded),
     // Without `channels:read` the page shows no Publishing card.
     client.GET("/admin/channels"),
     client.GET("/admin/categories"),
     // Without `inventory:read`, no Stock column.
     client.GET("/admin/locations"),
+    // Alongside the product rather than after it: one round trip less, at the price of
+    // a read that goes unused for the rare product with more variants than we preload.
+    client.GET("/admin/products/{id}/inventory", { params: { path: { id } } }),
     loadCurrencies(),
   ]);
-  const stock = locations.data ? await loadStock(client, product) : undefined;
+  const stock = locations.data ? stockOf(product, inventory.data?.items ?? []) : undefined;
 
   return (
     <Section padding={6}>
@@ -82,16 +85,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   );
 }
 
-/** The variants' stock by variant ID, in one read, for products with few enough. */
-async function loadStock(
-  client: Awaited<ReturnType<typeof sessionClient>>,
-  product: Product,
-): Promise<Record<string, Stock>> {
+/** The variants' stock by variant ID, for products with few enough. */
+function stockOf(product: Product, items: Stock[]): Record<string, Stock> {
   if (product.variants.length > STOCK_PRELOAD) return {};
-  const { data } = await client.GET("/admin/products/{id}/inventory", {
-    params: { path: { id: product.id } },
-  });
-  return Object.fromEntries((data?.items ?? []).map((stock) => [stock.variant, stock]));
+  return Object.fromEntries(items.map((stock) => [stock.variant, stock]));
 }
 
 /** At a glance: what status means for shoppers, how many variants, what they cost. */
