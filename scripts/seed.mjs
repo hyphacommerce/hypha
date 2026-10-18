@@ -5,7 +5,8 @@
 // tax regions, price lists and fixed prices, two warehouses, shipping zones with rates,
 // a category tree, products with sizes and colours (sparse variants, generated colour
 // images, stock, some sold out), publishing, search filters, a publishable key, the
-// storefront's webhook, and a few orders in different states.
+// storefront's webhook, payment methods (cash on delivery in Serbia, bank transfer
+// everywhere), and a few orders in different states, some paid.
 //
 // Run it against a fresh store (it stops when products already exist):
 //
@@ -767,6 +768,26 @@ async function main() {
     console.warn(`  (no webhook: ${e.message})`);
   }
 
+  console.log("Payment methods");
+  // Manual ones (design note 0027): the shopper is told how to pay, staff mark it paid.
+  const cashOnDelivery = await admin.post("/admin/payment-methods", {
+    provider: "manual",
+    name: "Cash on delivery",
+    instructions: "Pay the courier in cash when your order arrives.",
+    markets: [byName.Serbia],
+  });
+  const bankTransfer = await admin.post("/admin/payment-methods", {
+    provider: "manual",
+    name: "Bank transfer",
+    instructions: [
+      "Transfer the total to:",
+      "Lumen & Loom d.o.o., Demo Bank d.d.",
+      "IBAN: HR00 0000 0000 0000 0000 0",
+      "BIC: DEMOHR2X",
+      "Use your order number as the reference. We ship once the payment arrives.",
+    ].join("\n"),
+  });
+
   console.log("Customers and orders");
   const SHOPPERS = [
     { email: "ana.horvat@example.com", first: "Ana", last: "Horvat", country: "HR", line1: "Vlaška 12", city: "Zagreb", postal: "10000" },
@@ -809,24 +830,39 @@ async function main() {
       const offer = group.offers.find((o) => o.option) ?? group.offers[0];
       if (offer?.option) await sf("PUT", `/storefront/carts/${cart.id}/shipping/${group.group}`, { option: offer.option });
     }
-    const priced = await sf("GET", `/storefront/carts/${cart.id}`);
+    let priced = await sf("GET", `/storefront/carts/${cart.id}`);
     if (priced.lines.length === 0) continue;
+    // Checkout needs a method when there's something to pay: cash on delivery where it's
+    // offered (Serbia), else a bank transfer.
+    if (priced.total.amount > 0) {
+      const methods = await sf("GET", `/storefront/carts/${cart.id}/payment-methods`);
+      const method =
+        methods.items.find((m) => m.id === cashOnDelivery.id) ??
+        methods.items.find((m) => m.id === bankTransfer.id);
+      priced = await sf("PUT", `/storefront/carts/${cart.id}/payment-method`, { payment_method: method.id });
+    }
     const order = await call("POST", `/storefront/carts/${cart.id}/checkout`, { expected_total: priced.total }, {
       key: key.token,
       headers: { "idempotency-key": `seed-${cart.id}` },
     });
     orders.push({ order, shopper });
-    console.log(`  #${order.number} ${shopper.first} ${shopper.last} (${shopper.country}) ${(priced.total.amount / 100).toFixed(2)} ${priced.total.currency}`);
+    const paying = order.payment?.method_name ? `, ${order.payment.method_name}` : "";
+    console.log(`  #${order.number} ${shopper.first} ${shopper.last} (${shopper.country}) ${(priced.total.amount / 100).toFixed(2)} ${priced.total.currency}${paying}`);
   }
 
-  // Their states: paid, paid and shipped with tracking, one cancelled, the rest pending.
+  // Their states: paid, paid and shipped with tracking, one cancelled (its pending
+  // payment voided), the rest awaiting payment. A paid order carries what staff have to
+  // show for it: the bank's reference for a transfer, the courier's receipt for cash.
   for (const [i, { order, shopper }] of orders.entries()) {
     if (i === orders.length - 1) {
       await admin.post(`/admin/orders/${order.id}/cancel`, { reason: "customer", notify: false });
       continue;
     }
     if (i % 3 === 2) continue; // left pending
-    await admin.post(`/admin/orders/${order.id}/paid`);
+    const cash = order.payment?.method_name === "Cash on delivery";
+    await admin.post(`/admin/orders/${order.id}/paid`, {
+      reference: cash ? `Courier receipt PE-${4100 + i}` : `HR-TRF-${order.number}-${20261000 + i}`,
+    });
     if (i % 2 === 0) {
       const location = shopper.country === "US" ? newJersey.id : zagreb.id;
       await admin.post(`/admin/orders/${order.id}/fulfillments`, {
@@ -839,7 +875,7 @@ async function main() {
   }
 
   console.log("\nDone: Lumen & Loom is set up.");
-  console.log(`  ${sellable.length} products for sale, 1 draft · ${MARKETS.length} markets · ${orders.length} orders`);
+  console.log(`  ${sellable.length} products for sale, 1 draft · ${MARKETS.length} markets · 2 payment methods · ${orders.length} orders`);
   console.log("\nFor the storefront (apps/storefront/.dev.vars):");
   console.log(`  STOREFRONT_KEY=${key.token}`);
   if (webhookSecret) console.log(`  HYPHA_WEBHOOK_SECRET=${webhookSecret}`);
