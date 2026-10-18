@@ -1,9 +1,10 @@
 # 0028: Notifications: email templates, branding and providers
 
-- **Status:** Proposed (2026-10-18). Danilo set the frame: Jinja templates (not Liquid),
+- **Status:** Accepted (2026-10-18). Danilo set the frame: Jinja templates (not Liquid),
   edited in the admin as code with the store's branding applied to every template, a
   visual editor later; Resend as the first hosted provider, Mailpit for local
-  development.
+  development. The open decisions (§10) as recommended. §11 pins the contract the build
+  follows.
 - **Scope:** the emails Hypha sends (to shoppers and to staff), their templates and the
   store's branding, rendering, the record of what was sent, the `EmailSender` port with
   log, SMTP and Resend senders, triggers (domain events, and the staff flows' direct
@@ -318,3 +319,72 @@ warning on the template, rather than leaving the customer without an email.
 **Q6. Who may edit templates?** Templates can show any variable in their context, all
 of which staff with `orders:read` already see, and can't reach anything else (no
 includes, no I/O). Recommended: `notifications:write` is enough; no extra review step.
+
+## 11. Implementation contract
+
+What the parts built in parallel agree on; where this and the sections above differ,
+this wins.
+
+**Crates.** `hypha-notifications` (leaf; depends on core, `minijinja`, `serde`):
+`TemplateKey`, `Template`, `NotificationSettings`, `Notification`, their repositories
+(`NotificationTemplateRepo`, `NotificationSettingsRepo`, `NotificationRepo`, with
+`HasNotificationTemplates`, `HasNotificationSettings`, `HasNotifications`), the
+`EmailSender` port, `render.rs`, errors, commands that need no other domain (list and
+read settings, list templates, revert, list messages). The default templates are
+embedded here (`defaults/<key>.subject.j2`, `.html.j2`, `.txt.j2`, and
+`defaults/layout.html.j2`; `include_str!`). `hypha-mail` (workflow; depends on
+notifications, orders, fulfillment, payments, stores, media, users, core): contexts and
+samples, `Mailer` (the `EventHandler`), `save_template` (checks against the sample),
+`preview`, `send_test`, `resend`, `update_settings` (the logo's asset usage),
+`send_staff` (what `Notifier<StaffEmail>` calls). `hypha-mail-resend` (adapter, like
+`hypha-store-s3`: the Resend sender over an `HttpClient` port). The SMTP and log senders
+live in the hosts (`hypha-host-axum` for SMTP; `hypha-http` for log).
+
+**Tables** (migration `0048_notifications.sql`):
+- `notification_templates (key text, locale text NOT NULL DEFAULT '', subject text,
+  html text, text text NULL, enabled boolean, version, created_at, updated_at,
+  PRIMARY KEY (key, locale))`;
+- `notification_settings (id smallint PRIMARY KEY CHECK (id = 1), version, logo_asset_id
+  uuid NULL, accent text, footer text NULL, sender_name text NULL, reply_to text NULL,
+  staff_recipients text[], order_url text NULL, created_at, updated_at)`; a missing row
+  reads as the defaults; the logo is an asset usage (0013) like a category's image;
+- `notifications (id uuid PK, version, template text, recipient text, subject text,
+  status text CHECK IN ('sending','sent','failed','skipped'), attempts int, provider
+  text NULL, provider_message_id text NULL, error text NULL, event_id uuid NULL,
+  order_id uuid NULL, sent_at timestamptz NULL, created_at, updated_at)`, a unique index
+  on `(event_id, template, recipient) WHERE event_id IS NOT NULL`, an index on
+  `(order_id, id DESC)`.
+
+**Template variables** (each template's context; `null` where the value is absent;
+money is `{ "amount": i64 minor units, "currency": "EUR", "formatted": "€12.50" }` and
+templates print `{{ x.formatted }}`; times are `{ "iso": "…", "formatted": "18 Oct
+2026, 14:05" }` in the store's time zone, UTC without one):
+- every template: `shop { name, email, url }` (`url`: the origin of `order_url`, or
+  null), `brand { logo_url, accent, footer }`;
+- `order_*` and `staff_new_order`: `order { id, number, url, email, placed_at, lines[] {
+  title, variant, sku, quantity, unit_price, total }, subtotal, shipping, tax, total,
+  taxes_included, shipping_address { name, company, line1, line2, city, province,
+  postal_code, country, phone }, shipping_method, payment { method, status,
+  instructions } }`, `customer { name }` (from the shipping address, else null);
+- `order_shipped`, `order_tracking_updated`: `fulfillment { lines[] { title, variant,
+  quantity }, tracking[] { carrier, number, url } }`;
+- `order_cancelled`: `cancellation { reason }` (the reason's display text);
+- `staff_new_order`: `admin_url` (the order in the admin, or null without
+  `server.admin_url`);
+- `staff_invite`, `staff_password_reset`: `user { email }`, `link`, `expires_at`.
+
+The layout's blocks: `{% block preheader %}`, `{% block content %}`; templates start
+with `{% extends "layout" %}`. Filters: none beyond minijinja's builtins in v1 (values
+arrive formatted). Order links: `order_url`'s `{order}` and `{token}` are replaced with
+the order's ID and access token (`HostEnv::order_token`, passed into `hypha-mail` as a
+function so the workflow doesn't know how it's made).
+
+**Routes** as §7, with scopes `notifications:read` / `notifications:write`, and the
+fulfilment and cancel routes' existing `notify` field carried into the events as
+`notify_customer`.
+
+**Configuration**: `[email] sender = "log" | "smtp" | "resend"`, `from`, `[email.smtp]
+host, port, tls ("none" | "starttls" | "tls"), username`; `HYPHA_SMTP_PASSWORD`,
+`HYPHA_RESEND_API_KEY` (environment only). The Workers host supports `log` and `resend`;
+`smtp` there is a startup error. The CLI: `init` asks for the sender (Resend key or
+none) and `from`; `deploy` passes the key as a secret; `pnpm dev` uses Mailpit.
