@@ -73,6 +73,8 @@ pub struct InMemoryPorts {
     pub notification_templates: crate::InMemoryNotificationTemplateRepo,
     pub notification_settings: crate::InMemoryNotificationSettingsRepo,
     pub notifications: crate::InMemoryNotificationRepo,
+    // Calls to apps' extension points (design note 0029).
+    pub extension_calls: crate::InMemoryExtensionCallRepo,
     // The store itself (design note 0006, model A: its row is in its own database), so
     // the ports are its directory too, as a host's are.
     pub stores: crate::InMemoryStoreRepo,
@@ -119,6 +121,7 @@ impl Default for InMemoryPorts {
             notification_templates: crate::InMemoryNotificationTemplateRepo::sharing(&outbox),
             notification_settings: crate::InMemoryNotificationSettingsRepo::sharing(&outbox),
             notifications: crate::InMemoryNotificationRepo::sharing(&outbox),
+            extension_calls: crate::InMemoryExtensionCallRepo::default(),
             stores: crate::InMemoryStoreRepo::sharing(&outbox),
             outbox,
         }
@@ -388,6 +391,13 @@ impl HasInvites for InMemoryPorts {
     type Invites = InMemoryInviteRepo;
     fn invites(&self) -> &InMemoryInviteRepo {
         &self.invites
+    }
+}
+
+impl hypha_extensions::HasExtensionCalls for InMemoryPorts {
+    type ExtensionCalls = crate::InMemoryExtensionCallRepo;
+    fn extension_calls(&self) -> &crate::InMemoryExtensionCallRepo {
+        &self.extension_calls
     }
 }
 

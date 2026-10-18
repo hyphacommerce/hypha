@@ -153,6 +153,8 @@ define_id!(EventId, "evt");
 define_id!(DeliveryId, "dlv");
 // Emails sent and their records (design note 0028).
 define_id!(NotificationId, "ntf");
+// Calls Hypha made to apps' extension points (design note 0029, AP3).
+define_id!(ExtensionCallId, "xcall");
 
 #[cfg(test)]
 mod tests {

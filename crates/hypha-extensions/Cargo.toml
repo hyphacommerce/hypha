@@ -1,0 +1,28 @@
+[package]
+name = "hypha-extensions"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Extension points (design note 0029, AP3): the contracts Hypha calls apps through, the call log, and the call itself."
+
+[dependencies]
+hypha-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# A call that can't be logged is still a call: the failure to log it is traced.
+tracing = "0.1"
+# Only for hosts that publish the extensions document (`openapi/extensions.json`),
+# like hypha-core's own `openapi` feature.
+utoipa = { version = "6", optional = true }
+
+[features]
+openapi = ["dep:utoipa", "hypha-core/openapi"]
+
+[dev-dependencies]
+pollster = "0.4"
+uuid.workspace = true
+hypha-testkit = { path = "../hypha-testkit" }
+
+[lints]
+workspace = true

@@ -106,6 +106,13 @@ fn idempotency_repo() {
 }
 
 #[test]
+fn extension_call_repo() {
+    block_on(contract::extension_call_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
 fn fulfillment_repo() {
     block_on(contract::fulfillment_repo(async || {
         InMemoryFulfillmentRepo::default()

@@ -1030,6 +1030,7 @@ dependencies = [
  "hypha-categories",
  "hypha-core",
  "hypha-dispatch",
+ "hypha-extensions",
  "hypha-media",
  "hypha-notifications",
  "hypha-search",
@@ -1080,6 +1081,21 @@ dependencies = [
  "hypha-testkit",
  "pollster",
  "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-extensions"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "utoipa",
  "uuid",
 ]
 
@@ -1188,6 +1204,7 @@ dependencies = [
  "hypha-core",
  "hypha-customers",
  "hypha-dispatch",
+ "hypha-extensions",
  "hypha-fulfillment",
  "hypha-inventory",
  "hypha-mail",
@@ -1446,6 +1463,7 @@ dependencies = [
  "hypha-checkout",
  "hypha-core",
  "hypha-customers",
+ "hypha-extensions",
  "hypha-fulfillment",
  "hypha-inventory",
  "hypha-markets",
@@ -1517,6 +1535,7 @@ dependencies = [
  "hypha-channels",
  "hypha-core",
  "hypha-customers",
+ "hypha-extensions",
  "hypha-fulfillment",
  "hypha-inventory",
  "hypha-markets",
