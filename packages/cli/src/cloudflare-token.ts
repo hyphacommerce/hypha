@@ -45,22 +45,28 @@ export function isTokenValue(value: string): boolean {
 }
 
 /** What the token must allow, as the dashboard's template keys
- * (developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template). */
-export const PERMISSIONS: { key: string; type: "read" | "edit"; why: string }[] = [
+ * (developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template). The
+ * template has no key for some (`manual`: the form's own names), which the person adds
+ * to the filled-in form themselves. */
+export const PERMISSIONS: { key: string; type: "read" | "edit"; why: string; manual?: string }[] = [
   { key: "account_settings", type: "read", why: "finding the account" },
   { key: "workers_scripts", type: "edit", why: "deploying the three Workers" },
-  { key: "workers_tail", type: "read", why: "`hypha logs`" },
+  { key: "workers_tail", type: "read", why: "`hypha logs`", manual: "Account › Workers Tail › Read" },
   { key: "workers_kv_storage", type: "edit", why: "the jobs' marks and the storefront's cache" },
   { key: "workers_r2", type: "edit", why: "the media bucket" },
-  { key: "hyperdrive", type: "edit", why: "the database connection" },
+  { key: "hyperdrive", type: "edit", why: "the database connection", manual: "Account › Hyperdrive › Edit" },
   { key: "zone", type: "read", why: "finding the domain" },
   { key: "workers_routes", type: "edit", why: "the Workers' custom domains" },
   { key: "dns", type: "edit", why: "the custom domains' records" },
 ];
 
-/** The dashboard's create-token page, filled in with `PERMISSIONS`. */
+/** The permissions the link can't fill in, as the form names them. */
+export const MANUAL = PERMISSIONS.flatMap((p) => (p.manual ? [p.manual] : []));
+
+/** The dashboard's create-token page, filled in with `PERMISSIONS` (except `MANUAL`). */
 export function templateUrl(name = "Hypha deploy"): string {
-  const keys = encodeURIComponent(JSON.stringify(PERMISSIONS.map(({ key, type }) => ({ key, type }))));
+  const filled = PERMISSIONS.filter((p) => !p.manual).map(({ key, type }) => ({ key, type }));
+  const keys = encodeURIComponent(JSON.stringify(filled));
   return (
     "https://dash.cloudflare.com/profile/api-tokens" +
     `?permissionGroupKeys=${keys}&accountId=*&zoneId=all&name=${encodeURIComponent(name)}`
@@ -138,7 +144,7 @@ export async function checkToken(
   ];
   const lacking = (key: string) => {
     const permission = PERMISSIONS.find((p) => p.key === key)!;
-    return `${key} (${permission.type}): ${permission.why}`;
+    return `${permission.manual ?? `${key} (${permission.type})`}: ${permission.why}`;
   };
   const missing: string[] = [];
   for (const [path, key] of probes) {

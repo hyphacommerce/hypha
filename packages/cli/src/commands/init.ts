@@ -21,7 +21,7 @@ import {
   type Target,
   url,
 } from "../deployment.ts";
-import { checkR2Keys, checkToken, isTokenValue, r2KeysOf, templateUrl } from "../cloudflare-token.ts";
+import { checkR2Keys, checkToken, isTokenValue, MANUAL, r2KeysOf, templateUrl } from "../cloudflare-token.ts";
 import { BLOCK, checkDatabaseUrl } from "../cloudflare.ts";
 import { run } from "../shell.ts";
 import {
@@ -339,8 +339,9 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   if (!args["api-token"] && !knownToken) {
     const link = templateUrl(`Hypha ${name}`);
     p.log.step(
-      "Hypha deploys with a Cloudflare API token. Create one with this link (the permissions are\n" +
-        `filled in; pick the account and ${domain}'s zone), then paste it here:\n${link}`,
+      "Hypha deploys with a Cloudflare API token. Create one with this link (most permissions are\n" +
+        `filled in; pick the account and ${domain}'s zone), add these with "+ Add more", which the\n` +
+        `link can't fill in:\n${MANUAL.map((m) => `  ${m}`).join("\n")}\nthen paste the token here:\n${link}`,
     );
     if (process.stdin.isTTY && !args.yes) openInBrowser(link);
   }

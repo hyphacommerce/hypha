@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { checkR2Keys, checkToken, isTokenValue, PERMISSIONS, r2KeysOf, templateUrl } from "./cloudflare-token.ts";
+import { checkR2Keys, checkToken, isTokenValue, MANUAL, PERMISSIONS, r2KeysOf, templateUrl } from "./cloudflare-token.ts";
 
 test("the link fills in every permission deploying needs", () => {
   const link = new URL(templateUrl("Hypha shop"));
@@ -9,8 +9,13 @@ test("the link fills in every permission deploying needs", () => {
   assert.equal(link.searchParams.get("name"), "Hypha shop");
   assert.deepEqual(
     JSON.parse(link.searchParams.get("permissionGroupKeys")!),
-    PERMISSIONS.map(({ key, type }) => ({ key, type })),
+    PERMISSIONS.filter((p) => !p.manual).map(({ key, type }) => ({ key, type })),
   );
+});
+
+test("what the link can't fill in is named as the form names it", () => {
+  assert.deepEqual(MANUAL, ["Account › Workers Tail › Read", "Account › Hyperdrive › Edit"]);
+  assert.ok(!templateUrl().includes("hyperdrive"));
 });
 
 /** Cloudflare's API as a fake: `refused` paths answer 403. */
@@ -45,7 +50,7 @@ test("a good token gives the account and the domain's zone, its parent's for a s
 test("a token that can't reach something says which permission to add", async () => {
   const { get } = cloudflare({ refused: ["/accounts/acc/hyperdrive", "/zones/zone1/dns_records"] });
   const { missing } = await checkToken("t", "example.com", { media: false }, get);
-  assert.deepEqual(missing.map((m) => m.split(" ")[0]), ["hyperdrive", "dns"]);
+  assert.deepEqual(missing.map((m) => m.split(":")[0]), ["Account › Hyperdrive › Edit", "dns (edit)"]);
 });
 
 test("R2 is tried, and required only when asked", async () => {
