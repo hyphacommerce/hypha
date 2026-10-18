@@ -44,6 +44,12 @@ export default defineConfig({
       // Theme declarations (`astryx theme build`) and `import "./globals.css"`.
       "unicorn/require-module-specifiers": "off",
       "import/no-unassigned-import": "off",
+      // Sequential on purpose wherever it appears: paging by cursor, writes that must
+      // happen in order and stop at the first error, uploads one at a time, deploy steps.
+      "no-await-in-loop": "off",
+      // Immutable updates of props, state and API data; the suggested `Object.assign`
+      // would mutate shared objects.
+      "oxc/no-map-spread": "off",
     },
     overrides: [
       {
@@ -63,10 +69,6 @@ export default defineConfig({
         files: ["packages/cli/**", "scripts/**", "packages/sdk/scripts/**", "apps/*/scripts/**"],
         plugins: ["node"],
         env: { node: true },
-        rules: {
-          // Deploy steps and seeding run in order on purpose: each needs the last.
-          "no-await-in-loop": "off",
-        },
       },
       {
         // `node:test`'s `test()` returns a promise the runner awaits.
