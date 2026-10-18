@@ -21,7 +21,7 @@ import {
   type Target,
   url,
 } from "../deployment.ts";
-import { checkR2Keys, checkToken, isTokenValue, MANUAL, r2KeysOf, templateUrl } from "../cloudflare-token.ts";
+import { checkR2Keys, isTokenValue, r2KeysOf } from "../cloudflare-token.ts";
 import { BLOCK, checkDatabaseUrl } from "../cloudflare.ts";
 import { run } from "../shell.ts";
 import {
@@ -34,6 +34,7 @@ import {
   seaweedConfig,
 } from "../templates.ts";
 import { ask, dirArg, guarded, setUnattended } from "./shared.ts";
+import { obtainToken } from "./token.ts";
 
 /** What `--force` keeps from the deployment's `.env`. */
 const KEPT = [
@@ -335,43 +336,15 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   const wantsMedia = args.media !== false;
 
   // The token everything deploys with (cloudflare-token.ts).
-  const knownToken = earlierEnv?.get("CLOUDFLARE_API_TOKEN") || process.env.CLOUDFLARE_API_TOKEN || undefined;
-  if (!args["api-token"] && !knownToken) {
-    const link = templateUrl(`Hypha ${name}`);
-    p.log.step(
-      "Hypha deploys with a Cloudflare API token. Create one with this link (most permissions are\n" +
-        `filled in; pick the account and ${domain}'s zone), add these with "+ Add more", which the\n` +
-        `link can't fill in:\n${MANUAL.map((m) => `  ${m}`).join("\n")}\nthen paste the token here:\n${link}`,
-    );
-    if (process.stdin.isTTY && !args.yes) openInBrowser(link);
-  }
-  const token = (
-    await ask(args["api-token"], knownToken, () =>
-      p.password({ message: "The API token", validate: (v) => (v?.trim() ? undefined : "paste the token") }),
-    )
-  ).trim();
-  const spin = p.spinner();
-  spin.start("Checking the token");
-  let checked;
-  try {
-    checked = await checkToken(token, domain, {
-      accountId: args["account-id"],
-      zoneId: args["zone-id"],
-      // Required when the deploy token is to give the keys and none came otherwise.
-      media: false,
-    });
-  } catch (e) {
-    spin.error("The token won't do");
-    throw e;
-  }
-  if (checked.missing.length > 0) {
-    spin.error("The token lacks permissions");
-    throw new Error(
-      "add these to the token (dash.cloudflare.com/profile/api-tokens → Edit), then run init again:\n" +
-        checked.missing.map((m) => `  ${m}`).join("\n"),
-    );
-  }
-  spin.stop(`The token reaches the account and ${domain}`);
+  const { token, checked } = await obtainToken({
+    name,
+    domain,
+    given: args["api-token"],
+    known: earlierEnv?.get("CLOUDFLARE_API_TOKEN") || process.env.CLOUDFLARE_API_TOKEN || undefined,
+    accountId: args["account-id"],
+    zoneId: args["zone-id"],
+    quiet: args.yes,
+  });
 
   let r2 = { id: "", secret: "" };
   if (!wantsMedia) {
@@ -456,16 +429,4 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   );
   p.log.step("hypha deploy needs Rust with `rustup target add wasm32-unknown-unknown` and `cargo install worker-build`.");
   p.outro(`Next: hypha deploy${args.dir === "hypha-deploy" ? "" : ` --dir ${args.dir}`}`);
-}
-
-/** Opens `link` in the browser, if this machine has a way; the link is printed anyway. */
-function openInBrowser(link: string): void {
-  // Not `cmd /c start`: cmd would split the link at its `&`s.
-  const [program, ...args] =
-    process.platform === "darwin"
-      ? ["open"]
-      : process.platform === "win32"
-        ? ["rundll32", "url.dll,FileProtocolHandler"]
-        : ["xdg-open"];
-  run(program, [...args, link], { capture: true }).catch(() => {});
 }

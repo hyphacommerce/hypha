@@ -267,7 +267,7 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
   if (!token && deployed.length > 0) {
     throw new Error(
       ".env has no CLOUDFLARE_API_TOKEN, which the admin and storefront deploy with: run " +
-        "`hypha init --force` with the same answers (it asks for one), then deploy",
+        "`hypha deploy` in a terminal (it asks for one), or set it in .env",
     );
   }
   if (!cf.accountId) {

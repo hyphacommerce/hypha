@@ -45,28 +45,37 @@ export function isTokenValue(value: string): boolean {
 }
 
 /** What the token must allow, as the dashboard's template keys
- * (developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template). The
- * template has no key for some (`manual`: the form's own names), which the person adds
- * to the filled-in form themselves. */
-export const PERMISSIONS: { key: string; type: "read" | "edit"; why: string; manual?: string }[] = [
+ * (developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template). */
+export const PERMISSIONS: { key: string; type: "read" | "edit"; why: string }[] = [
   { key: "account_settings", type: "read", why: "finding the account" },
   { key: "workers_scripts", type: "edit", why: "deploying the three Workers" },
-  { key: "workers_tail", type: "read", why: "`hypha logs`", manual: "Account › Workers Tail › Read" },
+  { key: "workers_tail", type: "read", why: "`hypha logs`" },
   { key: "workers_kv_storage", type: "edit", why: "the jobs' marks and the storefront's cache" },
   { key: "workers_r2", type: "edit", why: "the media bucket" },
-  { key: "hyperdrive", type: "edit", why: "the database connection", manual: "Account › Hyperdrive › Edit" },
+  // The dashboard's key for Hyperdrive is its old name (its permission groups' label
+  // `query_cache_write`); there's none called `hyperdrive`.
+  { key: "query_cache", type: "edit", why: "the database connection" },
   { key: "zone", type: "read", why: "finding the domain" },
   { key: "workers_routes", type: "edit", why: "the Workers' custom domains" },
   { key: "dns", type: "edit", why: "the custom domains' records" },
 ];
 
-/** The permissions the link can't fill in, as the form names them. */
-export const MANUAL = PERMISSIONS.flatMap((p) => (p.manual ? [p.manual] : []));
+/** The permissions as the form names them, for telling the person what to add. */
+const NAMES: Record<string, string> = {
+  account_settings: "Account Settings",
+  workers_scripts: "Workers Scripts",
+  workers_tail: "Workers Tail",
+  workers_kv_storage: "Workers KV Storage",
+  workers_r2: "Workers R2 Storage",
+  query_cache: "Hyperdrive",
+  zone: "Zone",
+  workers_routes: "Workers Routes",
+  dns: "DNS",
+};
 
-/** The dashboard's create-token page, filled in with `PERMISSIONS` (except `MANUAL`). */
+/** The dashboard's create-token page, filled in with `PERMISSIONS`. */
 export function templateUrl(name = "Hypha deploy"): string {
-  const filled = PERMISSIONS.filter((p) => !p.manual).map(({ key, type }) => ({ key, type }));
-  const keys = encodeURIComponent(JSON.stringify(filled));
+  const keys = encodeURIComponent(JSON.stringify(PERMISSIONS.map(({ key, type }) => ({ key, type }))));
   return (
     "https://dash.cloudflare.com/profile/api-tokens" +
     `?permissionGroupKeys=${keys}&accountId=*&zoneId=all&name=${encodeURIComponent(name)}`
@@ -138,13 +147,13 @@ export async function checkToken(
   const probes: [string, string][] = [
     [`/accounts/${accountId}/workers/scripts`, "workers_scripts"],
     [`/accounts/${accountId}/storage/kv/namespaces?per_page=5`, "workers_kv_storage"],
-    [`/accounts/${accountId}/hyperdrive/configs`, "hyperdrive"],
+    [`/accounts/${accountId}/hyperdrive/configs`, "query_cache"],
     [`/zones/${zoneId}/workers/routes`, "workers_routes"],
     [`/zones/${zoneId}/dns_records?per_page=1`, "dns"],
   ];
   const lacking = (key: string) => {
     const permission = PERMISSIONS.find((p) => p.key === key)!;
-    return `${permission.manual ?? `${key} (${permission.type})`}: ${permission.why}`;
+    return `${NAMES[key] ?? key} (${permission.type}): ${permission.why}`;
   };
   const missing: string[] = [];
   for (const [path, key] of probes) {

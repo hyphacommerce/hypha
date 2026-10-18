@@ -12,11 +12,12 @@ import { defineCommand } from "citty";
 
 import { Staff, waitForHealth } from "../api.ts";
 import { deployCloudflare, hereTools } from "../cloudflare.ts";
-import { apps, type Deployment, ENV_FILE, loadDeployment, loadEnv, saveEnv, url } from "../deployment.ts";
+import { apps, type Deployment, ENV_FILE, loadDeployment, loadEnv, saveDeployment, saveEnv, url } from "../deployment.ts";
 import { build, images } from "../images.ts";
 import { CommandFailed, type Machine } from "../shell.ts";
 import { connectStorefront, syncWebhook } from "../storefront.ts";
 import { dirArg, guarded, open } from "./shared.ts";
+import { obtainToken } from "./token.ts";
 
 /** What the server runs: copied on every deploy. */
 const FILES = [ENV_FILE, "compose.yaml", "Caddyfile", "hypha.config.toml", "hypha.config.schema.json", "seaweedfs/s3.json"];
@@ -35,6 +36,24 @@ export const deploy = defineCommand({
       if (deployment.target === "cloudflare") {
         p.intro("hypha deploy → Cloudflare");
         const env = await loadEnv(dir);
+        const cf = deployment.cloudflare;
+        if (cf && !env.get("CLOUDFLARE_API_TOKEN") && apps(deployment).length > 0) {
+          // A deployment made before the token, or one whose token was removed: ask
+          // here rather than send the person through `init` again.
+          const { token, checked } = await obtainToken({
+            name: cf.name,
+            domain: deployment.domains.api,
+            accountId: cf.accountId,
+            zoneId: cf.zoneId,
+            quiet: args.yes,
+          });
+          env.set("CLOUDFLARE_API_TOKEN", token);
+          await saveEnv(dir, env);
+          if (!cf.accountId || !cf.zoneId) {
+            Object.assign(cf, { accountId: checked.accountId, zoneId: checked.zoneId });
+            await saveDeployment(dir, deployment);
+          }
+        }
         await deployCloudflare(resolve(dir), deployment, env, hereTools(deployment, env));
         const password = env.get("HYPHA_OWNER_PASSWORD");
         const lines = [
