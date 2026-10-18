@@ -1,0 +1,5 @@
+# Formatting-only commits, skipped by `git blame` (git config blame.ignoreRevsFile .git-blame-ignore-revs;
+# GitHub reads it by itself).
+
+# style: format the TypeScript side with Oxfmt
+7162bf2b5b1cbcba8e9d6569f392c5d6a2e985f8
