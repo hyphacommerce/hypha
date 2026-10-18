@@ -68,22 +68,29 @@ fn load_config() -> Result<(Config, Option<String>), String> {
 
 /// `hypha-host-axum config` prints the settings in effect; `config schema [PATH]` writes
 /// the file's JSON Schema to `PATH` (default `hypha.config.schema.json`; a test fails
-/// while the committed one is stale); `config rate-limits` prints each rule's quota in
-/// effect as JSON (`{"login_ip": {"burst": 10, "per_ms": 30000}, …}`), for `hypha deploy`
-/// to size a Worker's Rate Limiting bindings (design note 0026, W8).
+/// while the committed one is stale); `config rate-limits` prints a Worker's Rate
+/// Limiting bindings under the quotas in effect, as JSON (`{"slots": 100, "bindings":
+/// [{"rule": "login_ip", "binding": "RL_LOGIN_IP", "slot": 0, "limit": 12, "period":
+/// 60}, …]}`), which `hypha deploy` copies into `wrangler.toml` (design note 0026, W8).
 fn config_command(args: &[String]) -> Result<(), String> {
     if args.first().map(String::as_str) == Some("rate-limits") {
+        use hypha_http::rate_limit::{BINDING_SLOTS, BINDING_WINDOW};
         let (config, _) = load_config()?;
-        let quotas: serde_json::Map<String, serde_json::Value> = Rule::ALL
+        let limits = &config.rate_limits;
+        let bindings: Vec<serde_json::Value> = Rule::ALL
             .into_iter()
             .map(|rule| {
-                let (burst, per) = rule.quota(&config.rate_limits);
-                let per_ms = u64::try_from(per.as_millis()).unwrap_or(u64::MAX);
-                let quota = serde_json::json!({ "burst": burst, "per_ms": per_ms });
-                (rule.config_key().to_string(), quota)
+                serde_json::json!({
+                    "rule": rule.config_key(),
+                    "binding": rule.binding(),
+                    "slot": rule.binding_slot(),
+                    "limit": rule.binding_limit(limits),
+                    "period": BINDING_WINDOW.as_secs(),
+                })
             })
             .collect();
-        println!("{}", serde_json::Value::Object(quotas));
+        let out = serde_json::json!({ "slots": BINDING_SLOTS, "bindings": bindings });
+        println!("{out}");
         return Ok(());
     }
     if args.first().map(String::as_str) == Some("schema") {

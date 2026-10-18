@@ -84,6 +84,51 @@ impl Rule {
         }
     }
 
+    /// The Cloudflare Rate Limiting binding that caps this rule across a Worker's
+    /// isolates (design note 0026, W8): its configuration key in capitals. A contract
+    /// with deployments, like the key: never renamed.
+    pub fn binding(self) -> &'static str {
+        match self {
+            Rule::LoginIp => "RL_LOGIN_IP",
+            Rule::LoginEmailFromIp => "RL_LOGIN_EMAIL_FROM_IP",
+            Rule::LoginEmail => "RL_LOGIN_EMAIL",
+            Rule::MfaIp => "RL_MFA_IP",
+            Rule::ResetIp => "RL_RESET_IP",
+            Rule::ResetEmailFromIp => "RL_RESET_EMAIL_FROM_IP",
+            Rule::ResetConfirmIp => "RL_RESET_CONFIRM_IP",
+            Rule::InviteIp => "RL_INVITE_IP",
+            Rule::ShippingQuotesCart => "RL_SHIPPING_QUOTES_CART",
+            Rule::CartCreateIp => "RL_CART_CREATE_IP",
+        }
+    }
+
+    /// The binding's place in a deployment's block of `namespace_id`s (`BINDING_SLOTS`
+    /// of them; a namespace is where the counts live). Fixed per rule, never reused: a
+    /// new rule takes the next free one, so no other rule's counts move.
+    pub fn binding_slot(self) -> u32 {
+        match self {
+            Rule::LoginIp => 0,
+            Rule::LoginEmailFromIp => 1,
+            Rule::LoginEmail => 2,
+            Rule::MfaIp => 3,
+            Rule::ResetIp => 4,
+            Rule::ResetEmailFromIp => 5,
+            Rule::ResetConfirmIp => 6,
+            Rule::InviteIp => 7,
+            Rule::ShippingQuotesCart => 8,
+            Rule::CartCreateIp => 9,
+        }
+    }
+
+    /// The binding's limit per `BINDING_WINDOW` under `limits`: the most the quota
+    /// allows in any window (its burst, plus one per period that fits), so the binding
+    /// never refuses what the quota allows and only catches what isolates miss.
+    pub fn binding_limit(self, limits: &RateLimits) -> u32 {
+        let (burst, every) = self.quota(limits);
+        let more = BINDING_WINDOW.as_millis() / every.as_millis().max(1);
+        burst.saturating_add(u32::try_from(more).unwrap_or(u32::MAX))
+    }
+
     /// `(burst, one more every)` under `limits` (`[rate_limits]`, design note 0017; the
     /// defaults are 0009's, section 3).
     pub fn quota(self, limits: &RateLimits) -> (u32, Duration) {
@@ -102,6 +147,13 @@ impl Rule {
         (quota.burst, quota.per.0)
     }
 }
+
+/// A Rate Limiting binding's window: the longer of the two Cloudflare offers (10 or 60
+/// seconds).
+pub const BINDING_WINDOW: Duration = Duration::from_secs(60);
+
+/// How many `namespace_id`s a deployment's block holds (`Rule::binding_slot`).
+pub const BINDING_SLOTS: u32 = 100;
 
 /// The key for a rule on an email and an address together.
 pub fn pair_key(email: &hypha_core::Email, ip: &str) -> String {
@@ -142,6 +194,34 @@ pub trait RateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_binding_is_its_rules_key_in_capitals() {
+        for rule in Rule::ALL {
+            let key = rule.config_key().to_uppercase();
+            assert_eq!(rule.binding(), format!("RL_{key}"));
+        }
+    }
+
+    #[test]
+    fn each_rule_has_its_own_binding_slot_in_the_block() {
+        let mut slots: Vec<u32> = Rule::ALL.iter().map(|r| r.binding_slot()).collect();
+        slots.sort_unstable();
+        slots.dedup();
+        assert_eq!(slots.len(), Rule::ALL.len());
+        assert!(slots.iter().all(|s| *s < BINDING_SLOTS));
+    }
+
+    #[test]
+    fn a_bindings_limit_is_the_most_a_quota_allows_in_a_minute() {
+        let limits = RateLimits::default();
+        // 10, then one every 30 s; 10, then every 2 s; 50, then every 72 s; 3 per 5 min.
+        assert_eq!(Rule::LoginIp.binding_limit(&limits), 12);
+        assert_eq!(Rule::ShippingQuotesCart.binding_limit(&limits), 40);
+        assert_eq!(Rule::LoginEmail.binding_limit(&limits), 50);
+        assert_eq!(Rule::ResetEmailFromIp.binding_limit(&limits), 3);
+        assert_eq!(Rule::LoginEmailFromIp.binding_limit(&limits), 6);
+    }
 
     #[test]
     fn each_rules_key_is_its_field_under_rate_limits() {

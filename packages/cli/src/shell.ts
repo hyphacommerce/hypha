@@ -25,15 +25,44 @@ export type RunOptions = {
   input?: string;
   cwd?: string;
   env?: Record<string, string>;
-  /** `env` alone (with `PATH` and `HOME`), not added to this process's environment. */
+  /** `env` alone (with what the system itself needs: `PATH`, `HOME`, and on Windows
+   * `SystemRoot`, `TEMP` and the like, without which DNS and TLS fail), not added to
+   * this process's environment. */
   bareEnv?: boolean;
 };
+
+/** The variables a program needs from the system, whoever runs it. */
+const SYSTEM = [
+  "PATH",
+  "HOME",
+  "SystemRoot",
+  "windir",
+  "SystemDrive",
+  "ComSpec",
+  "PATHEXT",
+  "TEMP",
+  "TMP",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "ProgramData",
+];
+
+/** The system's own variables from `from` (this process's environment). */
+export function systemEnv(from: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of SYSTEM) {
+    const value = from[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
 
 /** Runs `program` and resolves with its output when `capture` is set; rejects on a
  * non-zero exit with the output's last lines. */
 export function run(program: string, args: string[], options: RunOptions = {}): Promise<string> {
   const { capture = false, input, cwd, env, bareEnv = false } = options;
-  const base = bareEnv ? { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" } : process.env;
+  const base = bareEnv ? systemEnv() : process.env;
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, {
       cwd,

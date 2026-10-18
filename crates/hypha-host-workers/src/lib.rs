@@ -264,7 +264,7 @@ mod worker_main {
     /// in the isolate only, with a warning.
     fn rate_limit_bindings(env: &Env) -> [Option<RateLimiter>; Rule::ALL.len()] {
         Rule::ALL.map(|rule| {
-            let name = crate::limiter::binding(rule);
+            let name = rule.binding();
             let binding = env.rate_limiter(name).ok();
             if binding.is_none() {
                 tracing::warn!(
@@ -283,10 +283,10 @@ mod worker_main {
         match binding.limit(key).await {
             Ok(outcome) if outcome.success => Decision::Allowed,
             Ok(_) => Decision::Limited {
-                retry_after: crate::limiter::WINDOW,
+                retry_after: hypha_http::rate_limit::BINDING_WINDOW,
             },
             Err(e) => {
-                let name = crate::limiter::binding(rule);
+                let name = rule.binding();
                 tracing::warn!(binding = name, error = %e, "rate limits: the binding failed");
                 Decision::Allowed
             }

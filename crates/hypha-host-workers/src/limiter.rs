@@ -1,11 +1,11 @@
 //! Rate limits on Workers (design note 0009's rules and quotas; 0026, W8): each check
 //! counts twice. GCRA in this isolate's memory gives the quota's exact shape (a burst,
 //! then one more every period) and the time to wait; Cloudflare's Rate Limiting binding,
-//! one per rule (`binding`), caps all isolates together, in fixed windows of a minute.
+//! one per rule (`Rule::binding`), caps all isolates together, in fixed windows of a minute.
 //! A Worker runs in many isolates, each counting on its own, so the binding is what
 //! bounds a client spread over them.
 //!
-//! The binding's limit is the most the quota allows in any minute (`binding_limit`:
+//! The binding's limit is the most the quota allows in any minute (`Rule::binding_limit`:
 //! the burst, plus one per period that fits), so it never refuses what the quota allows
 //! and only catches what the isolates' counts miss. Rules whose period is longer than a
 //! minute are held loosely across isolates (`login_email`'s binding allows 50 a minute,
@@ -19,35 +19,6 @@ use std::time::Duration;
 use hypha_config::RateLimits;
 use hypha_core::Timestamp;
 use hypha_http::rate_limit::{Decision, Rule};
-
-/// The binding's window: the longer of the two it offers (10 or 60 seconds).
-pub const WINDOW: Duration = Duration::from_secs(60);
-
-/// The Rate Limiting binding for `rule` (`wrangler.toml`'s `[[ratelimits]]`): its
-/// configuration key in capitals. A binding name is a contract with deployments, like a
-/// key: never rename one.
-pub fn binding(rule: Rule) -> &'static str {
-    match rule {
-        Rule::LoginIp => "RL_LOGIN_IP",
-        Rule::LoginEmailFromIp => "RL_LOGIN_EMAIL_FROM_IP",
-        Rule::LoginEmail => "RL_LOGIN_EMAIL",
-        Rule::MfaIp => "RL_MFA_IP",
-        Rule::ResetIp => "RL_RESET_IP",
-        Rule::ResetEmailFromIp => "RL_RESET_EMAIL_FROM_IP",
-        Rule::ResetConfirmIp => "RL_RESET_CONFIRM_IP",
-        Rule::InviteIp => "RL_INVITE_IP",
-        Rule::ShippingQuotesCart => "RL_SHIPPING_QUOTES_CART",
-        Rule::CartCreateIp => "RL_CART_CREATE_IP",
-    }
-}
-
-/// The binding's limit per `WINDOW` for a quota of `burst`, then one more `every`: the
-/// most the quota allows in any window.
-pub fn binding_limit(burst: u32, every: Duration) -> u32 {
-    let every = every.as_millis().max(1);
-    let more = WINDOW.as_millis() / every;
-    burst.saturating_add(u32::try_from(more).unwrap_or(u32::MAX))
-}
 
 /// Keys tracked per rule before the ones back to fresh are dropped. If too many are
 /// still counting (someone rotating addresses), the half nearest to fresh go too: their
@@ -124,23 +95,6 @@ mod tests {
         (IsolateLimiter::new(&limits), burst, every)
     }
 
-    /// `hypha deploy` names the bindings the same way, from the configuration keys.
-    #[test]
-    fn a_binding_is_its_rules_key_in_capitals() {
-        for rule in Rule::ALL {
-            let key = rule.config_key().to_uppercase();
-            assert_eq!(binding(rule), format!("RL_{key}"));
-        }
-    }
-
-    #[test]
-    fn a_bindings_limit_is_the_most_a_quota_allows_in_a_minute() {
-        assert_eq!(binding_limit(10, Duration::from_secs(30)), 12);
-        assert_eq!(binding_limit(10, Duration::from_secs(2)), 40);
-        assert_eq!(binding_limit(50, Duration::from_secs(72)), 50);
-        assert_eq!(binding_limit(3, Duration::from_secs(60)), 4);
-    }
-
     /// `wrangler.toml`'s bindings are the defaults' (`hypha deploy` writes a deployment's
     /// own from its configuration).
     #[test]
@@ -148,23 +102,26 @@ mod tests {
         let file: toml::Table = include_str!("../wrangler.toml").parse().unwrap();
         let bindings = file["ratelimits"].as_array().unwrap();
         let limits = RateLimits::default();
-        let mut namespaces = std::collections::HashSet::new();
         assert_eq!(bindings.len(), Rule::ALL.len());
         for rule in Rule::ALL {
             let entry = bindings
                 .iter()
-                .find(|b| b["name"].as_str() == Some(binding(rule)))
-                .unwrap_or_else(|| panic!("no binding {}", binding(rule)));
-            let (burst, every) = rule.quota(&limits);
+                .find(|b| b["name"].as_str() == Some(rule.binding()))
+                .unwrap_or_else(|| panic!("no binding {}", rule.binding()));
             let simple = &entry["simple"];
             assert_eq!(
                 simple["limit"].as_integer(),
-                Some(i64::from(binding_limit(burst, every))),
+                Some(i64::from(rule.binding_limit(&limits))),
                 "{}",
-                binding(rule)
+                rule.binding()
             );
             assert_eq!(simple["period"].as_integer(), Some(60));
-            assert!(namespaces.insert(entry["namespace_id"].as_str().unwrap().to_string()));
+            // The block starts at 1000 here; each rule at its slot.
+            let namespace = 1000 + rule.binding_slot();
+            assert_eq!(
+                entry["namespace_id"].as_str(),
+                Some(namespace.to_string().as_str())
+            );
         }
     }
 

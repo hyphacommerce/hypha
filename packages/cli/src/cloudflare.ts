@@ -29,28 +29,19 @@ export const WRANGLER_FILE = "wrangler.toml";
 const SECRETS_FILE = ".secrets.json";
 const WORKER_CRATE = join(REPO, "crates", "hypha-host-workers");
 
-/** The window of every Rate Limiting binding, in seconds (the longer of the two offered). */
-export const WINDOW_SECONDS = 60;
+/** How many `namespace_id`s each deployment's block holds: a rule's binding is at its
+ * fixed slot in it (`Rule::binding_slot`), so adding a rule moves no other's counts. */
+export const BLOCK = 100;
 
-/** A rule's quota in effect, as `hypha-host-axum config rate-limits` prints it. */
-export type Quota = { burst: number; per_ms: number };
-
-/** The binding for the rule under `[rate_limits]` key `key` (the Worker's `limiter::binding`). */
-export function bindingName(key: string): string {
-  return `RL_${key.toUpperCase()}`;
-}
-
-/** The most a quota allows in one window: its burst, plus one per period that fits (the
- * Worker's `limiter::binding_limit`). The binding then never refuses what the quota
- * allows, and caps every isolate together. */
-export function bindingLimit(quota: Quota): number {
-  return quota.burst + Math.floor((WINDOW_SECONDS * 1000) / Math.max(quota.per_ms, 1));
-}
+/** A Rate Limiting binding as `hypha-host-axum config rate-limits` prints it: sized
+ * from the deployment's `[rate_limits]` by the API itself (`Rule::binding_limit`). */
+export type Binding = { rule: string; binding: string; slot: number; limit: number; period: number };
 
 /** The database's `host:port`, which the Worker is placed next to. */
 export function databaseHost(databaseUrl: string): string {
   const parsed = new URL(databaseUrl);
-  return `${parsed.hostname.replace(/^\[|\]$/g, "")}:${parsed.port || "5432"}`;
+  // An IPv6 address keeps its brackets, as the URL has it, so the port stays apart.
+  return `${parsed.hostname}:${parsed.port || "5432"}`;
 }
 
 /** Why `databaseUrl` can't be a Worker's database, if it can't. */
@@ -83,7 +74,7 @@ export type WorkerInput = {
   kvId: string;
   /** `hypha.config.toml`'s text, the Worker's `HYPHA_CONFIG`. */
   config: string;
-  quotas: Record<string, Quota>;
+  bindings: Binding[];
   compatibilityDate: string;
   /** With R2 keys; without, media is off. */
   media: boolean;
@@ -110,15 +101,18 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
   const placement = cf.region
     ? ["[placement]", 'mode = "targeted"', `region = ${str(cf.region)}`]
     : ["[placement]", 'mode = "targeted"', `host = ${str(databaseHost(input.databaseUrl))}`];
-  const limits = Object.entries(input.quotas)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .flatMap(([key, quota], i) => [
+  const limits = input.bindings.flatMap((b) => {
+    if (!Number.isInteger(b.slot) || b.slot < 0 || b.slot >= BLOCK) {
+      throw new Error(`${b.binding}: slot ${b.slot} is outside a deployment's block of ${BLOCK}`);
+    }
+    return [
       "[[ratelimits]]",
-      `name = ${str(bindingName(key))}`,
-      `namespace_id = ${str(String(cf.rateLimitBase + i))}`,
-      `simple = { limit = ${bindingLimit(quota)}, period = ${WINDOW_SECONDS} }`,
+      `name = ${str(b.binding)}`,
+      `namespace_id = ${str(String(cf.rateLimitBase + b.slot))}`,
+      `simple = { limit = ${b.limit}, period = ${b.period} }`,
       "",
-    ]);
+    ];
+  });
   return [
     "# Written by `hypha deploy` from hypha.json and hypha.config.toml on every deploy",
     "# (design note 0026): change those, not this file.",
@@ -289,7 +283,9 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
     };
     spin.message("Setting the database up");
     await tools.host(binary, ["setup"], hostEnv);
-    const quotas = JSON.parse(await tools.host(binary, ["config", "rate-limits"], hostEnv)) as Record<string, Quota>;
+    const { bindings } = JSON.parse(await tools.host(binary, ["config", "rate-limits"], hostEnv)) as {
+      bindings: Binding[];
+    };
     stop("Database ready");
 
     // 2. What the Worker binds to.
@@ -355,7 +351,7 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
         hyperdriveId: cf.hyperdriveId,
         kvId: cf.kvId,
         config: await readFile(join(dir, "hypha.config.toml"), "utf8"),
-        quotas,
+        bindings,
         compatibilityDate,
         media,
       }),
@@ -412,7 +408,8 @@ export function hereTools(d: Deployment): Tools {
       return join(process.env.CARGO_TARGET_DIR ?? join(REPO, "target"), "release", "hypha-host-axum");
     },
     // Only what setup needs: no DATABASE_URL, HYPHA_* or S3 settings from this shell.
-    host: (binary, args, env) => run(binary, args, { cwd: REPO, env: { RUST_LOG: "info", ...env }, bareEnv: true, capture: true }),
+    host: (binary, args, env) =>
+      run(binary, args, { cwd: REPO, env: { RUST_LOG: "info", ...env }, bareEnv: true, capture: true }),
     async checkToolchain() {
       await run("worker-build", ["--version"], { capture: true }).catch(() => {
         throw new Error("worker-build is missing: `cargo install worker-build`");

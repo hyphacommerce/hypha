@@ -21,7 +21,7 @@ import {
   type Target,
   url,
 } from "../deployment.ts";
-import { checkDatabaseUrl } from "../cloudflare.ts";
+import { BLOCK, checkDatabaseUrl } from "../cloudflare.ts";
 import {
   caddyfile,
   composeFile,
@@ -350,8 +350,8 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
       ...((args["account-id"] || earlier?.accountId) ? { accountId: args["account-id"] || earlier?.accountId } : {}),
       ...(zoneId.trim() ? { zoneId: zoneId.trim() } : {}),
       ...(args.region ? { region: args.region } : {}),
-      // A namespace_id is a number unique per account: a random block of ten.
-      rateLimitBase: earlier?.rateLimitBase ?? 1000 + randomInt(90_000) * 10,
+      // A namespace_id is a number unique per account: a random block per deployment.
+      rateLimitBase: earlier?.rateLimitBase ?? (1 + randomInt(90_000)) * BLOCK,
       ...(earlier?.hyperdriveId ? { hyperdriveId: earlier.hyperdriveId } : {}),
       ...(earlier?.kvId ? { kvId: earlier.kvId } : {}),
     },

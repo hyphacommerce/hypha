@@ -29,55 +29,56 @@ id = "00000000000000000000000000000000"
 # counts the exact quota (`src/limiter.rs`). The limit is the most the rule's
 # `[rate_limits]` quota allows in a minute (burst + one per period that fits); these are
 # the defaults', and `hypha deploy` writes a deployment's own. A namespace_id is unique
-# per account: two deployments on one account need different ones.
+# per account: each deployment has its own block, each rule its slot in it
+# (`Rule::binding_slot`).
 [[ratelimits]]
 name = "RL_LOGIN_IP"
-namespace_id = "1001"
+namespace_id = "1000"
 simple = { limit = 12, period = 60 }
 
 [[ratelimits]]
 name = "RL_LOGIN_EMAIL_FROM_IP"
-namespace_id = "1002"
+namespace_id = "1001"
 simple = { limit = 6, period = 60 }
 
 [[ratelimits]]
 name = "RL_LOGIN_EMAIL"
-namespace_id = "1003"
+namespace_id = "1002"
 simple = { limit = 50, period = 60 }
 
 [[ratelimits]]
 name = "RL_MFA_IP"
-namespace_id = "1004"
+namespace_id = "1003"
 simple = { limit = 12, period = 60 }
 
 [[ratelimits]]
 name = "RL_RESET_IP"
-namespace_id = "1005"
+namespace_id = "1004"
 simple = { limit = 6, period = 60 }
 
 [[ratelimits]]
 name = "RL_RESET_EMAIL_FROM_IP"
-namespace_id = "1006"
+namespace_id = "1005"
 simple = { limit = 3, period = 60 }
 
 [[ratelimits]]
 name = "RL_RESET_CONFIRM_IP"
-namespace_id = "1007"
+namespace_id = "1006"
 simple = { limit = 12, period = 60 }
 
 [[ratelimits]]
 name = "RL_INVITE_IP"
-namespace_id = "1008"
+namespace_id = "1007"
 simple = { limit = 12, period = 60 }
 
 [[ratelimits]]
 name = "RL_SHIPPING_QUOTES_CART"
-namespace_id = "1009"
+namespace_id = "1008"
 simple = { limit = 40, period = 60 }
 
 [[ratelimits]]
 name = "RL_CART_CREATE_IP"
-namespace_id = "1010"
+namespace_id = "1009"
 simple = { limit = 40, period = 60 }
 
 # One tick a minute (W6): dispatch and search sync when the marks say so, prune and the media sweep

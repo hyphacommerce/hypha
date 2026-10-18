@@ -5,17 +5,16 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
-  bindingLimit,
-  bindingName,
+  type Binding,
   checkDatabaseUrl,
   databaseHost,
   deployCloudflare,
   hyperdriveOrigin,
-  type Quota,
   type Tools,
   wranglerToml,
 } from "./cloudflare.ts";
 import { type Deployment, EnvFile, loadDeployment, saveDeployment } from "./deployment.ts";
+import { systemEnv } from "./shell.ts";
 import { REPO } from "./templates.ts";
 
 const DB = "postgres://hypha:secret@ep-quiet-sky.eu-central-1.aws.neon.tech/hypha?sslmode=require";
@@ -33,24 +32,17 @@ function deployment(): Deployment {
   };
 }
 
-const QUOTAS: Record<string, Quota> = {
-  login_ip: { burst: 10, per_ms: 30_000 },
-  shipping_quotes_cart: { burst: 10, per_ms: 2_000 },
-  login_email: { burst: 50, per_ms: 72_000 },
-};
-
-test("a binding allows the most its quota allows in a minute, as the Worker computes it", () => {
-  assert.equal(bindingLimit({ burst: 10, per_ms: 30_000 }), 12);
-  assert.equal(bindingLimit({ burst: 10, per_ms: 2_000 }), 40);
-  assert.equal(bindingLimit({ burst: 50, per_ms: 72_000 }), 50);
-  assert.equal(bindingLimit({ burst: 3, per_ms: 60_000 }), 4);
-  assert.equal(bindingName("login_email_from_ip"), "RL_LOGIN_EMAIL_FROM_IP");
-});
+/** As `hypha-host-axum config rate-limits` prints them (a few). */
+const BINDINGS: Binding[] = [
+  { rule: "login_ip", binding: "RL_LOGIN_IP", slot: 0, limit: 12, period: 60 },
+  { rule: "login_email", binding: "RL_LOGIN_EMAIL", slot: 2, limit: 50, period: 60 },
+  { rule: "shipping_quotes_cart", binding: "RL_SHIPPING_QUOTES_CART", slot: 8, limit: 40, period: 60 },
+];
 
 test("the Worker is placed next to the database's host, whoever runs it", () => {
   assert.equal(databaseHost(DB), "ep-quiet-sky.eu-central-1.aws.neon.tech:5432");
   assert.equal(databaseHost("postgres://u:p@db.example.com:6543/x"), "db.example.com:6543");
-  assert.equal(databaseHost("postgres://u:p@[2001:db8::1]:5432/x"), "2001:db8::1:5432");
+  assert.equal(databaseHost("postgres://u:p@[2001:db8::1]:5432/x"), "[2001:db8::1]:5432");
 });
 
 test("a database Cloudflare can't reach, or without credentials, is refused", () => {
@@ -70,7 +62,7 @@ function toml(d: Deployment, media = true) {
     hyperdriveId: "h".repeat(32),
     kvId: "k".repeat(32),
     config: '[rate_limits.login_ip]\nburst = 20\nper = "30s"\n',
-    quotas: QUOTAS,
+    bindings: BINDINGS,
     compatibilityDate: "2026-10-01",
     media,
   });
@@ -83,9 +75,10 @@ test("wrangler.toml binds Hyperdrive, KV and a rate limiter per rule, and is pla
   assert.match(file, /\[placement\]\nmode = "targeted"\nhost = "ep-quiet-sky\.eu-central-1\.aws\.neon\.tech:5432"/);
   assert.match(file, /\[\[hyperdrive\]\]\nbinding = "HYPERDRIVE"\nid = "h{32}"/);
   assert.match(file, /\[\[kv_namespaces\]\]\nbinding = "JOBS"\nid = "k{32}"/);
-  assert.match(file, /name = "RL_LOGIN_EMAIL"\nnamespace_id = "5000"\nsimple = \{ limit = 50, period = 60 \}/);
-  assert.match(file, /name = "RL_LOGIN_IP"\nnamespace_id = "5001"\nsimple = \{ limit = 12, period = 60 \}/);
-  assert.match(file, /name = "RL_SHIPPING_QUOTES_CART"\nnamespace_id = "5002"\nsimple = \{ limit = 40, period = 60 \}/);
+  // Each rule at its own slot in the deployment's block, whatever else is listed.
+  assert.match(file, /name = "RL_LOGIN_IP"\nnamespace_id = "5000"\nsimple = \{ limit = 12, period = 60 \}/);
+  assert.match(file, /name = "RL_LOGIN_EMAIL"\nnamespace_id = "5002"\nsimple = \{ limit = 50, period = 60 \}/);
+  assert.match(file, /name = "RL_SHIPPING_QUOTES_CART"\nnamespace_id = "5008"\nsimple = \{ limit = 40, period = 60 \}/);
   assert.match(file, /^HYPHA_CONFIG = "\[rate_limits\.login_ip\]\\nburst = 20\\nper = \\"30s\\"\\n"$/m);
   assert.match(file, /^HYPHA_ADMIN_URL = "https:\/\/admin\.example\.com"$/m);
   assert.match(file, /^main = "\.\.\/crates\/hypha-host-workers\/build\/worker\/shim\.mjs"$/m);
@@ -132,7 +125,7 @@ function fakeTools(): { tools: Tools; calls: string[]; secrets: string[] } {
     },
     async host(_binary, args, env) {
       calls.push(`host ${args.join(" ")} DATABASE_URL=${env.DATABASE_URL}`);
-      return args[0] === "config" ? JSON.stringify(QUOTAS) : "";
+      return args[0] === "config" ? JSON.stringify({ slots: 100, bindings: BINDINGS }) : "";
     },
     async checkToolchain() {},
     now: () => 1_800_000_000_000,
@@ -224,4 +217,34 @@ test("a failed Hyperdrive call doesn't print the database's password", async () 
     assert.match(e.message, /hypha:\*\*\*@/);
     return true;
   });
+});
+
+test("a binding outside the deployment's block is refused, not spilled into another's", () => {
+  const d = deployment();
+  assert.throws(
+    () =>
+      wranglerToml(d, {
+        dir: join(REPO, "hypha-deploy"),
+        accountId: "a".repeat(32),
+        databaseUrl: DB,
+        hyperdriveId: "h".repeat(32),
+        kvId: "k".repeat(32),
+        config: "",
+        bindings: [{ rule: "x", binding: "RL_X", slot: 100, limit: 1, period: 60 }],
+        compatibilityDate: "2026-10-01",
+        media: false,
+      }),
+    /outside a deployment's block of 100/,
+  );
+});
+
+test("a bare environment keeps what Windows needs for DNS and TLS, and nothing else", () => {
+  const env = systemEnv({
+    PATH: "C:\\Windows",
+    SystemRoot: "C:\\Windows",
+    TEMP: "C:\\Temp",
+    DATABASE_URL: "postgres://elsewhere",
+    HYPHA_S3_ENDPOINT: "http://localhost:8333",
+  });
+  assert.deepEqual(env, { PATH: "C:\\Windows", SystemRoot: "C:\\Windows", TEMP: "C:\\Temp" });
 });
