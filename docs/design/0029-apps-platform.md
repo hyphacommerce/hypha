@@ -1,10 +1,12 @@
 # 0029: The apps platform: extension points, installation, and app UI in any admin or storefront
 
-- **Status:** Proposed (2026-10-18). Replaces the spore design this note first held
+- **Status:** Accepted (2026-10-18). Replaces the spore design this note first held
   (compiled-in Rust extensions, 0002 §6): Danilo asked how Shopify lets apps change its
   behaviour, and whether that model fits a headless Hypha better. It does: this note
-  makes apps the one public way to extend Hypha. The decisions marked *hard to reverse*
-  and the open questions (§13) are his.
+  makes apps the one public way to extend Hypha. Decided: **OAuth and staff-approved
+  scopes from day one** (Q1), with every change of scopes approved again, and personal
+  data behind its own scopes (AP10) so the merchant consents to exactly what an app sees;
+  the other questions as recommended.
 - **Scope:** what an app may do and how; extension points (synchronous contracts Hypha
   calls apps through) and the first ones (payments, search, and shipping rates moved
   onto the mechanism); the app manifest, installation and credentials; how an app's UI
@@ -39,7 +41,8 @@ Meilisearch are apps and third parties can build the same way in any language.
 | AP2 | **Five channels, no others**: the Admin API (and Storefront API) with the app's scopes; webhooks (exist); **extension points**, synchronous calls Hypha makes to an app mid-flow; **app endpoints** reached through Hypha (an app proxy, §8); **UI extensions** (§6–§7). Everything an app contributes is declared in its manifest |
 | AP3 | **An extension point is a published, versioned contract**: a name (`payments.start`), a version, request and response types (Rust DTOs, documented in a third OpenAPI document, `openapi/extensions.json`), a timeout, a failure policy (fail closed, or fall back to the default), an idempotency key, and the existing request signature (0015 §5, 0016 §8). Hypha calls, logs every call (admin-visible), and never runs app code. *Hard to reverse (contracts apps are written against)* |
 | AP4 | **The manifest** (`hypha-app.json`, served by the app at a URL or uploaded) declares identity, the scopes it asks for, webhook subscriptions, the extension points it implements (with their versions and URLs), its UI extensions, its proxy path and its settings schema. Hypha validates it against a published JSON Schema. *Hard to reverse (format)* |
-| AP5 | **Installing an app** is `POST /admin/apps/install { manifest_url }`: Hypha fetches the manifest, the staff member approves the scopes (in any admin, or an agent through MCP), Hypha creates the app with a sealed secret and a scoped **app access token** (`hypha_app_…`), and POSTs both to the manifest's install callback. Updating the manifest asking for more scopes needs approval again. Uninstalling revokes the token, unregisters everything and notifies the app |
+| AP5 | **Installing an app is OAuth 2.1** (authorization code with PKCE): the app's **client ID is its manifest URL** (a client ID metadata document, as MCP's authorization uses), so any deployment can be authorized by any app with no registration step. A staff member approves the requested scopes on a consent screen; the app exchanges the code for an access token and a refresh token bound to the app and exactly the approved scopes. **Any change of scopes is a new authorization the staff approve**; until then the app keeps the old grant. Uninstalling revokes every token. *Decided (Q1); hard to reverse (the flow apps implement)* |
+| AP10 | **Personal data has its own scopes.** `orders:read` or `customers:read` give an app the records without personal fields; names, emails, phone numbers and addresses need `customer_data:name`, `:email`, `:phone`, `:address` (Shopify's protected customer data, per field). Without them those fields are absent from API responses, webhook payloads and extension-point requests to that app, so the consent screen says precisely which personal data an app sees. Staff sessions are unaffected. *Decided (Q1's intent); hard to reverse (scope names, the redaction contract)* |
 | AP6 | **UI extensions come in three forms, each usable by any frontend**, from most portable to most integrated: **data and actions** (rendered generically from schemas), **declarative blocks** (a small JSON UI tree the host renders with its own components), and **embedded pages** (the app's own page in an iframe with a postMessage bridge). Storefronts add **elements**: web components loaded from the app. Every frontend discovers them through the API. *Hard to reverse (slot names, the block format, the bridge protocol)* |
 | AP7 | **App data lives on core objects as metafields** (0002 §3's custom fields, built for this): namespaced by app (`app_reviews.rating`), typed, with read and write access by surface, so a storefront shows an app's data without calling the app |
 | AP8 | **First-party apps are apps**: Stripe (payments) and Meilisearch (search) are built against the same public contracts, in their own repositories, and `hypha deploy` can deploy them next to the API (a Worker reached through a Service Binding on Cloudflare, a container on a VPS) so an operator still runs one command and no request leaves the deployment unless the app itself calls out |
@@ -133,7 +136,7 @@ Later points, same mechanism: `tax.calculate`, `inventory.availability` (an ERP 
 stock for add-to-cart and checkout), `fulfillment.request`, `cart.validate`,
 `discounts.calculate` (or Functions, §11).
 
-## 4. Manifest and installation (AP4, AP5)
+## 4. Manifest and installation (AP4, AP5, AP10)
 
 ```json
 {
@@ -142,8 +145,9 @@ stock for add-to-cart and checkout), `fulfillment.request`, `cart.validate`,
   "name": "Stripe",
   "version": "1.2.0",
   "app_url": "https://stripe-app.example.com",
-  "install_callback": "/hypha/install",
-  "scopes": ["payments:write", "orders:read"],
+  "redirect_uris": ["https://stripe-app.example.com/hypha/oauth/callback"],
+  "scopes": ["payments:write", "orders:read", "customer_data:email"],
+  "scope_reasons": { "customer_data:email": "Stripe sends the receipt to the buyer" },
   "webhooks": { "url": "/hypha/webhooks", "events": ["order.cancelled"] },
   "extension_points": [
     { "point": "payments.start", "version": 1, "url": "/hypha/payments/start" },
@@ -164,14 +168,66 @@ stock for add-to-cart and checkout), `fulfillment.request`, `cart.validate`,
 }
 ```
 
-- **Install:** `POST /admin/apps/install` (`apps:write`) with the manifest URL →
-  Hypha fetches and validates it, answers `pending` with the scopes asked; a second
-  call `POST /admin/apps/{key}/approve` (by staff holding every scope asked, as role
-  grants require today, 0008) creates the app: a sealed secret, an app access token
-  with exactly those scopes, the registrations; then POSTs `{ store, api_url, token,
-  secret }` to the install callback over TLS.
-- **App access tokens** are API keys (0008) owned by the app (`Actor::App`), so every
-  write is stamped with the app in the outbox and the audit trail.
+### 4.1 The OAuth flow (AP5)
+
+Hypha's API is the authorization server; the consent screen is a page of whichever
+admin the store uses (`server.admin_url`), so it stays headless:
+
+1. **Start:** the app (from its own site, or after a staff member pastes the app's URL
+   into Settings → Apps) sends the browser to
+   `GET {api}/oauth/authorize?client_id=<manifest URL>&redirect_uri=…&scope=…&state=…&code_challenge=…&code_challenge_method=S256`.
+2. **Checks:** Hypha fetches the manifest (the client metadata), checks the redirect URI
+   is one it lists exactly, that the requested scopes are ones it declares, and stores
+   a pending **authorization request** (10 minutes). It redirects to the admin's consent
+   page, `{admin}/apps/consent?request=<id>`.
+3. **Consent:** the admin reads `GET /admin/oauth/requests/{id}` (app name, publisher
+   URL, icon, scopes grouped by area, **personal-data scopes listed separately with the
+   manifest's reasons**, what's new compared with the current grant). A staff member
+   needs `apps:write` and must hold every scope requested (as role grants require,
+   0008). `POST /admin/oauth/requests/{id}/approve` or `/deny`; Hypha redirects to the
+   app's redirect URI with `code` and `state` (or `error=access_denied`).
+4. **Token:** the app calls `POST {api}/oauth/token` (`grant_type=authorization_code`,
+   the code, the PKCE verifier, `client_id`); on first install the response includes
+   the **app secret** (for verifying Hypha's webhook and extension-point signatures),
+   once. Access tokens (`hypha_at_…`) live an hour; refresh tokens (`hypha_rt_…`)
+   rotate on use, and a reused one revokes the grant (theft detection).
+5. **Registrations** (webhooks, extension points, UI extensions) take effect when the
+   grant does, filtered by it: a webhook for an event whose payload needs a scope the
+   grant lacks isn't delivered; an extension point needing a scope isn't called.
+
+- **Scope changes:** a manifest that now asks for more (or the app requesting a new
+  `scope` at `/oauth/authorize`) starts a new request showing exactly what changes; the
+  old grant stays in force until it's approved; fewer scopes take effect at once. Staff
+  can also narrow a grant from the admin (`PATCH /admin/apps/{key}/grant`), which the
+  app learns by webhook (`app.grant_changed`).
+- **Grants are visible:** `GET /admin/apps/{key}` shows the grant (scopes, who approved,
+  when, the request history); every token use is attributed to `Actor::App`, so writes
+  are stamped with the app in the outbox and audit trail.
+- **Uninstall:** `DELETE /admin/apps/{key}` revokes all tokens, removes registrations
+  and sends `app.uninstalled` (the last webhook it gets).
+- **Private apps** (a store's own integration with no public site) use the same flow
+  with a manifest uploaded to the admin; today's manually created apps (0016) become
+  private apps once a staff member approves their scopes (until then they keep
+  webhooks only).
+
+### 4.2 Personal data (AP10)
+
+| Scope | Unlocks |
+| --- | --- |
+| `customer_data:name` | first and last names (customers, addresses on orders, carts) |
+| `customer_data:email` | email addresses |
+| `customer_data:phone` | phone numbers |
+| `customer_data:address` | street lines, postal code, city, province (country and company stay visible) |
+
+- Redaction is applied where data leaves for an app: response DTOs (the field is
+  absent and the object says `"redacted": ["email", …]`), webhook envelopes, extension
+  point requests, the proxy's context headers. One function decides it per field, so
+  every channel agrees; a contract test runs each route with an app token without the
+  scopes and checks no personal field leaks.
+- The same scopes apply to API keys and agents (anything that isn't a staff session),
+  so an integration key made for a dashboard doesn't see emails by default.
+- Data an app already received isn't Hypha's to delete; uninstall tells the app, and the
+  consent screen links to the app's privacy policy (a required manifest field).
 - **Settings:** an app keeps its own settings (its database). Hypha stores none, except
   what a merchant must not hand an app's UI: none in v1. The manifest's settings schema
   is for frontends that render a settings form without the app's page (§6.1).
@@ -311,7 +367,7 @@ through it.
   (`"apps": ["stripe"]`): on Cloudflare, each as its own Worker with a Service Binding
   from the API (so extension-point calls never leave Cloudflare's network and cost no
   request fee) and from the admin and storefront for their proxies; on a VPS, as
-  containers in the compose file. The deploy installs them (§4) automatically.
+  containers in the compose file. First-party apps get no shortcut: the deploy starts their OAuth authorization and prints (and opens) the consent link, and a staff member approves their scopes like any app's (§4.1).
 - **Stripe app:** its own D1 or KV for its settings and Stripe's webhook dedupe;
   receives Stripe's webhooks itself (its own public URL) and reports to Hypha
   (`POST /admin/payments/{id}/events`); `payments.start` creates PaymentIntents
@@ -368,11 +424,8 @@ payments, media usage) stay unused; a later cleanup may remove them.
 
 ## 13. Open decisions
 
-**Q1. Install flow: manifest URL plus approval, or OAuth from day one?** OAuth (with a
-redirect to the app and back) is what marketplaces need: the app proves who it is and
-the merchant installs from the app's site. Recommended: manifest URL plus approval now
-(§4; it already gives the app its credentials safely), OAuth when there's a listing of
-public apps.
+**Q1. Install flow.** *Decided:* OAuth from day one (§4.1), staff approve every grant
+and every change of scopes, and personal data sits behind its own scopes (§4.2).
 
 **Q2. Declarative blocks: fetched JSON (v1) or app scripts rendering remotely?**
 Shopify runs the app's script in a sandboxed Web Worker that describes UI (remote-dom),
@@ -402,7 +455,9 @@ admin target, as the reference for custom admins.
 
 1. Extension points (§3) with `shipping.rates` moved onto them; the call log; the
    extensions OpenAPI document.
-2. Manifest, install and approval, app tokens, refresh, uninstall; the proxy.
+2. OAuth (authorize, consent requests, token, refresh rotation, revocation), the
+   manifest as client metadata, grants and scope changes, the personal-data scopes with
+   redaction across every channel (and its contract test); the proxy.
 3. Discovery, actions, session tokens; the block format and the React renderer; the
    bridge packages; Settings → Apps in our admin with install and app pages.
 4. Payments as extension points, payment events, the storefront element loader; the
