@@ -7,8 +7,9 @@
 //! - `written`: a run (after a write, or a tick's) ended with work left;
 //! - `checked`: the start of the last tick whose run left nothing;
 //! - `due`: when work is next due: the dispatcher's (`OutboxRepo::next_due`: a retry,
-//!   the end of a lease) or a failed search rebuild's (its lease's end), as the last run
-//!   that did something found it.
+//!   the end of a lease), the send job's (`NotificationRepo::next_due`: a queued email's
+//!   next attempt, the end of a lease) or a failed search rebuild's (its lease's end), as
+//!   the last run that did something found it.
 //!
 //! A tick runs the jobs when a run left work since the last clean check, when `due` came
 //! between that check and now, or when nothing was ever checked (a new namespace: setup
@@ -101,7 +102,8 @@ pub struct After {
     pub written: bool,
     /// Write `checked` with this time.
     pub checked: Option<u64>,
-    /// Write `due`: the earlier of the outbox's next due time and `retry_at`.
+    /// Write `due`: the earliest of the outbox's and the emails' next due times and
+    /// `retry_at`.
     pub due: bool,
     pub retry_at: Option<u64>,
 }

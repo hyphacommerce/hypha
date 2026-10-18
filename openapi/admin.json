@@ -3432,7 +3432,7 @@
         "type": "object"
       },
       "NotificationResponse": {
-        "description": "One email's record. Bodies aren't kept: `POST /admin/notification-templates/{key}/\npreview` with the `order` shows what it looks like now.",
+        "description": "One email's record. Bodies aren't returned (they're kept only until it's sent): `POST\n/admin/notification-templates/{key}/preview` with the `order` shows what it looks\nlike now.",
         "properties": {
           "attempts": {
             "description": "Sends tried so far.",
@@ -3463,6 +3463,20 @@
           },
           "id": {
             "$ref": "#/components/schemas/NotificationId"
+          },
+          "next_attempt_at": {
+            "description": "When a queued message is next tried.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "description": "How it was made, when staff should know: \"sent with the default template: …\"\nwhen the store's template didn't render on this order.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "order_id": {
             "oneOf": [
@@ -3605,8 +3619,9 @@
         "type": "object"
       },
       "NotificationStatus": {
-        "description": "Where a message is.\n\nKnown values: `sending`, `sent`, `failed`, `skipped`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Where a message is.\n\nKnown values: `queued`, `sending`, `sent`, `failed`, `skipped`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
+          "queued",
           "sending",
           "sent",
           "failed",
@@ -17203,8 +17218,9 @@
             "name": "status",
             "required": false,
             "schema": {
-              "description": "Where a message is.\n\nKnown values: `sending`, `sent`, `failed`, `skipped`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "description": "Where a message is.\n\nKnown values: `queued`, `sending`, `sent`, `failed`, `skipped`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
               "enum": [
+                "queued",
                 "sending",
                 "sent",
                 "failed",
@@ -17282,12 +17298,13 @@
             "bearer": []
           }
         ],
-        "summary": "The emails sent, newest first: an order's (`order`), or every one of a template or\nstatus.",
+        "summary": "The emails sent, newest first: an order's (`order`), or every one of a template or\nstatus. They name buyers and their orders, so `orders:read` is needed too.",
         "tags": [
           "notifications"
         ],
         "x-hypha-scopes": [
-          "notifications:read"
+          "notifications:read",
+          "orders:read"
         ]
       }
     },
@@ -17371,12 +17388,13 @@
             "bearer": []
           }
         ],
-        "summary": "One email's record.",
+        "summary": "One email's record (`orders:read` too, as the list).",
         "tags": [
           "notifications"
         ],
         "x-hypha-scopes": [
-          "notifications:read"
+          "notifications:read",
+          "orders:read"
         ]
       }
     },
@@ -17470,7 +17488,7 @@
             "bearer": []
           }
         ],
-        "summary": "Sends an order's email again (\"the customer didn't get it\"), rendered from the order\nas it is now with the templates in effect, even if the template is off: a new record\n(201), `sent`, or `failed` when the provider refused it. Invites and resets can't be\nresent (`notification_not_resendable`: their token isn't kept). A provider that\ncan't be reached is `502 email_unavailable` (the new record says `failed`).",
+        "summary": "Sends an order's email again (\"the customer didn't get it\"), rendered from the order\nas it is now with the templates in effect, even if the template is off: a new record\n(201), `queued` for the send job, which goes at once (read the record again for how\nit went). Invites and resets can't be resent (`notification_not_resendable`: their\ntoken isn't kept).",
         "tags": [
           "notifications"
         ],

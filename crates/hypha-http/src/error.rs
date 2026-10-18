@@ -73,7 +73,7 @@ pub struct ApiErrorBody {
 /// concurrent change (`concurrent_modification`); 422 invalid input, including IDs in the
 /// body that don't exist; 500 storage failures (message hidden, logged instead); 502 an
 /// email that could not be handed over (the write before it stands): the staff flows'
-/// `notification_failed`, and for test sends and resends the provider's own words,
+/// `notification_failed`, and for test sends the provider's own words,
 /// `email_unavailable` (unreachable, try again) or `email_refused` (refused for good).
 #[derive(Debug)]
 pub struct ApiError {
@@ -1063,7 +1063,7 @@ fn notification_error_status(e: &hypha_notifications::NotificationError) -> Opti
     use hypha_notifications::NotificationError as N;
     match e {
         N::Text(_) => Some(StatusCode::UNPROCESSABLE_ENTITY),
-        N::InvalidTransition { .. } => Some(StatusCode::CONFLICT),
+        N::InvalidTransition { .. } | N::NotDue(_) => Some(StatusCode::CONFLICT),
         N::Inconsistent { .. } => None,
     }
 }

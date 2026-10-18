@@ -19,6 +19,7 @@ use hypha_categories::CategorySettings;
 use hypha_core::ErrorCode;
 use hypha_dispatch::{DispatchSettings, LONGEST_RUN, RetrySchedule};
 use hypha_media::MediaSettings;
+use hypha_notifications::{LONGEST_SEND, SendSettings};
 use hypha_search::SyncSettings;
 use ipnet::IpNet;
 use thiserror::Error;
@@ -43,6 +44,8 @@ pub struct Config {
     pub dispatch: DispatchSettings,
     /// The search sync job's batch and lease (design note 0019).
     pub search_sync: SyncSettings,
+    /// The send job's batch, lease and retries (design note 0028, §4).
+    pub send_notifications: SendSettings,
     pub jobs: JobsConfig,
     pub rate_limits: RateLimits,
     /// The file with the environment applied, for `Config::to_toml`.
@@ -136,6 +139,7 @@ pub struct JobsConfig {
     pub prune: JobConfig,
     pub media_sweep: JobConfig,
     pub search_sync: JobConfig,
+    pub send_notifications: JobConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -681,6 +685,10 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         ("jobs.prune.interval", jobs.prune.interval),
         ("jobs.media_sweep.interval", jobs.media_sweep.interval),
         ("jobs.search_sync.interval", jobs.search_sync.interval),
+        (
+            "jobs.send_notifications.interval",
+            jobs.send_notifications.interval,
+        ),
         ("jobs.prune.sessions_after", jobs.prune.sessions_after),
         ("jobs.idle_interval", jobs.idle_interval),
     ] {
@@ -689,6 +697,10 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
     for (key, batch) in [
         ("jobs.dispatch.batch", jobs.dispatch.batch),
         ("jobs.search_sync.batch", jobs.search_sync.batch),
+        (
+            "jobs.send_notifications.batch",
+            jobs.send_notifications.batch,
+        ),
     ] {
         if !(1..=1_000).contains(&batch) {
             let value = u64::from(batch);
@@ -719,6 +731,28 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         jobs.search_sync.lease,
         Duration::from_secs(10),
     );
+    // A lease must hold one send, with room to record it.
+    p.at_least(
+        "jobs.send_notifications.lease",
+        jobs.send_notifications.lease,
+        LONGEST_SEND.saturating_add(Duration::from_secs(5)),
+    );
+    let sends = &jobs.send_notifications;
+    for (i, wait) in sends.retry.iter().enumerate() {
+        p.between(
+            &format!("jobs.send_notifications.retry[{i}]"),
+            *wait,
+            SECOND,
+            LONGEST,
+        );
+    }
+    if sends.retry.len() > 20 {
+        let count = sends.retry.len();
+        p.add(
+            "jobs.send_notifications.retry",
+            Broken::TooManyWaits { count, max: 20 },
+        );
+    }
     // Pruning an event deletes its deliveries, so none may still be due: events outlive
     // the last retry.
     p.longer_than(
@@ -816,12 +850,21 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             batch: jobs.search_sync.batch,
             lease: jobs.search_sync.lease.0,
         },
+        send_notifications: SendSettings {
+            batch: jobs.send_notifications.batch,
+            lease: jobs.send_notifications.lease.0,
+            retry: jobs.send_notifications.retry.iter().map(|d| d.0).collect(),
+        },
         jobs: JobsConfig {
             idle_interval: jobs.idle_interval.0,
             dispatch: job(jobs.dispatch.enabled, jobs.dispatch.interval),
             prune: job(jobs.prune.enabled, jobs.prune.interval),
             media_sweep: job(jobs.media_sweep.enabled, jobs.media_sweep.interval),
             search_sync: job(jobs.search_sync.enabled, jobs.search_sync.interval),
+            send_notifications: job(
+                jobs.send_notifications.enabled,
+                jobs.send_notifications.interval,
+            ),
         },
         rate_limits: file.rate_limits.clone(),
         effective: file.clone(),
@@ -1031,6 +1074,41 @@ mod tests {
             ]
         );
         assert!(load("[auth]\nsession_lifetime = \"365d\"").is_ok());
+    }
+
+    #[test]
+    fn sending_notifications_has_a_batch_a_lease_and_retries() {
+        let config = load("").unwrap();
+        assert_eq!(config.send_notifications, SendSettings::default());
+        assert!(config.jobs.send_notifications.enabled);
+        let changed =
+            load("[jobs.send_notifications]\nbatch = 5\nlease = \"1m\"\nretry = [\"30s\"]")
+                .unwrap();
+        assert_eq!(
+            changed.send_notifications,
+            SendSettings {
+                batch: 5,
+                lease: Duration::from_secs(60),
+                retry: vec![Duration::from_secs(30)],
+            }
+        );
+        assert_eq!(
+            problems(load(
+                "[jobs.send_notifications]\nbatch = 0\nlease = \"10s\"\nretry = [\"0s\"]"
+            )),
+            [
+                "jobs.send_notifications.batch: is 0, 1 to 1000",
+                "jobs.send_notifications.lease: is 10s, at least 20s is needed",
+                "jobs.send_notifications.retry[0]: is 0s, at least 1s is needed",
+            ]
+        );
+        assert!(
+            !load("[jobs]\nenabled = false")
+                .unwrap()
+                .jobs
+                .send_notifications
+                .enabled
+        );
     }
 
     #[test]

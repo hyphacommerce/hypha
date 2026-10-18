@@ -3,12 +3,12 @@
 
 use hypha_core::{
     AssetId, Email, EventId, Language, NotificationId, OrderId, Page, PageRequest, RepoError,
-    Version, Versioned, stamp_insert, stamp_update,
+    Timestamp, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_notifications::{
     Colour, Notification, NotificationFilter, NotificationRepo, NotificationSettings,
     NotificationSettingsRepo, NotificationSettingsSnapshot, NotificationSnapshot,
-    NotificationTemplateRepo, OrderUrl, Template, TemplateKey, TemplateSnapshot,
+    NotificationTemplateRepo, OrderUrl, QueuedEmail, Template, TemplateKey, TemplateSnapshot,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -370,12 +370,16 @@ pub(crate) async fn update_settings(
     Ok(version)
 }
 
-fn notification_columns() -> String {
+fn notification_columns(prefix: &str) -> String {
+    let p = prefix;
     format!(
-        "id, version, template, recipient, subject, status, attempts, provider,
-         provider_message_id, error, event_id, order_id, {}, {}",
-        micros("sent_at"),
-        stamp_columns("")
+        "{p}id, {p}version, {p}template, {p}recipient, {p}subject, {p}status, {p}attempts,
+         {p}provider, {p}provider_message_id, {p}error, {p}note, {p}event_id, {p}order_id,
+         {p}email_sender_name, {p}email_reply_to, {p}email_html, {p}email_text, {}, {}, {}, {}",
+        micros(&format!("{p}sent_at")),
+        micros(&format!("{p}next_attempt_at")),
+        micros(&format!("{p}lease_until")),
+        stamp_columns(p)
     )
 }
 
@@ -385,6 +389,18 @@ fn notification_from_row(row: &Row) -> Result<Notification, RepoError> {
     let attempts: i32 = col(row, "attempts")?;
     let event: Option<Uuid> = col(row, "event_id")?;
     let order: Option<Uuid> = col(row, "order_id")?;
+    let html: Option<String> = col(row, "email_html")?;
+    let text: Option<String> = col(row, "email_text")?;
+    let reply_to: Option<String> = col(row, "email_reply_to")?;
+    let email = match (html, text) {
+        (Some(html), Some(text)) => Some(QueuedEmail {
+            sender_name: col(row, "email_sender_name")?,
+            reply_to: reply_to.as_deref().map(email_from_db).transpose()?,
+            html,
+            text,
+        }),
+        _ => None,
+    };
     Notification::restore(NotificationSnapshot {
         id,
         version: version_from_db(col(row, "version")?)?,
@@ -400,15 +416,115 @@ fn notification_from_row(row: &Row) -> Result<Notification, RepoError> {
         provider: col(row, "provider")?,
         provider_message_id: col(row, "provider_message_id")?,
         error: col(row, "error")?,
+        note: col(row, "note")?,
         event: event.map(EventId::from_uuid),
         order: order.map(OrderId::from_uuid),
         sent_at: opt_ts(col(row, "sent_at")?),
+        next_attempt_at: opt_ts(col(row, "next_attempt_at")?),
+        lease_until: opt_ts(col(row, "lease_until")?),
+        email,
     })
     .map_err(|e| corrupt(format!("notification {id}: {e}")))
 }
 
-fn attempts_to_db(n: &NotificationSnapshot) -> Result<i32, RepoError> {
-    i32::try_from(n.attempts).map_err(|_| corrupt(format!("{} attempts too many", n.id)))
+/// A message's values as its columns hold them.
+struct NotificationColumns<'a> {
+    s: &'a NotificationSnapshot,
+    template: &'static str,
+    recipient: &'a str,
+    status: &'static str,
+    attempts: i32,
+    event: Option<Uuid>,
+    order: Option<Uuid>,
+    sent_at: Option<i64>,
+    next_attempt_at: Option<i64>,
+    lease_until: Option<i64>,
+    sender_name: Option<&'a str>,
+    reply_to: Option<&'a str>,
+    html: Option<&'a str>,
+    text: Option<&'a str>,
+}
+
+/// The columns `INSERT` and `UPDATE` write after `id` and `version`, in this order.
+const NOTIFICATION_FIELDS: [&str; 18] = [
+    "template",
+    "recipient",
+    "subject",
+    "status",
+    "attempts",
+    "provider",
+    "provider_message_id",
+    "error",
+    "note",
+    "event_id",
+    "order_id",
+    "email_sender_name",
+    "email_reply_to",
+    "email_html",
+    "email_text",
+    "sent_at",
+    "next_attempt_at",
+    "lease_until",
+];
+
+/// How many of `NOTIFICATION_FIELDS` are timestamps (the last ones), written with `ts`.
+const NOTIFICATION_TIMES: usize = 3;
+
+impl<'a> NotificationColumns<'a> {
+    fn of(s: &'a NotificationSnapshot) -> Result<Self, RepoError> {
+        let email = s.email.as_ref();
+        Ok(Self {
+            s,
+            template: s.template.as_str(),
+            recipient: s.to.as_str(),
+            status: s.status.as_str(),
+            attempts: i32::try_from(s.attempts)
+                .map_err(|_| corrupt(format!("{} attempts too many", s.id)))?,
+            event: s.event.map(|e| e.as_uuid()),
+            order: s.order.map(|o| o.as_uuid()),
+            sent_at: opt_micros(s.sent_at),
+            next_attempt_at: opt_micros(s.next_attempt_at),
+            lease_until: opt_micros(s.lease_until),
+            sender_name: email.and_then(|e| e.sender_name.as_deref()),
+            reply_to: email.and_then(|e| e.reply_to.as_ref().map(Email::as_str)),
+            html: email.map(|e| e.html.as_str()),
+            text: email.map(|e| e.text.as_str()),
+        })
+    }
+
+    /// `NOTIFICATION_FIELDS`' values, in order.
+    fn params(&self) -> Vec<Param<'_>> {
+        vec![
+            (&self.template, Type::TEXT),
+            (&self.recipient, Type::TEXT),
+            (&self.s.subject, Type::TEXT),
+            (&self.status, Type::TEXT),
+            (&self.attempts, Type::INT4),
+            (&self.s.provider, Type::TEXT),
+            (&self.s.provider_message_id, Type::TEXT),
+            (&self.s.error, Type::TEXT),
+            (&self.s.note, Type::TEXT),
+            (&self.event, Type::UUID),
+            (&self.order, Type::UUID),
+            (&self.sender_name, Type::TEXT),
+            (&self.reply_to, Type::TEXT),
+            (&self.html, Type::TEXT),
+            (&self.text, Type::TEXT),
+            (&self.sent_at, Type::INT8),
+            (&self.next_attempt_at, Type::INT8),
+            (&self.lease_until, Type::INT8),
+        ]
+    }
+}
+
+/// `$n` for field `i` of `NOTIFICATION_FIELDS` whose parameters start at `$first`.
+fn field_value(i: usize, first: usize) -> String {
+    let n = first + i;
+    if i >= NOTIFICATION_FIELDS.len() - NOTIFICATION_TIMES {
+        ts(n)
+    } else {
+        format!("${n}")
+    }
 }
 
 impl<C: PgConnection> NotificationRepo for PgStore<C> {
@@ -419,7 +535,7 @@ impl<C: PgConnection> NotificationRepo for PgStore<C> {
             .query_typed_opt(
                 &format!(
                     "SELECT {} FROM notifications WHERE id = $1",
-                    notification_columns()
+                    notification_columns("")
                 ),
                 &[(&id.as_uuid(), Type::UUID)],
             )
@@ -441,7 +557,7 @@ impl<C: PgConnection> NotificationRepo for PgStore<C> {
                 &format!(
                     "SELECT {} FROM notifications
                      WHERE event_id = $1 AND template = $2 AND recipient = $3",
-                    notification_columns()
+                    notification_columns("")
                 ),
                 &[
                     (&event.as_uuid(), Type::UUID),
@@ -497,7 +613,7 @@ impl<C: PgConnection> NotificationRepo for PgStore<C> {
             .query_typed(
                 &format!(
                     "SELECT {} FROM notifications {filters} ORDER BY id DESC LIMIT ${}",
-                    notification_columns(),
+                    notification_columns(""),
                     params.len()
                 ),
                 &params,
@@ -513,42 +629,25 @@ impl<C: PgConnection> NotificationRepo for PgStore<C> {
     async fn insert(&self, notification: &mut Notification) -> Result<(), RepoError> {
         stamp_insert(notification, self.now());
         let s = notification.snapshot();
-        let attempts = attempts_to_db(&s)?;
+        let c = NotificationColumns::of(&s)?;
+        let id = s.id.as_uuid();
+        let values: Vec<String> = (0..NOTIFICATION_FIELDS.len())
+            .map(|i| field_value(i, 2))
+            .collect();
+        let mut params: Vec<Param<'_>> = vec![(&id, Type::UUID)];
+        params.extend(c.params());
         in_transaction!(self, |tx| {
             tx.query_typed(
                 &format!(
-                    "INSERT INTO notifications (id, version, template, recipient, subject,
-                         status, attempts, provider, provider_message_id, error, event_id,
-                         order_id, sent_at)
-                     VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {})",
-                    ts(12)
+                    "INSERT INTO notifications (id, version, {}) VALUES ($1, 1, {})",
+                    NOTIFICATION_FIELDS.join(", "),
+                    values.join(", ")
                 ),
-                &[
-                    (&s.id.as_uuid(), Type::UUID),
-                    (&s.template.as_str(), Type::TEXT),
-                    (&s.to.as_str(), Type::TEXT),
-                    (&s.subject, Type::TEXT),
-                    (&s.status.as_str(), Type::TEXT),
-                    (&attempts, Type::INT4),
-                    (&s.provider, Type::TEXT),
-                    (&s.provider_message_id, Type::TEXT),
-                    (&s.error, Type::TEXT),
-                    (&s.event.map(|e| e.as_uuid()), Type::UUID),
-                    (&s.order.map(|o| o.as_uuid()), Type::UUID),
-                    (&opt_micros(s.sent_at), Type::INT8),
-                ],
+                &params,
             )
             .await
             .map_err(repo_error)?;
-            write_stamps(
-                tx,
-                "notifications",
-                "id",
-                &s.id.as_uuid(),
-                Type::UUID,
-                s.stamps,
-            )
-            .await
+            write_stamps(tx, "notifications", "id", &id, Type::UUID, s.stamps).await
         })?;
         notification.set_version(Version::NEW.next());
         Ok(())
@@ -557,50 +656,109 @@ impl<C: PgConnection> NotificationRepo for PgStore<C> {
     async fn update(&self, notification: &mut Notification) -> Result<(), RepoError> {
         stamp_update(notification, self.now());
         let s = notification.snapshot();
-        let attempts = attempts_to_db(&s)?;
+        let c = NotificationColumns::of(&s)?;
+        let id = s.id.as_uuid();
+        let version = version_to_db(s.version)?;
+        let assignments: Vec<String> = NOTIFICATION_FIELDS
+            .iter()
+            .enumerate()
+            .map(|(i, field)| format!("{field} = {}", field_value(i, 3)))
+            .collect();
+        let mut params: Vec<Param<'_>> = vec![(&id, Type::UUID), (&version, Type::INT8)];
+        params.extend(c.params());
         let version = in_transaction!(self, |tx| {
             let row = tx
                 .query_typed_opt(
                     &format!(
-                        "UPDATE notifications SET version = version + 1, template = $3,
-                             recipient = $4, subject = $5, status = $6, attempts = $7,
-                             provider = $8, provider_message_id = $9, error = $10,
-                             event_id = $11, order_id = $12, sent_at = {}
+                        "UPDATE notifications SET version = version + 1, {}
                          WHERE id = $1 AND version = $2 RETURNING version",
-                        ts(13)
+                        assignments.join(", ")
                     ),
-                    &[
-                        (&s.id.as_uuid(), Type::UUID),
-                        (&version_to_db(s.version)?, Type::INT8),
-                        (&s.template.as_str(), Type::TEXT),
-                        (&s.to.as_str(), Type::TEXT),
-                        (&s.subject, Type::TEXT),
-                        (&s.status.as_str(), Type::TEXT),
-                        (&attempts, Type::INT4),
-                        (&s.provider, Type::TEXT),
-                        (&s.provider_message_id, Type::TEXT),
-                        (&s.error, Type::TEXT),
-                        (&s.event.map(|e| e.as_uuid()), Type::UUID),
-                        (&s.order.map(|o| o.as_uuid()), Type::UUID),
-                        (&opt_micros(s.sent_at), Type::INT8),
-                    ],
+                    &params,
                 )
                 .await
                 .map_err(repo_error)?
                 .ok_or(RepoError::StaleVersion)?;
             let version = version_from_db(col(&row, "version")?)?;
-            write_stamps(
-                tx,
-                "notifications",
-                "id",
-                &s.id.as_uuid(),
-                Type::UUID,
-                s.stamps,
-            )
-            .await?;
+            write_stamps(tx, "notifications", "id", &id, Type::UUID, s.stamps).await?;
             Ok(version)
         })?;
         notification.set_version(version);
         Ok(())
+    }
+
+    async fn lease_due(
+        &self,
+        now: Timestamp,
+        lease_until: Timestamp,
+        limit: u32,
+    ) -> Result<Vec<Notification>, RepoError> {
+        let (now, until, stamp) = (
+            now.unix_micros(),
+            lease_until.unix_micros(),
+            self.now().unix_micros(),
+        );
+        // `Notification::lease` in SQL: due (queued and its attempt has come, or leased
+        // by a lease that ended), earliest first; rows another lease is taking are
+        // skipped. The CHECKs keep a leased row's email.
+        in_transaction!(self, |tx| {
+            let rows = tx
+                .query_typed(
+                    &format!(
+                        "UPDATE notifications n SET version = n.version + 1, status = 'sending',
+                             attempts = n.attempts + 1, next_attempt_at = NULL,
+                             lease_until = {until}, updated_at = {stamp}
+                         FROM (
+                             SELECT id FROM notifications
+                             WHERE (status = 'queued' AND next_attempt_at <= {now})
+                                OR (lease_until IS NOT NULL AND lease_until <= {now})
+                             ORDER BY COALESCE(next_attempt_at, lease_until), id
+                             LIMIT $4 FOR UPDATE SKIP LOCKED
+                         ) due
+                         WHERE n.id = due.id
+                         RETURNING {}",
+                        notification_columns("n."),
+                        now = ts(1),
+                        until = ts(2),
+                        stamp = ts(3),
+                    ),
+                    &[
+                        (&now, Type::INT8),
+                        (&until, Type::INT8),
+                        (&stamp, Type::INT8),
+                        (&i64::from(limit), Type::INT8),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
+            let mut leased = rows
+                .iter()
+                .map(notification_from_row)
+                .collect::<Result<Vec<_>, _>>()?;
+            // `RETURNING` has no order.
+            leased.sort_by_key(|n| (n.lease_until(), n.id()));
+            Ok(leased)
+        })
+    }
+
+    async fn next_due(&self) -> Result<Option<Timestamp>, RepoError> {
+        let mut conn = self.conn().await;
+        // `LEAST` skips NULLs: nothing on one side.
+        let row = conn
+            .db()
+            .query_typed_one(
+                &format!(
+                    "SELECT {} FROM (SELECT LEAST(
+                         (SELECT min(next_attempt_at) FROM notifications WHERE status = 'queued'),
+                         (SELECT min(lease_until) FROM notifications WHERE lease_until IS NOT NULL)
+                     ) AS due) next",
+                    micros("due")
+                ),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        let due: Option<i64> = col(&row, "due")?;
+        Ok(due.map(Timestamp::from_unix_micros))
     }
 }

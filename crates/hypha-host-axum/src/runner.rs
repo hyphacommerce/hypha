@@ -5,12 +5,14 @@
 //! An idle job looks less and less often (design note 0025, §6): each round that finds
 //! nothing doubles the wait, up to `jobs.idle_interval`, and finding work brings it back
 //! to the interval. Work doesn't wait for that: a write that commits events (or retries
-//! a delivery) wakes the dispatcher (`AfterWrites`, through `Wake`), and a dispatch step that did something wakes search
-//! sync. So a quiet store costs the database a query a minute, not several a second.
+//! a delivery) wakes the dispatcher (`AfterWrites`, through `Wake`), a dispatch step that did something wakes search
+//! sync, and queueing an email (the `Mailer` handler, a resend) wakes the send job
+//! (`MailQueued`). So a quiet store costs the database a query a minute, not several a
+//! second.
 
 use std::{future::Future, sync::Arc, time::Duration};
 
-use hypha_http::host::AfterWrites;
+use hypha_http::host::{AfterWrites, MailQueued};
 use hypha_http::jobs::{self, Ran, Step};
 use hypha_http::state::SharedState;
 use tokio::{
@@ -48,6 +50,7 @@ impl Jobs {
 pub struct Wake {
     pub dispatch: Arc<Notify>,
     pub search_sync: Arc<Notify>,
+    pub send_notifications: Arc<Notify>,
 }
 
 impl Wake {
@@ -56,6 +59,12 @@ impl Wake {
     pub fn after_writes(&self) -> AfterWrites {
         let dispatch = Arc::clone(&self.dispatch);
         AfterWrites::new(move || dispatch.notify_one())
+    }
+
+    /// The mail host's `MailQueued`: queueing an email wakes the send job.
+    pub fn mail_queued(&self) -> MailQueued {
+        let send = Arc::clone(&self.send_notifications);
+        MailQueued::new(move || send.notify_one())
     }
 }
 
@@ -123,6 +132,25 @@ pub fn start(state: SharedState<PgStorage>, wake: Wake, limiter: Arc<MemoryRateL
             move || {
                 let s = Arc::clone(&s);
                 async move { jobs::search_sync(&s).await }
+            },
+        ));
+    }
+
+    // Sending queued emails (every 2 seconds by default, less often while there's
+    // nothing, and at once when the mailer or a resend queued one).
+    if jobs.send_notifications.enabled {
+        let s = Arc::clone(&state);
+        tasks.push(every(
+            &stopped,
+            Timer {
+                name: "send_notifications",
+                interval: jobs.send_notifications.interval,
+                idle,
+                wake: Some(Arc::clone(&wake.send_notifications)),
+            },
+            move || {
+                let s = Arc::clone(&s);
+                async move { jobs::send_notifications(&s).await }
             },
         ));
     }

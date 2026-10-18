@@ -66,6 +66,19 @@
           "enabled": true,
           "interval": "2s",
           "lease": "2m"
+        },
+        "send_notifications": {
+          "batch": 20,
+          "enabled": true,
+          "interval": "2s",
+          "lease": "2m",
+          "retry": [
+            "1m",
+            "5m",
+            "30m",
+            "2h",
+            "6h"
+          ]
         }
       }
     },
@@ -385,6 +398,22 @@
             "interval": "2s",
             "lease": "2m"
           }
+        },
+        "send_notifications": {
+          "$ref": "#/$defs/SendNotificationsJob",
+          "default": {
+            "batch": 20,
+            "enabled": true,
+            "interval": "2s",
+            "lease": "2m",
+            "retry": [
+              "1m",
+              "5m",
+              "30m",
+              "2h",
+              "6h"
+            ]
+          }
         }
       },
       "additionalProperties": false
@@ -633,6 +662,47 @@
           "description": "How long a runner holds the products it took; past it, another may take them.\nAt least 10 seconds.",
           "$ref": "#/$defs/Duration",
           "default": "2m"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SendNotificationsJob": {
+      "description": "Sending the emails the store queued (design note 0028, §4): order emails and\nresends. Staff invites and password resets are sent by their request, not by this\njob.",
+      "type": "object",
+      "properties": {
+        "batch": {
+          "description": "Emails sent per step (1 to 1,000).",
+          "type": "integer",
+          "format": "uint32",
+          "default": 20,
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "default": "2s"
+        },
+        "lease": {
+          "description": "How long a runner holds the emails it took; past it, another may take them (and\na provider without idempotency keys, SMTP, may then get one twice). At least 20\nseconds: a send may take 15.",
+          "$ref": "#/$defs/Duration",
+          "default": "2m"
+        },
+        "retry": {
+          "description": "The waits after each failure the provider says may pass (a timeout, a 5xx, a\nrate limit), in order; after the last, the email fails for good and staff can\nresend it. At most 20, each 1 second to 365 days.",
+          "type": "array",
+          "default": [
+            "1m",
+            "5m",
+            "30m",
+            "2h",
+            "6h"
+          ],
+          "items": {
+            "$ref": "#/$defs/Duration"
+          }
         }
       },
       "additionalProperties": false

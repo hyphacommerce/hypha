@@ -17,6 +17,7 @@ use hypha_notifications::{
     OutgoingEmail, Rendered, StageNotificationSettings, Template, TemplateKey, TemplateSources,
     keys, render, template_in_effect,
 };
+use hypha_payments::newest_payment;
 use hypha_stores::StoreRepo;
 use hypha_users::{HasUsers, StaffEmail, UserRepo};
 
@@ -25,7 +26,9 @@ use crate::{
     context::{MailContext, StaffMail, user_context},
     format::TimeValue,
     handler::{load_fulfillment, load_order, order_context},
-    send::{Branding, Message, branding, deliver, lost_a_race},
+    send::{
+        Branding, Message, Sources, branding, lost_a_race, queue, render_for_sending, send_now,
+    },
 };
 
 /// A change to the notification settings, as JSON Merge Patch reads (design note 0028,
@@ -198,10 +201,13 @@ impl TemplateInput {
 }
 
 /// Saves a template's sources and whether it's on (design note 0028, §3, §7). The
-/// sources must parse, and render against the template's sample in the layout in effect
-/// (`template_invalid` with the part and line otherwise); saving the layout renders
-/// every message template in it, so a layout that breaks one is refused. Turning off one
-/// that can't be is `template_required`.
+/// sources must parse, and render in the layout in effect against the template's
+/// sample, and against it with every value that may be absent absent
+/// (`MailContext::checks`): `template_invalid` with the part and line otherwise, so a
+/// template that only works when an order has a payment or a shipping address is
+/// refused here rather than failing on a real order. Saving the layout renders every
+/// message template in it, so a layout that breaks one is refused. Turning off one that
+/// can't be is `template_required`.
 pub async fn save_template<S: HasNotificationTemplates>(
     ctx: &Ctx,
     ports: &S,
@@ -249,8 +255,8 @@ pub async fn save_template<S: HasNotificationTemplates>(
     .await
 }
 
-/// Renders `sources` (of `key`) against the samples: a message in the layout in
-/// effect, or the layout around every message template in effect.
+/// Renders `sources` (of `key`) against the samples (`MailContext::checks`): a message
+/// in the layout in effect, or the layout around every message template in effect.
 async fn check_against_samples<S: HasNotificationTemplates>(
     ports: &S,
     key: TemplateKey,
@@ -259,19 +265,15 @@ async fn check_against_samples<S: HasNotificationTemplates>(
     if key.is_layout() {
         for message in TemplateKey::ALL.into_iter().filter(|k| !k.is_layout()) {
             let template = template_in_effect(ports, message).await?;
-            render(
-                sources.html(),
-                &template.sending_sources(),
-                &MailContext::sample(message),
-            )?;
+            for context in MailContext::checks(message) {
+                render(sources.html(), &template.sending_sources(), &context)?;
+            }
         }
     } else {
         let layout = template_in_effect(ports, TemplateKey::Layout).await?;
-        render(
-            layout.sending_sources().html(),
-            sources,
-            &MailContext::sample(key),
-        )?;
+        for context in MailContext::checks(key) {
+            render(layout.sending_sources().html(), sources, &context)?;
+        }
     }
     Ok(())
 }
@@ -294,7 +296,17 @@ async fn preview_context<E: MailEnv, P: MailPorts>(
     match (order, as_order) {
         (Some(order), Some(template)) => {
             let order = load_order(ports, order).await?;
-            order_context(env, ports, branding, template, &order, None).await
+            let payment = newest_payment(ports, order.id()).await?;
+            order_context(
+                env,
+                ports,
+                branding,
+                template,
+                &order,
+                payment.as_ref(),
+                None,
+            )
+            .await
         }
         _ => {
             Ok(MailContext::sample(key)
@@ -345,16 +357,11 @@ pub async fn preview<E: MailEnv, P: MailPorts>(
     Ok(render_preview(env, ports, key, input, order).await?.0)
 }
 
-/// The sender name every email goes out under: the merchant's, else the store's name.
+/// The sender every email goes out under: the operator's address with the merchant's
+/// sender name, else the store's name.
 fn from(env: &impl MailEnv, branding: &Branding) -> Mailbox {
     Mailbox {
-        name: Some(
-            branding
-                .settings
-                .sender_name()
-                .unwrap_or(branding.store.name())
-                .to_string(),
-        ),
+        name: Some(branding.sender_name().to_string()),
         address: env.sender_address().clone(),
     }
 }
@@ -409,12 +416,13 @@ where
     Ok(to)
 }
 
-/// Sends a message again (design note 0028, §4: "the customer didn't get it"),
-/// rendered from the order as it is now with the templates in effect, as a new record
-/// without an event, even if the template has since been turned off: staff asked. A
-/// shipping email is about the fulfilment its event named (while the event is kept),
-/// else the order's newest. Invites and resets can't be resent (their token isn't
-/// kept; the flow sends a new one): `notification_not_resendable`.
+/// Queues a message again (design note 0028, §4: "the customer didn't get it"),
+/// rendered from the order as it is now with the templates in effect, as a new `queued`
+/// record without an event, even if the template has since been turned off: staff
+/// asked. The send job sends it (woken now). A shipping email is about the fulfilment
+/// its event named (while the event is kept), else the order's newest. Invites and
+/// resets can't be resent (their token isn't kept; the flow sends a new one):
+/// `notification_not_resendable`.
 pub async fn resend<E, P>(
     ctx: &Ctx,
     env: &E,
@@ -460,24 +468,28 @@ where
         }
         _ => None,
     };
+    let payment = newest_payment(ports, order.id()).await?;
     let context = order_context(
         env,
         ports,
         &branding,
         template,
         &order,
+        payment.as_ref(),
         fulfillment.as_ref(),
     )
     .await?;
+    let sources = Sources::load(ports, template).await?;
+    let rendering = render_for_sending(&sources, &context)?;
     let message = Message {
         template,
         to: earlier.to().clone(),
         event: None,
         order: Some(order.id()),
-        context,
-        even_if_disabled: true,
     };
-    deliver(env, ports, &branding, message).await
+    let queued = queue(env, ports, &branding, &message, &rendering).await?;
+    env.queued();
+    Ok(queued)
 }
 
 /// Sends a staff flow's email at once (design note 0028, §4, NT7): an invite or a
@@ -535,10 +547,11 @@ where
         to,
         event: None,
         order: None,
-        context,
-        even_if_disabled: true,
     };
-    let record = deliver(env, ports, &branding, message)
+    let sources = Sources::load(ports, template)
+        .await
+        .map_err(|e| failed(e.into()))?;
+    let record = send_now(env, ports, &branding, &sources, message, &context)
         .await
         .map_err(failed)?;
     match record.status() {

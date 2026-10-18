@@ -166,6 +166,10 @@ pub enum NotificationError {
         from: NotificationStatus,
         to: NotificationStatus,
     },
+    /// Leasing a message that isn't waiting to be sent: not queued, its next attempt
+    /// still ahead, or held by another runner's lease.
+    #[error("notification {0} isn't due to be sent")]
+    NotDue(NotificationId),
     /// Bad stored data: a sent message without its time, a provider's ID on one that
     /// wasn't sent.
     #[error("notification {notification}: {reason}")]
@@ -180,6 +184,7 @@ impl ErrorCode for NotificationError {
         match self {
             NotificationError::Text(e) => e.code(),
             NotificationError::InvalidTransition { .. } => "invalid_notification_transition",
+            NotificationError::NotDue(_) => "notification_not_due",
             NotificationError::Inconsistent { .. } => "notification_inconsistent",
         }
     }

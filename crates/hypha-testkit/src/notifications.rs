@@ -4,7 +4,7 @@ use std::{
 };
 
 use hypha_core::{
-    Email, EventId, Language, NotificationId, Page, PageRequest, RepoError, Versioned,
+    Email, EventId, Language, NotificationId, Page, PageRequest, RepoError, Timestamp, Versioned,
     stamp_insert, stamp_update,
 };
 use hypha_notifications::{
@@ -192,6 +192,41 @@ impl NotificationRepo for InMemoryNotificationRepo {
         stamp_update(notification, self.outbox.now());
         self.notifications
             .update(notification.id(), notification, &unique_message)
+    }
+
+    async fn lease_due(
+        &self,
+        now: Timestamp,
+        lease_until: Timestamp,
+        limit: u32,
+    ) -> Result<Vec<Notification>, RepoError> {
+        let mut rows = self.notifications.lock();
+        let mut due: Vec<Notification> = rows.values().filter(|n| n.is_due(now)).cloned().collect();
+        // Earliest due first (a queued one's attempt, else its lease's end), then by ID.
+        due.sort_by_key(|n| (n.next_attempt_at().or(n.lease_until()), n.id()));
+        due.truncate(limit as usize);
+        let mut leased = Vec::with_capacity(due.len());
+        for mut n in due {
+            n.lease(now, lease_until)
+                .map_err(|e| RepoError::Backend(e.to_string()))?;
+            stamp_update(&mut n, self.outbox.now());
+            update_row(&mut rows, n.id(), &mut n, &unique_message)?;
+            leased.push(n);
+        }
+        Ok(leased)
+    }
+
+    async fn next_due(&self) -> Result<Option<Timestamp>, RepoError> {
+        Ok(self
+            .notifications
+            .all()
+            .iter()
+            .filter_map(|n| match n.status() {
+                hypha_notifications::NotificationStatus::Queued => n.next_attempt_at(),
+                hypha_notifications::NotificationStatus::Sending => n.lease_until(),
+                _ => None,
+            })
+            .min())
     }
 }
 

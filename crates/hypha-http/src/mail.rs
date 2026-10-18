@@ -16,13 +16,14 @@ use hypha_media::Asset;
 use hypha_users::StaffEmail;
 use uuid::Uuid;
 
-use crate::host::{HostClock, HostIds, HostMail};
+use crate::host::{HostClock, HostIds, HostMail, MailQueued};
 use crate::media::Media;
 use crate::state::{HostEnv, OrderTokens, Runtime};
 
 /// What sending needs from the host: the configured sender (`[email] sender`), the
 /// operator's from address (`email.from`), the store, the admin's URL
-/// (`server.admin_url`), orders' access tokens and the media storage for the logo's URL.
+/// (`server.admin_url`), orders' access tokens, the media storage for the logo's URL and
+/// the send job's wake-up.
 /// Built once at startup, before the handlers, and shared (`Arc`) by the `Mailer` and
 /// `AppState::mail`.
 pub struct MailHost {
@@ -35,6 +36,7 @@ pub struct MailHost {
     admin_url: Option<String>,
     order_tokens: OrderTokens,
     media: Option<Arc<Media>>,
+    queued: MailQueued,
 }
 
 /// The parts of a `MailHost` (`MailHost::new`).
@@ -47,6 +49,8 @@ pub struct MailParts {
     pub admin_url: Option<String>,
     pub order_tokens: OrderTokens,
     pub media: Option<Arc<Media>>,
+    /// Wakes the send job when emails are queued.
+    pub queued: MailQueued,
 }
 
 impl MailHost {
@@ -61,6 +65,7 @@ impl MailHost {
             admin_url: parts.admin_url,
             order_tokens: parts.order_tokens,
             media: parts.media,
+            queued: parts.queued,
         }
     }
 
@@ -116,6 +121,10 @@ impl MailEnv for MailHost {
                 None
             }
         }
+    }
+
+    fn queued(&self) {
+        self.queued.notify();
     }
 }
 

@@ -1039,7 +1039,10 @@ step "the order's confirmation" 200 - "$NOTIFICATIONS&template=order_confirmatio
 CONFIRMATION=$(sed -E 's/.*"id":"(ntf_[0-9a-f]+)".*/\1/' <<<"$BODY")
 step "resend it" 201 - -X POST "$BASE/admin/notifications/$CONFIRMATION/resend"
 contains "a new message, about no event" '"event_id":null'
+contains "queued for the send job" '"status":"queued"'
+RESENT=$(sed -E 's/^\{"id":"(ntf_[0-9a-f]+)".*/\1/' <<<"$BODY")
 mail "the resent confirmation arrived" guest@example.hr "confirmed"
+wait_for "and is recorded as sent" "$BASE/admin/notifications/$RESENT" '"status":"sent"'
 step "one message" 200 - "$BASE/admin/notifications/$CONFIRMATION"
 step "an unknown message" 404 notification_not_found \
     "$BASE/admin/notifications/ntf_00000000000000000000000000000063"

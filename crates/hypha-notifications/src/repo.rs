@@ -1,4 +1,6 @@
-use hypha_core::{Email, EventId, Language, NotificationId, OrderId, Page, PageRequest, RepoError};
+use hypha_core::{
+    Email, EventId, Language, NotificationId, OrderId, Page, PageRequest, RepoError, Timestamp,
+};
 
 use crate::{Notification, NotificationSettings, NotificationStatus, Template, TemplateKey};
 
@@ -86,6 +88,21 @@ pub trait NotificationRepo {
     async fn insert(&self, notification: &mut Notification) -> Result<(), RepoError>;
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
     async fn update(&self, notification: &mut Notification) -> Result<(), RepoError>;
+    /// Leases up to `limit` messages due at `now` (`Notification::is_due`: queued and
+    /// due, or leased by a lease that has ended), earliest due first, until
+    /// `lease_until` (`Notification::lease`), and returns them as stored (version
+    /// bumped, stamped). Concurrent calls never lease the same message: a message
+    /// another call is leasing is skipped, not waited for.
+    async fn lease_due(
+        &self,
+        now: Timestamp,
+        lease_until: Timestamp,
+        limit: u32,
+    ) -> Result<Vec<Notification>, RepoError>;
+    /// When a message is next due to be sent (a queued one's `next_attempt_at`, the end
+    /// of a lease), so a host that runs jobs only when there's work knows when (design
+    /// note 0026, W7); `None` with nothing queued or leased.
+    async fn next_due(&self) -> Result<Option<Timestamp>, RepoError>;
 }
 
 /// Stages settings writes in a `hypha_core::HasBatch` batch, so the workflow can write

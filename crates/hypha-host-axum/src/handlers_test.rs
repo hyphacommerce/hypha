@@ -6,7 +6,7 @@ use hypha_core::EventHandlers;
 
 use std::sync::Arc;
 
-use hypha_http::host::HostMail;
+use hypha_http::host::{HostMail, MailQueued};
 use hypha_http::mail::{MailHost, MailParts};
 use hypha_http::state::OrderTokens;
 
@@ -24,6 +24,7 @@ fn handler_names_are_unique_snake_case() {
             admin_url: None,
             order_tokens: OrderTokens::new([7; 32]),
             media: None,
+            queued: MailQueued::none(),
         },
         &crate::platform::runtime(),
     );

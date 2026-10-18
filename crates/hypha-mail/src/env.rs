@@ -1,6 +1,7 @@
 //! What sending needs besides the store's repositories (design note 0028, §11): the
 //! sender, the operator's from address, how the host makes links (the admin's, an
-//! order's access token, a file's URL), the store it serves, time and IDs. A host
+//! order's access token, a file's URL), the store it serves, time and IDs, and how the
+//! send job is woken. A host
 //! implements `MailEnv` once, over what it holds; the `Mailer` handler keeps one, and
 //! the commands take one like `ids` and `clock`.
 
@@ -49,6 +50,10 @@ pub trait MailEnv {
     /// none (no media storage, not ready). Prefer a public, unsigned URL: an email is
     /// read long after it's sent.
     async fn asset_url(&self, asset: &Asset) -> Option<String>;
+
+    /// Messages were queued: wake the send job (natively its runner; on Workers the
+    /// event's after-write run). Called after the records are stored.
+    fn queued(&self);
 }
 
 /// Forwards every input to the environment pointed at, for the pointers a host may hold
@@ -90,6 +95,10 @@ macro_rules! forward {
 
             async fn asset_url(&self, asset: &Asset) -> Option<String> {
                 (**self).asset_url(asset).await
+            }
+
+            fn queued(&self) {
+                (**self).queued()
             }
         }
     )+};

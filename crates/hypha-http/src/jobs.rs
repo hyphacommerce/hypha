@@ -11,6 +11,7 @@ use hypha_dispatch::{
     Prepared, fan_out, handle, has_time, lease_due, prepare, prune_events, prune_idempotency_keys,
     prune_sessions, record, send,
 };
+use hypha_notifications::{LONGEST_SEND, NotificationStatus};
 
 use crate::state::{AppState, Storage};
 
@@ -189,6 +190,112 @@ fn webhook_time(app: &hypha_apps::App) -> Duration {
     })
 }
 
+/// Sends a batch of the queued emails (design note 0028, §4): leases what's due, lets
+/// the connection go, sends each (a provider call of up to `LONGEST_SEND`), then takes a
+/// connection to record the outcomes, as `dispatch` delivers webhooks (a host whose
+/// connections aren't pooled keeps one, `Storage::KEEPS_PORTS_ACROSS_DELIVERIES`).
+/// Messages the lease can't cover any more are left for the next lease.
+pub async fn send_notifications<S: Storage>(state: &AppState<S>) -> Step {
+    send_notifications_within(state, None).await
+}
+
+/// `send_notifications` for a host that cuts its work off at `deadline` (Workers'
+/// `waitUntil`): no send starts that couldn't finish and be recorded by then. The
+/// messages left keep their lease until it ends, then the next lease takes them.
+pub async fn send_notifications_by<S: Storage>(state: &AppState<S>, deadline: Timestamp) -> Step {
+    send_notifications_within(state, Some(deadline)).await
+}
+
+async fn send_notifications_within<S: Storage>(
+    state: &AppState<S>,
+    deadline: Option<Timestamp>,
+) -> Step {
+    let settings = &state.config.send_notifications;
+    let fits = |takes: Duration| {
+        deadline.is_none_or(|by| state.clock.now().plus(takes + RECORD_MARGIN) <= by)
+    };
+    let no_connection = |_| "no connection".to_string();
+    let held = match S::KEEPS_PORTS_ACROSS_DELIVERIES {
+        true => Some(state.public_ports().await.map_err(no_connection)?),
+        false => None,
+    };
+    let leased = {
+        let fresh;
+        let ports = match &held {
+            Some(ports) => ports,
+            None => {
+                fresh = state.public_ports().await.map_err(no_connection)?;
+                &fresh
+            }
+        };
+        hypha_mail::lease_due(ports, &state.clock, settings)
+            .await
+            .map_err(|e| e.to_string())?
+    };
+    let mut attempts = Vec::with_capacity(leased.len());
+    for message in &leased {
+        // Out of lease or out of the host's time: left under its lease for a later run,
+        // and so are the ones behind it (they'd have less time still).
+        if !hypha_mail::has_time(message, &state.clock) || !fits(LONGEST_SEND) {
+            break;
+        }
+        attempts.push(hypha_mail::send_leased(&*state.mail, message).await);
+    }
+    let unstarted = leased
+        .iter()
+        .skip(attempts.len())
+        .filter_map(|n| n.lease_until());
+    let mut retry_at = unstarted.min();
+    if !attempts.is_empty() {
+        let fresh;
+        let ports = match &held {
+            Some(ports) => ports,
+            None => {
+                fresh = state.public_ports().await.map_err(no_connection)?;
+                &fresh
+            }
+        };
+        for (message, attempt) in leased.iter().cloned().zip(attempts) {
+            let id = message.id();
+            match hypha_mail::record_attempt(ports, &state.clock, settings, message, attempt).await
+            {
+                Ok(recorded) => {
+                    match recorded.status() {
+                        NotificationStatus::Failed => tracing::warn!(
+                            notification = %id,
+                            template = recorded.template().as_str(),
+                            "email: failed for good: {}",
+                            recorded.error().unwrap_or_default()
+                        ),
+                        NotificationStatus::Queued => tracing::info!(
+                            notification = %id,
+                            "email: the provider is unavailable, tried again later: {}",
+                            recorded.error().unwrap_or_default()
+                        ),
+                        _ => {}
+                    }
+                    retry_at = earliest(retry_at, recorded.next_attempt_at());
+                }
+                // Changed since it was leased (its lease ran out and another run took
+                // it): that run records it.
+                Err(e) => tracing::warn!(notification = %id, "email: not recorded: {e}"),
+            }
+        }
+    }
+    Ok(Ran {
+        more: leased.len() >= settings.batch as usize,
+        idle: leased.is_empty(),
+        retry_at,
+    })
+}
+
+fn earliest(a: Option<Timestamp>, b: Option<Timestamp>) -> Option<Timestamp> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
 /// Rebuilds a batch of the search documents events marked (design note 0019, section
 /// 5). One connection for the step: the built-in engine is the database.
 pub async fn search_sync<S: Storage>(state: &AppState<S>) -> Step {
@@ -281,15 +388,23 @@ pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     })
 }
 
-/// When dispatch next has work (`OutboxRepo::next_due`), for a host that runs the jobs
-/// only when there's some (design note 0026, W7).
+/// When dispatch or the send job next has work (`OutboxRepo::next_due`,
+/// `NotificationRepo::next_due`), for a host that runs the jobs only when there's some
+/// (design note 0026, W7).
 pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestamp>, String> {
     use hypha_core::{HasOutbox, OutboxRepo};
+    use hypha_notifications::{HasNotifications, NotificationRepo};
     let ports = state
         .public_ports()
         .await
         .map_err(|_| "no connection".to_string())?;
-    ports.outbox().next_due().await.map_err(|e| e.to_string())
+    let events = ports.outbox().next_due().await.map_err(|e| e.to_string())?;
+    let emails = ports
+        .notifications()
+        .next_due()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(earliest(events, emails))
 }
 
 /// How many search targets are queued, for a host whose runs don't follow each other on

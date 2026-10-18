@@ -620,12 +620,15 @@ pub async fn send_test<S: Storage>(
 #[schema(as = NotificationStatus)]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationStatusDto {
-    /// Handed to the sender (or about to be).
+    /// Rendered and waiting to be sent, from `next_attempt_at`: new, or tried again after
+    /// the provider couldn't be reached (`error` says why).
+    Queued,
+    /// Being handed to the provider.
     Sending,
     /// The provider accepted it.
     Sent,
-    /// The provider refused it or couldn't be reached (`error` says which); one about
-    /// an event is tried again on the dispatcher's schedule unless refused for good.
+    /// The provider refused it, or every attempt failed (`error` says why); final:
+    /// resend it to try again.
     Failed,
     /// Not sent on purpose: the template is turned off.
     Skipped,
@@ -634,6 +637,7 @@ pub enum NotificationStatusDto {
 impl From<NotificationStatus> for NotificationStatusDto {
     fn from(s: NotificationStatus) -> Self {
         match s {
+            NotificationStatus::Queued => Self::Queued,
             NotificationStatus::Sending => Self::Sending,
             NotificationStatus::Sent => Self::Sent,
             NotificationStatus::Failed => Self::Failed,
@@ -645,6 +649,7 @@ impl From<NotificationStatus> for NotificationStatusDto {
 impl From<NotificationStatusDto> for NotificationStatus {
     fn from(s: NotificationStatusDto) -> Self {
         match s {
+            NotificationStatusDto::Queued => Self::Queued,
             NotificationStatusDto::Sending => Self::Sending,
             NotificationStatusDto::Sent => Self::Sent,
             NotificationStatusDto::Failed => Self::Failed,
@@ -653,8 +658,9 @@ impl From<NotificationStatusDto> for NotificationStatus {
     }
 }
 
-/// One email's record. Bodies aren't kept: `POST /admin/notification-templates/{key}/
-/// preview` with the `order` shows what it looks like now.
+/// One email's record. Bodies aren't returned (they're kept only until it's sent): `POST
+/// /admin/notification-templates/{key}/preview` with the `order` shows what it looks
+/// like now.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct NotificationResponse {
     id: NotificationId,
@@ -670,10 +676,15 @@ pub struct NotificationResponse {
     provider_message_id: Option<String>,
     /// Why the last attempt failed, or why it was skipped.
     error: Option<String>,
+    /// How it was made, when staff should know: "sent with the default template: …"
+    /// when the store's template didn't render on this order.
+    note: Option<String>,
     /// The event it answered; `null` for resends and staff account emails.
     event_id: Option<EventId>,
     order_id: Option<OrderId>,
     sent_at: Option<String>,
+    /// When a queued message is next tried.
+    next_attempt_at: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -691,9 +702,11 @@ impl NotificationResponse {
             provider: n.provider().map(str::to_string),
             provider_message_id: n.provider_message_id().map(str::to_string),
             error: n.error().map(str::to_string),
+            note: n.note().map(str::to_string),
             event_id: n.event(),
             order_id: n.order(),
             sent_at: n.sent_at().map(rfc3339).transpose()?,
+            next_attempt_at: n.next_attempt_at().map(rfc3339).transpose()?,
             created_at,
             updated_at,
         })
@@ -719,13 +732,13 @@ pub struct NotificationFilters {
 type NotificationPage = PageResponse<NotificationResponse>;
 
 /// The emails sent, newest first: an order's (`order`), or every one of a template or
-/// status.
+/// status. They name buyers and their orders, so `orders:read` is needed too.
 #[utoipa::path(
     get,
     path = "/admin/notifications",
     params(PageParams, NotificationFilters),
     responses((status = 200, description = "OK", body = NotificationPage)),
-    extensions(("x-hypha-scopes" = json!(["notifications:read"]))),
+    extensions(("x-hypha-scopes" = json!(["notifications:read", "orders:read"]))),
 )]
 pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
@@ -748,13 +761,13 @@ pub async fn list<S: Storage>(
     )?))
 }
 
-/// One email's record.
+/// One email's record (`orders:read` too, as the list).
 #[utoipa::path(
     get,
     path = "/admin/notifications/{id}",
     params(("id" = NotificationId, Path)),
     responses((status = 200, description = "OK", body = NotificationResponse)),
-    extensions(("x-hypha-scopes" = json!(["notifications:read"]))),
+    extensions(("x-hypha-scopes" = json!(["notifications:read", "orders:read"]))),
 )]
 pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
@@ -768,9 +781,9 @@ pub async fn fetch<S: Storage>(
 
 /// Sends an order's email again ("the customer didn't get it"), rendered from the order
 /// as it is now with the templates in effect, even if the template is off: a new record
-/// (201), `sent`, or `failed` when the provider refused it. Invites and resets can't be
-/// resent (`notification_not_resendable`: their token isn't kept). A provider that
-/// can't be reached is `502 email_unavailable` (the new record says `failed`).
+/// (201), `queued` for the send job, which goes at once (read the record again for how
+/// it went). Invites and resets can't be resent (`notification_not_resendable`: their
+/// token isn't kept).
 #[utoipa::path(
     post,
     path = "/admin/notifications/{id}/resend",
@@ -784,6 +797,9 @@ pub async fn resend<S: Storage>(
     PathId(id): PathId<NotificationId>,
 ) -> Result<(StatusCode, Json<NotificationResponse>), ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let sent = hypha_mail::resend(&ctx, &*state.mail, &ports, id).await?;
-    Ok((StatusCode::CREATED, Json(NotificationResponse::new(&sent)?)))
+    let queued = hypha_mail::resend(&ctx, &*state.mail, &ports, id).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(NotificationResponse::new(&queued)?),
+    ))
 }

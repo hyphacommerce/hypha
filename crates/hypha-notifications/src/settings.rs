@@ -330,9 +330,7 @@ mod tests {
 
     #[test]
     fn an_order_url_is_http_with_the_order_placeholder() {
-        assert!(
-            OrderUrl::new("https://shop.example.com/order/{order}?token={token}").is_ok()
-        );
+        assert!(OrderUrl::new("https://shop.example.com/order/{order}?token={token}").is_ok());
         assert!(OrderUrl::new("http://localhost:3002/order/{order}").is_ok());
         for bad in [
             "https://shop.example.com/order",

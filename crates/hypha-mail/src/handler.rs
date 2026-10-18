@@ -1,14 +1,15 @@
-//! `Mailer` (design note 0028, §4, NT7): the event handler that emails buyers and staff
-//! about orders, with the dispatcher's retries and lease.
+//! `Mailer` (design note 0028, §4, NT7): the event handler that queues emails to buyers
+//! and staff about orders. It renders and records; the send job sends.
 
 use hypha_core::{Email, EventHandler, EventId, FulfillmentId, OrderId, StoredEvent, Timezone};
 use hypha_fulfillment::{Fulfillment, FulfillmentRepo, HasFulfillments};
 use hypha_media::HasAssets;
 use hypha_notifications::{
-    HasNotificationSettings, HasNotificationTemplates, HasNotifications, Notification, TemplateKey,
+    HasNotificationSettings, HasNotificationTemplates, HasNotifications, Notification,
+    NotificationRepo, TemplateKey,
 };
 use hypha_orders::{HasOrders, Order, OrderRepo};
-use hypha_payments::{HasPayments, newest_payment};
+use hypha_payments::{HasPayments, Payment, newest_payment};
 use hypha_stores::StoreRepo;
 use serde::Deserialize;
 
@@ -18,10 +19,10 @@ use crate::{
         CancellationContext, CancellationMail, CustomerContext, FulfillmentContext, MailContext,
         NewOrderMail, OrderContext, OrderMail, ShipmentMail,
     },
-    send::{Branding, Message, branding, deliver},
+    send::{Branding, Message, Sources, branding, queue, render_for_sending, skip},
 };
 
-/// Every repository sending reads or writes, so a host names one bound. The store's
+/// Every repository mailing reads or writes, so a host names one bound. The store's
 /// row is read through `StoreRepo` on the same ports: one store per deployment (design
 /// note 0006, model A) keeps it in the store's database.
 pub trait MailPorts:
@@ -62,11 +63,14 @@ pub const FULFILLMENT_UPDATED: &str = "fulfillment.updated";
 ///   `order_shipped`, `order_tracking_updated` to the buyer, when the event's
 ///   `notify_customer` says so (events recorded before it existed don't).
 ///
-/// It holds the host's `MailEnv` (the sender, links, the store), so a host builds its
-/// handler set at startup rather than as a `const`. Each message is recorded once per
-/// (event, template, recipient): a run that finds one sent (or skipped) sends nothing
-/// more, so running twice is harmless. Messages go one after another; a transient
-/// failure stops the run with `Err`, and the dispatcher's retry sends the rest.
+/// It renders each message and records it `queued` (or `skipped`, its template off) for
+/// the send job: no network, so a dispatch step's budget holds and no connection waits
+/// on a provider. Each message is recorded once per (event, template, recipient): a run
+/// that finds one queues nothing more, so running twice is harmless. It fails only for
+/// storage or data errors (a missing order, a bad payload), which the dispatcher retries.
+///
+/// It holds the host's `MailEnv` (links, the store, the send job's wake-up), so a host
+/// builds its handler set at startup rather than as a `const`.
 pub struct Mailer<E> {
     env: E,
 }
@@ -104,7 +108,7 @@ where
     }
 
     async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
-        mail_event(&self.env, ports, event)
+        queue_event(&self.env, ports, event)
             .await
             .map(drop)
             .map_err(|e| e.to_string())
@@ -120,48 +124,40 @@ struct Payload {
     notify_customer: bool,
 }
 
-/// Sends what `event` calls for and returns the records, in order. An event the mailer
-/// doesn't answer, or one staff chose not to tell the buyer about, sends nothing.
-pub async fn mail_event<E: MailEnv, P: MailPorts>(
+/// What an event is about, loaded once for all its messages.
+struct About {
+    branding: Branding,
+    order: Order,
+    payment: Option<Payment>,
+    fulfillment: Option<Fulfillment>,
+}
+
+/// Queues what `event` calls for and returns the records, in order (earlier runs'
+/// records included). An event the mailer doesn't answer, or one staff chose not to tell
+/// the buyer about, queues nothing. Wakes the send job (`MailEnv::queued`) when it
+/// queued something.
+pub async fn queue_event<E: MailEnv, P: MailPorts>(
     env: &E,
     ports: &P,
     event: &StoredEvent,
 ) -> Result<Vec<Notification>, CommandError> {
-    let messages = messages_for(env, ports, event).await?;
-    let Some((branding, messages)) = messages else {
-        return Ok(Vec::new());
-    };
-    let mut sent = Vec::with_capacity(messages.len());
-    for message in messages {
-        sent.push(deliver(env, ports, &branding, message).await?);
-    }
-    Ok(sent)
-}
-
-/// The messages `event` calls for, with the branding they were built with; `None` when
-/// it calls for none.
-pub(crate) async fn messages_for<E: MailEnv, P: MailPorts>(
-    env: &E,
-    ports: &P,
-    event: &StoredEvent,
-) -> Result<Option<(Branding, Vec<Message>)>, CommandError> {
     let template = match event.event_type.as_str() {
         ORDER_PLACED => TemplateKey::OrderConfirmation,
         ORDER_CANCELLED => TemplateKey::OrderCancelled,
         FULFILLMENT_CREATED => TemplateKey::OrderShipped,
         FULFILLMENT_UPDATED => TemplateKey::OrderTrackingUpdated,
-        _ => return Ok(None),
+        _ => return Ok(Vec::new()),
     };
+    let event_id = EventId::from_uuid(event.id);
     let payload: Payload =
         serde_json::from_value(event.data.clone()).map_err(|e| CommandError::BadEvent {
-            event: EventId::from_uuid(event.id),
+            event: event_id,
             event_type: event.event_type.clone(),
             reason: e.to_string(),
         })?;
     if template != TemplateKey::OrderConfirmation && !payload.notify_customer {
-        return Ok(None);
+        return Ok(Vec::new());
     }
-    let branding = branding(env, ports).await?;
     let order = load_order(ports, payload.order).await?;
     let fulfillment = match (template, payload.fulfillment) {
         (TemplateKey::OrderShipped | TemplateKey::OrderTrackingUpdated, Some(id)) => {
@@ -169,50 +165,91 @@ pub(crate) async fn messages_for<E: MailEnv, P: MailPorts>(
         }
         _ => None,
     };
-    let event_id = Some(EventId::from_uuid(event.id));
-    let mut messages = Vec::new();
-    let context = order_context(
-        env,
-        ports,
-        &branding,
-        template,
-        &order,
-        fulfillment.as_ref(),
-    )
-    .await?;
-    messages.push(Message {
-        template,
-        to: order.email().clone(),
-        event: event_id,
-        order: Some(order.id()),
-        context,
-        even_if_disabled: false,
-    });
+    let about = About {
+        branding: branding(env, ports).await?,
+        payment: newest_payment(ports, order.id()).await?,
+        order,
+        fulfillment,
+    };
+    let mut plan = vec![(template, vec![about.order.email().clone()])];
     if template == TemplateKey::OrderConfirmation {
-        let recipients: Vec<Email> = branding.settings.staff_recipients().to_vec();
-        if !recipients.is_empty() {
+        let staff = about.branding.settings.staff_recipients().to_vec();
+        if !staff.is_empty() {
+            plan.push((TemplateKey::StaffNewOrder, staff));
+        }
+    }
+    let mut records = Vec::new();
+    let mut queued = false;
+    for (template, recipients) in plan {
+        let (done, added) =
+            queue_template(env, ports, &about, event_id, template, recipients).await?;
+        records.extend(done);
+        queued |= added;
+    }
+    if queued {
+        env.queued();
+    }
+    Ok(records)
+}
+
+/// The records for `template` to each of `recipients` about `event`: an earlier run's
+/// where there is one, else new ones, `queued` (rendered once for all of them) or
+/// `skipped` when the template is off (not rendered). Says whether it queued any.
+async fn queue_template<E: MailEnv, P: MailPorts>(
+    env: &E,
+    ports: &P,
+    about: &About,
+    event: EventId,
+    template: TemplateKey,
+    recipients: Vec<Email>,
+) -> Result<(Vec<Notification>, bool), CommandError> {
+    let mut slots = Vec::with_capacity(recipients.len());
+    for to in recipients {
+        let earlier = ports.notifications().find(event, template, &to).await?;
+        slots.push((to, earlier));
+    }
+    if slots.iter().all(|(_, earlier)| earlier.is_some()) {
+        return Ok((slots.into_iter().filter_map(|(_, e)| e).collect(), false));
+    }
+    let sources = Sources::load(ports, template).await?;
+    let rendering = match sources.template.enabled {
+        true => {
             let context = order_context(
                 env,
                 ports,
-                &branding,
-                TemplateKey::StaffNewOrder,
-                &order,
-                None,
+                &about.branding,
+                template,
+                &about.order,
+                about.payment.as_ref(),
+                about.fulfillment.as_ref(),
             )
             .await?;
-            for to in recipients {
-                messages.push(Message {
-                    template: TemplateKey::StaffNewOrder,
-                    to,
-                    event: event_id,
-                    order: Some(order.id()),
-                    context: context.clone(),
-                    even_if_disabled: false,
-                });
-            }
+            Some(render_for_sending(&sources, &context)?)
         }
+        false => None,
+    };
+    let mut records = Vec::with_capacity(slots.len());
+    let mut queued = false;
+    for (to, earlier) in slots {
+        if let Some(earlier) = earlier {
+            records.push(earlier);
+            continue;
+        }
+        let message = Message {
+            template,
+            to,
+            event: Some(event),
+            order: Some(about.order.id()),
+        };
+        records.push(match &rendering {
+            Some(rendering) => {
+                queued = true;
+                queue(env, ports, &about.branding, &message, rendering).await?
+            }
+            None => skip(env, ports, &message).await?,
+        });
     }
-    Ok(Some((branding, messages)))
+    Ok((records, queued))
 }
 
 pub(crate) async fn load_order<P: HasOrders>(
@@ -251,25 +288,31 @@ pub(crate) async fn newest_fulfillment<P: HasFulfillments>(
 }
 
 /// The context of `template` (an order template or `staff_new_order`) for `order` as it
-/// is now; the shipping templates need `fulfillment` (the order's newest without one).
-pub async fn order_context<E: MailEnv, P: MailPorts>(
+/// is now, with its newest `payment`; the shipping templates need `fulfillment` (the
+/// order's newest without one). Staff emails get no `order.url`: the link carries the
+/// buyer's access token, which isn't staff's to forward (they have the admin's
+/// `admin_url`).
+pub async fn order_context<E: MailEnv, P: HasFulfillments>(
     env: &E,
     ports: &P,
     branding: &Branding,
     template: TemplateKey,
     order: &Order,
+    payment: Option<&Payment>,
     fulfillment: Option<&Fulfillment>,
 ) -> Result<MailContext, CommandError> {
     let zone: Option<Timezone> = branding.store.timezone();
-    let payment = newest_payment(ports, order.id()).await?;
-    let url = branding
-        .settings
-        .order_url()
-        .map(|pattern| pattern.link(order.id(), &env.order_token(order.id())));
+    let url = match template {
+        TemplateKey::StaffNewOrder => None,
+        _ => branding
+            .settings
+            .order_url()
+            .map(|pattern| pattern.link(order.id(), &env.order_token(order.id()))),
+    };
     let mail = OrderMail {
         shop: branding.shop.clone(),
         brand: branding.brand.clone(),
-        order: OrderContext::of(order, payment.as_ref(), url, zone),
+        order: OrderContext::of(order, payment, url, zone),
         customer: CustomerContext::of(order),
     };
     Ok(match template {

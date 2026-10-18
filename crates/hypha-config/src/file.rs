@@ -11,6 +11,7 @@ use hypha_auth::AuthSettings;
 use hypha_categories::CategorySettings;
 use hypha_dispatch::DispatchSettings;
 use hypha_media::MediaSettings;
+use hypha_notifications::SendSettings;
 use hypha_search::SyncSettings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -356,6 +357,7 @@ pub struct Jobs {
     pub prune: PruneJob,
     pub media_sweep: Job,
     pub search_sync: SearchSyncJob,
+    pub send_notifications: SendNotificationsJob,
 }
 
 impl Default for Jobs {
@@ -367,6 +369,7 @@ impl Default for Jobs {
             dispatch: DispatchJob::default(),
             prune: PruneJob::default(),
             search_sync: SearchSyncJob::default(),
+            send_notifications: SendNotificationsJob::default(),
             media_sweep: Job {
                 enabled: true,
                 interval: hour,
@@ -438,6 +441,39 @@ impl Default for SearchSyncJob {
             interval: Dur(Duration::from_secs(2)),
             batch: s.batch,
             lease: Dur(s.lease),
+        }
+    }
+}
+
+/// Sending the emails the store queued (design note 0028, §4): order emails and
+/// resends. Staff invites and password resets are sent by their request, not by this
+/// job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct SendNotificationsJob {
+    pub enabled: bool,
+    pub interval: Dur,
+    /// Emails sent per step (1 to 1,000).
+    pub batch: u32,
+    /// How long a runner holds the emails it took; past it, another may take them (and
+    /// a provider without idempotency keys, SMTP, may then get one twice). At least 20
+    /// seconds: a send may take 15.
+    pub lease: Dur,
+    /// The waits after each failure the provider says may pass (a timeout, a 5xx, a
+    /// rate limit), in order; after the last, the email fails for good and staff can
+    /// resend it. At most 20, each 1 second to 365 days.
+    pub retry: Vec<Dur>,
+}
+
+impl Default for SendNotificationsJob {
+    fn default() -> Self {
+        let s = SendSettings::default();
+        Self {
+            enabled: true,
+            interval: Dur(Duration::from_secs(2)),
+            batch: s.batch,
+            lease: Dur(s.lease),
+            retry: s.retry.into_iter().map(Dur).collect(),
         }
     }
 }

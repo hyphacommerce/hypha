@@ -9,9 +9,9 @@ use hypha_core::{
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentLine, FulfillmentRepo, NewFulfillment, Tracking};
 use hypha_mail::{
-    CommandError, MailContext, MailEnv, Mailer, TemplateInput, UpdateSettings, mail_event,
-    order_context, preview, render_for_sending, resend, save_template, send_staff, send_test,
-    update_settings,
+    CommandError, MailContext, MailEnv, Mailer, Sources, TemplateInput, UpdateSettings,
+    order_context, preview, queue_event, render_for_sending, resend, save_template, send_due,
+    send_staff, send_test, update_settings,
 };
 use hypha_media::{
     Asset, AssetRepo, AssetUsage, AssetUsageRepo, FileFacts, HasAssetUsages, MimeType, NewUpload,
@@ -20,17 +20,18 @@ use hypha_media::{
 use hypha_notifications::{
     EffectiveTemplate, EmailSender, NewTemplate, Notification, NotificationFilter,
     NotificationRepo, NotificationSettings, NotificationSettingsRepo, NotificationStatus,
-    NotificationTemplateRepo, OutgoingEmail, RenderError, SendError, Sent, Template, TemplateError,
-    TemplateKey, TemplatePart, TemplateSources, default_template, render,
+    NotificationTemplateRepo, OutgoingEmail, RenderError, SendError, SendSettings, Sent, Template,
+    TemplateError, TemplateKey, TemplatePart, TemplateSources, default_template, render,
 };
 use hypha_orders::{
     CancelReason, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
 };
-use hypha_payments::{NewPayment, Payment, PaymentRepo, ProviderKey};
+use hypha_payments::{NewPayment, Payment, PaymentRepo, ProviderKey, newest_payment};
 use hypha_stores::{Store, StoreRepo};
 use hypha_testkit::{FixedClock, InMemoryEmailSender, InMemoryPorts, SequentialIds};
 use hypha_users::{StaffEmail, User, UserRepo};
 use pollster::block_on;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use uuid::Uuid;
 
 fn uuid(n: u128) -> Uuid {
@@ -73,6 +74,8 @@ struct TestEnv<S = InMemoryEmailSender> {
     ids: SequentialIds,
     from: Email,
     admin_url: Option<String>,
+    /// How many times the send job was woken (`MailEnv::queued`).
+    woken: AtomicUsize,
 }
 
 impl TestEnv {
@@ -89,6 +92,7 @@ impl<S> TestEnv<S> {
             ids: SequentialIds::default(),
             from: email("shop@mail.example.com"),
             admin_url: Some("https://admin.example.com".to_string()),
+            woken: AtomicUsize::new(0),
         }
     }
 }
@@ -128,6 +132,22 @@ impl<S: EmailSender> MailEnv for TestEnv<S> {
 
     async fn asset_url(&self, asset: &Asset) -> Option<String> {
         Some(format!("https://cdn.example.com/{}", asset.id()))
+    }
+
+    fn queued(&self) {
+        self.woken.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+impl<S> TestEnv<S> {
+    fn woken(&self) -> usize {
+        self.woken.load(Ordering::SeqCst)
+    }
+
+    /// Moves the send job's clock `secs` on.
+    fn later(&self, secs: i64) {
+        self.clock
+            .set(hypha_core::Clock::now(&self.clock).plus_secs(secs));
     }
 }
 
@@ -323,6 +343,28 @@ fn disable(ports: &InMemoryPorts, key: TemplateKey) {
     block_on(ports.notification_templates.insert(&mut template)).unwrap();
 }
 
+/// Runs the send job once on everything due.
+fn send_job<S: EmailSender>(env: &TestEnv<S>, ports: &InMemoryPorts) -> Vec<Notification> {
+    block_on(send_due(env, ports, &SendSettings::default()))
+        .unwrap()
+        .attempted
+}
+
+/// Queues what `event` calls for and runs the send job: what a dispatch step and the
+/// send job it wakes do. The records as the job left them.
+fn mail_event(
+    env: &TestEnv,
+    ports: &InMemoryPorts,
+    event: &StoredEvent,
+) -> Result<Vec<Notification>, CommandError> {
+    let queued = block_on(queue_event(env, ports, event))?;
+    send_job(env, ports);
+    Ok(queued
+        .iter()
+        .map(|n| block_on(ports.notifications.get(n.id())).unwrap().unwrap())
+        .collect())
+}
+
 fn mailer() -> Mailer<TestEnv> {
     Mailer::new(TestEnv::new())
 }
@@ -354,6 +396,54 @@ fn every_default_renders_against_its_sample() {
 }
 
 #[test]
+fn every_default_renders_without_what_may_be_absent() {
+    let layout = default_template(TemplateKey::Layout).html;
+    for key in TemplateKey::ALL.into_iter().filter(|k| !k.is_layout()) {
+        for context in MailContext::checks(key) {
+            let rendered = render(layout, &default_template(key).sources(), &context);
+            let rendered = rendered.unwrap_or_else(|e| panic!("{key}: {e}"));
+            assert!(!rendered.text.contains("none"), "{key}: {}", rendered.text);
+        }
+    }
+}
+
+#[test]
+fn staff_get_no_buyers_order_link() {
+    let ports = world();
+    let input = UpdateSettings {
+        order_url: Some(Some(
+            "https://shop.example.com/order/{order}?token={token}".to_string(),
+        )),
+        ..UpdateSettings::default()
+    };
+    block_on(update_settings(&Ctx::system(), &ports, input)).unwrap();
+    let env = TestEnv::new();
+    let branding = block_on(hypha_mail::branding(&env, &ports)).unwrap();
+    let order = block_on(ports.orders.get(order_id())).unwrap().unwrap();
+    let context = |key| {
+        let context = block_on(order_context(
+            &env, &ports, &branding, key, &order, None, None,
+        ))
+        .unwrap();
+        serde_json::to_value(context).unwrap()
+    };
+    let link = format!(
+        "https://shop.example.com/order/{}?token=tok_{}",
+        order_id(),
+        order_id()
+    );
+    assert_eq!(
+        context(TemplateKey::OrderConfirmation)["order"]["url"],
+        link
+    );
+    let staff = context(TemplateKey::StaffNewOrder);
+    assert_eq!(staff["order"]["url"], serde_json::Value::Null);
+    assert!(!staff.to_string().contains("tok_"), "{staff}");
+    let sample = serde_json::to_value(MailContext::sample(TemplateKey::StaffNewOrder)).unwrap();
+    assert_eq!(sample["order"]["url"], serde_json::Value::Null);
+}
+
+#[test]
 fn every_default_renders_against_a_real_order() {
     let ports = world();
     // Recorded straight in the repo, the shipment leaves the order unfulfilled, so it
@@ -363,7 +453,7 @@ fn every_default_renders_against_a_real_order() {
     let env = TestEnv::new();
     let branding = block_on(hypha_mail::branding(&env, &ports)).unwrap();
     let order = block_on(ports.orders.get(order_id())).unwrap().unwrap();
-    let layout = EffectiveTemplate::of(TemplateKey::Layout, None);
+    let payment = block_on(newest_payment(&ports, order_id())).unwrap();
     for key in [
         TemplateKey::OrderConfirmation,
         TemplateKey::OrderShipped,
@@ -371,10 +461,24 @@ fn every_default_renders_against_a_real_order() {
         TemplateKey::OrderCancelled,
         TemplateKey::StaffNewOrder,
     ] {
-        let context = block_on(order_context(&env, &ports, &branding, key, &order, None)).unwrap();
-        let template = EffectiveTemplate::of(key, None);
-        let rendered = render_for_sending(&layout, &template, &context)
-            .unwrap_or_else(|e| panic!("{key}: {e}"));
+        let context = block_on(order_context(
+            &env,
+            &ports,
+            &branding,
+            key,
+            &order,
+            payment.as_ref(),
+            None,
+        ))
+        .unwrap();
+        let sources = Sources {
+            layout: EffectiveTemplate::of(TemplateKey::Layout, None),
+            template: EffectiveTemplate::of(key, None),
+        };
+        let rendering =
+            render_for_sending(&sources, &context).unwrap_or_else(|e| panic!("{key}: {e}"));
+        assert_eq!(rendering.note, None);
+        let rendered = rendering.rendered;
         assert!(
             rendered.subject.contains("#1001"),
             "{key}: {}",
@@ -388,7 +492,7 @@ fn every_default_renders_against_a_real_order() {
 fn the_confirmation_has_the_orders_details() {
     let ports = world();
     let env = TestEnv::new();
-    let sent = block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    let sent = mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     assert_eq!(sent.len(), 1);
     let emails = env.sender.sent();
     let email = &emails[0];
@@ -430,7 +534,7 @@ fn an_order_link_is_made_from_the_settings_pattern_and_the_token() {
     };
     block_on(update_settings(&Ctx::system(), &ports, input)).unwrap();
     let env = TestEnv::new();
-    block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     let text = &env.sender.sent()[0].text;
     let link = format!(
         "https://shop.example.com/order/{}?token=tok_{}",
@@ -460,13 +564,49 @@ fn the_mailer_wants_the_four_order_events() {
 }
 
 #[test]
-fn a_second_run_sends_nothing_more() {
+fn the_handler_only_queues_and_wakes_the_send_job() {
+    let ports = world();
+    set_staff_recipients(&ports, &["ops@fernandfield.example"]);
+    let mailer = mailer();
+    assert_eq!(
+        handle(&mailer, &ports, &event(&ports, "order.placed")),
+        Ok(())
+    );
+    assert!(
+        mailer.env().sender.sent().is_empty(),
+        "no network in the handler"
+    );
+    assert_eq!(mailer.env().woken(), 1);
+    let records = records(&ports);
+    assert_eq!(records.len(), 2);
+    for r in &records {
+        assert_eq!(r.status(), NotificationStatus::Queued);
+        assert_eq!(r.attempts(), 0);
+        assert_eq!(r.next_attempt_at(), Some(FixedClock::DEFAULT));
+        assert!(r.email().is_some_and(|e| e.text.contains("#1001")));
+    }
+    assert_eq!(records[0].subject(), "Order #1001 confirmed");
+    let sent = send_job(mailer.env(), &ports);
+    assert_eq!(sent.len(), 2);
+    assert!(sent.iter().all(|r| r.status() == NotificationStatus::Sent
+        && r.email().is_none()
+        && r.attempts() == 1));
+    assert_eq!(mailer.env().sender.sent().len(), 2);
+}
+
+#[test]
+fn a_second_run_queues_nothing_more() {
     let ports = world();
     set_staff_recipients(&ports, &["ops@fernandfield.example"]);
     let mailer = mailer();
     let placed = event(&ports, "order.placed");
     assert_eq!(handle(&mailer, &ports, &placed), Ok(()));
     assert_eq!(handle(&mailer, &ports, &placed), Ok(()));
+    assert_eq!(mailer.env().woken(), 1, "the second run queued nothing");
+    send_job(mailer.env(), &ports);
+    // And after they're sent, another run of the same event still sends nothing.
+    assert_eq!(handle(&mailer, &ports, &placed), Ok(()));
+    send_job(mailer.env(), &ports);
     assert_eq!(mailer.env().sender.sent().len(), 2);
     let records = records(&ports);
     assert_eq!(records.len(), 2);
@@ -488,7 +628,7 @@ fn staff_get_the_new_order_email_each() {
         &["ops@fernandfield.example", "boss@fernandfield.example"],
     );
     let env = TestEnv::new();
-    block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     let sent = env.sender.sent();
     let to: Vec<&str> = sent.iter().map(|e| e.to.as_str()).collect();
     assert_eq!(
@@ -500,6 +640,7 @@ fn staff_get_the_new_order_email_each() {
         ]
     );
     assert_eq!(sent[1].subject, "New order #1001: €112.90");
+    assert_eq!(sent[2].subject, sent[1].subject);
     let admin = format!("https://admin.example.com/orders/{}", order_id());
     assert!(sent[1].text.contains(&admin), "{}", sent[1].text);
 }
@@ -508,103 +649,221 @@ fn staff_get_the_new_order_email_each() {
 fn without_staff_recipients_only_the_buyer_is_emailed() {
     let ports = world();
     let env = TestEnv::new();
-    block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     let records = records(&ports);
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].template(), TemplateKey::OrderConfirmation);
 }
 
 #[test]
-fn a_template_turned_off_is_recorded_as_skipped() {
+fn a_template_turned_off_is_recorded_as_skipped_without_rendering() {
     let ports = world();
-    disable(&ports, TemplateKey::OrderConfirmation);
+    // Off, and broken: it isn't rendered, so it doesn't matter.
+    let sources = TemplateSources::new(
+        TemplateKey::OrderConfirmation,
+        "{{ order.nonexistent }}".to_string(),
+        r#"{% extends "layout" %}{% block content %}{{ nope.nope }}{% endblock %}"#.to_string(),
+        None,
+    )
+    .unwrap();
+    let mut template = Template::new(NewTemplate {
+        key: TemplateKey::OrderConfirmation,
+        locale: None,
+        sources: Some(sources),
+        enabled: false,
+    })
+    .unwrap();
+    block_on(ports.notification_templates.insert(&mut template)).unwrap();
     let env = TestEnv::new();
-    block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     assert!(env.sender.sent().is_empty());
+    assert_eq!(env.woken(), 0);
     let records = records(&ports);
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].status(), NotificationStatus::Skipped);
     assert_eq!(records[0].error(), Some("the template is turned off"));
-    assert_eq!(records[0].subject(), "Order #1001 confirmed");
+    assert_eq!(records[0].subject(), "");
     // And a second run doesn't make another.
-    block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     assert_eq!(self::records(&ports).len(), 1);
 }
 
 #[test]
-fn a_transient_failure_is_retried_and_sends_once() {
+fn a_transient_failure_is_queued_again_and_sent_once_later() {
     let ports = world();
     let mailer = mailer();
+    let env = mailer.env();
     let placed = event(&ports, "order.placed");
-    mailer
-        .env()
-        .sender
+    assert_eq!(handle(&mailer, &ports, &placed), Ok(()));
+    env.sender
         .fail_next(SendError::Transient("timed out".to_string()));
-    let first = handle(&mailer, &ports, &placed);
+    let first = send_job(env, &ports);
+    assert_eq!(first[0].status(), NotificationStatus::Queued);
+    assert_eq!(first[0].error(), Some("timed out"));
+    assert_eq!(first[0].provider(), Some("memory"));
+    assert_eq!(first[0].attempts(), 1);
+    // The schedule's first wait: a minute.
     assert_eq!(
-        first,
-        Err("the email provider is unavailable: timed out".to_string())
+        first[0].next_attempt_at(),
+        Some(FixedClock::DEFAULT.plus_secs(60))
     );
-    let failed = records(&ports);
-    assert_eq!(failed[0].status(), NotificationStatus::Failed);
-    assert_eq!(failed[0].error(), Some("timed out"));
-    assert_eq!(failed[0].provider(), Some("memory"));
-
+    // The event retried (another handler failed, say) changes nothing.
     assert_eq!(handle(&mailer, &ports, &placed), Ok(()));
-    assert_eq!(handle(&mailer, &ports, &placed), Ok(()));
-    assert_eq!(mailer.env().sender.sent().len(), 1);
-    let sent = records(&ports);
+    assert!(send_job(env, &ports).is_empty(), "not due yet");
+    env.later(60);
+    let sent = send_job(env, &ports);
     assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].id(), failed[0].id(), "the same record, tried again");
+    assert_eq!(sent[0].id(), first[0].id(), "the same record, tried again");
     assert_eq!(sent[0].status(), NotificationStatus::Sent);
     assert_eq!(sent[0].attempts(), 2);
     assert_eq!(sent[0].error(), None);
     assert_eq!(sent[0].provider_message_id(), Some("memory_1"));
-    assert_eq!(sent[0].sent_at(), Some(FixedClock::DEFAULT));
+    assert_eq!(sent[0].sent_at(), Some(FixedClock::DEFAULT.plus_secs(60)));
+    assert_eq!(env.sender.sent().len(), 1);
+    assert_eq!(env.sender.sent()[0].id, sent[0].id(), "the idempotency key");
+    assert_eq!(records(&ports).len(), 1);
 }
 
 #[test]
-fn a_permanent_refusal_is_recorded_and_not_retried() {
+fn transient_failures_fail_for_good_when_the_schedule_ends() {
+    let ports = world();
+    let env = TestEnv::new();
+    block_on(queue_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    let settings = SendSettings {
+        retry: vec![std::time::Duration::from_secs(10)],
+        ..SendSettings::default()
+    };
+    let run = |env: &TestEnv| {
+        block_on(send_due(env, &ports, &settings))
+            .unwrap()
+            .attempted
+    };
+    env.sender
+        .fail_next(SendError::Transient("421".to_string()));
+    env.sender
+        .fail_next(SendError::Transient("421 again".to_string()));
+    assert_eq!(run(&env)[0].status(), NotificationStatus::Queued);
+    env.later(10);
+    let last = run(&env);
+    assert_eq!(last[0].status(), NotificationStatus::Failed);
+    assert_eq!(last[0].error(), Some("421 again"));
+    assert_eq!(last[0].attempts(), 2);
+    assert_eq!(last[0].email(), None);
+    env.later(3600);
+    assert!(run(&env).is_empty());
+}
+
+#[test]
+fn a_permanent_refusal_is_final_even_when_the_event_runs_again() {
     let ports = world();
     let mailer = mailer();
+    let placed = event(&ports, "order.placed");
+    assert_eq!(handle(&mailer, &ports, &placed), Ok(()));
     mailer
         .env()
         .sender
         .fail_next(SendError::Permanent("address refused".to_string()));
-    assert_eq!(
-        handle(&mailer, &ports, &event(&ports, "order.placed")),
-        Ok(())
-    );
+    send_job(mailer.env(), &ports);
+    // Another destination's failure retries the event: this message stays failed.
+    assert_eq!(handle(&mailer, &ports, &placed), Ok(()));
+    mailer.env().later(24 * 3600);
+    assert!(send_job(mailer.env(), &ports).is_empty());
     let records = records(&ports);
+    assert_eq!(records.len(), 1);
     assert_eq!(records[0].status(), NotificationStatus::Failed);
     assert_eq!(records[0].error(), Some("address refused"));
+    assert!(mailer.env().sender.sent().is_empty());
 }
 
 #[test]
-fn a_transient_failure_stops_the_run_before_the_next_message() {
+fn one_messages_failure_doesnt_hold_up_the_others() {
     let ports = world();
     set_staff_recipients(&ports, &["ops@fernandfield.example"]);
-    let mailer = mailer();
-    let placed = event(&ports, "order.placed");
-    mailer
-        .env()
-        .sender
+    let env = TestEnv::new();
+    block_on(queue_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    env.sender
         .fail_next(SendError::Transient("rate limited".to_string()));
-    assert!(handle(&mailer, &ports, &placed).is_err());
+    let run = send_job(&env, &ports);
+    let statuses: Vec<NotificationStatus> = run.iter().map(Notification::status).collect();
     assert_eq!(
-        records(&ports).len(),
-        1,
-        "the staff email waits for the retry"
+        statuses,
+        [NotificationStatus::Queued, NotificationStatus::Sent]
     );
-    assert_eq!(handle(&mailer, &ports, &placed), Ok(()));
-    let to: Vec<String> = mailer
-        .env()
-        .sender
-        .sent()
-        .iter()
-        .map(|e| e.to.to_string())
-        .collect();
-    assert_eq!(to, ["ana@example.hr", "ops@fernandfield.example"]);
+    let to: Vec<String> = env.sender.sent().iter().map(|e| e.to.to_string()).collect();
+    assert_eq!(to, ["ops@fernandfield.example"]);
+}
+
+#[test]
+fn a_message_held_by_a_running_lease_isnt_sent_again() {
+    let ports = world();
+    let env = TestEnv::new();
+    block_on(queue_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    // One run leased it and is still sending; another starts.
+    let settings = SendSettings::default();
+    let held = block_on(hypha_mail::lease_due(&ports, &env.clock, &settings)).unwrap();
+    assert_eq!(held.len(), 1);
+    env.later(30);
+    assert!(send_job(&env, &ports).is_empty());
+    assert!(env.sender.sent().is_empty());
+    // The first finishes; its record stands.
+    let attempt = block_on(hypha_mail::send_leased(&env, &held[0]));
+    let done = block_on(hypha_mail::record_attempt(
+        &ports,
+        &env.clock,
+        &settings,
+        held[0].clone(),
+        attempt,
+    ))
+    .unwrap();
+    assert_eq!(done.status(), NotificationStatus::Sent);
+    assert_eq!(env.sender.sent().len(), 1);
+}
+
+#[test]
+fn a_lease_that_ran_out_is_taken_again_with_the_same_id() {
+    let ports = world();
+    let env = TestEnv::new();
+    block_on(queue_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    let settings = SendSettings::default();
+    // A runner leased it and stopped (crashed, cut off) without recording.
+    let lost = block_on(hypha_mail::lease_due(&ports, &env.clock, &settings)).unwrap();
+    env.later(settings.lease.as_secs() as i64);
+    let sent = send_job(&env, &ports);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].id(), lost[0].id());
+    assert_eq!(sent[0].attempts(), 2);
+    assert_eq!(sent[0].status(), NotificationStatus::Sent);
+    // The provider gets the record's ID as its idempotency key either way.
+    assert_eq!(env.sender.sent()[0].id, lost[0].id());
+    // The lost runner's late record is stale, not a second outcome.
+    let late = block_on(hypha_mail::record_attempt(
+        &ports,
+        &env.clock,
+        &settings,
+        lost[0].clone(),
+        hypha_mail::Attempt {
+            provider: "memory",
+            result: Ok(Sent::default()),
+        },
+    ));
+    assert_eq!(
+        late.map(drop),
+        Err(CommandError::Repo(hypha_core::RepoError::StaleVersion))
+    );
+}
+
+#[test]
+fn a_send_that_cant_finish_within_the_lease_isnt_started() {
+    let ports = world();
+    let env = TestEnv::new();
+    block_on(queue_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    let short = SendSettings {
+        lease: std::time::Duration::from_secs(10),
+        ..SendSettings::default()
+    };
+    let run = block_on(send_due(&env, &ports, &short)).unwrap();
+    assert_eq!((run.attempted.len(), run.left), (0, 1));
+    assert!(env.sender.sent().is_empty());
 }
 
 #[test]
@@ -613,16 +872,11 @@ fn shipping_emails_go_only_when_staff_chose_to_tell_the_buyer() {
     ship(&ports, false);
     let env = TestEnv::new();
     let quiet = event(&ports, "fulfillment.created");
-    assert_eq!(block_on(mail_event(&env, &ports, &quiet)), Ok(vec![]));
+    assert_eq!(mail_event(&env, &ports, &quiet), Ok(vec![]));
 
     let ports = world();
     ship(&ports, true);
-    let sent = block_on(mail_event(
-        &env,
-        &ports,
-        &event(&ports, "fulfillment.created"),
-    ))
-    .unwrap();
+    let sent = mail_event(&env, &ports, &event(&ports, "fulfillment.created")).unwrap();
     assert_eq!(sent[0].template(), TemplateKey::OrderShipped);
     let email = &env.sender.sent()[0];
     assert_eq!(email.subject, "Your order #1001 is on its way");
@@ -648,12 +902,7 @@ fn a_tracking_update_names_the_new_tracking() {
     fulfillment.set_tracking(tracking, true).unwrap();
     block_on(ports.fulfillments.update(&mut fulfillment)).unwrap();
     let env = TestEnv::new();
-    block_on(mail_event(
-        &env,
-        &ports,
-        &event(&ports, "fulfillment.updated"),
-    ))
-    .unwrap();
+    mail_event(&env, &ports, &event(&ports, "fulfillment.updated")).unwrap();
     let email = &env.sender.sent()[0];
     assert_eq!(email.subject, "Tracking updated for order #1001");
     assert!(email.text.contains("GLS: GLS42"), "{}", email.text);
@@ -665,11 +914,11 @@ fn a_cancellation_email_goes_only_when_asked_with_its_reason() {
     cancel(&ports, false);
     let env = TestEnv::new();
     let quiet = event(&ports, "order.cancelled");
-    assert_eq!(block_on(mail_event(&env, &ports, &quiet)), Ok(vec![]));
+    assert_eq!(mail_event(&env, &ports, &quiet), Ok(vec![]));
 
     let ports = world();
     cancel(&ports, true);
-    block_on(mail_event(&env, &ports, &event(&ports, "order.cancelled"))).unwrap();
+    mail_event(&env, &ports, &event(&ports, "order.cancelled")).unwrap();
     let email = &env.sender.sent()[0];
     assert_eq!(email.subject, "Order #1001 cancelled");
     assert!(
@@ -686,7 +935,7 @@ fn events_from_before_notify_customer_send_nothing() {
     let mut old = event(&ports, "order.cancelled");
     old.data = serde_json::json!({ "order": order_id(), "reason": "inventory" });
     let env = TestEnv::new();
-    assert_eq!(block_on(mail_event(&env, &ports, &old)), Ok(vec![]));
+    assert_eq!(mail_event(&env, &ports, &old), Ok(vec![]));
 }
 
 #[test]
@@ -723,8 +972,14 @@ fn a_customized_template_that_breaks_falls_back_to_the_default() {
     .unwrap();
     block_on(ports.notification_templates.insert(&mut template)).unwrap();
     let env = TestEnv::new();
-    block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    let sent = mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     assert_eq!(env.sender.sent()[0].subject, "Order #1001 confirmed");
+    let note = sent[0].note().unwrap_or_default();
+    assert!(
+        note.starts_with("sent with the default template: ") && note.contains("subject"),
+        "{note}"
+    );
+    assert_eq!(sent[0].status(), NotificationStatus::Sent);
 }
 
 // Settings.
@@ -811,7 +1066,7 @@ fn the_logo_is_in_every_email() {
     add_asset(&ports, 1, MimeType::Png, Visibility::Public, true);
     set_logo(&ports, Some(1)).unwrap();
     let env = TestEnv::new();
-    block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     let html = &env.sender.sent()[0].html;
     // As it is: only `& < > " '` are escaped (`render::format_value`).
     let url = format!(
@@ -880,7 +1135,7 @@ fn settings_are_checked_and_merged() {
         ))
     );
     let env = TestEnv::new();
-    block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     let email = &env.sender.sent()[0];
     assert_eq!(email.from.to_string(), r#""Fern" <shop@mail.example.com>"#);
     assert_eq!(
@@ -935,7 +1190,7 @@ fn a_saved_template_is_used_from_then_on() {
     .unwrap();
     assert!(saved.customized && saved.enabled);
     let env = TestEnv::new();
-    block_on(mail_event(&env, &ports, &event(&ports, "order.placed"))).unwrap();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
     let email = &env.sender.sent()[0];
     assert_eq!(email.subject, "Got it: #1001");
     assert!(email.html.contains("<p>Hi Ana Horvat</p>"));
@@ -994,6 +1249,50 @@ fn a_template_naming_a_missing_variable_is_refused_with_its_line() {
         matches!(&staff, Err(CommandError::Render(RenderError::Invalid(p))) if p.part == TemplatePart::Subject),
         "{staff:?}"
     );
+}
+
+#[test]
+fn a_template_that_needs_an_optional_value_is_refused() {
+    let ports = world();
+    // Fine on the sample, which has a payment; a cash order without one would break it.
+    let result = save(
+        &ports,
+        TemplateKey::OrderConfirmation,
+        input(
+            "Ok",
+            "{% extends \"layout\" %}\n{% block content %}\n<p>{{ order.payment.method|upper }}</p>\n{% endblock %}",
+        ),
+        true,
+    );
+    let Err(CommandError::Render(RenderError::Invalid(problem))) = &result else {
+        panic!("expected template_invalid, got {result:?}");
+    };
+    assert_eq!((problem.part, problem.line), (TemplatePart::Html, Some(3)));
+    // Tracking without a URL, likewise.
+    let result = save(
+        &ports,
+        TemplateKey::OrderShipped,
+        input(
+            "Ok",
+            "{% extends \"layout\" %}{% block content %}{% for t in fulfillment.tracking %}{{ t.url.upper() }}{% endfor %}{% endblock %}",
+        ),
+        true,
+    );
+    assert!(
+        matches!(&result, Err(CommandError::Render(RenderError::Invalid(p))) if p.part == TemplatePart::Html),
+        "{result:?}"
+    );
+    // Guarded, it's saved.
+    let guarded = save(
+        &ports,
+        TemplateKey::OrderConfirmation,
+        input(
+            "Ok",
+            "{% extends \"layout\" %}{% block content %}{% if order.payment %}{{ order.payment.method|upper }}{% endif %}{% endblock %}",
+        ),
+        true,
+    );
+    assert!(guarded.is_ok(), "{guarded:?}");
 }
 
 #[test]
@@ -1244,21 +1543,23 @@ fn a_resend_is_a_new_message_without_an_event() {
     let ports = world();
     ship(&ports, true);
     let env = TestEnv::new();
-    let first = block_on(mail_event(
-        &env,
-        &ports,
-        &event(&ports, "fulfillment.created"),
-    ))
-    .unwrap()
-    .remove(0);
+    let first = mail_event(&env, &ports, &event(&ports, "fulfillment.created"))
+        .unwrap()
+        .remove(0);
     // Even after the template was turned off: staff asked.
     disable(&ports, TemplateKey::OrderShipped);
+    let woken = env.woken();
     let again = block_on(resend(&Ctx::system(), &env, &ports, first.id())).unwrap();
     assert_ne!(again.id(), first.id());
     assert_eq!(again.event(), None);
     assert_eq!(again.order(), Some(order_id()));
     assert_eq!(again.template(), TemplateKey::OrderShipped);
-    assert_eq!(again.status(), NotificationStatus::Sent);
+    assert_eq!(again.status(), NotificationStatus::Queued);
+    assert_eq!(env.woken(), woken + 1);
+    assert_eq!(env.sender.sent().len(), 1, "the send job sends it");
+    let done = send_job(&env, &ports);
+    assert_eq!(done[0].id(), again.id());
+    assert_eq!(done[0].status(), NotificationStatus::Sent);
     let sent = env.sender.sent();
     assert_eq!(sent.len(), 2);
     assert_eq!(sent[1].subject, sent[0].subject);
@@ -1345,9 +1646,7 @@ fn a_staff_email_that_fails_is_the_flows_error() {
         .fail_next(SendError::Transient("timed out".to_string()));
     assert_eq!(
         block_on(send_staff(&env, &ports, invite_email())),
-        Err(hypha_core::NotifyError(
-            "the email provider is unavailable: timed out".to_string()
-        ))
+        Err(hypha_core::NotifyError("timed out".to_string()))
     );
     let records = records(&ports);
     assert_eq!(records.len(), 2);
@@ -1372,6 +1671,7 @@ fn the_futures_are_send_on_send_ports() {
     send(EventHandler::<InMemoryPorts>::handle(
         &mailer, &ports, &placed,
     ));
+    send(send_due(&env, &ports, &SendSettings::default()));
     send(update_settings(&ctx, &ports, UpdateSettings::default()));
     send(save_template(&ctx, &ports, key, default_input(key), true));
     send(preview(&ctx, &env, &ports, key, default_input(key), None));

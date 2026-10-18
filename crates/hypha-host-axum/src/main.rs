@@ -385,6 +385,7 @@ async fn prepare(
             admin_url: config.server.admin_url.clone(),
             order_tokens: env.order_tokens().clone(),
             media: media.clone(),
+            queued: wake.mail_queued(),
         },
         &runtime,
     ));

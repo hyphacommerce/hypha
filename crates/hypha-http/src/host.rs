@@ -311,6 +311,33 @@ impl AfterWrites {
     }
 }
 
+/// Called when emails were queued (`hypha_mail::MailEnv::queued`: the `Mailer`
+/// handler, a resend), so the send job runs soon. Natively it wakes the job's runner; on
+/// Workers it marks the event, whose after-write run then sends (design note 0028, §4).
+#[derive(Clone)]
+pub struct MailQueued(Arc<dyn Fn() + Send + Sync>);
+
+impl MailQueued {
+    pub fn new(notify: impl Fn() + Send + Sync + 'static) -> Self {
+        Self(Arc::new(notify))
+    }
+
+    /// Does nothing (a host without jobs, tests).
+    pub fn none() -> Self {
+        Self::new(|| {})
+    }
+
+    pub fn notify(&self) {
+        (self.0)();
+    }
+}
+
+impl std::fmt::Debug for MailQueued {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MailQueued")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

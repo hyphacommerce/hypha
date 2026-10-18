@@ -15,6 +15,7 @@ pub mod notification;
 pub mod render;
 pub mod repo;
 pub mod sender;
+pub mod sending;
 pub mod settings;
 pub mod template;
 
@@ -29,7 +30,9 @@ pub use error::{
     NotificationError, RenderError, SettingsError, TemplateError, TemplatePart, TemplateProblem,
 };
 pub use key::{Audience, TemplateKey};
-pub use notification::{NewNotification, Notification, NotificationSnapshot, NotificationStatus};
+pub use notification::{
+    NewNotification, Notification, NotificationSnapshot, NotificationStatus, QueuedEmail,
+};
 pub use render::{FUEL, Rendered, html_to_text, render};
 pub use repo::{
     HasNotificationSettings, HasNotificationTemplates, HasNotifications, NotificationFilter,
@@ -37,5 +40,6 @@ pub use repo::{
     StageNotificationSettings, keys,
 };
 pub use sender::{EmailSender, Mailbox, OutgoingEmail, SendError, Sent};
+pub use sending::{LONGEST_SEND, SEND_TIMEOUT, SendSettings};
 pub use settings::{Colour, NotificationSettings, NotificationSettingsSnapshot, OrderUrl};
 pub use template::{NewTemplate, Template, TemplateSnapshot, TemplateSources};

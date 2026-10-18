@@ -29,7 +29,7 @@ use std::net::SocketAddr;
 
 use axum::extract::connect_info::MockConnectInfo;
 
-use hypha_http::host::{AfterWrites, HostMail};
+use hypha_http::host::{AfterWrites, HostMail, MailQueued};
 use hypha_http::mail::{MailHost, MailParts};
 use hypha_http::media::Media;
 use hypha_http::state::{AppState, HostEnv, HostParts};
@@ -205,6 +205,7 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
             admin_url: config.server.admin_url.clone(),
             order_tokens: env.order_tokens().clone(),
             media: media.clone(),
+            queued: MailQueued::none(),
         },
         &runtime,
     ));
@@ -5362,6 +5363,27 @@ async fn a_placed_order_is_emailed_listed_and_resent() {
     assert_eq!(status, StatusCode::OK);
     let (order, _, _) = placed_order_for_three_mugs(&app).await;
     hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    // The mailer queued them; the send job sends.
+    assert!(app.emails.lock().unwrap().is_empty());
+    let (_, queued) = send(
+        &app,
+        "GET",
+        &format!("/admin/notifications?order={order}"),
+        None,
+    )
+    .await;
+    for n in queued["items"].as_array().unwrap() {
+        assert_eq!(
+            (&n["status"], &n["attempts"]),
+            (&json!("queued"), &json!(0)),
+            "{n}"
+        );
+        assert!(n["next_attempt_at"].is_string(), "{n}");
+    }
+    let ran = hypha_http::jobs::send_notifications(&app.state)
+        .await
+        .unwrap();
+    assert!(!ran.idle && !ran.more, "{ran:?}");
 
     let (status, page) = send(
         &app,
@@ -5428,9 +5450,27 @@ async fn a_placed_order_is_emailed_listed_and_resent() {
     assert_ne!(resent["id"], confirmation["id"]);
     assert_eq!(
         (&resent["status"], &resent["event_id"], &resent["to"]),
-        (&json!("sent"), &Value::Null, &json!("ana@example.hr"))
+        (&json!("queued"), &Value::Null, &json!("ana@example.hr"))
     );
+    assert_eq!(app.emails.lock().unwrap().len(), 2, "the send job sends it");
+    hypha_http::jobs::send_notifications(&app.state)
+        .await
+        .unwrap();
     assert_eq!(app.emails.lock().unwrap().len(), 3);
+    let resent_id = resent["id"].as_str().unwrap();
+    let (_, resent) = send(
+        &app,
+        "GET",
+        &format!("/admin/notifications/{resent_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(resent["status"], "sent", "{resent}");
+    // Nothing left.
+    let ran = hypha_http::jobs::send_notifications(&app.state)
+        .await
+        .unwrap();
+    assert!(ran.idle, "{ran:?}");
     let (_, page) = send(
         &app,
         "GET",
@@ -5539,4 +5579,24 @@ async fn notifications_need_their_scopes() {
         (StatusCode::FORBIDDEN, "missing_scope"),
         "an order's data needs orders:read"
     );
+    // The record of emails names buyers and orders: orders:read too.
+    let unknown = "ntf_00000000000000000000000000000063";
+    for uri in [
+        "/admin/notifications".to_string(),
+        format!("/admin/notifications/{unknown}"),
+    ] {
+        let (status, json) = send_as(&app, &reader, "GET", &uri, None).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::FORBIDDEN, "missing_scope"),
+            "{uri}"
+        );
+    }
+    let both = key(
+        &app,
+        json!({ "kind": "secret", "name": "Both", "scopes": ["notifications:read", "orders:read"] }),
+    )
+    .await;
+    let (status, json) = send_as(&app, &both, "GET", "/admin/notifications", None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
 }

@@ -261,6 +261,39 @@ fn a_message_is_found_by_its_id() {
 }
 
 #[test]
+fn reading_messages_needs_orders_read_too() {
+    let ports = InMemoryPorts::default();
+    record(&ports, 1, Some(7));
+    let settings_only = staff(vec![Scope::NotificationsWrite]);
+    let missing = Err(CommandError::Auth(AuthError::MissingScope(
+        Scope::OrdersRead,
+    )));
+    assert_eq!(
+        block_on(get_notification(&settings_only, &ports, nid(1))).map(|_| ()),
+        missing
+    );
+    let page = PageRequest {
+        after: None,
+        limit: PageLimit::new(10).unwrap(),
+    };
+    assert_eq!(
+        block_on(list_notifications(
+            &settings_only,
+            &ports,
+            NotificationFilter::default(),
+            page,
+        ))
+        .map(|_| ()),
+        missing
+    );
+    let both = staff(vec![Scope::NotificationsRead, Scope::OrdersRead]);
+    assert_eq!(
+        block_on(get_notification(&both, &ports, nid(1))).map(|n| n.id()),
+        Ok(nid(1))
+    );
+}
+
+#[test]
 fn reading_needs_notifications_read_and_changing_needs_write() {
     let ports = InMemoryPorts::default();
     let nobody = staff(vec![Scope::OrdersRead]);

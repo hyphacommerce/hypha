@@ -19,6 +19,8 @@ jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bun
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# Logging only (a template that fell back to the default, Q5); subscribers are the hosts'.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 uuid.workspace = true
 
 [dev-dependencies]

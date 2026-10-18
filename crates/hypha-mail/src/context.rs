@@ -404,7 +404,14 @@ impl MailContext {
                     "https://admin.example.com/orders/{}",
                     mail.order.id
                 )),
-                mail,
+                // Staff get no buyer's link (it carries the buyer's token).
+                mail: OrderMail {
+                    order: OrderContext {
+                        url: None,
+                        ..mail.order
+                    },
+                    ..mail
+                },
             }),
             TemplateKey::StaffInvite => MailContext::Staff(sample_staff(
                 "https://admin.example.com/invite?token=hypha_inv_sample",
@@ -413,6 +420,94 @@ impl MailContext {
                 "https://admin.example.com/reset-password?token=hypha_pwr_sample",
             )),
         }
+    }
+
+    /// `sample(key)` with every value that may be absent absent: no contact email or
+    /// shop URL, no logo or footer, no order link, one line without variant or SKU, no
+    /// shipping address, method or payment, no customer name, no tracking, no
+    /// cancellation reason, no admin URL. A template saved must render against it too,
+    /// or a real order without them would break it.
+    pub fn sparse(key: TemplateKey) -> Self {
+        let mut context = Self::sample(key);
+        let thin = |mail: &mut OrderMail| {
+            thin_branding(&mut mail.shop, &mut mail.brand);
+            let order = &mut mail.order;
+            order.url = None;
+            order.lines.truncate(1);
+            for line in &mut order.lines {
+                line.variant = None;
+                line.sku = None;
+            }
+            order.taxes_included = false;
+            order.shipping_address = None;
+            order.shipping_method = None;
+            order.payment = None;
+            mail.customer.name = None;
+        };
+        match &mut context {
+            MailContext::Order(m) => thin(m),
+            MailContext::Shipment(m) => {
+                thin(&mut m.mail);
+                m.fulfillment.lines.truncate(1);
+                for line in &mut m.fulfillment.lines {
+                    line.variant = None;
+                }
+                m.fulfillment.tracking.clear();
+            }
+            MailContext::Cancellation(m) => {
+                thin(&mut m.mail);
+                m.cancellation.reason = None;
+            }
+            MailContext::NewOrder(m) => {
+                thin(&mut m.mail);
+                m.admin_url = None;
+            }
+            MailContext::Staff(m) => thin_branding(&mut m.shop, &mut m.brand),
+        }
+        context
+    }
+
+    /// `sample(key)` with its objects present but their own optional fields absent: an
+    /// address with only its required lines, a payment without instructions, tracking
+    /// without carrier or URL. With `sparse`, what a saved template is checked against.
+    pub fn sparse_fields(key: TemplateKey) -> Self {
+        let mut context = Self::sample(key);
+        let thin = |mail: &mut OrderMail| {
+            if let Some(address) = &mut mail.order.shipping_address {
+                address.company = None;
+                address.line2 = None;
+                address.province = None;
+                address.postal_code = None;
+                address.phone = None;
+            }
+            if let Some(payment) = &mut mail.order.payment {
+                payment.instructions = None;
+            }
+        };
+        match &mut context {
+            MailContext::Order(m) => thin(m),
+            MailContext::Shipment(m) => {
+                thin(&mut m.mail);
+                for tracking in &mut m.fulfillment.tracking {
+                    tracking.carrier = None;
+                    tracking.url = None;
+                }
+            }
+            MailContext::Cancellation(m) => thin(&mut m.mail),
+            MailContext::NewOrder(m) => thin(&mut m.mail),
+            MailContext::Staff(_) => {}
+        }
+        context
+    }
+
+    /// What a template of `key` is checked against before it's saved: the sample, and
+    /// the sample with what may be absent absent (`sparse`, `sparse_fields`).
+    pub fn checks(key: TemplateKey) -> [MailContext; 3] {
+        [
+            Self::sample(key),
+            Self::sparse(key),
+            Self::sparse_fields(key),
+        ]
     }
 
     /// Puts the store's own `shop` and `brand` in, so a preview of the sample looks
@@ -429,6 +524,13 @@ impl MailContext {
         *b = brand;
         self
     }
+}
+
+fn thin_branding(shop: &mut ShopContext, brand: &mut BrandContext) {
+    shop.email = None;
+    shop.url = None;
+    brand.logo_url = None;
+    brand.footer = None;
 }
 
 fn sample_shop() -> ShopContext {

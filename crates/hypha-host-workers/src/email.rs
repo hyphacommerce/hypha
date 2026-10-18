@@ -51,7 +51,7 @@ pub fn email_sender(
 
 /// How long one request to the email provider may take, as natively
 /// (`hypha_mail_resend::ReqwestClient`).
-const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+const TIMEOUT: std::time::Duration = hypha_notifications::SEND_TIMEOUT;
 
 /// The provider's HTTP through `fetch`, aborted after `TIMEOUT`.
 struct FetchClient;

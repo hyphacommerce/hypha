@@ -13,8 +13,8 @@ use hypha_media::{
 use hypha_notifications::{
     Colour, HasNotificationSettings, NewNotification, NewTemplate, Notification,
     NotificationFilter, NotificationRepo, NotificationSettings, NotificationSettingsRepo,
-    NotificationStatus, NotificationTemplateRepo, OrderUrl, StageNotificationSettings, Template,
-    TemplateKey, TemplateSources, keys,
+    NotificationStatus, NotificationTemplateRepo, OrderUrl, QueuedEmail, StageNotificationSettings,
+    Template, TemplateKey, TemplateSources, keys,
 };
 use uuid::Uuid;
 
@@ -61,6 +61,14 @@ pub async fn notification_repo<R: NotificationRepo>(make: impl AsyncFn() -> R) {
     notification_found(&make().await).await;
     scenario("notification: listed newest first, filtered, in pages");
     notifications_listed(&make().await).await;
+    scenario("notification: queued and leased messages keep their email, times and note");
+    notification_queue_round_trips(&make().await).await;
+    scenario("notification: lease_due takes due messages earliest first, up to the limit");
+    notifications_leased(&make().await).await;
+    scenario("notification: lease_due takes a message again once its lease has ended");
+    expired_leases_leased_again(&make().await).await;
+    scenario("notification: next_due is the earliest queued attempt or lease end");
+    notifications_next_due(&make().await).await;
 }
 
 /// Runs the batch scenarios for notification settings: the settings and their logo's
@@ -347,6 +355,27 @@ fn message(
     })
 }
 
+/// A message about event `n` and order 1, queued due at `at(due)`.
+fn queued(n: u128, template: TemplateKey, to: &str, due: i64) -> Notification {
+    Notification::queued(
+        NewNotification {
+            id: nid(n),
+            template,
+            to: email(to),
+            subject: format!("Order #{n} — shipped"),
+            event: Some(eid(n)),
+            order: Some(oid(1)),
+        },
+        QueuedEmail {
+            sender_name: Some("Fern & Field — é".to_string()),
+            reply_to: Some(email("help@example.com")),
+            html: format!("<p>Order #{n} — é</p>"),
+            text: format!("Order #{n} — é"),
+        },
+        at(due),
+    )
+}
+
 async fn notification_round_trips<R: NotificationRepo>(repo: &R) {
     let mut sent = message(
         1,
@@ -354,7 +383,8 @@ async fn notification_round_trips<R: NotificationRepo>(repo: &R) {
         "ana@example.com",
         Some(1),
         Some(1),
-    );
+    )
+    .with_note(Some("sent with the default template: line 3"));
     sent.sent("resend", Some("re_123".to_string()), at(5))
         .unwrap();
     repo.insert(&mut sent).await.unwrap();
@@ -383,21 +413,18 @@ async fn notification_round_trips<R: NotificationRepo>(repo: &R) {
 }
 
 async fn notification_updates<R: NotificationRepo>(repo: &R) {
-    let mut n = message(
-        1,
-        TemplateKey::OrderShipped,
-        "ana@example.com",
-        Some(1),
-        Some(1),
-    );
+    let mut n = queued(1, TemplateKey::OrderShipped, "ana@example.com", 0);
     repo.insert(&mut n).await.unwrap();
     let stale = n.clone();
-    n.failed("resend", "timed out").unwrap();
+    n.lease(at(0), at(120)).unwrap();
     repo.update(&mut n).await.unwrap();
     assert_eq!(n.version(), Version::new(2));
     assert_eq!(repo.get(nid(1)).await, Ok(Some(n.clone())));
-    n.retry().unwrap();
-    n.sent("resend", Some("re_9".to_string()), at(9)).unwrap();
+    n.retry_at("resend", "timed out", at(60)).unwrap();
+    repo.update(&mut n).await.unwrap();
+    assert_eq!(repo.get(nid(1)).await, Ok(Some(n.clone())));
+    n.lease(at(60), at(180)).unwrap();
+    n.sent("resend", Some("re_9".to_string()), at(61)).unwrap();
     repo.update(&mut n).await.unwrap();
     assert_eq!(repo.get(nid(1)).await, Ok(Some(n)));
 
@@ -587,6 +614,161 @@ async fn notifications_listed<R: NotificationRepo>(repo: &R) {
         status: Some(NotificationStatus::Sending),
     };
     assert_eq!(listed(together, None, 10).await, (vec![nid(1)], false));
+}
+
+async fn notification_queue_round_trips<R: NotificationRepo>(repo: &R) {
+    let mut waiting = queued(1, TemplateKey::OrderConfirmation, "ana@example.com", 5)
+        .with_note(Some("sent with the default template: line 3"));
+    repo.insert(&mut waiting).await.unwrap();
+    assert_eq!(repo.get(nid(1)).await, Ok(Some(waiting.clone())));
+    let mut bare = Notification::queued(
+        NewNotification {
+            id: nid(2),
+            template: TemplateKey::StaffNewOrder,
+            to: email("staff@example.com"),
+            subject: "New order".to_string(),
+            event: None,
+            order: None,
+        },
+        QueuedEmail {
+            sender_name: None,
+            reply_to: None,
+            html: String::new(),
+            text: String::new(),
+        },
+        at(0),
+    );
+    repo.insert(&mut bare).await.unwrap();
+    assert_eq!(repo.get(nid(2)).await, Ok(Some(bare)));
+    waiting.lease(at(5), at(125)).unwrap();
+    repo.update(&mut waiting).await.unwrap();
+    assert_eq!(repo.get(nid(1)).await, Ok(Some(waiting.clone())));
+    waiting.failed("smtp", "550 refused").unwrap();
+    repo.update(&mut waiting).await.unwrap();
+    let stored = repo.get(nid(1)).await.unwrap().unwrap();
+    assert_eq!(stored.email(), None);
+    assert_eq!(stored, waiting);
+}
+
+/// The IDs `lease_due` returned, checking each is what's stored now.
+async fn leased_ids<R: NotificationRepo>(
+    repo: &R,
+    now: i64,
+    until: i64,
+    limit: u32,
+) -> Vec<NotificationId> {
+    let leased = repo.lease_due(at(now), at(until), limit).await.unwrap();
+    for n in &leased {
+        assert_eq!(n.status(), NotificationStatus::Sending);
+        assert_eq!(n.lease_until(), Some(at(until)));
+        assert_eq!(repo.get(n.id()).await, Ok(Some(n.clone())));
+    }
+    leased.iter().map(Notification::id).collect()
+}
+
+async fn notifications_leased<R: NotificationRepo>(repo: &R) {
+    // Due at 30, 10, 20 and (not yet) 100; a direct send and a sent one aren't the job's.
+    for (n, due) in [(1, 30), (2, 10), (3, 20), (4, 100)] {
+        repo.insert(&mut queued(
+            n,
+            TemplateKey::OrderShipped,
+            "a@example.com",
+            due,
+        ))
+        .await
+        .unwrap();
+    }
+    repo.insert(&mut message(
+        5,
+        TemplateKey::StaffInvite,
+        "s@example.com",
+        None,
+        None,
+    ))
+    .await
+    .unwrap();
+    let mut sent = message(6, TemplateKey::StaffInvite, "s@example.com", None, None);
+    sent.sent("smtp", None, at(1)).unwrap();
+    repo.insert(&mut sent).await.unwrap();
+
+    assert_eq!(leased_ids(repo, 50, 170, 2).await, [nid(2), nid(3)]);
+    let first = repo.get(nid(2)).await.unwrap().unwrap();
+    assert_eq!((first.attempts(), first.version()), (1, Version::new(2)));
+    // The rest that's due; those held aren't taken again while their lease lasts.
+    assert_eq!(leased_ids(repo, 60, 180, 10).await, [nid(1)]);
+    assert_eq!(
+        leased_ids(repo, 99, 219, 10).await,
+        Vec::<NotificationId>::new()
+    );
+    assert_eq!(leased_ids(repo, 100, 220, 10).await, [nid(4)]);
+    // A message leased here and then changed: the old copy is stale.
+    let mut copy = repo.get(nid(4)).await.unwrap().unwrap();
+    let mut other = copy.clone();
+    other.sent("smtp", None, at(101)).unwrap();
+    repo.update(&mut other).await.unwrap();
+    copy.failed("smtp", "late").unwrap();
+    assert_eq!(repo.update(&mut copy).await, Err(RepoError::StaleVersion));
+}
+
+async fn expired_leases_leased_again<R: NotificationRepo>(repo: &R) {
+    repo.insert(&mut queued(
+        1,
+        TemplateKey::OrderShipped,
+        "a@example.com",
+        0,
+    ))
+    .await
+    .unwrap();
+    assert_eq!(leased_ids(repo, 0, 120, 10).await, [nid(1)]);
+    assert_eq!(
+        leased_ids(repo, 119, 239, 10).await,
+        Vec::<NotificationId>::new()
+    );
+    assert_eq!(leased_ids(repo, 120, 240, 10).await, [nid(1)]);
+    let again = repo.get(nid(1)).await.unwrap().unwrap();
+    assert_eq!(again.attempts(), 2);
+    // A message queued again is due at its next attempt.
+    let mut retried = again;
+    retried.retry_at("smtp", "421", at(300)).unwrap();
+    repo.update(&mut retried).await.unwrap();
+    assert_eq!(
+        leased_ids(repo, 299, 419, 10).await,
+        Vec::<NotificationId>::new()
+    );
+    assert_eq!(leased_ids(repo, 300, 420, 10).await, [nid(1)]);
+}
+
+async fn notifications_next_due<R: NotificationRepo>(repo: &R) {
+    assert_eq!(repo.next_due().await, Ok(None));
+    let mut sent = message(9, TemplateKey::StaffInvite, "s@example.com", None, None);
+    sent.sent("smtp", None, at(1)).unwrap();
+    repo.insert(&mut sent).await.unwrap();
+    repo.insert(&mut message(
+        8,
+        TemplateKey::StaffInvite,
+        "s@example.com",
+        None,
+        None,
+    ))
+    .await
+    .unwrap();
+    assert_eq!(repo.next_due().await, Ok(None));
+    for (n, due) in [(1, 300), (2, 200)] {
+        repo.insert(&mut queued(
+            n,
+            TemplateKey::OrderShipped,
+            "a@example.com",
+            due,
+        ))
+        .await
+        .unwrap();
+    }
+    assert_eq!(repo.next_due().await, Ok(Some(at(200))));
+    // Leased until 320: the earliest is now the other's attempt at 300.
+    assert_eq!(leased_ids(repo, 250, 320, 1).await, [nid(2)]);
+    assert_eq!(repo.next_due().await, Ok(Some(at(300))));
+    assert_eq!(leased_ids(repo, 300, 420, 1).await, [nid(1)]);
+    assert_eq!(repo.next_due().await, Ok(Some(at(320))));
 }
 
 async fn logo_usages<S: HasAssetUsages>(ports: &S, asset: AssetId) -> Vec<AssetUsage> {

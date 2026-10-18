@@ -1031,6 +1031,7 @@ dependencies = [
  "hypha-core",
  "hypha-dispatch",
  "hypha-media",
+ "hypha-notifications",
  "hypha-search",
  "ipnet",
  "schemars",
@@ -1253,6 +1254,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tracing",
  "uuid",
 ]
 

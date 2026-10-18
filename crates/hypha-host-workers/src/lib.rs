@@ -10,7 +10,8 @@
 //! the event current while its future is polled.
 //!
 //! Jobs run after each write that gave them work (W6: events committed, a delivery
-//! retried; the ports say so through `AfterWrites`) and on a cron tick that touches the database only when
+//! retried, an email queued; the ports say so through `AfterWrites`, the mail host
+//! through `MailQueued`) and on a cron tick that touches the database only when
 //! KV's marks say there's work (W7, `marks`), so an idle serverless database can sleep.
 //!
 //! The portable parts (`ids`, `limiter`, `marks`, `schedule`) build natively, so their
@@ -50,7 +51,7 @@ mod worker_main {
     use futures_util::future::{FutureExt, LocalBoxFuture, Shared};
     use hypha_config::Config;
     use hypha_core::{Clock, Timestamp};
-    use hypha_http::host::{AfterWrites, BoxFuture, HostBackground, HostLimiter};
+    use hypha_http::host::{AfterWrites, BoxFuture, HostBackground, HostLimiter, MailQueued};
     use hypha_http::jobs::{self, Ran, Step};
     use hypha_http::mail::{MailHost, MailParts};
     use hypha_http::rate_limit::{Decision, Rule};
@@ -226,6 +227,8 @@ mod worker_main {
                 admin_url: config.server.admin_url.clone(),
                 order_tokens: env_ports.order_tokens().clone(),
                 media: media.clone(),
+                // Like a write's events: the event's after-write run sends them.
+                queued: MailQueued::new(mark_written),
             },
             &runtime,
         ));
@@ -263,13 +266,7 @@ mod worker_main {
                     }
                 })
             }),
-            after_writes: AfterWrites::new(|| {
-                CURRENT.with_borrow(|event| {
-                    if let Some(event) = event {
-                        event.wrote.set(true);
-                    }
-                })
-            }),
+            after_writes: AfterWrites::new(mark_written),
             calls: platform::host_calls(),
             media,
             mail,
@@ -288,6 +285,16 @@ mod worker_main {
             app,
             caller_key: env_string(&env, "HYPHA_CALLER_KEY"),
         }))
+    }
+
+    /// Notes on the current event that a write gave the jobs work (events committed, a
+    /// delivery retried, an email queued): its after-write run goes.
+    fn mark_written() {
+        CURRENT.with_borrow(|event| {
+            if let Some(event) = event {
+                event.wrote.set(true);
+            }
+        })
     }
 
     /// The Rate Limiting bindings (W8), at `rule as usize`; a rule without one counts
@@ -392,6 +399,15 @@ mod worker_main {
                         .await,
                     );
                 }
+                // The emails the dispatch run's mailer (or a resend) queued.
+                if jobs.send_notifications.enabled {
+                    run = run.and(
+                        steps("send notifications", &state, Some(deadline), || {
+                            jobs::send_notifications_by(&state, deadline)
+                        })
+                        .await,
+                    );
+                }
                 if let Some(kv) = kv {
                     mark(&kv, &state, marks::after(run, None), LAST_DUE.get()).await;
                 }
@@ -400,7 +416,8 @@ mod worker_main {
         Ok(response)
     }
 
-    /// The cron tick (every minute, `wrangler.toml`): dispatch and search sync when
+    /// The cron tick (every minute, `wrangler.toml`): dispatch, search sync and sending
+    /// emails when
     /// KV's marks say there's work (or on the safety net's ticks), the others on the
     /// ticks that start their interval (`schedule::due`).
     #[event(scheduled)]
@@ -433,6 +450,14 @@ mod worker_main {
                 }
                 if jobs.search_sync.enabled {
                     run = run.and(steps("search sync", &state, None, || search_step(&state)).await);
+                }
+                if jobs.send_notifications.enabled {
+                    run = run.and(
+                        steps("send notifications", &state, None, || {
+                            jobs::send_notifications(&state)
+                        })
+                        .await,
+                    );
                 }
                 if let Some(kv) = &kv {
                     let known = read.and_then(|marks| marks.due);

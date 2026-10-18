@@ -192,9 +192,9 @@ pub struct ReqwestClient(reqwest::Client);
 impl ReqwestClient {
     /// How long opening a connection may take.
     pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-    /// How long a whole request may take: one email, so the dispatcher's lease is never
-    /// at risk.
-    pub const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+    /// How long a whole request may take: one email, so the send job's lease is never at
+    /// risk.
+    pub const REQUEST_TIMEOUT: std::time::Duration = hypha_notifications::SEND_TIMEOUT;
 
     pub fn new() -> Result<Self, String> {
         reqwest::Client::builder()

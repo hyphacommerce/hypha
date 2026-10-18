@@ -225,7 +225,8 @@ pub async fn set_notification_template_enabled<S: HasNotificationTemplates>(
 }
 
 /// A page of messages, newest first: an order's emails (`filter.order`), or every one
-/// of a template or status.
+/// of a template or status. Records name buyers' addresses and their orders, so reading
+/// them takes `orders:read` too.
 pub async fn list_notifications<S: HasNotifications>(
     ctx: &Ctx,
     ports: &S,
@@ -233,15 +234,18 @@ pub async fn list_notifications<S: HasNotifications>(
     page: PageRequest<NotificationId>,
 ) -> Result<Page<Notification>, CommandError> {
     ctx.require(Scope::NotificationsRead)?;
+    ctx.require(Scope::OrdersRead)?;
     Ok(ports.notifications().list(filter, page).await?)
 }
 
+/// One message's record; `orders:read` too, as `list_notifications`.
 pub async fn get_notification<S: HasNotifications>(
     ctx: &Ctx,
     ports: &S,
     id: NotificationId,
 ) -> Result<Notification, CommandError> {
     ctx.require(Scope::NotificationsRead)?;
+    ctx.require(Scope::OrdersRead)?;
     ports
         .notifications()
         .get(id)

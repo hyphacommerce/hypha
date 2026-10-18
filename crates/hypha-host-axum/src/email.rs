@@ -66,7 +66,7 @@ pub struct SmtpSender {
 
 impl SmtpSender {
     /// How long connecting and each command may take.
-    pub const TIMEOUT: Duration = Duration::from_secs(20);
+    pub const TIMEOUT: Duration = hypha_notifications::SEND_TIMEOUT;
 
     /// `password` is `HYPHA_SMTP_PASSWORD`, needed with `username` and only with it.
     /// Call it inside the Tokio runtime: the connection pool runs (and is dropped) there.

@@ -1153,7 +1153,7 @@ export interface paths {
         };
         /**
          * The emails sent, newest first: an order's (`order`), or every one of a template or
-         *     status.
+         *     status. They name buyers and their orders, so `orders:read` is needed too.
          */
         get: operations["admin.notifications.list"];
         put?: never;
@@ -1171,7 +1171,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One email's record. */
+        /** One email's record (`orders:read` too, as the list). */
         get: operations["admin.notifications.fetch"];
         put?: never;
         post?: never;
@@ -1193,9 +1193,9 @@ export interface paths {
         /**
          * Sends an order's email again ("the customer didn't get it"), rendered from the order
          *     as it is now with the templates in effect, even if the template is off: a new record
-         *     (201), `sent`, or `failed` when the provider refused it. Invites and resets can't be
-         *     resent (`notification_not_resendable`: their token isn't kept). A provider that
-         *     can't be reached is `502 email_unavailable` (the new record says `failed`).
+         *     (201), `queued` for the send job, which goes at once (read the record again for how
+         *     it went). Invites and resets can't be resent (`notification_not_resendable`: their
+         *     token isn't kept).
          */
         post: operations["admin.notifications.resend"];
         delete?: never;
@@ -3191,8 +3191,9 @@ export interface components {
             next_cursor?: string | null;
         };
         /**
-         * @description One email's record. Bodies aren't kept: `POST /admin/notification-templates/{key}/
-         *     preview` with the `order` shows what it looks like now.
+         * @description One email's record. Bodies aren't returned (they're kept only until it's sent): `POST
+         *     /admin/notification-templates/{key}/preview` with the `order` shows what it looks
+         *     like now.
          */
         NotificationResponse: {
             /**
@@ -3205,6 +3206,13 @@ export interface components {
             error?: string | null;
             event_id?: components["schemas"]["EventId"] | null;
             id: components["schemas"]["NotificationId"];
+            /** @description When a queued message is next tried. */
+            next_attempt_at?: string | null;
+            /**
+             * @description How it was made, when staff should know: "sent with the default template: …"
+             *     when the store's template didn't render on this order.
+             */
+            note?: string | null;
             order_id?: components["schemas"]["OrderId"] | null;
             /** @description The sender that handled it: `log`, `smtp`, `resend`. */
             provider?: string | null;
@@ -3248,7 +3256,7 @@ export interface components {
         /**
          * @description Where a message is.
          *
-         *     Known values: `sending`, `sent`, `failed`, `skipped`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `queued`, `sending`, `sent`, `failed`, `skipped`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         NotificationStatus: string;
@@ -12267,7 +12275,7 @@ export interface operations {
                 /** @description Only messages of this template. */
                 template?: "layout" | "order_confirmation" | "order_shipped" | "order_tracking_updated" | "order_cancelled" | "staff_new_order" | "staff_invite" | "staff_password_reset";
                 /** @description Only messages in this status. */
-                status?: "sending" | "sent" | "failed" | "skipped";
+                status?: "queued" | "sending" | "sent" | "failed" | "skipped";
             };
             header?: never;
             path?: never;
