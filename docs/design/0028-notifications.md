@@ -40,10 +40,10 @@ make the emails look like their shop without a developer, as Shopify lets them.
 | NT4 | **Branding is store-wide and reaches every template through a shared `layout`** that the others extend (`{% extends "layout" %}`): logo, accent colour, sender name, reply-to, footer. The layout is itself an editable template, so a merchant can change the frame once; each template can still override any block or ignore the layout. That's Shopify's "customize email template" plus "edit code" in one mechanism |
 | NT5 | **v1 editing is code**: per template, a subject line, an HTML body and an optional plain-text body, in a code editor with a live preview, "send a test to me", enable/disable (where allowed), and revert to default. A template that was never edited is not stored: the build's default is used, so improved defaults reach every store that kept them |
 | NT6 | **Defaults are written in React Email** in a repo package (`packages/emails`) and built to Jinja templates that the Rust crate embeds (committed; a check fails while they're stale, like the themes). JSX gives good email HTML; the API only ever sees Jinja |
-| NT7 | **Shopper and staff emails ride the outbox** (0016): a `Mailer` event handler (0019 §5.1) wants `order.placed`, `order.cancelled`, `fulfillment.created`, `fulfillment.updated`, renders and sends, and gets the dispatcher's retries and lease. The staff's choice to tell the buyer travels in the event (`notify_customer`, an added field, so still version 1; Shopify's fulfilment has the same flag). **Messages that carry a secret (invite, password reset) are sent directly** by the flow, after its commit, as today, so a token never lands in the outbox |
-| NT8 | **Every message is recorded** (`ntf_…`): template, recipient, subject, status, attempts, the provider's message ID, the error; the event it answers and the order it's about. One message per (event, template, recipient): a handler that runs twice finds the record and sends nothing more. **Bodies aren't stored** (Q1) |
+| NT7 | **Shopper and staff emails ride the outbox** (0016): a `Mailer` event handler (0019 §5.1) wants `order.placed`, `order.cancelled`, `fulfillment.created`, `fulfillment.updated`, renders and records each message `queued`; a send job (`send_notifications`) sends what's queued with its own lease and retry schedule (§4). The staff's choice to tell the buyer travels in the event (`notify_customer`, an added field, so still version 1; Shopify's fulfilment has the same flag). **Messages that carry a secret (invite, password reset) are sent directly** by the flow, after its commit, as today, so a token never lands in the outbox |
+| NT8 | **Every message is recorded** (`ntf_…`): template, recipient, subject, status, attempts, the provider's message ID, the error, a note (a fallback to the default template); the event it answers and the order it's about. One message per (event, template, recipient): a handler that runs twice finds the record and queues nothing more. **Bodies are kept only until the message is sent or has failed** (Q1) |
 | NT9 | **One `EmailSender` port; the operator picks the sender in `hypha.config.toml`**: `log` (the default, today's behaviour), `smtp` (native only, `lettre`; Mailpit in development) or `resend` (both hosts, over HTTPS). The from address is the operator's (a domain the provider verified); the merchant sets the sender's name and the reply-to. *Hard to reverse (configuration keys)* |
-| NT10 | **New scopes `notifications:read` and `notifications:write`**: templates and settings are settings; resending a message is `notifications:write` |
+| NT10 | **New scopes `notifications:read` and `notifications:write`**: templates and settings are settings; resending a message is `notifications:write`. Reading the record of messages takes `orders:read` too: it names buyers and their orders |
 
 ## 1. What others do
 
@@ -102,11 +102,23 @@ payment (0027 copies them at checkout), not a template of their own.
   have no order link.
 
 **`Notification`** (`ntf_…`, aggregate root): `template: TemplateKey`, `to: Email`,
-`subject` (rendered), `status` (`sending` → `sent` or `failed`; `skipped` when the
-template is disabled or there's no recipient, so the order's card can say why nothing
-went), `attempts`, `provider` (`log`, `smtp`, `resend`), `provider_message_id`, `error`,
-`event: Option<EventId>`, `order: Option<OrderId>`, `sent_at`. Unique on (event,
-template, to) where `event` is set (NT8).
+`subject` (rendered; empty when skipped), `status`, `attempts`, `provider` (`log`,
+`smtp`, `resend`), `provider_message_id`, `error`, `note`, `event: Option<EventId>`,
+`order: Option<OrderId>`, `sent_at`, `next_attempt_at`, `lease_until`, and while it
+waits the rendered email (`QueuedEmail`: HTML, text, sender name, reply-to). Unique on
+(event, template, to) where `event` is set (NT8). Its statuses and moves:
+
+```text
+queued ──lease──► sending ──► sent
+   ▲                 │ └────► failed      (refused, or the retry schedule ran out)
+   └──transient──────┘
+skipped                                    (the template is off: never rendered)
+sending (lease ended) ──lease──► sending   (the runner stopped: taken again)
+```
+
+`sent`, `failed` and `skipped` are final; resending makes a new record. A direct send
+(an invite, a reset) is `sending` without a lease or a stored email while its request
+sends it, then `sent` or `failed`.
 
 Rendering (`render.rs`) builds a minijinja `Environment` per send from the template
 sources: the stored or default `layout` and the template, autoescaping HTML in `html`
@@ -140,25 +152,62 @@ refuses `template_invalid` with the error's line (`details.line`).
 
 ## 4. Sending
 
-1. **From events.** `Mailer` (in `hypha-mail`, listed in both hosts' `handlers.rs`)
-   loads what the context needs, renders, writes the `Notification` as `sending`, calls
-   the sender, then marks it `sent` (with the provider's ID) or `failed` (with the
-   error) and returns `Err` so the dispatcher retries on its schedule. On a retry it
-   finds the record: `sent` is done, otherwise it sends again. A permanent refusal
-   (the provider rejects the address) is `failed` and not retried.
-2. **Direct.** `Notifier<StaffEmail>` (`hypha-http`'s `StaffEnv`, around `HostEnv`) renders the staff template and sends
-   at once, recording a `Notification` with no event. A failure is the flow's
-   `notification_failed`, as today.
-3. **Resend.** `POST /admin/notifications/{id}/resend` renders the template again from
-   current data and sends a new message (a new record, `event` empty), for "the
-   customer didn't get it".
+1. **From events: queue, then send.** `Mailer` (in `hypha-mail`, listed in both hosts'
+   `handlers.rs`) only renders and records: per event it loads the store's branding,
+   the order, its newest payment and the fulfilment once, and per template the template
+   and layout once; for each recipient without a record for (event, template, to) it
+   writes the `Notification` as `queued` (due now, with the rendered email) or, when
+   the template is off, as `skipped` without rendering it. No network, so it's fast and
+   holds the dispatcher's connection only for its reads and writes; it fails only for a
+   storage or data error (a missing order, a bad payload), which the dispatcher retries
+   on its schedule, and a rerun finds the records and queues nothing more. Then it wakes
+   the send job (`MailEnv::queued`).
+2. **The send job** (`hypha_http::jobs::send_notifications`, the steps in `hypha-mail`'s
+   `send.rs`), shaped like the dispatcher's webhooks (0016, EV9): it leases a batch of
+   due messages (`NotificationRepo::lease_due`: `queued` whose `next_attempt_at` has
+   come, or `sending` whose `lease_until` has passed; `FOR UPDATE SKIP LOCKED`, so
+   concurrent runs never take the same one) for `jobs.send_notifications.lease`, lets
+   the connection go, sends each (`send_leased`, no ports), then takes a connection to
+   record the outcome (`record_attempt`): `sent`; a permanent refusal `failed`, final;
+   a transient failure back to `queued` at the next wait of
+   `jobs.send_notifications.retry` (1 min, 5 min, 30 min, 2 h, 6 h by default), and
+   `failed` once those are used up. It never starts a send that couldn't finish within
+   its lease or its host's time (`LONGEST_SEND`: the senders' 10-second timeout and
+   room to connect; on Workers, the `waitUntil` deadline), so a lease doesn't run out
+   mid-send. Natively it's its own job in `runner.rs`, woken when something is queued;
+   on Workers it runs in a write's `waitUntil` after dispatch and search sync, and on
+   the cron tick, whose `due` mark includes `NotificationRepo::next_due` (W7), so a
+   quiet store's ticks touch Postgres no more than before.
+3. **At least once, only after a crash.** A message is sent again only when the runner
+   that leased it stopped (crashed, cut off) after the provider took it but before the
+   outcome was recorded: its lease ends and the next lease takes it. Resend's
+   `Idempotency-Key` is the message's ID, so Resend drops that repeat within its 24
+   hours; SMTP has no such key, so an SMTP provider may deliver that message twice. A
+   run that overlaps a lease still in force never takes it: no duplicates from slow
+   runs. A late outcome from the stopped runner is a stale write and is dropped.
+4. **Direct.** `Notifier<StaffEmail>` (`hypha-http`'s `StaffEnv`, around `HostEnv`)
+   renders the staff template and sends at once (`send_now`), recording a
+   `Notification` with no event (`sending`, then `sent` or `failed`; no stored body, so
+   the token isn't kept). A failure is the flow's `notification_failed`, as today. Test
+   sends go at once too, unrecorded.
+5. **Resend.** `POST /admin/notifications/{id}/resend` renders the template again from
+   current data and queues a new message (a new record, `event` empty, even if the
+   template is off: staff asked), wakes the send job and answers `201` with it,
+   `queued`; the admin says "Queued again", and the order's card shows how it went.
+6. **A template that doesn't render.** `save_template` renders a template against its
+   sample and against the sample with every value that may be absent absent
+   (`MailContext::sparse`: no payment, address, order link, customer name, tracking,
+   …; `sparse_fields`: present objects without their optional fields) and refuses
+   `template_invalid` with the part and line, so one that only works when an order has
+   a payment is refused on save. If a stored template still fails on a real order, the
+   default renders that message instead (Q5), with a `tracing` warning and a note on
+   the record ("sent with the default template: …"), shown in the order's Emails card.
 
 `BuyerEmail` and the routes' `notify_buyer` go: the `notify` field the fulfilment and
 cancel routes already take sets `notify_customer` on the event instead.
 
-The `Mailer` sends one message per run of the handler, so a dispatch step on Workers
-(30 s of `waitUntil`, 0026) never starts a send it can't finish; a provider call is a
-single HTTPS request.
+`staff_new_order` gets no `order.url`: the order link carries the buyer's access token,
+and staff have `admin_url`.
 
 ## 5. The port and the senders
 
@@ -226,8 +275,8 @@ container or Worker.
   http://localhost:8025). `.cargo/config.toml` and `pnpm dev` point the API at it with
   `sender = "smtp"`, so every email of the local stack is readable in Mailpit.
 - The repository contract gains `notification_template_repo`, `notification_settings_repo`
-  and `notification_repo` (the (event, template, to) key); `hypha-testkit` gains an
-  `InMemoryEmailSender` that keeps what it was given.
+  and `notification_repo` (the (event, template, to) key, `lease_due`, `next_due`);
+  `hypha-testkit` gains an `InMemoryEmailSender` that keeps what it was given.
 - The `Mailer`'s tests run on testkit; render tests pin every default template against
   its sample (strict undefined catches a default that names a variable its context
   lacks).
@@ -249,8 +298,9 @@ container or Worker.
     sample or an `order` ID: rendered subject, HTML and text, or `template_invalid`);
   - `POST /admin/notification-templates/{key}/test` (send the preview to the calling
     staff member's own address only);
-  - `GET /admin/notifications?order=…&template=…&status=…` (a list, 0012), `POST
-    /admin/notifications/{id}/resend`.
+  - `GET /admin/notifications?order=…&template=…&status=…` (a list, 0012; with
+    `GET /admin/notifications/{id}`, `notifications:read` and `orders:read`), `POST
+    /admin/notifications/{id}/resend` (queues it, `201`).
 - Error codes: `template_invalid` (422, with `details.line`), `template_required`
   (disabling one that can't be), `email_not_configured` (409 for a test send with the
   `log` sender: there'd be nothing to receive), `notification_failed` (exists).
@@ -295,7 +345,9 @@ want them; the record is the source of truth meanwhile. The four trigger events 
 **Q1. Store rendered bodies?** Seeing exactly what a customer received helps support,
 but it keeps personal data (addresses, order contents) for as long as the record lives,
 and staff emails would store their tokens. Recommended: no; store the subject, and let
-the Emails card show "preview as of now" (re-rendered). Records are pruned after
+the Emails card show "preview as of now" (re-rendered). A queued message keeps its
+rendered email only until it's sent or has failed (§4), and staff emails, sent
+directly, never store theirs. Records are pruned after
 `jobs.prune_notifications.retention` (default 90 days).
 
 **Q2. Translations?** Recommended: not now, but reserve it: a template's identity is
@@ -349,11 +401,17 @@ live in the hosts (`hypha-host-axum` for SMTP; `hypha-http` for log).
   staff_recipients text[], order_url text NULL, created_at, updated_at)`; a missing row
   reads as the defaults; the logo is an asset usage (0013) like a category's image;
 - `notifications (id uuid PK, version, template text, recipient text, subject text,
-  status text CHECK IN ('sending','sent','failed','skipped'), attempts int, provider
-  text NULL, provider_message_id text NULL, error text NULL, event_id uuid NULL,
-  order_id uuid NULL, sent_at timestamptz NULL, created_at, updated_at)`, a unique index
-  on `(event_id, template, recipient) WHERE event_id IS NOT NULL`, an index on
-  `(order_id, id DESC)`.
+  status text CHECK IN ('queued','sending','sent','failed','skipped'), attempts int,
+  provider text NULL, provider_message_id text NULL, error text NULL, note text NULL,
+  event_id uuid NULL, order_id uuid NULL, sent_at timestamptz NULL, next_attempt_at
+  timestamptz NULL, lease_until timestamptz NULL, email_sender_name text NULL,
+  email_reply_to text NULL, email_html text NULL, email_text text NULL, created_at,
+  updated_at)`, with checks: `sent_at` exactly when sent, `next_attempt_at` exactly when
+  queued, `lease_until` only while sending, the email exactly while queued or leased;
+  a unique index on `(event_id, template, recipient) WHERE event_id IS NOT NULL`, an
+  index on `(order_id, id DESC)`, and partial indexes for the send job's leases and
+  `next_due`: `(next_attempt_at) WHERE status = 'queued'`, `(lease_until) WHERE
+  lease_until IS NOT NULL`.
 
 **Template variables** (each template's context; `null` where the value is absent;
 money is `{ "amount": i64 minor units, "currency": "EUR", "formatted": "€12.50" }` and
@@ -384,7 +442,9 @@ fulfilment and cancel routes' existing `notify` field carried into the events as
 `notify_customer`.
 
 **Configuration**: `[email] sender = "log" | "smtp" | "resend"`, `from`, `[email.smtp]
-host, port, tls ("none" | "starttls" | "tls"), username`; `HYPHA_SMTP_PASSWORD`,
+host, port, tls ("none" | "starttls" | "tls"), username`; `[jobs.send_notifications]
+enabled, interval (2s), batch (20), lease (2m, at least 20s), retry (["1m", "5m",
+"30m", "2h", "6h"])`; `HYPHA_SMTP_PASSWORD`,
 `HYPHA_RESEND_API_KEY` (environment only). The Workers host supports `log` and `resend`;
 `smtp` there is a startup error. The CLI: `init` asks for the sender (Resend key or
 none) and `from`; `deploy` passes the key as a secret; `pnpm dev` uses Mailpit.
