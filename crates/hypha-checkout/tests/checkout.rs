@@ -2,16 +2,23 @@ use hypha_cart::{
     AddLine, CartRepo, CartStatus, CreateCart, add_line, create_cart, set_cart_customer,
     set_cart_email,
 };
-use hypha_checkout::{Checkout, CommandError, checkout, view_cart};
+use hypha_checkout::{
+    Checkout, CommandError, Placed, cart_payment_methods, checkout, set_payment_method, view_cart,
+};
 use hypha_core::{
     Actor, AuthError, CartId, Clock, CountryCode, Ctx, Currency, CustomerId, Email,
     IdempotencyRequest, Idempotent, InventoryItemId, LocationId, MarketId, Money, Price, ProductId,
     Quantity, Scope, TaxRate, TaxRegionId, UserId, VariantId,
 };
+use hypha_core::{PaymentMethodId, Versioned};
 use hypha_customers::{Customer, CustomerRepo};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
 use hypha_markets::{Catalog, CatalogContext, CatalogRepo, Market, MarketRepo};
 use hypha_orders::{FinancialStatus, Order, OrderNumber, OrderRepo, OrderTaxSource};
+use hypha_payments::{
+    ManualProvider, NewPaymentMethod, NextAction, PaymentMethod, PaymentMethodRepo, PaymentRepo,
+    PaymentStatus, ProviderKey,
+};
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus};
 use hypha_tax::{TaxRegion, TaxRegionRepo};
 use hypha_testkit::{FixedClock, InMemoryPorts, NoRateProviders, SequentialIds};
@@ -150,6 +157,7 @@ impl World {
             Some(ana().to_string()),
         ))
         .unwrap();
+        self.ports.pay_by_hand(cart);
         cart
     }
 
@@ -170,6 +178,20 @@ impl World {
         expected_total: Option<Money>,
         idempotency: Option<IdempotencyRequest>,
     ) -> Result<Idempotent<Order>, CommandError> {
+        self.place_as(ctx, cart, expected_total, idempotency)
+            .map(|placed| Idempotent {
+                value: placed.value.order,
+                replayed: placed.replayed,
+            })
+    }
+
+    fn place_as(
+        &self,
+        ctx: &Ctx,
+        cart: CartId,
+        expected_total: Option<Money>,
+        idempotency: Option<IdempotencyRequest>,
+    ) -> Result<Idempotent<Placed>, CommandError> {
         let input = Checkout {
             cart,
             expected_total,
@@ -181,6 +203,7 @@ impl World {
             &self.ids,
             &self.clock,
             &NoRateProviders,
+            &(ManualProvider,),
             input,
         ))
     }
@@ -685,4 +708,301 @@ fn not_shipped(product: &mut Product, variant: VariantId) {
             },
         )
         .unwrap();
+}
+
+// ---- payments (design note 0027) ----
+
+fn bank_transfer() -> hypha_core::PaymentMethodId {
+    hypha_core::PaymentMethodId::from_uuid(Uuid::from_u128(InMemoryPorts::BANK_TRANSFER))
+}
+
+/// A cart like `cart`, without a payment method chosen.
+fn cart_without_method(world: &World) -> CartId {
+    let cart = world.cart();
+    let mut stored = block_on(world.carts.get(cart)).unwrap().unwrap();
+    stored.set_payment_method(None).unwrap();
+    block_on(world.carts.update(&mut stored)).unwrap();
+    cart
+}
+
+/// A second manual method, "Cash on delivery", offered where `markets` say.
+fn add_cod(world: &World, n: u128, markets: Vec<MarketId>, position: u32) -> PaymentMethodId {
+    let mut method = PaymentMethod::new(NewPaymentMethod {
+        id: PaymentMethodId::from_uuid(Uuid::from_u128(n)),
+        provider: ProviderKey::manual(),
+        name: "Cash on delivery".to_string(),
+        instructions: None,
+        markets,
+        channels: vec![],
+        enabled: true,
+        position,
+        settings: serde_json::json!({}),
+    })
+    .unwrap();
+    block_on(world.payment_methods.insert(&mut method)).unwrap();
+    method.id()
+}
+
+#[test]
+fn checkout_writes_a_pending_payment_and_answers_with_the_instructions() {
+    let world = World::new();
+    let cart = world.cart();
+    let placed = world
+        .place_as(&Ctx::system(), cart, None, None)
+        .unwrap()
+        .value;
+    let payment = placed.payment.clone().unwrap();
+    assert_eq!(payment.order(), placed.order.id());
+    assert_eq!(payment.method(), Some(bank_transfer()));
+    assert_eq!(payment.method_name(), Some("Bank transfer"));
+    assert_eq!(payment.status(), PaymentStatus::Pending);
+    assert_eq!(payment.amount(), placed.order.total());
+    assert_eq!(
+        payment.instructions(),
+        Some("IBAN HR12 3456 7890; quote your order number")
+    );
+    assert_eq!(
+        placed.next_action,
+        Some(Ok(NextAction::Instructions(
+            "IBAN HR12 3456 7890; quote your order number".to_string()
+        )))
+    );
+    assert_eq!(
+        block_on(world.payments.list_for_order(placed.order.id())),
+        Ok(vec![payment])
+    );
+    assert_eq!(placed.order.financial_status(), FinancialStatus::Pending);
+    assert!(
+        world
+            .outbox
+            .types()
+            .contains(&"payment.created".to_string())
+    );
+}
+
+#[test]
+fn later_edits_to_the_method_dont_change_the_payment() {
+    let world = World::new();
+    let placed = world
+        .place_as(&Ctx::system(), world.cart(), None, None)
+        .unwrap()
+        .value;
+    let mut method = block_on(world.payment_methods.get(bank_transfer()))
+        .unwrap()
+        .unwrap();
+    method.rename("Wire").unwrap();
+    method.set_instructions(None).unwrap();
+    block_on(world.payment_methods.update(&mut method)).unwrap();
+    let stored = block_on(world.payments.list_for_order(placed.order.id())).unwrap();
+    assert_eq!(stored[0].method_name(), Some("Bank transfer"));
+    assert!(stored[0].instructions().is_some());
+}
+
+#[test]
+fn checkout_needs_a_payment_method() {
+    let world = World::new();
+    let cart = cart_without_method(&world);
+    assert_eq!(
+        world.checkout(cart),
+        Err(CommandError::PaymentMethodRequired(cart))
+    );
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+#[test]
+fn a_method_no_longer_offered_stops_checkout() {
+    let world = World::new();
+    let cart = world.cart();
+    let mut method = block_on(world.payment_methods.get(bank_transfer()))
+        .unwrap()
+        .unwrap();
+    method.set_enabled(false);
+    block_on(world.payment_methods.update(&mut method)).unwrap();
+    assert_eq!(
+        world.checkout(cart),
+        Err(CommandError::PaymentMethodUnavailable(bank_transfer()))
+    );
+    method.set_enabled(true);
+    method.set_markets(vec![MarketId::from_uuid(Uuid::from_u128(4444))]);
+    block_on(world.payment_methods.update(&mut method)).unwrap();
+    assert_eq!(
+        world.checkout(cart),
+        Err(CommandError::PaymentMethodUnavailable(bank_transfer()))
+    );
+}
+
+#[test]
+fn a_method_of_a_provider_not_in_this_build_is_unavailable() {
+    let world = World::new();
+    let cart = world.cart();
+    let mut method = block_on(world.payment_methods.get(bank_transfer()))
+        .unwrap()
+        .unwrap();
+    let mut s = method.snapshot();
+    s.provider = ProviderKey::new("spore_stripe").unwrap();
+    s.version = method.version();
+    method = PaymentMethod::restore(s).unwrap();
+    block_on(world.payment_methods.update(&mut method)).unwrap();
+    assert_eq!(
+        world.checkout(cart),
+        Err(CommandError::PaymentMethodUnavailable(bank_transfer()))
+    );
+}
+
+#[test]
+fn nothing_to_pay_needs_no_method_and_makes_no_payment() {
+    let world = World::new();
+    let mut free = Product::new_simple(
+        ProductId::from_uuid(Uuid::from_u128(1110)),
+        Handle::new("sticker").unwrap(),
+        "Sticker".to_string(),
+        VariantId::from_uuid(Uuid::from_u128(1210)),
+        Price::new(eur(0)).unwrap(),
+    )
+    .unwrap();
+    not_shipped(&mut free, VariantId::from_uuid(Uuid::from_u128(1210)));
+    free.set_status(ProductStatus::Active).unwrap();
+    block_on(world.products.insert(&mut free)).unwrap();
+    let catalog = hypha_core::CatalogId::from_uuid(Uuid::from_u128(1003));
+    block_on(world.catalogs.add_products(catalog, &[free.id()])).unwrap();
+
+    let ctx = world.ports.storefront();
+    let input = CreateCart {
+        country: "HR".to_string(),
+        idempotency: None,
+    };
+    let cart = block_on(create_cart(
+        &ctx,
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        input,
+    ))
+    .unwrap()
+    .value
+    .id;
+    let line = AddLine {
+        cart,
+        variant: free.variants()[0].id(),
+        quantity: 1,
+        idempotency: None,
+    };
+    block_on(add_line(&ctx, &world.ports, &world.clock, line)).unwrap();
+    block_on(set_cart_email(
+        &ctx,
+        &world.ports,
+        cart,
+        Some(ana().to_string()),
+    ))
+    .unwrap();
+    let placed = world.place_as(&ctx, cart, None, None).unwrap().value;
+    assert_eq!(placed.order.total(), eur(0));
+    assert_eq!((placed.payment, placed.next_action), (None, None));
+}
+
+#[test]
+fn a_replayed_checkout_answers_with_the_same_payment() {
+    let world = World::new();
+    let cart = world.cart();
+    let key = || {
+        Some(IdempotencyRequest {
+            key: "co-pay".to_string(),
+            fingerprint: [2; 32],
+        })
+    };
+    let first = world.place_as(&Ctx::system(), cart, None, key()).unwrap();
+    let again = world.place_as(&Ctx::system(), cart, None, key()).unwrap();
+    assert!(again.replayed);
+    assert_eq!(again.value, first.value);
+}
+
+#[test]
+fn a_cart_lists_the_methods_offered_to_it_by_position() {
+    let world = World::new();
+    let cart = world.cart();
+    let cod = add_cod(&world, 1600, vec![], 0);
+    add_cod(
+        &world,
+        1601,
+        vec![MarketId::from_uuid(Uuid::from_u128(4444))],
+        0,
+    );
+    let mut bank = block_on(world.payment_methods.get(bank_transfer()))
+        .unwrap()
+        .unwrap();
+    bank.set_position(5);
+    block_on(world.payment_methods.update(&mut bank)).unwrap();
+    let listed = block_on(cart_payment_methods(
+        &world.ports.storefront(),
+        &world.ports,
+        &(ManualProvider,),
+        cart,
+    ))
+    .unwrap();
+    let ids: Vec<PaymentMethodId> = listed.iter().map(PaymentMethod::id).collect();
+    assert_eq!(ids, [cod, bank_transfer()]);
+}
+
+#[test]
+fn choosing_a_method_checks_it_is_offered() {
+    let world = World::new();
+    let cart = cart_without_method(&world);
+    let ctx = world.ports.storefront();
+    let elsewhere = add_cod(
+        &world,
+        1601,
+        vec![MarketId::from_uuid(Uuid::from_u128(4444))],
+        0,
+    );
+    let choose = |method| {
+        block_on(set_payment_method(
+            &ctx,
+            &world.ports,
+            &(ManualProvider,),
+            cart,
+            method,
+        ))
+    };
+    assert_eq!(
+        choose(Some(elsewhere)).map(|_| ()),
+        Err(CommandError::PaymentMethodUnavailable(elsewhere))
+    );
+    let unknown = PaymentMethodId::from_uuid(Uuid::from_u128(1999));
+    assert_eq!(
+        choose(Some(unknown)).map(|_| ()),
+        Err(CommandError::PaymentMethodNotFound(unknown))
+    );
+    let cod = add_cod(&world, 1600, vec![market_id()], 0);
+    let priced = choose(Some(cod)).unwrap();
+    assert_eq!(priced.payment_method, Some(cod));
+    assert_eq!(
+        block_on(world.carts.get(cart))
+            .unwrap()
+            .unwrap()
+            .payment_method(),
+        Some(cod)
+    );
+    assert_eq!(choose(None).unwrap().payment_method, None);
+}
+
+#[test]
+fn a_checked_out_cart_keeps_its_method() {
+    let world = World::new();
+    let cart = world.cart();
+    world.checkout(cart).unwrap();
+    let order = block_on(world.carts.get(cart)).unwrap().unwrap();
+    let CartStatus::Completed { order } = order.status() else {
+        panic!("completed");
+    };
+    assert_eq!(
+        block_on(set_payment_method(
+            &world.ports.storefront(),
+            &world.ports,
+            &(ManualProvider,),
+            cart,
+            None
+        ))
+        .map(|_| ()),
+        Err(CommandError::CartCompleted { cart, order })
+    );
 }

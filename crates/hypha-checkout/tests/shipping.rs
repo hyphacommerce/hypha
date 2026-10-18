@@ -191,6 +191,7 @@ impl World {
             Some("ana@example.hr".to_string()),
         ))
         .unwrap();
+        self.ports.pay_by_hand(cart);
         cart
     }
 
@@ -246,9 +247,10 @@ impl World {
             &self.ids,
             &self.clock,
             &self.dhl,
+            &(hypha_payments::ManualProvider,),
             input,
         ))
-        .map(|o| o.value)
+        .map(|o| o.value.order)
     }
 }
 
@@ -507,9 +509,10 @@ impl World {
             &self.ids,
             &self.clock,
             &rates,
+            &(hypha_payments::ManualProvider,),
             input,
         ))
-        .map(|o| o.value);
+        .map(|o| o.value.order);
         (placed, *rates.calls.lock().unwrap())
     }
 }

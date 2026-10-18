@@ -16,6 +16,9 @@ use hypha_core::{
 use hypha_customers::repo::keys as customer_keys;
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo};
 use hypha_markets::{Catalog, CatalogContext, CatalogRepo, Market, MarketRepo};
+use hypha_payments::{
+    ManualProvider, NewPaymentMethod, PaymentMethod, PaymentMethodRepo, ProviderKey,
+};
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus};
 use hypha_store_postgres::{CORE, PgStore, migrate};
 use hypha_testkit::{FixedClock, NoRateProviders, SequentialIds};
@@ -116,6 +119,22 @@ async fn shop(url: &str, schema: &str, on_hand: i64) -> (PgStore<Client>, Client
     item.set_on_hand(warehouse(), on_hand, None).unwrap();
     InventoryItemRepo::insert(&store, &mut item).await.unwrap();
 
+    let mut method = PaymentMethod::new(NewPaymentMethod {
+        id: cash_on_delivery(),
+        provider: ProviderKey::manual(),
+        name: "Cash on delivery".to_string(),
+        instructions: None,
+        markets: vec![],
+        channels: vec![],
+        enabled: true,
+        position: 0,
+        settings: serde_json::json!({}),
+    })
+    .unwrap();
+    PaymentMethodRepo::insert(&store, &mut method)
+        .await
+        .unwrap();
+
     (store, connect(url, schema).await)
 }
 
@@ -146,7 +165,20 @@ async fn cart(
     set_cart_email(&ctx, store, cart, Some(email.to_string()))
         .await
         .unwrap();
+    hypha_checkout::set_payment_method(
+        &ctx,
+        store,
+        &(ManualProvider,),
+        cart,
+        Some(cash_on_delivery()),
+    )
+    .await
+    .unwrap();
     cart
+}
+
+fn cash_on_delivery() -> hypha_core::PaymentMethodId {
+    hypha_core::PaymentMethodId::from_uuid(Uuid::from_u128(1006))
 }
 
 /// `n` stores, each on its own connection, so their transactions really overlap.
@@ -194,7 +226,15 @@ async fn carts_racing_for_the_last_units_never_oversell() {
             expected_total: None,
             idempotency: None,
         };
-        checkout(&ctx, store, &ids, &clock, &NoRateProviders, input)
+        checkout(
+            &ctx,
+            store,
+            &ids,
+            &clock,
+            &NoRateProviders,
+            &(ManualProvider,),
+            input,
+        )
     }))
     .await;
 
@@ -267,13 +307,21 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
             expected_total: None,
             idempotency: None,
         };
-        checkout(&ctx, store, &ids, &clock, &NoRateProviders, input)
+        checkout(
+            &ctx,
+            store,
+            &ids,
+            &clock,
+            &NoRateProviders,
+            &(ManualProvider,),
+            input,
+        )
     }))
     .await;
 
     let orders: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
     assert_eq!(orders.len(), 1, "exactly one checkout wins: {results:?}");
-    let order = orders[0].value.id();
+    let order = orders[0].value.order.id();
     for r in &results {
         assert!(
             match r {
@@ -313,7 +361,15 @@ async fn retries_with_the_same_key_all_get_the_one_order() {
                 fingerprint: [7; 32],
             }),
         };
-        checkout(&ctx, store, &ids, &clock, &NoRateProviders, input)
+        checkout(
+            &ctx,
+            store,
+            &ids,
+            &clock,
+            &NoRateProviders,
+            &(ManualProvider,),
+            input,
+        )
     }))
     .await;
 
@@ -326,8 +382,8 @@ async fn retries_with_the_same_key_all_get_the_one_order() {
         .collect();
     let fresh: Vec<_> = placed.iter().filter(|p| !p.replayed).collect();
     assert_eq!(fresh.len(), 1, "exactly one placed the order: {results:?}");
-    let order = fresh[0].value.id();
-    assert!(placed.iter().all(|p| p.value.id() == order));
+    let order = fresh[0].value.order.id();
+    assert!(placed.iter().all(|p| p.value.order.id() == order));
     assert_eq!(count(&rows, "SELECT count(*) FROM orders").await, 1);
     assert_eq!(mug_reservations(&setup).await, 1, "reserved once");
 }

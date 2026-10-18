@@ -110,6 +110,7 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         shipping_total: order.shipping_total(),
         tax_total: order.tax_total(),
         total: order.total(),
+        payment_method: cart.payment_method(),
     }
 }
 
