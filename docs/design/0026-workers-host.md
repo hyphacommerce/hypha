@@ -41,6 +41,8 @@ and cut most of it; this note carries that host to Workers.
 | W9 | **Migrations and first-start setup run from the CLI, not the Worker.** There's no startup hook, and advisory locks don't survive transaction pooling. `hypha deploy` runs the host binary's `setup` (migrations, the owner, the default location, the search index) against the database's direct URL before deploying the Worker. *Proposed* |
 | W10 | **Files on R2 through the S3 adapter we have.** `hypha-store-s3` already takes its HTTP through an `HttpClient` port; the Workers host implements it with `worker::Fetch`. Public files are served from the bucket's custom domain, thumbnails by Cloudflare's image transformations (`media.transforms = "cloudflare"`, 0013). *Proposed* |
 | W12 | **The API Worker runs next to the database** (`placement.region`, e.g. `aws:eu-central-1` for a Neon database in Frankfurt), not wherever the request arrives: a read is a dozen sequential queries, and each one crossing Europe cost 20–25 ms (§8). `hypha init` sets it from the database's region. *Proposed* |
+| W13 | **One API token deploys everything** (2026-10-18). wrangler (the API, Hyperdrive, KV, R2) and `cf` (which deploys vinext apps) keep separate logins, which can be different accounts. `hypha init` asks for one Cloudflare API token instead, linking to the dashboard's form with the permissions filled in (no login may create tokens), checks it and finds the account and the zone; `deploy` passes it to both as `CLOUDFLARE_API_TOKEN`. *Accepted* |
+| W14 | **The apps reach the API through Service Bindings, and the API trusts them for the client's address.** A binding call skips the edge, so its `CF-Connecting-IP` is whatever the caller wrote; the binding's props (`{ caller }`), which only the deployment's configuration sets, mark our own Workers, and for them the API reads the caller's `X-Forwarded-For`. *Accepted* |
 | W11 | **Configuration from Worker variables.** `hypha-config` parses a string and reads the environment through a function it's given (0017, CF3): the Worker passes `HYPHA_CONFIG` (the TOML, if any) and reads `env.var` / `env.secret`. Same keys, same checks. *Proposed* |
 
 ## 1. What changes, piece by piece
@@ -201,10 +203,16 @@ the domains; `hypha deploy` then:
    rate limiters from the deployment's quotas, W8, in a random block of `namespace_id`s
    so deployments on one account don't share counts), deploys with `--secrets-file`, marks
    the jobs as waiting (W7) and waits for `/health`. `wrangler deploy --dry-run` accepts
-   the file; the Worker is 13.4 MB raw, 3.7 MB gzipped (Paid allows 10). Left: the admin
-   and storefront Workers with Service Bindings (§5, step 4) and connecting the
-   storefront (step 5).
-7. **Caching**: the storefront's and admin's adapters (0025, §6), and the e2e script
+   the file; the Worker is 13.4 MB raw, 3.7 MB gzipped (Paid allows 10). Then (2026-10-18)
+   the admin and the storefront too, with one API token (W13): after the API answers,
+   `deploy` connects the storefront and builds each app with Vite, deploying it with `cf
+   deploy --prebuilt --secrets-file`; each app's `cloudflare.config.ts` takes the
+   deployment's Worker name, account, domain and API Worker (`HYPHA_CF_*`), and binds the
+   API (`API`, props `{ caller }`, W14), which the apps use through `#api-fetch`.
+7. **Caching**: the storefront's adapters (2026-10-18): vinext's Workers Cache adapter for
+   ISR pages and its KV adapter for `unstable_cache` data (`<name>-cache`), so the
+   webhook's revalidation reaches every isolate; through the binding the admin caches no
+   reads (0025, §4). Left: search and cart pages cached by URL (§2), and the e2e script
    against a deployed Worker.
 
 ## 7. Risks

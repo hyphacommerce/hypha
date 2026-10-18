@@ -148,25 +148,40 @@ export function newEnv(d: Deployment, owner: Owner): EnvFile {
 }
 
 /** A Cloudflare deployment's `.env` (design note 0026): kept here, never uploaded as a
- * file. `hypha deploy` passes the database URL to setup and Hyperdrive, and the secret
- * key and R2 keys to the Worker as secrets. */
-export function newCloudflareEnv(owner: Owner, databaseUrl: string, r2: { id: string; secret: string }): EnvFile {
-  return new EnvFile()
+ * file. `hypha deploy` passes the token to wrangler and `cf`, the database URL to setup
+ * and Hyperdrive, and the rest to the Workers as secrets. */
+export function newCloudflareEnv(
+  owner: Owner,
+  databaseUrl: string,
+  options: { token: string; r2: { id: string; secret: string }; storefront: boolean },
+): EnvFile {
+  const env = new EnvFile()
     .comment(
       "Written by `hypha init --target cloudflare` (design note 0026). Secrets: keep this file\n" +
         "private, and keep it (HYPHA_SECRET_KEY seals two-factor secrets; losing it locks staff out).",
     )
     .set("HYPHA_SECRET_KEY", secret())
     .comment("")
+    .comment("The Cloudflare API token everything deploys with (revoke it in the dashboard to stop that).")
+    .set("CLOUDFLARE_API_TOKEN", options.token)
+    .comment("")
     .comment("The database's direct URL: `hypha deploy` sets it up and points Hyperdrive at it.")
     .set("DATABASE_URL", databaseUrl)
     .comment("")
     .comment("An R2 API token's keys (R2 → Manage API tokens, Object Read & Write); empty: media off.")
-    .set("R2_ACCESS_KEY_ID", r2.id)
-    .set("R2_SECRET_ACCESS_KEY", r2.secret)
+    .set("R2_ACCESS_KEY_ID", options.r2.id)
+    .set("R2_SECRET_ACCESS_KEY", options.r2.secret)
     .comment("")
     .comment("The first owner, created by the first deploy (change the password after logging in).")
     .set("HYPHA_OWNER_EMAIL", owner.email)
     .set("HYPHA_OWNER_PASSWORD", password())
     .set("HYPHA_STORE_NAME", owner.storeName);
+  if (options.storefront) {
+    env
+      .comment("")
+      .comment("The storefront's publishable key and webhook secret: `hypha deploy` creates them.")
+      .set("STOREFRONT_KEY", "")
+      .set("HYPHA_WEBHOOK_SECRET", "");
+  }
+  return env;
 }

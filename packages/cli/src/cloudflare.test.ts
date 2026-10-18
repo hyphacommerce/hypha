@@ -104,9 +104,14 @@ test("media is R2's S3 endpoint, public files from the bucket's domain only with
 });
 
 /** Tools that record what they're asked and answer as wrangler would. */
-function fakeTools(): { tools: Tools; calls: string[]; secrets: string[] } {
+/** What `deployApp` was given, per app. */
+type Deployed = { env: Record<string, string>; secrets: Record<string, string> };
+
+function fakeTools(): { tools: Tools; calls: string[]; secrets: string[]; apps: Record<string, Deployed> } {
   const calls: string[] = [];
   const secrets: string[] = [];
+  const deployedApps: Record<string, Deployed> = {};
+  let namespaces = 0;
   const tools: Tools = {
     async wrangler(args) {
       calls.push(`wrangler ${args.join(" ")}`);
@@ -114,7 +119,7 @@ function fakeTools(): { tools: Tools; calls: string[]; secrets: string[] } {
       if (args[0] === "whoami") return JSON.stringify({ accounts: [{ id: "a".repeat(32), name: "Shop" }] });
       if (command.startsWith("hyperdrive create")) return `Created\n{ "id": "${"1".repeat(32)}" }`;
       if (command === "kv namespace list") return "[]";
-      if (command === "kv namespace create") return `id = "${"2".repeat(32)}"`;
+      if (command === "kv namespace create") return `id = "${String(2 + namespaces++).repeat(32)}"`;
       if (args[0] === "deploy") {
         const file = args[args.indexOf("--secrets-file") + 1];
         secrets.push(await readFile(file, "utf8"));
@@ -132,8 +137,24 @@ function fakeTools(): { tools: Tools; calls: string[]; secrets: string[] } {
     async checkToolchain() {},
     now: () => 1_800_000_000_000,
     answers: async () => true,
+    async reachable(target) {
+      calls.push(`reach ${target}`);
+      return true;
+    },
+    async connectStorefront() {
+      calls.push("connect storefront");
+      return { key: "hypha_pk_shop", webhookSecret: "hypha_as_hook" };
+    },
+    async syncWebhook() {
+      calls.push("sync webhook");
+      return null;
+    },
+    async deployApp(app, env, secretsFile) {
+      calls.push(`deploy app ${app}`);
+      deployedApps[app] = { env, secrets: JSON.parse(await readFile(secretsFile, "utf8")) };
+    },
   };
-  return { tools, calls, secrets };
+  return { tools, calls, secrets, apps: deployedApps };
 }
 
 async function folder(d: Deployment, r2 = true): Promise<{ dir: string; env: EnvFile }> {
@@ -146,7 +167,8 @@ async function folder(d: Deployment, r2 = true): Promise<{ dir: string; env: Env
     .set("R2_ACCESS_KEY_ID", r2 ? "key" : "")
     .set("R2_SECRET_ACCESS_KEY", r2 ? "shh" : "")
     .set("HYPHA_OWNER_EMAIL", "owner@example.com")
-    .set("HYPHA_OWNER_PASSWORD", "pw");
+    .set("HYPHA_OWNER_PASSWORD", "pw")
+    .set("CLOUDFLARE_API_TOKEN", "cf-token");
   return { dir, env };
 }
 
@@ -167,6 +189,8 @@ test("a first deploy sets the database up, creates the resources with Hyperdrive
     `wrangler r2 bucket cors set hypha-media --file ${join(dir, ".cors.json")} --force`,
     `wrangler deploy --config ${join(dir, "wrangler.toml")} --secrets-file ${join(dir, ".secrets.json")}`,
     `wrangler kv key put jobs:written 1800000000000 --namespace-id ${"2".repeat(32)} --remote`,
+    "deploy app admin",
+    "reach https://admin.example.com",
   ]);
   assert.deepEqual(JSON.parse(secrets[0]), {
     HYPHA_SECRET_KEY: "f".repeat(64),
@@ -249,4 +273,67 @@ test("a bare environment keeps what Windows needs for DNS and TLS, and nothing e
     HYPHA_S3_ENDPOINT: "http://localhost:8333",
   });
   assert.deepEqual(env, { PATH: "C:\\Windows", SystemRoot: "C:\\Windows", TEMP: "C:\\Temp" });
+});
+
+test("the admin and storefront deploy after the API, bound to it, with the storefront connected", async () => {
+  const d = deployment();
+  d.domains.storefront = "shop.example.com";
+  Object.assign(d.cloudflare!, { accountId: "a".repeat(32), hyperdriveId: "1".repeat(32), kvId: "2".repeat(32) });
+  const { dir, env } = await folder(d, false);
+  const { tools, calls, apps } = fakeTools();
+  await deployCloudflare(dir, d, env, tools);
+  const tail = calls.slice(calls.indexOf(`wrangler kv key put jobs:written 1800000000000 --namespace-id ${"2".repeat(32)} --remote`) + 1);
+  assert.deepEqual(tail, [
+    "connect storefront",
+    "wrangler kv namespace list",
+    "wrangler kv namespace create hypha-cache",
+    "deploy app admin",
+    "deploy app storefront",
+    "reach https://admin.example.com",
+    "reach https://shop.example.com",
+  ]);
+  assert.deepEqual(apps.storefront.env, {
+    CLOUDFLARE_API_TOKEN: "cf-token",
+    CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
+    HYPHA_CF_ACCOUNT_ID: "a".repeat(32),
+    HYPHA_CF_WORKER: "hypha-storefront",
+    HYPHA_CF_DOMAIN: "shop.example.com",
+    HYPHA_CF_API_WORKER: "hypha-api",
+    HYPHA_CF_CACHE_KV: "2".repeat(32),
+  });
+  assert.deepEqual(apps.storefront.secrets, {
+    HYPHA_API_URL: "https://api.example.com",
+    STOREFRONT_KEY: "hypha_pk_shop",
+    HYPHA_WEBHOOK_SECRET: "hypha_as_hook",
+  });
+  assert.deepEqual(apps.admin.secrets, { HYPHA_API_URL: "https://api.example.com" });
+  assert.equal(apps.admin.env.HYPHA_CF_WORKER, "hypha-admin");
+  // The keys are kept for the next deploy, and the cache's namespace is remembered.
+  const kept = EnvFile.parse(await readFile(join(dir, ".env"), "utf8"));
+  assert.equal(kept.get("STOREFRONT_KEY"), "hypha_pk_shop");
+  assert.equal((await loadDeployment(dir)).cloudflare?.cacheKvId, "2".repeat(32));
+  // No app's secrets stay on disk.
+  assert.ok(!(await readdir(dir)).some((f) => f.startsWith(".secrets")));
+});
+
+test("a connected storefront keeps its keys and only checks its webhook", async () => {
+  const d = deployment();
+  d.domains.storefront = "shop.example.com";
+  Object.assign(d.cloudflare!, { accountId: "a".repeat(32), hyperdriveId: "1".repeat(32), kvId: "2".repeat(32), cacheKvId: "3".repeat(32) });
+  const { dir, env } = await folder(d, false);
+  env.set("STOREFRONT_KEY", "hypha_pk_old").set("HYPHA_WEBHOOK_SECRET", "hypha_as_old");
+  const { tools, calls, apps } = fakeTools();
+  await deployCloudflare(dir, d, env, tools);
+  assert.ok(calls.includes("sync webhook") && !calls.includes("connect storefront"));
+  assert.equal(apps.storefront.secrets.STOREFRONT_KEY, "hypha_pk_old");
+  assert.equal(apps.storefront.env.HYPHA_CF_CACHE_KV, "3".repeat(32));
+});
+
+test("without an API token, the apps can't deploy and nothing starts", async () => {
+  const d = deployment();
+  const { dir, env } = await folder(d, false);
+  env.set("CLOUDFLARE_API_TOKEN", "");
+  const { tools, calls } = fakeTools();
+  await assert.rejects(deployCloudflare(dir, d, env, tools), /CLOUDFLARE_API_TOKEN/);
+  assert.deepEqual(calls, []);
 });

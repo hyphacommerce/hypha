@@ -21,7 +21,9 @@ import {
   type Target,
   url,
 } from "../deployment.ts";
+import { checkToken, templateUrl } from "../cloudflare-token.ts";
 import { BLOCK, checkDatabaseUrl } from "../cloudflare.ts";
+import { run } from "../shell.ts";
 import {
   caddyfile,
   composeFile,
@@ -46,6 +48,7 @@ const KEPT = [
   "DATABASE_URL",
   "R2_ACCESS_KEY_ID",
   "R2_SECRET_ACCESS_KEY",
+  "CLOUDFLARE_API_TOKEN",
 ];
 
 /** A Cloudflare deployment's name: its resources' prefix. */
@@ -88,7 +91,11 @@ export const init = defineCommand({
     },
     name: { type: "string", description: "cloudflare: its resources' prefix (default hypha: hypha-api, hypha-media, …)" },
     "account-id": { type: "string", description: "cloudflare: the account, when wrangler reaches more than one" },
-    "zone-id": { type: "string", description: "cloudflare: the media domain's zone, for the bucket's own domain" },
+    "api-token": {
+      type: "string",
+      description: "cloudflare: the API token to deploy with (else CLOUDFLARE_API_TOKEN, else init links to a filled-in form)",
+    },
+    "zone-id": { type: "string", description: "cloudflare: the domain's zone (found from the token otherwise)" },
     region: {
       type: "string",
       description: "cloudflare: a placement region (aws:eu-central-1) instead of measuring the database's host",
@@ -248,15 +255,19 @@ async function exists(path: string): Promise<boolean> {
 type CloudflareArgs = {
   dir: string;
   force?: boolean;
+  yes?: boolean;
   domain?: string;
   "api-domain"?: string;
   "admin-domain"?: string;
   "media-domain"?: string;
+  "storefront-domain"?: string;
   admin?: boolean;
+  storefront?: boolean;
   "owner-email"?: string;
   "store-name"?: string;
   "database-url"?: string;
   name?: string;
+  "api-token"?: string;
   "account-id"?: string;
   "zone-id"?: string;
   region?: string;
@@ -265,9 +276,9 @@ type CloudflareArgs = {
 };
 
 /**
- * `--target cloudflare` (design note 0026, §5): the API as a Worker on your account,
- * over Hyperdrive to the Postgres you give (any provider). Only the API for now: the
- * admin's domain is where invite links and uploads come from, hosted where you like.
+ * `--target cloudflare` (design note 0026, §5): the API, the admin and the storefront as
+ * Workers on your account, the API over Hyperdrive to the Postgres you give (any
+ * provider), all deployed with one API token.
  */
 async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> {
   const databaseUrl = (
@@ -284,7 +295,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
 
   const domain = (
     await ask(args.domain, undefined, () =>
-      p.text({ message: "Your domain, on this Cloudflare account", placeholder: "example.com", validate: checkDomain }),
+      p.text({ message: "Your domain, on Cloudflare", placeholder: "example.com", validate: checkDomain }),
     )
   ).toLowerCase();
   if (checkDomain(domain)) throw new Error(`--domain: ${domain} isn't a domain`);
@@ -293,26 +304,24 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     if (checkDomain(value)) throw new Error(`${label}: ${value} isn't a domain`);
     return value.toLowerCase();
   };
+  // Each becomes a Worker's custom domain: none may have a DNS record already.
   const domains: Deployment["domains"] = {
     api: await sub(args["api-domain"], "The API's address", `api.${domain}`),
     media: await sub(args["media-domain"], "Uploaded files' address", `media.${domain}`),
     ...(args.admin ? { admin: await sub(args["admin-domain"], "The admin's address", `admin.${domain}`) } : {}),
+    ...(args.storefront
+      ? { storefront: await sub(args["storefront-domain"], "The shop's address", `shop.${domain}`) }
+      : {}),
   };
 
   const name = await ask(args.name, "hypha", () =>
     p.text({
-      message: "A name for its resources (the Worker <name>-api, the bucket <name>-media, …)",
+      message: "A name for its resources (the Workers <name>-api, -admin, -storefront, …)",
       initialValue: "hypha",
       validate: (v) => (v && NAME.test(v) ? undefined : "lowercase letters, digits and dashes"),
     }),
   );
   if (!NAME.test(name)) throw new Error(`--name: ${name} should be lowercase letters, digits and dashes`);
-  const zoneId = await ask(args["zone-id"], "", () =>
-    p.text({
-      message: `The zone ID of ${domain}, for files on ${domains.media} (Overview page; empty for signed URLs)`,
-      defaultValue: "",
-    }),
-  );
   const r2Key = await ask(args["r2-access-key-id"], "", () =>
     p.text({
       message: "An R2 API token's access key ID, for files (R2 → Manage API tokens; empty for no media)",
@@ -325,6 +334,40 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
       )
     : "";
 
+  // The token everything deploys with (cloudflare-token.ts).
+  const earlierEnv = args.force ? await loadEnv(dir).catch(() => undefined) : undefined;
+  const knownToken = earlierEnv?.get("CLOUDFLARE_API_TOKEN") || process.env.CLOUDFLARE_API_TOKEN || undefined;
+  if (!args["api-token"] && !knownToken) {
+    const link = templateUrl(`Hypha ${name}`);
+    p.log.step(
+      "Hypha deploys with a Cloudflare API token. Create one with this link (the permissions are\n" +
+        `filled in; pick the account and ${domain}'s zone), then paste it here:\n${link}`,
+    );
+    if (process.stdin.isTTY && !args.yes) openInBrowser(link);
+  }
+  const token = (
+    await ask(args["api-token"], knownToken, () =>
+      p.password({ message: "The API token", validate: (v) => (v?.trim() ? undefined : "paste the token") }),
+    )
+  ).trim();
+  const spin = p.spinner();
+  spin.start("Checking the token");
+  let checked;
+  try {
+    checked = await checkToken(token, domain, { accountId: args["account-id"], media: Boolean(r2Key) });
+  } catch (e) {
+    spin.error("The token won't do");
+    throw e;
+  }
+  if (checked.missing.length > 0) {
+    spin.error("The token lacks permissions");
+    throw new Error(
+      "add these to the token (dash.cloudflare.com/profile/api-tokens → Edit), then run init again:\n" +
+        checked.missing.map((m) => `  ${m}`).join("\n"),
+    );
+  }
+  spin.stop(`The token reaches the account and ${domain}`);
+
   const email = (
     await ask(args["owner-email"], undefined, () =>
       p.text({ message: "The owner's email (the first staff user)", validate: checkEmail }),
@@ -335,7 +378,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     p.text({ message: "The store's name", initialValue: "My store" }),
   );
 
-  // Written again: keep what Cloudflare already holds (the resources' IDs, the account).
+  // Written again: keep what Cloudflare already holds (the resources' IDs).
   const earlierState = args.force ? await loadDeployment(dir).catch(() => undefined) : undefined;
   const earlier = earlierState?.cloudflare?.name === name ? earlierState.cloudflare : undefined;
   const d: Deployment = {
@@ -347,19 +390,28 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     domains,
     cloudflare: {
       name,
-      ...((args["account-id"] || earlier?.accountId) ? { accountId: args["account-id"] || earlier?.accountId } : {}),
-      ...(zoneId.trim() ? { zoneId: zoneId.trim() } : {}),
+      accountId: checked.accountId,
+      zoneId: args["zone-id"] || checked.zoneId,
       ...(args.region ? { region: args.region } : {}),
       // A namespace_id is a number unique per account: a random block per deployment.
       rateLimitBase: earlier?.rateLimitBase ?? (1 + randomInt(90_000)) * BLOCK,
       ...(earlier?.hyperdriveId ? { hyperdriveId: earlier.hyperdriveId } : {}),
       ...(earlier?.kvId ? { kvId: earlier.kvId } : {}),
+      ...(earlier?.cacheKvId ? { cacheKvId: earlier.cacheKvId } : {}),
     },
   };
-  const env = newCloudflareEnv({ email, storeName }, databaseUrl, { id: r2Key.trim(), secret: r2Secret.trim() });
-  const earlierEnv = args.force ? await loadEnv(dir).catch(() => undefined) : undefined;
-  // The database URL and R2 keys given now win; the secret key and owner stay.
-  const given = new Set(["DATABASE_URL", ...(r2Key ? ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"] : [])]);
+  const env = newCloudflareEnv({ email, storeName }, databaseUrl, {
+    token,
+    r2: { id: r2Key.trim(), secret: r2Secret.trim() },
+    storefront: Boolean(domains.storefront),
+  });
+  // The database URL, token and R2 keys given now win; the secret key, the owner and
+  // the storefront's keys stay.
+  const given = new Set([
+    "DATABASE_URL",
+    "CLOUDFLARE_API_TOKEN",
+    ...(r2Key ? ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"] : []),
+  ]);
   if (earlierEnv) for (const key of KEPT) {
     const value = earlierEnv.get(key);
     if (!given.has(key) && value !== undefined && value !== "" && env.get(key) !== undefined) env.set(key, value);
@@ -371,17 +423,25 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   await saveEnv(dir, env);
   await writeFile(join(dir, "hypha.config.toml"), configToml("cloudflare"));
   await writeFile(join(dir, "hypha.config.schema.json"), await configSchema());
-  await writeFile(join(dir, ".gitignore"), `# Secrets: never commit these.\n${ENV_FILE}\n.secrets.json\n.cors.json\n`);
+  await writeFile(join(dir, ".gitignore"), `# Secrets: never commit these.\n${ENV_FILE}\n.secrets*.json\n.cors.json\n`);
 
   p.note(
     [
       `API        ${url(d, domains.api)}`,
-      `Files      ${r2Key ? (zoneId ? url(d, domains.media) : "signed URLs from R2") : "off (no R2 keys)"}`,
-      ...(domains.admin ? [`Admin      ${url(d, domains.admin)} (host it where you like, for now)`] : []),
+      ...(domains.admin ? [`Admin      ${url(d, domains.admin)}`] : []),
+      ...(domains.storefront ? [`Storefront ${url(d, domains.storefront)}`] : []),
+      `Files      ${r2Key ? url(d, domains.media) : "off (no R2 keys)"}`,
       `Database   ${new URL(databaseUrl).host}`,
     ].join("\n"),
     `Written to ${dir}`,
   );
-  p.log.step("hypha deploy needs `wrangler login`, Rust with `rustup target add wasm32-unknown-unknown`,\nand `cargo install worker-build`.");
+  p.log.step("hypha deploy needs Rust with `rustup target add wasm32-unknown-unknown` and `cargo install worker-build`.");
   p.outro(`Next: hypha deploy${args.dir === "hypha-deploy" ? "" : ` --dir ${args.dir}`}`);
+}
+
+/** Opens `link` in the browser, if this machine has a way; the link is printed anyway. */
+function openInBrowser(link: string): void {
+  const [program, ...args] =
+    process.platform === "darwin" ? ["open"] : process.platform === "win32" ? ["cmd", "/c", "start", '""'] : ["xdg-open"];
+  run(program, [...args, link], { capture: true }).catch(() => {});
 }

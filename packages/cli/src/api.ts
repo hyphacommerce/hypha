@@ -123,6 +123,28 @@ export async function waitForHealth(d: Deployment, seconds: number): Promise<boo
   return false;
 }
 
+/** Polls `target` until it answers anything but a server error, or `seconds` pass: a new
+ * app's custom domain (its DNS record and certificate) can take a minute or two. */
+export async function waitForAnswer(target: string, seconds: number): Promise<boolean> {
+  const until = Date.now() + seconds * 1000;
+  const parsed = new URL(target);
+  const request = parsed.protocol === "https:" ? httpsRequest : httpRequest;
+  while (Date.now() < until) {
+    const status = await new Promise<number>((resolve) => {
+      const req = request(parsed, { method: "GET", timeout: 15_000, lookup: freshLookup }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
+      req.on("timeout", () => req.destroy(new Error("timed out")));
+      req.on("error", () => resolve(0));
+      req.end();
+    });
+    if (status > 0 && status < 500) return true;
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return false;
+}
+
 /** A staff session: the API's admin routes, as the owner. */
 export class Staff {
   private readonly d: Deployment;

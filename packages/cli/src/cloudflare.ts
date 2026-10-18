@@ -19,8 +19,9 @@ import { join, relative } from "node:path";
 
 import * as p from "@clack/prompts";
 
-import { waitForHealth } from "./api.ts";
-import { type Deployment, type EnvFile, saveDeployment, url } from "./deployment.ts";
+import { Staff, waitForAnswer, waitForHealth } from "./api.ts";
+import { type App, apps, type Deployment, type EnvFile, saveDeployment, saveEnv, url } from "./deployment.ts";
+import { connectStorefront, type StorefrontKeys, syncWebhook } from "./storefront.ts";
 import { run } from "./shell.ts";
 import { REPO } from "./templates.ts";
 
@@ -196,7 +197,19 @@ export interface Tools {
   now(): number;
   /** Whether the deployed API answers `GET /health` within a few minutes. */
   answers(d: Deployment): Promise<boolean>;
+  /** Whether `url` answers at all (below 500) within a few minutes: a new app's domain. */
+  reachable(url: string): Promise<boolean>;
+  /** As the owner, a publishable key and the storefront's webhook app (storefront.ts). */
+  connectStorefront(d: Deployment, email: string, password: string): Promise<StorefrontKeys>;
+  /** As the owner, points the storefront's webhook at its domain; the new URL if it moved. */
+  syncWebhook(d: Deployment, email: string, password: string): Promise<string | null>;
+  /** Builds `app` (Vite, for Workers) and deploys it with `cf`, with `env` for its
+   * `cloudflare.config.ts` and the secrets in `secretsFile`. */
+  deployApp(app: App, env: Record<string, string>, secretsFile: string): Promise<void>;
 }
+
+export const appWorker = (d: Deployment, app: App) => `${d.cloudflare!.name}-${app}`;
+const cacheTitle = (d: Deployment) => `${d.cloudflare!.name}-cache`;
 
 /** Hyperdrive's origin flags: the URL without its query (TLS is `--sslmode`, which
  * Hyperdrive takes for `require` and stricter), and the query cache always off. */
@@ -243,11 +256,20 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
   const keySecret = env.get("R2_SECRET_ACCESS_KEY");
   const media = Boolean(keyId && keySecret);
 
-  // Who's logged in, and to which account.
-  const who = JSON.parse(await tools.wrangler(["whoami", "--json"], { capture: true }).catch(() => {
-    throw new Error("wrangler isn't logged in: run `wrangler login` (or set CLOUDFLARE_API_TOKEN)");
-  })) as { accounts?: { id: string; name: string }[] };
+  // The account: init found it from the API token. Without a token (a deployment from
+  // before it), wrangler's own login, which can only deploy the API.
+  const token = env.get("CLOUDFLARE_API_TOKEN");
+  const deployed = apps(d);
+  if (!token && deployed.length > 0) {
+    throw new Error(
+      ".env has no CLOUDFLARE_API_TOKEN, which the admin and storefront deploy with: run " +
+        "`hypha init --force` with the same answers (it asks for one), then deploy",
+    );
+  }
   if (!cf.accountId) {
+    const who = JSON.parse(await tools.wrangler(["whoami", "--json"], { capture: true }).catch(() => {
+      throw new Error("wrangler isn't logged in: run `wrangler login` (or set CLOUDFLARE_API_TOKEN)");
+    })) as { accounts?: { id: string; name: string }[] };
     const accounts = who.accounts ?? [];
     if (accounts.length !== 1) {
       throw new Error(
@@ -307,14 +329,7 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
       await saveDeployment(dir, d);
     }
     if (!cf.kvId) {
-      const listed = JSON.parse(await tools.wrangler(["kv", "namespace", "list"], { capture: true })) as {
-        id: string;
-        title: string;
-      }[];
-      cf.kvId =
-        listed.find((n) => n.title === kvTitle(d))?.id ??
-        idIn(await tools.wrangler(["kv", "namespace", "create", kvTitle(d)], { capture: true }));
-      if (!cf.kvId) throw new Error("no KV namespace ID in wrangler's answer");
+      cf.kvId = await namespace(tools, kvTitle(d));
       await saveDeployment(dir, d);
     }
     if (media) {
@@ -379,13 +394,89 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
       stop("The API didn't answer", true);
       throw new Error(`${url(d, d.domains.api)}/health didn't answer in 5 minutes: see \`hypha logs\``);
     }
-    stop("Running");
+    stop("The API is running");
+
+    // 5. The storefront's keys, as on a VPS: a publishable key and its webhook app.
+    if (d.domains.storefront) {
+      const email = env.get("HYPHA_OWNER_EMAIL");
+      const password = env.get("HYPHA_OWNER_PASSWORD");
+      if (!email || !password) {
+        if (!env.get("STOREFRONT_KEY")) {
+          throw new Error("no owner credentials in .env to connect the storefront: set STOREFRONT_KEY and HYPHA_WEBHOOK_SECRET there");
+        }
+      } else if (!env.get("STOREFRONT_KEY")) {
+        start("Connecting the storefront: a publishable key and its webhook");
+        const keys = await tools.connectStorefront(d, email, password);
+        env.set("STOREFRONT_KEY", keys.key).set("HYPHA_WEBHOOK_SECRET", keys.webhookSecret ?? "");
+        await saveEnv(dir, env);
+        stop("Storefront connected");
+      } else {
+        const moved = await tools.syncWebhook(d, email, password).catch((e: unknown) => {
+          p.log.warn(`Couldn't check the storefront's webhook: ${e instanceof Error ? e.message : e}`);
+          return null;
+        });
+        if (moved) p.log.step(`The storefront's webhook now goes to ${moved}`);
+      }
+      if (!cf.cacheKvId) {
+        cf.cacheKvId = await namespace(tools, cacheTitle(d));
+        await saveDeployment(dir, d);
+      }
+    }
+
+    // 6. The admin and the storefront, bound to the API Worker (design note 0026, §2).
+    for (const app of deployed) {
+      const domain = d.domains[app]!;
+      const appEnv: Record<string, string> = {
+        CLOUDFLARE_API_TOKEN: token!,
+        CLOUDFLARE_ACCOUNT_ID: accountId,
+        HYPHA_CF_ACCOUNT_ID: accountId,
+        HYPHA_CF_WORKER: appWorker(d, app),
+        HYPHA_CF_DOMAIN: domain,
+        HYPHA_CF_API_WORKER: workerName(d),
+        ...(app === "storefront" ? { HYPHA_CF_CACHE_KV: cf.cacheKvId! } : {}),
+      };
+      // The binding's base URL; the binding itself skips the internet.
+      const appSecrets: Record<string, string> = { HYPHA_API_URL: url(d, d.domains.api) };
+      if (app === "storefront") {
+        appSecrets.STOREFRONT_KEY = env.get("STOREFRONT_KEY") ?? "";
+        appSecrets.HYPHA_WEBHOOK_SECRET = env.get("HYPHA_WEBHOOK_SECRET") ?? "";
+      }
+      const file = join(dir, `.secrets-${app}.json`);
+      await writeFile(file, JSON.stringify(appSecrets), { mode: 0o600 });
+      p.log.step(`Building and deploying the ${app} (${appWorker(d, app)})…`);
+      try {
+        await tools.deployApp(app, appEnv, file);
+      } finally {
+        await rm(file, { force: true });
+      }
+    }
+    for (const app of deployed) {
+      start(`Waiting for the ${app} at ${url(d, d.domains[app]!)}`);
+      if (!(await tools.reachable(url(d, d.domains[app]!)))) {
+        stop(`The ${app} didn't answer`, true);
+        throw new Error(`${url(d, d.domains[app]!)} didn't answer in 5 minutes: see \`hypha logs ${app}\``);
+      }
+      stop(`The ${app} is running`);
+    }
     if (!media) p.log.warn("Media is off: add an R2 API token's keys to .env (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY), then deploy.");
     else if (!cf.zoneId) p.log.warn("Files are served by signed URLs: pass --zone-id to `hypha init --force` for the media domain.");
   } catch (e) {
     if (spinning) stop("Stopped", true);
     throw e;
   }
+}
+
+/** The KV namespace titled `title`: the one already there, or a new one. */
+async function namespace(tools: Tools, title: string): Promise<string> {
+  const listed = JSON.parse(await tools.wrangler(["kv", "namespace", "list"], { capture: true })) as {
+    id: string;
+    title: string;
+  }[];
+  const id =
+    listed.find((n) => n.title === title)?.id ??
+    idIn(await tools.wrangler(["kv", "namespace", "create", title], { capture: true }));
+  if (!id) throw new Error(`no ID for the KV namespace ${title} in wrangler's answer`);
+  return id;
 }
 
 function pick(env: EnvFile, keys: string[]): Record<string, string> {
@@ -399,11 +490,19 @@ function pick(env: EnvFile, keys: string[]): Record<string, string> {
 
 /** The tools on this machine: wrangler (logged in, or `CLOUDFLARE_API_TOKEN`), cargo,
  * and `worker-build` with the wasm target. */
-export function hereTools(d: Deployment): Tools {
+export function hereTools(d: Deployment, env: EnvFile): Tools {
+  // The deployment's token and account for every wrangler and cf call, so their own
+  // logins don't decide where things go.
+  const auth = (): Record<string, string> => {
+    const out: Record<string, string> = {};
+    const token = env.get("CLOUDFLARE_API_TOKEN");
+    if (token) out.CLOUDFLARE_API_TOKEN = token;
+    if (d.cloudflare?.accountId) out.CLOUDFLARE_ACCOUNT_ID = d.cloudflare.accountId;
+    return out;
+  };
   return {
     wrangler(args, { capture } = {}) {
-      const accountId = d.cloudflare?.accountId;
-      return run("wrangler", args, { capture, cwd: REPO, env: accountId ? { CLOUDFLARE_ACCOUNT_ID: accountId } : {} });
+      return run("wrangler", args, { capture, cwd: REPO, env: auth() });
     },
     async buildHost() {
       await run("cargo", ["build", "--release", "-p", "hypha-host-axum"], { cwd: REPO, capture: true });
@@ -423,5 +522,15 @@ export function hereTools(d: Deployment): Tools {
     },
     now: () => Date.now(),
     answers: (d) => waitForHealth(d, 300),
+    reachable: (target) => waitForAnswer(target, 300),
+    connectStorefront: async (d, email, password) => connectStorefront(d, await Staff.login(d, email, password)),
+    syncWebhook: async (d, email, password) => syncWebhook(d, await Staff.login(d, email, password)),
+    async deployApp(app, appEnv, secretsFile) {
+      const cwd = join(REPO, "apps", app);
+      // A Workers build (not a VPS's Node one), with the deployment's values.
+      const buildEnv = { ...appEnv, ...auth(), HYPHA_TARGET: "", NODE_ENV: "production" };
+      await run("pnpm", ["exec", "vite", "build"], { cwd, env: buildEnv, capture: true });
+      await run("pnpm", ["exec", "cf", "deploy", "--prebuilt", "--secrets-file", secretsFile], { cwd, env: buildEnv });
+    },
   };
 }

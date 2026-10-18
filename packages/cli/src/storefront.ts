@@ -29,7 +29,8 @@ export async function syncWebhook(d: Deployment, staff: Staff): Promise<string |
 
 /**
  * The app first: it's the call that can be refused (a webhook URL the API won't call),
- * and a refused one leaves nothing behind. On this machine there's no webhook: the API
+ * and a refused one leaves nothing behind (on a server or on Cloudflare alike). On this
+ * machine there's no webhook: the API
  * calls only https URLs (or localhost), and the storefront is reachable from its
  * container only as `http://storefront:3000`. Its static pages then refresh within
  * their five minutes.
@@ -39,7 +40,7 @@ export async function connectStorefront(d: Deployment, staff: Staff): Promise<St
   const channel = channels.items.find((c) => c.kind === "online_store");
   if (!channel) throw new Error("the store has no Online Store channel to sell through");
   let webhookSecret: string | null = null;
-  if (d.target === "vps") {
+  if (d.target !== "local") {
     const app = await staff.call<{ secret: string }>("POST", "/admin/apps", {
       key: "app_storefront",
       name: "Storefront",

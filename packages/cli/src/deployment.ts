@@ -20,8 +20,9 @@ export type App = "admin" | "storefront";
 
 /** A Cloudflare deployment's account and what `hypha deploy` made there. */
 export interface Cloudflare {
-  /** Names its resources: the Worker `<name>-api`, the bucket `<name>-media`, the KV
-   * namespace `<name>-jobs`, Hyperdrive `<name>`. Fixed once deployed. */
+  /** Names its resources: the Workers `<name>-api`, `<name>-admin`, `<name>-storefront`,
+   * the bucket `<name>-media`, the KV namespaces `<name>-jobs` and `<name>-cache`,
+   * Hyperdrive `<name>`. Fixed once deployed. */
   name: string;
   /** The account (from `wrangler whoami` when it reaches only one). */
   accountId?: string;
@@ -34,6 +35,8 @@ export interface Cloudflare {
   rateLimitBase: number;
   hyperdriveId?: string;
   kvId?: string;
+  /** The storefront's cache (`<name>-cache`): ISR data shared by its isolates. */
+  cacheKvId?: string;
 }
 
 export interface Deployment {

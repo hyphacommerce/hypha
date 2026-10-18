@@ -35,9 +35,13 @@ export const deploy = defineCommand({
       if (deployment.target === "cloudflare") {
         p.intro("hypha deploy → Cloudflare");
         const env = await loadEnv(dir);
-        await deployCloudflare(resolve(dir), deployment, env, hereTools(deployment));
+        await deployCloudflare(resolve(dir), deployment, env, hereTools(deployment, env));
         const password = env.get("HYPHA_OWNER_PASSWORD");
-        const lines = [`API        ${url(deployment, deployment.domains.api)}`];
+        const lines = [
+          `API        ${url(deployment, deployment.domains.api)}`,
+          ...(deployment.domains.admin ? [`Admin      ${url(deployment, deployment.domains.admin)}`] : []),
+          ...(deployment.domains.storefront ? [`Storefront ${url(deployment, deployment.domains.storefront)}`] : []),
+        ];
         if (password) lines.push("", `Log in as ${env.get("HYPHA_OWNER_EMAIL")} with ${password}`, "(then change it)");
         p.note(lines.join("\n"), "Deployed");
         p.outro("Done.");

@@ -3,9 +3,9 @@
 import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 
-import { healthy } from "../api.ts";
-import { workerName } from "../cloudflare.ts";
-import { loadDeployment, url } from "../deployment.ts";
+import { healthy, waitForAnswer } from "../api.ts";
+import { appWorker, workerName } from "../cloudflare.ts";
+import { apps, type Deployment, loadDeployment, loadEnv, url } from "../deployment.ts";
 import { quote, run } from "../shell.ts";
 import { dirArg, guarded, open } from "./shared.ts";
 
@@ -16,9 +16,16 @@ export const status = defineCommand({
     guarded(async () => {
       const deployment = await loadDeployment(args.dir);
       if (deployment.target === "cloudflare") {
-        p.intro(`hypha status → Cloudflare (${workerName(deployment)})`);
-        const ok = await healthy(deployment);
-        p.outro(`${url(deployment, deployment.domains.api)}/health ${ok ? "answers" : "doesn't answer"}`);
+        p.intro("hypha status → Cloudflare");
+        let ok = await healthy(deployment);
+        p.log.step(`${workerName(deployment)}  ${url(deployment, deployment.domains.api)}/health ${ok ? "answers" : "doesn't answer"}`);
+        for (const app of apps(deployment)) {
+          const target = url(deployment, deployment.domains[app]!);
+          const answers = await waitForAnswer(target, 1);
+          ok &&= answers;
+          p.log.step(`${appWorker(deployment, app)}  ${target} ${answers ? "answers" : "doesn't answer"}`);
+        }
+        p.outro(ok ? "Everything answers" : "Something doesn't answer: see `hypha logs <api|admin|storefront>`");
         if (!ok) process.exitCode = 1;
         return;
       }
@@ -43,11 +50,13 @@ export const logs = defineCommand({
     guarded(async () => {
       const deployment = await loadDeployment(args.dir);
       if (deployment.target === "cloudflare") {
-        // The Worker's live logs (Workers Logs keeps the past ones, in the dashboard).
-        const env: Record<string, string> = deployment.cloudflare?.accountId
-          ? { CLOUDFLARE_ACCOUNT_ID: deployment.cloudflare.accountId }
-          : {};
-        await run("wrangler", ["tail", workerName(deployment), "--format", "pretty"], { env });
+        // A Worker's live logs (Workers Logs keeps the past ones, in the dashboard).
+        const worker = cloudflareWorker(deployment, args.service);
+        const env: Record<string, string> = {};
+        const token = (await loadEnv(args.dir).catch(() => undefined))?.get("CLOUDFLARE_API_TOKEN");
+        if (token) env.CLOUDFLARE_API_TOKEN = token;
+        if (deployment.cloudflare?.accountId) env.CLOUDFLARE_ACCOUNT_ID = deployment.cloudflare.accountId;
+        await run("wrangler", ["tail", worker, "--format", "pretty"], { env });
         return;
       }
       const { machine } = await open(args.dir);
@@ -55,3 +64,13 @@ export const logs = defineCommand({
       await machine.sh(`docker compose logs --tail ${quote(args.tail)}${args.follow ? " -f" : ""}${service}`);
     }),
 });
+
+/** The Worker `service` names (api by default) in a Cloudflare deployment. */
+function cloudflareWorker(d: Deployment, service: string | undefined): string {
+  if (!service || service === "api") return workerName(d);
+  if (service === "admin" || service === "storefront") {
+    if (!d.domains[service]) throw new Error(`this deployment has no ${service}`);
+    return appWorker(d, service);
+  }
+  throw new Error(`on Cloudflare, logs are per Worker: api, admin or storefront (not ${service})`);
+}
