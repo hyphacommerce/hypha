@@ -1,0 +1,164 @@
+[
+  {
+    "name": "design note 0029's example",
+    "tree": {
+      "version": 1,
+      "root": {
+        "type": "card",
+        "title": "Stripe",
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              { "type": "text", "value": "Captured" },
+              { "type": "badge", "value": "succeeded", "tone": "success" }
+            ]
+          },
+          {
+            "type": "link",
+            "label": "Open in Stripe",
+            "href": "https://dashboard.stripe.com/payments/pi_1",
+            "external": true
+          },
+          { "type": "button", "label": "Refund", "action": "refund" }
+        ]
+      }
+    }
+  },
+  {
+    "name": "every element",
+    "tree": {
+      "version": 1,
+      "root": {
+        "type": "stack",
+        "gap": 3,
+        "children": [
+          { "type": "heading", "value": "Reviews", "level": 2 },
+          {
+            "type": "text",
+            "value": "4.6 out of 5",
+            "variant": "supporting",
+            "weight": "semibold"
+          },
+          {
+            "type": "banner",
+            "tone": "warning",
+            "title": "3 reviews wait for moderation",
+            "description": "Approve them in the app."
+          },
+          { "type": "divider" },
+          {
+            "type": "image",
+            "src": "https://cdn.app.example/chart.png",
+            "alt": "Ratings over time",
+            "width": 600,
+            "height": 200
+          },
+          {
+            "type": "list",
+            "items": [
+              { "label": "Great shoes", "description": "5 stars" },
+              { "label": "Too small" }
+            ]
+          },
+          {
+            "type": "table",
+            "columns": [
+              { "key": "author", "header": "Author" },
+              { "key": "rating", "header": "Rating", "align": "end" }
+            ],
+            "rows": [
+              { "author": "Ana", "rating": 5 },
+              { "author": "Ben", "rating": null }
+            ]
+          },
+          {
+            "type": "keyvalue",
+            "items": [
+              { "label": "Average", "value": "4.6" },
+              { "label": "Count", "value": "128" }
+            ]
+          },
+          {
+            "type": "row",
+            "align": "between",
+            "gap": 1,
+            "children": [
+              {
+                "type": "button",
+                "label": "Open dashboard",
+                "navigate": "/dashboard",
+                "variant": "primary"
+              },
+              {
+                "type": "button",
+                "label": "Delete all",
+                "action": "delete_all",
+                "variant": "destructive"
+              }
+            ]
+          },
+          {
+            "type": "form",
+            "action": "settings.save",
+            "submit_label": "Save settings",
+            "fields": [
+              {
+                "type": "field",
+                "input": "text",
+                "name": "title",
+                "label": "Widget title",
+                "value": "Reviews",
+                "placeholder": "Reviews",
+                "required": true
+              },
+              {
+                "type": "field",
+                "input": "number",
+                "name": "per_page",
+                "label": "Per page",
+                "value": 10,
+                "min": 1,
+                "max": 50
+              },
+              {
+                "type": "field",
+                "input": "select",
+                "name": "order",
+                "label": "Order",
+                "value": "newest",
+                "options": [
+                  { "value": "newest", "label": "Newest first" },
+                  { "value": "best", "label": "Best first" }
+                ]
+              },
+              {
+                "type": "field",
+                "input": "checkbox",
+                "name": "photos",
+                "label": "Show photos",
+                "value": true,
+                "description": "Only reviews with photos"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "an element a newer version added is allowed, with a warning",
+    "warnings": ["root.children[1]"],
+    "tree": {
+      "version": 1,
+      "root": {
+        "type": "stack",
+        "children": [
+          { "type": "text", "value": "Before" },
+          { "type": "chart", "series": [1, 2, 3] },
+          { "type": "text", "value": "After" }
+        ]
+      }
+    }
+  }
+]

@@ -1,0 +1,121 @@
+[
+  {
+    "name": "another version",
+    "error": "$.version",
+    "tree": { "version": 2, "root": { "type": "divider" } }
+  },
+  { "name": "no root", "error": "$.root", "tree": { "version": 1 } },
+  {
+    "name": "an extra top-level key",
+    "error": "$.script",
+    "tree": { "version": 1, "root": { "type": "divider" }, "script": "alert(1)" }
+  },
+  {
+    "name": "a link that isn't https",
+    "error": "root.href",
+    "tree": {
+      "version": 1,
+      "root": { "type": "link", "label": "x", "href": "javascript:alert(1)" }
+    }
+  },
+  {
+    "name": "an image over http",
+    "error": "root.src",
+    "tree": {
+      "version": 1,
+      "root": { "type": "image", "src": "http://x.example/a.png", "alt": "" }
+    }
+  },
+  {
+    "name": "a button with both action and navigate",
+    "error": "root",
+    "tree": {
+      "version": 1,
+      "root": { "type": "button", "label": "Go", "action": "go", "navigate": "/go" }
+    }
+  },
+  {
+    "name": "a button with neither",
+    "error": "root",
+    "tree": { "version": 1, "root": { "type": "button", "label": "Go" } }
+  },
+  {
+    "name": "navigate to another site",
+    "error": "root.navigate",
+    "tree": {
+      "version": 1,
+      "root": { "type": "button", "label": "Go", "navigate": "//evil.example" }
+    }
+  },
+  {
+    "name": "an unknown badge tone",
+    "error": "root.tone",
+    "tree": { "version": 1, "root": { "type": "badge", "value": "x", "tone": "critical" } }
+  },
+  {
+    "name": "an unknown property on a known element",
+    "error": "root.onclick",
+    "tree": { "version": 1, "root": { "type": "text", "value": "x", "onclick": "alert(1)" } }
+  },
+  {
+    "name": "a card without children",
+    "error": "root.children",
+    "tree": { "version": 1, "root": { "type": "card", "title": "x" } }
+  },
+  {
+    "name": "a field outside a form",
+    "error": "root",
+    "tree": {
+      "version": 1,
+      "root": { "type": "field", "input": "text", "name": "a", "label": "A" }
+    }
+  },
+  {
+    "name": "a select without options",
+    "error": "root.fields[0].options",
+    "tree": {
+      "version": 1,
+      "root": {
+        "type": "form",
+        "action": "save",
+        "fields": [{ "type": "field", "input": "select", "name": "a", "label": "A" }]
+      }
+    }
+  },
+  {
+    "name": "a checkbox with a placeholder",
+    "error": "root.fields[0].placeholder",
+    "tree": {
+      "version": 1,
+      "root": {
+        "type": "form",
+        "action": "save",
+        "fields": [
+          { "type": "field", "input": "checkbox", "name": "a", "label": "A", "placeholder": "x" }
+        ]
+      }
+    }
+  },
+  {
+    "name": "a table cell that's an object",
+    "error": "root.rows[0].a",
+    "tree": {
+      "version": 1,
+      "root": {
+        "type": "table",
+        "columns": [{ "key": "a", "header": "A" }],
+        "rows": [{ "a": { "x": 1 } }]
+      }
+    }
+  },
+  {
+    "name": "an element without a type",
+    "error": "root.children[0].type",
+    "tree": { "version": 1, "root": { "type": "stack", "children": [{ "value": "x" }] } }
+  },
+  {
+    "name": "an action id with spaces",
+    "error": "root.action",
+    "tree": { "version": 1, "root": { "type": "button", "label": "Go", "action": "do it" } }
+  }
+]
