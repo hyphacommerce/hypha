@@ -10,6 +10,7 @@ const generated = [
   "**/dist/**",
   "**/node_modules/**",
   "packages/sdk/src/generated/**",
+  "packages/app/src/generated/**",
   "apps/*/theme/*.css",
   "apps/*/theme/*.js",
   "apps/*/theme/*.d.ts",

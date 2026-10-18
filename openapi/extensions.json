@@ -110,6 +110,11 @@
                 "type": "string"
               },
               "props": {
+                "additionalProperties": {},
+                "description": "Any JSON object: the element's own properties.",
+                "propertyNames": {
+                  "type": "string"
+                },
                 "type": "object"
               },
               "type": {

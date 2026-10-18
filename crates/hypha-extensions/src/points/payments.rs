@@ -107,7 +107,11 @@ pub enum NextAction {
     /// `hypha:payment-confirmed` event.
     ClientWidget {
         element: String,
-        #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+        /// Any JSON object: the element's own properties.
+        #[cfg_attr(
+            feature = "openapi",
+            schema(value_type = std::collections::HashMap<String, serde_json::Value>)
+        )]
         props: serde_json::Map<String, serde_json::Value>,
     },
     /// Show these words (a bank transfer's details); the money comes later.
