@@ -128,6 +128,10 @@
           "burst": 10,
           "per": "30s"
         },
+        "oauth_ip": {
+          "burst": 20,
+          "per": "3s"
+        },
         "reset_confirm_ip": {
           "burst": 10,
           "per": "30s"
@@ -571,6 +575,14 @@
           "default": {
             "burst": 10,
             "per": "30s"
+          }
+        },
+        "oauth_ip": {
+          "description": "The OAuth endpoints (authorize, token, revoke), per client address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 20,
+            "per": "3s"
           }
         },
         "reset_confirm_ip": {

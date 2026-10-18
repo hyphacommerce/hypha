@@ -124,6 +124,16 @@ impl ApiError {
         )
     }
 
+    /// `/oauth/authorize` without `server.admin_url`: there is no consent page to send
+    /// the browser to (design note 0029, §4.1).
+    pub fn admin_url_missing() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "admin_url_not_configured",
+            "set server.admin_url (HYPHA_ADMIN_URL): apps are approved on the admin's consent page",
+        )
+    }
+
     /// No credentials at all (design note 0008, section 3).
     pub fn unauthenticated() -> Self {
         Self::new(
@@ -1000,8 +1010,74 @@ impl From<hypha_apps::CommandError> for ApiError {
                 StatusCode::NOT_FOUND
             }
             E::AppExists(_) => StatusCode::CONFLICT,
-            E::App(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::App(inner) => return Self::from_app(inner.clone()),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
+impl ApiError {
+    /// An app's own rules (design notes 0016, 0029): bad input is 422, with every
+    /// manifest problem in `details.errors` (`[{"path", "message"}]`); an app that isn't
+    /// installed through OAuth, for uninstalling or narrowing, 409.
+    fn from_app(e: hypha_apps::AppError) -> Self {
+        use hypha_apps::AppError as E;
+        let status = match &e {
+            E::NotInstalled => StatusCode::CONFLICT,
+            E::IncompleteManifest => return Self::internal(e),
+            _ => StatusCode::UNPROCESSABLE_ENTITY,
+        };
+        let details = match &e {
+            E::Manifest(m) => Some(manifest_problems(m)),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
+    }
+
+    /// A manifest that couldn't be fetched (`manifest_unreachable`) or isn't valid
+    /// (`manifest_invalid`, `details.errors`), at `status`.
+    pub fn manifest(status: StatusCode, e: hypha_apps::FetchError) -> Self {
+        let details = match &e {
+            hypha_apps::FetchError::Invalid(m) => Some(manifest_problems(m)),
+            hypha_apps::FetchError::Unreachable { .. } => None,
+        };
+        Self::domain(status, e).with_details(details)
+    }
+
+    /// An OAuth endpoint's error that can't go back to the app (RFC 6749 §4.1.2.1): a
+    /// 400 with the usual body, for the browser.
+    pub fn unredirectable(e: hypha_oauth::UnredirectableError) -> Self {
+        match e {
+            hypha_oauth::UnredirectableError::Manifest(m) => {
+                Self::manifest(StatusCode::BAD_REQUEST, m)
+            }
+            other => Self::domain(StatusCode::BAD_REQUEST, other),
+        }
+    }
+}
+
+fn manifest_problems(e: &hypha_apps::ManifestError) -> Value {
+    json!({
+        "errors": e.problems.iter().map(|p| json!({"path": p.path, "message": p.message}))
+            .collect::<Vec<_>>()
+    })
+}
+
+impl From<hypha_oauth::CommandError> for ApiError {
+    fn from(e: hypha_oauth::CommandError) -> Self {
+        use hypha_oauth::CommandError as E;
+        let status = match &e {
+            E::Auth(_) | E::CannotGrant(_) => StatusCode::FORBIDDEN,
+            E::App(inner) => return Self::from_app(inner.clone()),
+            E::InvalidToken => return hypha_auth::CommandError::InvalidToken.into(),
+            // Requests and apps only arrive in URLs.
+            E::AppNotFound(_) | E::RequestNotFound(_) => StatusCode::NOT_FOUND,
+            E::RequestExpired(_) | E::RequestDecided(_) => StatusCode::CONFLICT,
+            E::Seal(_) | E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,

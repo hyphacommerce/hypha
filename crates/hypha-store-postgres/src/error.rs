@@ -12,6 +12,7 @@ use hypha_inventory::repo::keys as inventory_keys;
 use hypha_markets::repo::keys as market_keys;
 use hypha_media::repo::keys as media_keys;
 use hypha_notifications::keys as notification_keys;
+use hypha_oauth::keys as oauth_keys;
 use hypha_orders::repo::keys as order_keys;
 use hypha_payments::keys as payment_keys;
 use hypha_products::repo::keys as product_keys;
@@ -99,6 +100,12 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("invite_token", user_keys::INVITE_TOKEN),
     ("assets_pkey", media_keys::ASSET_ID),
     ("app_key", app_keys::APP_KEY),
+    ("app_id", app_keys::APP_ID),
+    ("oauth_request_id", oauth_keys::OAUTH_REQUEST_ID),
+    ("oauth_code", oauth_keys::OAUTH_CODE),
+    ("oauth_token_id", oauth_keys::OAUTH_TOKEN_ID),
+    ("oauth_access_token", oauth_keys::OAUTH_ACCESS_TOKEN),
+    ("oauth_refresh_token", oauth_keys::OAUTH_REFRESH_TOKEN),
 ];
 
 /// Maps a driver error to the repo error the ports promise.

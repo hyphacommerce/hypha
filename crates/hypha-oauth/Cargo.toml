@@ -1,0 +1,22 @@
+[package]
+name = "hypha-oauth"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+hypha-apps = { path = "../hypha-apps" }
+hypha-auth = { path = "../hypha-auth" }
+thiserror.workspace = true
+serde_json.workspace = true
+sha2 = { version = "0.11", default-features = false }
+url = "2.5"
+uuid.workspace = true
+
+[dev-dependencies]
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "0.4"
+
+[lints]
+workspace = true

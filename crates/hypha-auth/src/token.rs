@@ -18,15 +18,24 @@ pub enum TokenKind {
     PublishableKey,
     Invite,
     PasswordReset,
+    /// An OAuth authorization code (design note 0029, §15): 60 seconds, single use.
+    AuthorizationCode,
+    /// An app's OAuth access token: an hour, with the grant's scopes.
+    AccessToken,
+    /// An app's OAuth refresh token: 30 days, replaced on every use.
+    RefreshToken,
 }
 
 impl TokenKind {
-    const ALL: [TokenKind; 5] = [
+    const ALL: [TokenKind; 8] = [
         TokenKind::Session,
         TokenKind::SecretKey,
         TokenKind::PublishableKey,
         TokenKind::Invite,
         TokenKind::PasswordReset,
+        TokenKind::AuthorizationCode,
+        TokenKind::AccessToken,
+        TokenKind::RefreshToken,
     ];
 
     pub const fn prefix(self) -> &'static str {
@@ -36,6 +45,9 @@ impl TokenKind {
             TokenKind::PublishableKey => "hypha_pk_",
             TokenKind::Invite => "hypha_inv_",
             TokenKind::PasswordReset => "hypha_rst_",
+            TokenKind::AuthorizationCode => "hypha_ac_",
+            TokenKind::AccessToken => "hypha_at_",
+            TokenKind::RefreshToken => "hypha_rt_",
         }
     }
 

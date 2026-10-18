@@ -38,7 +38,7 @@ jobs:
           -p hypha-tax -p hypha-inventory -p hypha-customers -p hypha-stores -p hypha-orders
           -p hypha-fulfillment -p hypha-order-actions -p hypha-payments -p hypha-notifications -p hypha-mail
           -p hypha-checkout -p hypha-dispatch -p hypha-auth -p hypha-users -p hypha-media
-          -p hypha-merchandising -p hypha-shipping -p hypha-apps -p hypha-channels -p hypha-search-index -p hypha-search -p hypha-config -p hypha-store-postgres -p hypha-store-s3 -p hypha-mail-resend
+          -p hypha-merchandising -p hypha-shipping -p hypha-apps -p hypha-oauth -p hypha-channels -p hypha-search-index -p hypha-search -p hypha-config -p hypha-store-postgres -p hypha-store-s3 -p hypha-mail-resend
           -p hypha-categories -p hypha-http -p hypha-host-workers
       - name: The services' logs, when something failed
         if: failure()
@@ -51,7 +51,7 @@ jobs:
           HYPHA_SECRET_KEY="$(openssl rand -hex 32)" \
           HYPHA_OWNER_EMAIL=owner@example.com HYPHA_OWNER_PASSWORD=e2e-owner-password \
           HYPHA_BIND=127.0.0.1:3000 \
-          HYPHA_ALLOW_PRIVATE_CALLBACKS=true \
+          HYPHA_ALLOW_PRIVATE_CALLBACKS=true HYPHA_ADMIN_URL=http://admin.e2e.test \
             cargo run -p hypha-host-axum > host.log 2>&1 &
           for _ in $(seq 1 60); do
             curl -sf http://127.0.0.1:3000/health > /dev/null && break

@@ -20,6 +20,7 @@ hypha-users = { path = "../hypha-users" }
 hypha-media = { path = "../hypha-media" }
 hypha-shipping = { path = "../hypha-shipping" }
 hypha-apps = { path = "../hypha-apps" }
+hypha-oauth = { path = "../hypha-oauth" }
 hypha-search-index = { path = "../hypha-search-index" }
 hypha-channels = { path = "../hypha-channels" }
 hypha-categories = { path = "../hypha-categories" }

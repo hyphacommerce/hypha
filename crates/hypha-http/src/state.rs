@@ -359,6 +359,14 @@ impl<S> AppState<S> {
 }
 
 impl<S> AppState<S> {
+    /// Fetches apps' manifests (design note 0029) through the host's outbound client.
+    pub fn manifests(&self) -> crate::manifests::HostManifests<'_> {
+        crate::manifests::HostManifests {
+            calls: &self.calls,
+            outbound: self.outbound(),
+        }
+    }
+
     /// The webhook sender the dispatcher delivers to apps with (design note 0016).
     pub fn webhooks(&self) -> crate::webhooks::HostWebhooks<'_> {
         crate::webhooks::HostWebhooks {
@@ -395,6 +403,9 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_core::ActingAs
         + hypha_core::SignalsDispatch
         + hypha_apps::HasApps
+        + hypha_oauth::HasOAuthRequests
+        + hypha_oauth::HasOAuthCodes
+        + hypha_oauth::HasOAuthTokens
         + hypha_search_index::HasSearchQueue
         + hypha_search_index::HasSearchSettings
         + hypha_channels::HasChannels
@@ -408,7 +419,9 @@ pub trait Storage: Send + Sync + 'static {
                        + hypha_tax::StageTaxAssignments
                        + hypha_channels::StagePublications
                        + hypha_categories::StageCategories
-                       + hypha_notifications::StageNotificationSettings,
+                       + hypha_notifications::StageNotificationSettings
+                       + hypha_apps::StageApps
+                       + hypha_oauth::StageOAuth,
         >
     where
         Self: 'a;

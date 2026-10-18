@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{AgentId, ApiKeyId, ChannelId, ErrorCode, UserId, scope::Scope};
+use crate::{AgentId, ApiKeyId, AppId, ChannelId, ErrorCode, UserId, scope::Scope};
 
 /// Who a command runs for, for audit and idempotency (keys are per actor).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -11,6 +11,10 @@ pub enum Actor {
     Agent(AgentId),
     /// A script, integration or storefront, through a secret or publishable key.
     ApiKey(ApiKeyId),
+    /// An app installed through OAuth, through one of its access tokens, with the
+    /// scopes staff granted it (design note 0029, AP5). Its ID rather than its key
+    /// (`app_<name>`), so `Actor` stays `Copy`.
+    App(AppId),
     /// The host itself: startup tasks and tests.
     System,
 }
@@ -30,12 +34,17 @@ pub struct Ctx {
 pub enum AuthError {
     #[error("missing scope {0}")]
     MissingScope(Scope),
+    /// An app's token lacks the scope (design note 0029, §15): the merchant hasn't
+    /// granted it, which only a new authorization staff approve can change.
+    #[error("the app is not authorized for {0}")]
+    AppNotAuthorized(Scope),
 }
 
 impl ErrorCode for AuthError {
     fn code(&self) -> &'static str {
         match self {
             AuthError::MissingScope(_) => "missing_scope",
+            AuthError::AppNotAuthorized(_) => "app_not_authorized",
         }
     }
 }
@@ -87,11 +96,17 @@ impl Ctx {
     }
 
     pub fn require(&self, scope: Scope) -> Result<(), AuthError> {
-        if !self.has_scope(scope) {
-            Err(AuthError::MissingScope(scope))
-        } else {
-            Ok(())
+        match self.actor {
+            _ if self.has_scope(scope) => Ok(()),
+            Actor::App(_) => Err(AuthError::AppNotAuthorized(scope)),
+            _ => Err(AuthError::MissingScope(scope)),
         }
+    }
+
+    /// Whether the caller is a staff member through a session: the only callers who see
+    /// personal data without the `customer_data:*` scopes (design note 0029, AP10).
+    pub fn is_staff(&self) -> bool {
+        matches!(self.actor, Actor::User(_))
     }
 }
 
@@ -134,6 +149,21 @@ mod tests {
         assert!(writer.has_scope(Scope::ProductsRead));
         assert!(!writer.has_scope(Scope::MarketsRead));
         assert!(!reader().has_scope(Scope::ProductsWrite));
+    }
+
+    #[test]
+    fn an_app_missing_a_scope_is_not_authorized_for_it() {
+        let app = Ctx::new(
+            Actor::App(AppId::from_uuid(Uuid::from_u128(1))),
+            vec![Scope::OrdersRead],
+        );
+        assert_eq!(app.require(Scope::OrdersRead), Ok(()));
+        assert_eq!(
+            app.require(Scope::CustomerDataEmail),
+            Err(AuthError::AppNotAuthorized(Scope::CustomerDataEmail))
+        );
+        assert!(!app.is_staff());
+        assert!(reader().is_staff());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use hypha_core::{
-    AuthError, Clock, Ctx, DeliveryId, DeliveryRecord, DeliveryStatus, ErrorCode, EventId,
-    HasOutbox, OutboxRepo, Page, PageRequest, Random, RepoError, Scope, SealError, Sealed,
-    SecretBox, StoredEvent,
+    AppId, AuthError, Clock, Ctx, DeliveryId, DeliveryRecord, DeliveryStatus, ErrorCode, EventId,
+    HasOutbox, IdGenerator, OutboxRepo, Page, PageRequest, Random, RepoError, Scope, SealError,
+    Sealed, SecretBox, StoredEvent,
 };
 use thiserror::Error;
 
@@ -66,7 +66,7 @@ pub struct CreateApp {
 pub async fn create_app<R: AppRepo>(
     ctx: &Ctx,
     apps: &R,
-    random: &impl Random,
+    env: &(impl Random + IdGenerator),
     secrets: &impl SecretBox,
     input: CreateApp,
 ) -> Result<(App, String), CommandError> {
@@ -76,9 +76,10 @@ pub async fn create_app<R: AppRepo>(
         .webhook
         .map(|w| Webhook::new(&w.url, w.timeout_ms))
         .transpose()?;
-    let (secret, sealed) = new_secret(&key, random, secrets);
+    let (secret, sealed) = new_secret(&key, env, secrets);
     let mut app = App::new(NewApp {
         key: key.clone(),
+        id: AppId::from_uuid(env.new_uuid()),
         name: input.name,
         secret: sealed,
         webhook,
@@ -235,7 +236,11 @@ async fn load<R: AppRepo>(apps: &R, key: &str) -> Result<App, CommandError> {
 
 /// 32 random bytes as hex after the prefix, and that string sealed with the key as
 /// context (as shipping sealed its providers' secrets, so those carried over as is).
-fn new_secret(key: &AppKey, random: &impl Random, secrets: &impl SecretBox) -> (String, Sealed) {
+pub fn new_secret(
+    key: &AppKey,
+    random: &impl Random,
+    secrets: &impl SecretBox,
+) -> (String, Sealed) {
     let mut bytes = [0u8; 32];
     random.fill(&mut bytes);
     let mut secret = String::with_capacity(SECRET_PREFIX.len() + 64);

@@ -153,6 +153,11 @@ define_id!(EventId, "evt");
 define_id!(DeliveryId, "dlv");
 // Emails sent and their records (design note 0028).
 define_id!(NotificationId, "ntf");
+// Apps installed through OAuth act as `Actor::App(AppId)` (design note 0029): a Copy
+// identity beside the app's key (`app_<name>`), whose prefix can't be mistaken for a key.
+define_id!(AppId, "appid");
+// Pending OAuth authorization requests, shown on the consent page (design note 0029).
+define_id!(OAuthRequestId, "oareq");
 
 #[cfg(test)]
 mod tests {

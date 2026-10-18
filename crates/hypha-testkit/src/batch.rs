@@ -1,3 +1,4 @@
+use hypha_apps::{App, StageApps};
 use hypha_auth::{
     Identity, PasswordReset, Session, StageIdentities, StagePasswordResets, StageSessions,
     keys as auth_keys,
@@ -5,6 +6,7 @@ use hypha_auth::{
 use hypha_cart::{Cart, StageCarts, repo::keys as cart_keys};
 use hypha_categories::{Category, StageCategories, keys as category_keys};
 use hypha_channels::StagePublications;
+use hypha_core::AppKey;
 use hypha_core::{
     CatalogId, CategoryId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
     PriceListId, ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency,
@@ -17,6 +19,9 @@ use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
     NotificationSettings, StageNotificationSettings, keys as notification_keys,
+};
+use hypha_oauth::{
+    AuthorizationCode, AuthorizationRequest, OAuthToken, StageOAuth, keys as oauth_keys,
 };
 use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
 use hypha_payments::{Payment, StagePayments, keys as payment_keys};
@@ -85,7 +90,75 @@ enum Staged {
     FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
     NewNotificationSettings(NotificationSettings),
     NotificationSettings(NotificationSettings),
+    NewApp(App),
+    App(App),
+    NewOAuthRequest(AuthorizationRequest),
+    OAuthRequest(AuthorizationRequest),
+    NewOAuthCode(AuthorizationCode),
+    OAuthCode(AuthorizationCode),
+    NewOAuthToken(OAuthToken),
+    OAuthToken(OAuthToken),
+    RevokeAppTokens(AppKey, Timestamp),
     Events(Vec<PendingEvent>, Option<Version>),
+}
+
+impl StageApps for InMemoryBatch {
+    fn insert_app(&mut self, app: &mut App) {
+        stamp_insert(app, self.now);
+        let events = app.take_events();
+        self.stage(Staged::NewApp(app.clone()));
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        }
+        app.set_version(Version::NEW.next());
+    }
+
+    fn update_app(&mut self, app: &mut App) {
+        stamp_update(app, self.now);
+        let version = app.version().next();
+        let events = app.take_events();
+        self.stage(Staged::App(app.clone()));
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, Some(version)));
+        }
+        app.set_version(version);
+    }
+}
+
+impl StageOAuth for InMemoryBatch {
+    fn insert_oauth_request(&mut self, request: &mut AuthorizationRequest) {
+        self.stage(Staged::NewOAuthRequest(request.clone()));
+        request.set_version(Version::NEW.next());
+    }
+
+    fn update_oauth_request(&mut self, request: &mut AuthorizationRequest) {
+        self.stage(Staged::OAuthRequest(request.clone()));
+        request.set_version(request.version().next());
+    }
+
+    fn insert_oauth_code(&mut self, code: &mut AuthorizationCode) {
+        self.stage(Staged::NewOAuthCode(code.clone()));
+        code.set_version(Version::NEW.next());
+    }
+
+    fn update_oauth_code(&mut self, code: &mut AuthorizationCode) {
+        self.stage(Staged::OAuthCode(code.clone()));
+        code.set_version(code.version().next());
+    }
+
+    fn insert_oauth_token(&mut self, token: &mut OAuthToken) {
+        self.stage(Staged::NewOAuthToken(token.clone()));
+        token.set_version(Version::NEW.next());
+    }
+
+    fn update_oauth_token(&mut self, token: &mut OAuthToken) {
+        self.stage(Staged::OAuthToken(token.clone()));
+        token.set_version(token.version().next());
+    }
+
+    fn revoke_app_tokens(&mut self, app: &AppKey, at: Timestamp) {
+        self.stage(Staged::RevokeAppTokens(app.clone(), at));
+    }
 }
 
 impl InMemoryBatch {
@@ -358,6 +431,12 @@ impl HasBatch for InMemoryPorts {
         let tax_classes_before = tax_classes.clone();
         let mut notification_settings = self.notification_settings.settings.lock();
         let notification_settings_before = notification_settings.clone();
+        let mut apps = self.apps.apps.lock().unwrap();
+        let apps_before = apps.clone();
+        let mut oauth = self.oauth.lock();
+        let oauth_before = oauth.clone();
+        // Single writes first, the set-based revocation after them (as Postgres sorts).
+        let mut revocations = Vec::new();
         let before = (
             orders.clone(),
             carts.clone(),
@@ -621,8 +700,51 @@ impl HasBatch for InMemoryPorts {
                         &mut settings,
                         &no_unique_keys,
                     )?,
+                    Staged::NewApp(mut app) => crate::apps::insert_app(&mut apps, &mut app)?,
+                    Staged::App(mut app) => crate::apps::update_app(&mut apps, &mut app)?,
+                    Staged::NewOAuthRequest(mut request) => insert_row(
+                        &mut oauth.requests,
+                        request.id(),
+                        &mut request,
+                        oauth_keys::OAUTH_REQUEST_ID,
+                        &no_unique_keys,
+                    )?,
+                    Staged::OAuthRequest(mut request) => update_row(
+                        &mut oauth.requests,
+                        request.id(),
+                        &mut request,
+                        &no_unique_keys,
+                    )?,
+                    Staged::NewOAuthCode(mut code) => {
+                        crate::oauth::insert_code(&mut oauth, &mut code)?
+                    }
+                    Staged::OAuthCode(mut code) => {
+                        update_row(&mut oauth.codes, code.hash(), &mut code, &no_unique_keys)?
+                    }
+                    Staged::NewOAuthToken(mut token) => {
+                        if !apps.contains_key(token.app().as_str()) {
+                            return Err(missing("app", token.app()));
+                        }
+                        insert_row(
+                            &mut oauth.tokens,
+                            token.id(),
+                            &mut token,
+                            oauth_keys::OAUTH_TOKEN_ID,
+                            &crate::oauth::unique_token,
+                        )?
+                    }
+                    Staged::OAuthToken(mut token) => update_row(
+                        &mut oauth.tokens,
+                        token.id(),
+                        &mut token,
+                        &crate::oauth::unique_token,
+                    )?,
+                    Staged::RevokeAppTokens(app, at) => revocations.push((app, at)),
                     Staged::Events(staged, version) => events.push((staged, version)),
                 }
+            }
+            for (app, at) in revocations {
+                crate::oauth::revoke_where(&mut oauth, at, |t| t.app() == &app);
             }
             Ok(())
         })();
@@ -643,6 +765,8 @@ impl HasBatch for InMemoryPorts {
             *fixed_prices = fixed_prices_before;
             *tax_classes = tax_classes_before;
             *notification_settings = notification_settings_before;
+            *apps = apps_before;
+            *oauth = oauth_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written

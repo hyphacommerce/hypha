@@ -3,6 +3,7 @@
 # storage (`docker compose up -d`; see CLAUDE.md).
 #
 #   HYPHA_OWNER_EMAIL=owner@example.com HYPHA_OWNER_PASSWORD=e2e-owner-password \
+#   HYPHA_ALLOW_PRIVATE_CALLBACKS=true HYPHA_ADMIN_URL=http://admin.e2e.test \
 #       cargo run -p hypha-host-axum  # in one terminal (PORT=... if 3000 is taken)
 #   bash scripts/e2e.sh               # in another (Git Bash on Windows; HYPHA_URL=...)
 #
@@ -1090,13 +1091,37 @@ echo "## apps and webhooks (design note 0016)"
 HOOK_PORT=${E2E_HOOK_PORT:-3199}
 HOOKS_FILE=$(mktemp)
 HOOKS=''
+# The same server is an app's site for the OAuth steps (design note 0029): it serves the
+# app's manifest at /hypha-app.json.
+APP_BASE="http://127.0.0.1:$HOOK_PORT"
+MANIFEST_FILE=$(mktemp)
+cat >"$MANIFEST_FILE" <<JSON
+{"key":"app_e2e_helper","name":"E2E helper","version":"1.0.0","publisher":"E2E",
+ "app_url":"$APP_BASE","redirect_uris":["/callback"],
+ "scopes":["orders:read","customers:read","customer_data:email"],
+ "scope_reasons":{"customer_data:email":"receipts"},"privacy_url":"/privacy",
+ "webhooks":{"url":"/hooks","events":["order.*"]}}
+JSON
 if command -v python3 >/dev/null 2>&1; then
-    python3 - "$HOOK_PORT" "$HOOKS_FILE" <<'PY' &
+    python3 - "$HOOK_PORT" "$HOOKS_FILE" "$MANIFEST_FILE" <<'PY' &
 import http.server, sys
 
-port, out = int(sys.argv[1]), sys.argv[2]
+port, out, manifest = int(sys.argv[1]), sys.argv[2], sys.argv[3]
 
 class Hook(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/hypha-app.json":
+            self.send_response(404)
+            self.end_headers()
+            return
+        with open(manifest, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("content-length", 0)))
         with open(out, "ab") as f:
@@ -1112,7 +1137,7 @@ PY
     HOOKS=$!
     # Not a job of this shell any more, so killing it at the end prints nothing.
     disown "$HOOKS"
-    trap 'kill $HOOKS 2>/dev/null; rm -f "$HOOKS_FILE"' EXIT
+    trap 'kill $HOOKS 2>/dev/null; rm -f "$HOOKS_FILE" "$MANIFEST_FILE"' EXIT
     sleep 1
 fi
 HOOK_URL="http://127.0.0.1:$HOOK_PORT/hooks"
@@ -1159,6 +1184,108 @@ step "a new secret" 200 - -X POST "$BASE/admin/apps/app_erp/secret"
 contains "shown once" '"secret":"hypha_as_'
 step "delete the app" 204 - -X DELETE "$BASE/admin/apps/app_erp"
 step "it's gone" 404 app_not_found "$BASE/admin/apps/app_erp"
+
+echo
+echo "## apps through OAuth (design note 0029)"
+# Needs the receiver above (it serves the manifest) and a host with HYPHA_ADMIN_URL set
+# (the consent page's address; nothing is served there, the script plays the admin).
+if [[ -n $HOOKS ]]; then
+    # PKCE (S256): a random verifier and its challenge, base64url without padding.
+    VERIFIER=$(openssl rand -hex 32)
+    CHALLENGE=$(printf %s "$VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+    CLIENT="$APP_BASE/hypha-app.json"
+    REDIRECT="$APP_BASE/callback"
+    # authorize WANT_STATUS EXTRA_CURL_ARGS...: GET /oauth/authorize; leaves Location in $LOCATION.
+    authorize() {
+        local name=$1 want=$2
+        shift 2
+        local out
+        out=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --get "$BASE/oauth/authorize" \
+            --data-urlencode response_type=code --data-urlencode "client_id=$CLIENT" \
+            --data-urlencode state=e2e-state --data-urlencode "code_challenge=$CHALLENGE" \
+            --data-urlencode code_challenge_method=S256 "$@")
+        LOCATION=${out#* }
+        if [[ ${out%% *} == "$want" ]]; then
+            echo "ok   $name"
+        else
+            echo "FAIL $name: expected HTTP $want, got $out"
+            FAILED=$((FAILED + 1))
+        fi
+    }
+    step "a redirect URI the manifest doesn't list is a page" 400 invalid_redirect_uri --get "$BASE/oauth/authorize" \
+        --data-urlencode response_type=code --data-urlencode "client_id=$CLIENT" \
+        --data-urlencode "redirect_uri=$APP_BASE/elsewhere" --data-urlencode "code_challenge=$CHALLENGE" \
+        --data-urlencode code_challenge_method=S256
+    authorize "a scope the manifest lacks goes back to the app" 302 --data-urlencode "redirect_uri=$REDIRECT" \
+        --data-urlencode scope=products:write
+    if [[ $LOCATION == "$REDIRECT?"*"error=invalid_scope"*"state=e2e-state"* ]]; then
+        echo "ok   with error=invalid_scope and the state"
+    else
+        echo "FAIL with error=invalid_scope and the state: $LOCATION"
+        FAILED=$((FAILED + 1))
+    fi
+    authorize "authorize sends the browser to the consent page" 302 --data-urlencode "redirect_uri=$REDIRECT" \
+        --data-urlencode "scope=orders:read customers:read"
+    REQUEST=$(sed -E 's/.*request=(oareq_[0-9a-f]+).*/\1/' <<<"$LOCATION")
+    step "the consent page reads the request" 200 - "$BASE/admin/oauth/requests/$REQUEST"
+    contains "what's asked, by area" '"groups":[{"area":"customers","scopes":["customers:read"]},{"area":"orders","scopes":["orders:read"]}]'
+    contains "no personal data asked" '"personal_data":[]'
+    step "the owner approves" 200 - -X POST "$BASE/admin/oauth/requests/$REQUEST/approve"
+    CODE=$(sed -E 's/.*[?&]code=(hypha_ac_[0-9a-f]+).*/\1/' <<<"$BODY")
+    step "a request is answered once" 409 oauth_request_decided -X POST "$BASE/admin/oauth/requests/$REQUEST/approve"
+    exchange() {
+        curl -s -w '\n%{http_code}' -X POST "$BASE/oauth/token" \
+            --data-urlencode grant_type=authorization_code --data-urlencode "code=$CODE" \
+            --data-urlencode "code_verifier=$1" --data-urlencode "client_id=$CLIENT" \
+            --data-urlencode "redirect_uri=$REDIRECT"
+    }
+    oauth_step() {
+        local name=$1 want=$2 out=$3
+        local status=${out##*$'\n'}
+        BODY=${out%$'\n'*}
+        if [[ $status == "$want" ]]; then echo "ok   $name"; else
+            echo "FAIL $name: expected HTTP $want, got $status: $BODY"
+            FAILED=$((FAILED + 1))
+        fi
+    }
+    oauth_step "a wrong PKCE verifier is refused" 400 "$(exchange "$(openssl rand -hex 32)")"
+    contains "as invalid_grant" '"error":"invalid_grant"'
+    oauth_step "the code for tokens" 200 "$(exchange "$VERIFIER")"
+    contains "with the app's secret, once" '"app_secret":"hypha_as_'
+    APP_TOKEN=$(sed -E 's/.*"access_token":"(hypha_at_[0-9a-f]+)".*/\1/' <<<"$BODY")
+    REFRESH=$(sed -E 's/.*"refresh_token":"(hypha_rt_[0-9a-f]+)".*/\1/' <<<"$BODY")
+    OWNER_AUTH=("${AUTH[@]}")
+    AUTH=(-H "authorization: Bearer $APP_TOKEN")
+    step "the app reads customers" 200 - "$BASE/admin/customers"
+    contains "without their personal data" '"redacted":["first_name","last_name","email","phone"]'
+    if [[ $BODY == *"ana@example.hr"* ]]; then
+        echo "FAIL no email reaches the app: $BODY"
+        FAILED=$((FAILED + 1))
+    else
+        echo "ok   no email reaches the app"
+    fi
+    step "searching by email needs customer_data:email" 403 app_not_authorized "$BASE/admin/customers?q=ana"
+    step "nor may it change products" 403 app_not_authorized -X POST "$BASE/admin/products" -H "$JSON" \
+        -d '{"handle":"app-mug","title":"Mug","price":{"amount":1,"currency":"EUR"}}'
+    AUTH=("${OWNER_AUTH[@]}")
+    oauth_step "refresh rotates" 200 "$(curl -s -w '\n%{http_code}' -X POST "$BASE/oauth/token" \
+        --data-urlencode grant_type=refresh_token --data-urlencode "refresh_token=$REFRESH")"
+    NEW_TOKEN=$(sed -E 's/.*"access_token":"(hypha_at_[0-9a-f]+)".*/\1/' <<<"$BODY")
+    oauth_step "the old refresh token again is theft" 400 "$(curl -s -w '\n%{http_code}' -X POST "$BASE/oauth/token" \
+        --data-urlencode grant_type=refresh_token --data-urlencode "refresh_token=$REFRESH")"
+    AUTH=(-H "authorization: Bearer $NEW_TOKEN")
+    step "and every token of the app is revoked" 401 invalid_token "$BASE/admin/orders"
+    AUTH=("${OWNER_AUTH[@]}")
+    step "the app's grant" 200 - "$BASE/admin/apps/app_e2e_helper"
+    contains "installed, with its scopes" '"installed":true,"grant":{"scopes":["customers:read","orders:read"]'
+    step "uninstall it" 204 - -X DELETE "$BASE/admin/apps/app_e2e_helper"
+    wait_for "it hears it last" "$BASE/admin/apps/app_e2e_helper/deliveries?status=succeeded" '"event_type":"app.uninstalled"'
+    step "delete it for good" 204 - -X DELETE "$BASE/admin/apps/app_e2e_helper"
+    step "the OAuth metadata (RFC 8414)" 200 - "$BASE/.well-known/oauth-authorization-server"
+    contains "PKCE with S256" '"code_challenge_methods_supported":["S256"]'
+else
+    echo "skip OAuth steps: no python3 for the app's site"
+fi
 
 echo
 echo "## errors"

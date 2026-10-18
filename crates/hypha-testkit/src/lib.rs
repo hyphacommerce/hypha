@@ -19,6 +19,7 @@ mod locations;
 mod markets;
 mod media;
 mod notifications;
+mod oauth;
 mod orders;
 mod outbox;
 mod payments;
@@ -55,6 +56,10 @@ pub use media::{InMemoryAssetRepo, InMemoryBlobStore};
 pub use notifications::{
     InMemoryEmailSender, InMemoryNotificationRepo, InMemoryNotificationSettingsRepo,
     InMemoryNotificationTemplateRepo,
+};
+pub use oauth::{
+    InMemoryOAuth, InMemoryOAuthCodeRepo, InMemoryOAuthRequestRepo, InMemoryOAuthTokenRepo,
+    app_manifest,
 };
 pub use orders::InMemoryOrderRepo;
 pub use outbox::InMemoryOutbox;

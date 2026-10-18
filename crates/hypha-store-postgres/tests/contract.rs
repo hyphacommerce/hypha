@@ -253,6 +253,12 @@ async fn app_repo() {
 }
 
 #[tokio::test]
+async fn oauth_repos() {
+    let Some(url) = database_url() else { return };
+    contract::oauth_repos(async || fresh_store(&url, "contract_oauth").await).await;
+}
+
+#[tokio::test]
 async fn app_deliveries() {
     let Some(url) = database_url() else { return };
     contract::app_deliveries(async || fresh_store(&url, "contract_app_deliveries").await).await;

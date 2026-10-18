@@ -110,6 +110,29 @@ pub fn prepare(policy: OutboundPolicy, call: SignedCall<'_>) -> Result<OutboundC
     })
 }
 
+/// An unsigned GET of a JSON document (an app's manifest, design note 0029) with its
+/// URL checked like `prepare`'s.
+pub fn prepare_get(
+    policy: OutboundPolicy,
+    url: &str,
+    timeout: std::time::Duration,
+) -> Result<OutboundCall, CallError> {
+    let literal = literal_ip(url)?;
+    if literal.is_some_and(|ip| !policy.allows(ip)) {
+        return Err(CallError::Failed(
+            "the URL is not a public address".to_string(),
+        ));
+    }
+    Ok(OutboundCall {
+        method: Method::Get,
+        url: url.to_string(),
+        timeout,
+        headers: vec![("accept".to_string(), "application/json".to_string())],
+        body: Vec::new(),
+        discard_answer: false,
+    })
+}
+
 /// The IP a URL names directly, if it names one: read with the WHATWG URL parser that
 /// the native host's client uses too, so every way of writing an address (`127.1`,
 /// `2130706433`, `0x7f.0.0.1`, a trailing dot, percent-encoding, `\@`) comes out as the

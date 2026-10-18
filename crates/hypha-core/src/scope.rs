@@ -95,6 +95,20 @@ pub enum Scope {
     NotificationsRead,
     #[serde(rename = "notifications:write")]
     NotificationsWrite,
+    /// Personal data (design note 0029, AP10, §4.2): without these, a caller that isn't
+    /// a staff session (an API key, an app) gets customers, orders and carts with the
+    /// field absent and listed in `redacted`. First and last names.
+    #[serde(rename = "customer_data:name")]
+    CustomerDataName,
+    /// Email addresses.
+    #[serde(rename = "customer_data:email")]
+    CustomerDataEmail,
+    /// Phone numbers.
+    #[serde(rename = "customer_data:phone")]
+    CustomerDataPhone,
+    /// Street lines, postal code, city and province (country and company stay visible).
+    #[serde(rename = "customer_data:address")]
+    CustomerDataAddress,
 }
 
 impl Scope {
@@ -138,7 +152,22 @@ impl Scope {
             Scope::PaymentsWrite => "payments:write",
             Scope::NotificationsRead => "notifications:read",
             Scope::NotificationsWrite => "notifications:write",
+            Scope::CustomerDataName => "customer_data:name",
+            Scope::CustomerDataEmail => "customer_data:email",
+            Scope::CustomerDataPhone => "customer_data:phone",
+            Scope::CustomerDataAddress => "customer_data:address",
         }
+    }
+
+    /// The scope named `name` (`as_str`'s inverse), `None` for anything else.
+    pub fn parse(name: &str) -> Option<Scope> {
+        Scope::ALL.into_iter().find(|s| s.as_str() == name)
+    }
+
+    /// Whether this scope unlocks personal data (`customer_data:*`): consent screens
+    /// list these apart, with the app's reason for each.
+    pub fn is_personal_data(self) -> bool {
+        Scope::CUSTOMER_DATA.contains(&self)
     }
 
     /// The scope that also grants this one: a write scope grants its read scope, as in
@@ -182,7 +211,11 @@ impl Scope {
             | Scope::FulfillmentsWrite
             | Scope::ChannelsWrite
             | Scope::PaymentsWrite
-            | Scope::NotificationsWrite => None,
+            | Scope::NotificationsWrite
+            | Scope::CustomerDataName
+            | Scope::CustomerDataEmail
+            | Scope::CustomerDataPhone
+            | Scope::CustomerDataAddress => None,
         }
     }
 
@@ -198,7 +231,15 @@ impl Scope {
         Scope::Checkout,
     ];
 
-    pub const ALL: [Scope; 37] = [
+    /// The personal-data scopes (AP10), in `ALL` order.
+    pub const CUSTOMER_DATA: [Scope; 4] = [
+        Scope::CustomerDataName,
+        Scope::CustomerDataEmail,
+        Scope::CustomerDataPhone,
+        Scope::CustomerDataAddress,
+    ];
+
+    pub const ALL: [Scope; 41] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -236,6 +277,10 @@ impl Scope {
         Scope::PaymentsWrite,
         Scope::NotificationsRead,
         Scope::NotificationsWrite,
+        Scope::CustomerDataName,
+        Scope::CustomerDataEmail,
+        Scope::CustomerDataPhone,
+        Scope::CustomerDataAddress,
     ];
 }
 
@@ -271,6 +316,16 @@ mod test {
                 assert_eq!(scope.implied_by(), None, "{scope}");
             }
         }
+    }
+
+    #[test]
+    fn parse_is_as_str_reversed() {
+        for scope in Scope::ALL {
+            assert_eq!(Scope::parse(scope.as_str()), Some(scope));
+        }
+        assert_eq!(Scope::parse("customer_data:ssn"), None);
+        assert!(Scope::CustomerDataEmail.is_personal_data());
+        assert!(!Scope::CustomersRead.is_personal_data());
     }
 
     #[test]

@@ -3,10 +3,14 @@
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_apps::{
-    App, CreateApp, HasApps, UpdateApp, WebhookInput, create_app, delete_app, get_app, get_event,
+    App, CreateApp, Grant, HasApps, UpdateApp, WebhookInput, create_app, get_app, get_event,
     list_apps, list_deliveries, retry_delivery, rotate_app_secret, update_app,
 };
-use hypha_core::{DeliveryId, DeliveryRecord, DeliveryStatus, EventId, HasOutbox, Stamped};
+use hypha_core::{
+    AppId, DeliveryId, DeliveryRecord, DeliveryStatus, EventId, HasOutbox, OAuthRequestId, Scope,
+    Stamped,
+};
+use hypha_oauth::{narrow_grant, request_history, uninstall};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -18,7 +22,7 @@ use crate::{
     extract::{Caller, JsonBody, PathId},
     patch,
     state::{SharedState, Storage},
-    webhooks::EventEnvelope,
+    webhooks::{EventActor, EventEnvelope, actor_of},
 };
 
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
@@ -41,6 +45,26 @@ impl From<WebhookDto> for WebhookInput {
     }
 }
 
+/// The scopes staff approved for an app installed through OAuth (design note 0029).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct GrantResponse {
+    /// What the app's tokens may do, at most.
+    scopes: Vec<Scope>,
+    /// Who approved (or last narrowed) it.
+    approved_by: EventActor,
+    approved_at: String,
+}
+
+impl GrantResponse {
+    fn new(grant: &Grant) -> Result<Self, ApiError> {
+        Ok(Self {
+            scopes: grant.scopes().to_vec(),
+            approved_by: actor_of(grant.approved_by()),
+            approved_at: rfc3339(grant.approved_at())?,
+        })
+    }
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct AppResponse {
     /// `app_<name>`.
@@ -48,6 +72,15 @@ pub struct AppResponse {
     name: String,
     /// A disabled app gets no webhooks and quotes no rates.
     enabled: bool,
+    /// What it acts as (`appid_…`): events it causes name it as their actor.
+    id: AppId,
+    /// Installed through OAuth, with a grant in force.
+    installed: bool,
+    /// The approved scopes; `null` for an app made by hand, and after an uninstall.
+    grant: Option<GrantResponse>,
+    /// When it was uninstalled (it then only gets `app.uninstalled`); `DELETE` again
+    /// removes it.
+    uninstalled_at: Option<String>,
     /// Where its events go; `null` when it takes none.
     webhook: Option<WebhookDto>,
     /// Event types it gets: exact (`order.placed`), a kind (`product.*`) or `*`.
@@ -63,6 +96,10 @@ impl AppResponse {
             key: app.key().to_string(),
             name: app.name().to_string(),
             enabled: app.enabled(),
+            id: app.id(),
+            installed: app.is_installed(),
+            grant: app.grant().map(GrantResponse::new).transpose()?,
+            uninstalled_at: app.uninstalled_at().map(rfc3339).transpose()?,
             webhook: app.webhook().map(|w| WebhookDto {
                 url: w.url.as_str().to_string(),
                 timeout_ms: Some(w.timeout_ms),
@@ -157,21 +194,160 @@ pub async fn list<S: Storage>(
     }))
 }
 
-/// One app.
+/// The manifest an app was installed from.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct InstalledManifestResponse {
+    /// Its URL: the app's OAuth client ID.
+    url: String,
+    fetched_at: String,
+    /// The manifest as checked, every URL absolute (`docs/apps/manifest.schema.json`).
+    #[schema(value_type = Object)]
+    document: serde_json::Value,
+}
+
+/// What an installed app registers, from its manifest, in force with its grant.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct RegistrationsResponse {
+    /// The webhook URL and events (`webhook` and `subscriptions` above).
+    #[schema(value_type = Option<Object>)]
+    webhooks: Option<serde_json::Value>,
+    /// `[{point, version, url}]`.
+    #[schema(value_type = Vec<Object>)]
+    extension_points: Vec<serde_json::Value>,
+    /// `{pages, blocks, actions}`.
+    #[schema(value_type = Option<Object>)]
+    admin: Option<serde_json::Value>,
+    /// `{elements, proxy}`.
+    #[schema(value_type = Option<Object>)]
+    storefront: Option<serde_json::Value>,
+}
+
+/// One authorization request in an app's history.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct GrantHistoryEntry {
+    id: OAuthRequestId,
+    /// `pending`, `approved` or `denied`.
+    status: &'static str,
+    /// What it asked for.
+    scopes: Vec<Scope>,
+    /// The grant when it asked; `null` for a first install.
+    previous_scopes: Option<Vec<Scope>>,
+    /// Who answered (an app answering for itself: no new scope, approved at once).
+    decided_by: Option<EventActor>,
+    decided_at: Option<String>,
+    created_at: String,
+}
+
+/// An app with its grant, manifest, registrations and authorization history.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct AppDetailResponse {
+    #[serde(flatten)]
+    app: AppResponse,
+    /// `null` for an app made by hand.
+    manifest: Option<InstalledManifestResponse>,
+    /// `null` unless installed.
+    registrations: Option<RegistrationsResponse>,
+    /// Its authorization requests, newest first (at most 50).
+    history: Vec<GrantHistoryEntry>,
+}
+
+impl AppDetailResponse {
+    fn new(app: &App, history: &[hypha_oauth::AuthorizationRequest]) -> Result<Self, ApiError> {
+        let manifest = app
+            .manifest()
+            .map(|m| {
+                Ok::<_, ApiError>(InstalledManifestResponse {
+                    url: m.url.clone(),
+                    fetched_at: rfc3339(m.fetched_at)?,
+                    document: m.manifest.to_value(),
+                })
+            })
+            .transpose()?;
+        let registrations = app.manifest().filter(|_| app.is_installed()).map(|m| {
+            let doc = m.manifest.document();
+            RegistrationsResponse {
+                webhooks: doc.webhooks.as_ref().map(json),
+                extension_points: doc.extension_points.iter().map(json).collect(),
+                admin: doc.admin.as_ref().map(json),
+                storefront: doc.storefront.as_ref().map(json),
+            }
+        });
+        Ok(Self {
+            app: AppResponse::new(app)?,
+            manifest,
+            registrations,
+            history: history
+                .iter()
+                .map(|r| {
+                    Ok::<_, ApiError>(GrantHistoryEntry {
+                        id: r.id(),
+                        status: r.status().as_str(),
+                        scopes: r.scopes().to_vec(),
+                        previous_scopes: r.previous_scopes().map(<[Scope]>::to_vec),
+                        decided_by: r.decided_by().map(actor_of),
+                        decided_at: r.decided_at().map(rfc3339).transpose()?,
+                        created_at: rfc3339(r.created_at())?,
+                    })
+                })
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+/// A manifest part as JSON (plain data: it always serializes).
+fn json(part: &impl Serialize) -> serde_json::Value {
+    serde_json::to_value(part).unwrap_or(serde_json::Value::Null)
+}
+
+/// One app, with its grant, the manifest it was installed from, what it registers and
+/// its authorization history.
 #[utoipa::path(
     get,
     path = "/admin/apps/{key}",
     params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp")),
-    responses((status = 200, description = "OK", body = AppResponse)),
+    responses((status = 200, description = "OK", body = AppDetailResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:read"]))),
 )]
 pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
-) -> Result<Json<AppResponse>, ApiError> {
+) -> Result<Json<AppDetailResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let app = get_app(&ctx, ports.apps(), &key).await?;
+    let history = request_history(&ctx, &ports, app.key()).await?;
+    Ok(Json(AppDetailResponse::new(&app, &history)?))
+}
+
+/// The scopes to keep.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NarrowGrantRequest {
+    /// Some of the grant's scopes; the rest are taken away at once.
+    scopes: Vec<Scope>,
+}
+
+/// Narrows an installed app's grant (design note 0029, §4.1): the scopes left out stop
+/// working at once, for tokens held already too, and the app is sent
+/// `app.grant_changed`. Adding a scope takes a new authorization staff approve
+/// (`grant_not_narrower`, 422); an app that isn't installed is `app_not_installed`, 409.
+#[utoipa::path(
+    patch,
+    path = "/admin/apps/{key}/grant",
+    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp")),
+    request_body = NarrowGrantRequest,
+    responses((status = 200, description = "OK", body = AppResponse)),
+    extensions(("x-hypha-scopes" = json!(["apps:write"]))),
+)]
+pub async fn narrow<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(key): PathId<String>,
+    body: JsonBody<NarrowGrantRequest>,
+) -> Result<Json<AppResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let app = narrow_grant(&ctx, &ports, &state.clock, &key, &req.scopes).await?;
     Ok(Json(AppResponse::new(&app)?))
 }
 
@@ -221,7 +397,11 @@ pub async fn update<S: Storage>(
     Ok(Json(AppResponse::new(&app)?))
 }
 
-/// Removes an app, its rate settings with it; deliveries still due to it fail.
+/// Uninstalls an app installed through OAuth (design note 0029, §4.1): every token is
+/// revoked, its registrations removed, and it's sent `app.uninstalled` as its last
+/// webhook; it's listed as uninstalled until a second `DELETE`. Any other app (made by
+/// hand, or uninstalled already) is removed, its rate settings with it; deliveries still
+/// due to it fail.
 #[utoipa::path(
     delete,
     path = "/admin/apps/{key}",
@@ -235,7 +415,7 @@ pub async fn delete<S: Storage>(
     PathId(key): PathId<String>,
 ) -> Result<StatusCode, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    delete_app(&ctx, ports.apps(), &key).await?;
+    uninstall(&ctx, &ports, &state.clock, &key).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -408,5 +588,10 @@ pub async fn event<S: Storage>(
 ) -> Result<Json<EventEnvelope>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let event = get_event(&ctx, ports.outbox(), id).await?;
-    Ok(Json(EventEnvelope::new(&event)?))
+    let mut envelope = EventEnvelope::new(&event)?;
+    // As an app would receive it (design note 0029, AP10).
+    if !ctx.is_staff() {
+        envelope.data = crate::redact::event_data(|s| ctx.has_scope(s), &event.data);
+    }
+    Ok(Json(envelope))
 }

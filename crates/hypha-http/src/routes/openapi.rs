@@ -53,8 +53,11 @@ impl Doc {
                     HttpBuilder::new()
                         .scheme(HttpAuthScheme::Bearer)
                         .description(Some(
-                            "A staff session (`hypha_sess_…`, from `POST /admin/auth/login`) or a \
-                             secret API key (`hypha_sk_…`).",
+                            "A staff session (`hypha_sess_…`, from `POST /admin/auth/login`), a \
+                             secret API key (`hypha_sk_…`), or an app's OAuth access token \
+                             (`hypha_at_…`, from `POST /oauth/token`). Callers other than staff \
+                             sessions see personal data only with the `customer_data:*` scopes: \
+                             without them those fields are absent and listed in `redacted`.",
                         ))
                         .build(),
                 ),

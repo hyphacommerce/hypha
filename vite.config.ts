@@ -15,6 +15,7 @@ const generated = [
   "apps/*/theme/*.d.ts",
   "openapi/**",
   "hypha.config.schema.json",
+  "docs/apps/manifest.schema.json",
   "target/**",
   "spikes/**",
   "hypha-deploy*/**",

@@ -32,6 +32,7 @@ mod inventory;
 mod markets;
 mod media;
 mod notifications;
+mod oauth;
 mod orders;
 mod outbox;
 mod payments;
@@ -60,6 +61,7 @@ pub use notifications::{
     notification_repo, notification_settings_batch, notification_settings_repo,
     notification_template_repo,
 };
+pub use oauth::oauth_repos;
 pub use orders::order_repo;
 pub use outbox::outbox;
 pub use payments::{payment_batch, payment_method_delete, payment_method_repo, payment_repo};

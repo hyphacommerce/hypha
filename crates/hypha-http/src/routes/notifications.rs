@@ -3,7 +3,7 @@
 //! message with resending.
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AssetId, EventId, NotificationId, OrderId, Stamped};
+use hypha_core::{AssetId, EventId, NotificationId, OrderId, Scope, Stamped};
 use hypha_mail::{MailContext, MailEnv, TemplateInput, UpdateSettings};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_notifications::{
@@ -23,6 +23,7 @@ use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
     patch,
+    redact::{self, Family, Redacted},
     state::{SharedState, Storage},
 };
 
@@ -576,6 +577,11 @@ pub async fn preview<S: Storage>(
     let req = body.parse()?;
     let key = template_key(&key)?;
     let (input, order) = req.into_parts();
+    // A preview of an order's email shows the buyer's details: only for callers who may
+    // see all of them (design note 0029, AP10).
+    if order.is_some() {
+        redact::require_fields(&ctx, &Scope::CUSTOMER_DATA)?;
+    }
     let rendered = hypha_mail::preview(&ctx, &*state.mail, &ports, key, input, order).await?;
     Ok(Json(rendered.into()))
 }
@@ -666,6 +672,12 @@ pub struct NotificationResponse {
     id: NotificationId,
     template: TemplateKeyDto,
     to: String,
+    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
+    /// app without the matching `customer_data:*` scope. They are absent from the
+    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
     subject: String,
     status: NotificationStatusDto,
     /// Sends tried so far.
@@ -696,6 +708,7 @@ impl NotificationResponse {
             id: n.id(),
             template: n.template().into(),
             to: n.to().to_string(),
+            redacted: None,
             subject: n.subject().to_string(),
             status: n.status().into(),
             attempts: n.attempts(),
@@ -744,7 +757,7 @@ pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     query: ListQuery<NotificationFilters>,
-) -> Result<Json<NotificationPage>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, filters, scope) = query.parse()?;
     let filter = NotificationFilter {
@@ -753,12 +766,8 @@ pub async fn list<S: Storage>(
         status: filters.status.map(Into::into),
     };
     let page = list_notifications(&ctx, &ports, filter, page).await?;
-    Ok(Json(PageResponse::new(
-        page,
-        &scope,
-        |n| n.id(),
-        |n| NotificationResponse::new(&n),
-    )?))
+    let page = PageResponse::new(page, &scope, |n| n.id(), |n| NotificationResponse::new(&n))?;
+    Ok(Json(redact::page(&ctx, Family::Notification, page)?))
 }
 
 /// One email's record (`orders:read` too, as the list).
@@ -773,10 +782,14 @@ pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<NotificationId>,
-) -> Result<Json<NotificationResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let notification = get_notification(&ctx, &ports, id).await?;
-    Ok(Json(NotificationResponse::new(&notification)?))
+    Ok(Json(redact::one(
+        &ctx,
+        Family::Notification,
+        NotificationResponse::new(&notification)?,
+    )?))
 }
 
 /// Sends an order's email again ("the customer didn't get it"), rendered from the order
@@ -795,11 +808,15 @@ pub async fn resend<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<NotificationId>,
-) -> Result<(StatusCode, Json<NotificationResponse>), ApiError> {
+) -> Result<(StatusCode, Json<Redacted>), ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let queued = hypha_mail::resend(&ctx, &*state.mail, &ports, id).await?;
     Ok((
         StatusCode::CREATED,
-        Json(NotificationResponse::new(&queued)?),
+        Json(redact::one(
+            &ctx,
+            Family::Notification,
+            NotificationResponse::new(&queued)?,
+        )?),
     ))
 }

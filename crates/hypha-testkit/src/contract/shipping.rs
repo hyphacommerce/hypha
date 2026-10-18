@@ -44,6 +44,7 @@ pub async fn app_provider_repo<S: HasAppProviders + HasApps>(make: impl AsyncFn(
 async fn add_app<S: HasApps>(store: &S, k: &str) {
     let mut app = App::new(NewApp {
         key: AppKey::new(k).unwrap(),
+        id: super::apps::id_of(k),
         name: "Acme Carrier".to_string(),
         secret: Sealed::from_bytes(vec![1, 2, 3, 255]),
         webhook: None,

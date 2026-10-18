@@ -50,11 +50,15 @@ pub enum Rule {
     /// around the per-cart limit above. A server-rendered storefront passes each
     /// shopper's address in `X-Forwarded-For` and is listed in `HYPHA_TRUSTED_PROXIES`.
     CartCreateIp,
+    /// `GET /oauth/authorize`, `POST /oauth/token` and `POST /oauth/revoke`, per client
+    /// address (design note 0029): they need no credentials, and token guessing must be
+    /// slow.
+    OAuthIp,
 }
 
 impl Rule {
     /// In declaration order: an in-memory limiter can index by `rule as usize`.
-    pub const ALL: [Rule; 10] = [
+    pub const ALL: [Rule; 11] = [
         Rule::LoginIp,
         Rule::LoginEmailFromIp,
         Rule::LoginEmail,
@@ -65,6 +69,7 @@ impl Rule {
         Rule::InviteIp,
         Rule::ShippingQuotesCart,
         Rule::CartCreateIp,
+        Rule::OAuthIp,
     ];
 
     /// The rule's key under `[rate_limits]` (`login_ip`): a contract with operators,
@@ -81,6 +86,7 @@ impl Rule {
             Rule::InviteIp => "invite_ip",
             Rule::ShippingQuotesCart => "shipping_quotes_cart",
             Rule::CartCreateIp => "cart_create_ip",
+            Rule::OAuthIp => "oauth_ip",
         }
     }
 
@@ -99,6 +105,7 @@ impl Rule {
             Rule::InviteIp => "RL_INVITE_IP",
             Rule::ShippingQuotesCart => "RL_SHIPPING_QUOTES_CART",
             Rule::CartCreateIp => "RL_CART_CREATE_IP",
+            Rule::OAuthIp => "RL_OAUTH_IP",
         }
     }
 
@@ -117,6 +124,7 @@ impl Rule {
             Rule::InviteIp => 7,
             Rule::ShippingQuotesCart => 8,
             Rule::CartCreateIp => 9,
+            Rule::OAuthIp => 10,
         }
     }
 
@@ -143,6 +151,7 @@ impl Rule {
             Rule::InviteIp => limits.invite_ip,
             Rule::ShippingQuotesCart => limits.shipping_quotes_cart,
             Rule::CartCreateIp => limits.cart_create_ip,
+            Rule::OAuthIp => limits.oauth_ip,
         };
         (quota.burst, quota.per.0)
     }

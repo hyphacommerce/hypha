@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use hypha_apps::{App, open_secret};
 use hypha_core::{
-    Actor, CatalogId, Clock, CustomerId, Delivery, DeliveryId, EventId, InventoryItemId, MarketId,
-    OrderId, PriceListId, ProductId, ShippingZoneId, StoredEvent, TaxClassId, TaxRegionId,
+    Actor, AppId, CatalogId, Clock, CustomerId, Delivery, DeliveryId, EventId, InventoryItemId,
+    MarketId, OrderId, PriceListId, ProductId, ShippingZoneId, StoredEvent, TaxClassId,
+    TaxRegionId,
 };
 use hypha_dispatch::WebhookSender;
 use serde::Serialize;
@@ -63,7 +64,7 @@ pub struct EventSubject {
 /// Who caused an event.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct EventActor {
-    /// `user`, `agent`, `api_key` or `system`.
+    /// `user`, `agent`, `api_key`, `app` or `system`.
     #[serde(rename = "type")]
     pub kind: &'static str,
     /// Their prefixed ID; `null` for the system.
@@ -81,7 +82,7 @@ impl EventEnvelope {
                 id: subject_id(&event.subject_kind, event.subject_id),
                 version: event.subject_version.map(|v| v.value()),
             },
-            actor: actor(event.actor),
+            actor: actor_of(event.actor),
             occurred_at: rfc3339(event.occurred_at)?,
             data: event.data.clone(),
         })
@@ -102,16 +103,19 @@ fn subject_id(kind: &str, id: Uuid) -> String {
         "customer" => CustomerId::PREFIX,
         "order" => OrderId::PREFIX,
         "shipping_zone" => ShippingZoneId::PREFIX,
+        "app" => AppId::PREFIX,
         _ => return id.to_string(),
     };
     format!("{prefix}_{}", id.simple())
 }
 
-fn actor(actor: Actor) -> EventActor {
+/// An actor as events and grants show it: its kind and prefixed ID.
+pub fn actor_of(actor: Actor) -> EventActor {
     let (kind, id) = match actor {
         Actor::User(id) => ("user", Some(id.to_string())),
         Actor::Agent(id) => ("agent", Some(id.to_string())),
         Actor::ApiKey(id) => ("api_key", Some(id.to_string())),
+        Actor::App(id) => ("app", Some(id.to_string())),
         Actor::System => ("system", None),
     };
     EventActor { kind, id }
@@ -131,10 +135,15 @@ impl WebhookSender for HostWebhooks<'_> {
         let webhook = app
             .webhook()
             .ok_or_else(|| format!("app {} has no webhook", app.key()))?;
-        let envelope = EventEnvelope::new(&delivery.event).map_err(|e| {
+        let mut envelope = EventEnvelope::new(&delivery.event).map_err(|e| {
             tracing::error!(event = %delivery.event.id, error = ?e, "webhooks: bad event");
             "the event can't be sent".to_string()
         })?;
+        // Personal data only as far as the app's grant allows (design note 0029, AP10).
+        envelope.data = crate::redact::event_data(
+            |scope| app.grant().is_some_and(|g| g.has(scope)),
+            &delivery.event.data,
+        );
         let body = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
         // Another `HYPHA_SECRET_KEY` than the one that sealed it: the operator's to fix.
         let secret = open_secret(self.env, app).map_err(|e| {
@@ -212,7 +221,7 @@ mod tests {
             subject_id("spore_thing", Uuid::from_u128(2)),
             "00000000-0000-0000-0000-000000000002"
         );
-        let system = actor(Actor::System);
+        let system = actor_of(Actor::System);
         assert_eq!((system.kind, system.id), ("system", None));
     }
 }

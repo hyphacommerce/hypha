@@ -261,6 +261,16 @@
               "string",
               "null"
             ]
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
@@ -422,6 +432,59 @@
         ],
         "type": "object"
       },
+      "AppDetailResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AppResponse"
+          },
+          {
+            "properties": {
+              "history": {
+                "description": "Its authorization requests, newest first (at most 50).",
+                "items": {
+                  "$ref": "#/components/schemas/GrantHistoryEntry"
+                },
+                "type": "array"
+              },
+              "manifest": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/InstalledManifestResponse",
+                    "description": "`null` for an app made by hand."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "registrations": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RegistrationsResponse",
+                    "description": "`null` unless installed."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "history"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "An app with its grant, manifest, registrations and authorization history."
+      },
+      "AppId": {
+        "description": "A AppId: `appid_` and 32 hex digits.",
+        "examples": [
+          "appid_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^appid_[0-9a-f]{32}$",
+        "type": "string"
+      },
       "AppList": {
         "properties": {
           "items": {
@@ -492,6 +555,25 @@
             "description": "A disabled app gets no webhooks and quotes no rates.",
             "type": "boolean"
           },
+          "grant": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GrantResponse",
+                "description": "The approved scopes; `null` for an app made by hand, and after an uninstall."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/AppId",
+            "description": "What it acts as (`appid_…`): events it causes name it as their actor."
+          },
+          "installed": {
+            "description": "Installed through OAuth, with a grant in force.",
+            "type": "boolean"
+          },
           "key": {
             "description": "`app_<name>`.",
             "type": "string"
@@ -505,6 +587,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "uninstalled_at": {
+            "description": "When it was uninstalled (it then only gets `app.uninstalled`); `DELETE` again\nremoves it.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "updated_at": {
             "type": "string"
@@ -525,6 +614,8 @@
           "key",
           "name",
           "enabled",
+          "id",
+          "installed",
           "subscriptions",
           "created_at",
           "updated_at"
@@ -901,6 +992,16 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
             ]
           },
           "shipping_address": {
@@ -1490,6 +1591,136 @@
         "required": [
           "token",
           "password"
+        ],
+        "type": "object"
+      },
+      "ConsentAnswer": {
+        "description": "Where to send the browser after an answer.",
+        "properties": {
+          "redirect_to": {
+            "description": "The app's redirect URI with `code` and `state` (approved), or `error=access_denied`\nand `state` (denied). Navigate the browser there.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_to"
+        ],
+        "type": "object"
+      },
+      "ConsentApp": {
+        "description": "The app as its manifest describes it, for the consent page.",
+        "properties": {
+          "app_url": {
+            "description": "The publisher's site (the manifest's `app_url`).",
+            "type": "string"
+          },
+          "client_id": {
+            "description": "The manifest's URL: the app's client ID.",
+            "type": "string"
+          },
+          "icon": {
+            "description": "A square image's URL.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "installed": {
+            "description": "Whether the app is installed (a grant in force): then this is a change of scopes.",
+            "type": "boolean"
+          },
+          "key": {
+            "description": "`app_<name>`.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "privacy_url": {
+            "description": "The app's privacy policy: link it.",
+            "type": "string"
+          },
+          "publisher": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "description": "The app's own version.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "version",
+          "app_url",
+          "privacy_url",
+          "client_id",
+          "installed"
+        ],
+        "type": "object"
+      },
+      "ConsentRequestResponse": {
+        "description": "An authorization request, as the consent page shows it.",
+        "properties": {
+          "app": {
+            "$ref": "#/components/schemas/ConsentApp"
+          },
+          "changes": {
+            "$ref": "#/components/schemas/ScopeChanges"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "The request can be answered until then (RFC 3339).",
+            "type": "string"
+          },
+          "groups": {
+            "description": "The scopes that aren't personal data, by area.",
+            "items": {
+              "$ref": "#/components/schemas/ScopeGroup"
+            },
+            "type": "array"
+          },
+          "id": {
+            "$ref": "#/components/schemas/OAuthRequestId"
+          },
+          "personal_data": {
+            "description": "The `customer_data:*` scopes asked for, with the manifest's reasons: list these\napart, so staff see exactly which personal data the app will see.",
+            "items": {
+              "$ref": "#/components/schemas/PersonalDataScope"
+            },
+            "type": "array"
+          },
+          "redirect_uri": {
+            "description": "Where the browser goes after the answer.",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "Every scope asked for, in `Scope` order (personal-data ones included).",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OAuthRequestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "app",
+          "scopes",
+          "groups",
+          "personal_data",
+          "changes",
+          "redirect_uri",
+          "created_at",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -2193,6 +2424,16 @@
               "null"
             ]
           },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "updated_at": {
             "description": "When it last changed, RFC 3339 in UTC.",
             "type": "string"
@@ -2268,6 +2509,16 @@
           "phone": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
               "null"
             ]
           },
@@ -2441,7 +2692,7 @@
             ]
           },
           "type": {
-            "description": "`user`, `agent`, `api_key` or `system`.",
+            "description": "`user`, `agent`, `api_key`, `app` or `system`.",
             "type": "string"
           }
         },
@@ -2803,6 +3054,87 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "GrantHistoryEntry": {
+        "description": "One authorization request in an app's history.",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "decided_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "decided_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventActor",
+                "description": "Who answered (an app answering for itself: no new scope, approved at once)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/OAuthRequestId"
+          },
+          "previous_scopes": {
+            "description": "The grant when it asked; `null` for a first install.",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "scopes": {
+            "description": "What it asked for.",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "`pending`, `approved` or `denied`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "scopes",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "GrantResponse": {
+        "description": "The scopes staff approved for an app installed through OAuth (design note 0029).",
+        "properties": {
+          "approved_at": {
+            "type": "string"
+          },
+          "approved_by": {
+            "$ref": "#/components/schemas/EventActor",
+            "description": "Who approved (or last narrowed) it."
+          },
+          "scopes": {
+            "description": "What the app's tokens may do, at most.",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "scopes",
+          "approved_by",
+          "approved_at"
+        ],
+        "type": "object"
+      },
       "HeaderResponse": {
         "properties": {
           "name": {
@@ -2815,6 +3147,28 @@
         "required": [
           "name",
           "value"
+        ],
+        "type": "object"
+      },
+      "InstalledManifestResponse": {
+        "description": "The manifest an app was installed from.",
+        "properties": {
+          "document": {
+            "description": "The manifest as checked, every URL absolute (`docs/apps/manifest.schema.json`).",
+            "type": "object"
+          },
+          "fetched_at": {
+            "type": "string"
+          },
+          "url": {
+            "description": "Its URL: the app's OAuth client ID.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "fetched_at",
+          "document"
         ],
         "type": "object"
       },
@@ -3387,6 +3741,23 @@
         ],
         "type": "object"
       },
+      "NarrowGrantRequest": {
+        "additionalProperties": false,
+        "description": "The scopes to keep.",
+        "properties": {
+          "scopes": {
+            "description": "Some of the grant's scopes; the rest are taken away at once.",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "scopes"
+        ],
+        "type": "object"
+      },
       "NotificationAudience": {
         "description": "Who a template's messages go to.\n\nKnown values: `buyer`, `staff`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -3499,6 +3870,16 @@
             "description": "The provider's ID for it, when it gives one.",
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
               "null"
             ]
           },
@@ -3745,6 +4126,25 @@
           "can_disable"
         ],
         "type": "object"
+      },
+      "OAuthRequestId": {
+        "description": "A OAuthRequestId: `oareq_` and 32 hex digits.",
+        "examples": [
+          "oareq_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^oareq_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "OAuthRequestStatus": {
+        "description": "Where a request stands.\n\nKnown values: `pending`, `approved`, `denied`, `expired`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "pending",
+          "approved",
+          "denied",
+          "expired"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "OptionId": {
         "description": "A OptionId: `opt_` and 32 hex digits.",
@@ -4000,6 +4400,16 @@
             "description": "RFC 3339, UTC.",
             "type": "string"
           },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "shipping_address": {
             "oneOf": [
               {
@@ -4216,6 +4626,16 @@
           "placed_at": {
             "description": "RFC 3339, UTC.",
             "type": "string"
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "total": {
             "$ref": "#/components/schemas/Money"
@@ -4471,6 +4891,23 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "PersonalDataScope": {
+        "description": "A personal-data scope and why the app says it needs it.",
+        "properties": {
+          "reason": {
+            "description": "From the manifest's `scope_reasons` (required for these).",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope"
+          }
+        },
+        "required": [
+          "scope",
+          "reason"
+        ],
+        "type": "object"
+      },
       "PostalAddressRequest": {
         "additionalProperties": false,
         "description": "Sent: checked by `Address::new` (last name, first line and city required; text is\ntrimmed, at most 255 characters per field).",
@@ -4580,6 +5017,16 @@
           "province": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
               "null"
             ]
           }
@@ -5139,6 +5586,43 @@
         ],
         "type": "object"
       },
+      "RegistrationsResponse": {
+        "description": "What an installed app registers, from its manifest, in force with its grant.",
+        "properties": {
+          "admin": {
+            "description": "`{pages, blocks, actions}`.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "extension_points": {
+            "description": "`[{point, version, url}]`.",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "storefront": {
+            "description": "`{elements, proxy}`.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "webhooks": {
+            "description": "The webhook URL and events (`webhook` and `subscriptions` above).",
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "extension_points"
+        ],
+        "type": "object"
+      },
       "RemoveFixedPricesRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5268,7 +5752,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "products:read",
           "products:write",
@@ -5306,10 +5790,63 @@
           "payments:read",
           "payments:write",
           "notifications:read",
-          "notifications:write"
+          "notifications:write",
+          "customer_data:name",
+          "customer_data:email",
+          "customer_data:phone",
+          "customer_data:address"
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "ScopeChanges": {
+        "description": "What approving changes compared with the app's current grant (everything is `added`\non a first install).",
+        "properties": {
+          "added": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          },
+          "kept": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          },
+          "removed": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "added",
+          "removed",
+          "kept"
+        ],
+        "type": "object"
+      },
+      "ScopeGroup": {
+        "description": "Scopes of one area (`orders`), for the consent page.",
+        "properties": {
+          "area": {
+            "description": "The scopes' prefix: `orders`, `products`, `checkout`.",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "area",
+          "scopes"
+        ],
+        "type": "object"
       },
       "SearchSettingsResponse": {
         "properties": {
@@ -7087,7 +7624,7 @@
     },
     "securitySchemes": {
       "bearer": {
-        "description": "A staff session (`hypha_sess_…`, from `POST /admin/auth/login`) or a secret API key (`hypha_sk_…`).",
+        "description": "A staff session (`hypha_sess_…`, from `POST /admin/auth/login`), a secret API key (`hypha_sk_…`), or an app's OAuth access token (`hypha_at_…`, from `POST /oauth/token`). Callers other than staff sessions see personal data only with the `customer_data:*` scopes: without them those fields are absent and listed in `redacted`.",
         "scheme": "bearer",
         "type": "http"
       }
@@ -7772,7 +8309,7 @@
             "bearer": []
           }
         ],
-        "summary": "Removes an app, its rate settings with it; deliveries still due to it fail.",
+        "summary": "Uninstalls an app installed through OAuth (design note 0029, §4.1): every token is\nrevoked, its registrations removed, and it's sent `app.uninstalled` as its last\nwebhook; it's listed as uninstalled until a second `DELETE`. Any other app (made by\nhand, or uninstalled already) is removed, its rate settings with it; deliveries still\ndue to it fail.",
         "tags": [
           "apps"
         ],
@@ -7799,7 +8336,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppResponse"
+                  "$ref": "#/components/schemas/AppDetailResponse"
                 }
               }
             },
@@ -7861,7 +8398,7 @@
             "bearer": []
           }
         ],
-        "summary": "One app.",
+        "summary": "One app, with its grant, the manifest it was installed from, what it registers and\nits authorization history.",
         "tags": [
           "apps"
         ],
@@ -8241,6 +8778,147 @@
           }
         ],
         "summary": "Sends a delivery again when the dispatcher next runs (within seconds): a failed one\ngets one more attempt, a pending one stops waiting. One being sent right now is\nreturned as it is.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      }
+    },
+    "/admin/apps/{key}/grant": {
+      "patch": {
+        "operationId": "admin.apps.narrow",
+        "parameters": [
+          {
+            "example": "app_erp",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NarrowGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Narrows an installed app's grant (design note 0029, §4.1): the scopes left out stop\nworking at once, for tokens held already too, and the app is sent\n`app.grant_changed`. Adding a scope takes a new authorization staff approve\n(`grant_not_narrower`, 422); an app that isn't installed is `app_not_installed`, 409.",
         "tags": [
           "apps"
         ],
@@ -12314,7 +12992,7 @@
             }
           },
           {
-            "description": "Only customers whose email, first or last name or phone contains this text,\nignoring case. Up to 255 characters; blank filters nothing.",
+            "description": "Only customers whose email, first or last name or phone contains this text,\nignoring case. Up to 255 characters; blank filters nothing. A caller that isn't\na staff session needs `customer_data:name`, `:email` and `:phone` for it\n(sorting by email or name, the matching one).",
             "in": "query",
             "name": "q",
             "required": false,
@@ -17497,6 +18175,293 @@
         ]
       }
     },
+    "/admin/oauth/requests/{id}": {
+      "get": {
+        "operationId": "admin.oauth.fetch_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OAuthRequestId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentRequestResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "An authorization request for the consent page: the app, the scopes grouped by area,\nthe personal-data scopes apart with the manifest's reasons, and what changes\ncompared with the app's grant.",
+        "tags": [
+          "oauth"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      }
+    },
+    "/admin/oauth/requests/{id}/approve": {
+      "post": {
+        "operationId": "admin.oauth.approve_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OAuthRequestId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentAnswer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Approves a request: installs the app (or replaces its grant) with the scopes asked\nfor. The staff member needs `apps:write` and every scope requested\n(`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten\nminutes, `oauth_request_decided` once answered.",
+        "tags": [
+          "oauth"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      }
+    },
+    "/admin/oauth/requests/{id}/deny": {
+      "post": {
+        "operationId": "admin.oauth.deny_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OAuthRequestId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentAnswer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Denies a request; the app is told `access_denied`.",
+        "tags": [
+          "oauth"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      }
+    },
     "/admin/orders": {
       "get": {
         "operationId": "admin.orders.list",
@@ -17523,7 +18488,7 @@
             }
           },
           {
-            "description": "The order's number (`1001` or `#1001`), or text its email contains, ignoring case.\nUp to 255 characters; blank filters nothing.",
+            "description": "The order's number (`1001` or `#1001`), or text its email contains, ignoring case.\nUp to 255 characters; blank filters nothing. Searching by email takes\n`customer_data:email` for callers that aren't staff sessions.",
             "in": "query",
             "name": "q",
             "required": false,

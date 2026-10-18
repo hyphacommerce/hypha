@@ -39,8 +39,8 @@ pub use email::{Email, EmailError};
 pub use error_code::ErrorCode;
 pub use events::{
     ActingAs, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, DispatchHook, Event,
-    HasOutbox, OutboxRepo, Outcome, PendingEvent, Recorded, Recorder, SignalsDispatch, StageEvents,
-    StoredEvent, Subject,
+    EventRoute, HasOutbox, OutboxRepo, Outcome, PendingEvent, Recorded, Recorder, SignalsDispatch,
+    StageEvents, StoredEvent, Subject,
 };
 pub use financial::FinancialStatus;
 pub use handle::{Handle, HandleError};
@@ -50,11 +50,12 @@ pub use idempotency::{
     IdempotencyRequest, Idempotent, StageIdempotency, earlier_id, earlier_result,
 };
 pub use ids::{
-    AddressId, AgentId, ApiKeyId, AssetId, CartId, CatalogId, CategoryId, ChannelId, CustomerId,
-    DeliveryId, EventId, FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId, LocationId,
-    MarketId, NotificationId, OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId,
-    PaymentId, PaymentMethodId, PriceListId, ProductId, RoleId, SessionId, ShippingGroupId,
-    ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId, VariantId,
+    AddressId, AgentId, ApiKeyId, AppId, AssetId, CartId, CatalogId, CategoryId, ChannelId,
+    CustomerId, DeliveryId, EventId, FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId,
+    LocationId, MarketId, NotificationId, OAuthRequestId, OptionId, OptionValueId, OrderId,
+    OrderLineId, PasswordResetId, PaymentId, PaymentMethodId, PriceListId, ProductId, RoleId,
+    SessionId, ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId,
+    UserId, VariantId,
 };
 pub use language::{Language, LanguageError};
 pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};

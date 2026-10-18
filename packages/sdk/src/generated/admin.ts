@@ -79,11 +79,20 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One app. */
+        /**
+         * One app, with its grant, the manifest it was installed from, what it registers and
+         *     its authorization history.
+         */
         get: operations["admin.apps.fetch"];
         put?: never;
         post?: never;
-        /** Removes an app, its rate settings with it; deliveries still due to it fail. */
+        /**
+         * Uninstalls an app installed through OAuth (design note 0029, §4.1): every token is
+         *     revoked, its registrations removed, and it's sent `app.uninstalled` as its last
+         *     webhook; it's listed as uninstalled until a second `DELETE`. Any other app (made by
+         *     hand, or uninstalled already) is removed, its rate settings with it; deliveries still
+         *     due to it fail.
+         */
         delete: operations["admin.apps.delete"];
         options?: never;
         head?: never;
@@ -130,6 +139,28 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/apps/{key}/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Narrows an installed app's grant (design note 0029, §4.1): the scopes left out stop
+         *     working at once, for tokens held already too, and the app is sent
+         *     `app.grant_changed`. Adding a scope takes a new authorization staff approve
+         *     (`grant_not_narrower`, 422); an app that isn't installed is `app_not_installed`, 409.
+         */
+        patch: operations["admin.apps.narrow"];
         trace?: never;
     };
     "/admin/apps/{key}/secret": {
@@ -1204,6 +1235,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/oauth/requests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An authorization request for the consent page: the app, the scopes grouped by area,
+         *     the personal-data scopes apart with the manifest's reasons, and what changes
+         *     compared with the app's grant.
+         */
+        get: operations["admin.oauth.fetch_request"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/oauth/requests/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approves a request: installs the app (or replaces its grant) with the scopes asked
+         *     for. The staff member needs `apps:write` and every scope requested
+         *     (`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten
+         *     minutes, `oauth_request_decided` once answered.
+         */
+        post: operations["admin.oauth.approve_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/oauth/requests/{id}/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Denies a request; the app is told `access_denied`. */
+        post: operations["admin.oauth.deny_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/orders": {
         parameters: {
             query?: never;
@@ -2118,6 +2209,12 @@ export interface components {
             phone?: string | null;
             postal_code?: string | null;
             province?: string | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
         };
         AdjustOnHandRequest: {
             /**
@@ -2170,6 +2267,18 @@ export interface components {
             revoked_at?: string | null;
             scopes: components["schemas"]["Scope"][];
         };
+        /** @description An app with its grant, manifest, registrations and authorization history. */
+        AppDetailResponse: components["schemas"]["AppResponse"] & {
+            /** @description Its authorization requests, newest first (at most 50). */
+            history: components["schemas"]["GrantHistoryEntry"][];
+            manifest?: components["schemas"]["InstalledManifestResponse"] | null;
+            registrations?: components["schemas"]["RegistrationsResponse"] | null;
+        };
+        /**
+         * @description A AppId: `appid_` and 32 hex digits.
+         * @example appid_0190f1a2b3c47d8e9f00112233445566
+         */
+        AppId: string;
         AppList: {
             /** @description By key. */
             items: components["schemas"]["AppResponse"][];
@@ -2195,11 +2304,21 @@ export interface components {
             created_at: string;
             /** @description A disabled app gets no webhooks and quotes no rates. */
             enabled: boolean;
+            grant?: components["schemas"]["GrantResponse"] | null;
+            /** @description What it acts as (`appid_…`): events it causes name it as their actor. */
+            id: components["schemas"]["AppId"];
+            /** @description Installed through OAuth, with a grant in force. */
+            installed: boolean;
             /** @description `app_<name>`. */
             key: string;
             name: string;
             /** @description Event types it gets: exact (`order.placed`), a kind (`product.*`) or `*`. */
             subscriptions: string[];
+            /**
+             * @description When it was uninstalled (it then only gets `app.uninstalled`); `DELETE` again
+             *     removes it.
+             */
+            uninstalled_at?: string | null;
             updated_at: string;
             webhook?: components["schemas"]["WebhookDto"] | null;
         };
@@ -2326,6 +2445,12 @@ export interface components {
             market: components["schemas"]["MarketId"];
             order?: components["schemas"]["OrderId"] | null;
             payment_method?: components["schemas"]["PaymentMethodId"] | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
             /**
              * @description The groups of lines that ship together, each needing a chosen option before
@@ -2509,6 +2634,54 @@ export interface components {
         ConfirmResetRequest: {
             password: string;
             token: string;
+        };
+        /** @description Where to send the browser after an answer. */
+        ConsentAnswer: {
+            /**
+             * @description The app's redirect URI with `code` and `state` (approved), or `error=access_denied`
+             *     and `state` (denied). Navigate the browser there.
+             */
+            redirect_to: string;
+        };
+        /** @description The app as its manifest describes it, for the consent page. */
+        ConsentApp: {
+            /** @description The publisher's site (the manifest's `app_url`). */
+            app_url: string;
+            /** @description The manifest's URL: the app's client ID. */
+            client_id: string;
+            /** @description A square image's URL. */
+            icon?: string | null;
+            /** @description Whether the app is installed (a grant in force): then this is a change of scopes. */
+            installed: boolean;
+            /** @description `app_<name>`. */
+            key: string;
+            name: string;
+            /** @description The app's privacy policy: link it. */
+            privacy_url: string;
+            publisher?: string | null;
+            /** @description The app's own version. */
+            version: string;
+        };
+        /** @description An authorization request, as the consent page shows it. */
+        ConsentRequestResponse: {
+            app: components["schemas"]["ConsentApp"];
+            changes: components["schemas"]["ScopeChanges"];
+            created_at: string;
+            /** @description The request can be answered until then (RFC 3339). */
+            expires_at: string;
+            /** @description The scopes that aren't personal data, by area. */
+            groups: components["schemas"]["ScopeGroup"][];
+            id: components["schemas"]["OAuthRequestId"];
+            /**
+             * @description The `customer_data:*` scopes asked for, with the manifest's reasons: list these
+             *     apart, so staff see exactly which personal data the app will see.
+             */
+            personal_data: components["schemas"]["PersonalDataScope"][];
+            /** @description Where the browser goes after the answer. */
+            redirect_uri: string;
+            /** @description Every scope asked for, in `Scope` order (personal-data ones included). */
+            scopes: components["schemas"]["Scope"][];
+            status: components["schemas"]["OAuthRequestStatus"];
         };
         /**
          * @description An ISO 3166-1 alpha-2 country code.
@@ -2748,6 +2921,12 @@ export interface components {
             id: components["schemas"]["CustomerId"];
             last_name?: string | null;
             phone?: string | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
         };
@@ -2773,6 +2952,12 @@ export interface components {
             id: components["schemas"]["CustomerId"];
             last_name?: string | null;
             phone?: string | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
             /** @description When the customer last changed, RFC 3339 in UTC. */
             updated_at: string;
         };
@@ -2844,7 +3029,7 @@ export interface components {
         EventActor: {
             /** @description Their prefixed ID; `null` for the system. */
             id?: string | null;
-            /** @description `user`, `agent`, `api_key` or `system`. */
+            /** @description `user`, `agent`, `api_key`, `app` or `system`. */
             type: string;
         };
         /**
@@ -2978,9 +3163,38 @@ export interface components {
          * @enum {string}
          */
         FulfillmentStatusDto: string;
+        /** @description One authorization request in an app's history. */
+        GrantHistoryEntry: {
+            created_at: string;
+            decided_at?: string | null;
+            decided_by?: components["schemas"]["EventActor"] | null;
+            id: components["schemas"]["OAuthRequestId"];
+            /** @description The grant when it asked; `null` for a first install. */
+            previous_scopes?: components["schemas"]["Scope"][] | null;
+            /** @description What it asked for. */
+            scopes: components["schemas"]["Scope"][];
+            /** @description `pending`, `approved` or `denied`. */
+            status: string;
+        };
+        /** @description The scopes staff approved for an app installed through OAuth (design note 0029). */
+        GrantResponse: {
+            approved_at: string;
+            /** @description Who approved (or last narrowed) it. */
+            approved_by: components["schemas"]["EventActor"];
+            /** @description What the app's tokens may do, at most. */
+            scopes: components["schemas"]["Scope"][];
+        };
         HeaderResponse: {
             name: string;
             value: string;
+        };
+        /** @description The manifest an app was installed from. */
+        InstalledManifestResponse: {
+            /** @description The manifest as checked, every URL absolute (`docs/apps/manifest.schema.json`). */
+            document: Record<string, never>;
+            fetched_at: string;
+            /** @description Its URL: the app's OAuth client ID. */
+            url: string;
         };
         /**
          * @description A InventoryItemId: `invi_` and 32 hex digits.
@@ -3170,6 +3384,11 @@ export interface components {
              */
             currency: string;
         };
+        /** @description The scopes to keep. */
+        NarrowGrantRequest: {
+            /** @description Some of the grant's scopes; the rest are taken away at once. */
+            scopes: components["schemas"]["Scope"][];
+        };
         /**
          * @description Who a template's messages go to.
          *
@@ -3218,6 +3437,12 @@ export interface components {
             provider?: string | null;
             /** @description The provider's ID for it, when it gives one. */
             provider_message_id?: string | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
             sent_at?: string | null;
             status: components["schemas"]["NotificationStatus"];
             subject: string;
@@ -3305,6 +3530,18 @@ export interface components {
             problem?: components["schemas"]["TemplateProblemResponse"] | null;
         };
         /**
+         * @description A OAuthRequestId: `oareq_` and 32 hex digits.
+         * @example oareq_0190f1a2b3c47d8e9f00112233445566
+         */
+        OAuthRequestId: string;
+        /**
+         * @description Where a request stands.
+         *
+         *     Known values: `pending`, `approved`, `denied`, `expired`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        OAuthRequestStatus: string;
+        /**
          * @description A OptionId: `opt_` and 32 hex digits.
          * @example opt_0190f1a2b3c47d8e9f00112233445566
          */
@@ -3385,6 +3622,12 @@ export interface components {
             number: number;
             /** @description RFC 3339, UTC. */
             placed_at: string;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
             /** @description How each group of lines ships, as charged. */
             shipping_lines: components["schemas"]["OrderShippingLineResponse"][];
@@ -3450,6 +3693,12 @@ export interface components {
             number: number;
             /** @description RFC 3339, UTC. */
             placed_at: string;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
             total: components["schemas"]["Money"];
         };
         OrderTaxResponse: {
@@ -3536,6 +3785,12 @@ export interface components {
          * @enum {string}
          */
         PaymentStatusDto: string;
+        /** @description A personal-data scope and why the app says it needs it. */
+        PersonalDataScope: {
+            /** @description From the manifest's `scope_reasons` (required for these). */
+            reason: string;
+            scope: components["schemas"]["Scope"];
+        };
         /**
          * @description Sent: checked by `Address::new` (last name, first line and city required; text is
          *     trimmed, at most 255 characters per field).
@@ -3564,6 +3819,12 @@ export interface components {
             phone?: string | null;
             postal_code?: string | null;
             province?: string | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
         };
         /** @description Unsaved sources to render. */
         PreviewNotificationRequest: {
@@ -3745,6 +4006,17 @@ export interface components {
             /** @description Shown only now: each works once if the authenticator is lost. */
             recovery_codes: string[];
         };
+        /** @description What an installed app registers, from its manifest, in force with its grant. */
+        RegistrationsResponse: {
+            /** @description `{pages, blocks, actions}`. */
+            admin?: Record<string, never> | null;
+            /** @description `[{point, version, url}]`. */
+            extension_points: Record<string, never>[];
+            /** @description `{elements, proxy}`. */
+            storefront?: Record<string, never> | null;
+            /** @description The webhook URL and events (`webhook` and `subscriptions` above). */
+            webhooks?: Record<string, never> | null;
+        };
         RemoveFixedPricesRequest: {
             variants: components["schemas"]["VariantId"][];
         };
@@ -3787,10 +4059,25 @@ export interface components {
             text?: string | null;
         };
         /**
-         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         Scope: string;
+        /**
+         * @description What approving changes compared with the app's current grant (everything is `added`
+         *     on a first install).
+         */
+        ScopeChanges: {
+            added: components["schemas"]["Scope"][];
+            kept: components["schemas"]["Scope"][];
+            removed: components["schemas"]["Scope"][];
+        };
+        /** @description Scopes of one area (`orders`), for the consent page. */
+        ScopeGroup: {
+            /** @description The scopes' prefix: `orders`, `products`, `checkout`. */
+            area: string;
+            scopes: components["schemas"]["Scope"][];
+        };
         SearchSettingsResponse: {
             /**
              * @description The facets storefronts show, in order. Empty: the defaults (product type,
@@ -4921,7 +5208,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppResponse"];
+                    "application/json": components["schemas"]["AppDetailResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). */
@@ -5298,6 +5585,114 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.narrow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example app_erp */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NarrowGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8484,7 +8879,9 @@ export interface operations {
                 limit?: number;
                 /**
                  * @description Only customers whose email, first or last name or phone contains this text,
-                 *     ignoring case. Up to 255 characters; blank filters nothing.
+                 *     ignoring case. Up to 255 characters; blank filters nothing. A caller that isn't
+                 *     a staff session needs `customer_data:name`, `:email` and `:phone` for it
+                 *     (sorting by email or name, the matching one).
                  */
                 q?: string;
                 sort?: "newest" | "oldest" | "email_asc" | "email_desc" | "name_asc" | "name_desc";
@@ -12482,6 +12879,225 @@ export interface operations {
             };
         };
     };
+    "admin.oauth.fetch_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["OAuthRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentRequestResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.oauth.approve_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["OAuthRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentAnswer"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.oauth.deny_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["OAuthRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentAnswer"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.orders.list": {
         parameters: {
             query?: {
@@ -12491,7 +13107,8 @@ export interface operations {
                 limit?: number;
                 /**
                  * @description The order's number (`1001` or `#1001`), or text its email contains, ignoring case.
-                 *     Up to 255 characters; blank filters nothing.
+                 *     Up to 255 characters; blank filters nothing. Searching by email takes
+                 *     `customer_data:email` for callers that aren't staff sessions.
                  */
                 q?: string;
                 /** @description Only orders in this payment status; repeat for any of several. */

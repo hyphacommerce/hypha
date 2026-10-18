@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 
+use hypha_apps::{App, AppSnapshot, StageApps};
 use hypha_auth::{
     Identity, IdentitySnapshot, PasswordReset, PasswordResetSnapshot, Session, SessionSnapshot,
     StageIdentities, StagePasswordResets, StageSessions,
@@ -18,6 +19,10 @@ use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
     NotificationSettings, NotificationSettingsSnapshot, StageNotificationSettings,
+};
+use hypha_oauth::{
+    AuthorizationCode, AuthorizationRequest, CodeSnapshot, OAuthToken, RequestSnapshot, StageOAuth,
+    TokenSnapshot,
 };
 use hypha_orders::{Order, OrderSnapshot, StageOrders};
 use hypha_payments::{Payment, PaymentSnapshot, StagePayments};
@@ -113,6 +118,16 @@ enum Staged {
     FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
     NewNotificationSettings(NotificationSettingsSnapshot),
     NotificationSettings(NotificationSettingsSnapshot),
+    NewApp(AppSnapshot),
+    App(AppSnapshot),
+    NewOAuthRequest(RequestSnapshot),
+    OAuthRequest(RequestSnapshot),
+    NewOAuthCode(CodeSnapshot),
+    OAuthCode(CodeSnapshot),
+    NewOAuthToken(TokenSnapshot),
+    OAuthToken(TokenSnapshot),
+    /// Every live token of the app revoked at the time, after the single writes.
+    RevokeAppTokens(String, Timestamp),
     /// Events about the aggregate staged just before, with the version that write gives
     /// it, or staged on their own (`StageEvents`, no version).
     Events(Vec<PendingEvent>, Option<Version>),
@@ -168,6 +183,16 @@ impl Staged {
             Staged::DeletedInventoryItem(_) => 35,
             // Inserts into a table nothing else locks: anywhere would do.
             Staged::Events(..) => 36,
+            // An app before what refers to it (its tokens), a request before its codes.
+            Staged::NewApp(_) => 37,
+            Staged::App(_) => 38,
+            Staged::NewOAuthRequest(_) => 39,
+            Staged::OAuthRequest(_) => 40,
+            Staged::NewOAuthCode(_) => 41,
+            Staged::OAuthCode(_) => 42,
+            Staged::NewOAuthToken(_) => 43,
+            Staged::OAuthToken(_) => 44,
+            Staged::RevokeAppTokens(..) => 45,
         }
     }
 
@@ -213,6 +238,13 @@ impl Staged {
                 (Staged::DeletedCategory(a), Staged::DeletedCategory(b)) => a.cmp(b),
                 (Staged::CategoryProducts(a, ..), Staged::CategoryProducts(b, ..)) => a.cmp(b),
                 (Staged::FixedPrices(a, _), Staged::FixedPrices(b, _)) => a.cmp(b),
+                (Staged::NewApp(a), Staged::NewApp(b)) | (Staged::App(a), Staged::App(b)) => {
+                    a.key.cmp(&b.key)
+                }
+                (Staged::NewOAuthRequest(a), Staged::NewOAuthRequest(b))
+                | (Staged::OAuthRequest(a), Staged::OAuthRequest(b)) => a.id.cmp(&b.id),
+                (Staged::NewOAuthToken(a), Staged::NewOAuthToken(b))
+                | (Staged::OAuthToken(a), Staged::OAuthToken(b)) => a.id.cmp(&b.id),
                 _ => Ordering::Equal,
             })
     }
@@ -568,6 +600,19 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::Events(events, version) => {
                         insert_events(&db, &events, version, self.event_stamp()).await?
                     }
+                    Staged::NewApp(s) => crate::apps::insert_app(&db, &s).await?,
+                    Staged::App(s) => {
+                        crate::apps::update_app(&db, &s).await?;
+                    }
+                    Staged::NewOAuthRequest(s) => crate::oauth::insert_request(&db, &s).await?,
+                    Staged::OAuthRequest(s) => crate::oauth::update_request(&db, &s).await?,
+                    Staged::NewOAuthCode(s) => crate::oauth::insert_code(&db, &s).await?,
+                    Staged::OAuthCode(s) => crate::oauth::update_code(&db, &s).await?,
+                    Staged::NewOAuthToken(s) => crate::oauth::insert_token(&db, &s).await?,
+                    Staged::OAuthToken(s) => crate::oauth::update_token(&db, &s).await?,
+                    Staged::RevokeAppTokens(app, at) => {
+                        crate::oauth::revoke_app_tokens(&db, &app, at).await?;
+                    }
                 }
             }
             insert_records(&db, &records).await?;
@@ -662,6 +707,59 @@ impl StageFixedPrices for PgBatch {
     fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]) {
         let changes = variants.iter().map(|v| (*v, None)).collect();
         self.stage(Staged::FixedPrices(list, changes));
+    }
+}
+
+impl StageApps for PgBatch {
+    fn insert_app(&mut self, app: &mut App) {
+        stamp_insert(app, self.now);
+        self.stage(Staged::NewApp(app.snapshot()));
+        self.stage_events_of(app, Version::NEW.next());
+        app.set_version(Version::NEW.next());
+    }
+
+    fn update_app(&mut self, app: &mut App) {
+        stamp_update(app, self.now);
+        self.stage(Staged::App(app.snapshot()));
+        let version = app.version().next();
+        self.stage_events_of(app, version);
+        app.set_version(version);
+    }
+}
+
+impl StageOAuth for PgBatch {
+    fn insert_oauth_request(&mut self, request: &mut AuthorizationRequest) {
+        self.stage(Staged::NewOAuthRequest(request.snapshot()));
+        request.set_version(Version::NEW.next());
+    }
+
+    fn update_oauth_request(&mut self, request: &mut AuthorizationRequest) {
+        self.stage(Staged::OAuthRequest(request.snapshot()));
+        request.set_version(request.version().next());
+    }
+
+    fn insert_oauth_code(&mut self, code: &mut AuthorizationCode) {
+        self.stage(Staged::NewOAuthCode(code.snapshot()));
+        code.set_version(Version::NEW.next());
+    }
+
+    fn update_oauth_code(&mut self, code: &mut AuthorizationCode) {
+        self.stage(Staged::OAuthCode(code.snapshot()));
+        code.set_version(code.version().next());
+    }
+
+    fn insert_oauth_token(&mut self, token: &mut OAuthToken) {
+        self.stage(Staged::NewOAuthToken(token.snapshot()));
+        token.set_version(Version::NEW.next());
+    }
+
+    fn update_oauth_token(&mut self, token: &mut OAuthToken) {
+        self.stage(Staged::OAuthToken(token.snapshot()));
+        token.set_version(token.version().next());
+    }
+
+    fn revoke_app_tokens(&mut self, app: &hypha_core::AppKey, at: Timestamp) {
+        self.stage(Staged::RevokeAppTokens(app.as_str().to_string(), at));
     }
 }
 
