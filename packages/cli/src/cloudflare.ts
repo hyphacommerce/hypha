@@ -14,6 +14,7 @@
 // 4. marks the jobs as waiting (setup may have queued a search rebuild) and waits for
 //    `GET /health`.
 
+import { randomBytes } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
@@ -284,6 +285,14 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
     await saveDeployment(dir, d);
   }
   const accountId = cf.accountId;
+  // What the admin and storefront send the API so it believes the client addresses they
+  // pass on (the Worker's `peer.rs`); made once, kept in .env.
+  let callerKey = env.get("HYPHA_CALLER_KEY");
+  if (deployed.length > 0 && !callerKey) {
+    callerKey = randomBytes(32).toString("hex");
+    env.set("HYPHA_CALLER_KEY", callerKey);
+    await saveEnv(dir, env);
+  }
   await tools.checkToolchain();
 
   // A spinner left turning on a failure would keep the process alive.
@@ -377,6 +386,7 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
       }),
     );
     const secrets: Record<string, string> = { HYPHA_SECRET_KEY: secretKey };
+    if (callerKey) secrets.HYPHA_CALLER_KEY = callerKey;
     if (media) Object.assign(secrets, { HYPHA_S3_ACCESS_KEY_ID: keyId!, HYPHA_S3_SECRET_ACCESS_KEY: keySecret! });
     const secretsPath = join(dir, SECRETS_FILE);
     await writeFile(secretsPath, JSON.stringify(secrets), { mode: 0o600 });
@@ -439,7 +449,7 @@ export async function deployCloudflare(dir: string, d: Deployment, env: EnvFile,
         ...(app === "storefront" ? { HYPHA_CF_CACHE_KV: cf.cacheKvId! } : {}),
       };
       // The binding's base URL; the binding itself skips the internet.
-      const appSecrets: Record<string, string> = { HYPHA_API_URL: url(d, d.domains.api) };
+      const appSecrets: Record<string, string> = { HYPHA_API_URL: url(d, d.domains.api), HYPHA_CALLER_KEY: callerKey! };
       if (app === "storefront") {
         appSecrets.STOREFRONT_KEY = env.get("STOREFRONT_KEY") ?? "";
         appSecrets.HYPHA_WEBHOOK_SECRET = env.get("HYPHA_WEBHOOK_SECRET") ?? "";

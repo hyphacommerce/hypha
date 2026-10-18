@@ -29,9 +29,10 @@ export default defineConfig({
       // Where the Hypha API runs. Per deployment, so not in source: `.dev.vars` locally
       // (see .env.example), a Worker secret in production. Server-side only.
       HYPHA_API_URL: bindings.secret(),
-      // The API through a Service Binding (lib/api-fetch.workerd.ts); its props tell the
-      // API the call is ours, so it believes the user's address the admin passes on.
-      ...(api ? { API: bindings.worker({ worker: api, props: { caller: "admin" } }) } : {}),
+      // The API through a Service Binding (lib/api-fetch.workerd.ts), with the
+      // deployment's caller key, so the API believes the user's address we pass on (not the
+      // binding's props: Cloudflare drops them for a Worker with a placement, as the API's).
+      ...(api ? { API: bindings.worker({ worker: api }), HYPHA_CALLER_KEY: bindings.secret() } : {}),
     },
   }),
 });

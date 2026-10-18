@@ -38,9 +38,10 @@ export default defineConfig({
       STOREFRONT_KEY: bindings.secret(),
       HYPHA_WEBHOOK_SECRET: bindings.secret(),
       ...(deploy.STOREFRONT_ROUTING ? { STOREFRONT_ROUTING: bindings.text(deploy.STOREFRONT_ROUTING) } : {}),
-      // The API through a Service Binding (lib/api-fetch.workerd.ts); its props tell the
-      // API the call is ours, so it believes the shopper's address we pass on.
-      ...(api ? { API: bindings.worker({ worker: api, props: { caller: "storefront" } }) } : {}),
+      // The API through a Service Binding (lib/api-fetch.workerd.ts), with the
+      // deployment's caller key, so the API believes the shopper's address we pass on (not the
+      // binding's props: Cloudflare drops them for a Worker with a placement, as the API's).
+      ...(api ? { API: bindings.worker({ worker: api }), HYPHA_CALLER_KEY: bindings.secret() } : {}),
     },
     exports: { ...workersCache.exports },
   }),

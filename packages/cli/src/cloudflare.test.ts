@@ -192,13 +192,17 @@ test("a first deploy sets the database up, creates the resources with Hyperdrive
     "deploy app admin",
     "reach https://admin.example.com",
   ]);
-  assert.deepEqual(JSON.parse(secrets[0]), {
+  const { HYPHA_CALLER_KEY: callerKey, ...apiSecrets } = JSON.parse(secrets[0]);
+  assert.deepEqual(apiSecrets, {
     HYPHA_SECRET_KEY: "f".repeat(64),
     HYPHA_S3_ACCESS_KEY_ID: "a".repeat(32),
     HYPHA_S3_SECRET_ACCESS_KEY: "b".repeat(64),
   });
+  // The admin is deployed, so the API gets a caller key, made once and kept.
+  assert.match(callerKey, /^[0-9a-f]{64}$/);
+  assert.equal(EnvFile.parse(await readFile(join(dir, ".env"), "utf8")).get("HYPHA_CALLER_KEY"), callerKey);
   // The secrets don't stay on disk; what was created is remembered.
-  assert.deepEqual((await readdir(dir)).sort(), ["hypha.config.toml", "hypha.json", "wrangler.toml"]);
+  assert.deepEqual((await readdir(dir)).sort(), [".env", "hypha.config.toml", "hypha.json", "wrangler.toml"]);
   const saved = await loadDeployment(dir);
   assert.equal(saved.cloudflare?.accountId, "a".repeat(32));
   assert.equal(saved.cloudflare?.hyperdriveId, "1".repeat(32));
@@ -217,7 +221,7 @@ test("a later deploy updates Hyperdrive (cache still off) and creates nothing ag
   assert.ok(!calls.some((c) => / create /.test(c) || c.includes("kv namespace list")));
   // No R2 keys: no bucket, no media secrets.
   assert.ok(!calls.some((c) => c.includes(" r2 ")));
-  assert.deepEqual(JSON.parse(secrets[0]), { HYPHA_SECRET_KEY: "f".repeat(64) });
+  assert.deepEqual(JSON.parse(secrets[0]), { HYPHA_SECRET_KEY: "f".repeat(64), HYPHA_CALLER_KEY: env.get("HYPHA_CALLER_KEY") });
 });
 
 test("Hyperdrive gets the URL without its query, TLS as --sslmode, and never a cache", () => {
@@ -301,12 +305,16 @@ test("the admin and storefront deploy after the API, bound to it, with the store
     HYPHA_CF_API_WORKER: "hypha-api",
     HYPHA_CF_CACHE_KV: "2".repeat(32),
   });
+  // Both apps send the API the same caller key.
+  const callerKey = env.get("HYPHA_CALLER_KEY");
+  assert.match(callerKey ?? "", /^[0-9a-f]{64}$/);
   assert.deepEqual(apps.storefront.secrets, {
     HYPHA_API_URL: "https://api.example.com",
+    HYPHA_CALLER_KEY: callerKey,
     STOREFRONT_KEY: "hypha_pk_shop",
     HYPHA_WEBHOOK_SECRET: "hypha_as_hook",
   });
-  assert.deepEqual(apps.admin.secrets, { HYPHA_API_URL: "https://api.example.com" });
+  assert.deepEqual(apps.admin.secrets, { HYPHA_API_URL: "https://api.example.com", HYPHA_CALLER_KEY: callerKey });
   assert.equal(apps.admin.env.HYPHA_CF_WORKER, "hypha-admin");
   // The keys are kept for the next deploy, and the cache's namespace is remembered.
   const kept = EnvFile.parse(await readFile(join(dir, ".env"), "utf8"));

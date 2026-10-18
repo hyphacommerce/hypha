@@ -78,6 +78,9 @@ mod worker_main {
     struct Isolate {
         state: SharedState<WorkersStorage>,
         app: Router,
+        /// The deployment's caller key (`HYPHA_CALLER_KEY`): the admin and storefront
+        /// Workers send it, so their shoppers' addresses are believed (`peer`).
+        caller_key: Option<String>,
     }
 
     type Setup = Shared<LocalBoxFuture<'static, Result<Rc<Isolate>, String>>>;
@@ -263,7 +266,11 @@ mod worker_main {
                 hypha_http::writes::after_writes,
             ))
             .with_state(Arc::clone(&state));
-        Ok(Rc::new(Isolate { state, app }))
+        Ok(Rc::new(Isolate {
+            state,
+            app,
+            caller_key: env_string(&env, "HYPHA_CALLER_KEY"),
+        }))
     }
 
     /// The Rate Limiting bindings (W8), at `rule as usize`; a rule without one counts
@@ -299,13 +306,6 @@ mod worker_main {
         }
     }
 
-    /// What a Service Binding from one of our Workers carries (`props`, set by the
-    /// deployment's configuration: `{ caller = "storefront" }`).
-    #[derive(serde::Deserialize)]
-    struct CallerProps {
-        caller: Option<String>,
-    }
-
     /// The API's error shape (`{"code", "error", "details"}`) for a Worker that can't
     /// serve: its configuration or database isn't ready. The reason is logged.
     fn unavailable(reason: &str) -> Response<Body> {
@@ -329,15 +329,20 @@ mod worker_main {
             let ctx = Rc::clone(&ctx);
             Event::new(move |work| ctx.wait_until(work))
         };
-        // From the internet, `CF-Connecting-IP`; through one of our bindings, the
-        // caller's `X-Forwarded-For` (`peer`).
-        let caller = ctx.props::<CallerProps>().ok().and_then(|p| p.caller);
+        // From the internet, `CF-Connecting-IP`; from one of our Workers, the caller's
+        // `X-Forwarded-For` (`peer`).
         let header = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok());
-        if let Some(ip) = crate::peer::client_address(
-            caller.as_deref(),
+        let ours = crate::peer::is_ours(
+            isolate.caller_key.as_deref(),
+            header(crate::peer::CALLER_HEADER),
+        );
+        let ip = crate::peer::client_address(
+            ours,
             header("cf-connecting-ip"),
             header("x-forwarded-for"),
-        ) {
+        );
+        req.headers_mut().remove(crate::peer::CALLER_HEADER);
+        if let Some(ip) = ip {
             req.extensions_mut()
                 .insert(hypha_http::client_ip::PeerAddr(ip));
         }
