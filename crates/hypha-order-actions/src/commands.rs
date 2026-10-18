@@ -15,6 +15,10 @@ use hypha_inventory::{
     LocationRepo, ReservationRef, StageInventoryItems,
 };
 use hypha_orders::{CancelReason, HasOrders, Order, OrderError, OrderRepo, StageOrders};
+use hypha_payments::{
+    HasPayments, NewPayment, Payment, PaymentError, PaymentRepo, PaymentStatus, StagePayments,
+    financial_status,
+};
 use thiserror::Error;
 
 /// The operation name `fulfill`'s idempotency records carry.
@@ -36,6 +40,8 @@ pub enum CommandError {
     Quantity(#[from] QuantityError),
     #[error(transparent)]
     Idempotency(#[from] IdempotencyError),
+    #[error(transparent)]
+    Payment(#[from] PaymentError),
     #[error("order {0} not found")]
     OrderNotFound(OrderId),
     #[error("fulfilment {0} not found")]
@@ -60,6 +66,7 @@ impl ErrorCode for CommandError {
             CommandError::Inventory(e) => e.code(),
             CommandError::Quantity(e) => e.code(),
             CommandError::Idempotency(e) => e.code(),
+            CommandError::Payment(e) => e.code(),
             CommandError::OrderNotFound(_) => "order_not_found",
             CommandError::FulfillmentNotFound(_) => "fulfillment_not_found",
             CommandError::LocationNotFound(_) => "location_not_found",
@@ -76,7 +83,14 @@ pub trait OrderActionPorts:
     + HasInventoryItems
     + HasLocations
     + HasIdempotency
-    + HasBatch<Batch: StageOrders + StageFulfillments + StageInventoryItems + StageIdempotency>
+    + HasPayments
+    + HasBatch<
+        Batch: StageOrders
+                   + StageFulfillments
+                   + StageInventoryItems
+                   + StageIdempotency
+                   + StagePayments,
+    >
 {
 }
 
@@ -86,8 +100,14 @@ impl<T> OrderActionPorts for T where
         + HasInventoryItems
         + HasLocations
         + HasIdempotency
-        + HasBatch<Batch: StageOrders + StageFulfillments + StageInventoryItems + StageIdempotency>
-        + ?Sized
+        + HasPayments
+        + HasBatch<
+            Batch: StageOrders
+                       + StageFulfillments
+                       + StageInventoryItems
+                       + StageIdempotency
+                       + StagePayments,
+        > + ?Sized
 {
 }
 
@@ -300,17 +320,26 @@ pub struct CancelOrder {
     pub reason: CancelReason,
 }
 
-/// Cancels an order (design note 0018, FU7): every line's reservation is released, in
-/// the same batch as the order. Refused while fulfilments stand
-/// (`order_has_fulfillments`, listing them). Payment is untouched: a paid order stays
-/// paid until refunds exist. Cancelling it again changes nothing, and says so (`false`),
-/// so only the request that cancelled it tells the buyer.
+/// An order and its payments, newest first, as they are after an action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderPayments {
+    pub order: Order,
+    pub payments: Vec<Payment>,
+}
+
+/// Cancels an order (design note 0018, FU7): every line's reservation is released, and
+/// its pending payments are voided (design note 0027, PA8: cash never collected, a
+/// transfer never sent), in the same batch as the order, whose payment status follows
+/// (`voided` once every payment is). Refused while fulfilments stand
+/// (`order_has_fulfillments`, listing them). A paid payment stays paid until refunds
+/// exist. Cancelling it again changes nothing, and says so (`false`), so only the
+/// request that cancelled it tells the buyer.
 pub async fn cancel_order<S: OrderActionPorts>(
     ctx: &Ctx,
     ports: &S,
     clock: &impl Clock,
     input: CancelOrder,
-) -> Result<(Order, bool), CommandError> {
+) -> Result<(OrderPayments, bool), CommandError> {
     ctx.require(Scope::OrdersWrite)?;
     let mut attempts = Attempts::first();
     loop {
@@ -325,11 +354,15 @@ async fn cancel_order_once<S: OrderActionPorts>(
     ports: &S,
     clock: &impl Clock,
     input: &CancelOrder,
-) -> Result<(Order, bool), CommandError> {
+) -> Result<(OrderPayments, bool), CommandError> {
     let mut order = load_order(ports, input.order).await?;
-    match order.cancel(clock.now(), input.reason) {
+    let now = clock.now();
+    match order.cancel(now, input.reason) {
         Ok(true) => {}
-        Ok(false) => return Ok((order, false)),
+        Ok(false) => {
+            let payments = ports.payments().list_for_order(order.id()).await?;
+            return Ok((OrderPayments { order, payments }, false));
+        }
         Err(OrderError::HasFulfillments(id)) => {
             let fulfillments = ports
                 .fulfillments()
@@ -351,12 +384,98 @@ async fn cancel_order_once<S: OrderActionPorts>(
     for line in lines {
         stock.change(&order, line, |item, reference| Ok(item.release(reference)))?;
     }
+    let mut payments = ports.payments().list_for_order(order.id()).await?;
+    let mut voided = Vec::new();
+    for (i, payment) in payments.iter_mut().enumerate() {
+        if payment.status() == PaymentStatus::Pending && payment.void(now)? {
+            voided.push(i);
+        }
+    }
+    // Only voiding moves the payment status: an order without payments keeps its own.
+    if !voided.is_empty() {
+        order.set_financial_status(financial_status(order.total(), &payments)?);
+    }
 
     let mut batch = ports.batch();
     batch.update_order(&mut order);
+    for i in voided {
+        batch.update_payment(&mut payments[i]);
+    }
     stock.stage(&mut batch)?;
     ports.commit(batch).await?;
-    Ok((order, true))
+    Ok((OrderPayments { order, payments }, true))
+}
+
+/// Recording money staff received by hand (design note 0027, §5).
+pub struct MarkPaid {
+    pub order: OrderId,
+    /// What staff typed: a bank reference, the courier's receipt.
+    pub reference: Option<String>,
+}
+
+/// Records the order's pending payment as paid, with `reference` (design note 0027,
+/// §5): the order's payment status follows (`paid`, recording `order.paid`), in one
+/// batch. An order with no open payment (placed before payments, or with nothing to pay
+/// at checkout) gets a `manual` payment of its total, created and paid on the spot, so
+/// this works for every order.
+///
+/// Marking a paid order again changes nothing, even when two requests mark it at once
+/// (the loser of the race reloads and finds it paid). A cancelled order is refused
+/// (`order_cancelled`).
+pub async fn mark_paid<S: OrderActionPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    ids: &impl IdGenerator,
+    clock: &impl Clock,
+    input: MarkPaid,
+) -> Result<OrderPayments, CommandError> {
+    ctx.require(Scope::OrdersWrite)?;
+    let mut attempts = Attempts::first();
+    loop {
+        match mark_paid_once(ports, ids, clock, &input).await {
+            Err(e) if lost_a_race(&e) && attempts.another() => continue,
+            done => return done,
+        }
+    }
+}
+
+async fn mark_paid_once<S: OrderActionPorts>(
+    ports: &S,
+    ids: &impl IdGenerator,
+    clock: &impl Clock,
+    input: &MarkPaid,
+) -> Result<OrderPayments, CommandError> {
+    let mut order = load_order(ports, input.order).await?;
+    let mut payments = ports.payments().list_for_order(order.id()).await?;
+    if order.financial_status() == hypha_core::FinancialStatus::Paid {
+        return Ok(OrderPayments { order, payments });
+    }
+    order.ensure_not_cancelled()?;
+    let now = clock.now();
+    // The newest open one: what checkout started.
+    let open = payments.iter().position(|p| p.status().is_open());
+    let (index, created) = match open {
+        Some(i) => (i, false),
+        None => {
+            let id = hypha_core::PaymentId::from_uuid(ids.new_uuid());
+            let payment =
+                Payment::new(NewPayment::recorded_by_hand(id, order.id(), order.total()))?;
+            payments.insert(0, payment);
+            (0, true)
+        }
+    };
+    payments[index].pay(now, input.reference.clone())?;
+    order.set_financial_status(financial_status(order.total(), &payments)?);
+
+    let mut batch = ports.batch();
+    if created {
+        batch.insert_payment(&mut payments[index]);
+    } else {
+        batch.update_payment(&mut payments[index]);
+    }
+    batch.update_order(&mut order);
+    ports.commit(batch).await?;
+    Ok(OrderPayments { order, payments })
 }
 
 /// Another request committed first (the order, the fulfilment or an item changed), so

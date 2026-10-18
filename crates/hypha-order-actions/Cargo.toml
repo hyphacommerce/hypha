@@ -9,6 +9,7 @@ hypha-core.workspace = true
 hypha-fulfillment = { path = "../hypha-fulfillment" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-orders = { path = "../hypha-orders" }
+hypha-payments = { path = "../hypha-payments" }
 thiserror.workspace = true
 
 [dev-dependencies]

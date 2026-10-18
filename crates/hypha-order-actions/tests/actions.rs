@@ -8,13 +8,14 @@ use hypha_core::{
 use hypha_fulfillment::{FulfillmentError, FulfillmentRepo, FulfillmentState, TrackingInput};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
 use hypha_order_actions::{
-    CancelOrder, CommandError, Fulfil, FulfilLine, Fulfilled, OrderView, Unfulfilled,
-    cancel_fulfillment, cancel_order, fulfill, order_view,
+    CancelOrder, CommandError, Fulfil, FulfilLine, Fulfilled, MarkPaid, OrderPayments, OrderView,
+    Unfulfilled, cancel_fulfillment, cancel_order, fulfill, mark_paid, order_view,
 };
 use hypha_orders::{
     CancelReason, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderError, OrderLine,
     OrderNumber, OrderRepo,
 };
+use hypha_payments::{NewPayment, Payment, PaymentError, PaymentRepo, PaymentStatus, ProviderKey};
 use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
@@ -178,6 +179,7 @@ impl World {
             &self.clock,
             input,
         ))
+        .map(|(done, changed)| (done.order, changed))
     }
 
     fn order(&self) -> Order {
@@ -593,7 +595,7 @@ fn cancelling_again_keeps_the_first_cancellation() {
 fn a_paid_order_cancelled_stays_paid() {
     let world = World::new();
     let mut order = world.order();
-    order.mark_paid().unwrap();
+    order.set_financial_status(FinancialStatus::Paid);
     block_on(world.orders.update(&mut order)).unwrap();
     let cancelled = world.cancel(CancelReason::Customer).unwrap();
     assert_eq!(cancelled.financial_status(), FinancialStatus::Paid);
@@ -771,4 +773,167 @@ fn only_the_request_that_cancels_says_it_changed_the_order() {
     let world = World::new();
     assert!(world.cancel_and_changed(CancelReason::Customer).unwrap().1);
     assert!(!world.cancel_and_changed(CancelReason::Customer).unwrap().1);
+}
+
+// ---- payments (design note 0027) ----
+
+/// A pending payment of the order's total, as checkout leaves it.
+fn pending_payment(world: &World) -> Payment {
+    let mut payment = Payment::new(NewPayment {
+        id: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+        order: order_id(),
+        method: Some(hypha_core::PaymentMethodId::from_uuid(Uuid::from_u128(
+            8002,
+        ))),
+        method_name: Some("Bank transfer".to_string()),
+        provider: ProviderKey::manual(),
+        amount: eur(2000),
+        instructions: Some("IBAN HR12".to_string()),
+    })
+    .unwrap();
+    block_on(world.payments.insert(&mut payment)).unwrap();
+    payment
+}
+
+impl World {
+    fn mark_paid_as(
+        &self,
+        ctx: &Ctx,
+        reference: Option<&str>,
+    ) -> Result<OrderPayments, CommandError> {
+        let input = MarkPaid {
+            order: order_id(),
+            reference: reference.map(str::to_string),
+        };
+        block_on(mark_paid(ctx, &self.ports, &self.ids, &self.clock, input))
+    }
+
+    fn mark_paid(&self, reference: Option<&str>) -> Result<OrderPayments, CommandError> {
+        self.mark_paid_as(&Ctx::system(), reference)
+    }
+}
+
+#[test]
+fn marking_paid_records_the_pending_payment() {
+    let world = World::new();
+    let pending = pending_payment(&world);
+    let done = world.mark_paid(Some("RF-1001")).unwrap();
+    assert_eq!(done.order.financial_status(), FinancialStatus::Paid);
+    assert_eq!(done.payments.len(), 1);
+    let paid = &done.payments[0];
+    assert_eq!(paid.id(), pending.id());
+    assert_eq!(
+        (paid.status(), paid.reference(), paid.paid_at()),
+        (
+            PaymentStatus::Paid,
+            Some("RF-1001"),
+            Some(FixedClock::DEFAULT)
+        )
+    );
+    assert_eq!(
+        block_on(world.payments.get(paid.id())),
+        Ok(Some(paid.clone()))
+    );
+    assert_eq!(world.order(), done.order);
+    let types = world.outbox.types();
+    let tail = &types[types.len() - 2..];
+    assert!(tail.contains(&"payment.paid".to_string()) && tail.contains(&"order.paid".to_string()));
+}
+
+#[test]
+fn marking_an_order_without_a_payment_creates_a_manual_one() {
+    let world = World::new();
+    let done = world.mark_paid(None).unwrap();
+    assert_eq!(done.order.financial_status(), FinancialStatus::Paid);
+    let [payment] = done.payments.as_slice() else {
+        panic!("one payment: {:?}", done.payments)
+    };
+    assert_eq!(payment.provider(), &ProviderKey::manual());
+    assert_eq!((payment.method(), payment.method_name()), (None, None));
+    assert_eq!(payment.amount(), eur(2000));
+    assert_eq!(payment.status(), PaymentStatus::Paid);
+    assert_eq!(
+        block_on(world.payments.list_for_order(order_id())),
+        Ok(done.payments.clone())
+    );
+}
+
+#[test]
+fn marking_a_paid_order_again_changes_nothing() {
+    let world = World::new();
+    pending_payment(&world);
+    let first = world.mark_paid(Some("first")).unwrap();
+    let events = world.outbox.types().len();
+    let again = world.mark_paid(Some("second")).unwrap();
+    assert_eq!(again, first);
+    assert_eq!(world.outbox.types().len(), events);
+}
+
+#[test]
+fn a_cancelled_order_cant_be_marked_paid() {
+    let world = World::new();
+    pending_payment(&world);
+    world.cancel(CancelReason::Fraud).unwrap();
+    assert_eq!(
+        world.mark_paid(None),
+        Err(CommandError::Order(OrderError::Cancelled(order_id())))
+    );
+}
+
+#[test]
+fn a_reference_is_short_text() {
+    let world = World::new();
+    pending_payment(&world);
+    assert_eq!(
+        world.mark_paid(Some(&"x".repeat(256))),
+        Err(CommandError::Payment(PaymentError::Text(
+            hypha_core::TextError::TooLong("reference")
+        )))
+    );
+    assert_eq!(world.order().financial_status(), FinancialStatus::Pending);
+}
+
+#[test]
+fn marking_paid_needs_orders_write() {
+    let world = World::new();
+    assert_eq!(
+        world.mark_paid_as(&user_with(vec![Scope::PaymentsWrite]), None),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::OrdersWrite
+        )))
+    );
+}
+
+#[test]
+fn cancelling_voids_the_pending_payment() {
+    let world = World::new();
+    let pending = pending_payment(&world);
+    let cancelled = world.cancel(CancelReason::Customer).unwrap();
+    assert_eq!(cancelled.financial_status(), FinancialStatus::Voided);
+    let voided = block_on(world.payments.get(pending.id())).unwrap().unwrap();
+    assert_eq!(
+        (voided.status(), voided.voided_at()),
+        (PaymentStatus::Voided, Some(FixedClock::DEFAULT))
+    );
+    assert!(world.outbox.types().contains(&"payment.voided".to_string()));
+    // The view shows it.
+    assert_eq!(world.view().payments, [voided]);
+}
+
+#[test]
+fn cancelling_a_paid_order_leaves_its_payment_paid() {
+    let world = World::new();
+    pending_payment(&world);
+    world.mark_paid(None).unwrap();
+    let cancelled = world.cancel(CancelReason::Customer).unwrap();
+    assert_eq!(cancelled.financial_status(), FinancialStatus::Paid);
+    let payments = block_on(world.payments.list_for_order(order_id())).unwrap();
+    assert_eq!(payments[0].status(), PaymentStatus::Paid);
+}
+
+#[test]
+fn cancelling_an_order_without_payments_leaves_it_pending() {
+    let world = World::new();
+    let cancelled = world.cancel(CancelReason::Customer).unwrap();
+    assert_eq!(cancelled.financial_status(), FinancialStatus::Pending);
 }

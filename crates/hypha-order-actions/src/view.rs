@@ -4,6 +4,7 @@
 use hypha_core::{Ctx, LocationId, OrderId, OrderLineId, Scope};
 use hypha_inventory::{HasInventoryItems, ReservationRef};
 use hypha_orders::{HasOrders, Order, OrderRepo};
+use hypha_payments::{HasPayments, Payment, PaymentRepo};
 
 use crate::CommandError;
 
@@ -23,11 +24,13 @@ pub struct OrderView {
     /// For each line with something left, in line order, then location by the
     /// reservations' order; nothing for a cancelled order.
     pub unfulfilled: Vec<Unfulfilled>,
+    /// Its payments, newest first (design note 0027).
+    pub payments: Vec<Payment>,
 }
 
-/// The order and what's left to ship (`orders:read`; the stock it reads is the order's
-/// own, so no inventory scope).
-pub async fn order_view<S: HasOrders + HasInventoryItems>(
+/// The order, what's left to ship and its payments (`orders:read`; the stock and
+/// payments it reads are the order's own, so no inventory or payments scope).
+pub async fn order_view<S: HasOrders + HasInventoryItems + HasPayments>(
     ctx: &Ctx,
     ports: &S,
     id: OrderId,
@@ -38,10 +41,12 @@ pub async fn order_view<S: HasOrders + HasInventoryItems>(
         .get(id)
         .await?
         .ok_or(CommandError::OrderNotFound(id))?;
+    let payments = ports.payments().list_for_order(id).await?;
     if order.cancelled().is_some() {
         return Ok(OrderView {
             order,
             unfulfilled: Vec::new(),
+            payments,
         });
     }
     let items = crate::commands::order_items(ports, &order).await?;
@@ -74,5 +79,9 @@ pub async fn order_view<S: HasOrders + HasInventoryItems>(
             });
         }
     }
-    Ok(OrderView { order, unfulfilled })
+    Ok(OrderView {
+        order,
+        unfulfilled,
+        payments,
+    })
 }
