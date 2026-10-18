@@ -473,6 +473,14 @@ async fn orders_marked_paid_before_payments_get_their_payment() {
             .await
             .unwrap();
     }
+    // Marked paid a while ago: the payment is of that moment.
+    client
+        .batch_execute(
+            "UPDATE orders SET updated_at = '2025-03-01 10:20:30.456789+00'
+             WHERE id = '00000000-0000-0000-0000-000000000001'",
+        )
+        .await
+        .unwrap();
     migrate(&mut client, &[CORE]).await.unwrap();
 
     let payments = client
@@ -506,4 +514,47 @@ async fn orders_marked_paid_before_payments_get_their_payment() {
             true
         )
     );
+
+    // A UUIDv7 of when the order was marked paid, so it sorts like the IDs hosts make.
+    let row = client
+        .query_one(
+            "SELECT payments.id, payments.paid_at = o.updated_at, payments.created_at = o.updated_at,
+                 payments.updated_at = o.updated_at
+             FROM payments JOIN orders o ON o.id = payments.order_id",
+            &[],
+        )
+        .await
+        .unwrap();
+    let id: uuid::Uuid = row.get(0);
+    assert_eq!(id.get_version_num(), 7);
+    assert_eq!(id.get_variant(), uuid::Variant::RFC4122);
+    let bytes = id.as_bytes();
+    let mut millis = [0u8; 8];
+    millis[2..].copy_from_slice(&bytes[..6]);
+    assert_eq!(u64::from_be_bytes(millis), 1_740_824_430_456);
+    assert_eq!(
+        (
+            row.get::<_, bool>(1),
+            row.get::<_, bool>(2),
+            row.get::<_, bool>(3)
+        ),
+        (true, true, true)
+    );
+    // The smallest UUIDv7 of now sorts after it, in Rust and in Postgres alike.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let mut fresh = [0u8; 16];
+    fresh[..6].copy_from_slice(&now.to_be_bytes()[2..]);
+    fresh[6] = 0x70;
+    fresh[8] = 0x80;
+    let fresh = uuid::Uuid::from_bytes(fresh);
+    assert!(id < fresh);
+    let below: bool = client
+        .query_one("SELECT $1::uuid < $2::uuid", &[&id, &fresh])
+        .await
+        .unwrap()
+        .get(0);
+    assert!(below);
 }

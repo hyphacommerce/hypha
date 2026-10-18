@@ -47,14 +47,25 @@ CREATE TABLE payments (
 
 -- An order's payments, newest first.
 CREATE INDEX payments_by_order ON payments (order_id, id DESC);
--- Whether a method has a pending payment (it can't be deleted then).
-CREATE INDEX payments_pending_by_method ON payments (method_id) WHERE status = 'pending';
+-- Whether a method has an open payment (it can't be deleted then).
+CREATE INDEX payments_open_by_method ON payments (method_id)
+    WHERE status IN ('pending', 'authorized');
 
 -- Orders marked paid before payments existed get the payment that marking stands for:
--- manual, of the whole total, paid when the order last changed.
-INSERT INTO payments (id, version, order_id, provider, currency, amount, status, paid_at)
-SELECT gen_random_uuid(), 1, id, 'manual', currency, total, 'paid', updated_at
-FROM orders WHERE financial_status = 'paid';
+-- manual, of the whole total, made and paid when the order last changed. Its ID is a
+-- UUIDv7 of that moment, like the ones hosts make, so an order's payments still sort
+-- newest first by ID: a random UUID (v4) with its first 48 bits replaced by the Unix
+-- time in milliseconds and its version nibble set to 7 (v4's variant bits are v7's).
+INSERT INTO payments (id, version, order_id, provider, currency, amount, status, paid_at,
+                      created_at, updated_at)
+SELECT encode(set_byte(v7.bytes, 6, (get_byte(v7.bytes, 6) & 15) | 112), 'hex')::uuid,
+       1, orders.id, 'manual', currency, total, 'paid', updated_at, updated_at, updated_at
+FROM orders,
+     LATERAL (SELECT overlay(uuid_send(gen_random_uuid())
+                             PLACING substring(int8send(floor(extract(epoch FROM updated_at)
+                                                              * 1000)::bigint) FROM 3)
+                             FROM 1 FOR 6) AS bytes) AS v7
+WHERE financial_status = 'paid';
 
 -- The method the shopper chose (checked again at checkout).
 ALTER TABLE carts ADD COLUMN payment_method_id uuid;
