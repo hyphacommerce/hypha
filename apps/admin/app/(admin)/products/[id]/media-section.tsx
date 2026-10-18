@@ -22,7 +22,7 @@ import {
   PhotoIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { type DragEvent, useEffect, useRef, useState, useTransition } from "react";
+import { type DragEvent, useEffect, useEffectEvent, useRef, useState, useTransition } from "react";
 
 import { ACCEPT_PRODUCT_MEDIA, MAX_BYTES, uploadFile } from "../../media/upload";
 import { LibrarySearch } from "@/components/library-search";
@@ -114,19 +114,22 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
     setError(undefined);
     const uploaded: string[] = [];
     const failed: string[] = [];
-    // One at a time, like the Media page.
-    for (const file of files) {
-      const result = await uploadFile(file);
-      if ("error" in result) failed.push(`${file.name}: ${result.error}`);
-      else uploaded.push(result.id);
+    try {
+      // One at a time, like the Media page.
+      for (const file of files) {
+        const result = await uploadFile(file);
+        if ("error" in result) failed.push(`${file.name}: ${result.error}`);
+        else uploaded.push(result.id);
+      }
+      if (uploaded.length > 0) {
+        const attachError = await attach(uploaded);
+        if (attachError) failed.push(attachError);
+      }
+    } finally {
+      if (failed.length > 0) setError(failed.join(" · "));
+      setUploads([]);
+      setIsUploading(false);
     }
-    if (uploaded.length > 0) {
-      const error = await attach(uploaded);
-      if (error) failed.push(error);
-    }
-    if (failed.length > 0) setError(failed.join(" · "));
-    setUploads([]);
-    setIsUploading(false);
   };
 
   const onDrop = (to: number) => (e: DragEvent) => {
@@ -298,7 +301,8 @@ function LibraryPicker({
       setNext(page.next);
     });
   // The first page, once, when the dialog opens.
-  useEffect(() => load(), []);
+  const loadFirst = useEffectEvent(() => load());
+  useEffect(() => loadFirst(), []);
 
   const toggle = (asset: string, isSelected: boolean) =>
     setPicked((before) => (isSelected ? [...before, asset] : before.filter((id) => id !== asset)));

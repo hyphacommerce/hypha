@@ -25,7 +25,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { PhotoIcon, TrashIcon } from "@heroicons/react/24/outline";
-import { type ReactNode, useEffect, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useEffectEvent, useState, useTransition } from "react";
 
 import { Pager } from "@/components/pager";
 import { ProductPicker } from "@/components/product-picker";
@@ -265,7 +265,8 @@ function ImagePicker({
       setNext(page.next);
     });
   // The first page, once, when the dialog opens.
-  useEffect(() => load(), []);
+  const loadFirst = useEffectEvent(() => load());
+  useEffect(() => loadFirst(), []);
 
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={760} purpose="form">

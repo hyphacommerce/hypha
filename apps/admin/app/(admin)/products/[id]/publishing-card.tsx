@@ -42,7 +42,7 @@ export function PublishingCard({
           label="Sales channels"
           isLabelHidden
           value={draft.channels}
-          onChange={(next) => onChange({ channels: [...next].sort() })}
+          onChange={(next) => onChange({ channels: next.toSorted() })}
         >
           {channels.map((channel) => (
             <CheckboxListItem key={channel.id} value={channel.id} label={channel.name} />

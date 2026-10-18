@@ -18,7 +18,8 @@ export function MfaForm() {
   // the change events the state follows.
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const submitted = String(new FormData(e.currentTarget).get("code") ?? "").trim();
+    const field = new FormData(e.currentTarget).get("code");
+    const submitted = typeof field === "string" ? field.trim() : "";
     setCode(submitted);
     if (submitted) startTransition(() => verify(submitted));
   };

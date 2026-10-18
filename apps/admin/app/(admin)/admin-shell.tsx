@@ -93,7 +93,8 @@ const ALL_HREFS = NAV.flatMap((s) =>
 
 /** The nav item a page belongs to: the longest href that covers it. */
 function currentHref(pathname: string): string | undefined {
-  return ALL_HREFS.filter((href) => covers(pathname, href)).sort((a, b) => b.length - a.length)[0];
+  const covering = ALL_HREFS.filter((href) => covers(pathname, href));
+  return covering.toSorted((a, b) => b.length - a.length)[0];
 }
 
 /** The setup guide's nav item; the layout streams it in while the guide isn't finished. */

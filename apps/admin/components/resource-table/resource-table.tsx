@@ -13,6 +13,7 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import type { ISODateString } from "@astryxdesign/core/Calendar";
 import { type DateRange, DateRangeInput } from "@astryxdesign/core/DateRangeInput";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { HStack } from "@astryxdesign/core/Layout";
@@ -91,7 +92,7 @@ type Props<T extends Row> = {
   /** No rows with filters; a Clear filters button is added. */
   noResults?: EmptyText;
   /** Bulk actions for the selected rows, beside the count. */
-  bulkActions?: (selected: T[], clear: () => void) => ReactNode;
+  renderBulkActions?: (selected: T[], clear: () => void) => ReactNode;
   /** Row checkboxes; on by default. */
   isSelectable?: boolean;
   /** Names a row for screen readers ("Select Mug"). */
@@ -117,12 +118,15 @@ function rowLinks<T extends Row>(
               style: { ...props.htmlProps.style, cursor: "pointer" },
               onClick: (event) => {
                 props.htmlProps.onClick?.(event);
-                const target = event.target as HTMLElement;
-                if (target.closest("a, button, input, label, [role=checkbox], [role=button]")) {
+                const target = event.target;
+                if (
+                  target instanceof Element &&
+                  target.closest("a, button, input, label, [role=checkbox], [role=button]")
+                ) {
                   return;
                 }
                 const url = rowHref(item);
-                if (event.metaKey || event.ctrlKey) window.open(url, "_blank");
+                if (event.metaKey || event.ctrlKey) window.open(url, "_blank", "noopener");
                 else go(url);
               },
             },
@@ -145,7 +149,13 @@ function TextFilter({
   isWide?: boolean;
 }) {
   const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
+  // The URL changed under the box (a view, Clear all, Back): show what it says now. Set
+  // while rendering, not in an effect, so the stale text never paints.
+  const [shownValue, setShownValue] = useState(value);
+  if (value !== shownValue) {
+    setShownValue(value);
+    setText(value);
+  }
   useEffect(() => {
     if (text.trim() === value.trim()) return;
     const timer = setTimeout(() => apply(text.trim()), 400);
@@ -167,19 +177,30 @@ function TextFilter({
   );
 }
 
+const DAY = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/** "1 Oct" from `2026-10-01`. */
+function dayLabel(d?: string): string {
+  return d ? DAY.format(new Date(`${d}T00:00:00Z`)) : "";
+}
+
 /** "1 Oct – 17 Oct" from `2026-10-01..2026-10-17`. */
 function rangeLabel(raw: string): string {
   const [start, end] = raw.split("..");
-  const day = (d?: string) =>
-    d
-      ? new Intl.DateTimeFormat("en-GB", {
-          day: "numeric",
-          month: "short",
-          timeZone: "UTC",
-        }).format(new Date(`${d}T00:00:00Z`))
-      : "";
-  return `${day(start)} – ${day(end)}`;
+  return `${dayLabel(start)} – ${dayLabel(end)}`;
 }
+
+/** A day as the date inputs take it; the URL may hold anything. */
+function isDay(value: string | undefined): value is ISODateString {
+  return value !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+// Defaults shared across renders, so a missing prop doesn't make a new object each time
+// (and break the memos that depend on it).
+const NO_FILTERS: FilterDef[] = [];
+const NO_SORTS: Record<string, SortDef> = {};
+const NO_REQUIREMENTS: Record<string, string> = {};
+const NO_COMPARE: Record<string, never> = {};
 
 /**
  * The view the URL shows: the one whose values it has exactly, among the parameters
@@ -189,14 +210,23 @@ function activeView(views: View[], params: URLSearchParams): number {
   const keys = [...new Set(views.flatMap((v) => Object.keys(v.params)))];
   return views.findIndex((view) =>
     keys.every((p) => {
-      const want = [...(view.params[p] ?? [])].sort();
+      const want = (view.params[p] ?? []).toSorted();
       const have = params
         .getAll(p)
         .filter((v) => v.trim() !== "")
-        .sort();
+        .toSorted();
       return want.length === have.length && want.every((v, i) => v === have[i]);
     }),
   );
+}
+
+/** The column and direction an API sort stands for, for the headers' arrows. */
+function columnSort(sorts: Record<string, SortDef>, sort: string | undefined): TableSortState {
+  for (const [key, def] of Object.entries(sorts)) {
+    if (def.asc === sort) return [{ sortKey: key, direction: "ascending" }];
+    if (def.desc === sort) return [{ sortKey: key, direction: "descending" }];
+  }
+  return [];
 }
 
 export function ResourceTable<T extends Row>(props: Props<T>) {
@@ -206,16 +236,16 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
     columns,
     idKey,
     rowHref,
-    filters = [],
+    filters = NO_FILTERS,
     views,
-    sorts = {},
+    sorts = NO_SORTS,
     sortOptions,
     defaultSort,
-    sortRequires = {},
+    sortRequires = NO_REQUIREMENTS,
     error,
     empty,
     noResults,
-    bulkActions,
+    renderBulkActions,
     isSelectable = true,
     rowLabel,
     toolbarEnd,
@@ -237,18 +267,11 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
     const url = href(pathname, withChanges(params, { ...reset, ...changes }));
     startTransition(() => router.replace(url, { scroll: false }));
   };
-  const open = (url: string) => startTransition(() => router.push(url));
 
   // ---------- sort ----------
   const sort = params.get("sort") ?? defaultSort;
-  const sortState: TableSortState<string> = useMemo(() => {
-    for (const [key, def] of Object.entries(sorts)) {
-      if (def.asc === sort) return [{ sortKey: key, direction: "ascending" }];
-      if (def.desc === sort) return [{ sortKey: key, direction: "descending" }];
-    }
-    return [];
-  }, [sort, sorts]);
-  const sortPlugin = useTableSortable<T, string>({
+  const sortState = useMemo(() => columnSort(sorts, sort), [sort, sorts]);
+  const sortPlugin = useTableSortable<T>({
     sort: sortState,
     onSortChange: (next) => {
       const entry = next[0];
@@ -281,7 +304,7 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
   };
 
   // ---------- selection ----------
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const { selectionConfig, selectionState } = useTableSelectionState<T>({
     data: rows,
     idKey,
@@ -289,15 +312,23 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
     setSelectedKeys,
   });
   const selectionPlugin = useTableSelection<T>({ ...selectionConfig, getRowLabel: rowLabel });
-  // A new page is new rows: what was selected is no longer shown.
-  useEffect(() => setSelectedKeys(new Set()), [rows]);
+  // A new page is new rows: what was selected is no longer shown. Cleared while
+  // rendering, so the old selection never paints over the new rows.
+  const [selectionRows, setSelectionRows] = useState(rows);
+  if (rows !== selectionRows) {
+    setSelectionRows(rows);
+    setSelectedKeys(new Set());
+  }
 
-  const links = useMemo(() => rowLinks<T>(rowHref, open), [rowHref]); // eslint-disable-line react-hooks/exhaustive-deps
+  const links = useMemo(
+    () => rowLinks<T>(rowHref, (url) => startTransition(() => router.push(url))),
+    [rowHref, router],
+  );
 
   const plugins: Record<string, TablePlugin<T>> = {
     sort: sortPlugin,
     links,
-    ...(isSelectable || bulkActions ? { selection: selectionPlugin } : {}),
+    ...(isSelectable || renderBulkActions ? { selection: selectionPlugin } : {}),
   };
 
   // ---------- filters ----------
@@ -368,7 +399,7 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
       case "dates": {
         const raw = params.get(filter.param);
         const [start, end] = raw?.split("..") ?? [];
-        const value = start && end ? ({ start, end } as DateRange) : null;
+        const value: DateRange | null = isDay(start) && isDay(end) ? { start, end } : null;
         return (
           <DateRangeInput
             key={filter.param}
@@ -536,7 +567,7 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
       {selectionState.hasSelection && (
         <div className="rt-selection">
           <Text weight="medium">{selected.length} selected</Text>
-          {bulkActions?.(selected, selectionState.clearSelection)}
+          {renderBulkActions?.(selected, selectionState.clearSelection)}
           <div style={{ flex: 1 }} />
           <Button label="Clear" variant="ghost" size="sm" onClick={selectionState.clearSelection} />
         </div>
@@ -639,14 +670,14 @@ export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
     rowHref,
     searchText,
     searchLabel,
-    compare = {},
+    compare = NO_COMPARE,
     empty,
     toolbarEnd,
   } = props;
   const router = useRouter();
   const [q, setQ] = useState("");
-  const [sort, setSort] = useState<TableSortState<string>>([]);
-  const sortPlugin = useTableSortable<T, string>({
+  const [sort, setSort] = useState<TableSortState>([]);
+  const sortPlugin = useTableSortable<T>({
     sort,
     onSortChange: setSort,
     allowUnsortedState: true,
@@ -662,8 +693,8 @@ export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
     const entry = sort[0];
     const cmp = entry && compare[entry.sortKey];
     if (!cmp) return found;
-    const sorted = [...found].sort(cmp);
-    return entry.direction === "descending" ? sorted.reverse() : sorted;
+    const sorted = found.toSorted(cmp);
+    return entry.direction === "descending" ? sorted.toReversed() : sorted;
   }, [rows, q, sort, searchText, compare]);
 
   return (

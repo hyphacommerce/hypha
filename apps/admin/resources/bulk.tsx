@@ -244,7 +244,7 @@ function CategoryDialog({
   const [category, setCategory] = useState<string>();
   const options = Object.entries(categories)
     .map(([value, label]) => ({ value, label }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .toSorted((a, b) => a.label.localeCompare(b.label));
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={440} purpose="form">
       <DialogHeader

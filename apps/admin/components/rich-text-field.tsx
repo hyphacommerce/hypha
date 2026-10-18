@@ -12,7 +12,7 @@ import {
   type ElementNode,
   type LexicalEditor,
 } from "lexical";
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 
 /** The update tag of loading a value in, which isn't an edit. */
 const LOAD = "hypha-load";
@@ -58,8 +58,8 @@ function HtmlValuePlugin({ value, onChange }: { value: string; onChange: (html: 
   // The HTML the editor holds: what it loaded or last reported, so the value coming back
   // from the parent isn't loaded again (that would move the cursor while typing).
   const holds = useRef<string | null>(null);
-  const report = useRef(onChange);
-  report.current = onChange;
+  // The latest `onChange`, without registering the listener again when it changes.
+  const report = useEffectEvent((html: string) => onChange(html));
 
   useEffect(() => {
     if (value === holds.current) return;
@@ -76,7 +76,7 @@ function HtmlValuePlugin({ value, onChange }: { value: string; onChange: (html: 
         );
         if (html === holds.current) return;
         holds.current = html;
-        report.current(html);
+        report(html);
       }),
     [editor],
   );

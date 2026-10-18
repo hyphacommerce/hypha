@@ -16,14 +16,15 @@ import { Text } from "@astryxdesign/core/Text";
 import { PageHeader } from "@/components/page-header";
 import { loaded, sessionClient } from "@/lib/hypha";
 
+const PERCENT = new Intl.NumberFormat("en-IE", {
+  maximumFractionDigits: 2,
+  signDisplay: "always",
+});
+
 /** "−10%" from basis points (−1000); "No adjustment" for 0. */
 function adjustment(bps: number): string {
   if (bps === 0) return "No adjustment";
-  const percent = new Intl.NumberFormat("en-IE", {
-    maximumFractionDigits: 2,
-    signDisplay: "always",
-  });
-  return `${percent.format(bps / 100)}%`;
+  return `${PERCENT.format(bps / 100)}%`;
 }
 
 /**
@@ -67,13 +68,13 @@ export default async function PriceListsPage() {
             </TableHeader>
             <TableBody>
               {lists.items.map((list) => {
-                const markets = usedBy(list.id);
+                const users = usedBy(list.id);
                 return (
                   <TableRow key={list.id}>
                     <TableCell>
-                      {markets.length > 0 ? (
+                      {users.length > 0 ? (
                         <HStack gap={2} wrap="wrap">
-                          {markets.map((m) => (
+                          {users.map((m) => (
                             <Link key={m.id} href={`/markets/${m.id}`} weight="medium">
                               {m.name}
                             </Link>

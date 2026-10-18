@@ -8,7 +8,7 @@ import {
   sessionClient,
 } from "@/lib/hypha";
 
-import { setupSteps } from "../setup-checklist";
+import { setupDone } from "../setup-checklist";
 import { type WizardData, SetupWizard } from "./setup-wizard";
 
 /**
@@ -23,9 +23,9 @@ export default async function SetupPage({
 }) {
   const params = await searchParams;
   const client = await sessionClient();
-  const [steps, store, markets, zones, locations, channels, products, countries, methods] =
+  const [done, store, markets, zones, locations, channels, products, countries, methods] =
     await Promise.all([
-      setupSteps(),
+      setupDone(),
       requireStore(),
       client.GET("/admin/markets").then(loaded),
       client.GET("/admin/shipping-zones").then(loaded),
@@ -39,7 +39,7 @@ export default async function SetupPage({
     ]);
 
   const data: WizardData = {
-    done: Object.fromEntries(steps.map((s) => [s.key, s.isDone])) as WizardData["done"],
+    done,
     store,
     markets: markets.items,
     zones: zones.items,

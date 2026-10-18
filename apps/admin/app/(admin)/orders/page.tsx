@@ -78,7 +78,7 @@ export default async function OrdersPage({
   const countryName = new Map(countries.map((c) => [c.code, c.name]));
   const soldTo = [...new Set(sold.flatMap((m) => m.countries))]
     .map((code) => ({ value: code, label: countryName.get(code) ?? code }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .toSorted((a, b) => a.label.localeCompare(b.label));
 
   return (
     <Section padding={6}>
@@ -89,7 +89,7 @@ export default async function OrdersPage({
           currencies={currencies}
           channels={Object.fromEntries(channelName)}
           countries={soldTo}
-          orderCurrencies={[...new Set(sold.map((m) => m.currency))].sort()}
+          orderCurrencies={[...new Set(sold.map((m) => m.currency))].toSorted()}
         />
       </VStack>
     </Section>

@@ -58,10 +58,14 @@ function addressDraft(a: Store["legal_address"]): AddressDraft {
   };
 }
 
+/** A blank field: the API clears it with `null`. */
+function optional(v: string): string | null {
+  return v.trim() === "" ? null : v;
+}
+
 /** The address to send: `null` when every field is blank (clears it). */
 function addressValue(d: AddressDraft): AdminSchemas["PostalAddressRequest"] | null {
   if (Object.values(d).every((v) => v.trim() === "")) return null;
-  const optional = (v: string) => (v.trim() === "" ? null : v);
   return {
     first_name: optional(d.first_name),
     last_name: d.last_name,

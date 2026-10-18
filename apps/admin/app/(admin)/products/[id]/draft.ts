@@ -80,8 +80,8 @@ export function fromProduct(product: Product, currencies: Currencies): Draft {
         product.options.map((o, i) => [o.id, v.selections[i]] as const),
       ),
     })),
-    categories: [...product.categories].sort(),
-    channels: [...product.channels].sort(),
+    categories: product.categories.toSorted(),
+    channels: product.channels.toSorted(),
   };
 }
 
@@ -202,9 +202,14 @@ export function changes(draft: Draft, saved: Draft, currency: string, currencies
     variants:
       options ||
       !same(variantsKey(draft, currency, currencies), variantsKey(saved, currency, currencies)),
-    categories: !same([...draft.categories].sort(), [...saved.categories].sort()),
-    channels: !same([...draft.channels].sort(), [...saved.channels].sort()),
+    categories: !same(draft.categories.toSorted(), saved.categories.toSorted()),
+    channels: !same(draft.channels.toSorted(), saved.channels.toSorted()),
   };
+}
+
+/** A cleared text field: the API clears it with `null`. */
+function blankIsNull(s: string): string | null {
+  return s.trim() === "" ? null : s;
 }
 
 /**
@@ -221,7 +226,6 @@ export function plan(
   const changed = changes(draft, saved, currency, currencies);
   const result: SavePlan = {};
   if (changed.product) {
-    const blankIsNull = (s: string) => (s.trim() === "" ? null : s);
     const body: AdminSchemas["UpdateProductRequest"] = {};
     if (draft.title.trim() !== saved.title) body.title = draft.title;
     if (draft.handle !== saved.handle) body.handle = draft.handle;
@@ -278,8 +282,8 @@ export function plan(
     }
     result.variants = planned;
   }
-  if (changed.categories) result.categories = [...draft.categories].sort();
-  if (changed.channels) result.channels = [...draft.channels].sort();
+  if (changed.categories) result.categories = draft.categories.toSorted();
+  if (changed.channels) result.channels = draft.channels.toSorted();
   return { plan: result };
 }
 

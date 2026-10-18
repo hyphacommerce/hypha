@@ -110,12 +110,12 @@ export function ProductEditor({
       }
       setError(undefined);
       // What the API stored, at once; the page's refresh then brings the same product.
-      const { categories, channels } = result;
-      if (result.product || categories || channels) {
+      const { categories: storedCategories, channels: storedChannels } = result;
+      if (result.product || storedCategories || storedChannels) {
         const stored: Product = {
           ...(result.product ?? base),
-          ...(categories && { categories }),
-          ...(channels && { channels }),
+          ...(storedCategories && { categories: storedCategories }),
+          ...(storedChannels && { channels: storedChannels }),
         };
         setBase(stored);
         setDraft(fromProduct(stored, currencies));

@@ -14,6 +14,10 @@ export default async function StaffPage() {
     client.GET("/admin/invites").then(loaded),
     client.GET("/admin/roles").then(loaded),
   ]);
+  // From the server, so the browser renders the same expired badges it sent. A server
+  // component renders once per request, so reading the clock here is fine.
+  // oxlint-disable-next-line react/purity
+  const now = Date.now();
 
   return (
     <Section padding={6}>
@@ -24,6 +28,7 @@ export default async function StaffPage() {
           invites={invites.items}
           roles={roles.items}
           canInvite={me.scopes.includes("users:write")}
+          now={now}
         />
       </VStack>
     </Section>

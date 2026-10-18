@@ -199,7 +199,7 @@ export function OrdersTable({
         <BulkOutcomeBanner outcome={outcome} noun="order" onClose={() => setOutcome(undefined)} />
       )}
       <ResourceTable<Order>
-        bulkActions={(selected, clear) => (
+        renderBulkActions={(selected, clear) => (
           <OrderBulkActions selected={selected} clear={clear} onDone={setOutcome} />
         )}
         rowLabel={(o) => `Order #${o.number}`}

@@ -164,7 +164,10 @@ function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose: () =>
             description="What the channel is for. Can't change later."
             options={KINDS}
             value={kind}
-            onChange={(value) => setKind(value as ChannelKind)}
+            onChange={(value) => {
+              const picked = KINDS.find((k) => k.value === value);
+              if (picked) setKind(picked.value);
+            }}
           />
         )}
         <HStack gap={2} hAlign="end">

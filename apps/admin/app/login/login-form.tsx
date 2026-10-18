@@ -24,8 +24,11 @@ export function LoginForm() {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fields = new FormData(e.currentTarget);
-    const submittedEmail = String(fields.get("email") ?? "").trim();
-    const submittedPassword = String(fields.get("password") ?? "");
+    const emailField = fields.get("email");
+    const passwordField = fields.get("password");
+    // Text inputs give strings; anything else (a file, nothing) counts as empty.
+    const submittedEmail = typeof emailField === "string" ? emailField.trim() : "";
+    const submittedPassword = typeof passwordField === "string" ? passwordField : "";
     setEmail(submittedEmail);
     setPassword(submittedPassword);
     if (!submittedEmail || !submittedPassword) {

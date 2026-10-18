@@ -30,7 +30,6 @@ import { currencyCodes } from "@/lib/format";
 import {
   RATE_KINDS,
   type RateDraft,
-  type RateKind,
   describeRate,
   emptyDraft,
   fromDraft,
@@ -83,7 +82,7 @@ export function ZonesSection({ zones, providers }: { zones: Zone[]; providers: P
 /** A new zone, or `zone`'s name and countries. */
 function ZoneDialog({ zone, onClose }: { zone?: Zone; onClose: () => void }) {
   const [name, setName] = useState(zone?.name ?? "");
-  const [countries, setCountries] = useState(zone?.countries.join(", ") ?? "");
+  const [countries, setCountries] = useState(() => zone?.countries.join(", ") ?? "");
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   const submit = () => {
@@ -459,11 +458,12 @@ function OptionDialog({
               disabled: kind.value === "provider" && providers.length === 0,
             }))}
             value={draft.kind}
-            onChange={(kind) =>
-              setDraft(
-                emptyDraft(kind as RateKind, "prices" in draft ? draft.prices[0].currency : "EUR"),
-              )
-            }
+            onChange={(value) => {
+              const kind = RATE_KINDS.find((k) => k.value === value)?.value;
+              if (kind) {
+                setDraft(emptyDraft(kind, "prices" in draft ? draft.prices[0].currency : "EUR"));
+              }
+            }}
           />
           <RateEditor draft={draft} providers={providers} onChange={setDraft} />
           <HStack gap={3}>
@@ -552,8 +552,11 @@ function RateEditor({
       onChange({ ...draft, prices: [...draft.prices, ...extra.prices] });
     } else if (draft.kind === "free_over" && extra.kind === "free_over") {
       onChange({ ...draft, tables: [...draft.tables, ...extra.tables] });
-    } else if ((draft.kind === "subtotal" || draft.kind === "weight") && "tables" in extra) {
-      onChange({ ...draft, tables: [...draft.tables, ...(extra.tables as typeof draft.tables)] });
+    } else if (
+      (draft.kind === "subtotal" || draft.kind === "weight") &&
+      (extra.kind === "subtotal" || extra.kind === "weight")
+    ) {
+      onChange({ ...draft, tables: [...draft.tables, ...extra.tables] });
     }
   };
   const currencyPicker = (currency: Currency, set: (currency: Currency) => void) => (
@@ -566,7 +569,7 @@ function RateEditor({
         .map((c) => ({ value: c, label: c }))}
       hasSearch
       value={currency}
-      onChange={(value) => set(value as Currency)}
+      onChange={(value) => set(value)}
     />
   );
 
@@ -634,6 +637,9 @@ function RateEditor({
                     tiers: table.tiers.map((t, n) => (n === k ? { ...t, ...patch } : t)),
                   });
                 return (
+                  // Tiers have no ID of their own; their place is what they are, and their
+                  // fields are controlled, so a removed tier can't leave its text behind.
+                  // oxlint-disable-next-line react/no-array-index-key
                   <HStack key={k} gap={2} vAlign="end">
                     {isLast ? (
                       <Text color="secondary">{k === 0 ? "Any" : "Above that"}</Text>

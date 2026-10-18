@@ -20,15 +20,18 @@ export function Uploader() {
     setIsUploading(true);
     setErrors([]);
     const failed: string[] = [];
-    // One at a time: a merchant dropping fifty photos shouldn't open fifty connections.
-    for (const file of list) {
-      const uploaded = await uploadFile(file);
-      if ("error" in uploaded) failed.push(`${file.name}: ${uploaded.error}`);
+    try {
+      // One at a time: a merchant dropping fifty photos shouldn't open fifty connections.
+      for (const file of list) {
+        const uploaded = await uploadFile(file);
+        if ("error" in uploaded) failed.push(`${file.name}: ${uploaded.error}`);
+      }
+    } finally {
+      setErrors(failed);
+      setFiles([]);
+      setIsUploading(false);
+      router.refresh();
     }
-    setErrors(failed);
-    setFiles([]);
-    setIsUploading(false);
-    router.refresh();
   };
 
   return (

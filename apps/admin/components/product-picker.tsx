@@ -32,10 +32,19 @@ const STATUSES: { value: Status; label: string }[] = [
 
 export type { PickerProduct };
 
+function addLabel(n: number): string {
+  return n > 1 ? `Add ${n} products` : "Add product";
+}
+
+/** What a search is for, to tell whether the list shown answers it. */
+function searchKey(q: string, statuses: Status[]): string {
+  return JSON.stringify([q, statuses]);
+}
+
 export function ProductPicker({
   title,
   description,
-  confirmLabel = (n) => (n > 1 ? `Add ${n} products` : "Add product"),
+  confirmLabel = addLabel,
   mode = "multiple",
   isAlreadyIn,
   alreadyInLabel = "Already added",
@@ -62,9 +71,11 @@ export function ProductPicker({
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [items, setItems] = useState<PickerProduct[]>();
   const [next, setNext] = useState<string | null>(null);
-  const [picked, setPicked] = useState<Map<string, PickerProduct>>(new Map());
+  const [picked, setPicked] = useState<Map<string, PickerProduct>>(() => new Map());
   const [error, setError] = useState<string>();
-  const [isLoading, setIsLoading] = useState(true);
+  // The search the shown items answer: loading while it isn't the current one.
+  const [shownFor, setShownFor] = useState<string>();
+  const isLoading = shownFor !== searchKey(q, statuses);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isSaving, startSaving] = useTransition();
   // Only the latest search's answer counts: typing fast starts several.
@@ -72,7 +83,6 @@ export function ProductPicker({
 
   useEffect(() => {
     const request = ++latest.current;
-    setIsLoading(true);
     const timer = setTimeout(
       async () => {
         const page = await pickerProducts({ q, statuses });
@@ -80,7 +90,7 @@ export function ProductPicker({
         setItems(page.items);
         setNext(page.nextCursor);
         setError(page.error);
-        setIsLoading(false);
+        setShownFor(searchKey(q, statuses));
       },
       q ? 250 : 0,
     );
@@ -91,8 +101,12 @@ export function ProductPicker({
     if (!next) return;
     const request = latest.current;
     setIsLoadingMore(true);
-    const page = await pickerProducts({ q, statuses, cursor: next });
-    setIsLoadingMore(false);
+    let page;
+    try {
+      page = await pickerProducts({ q, statuses, cursor: next });
+    } finally {
+      setIsLoadingMore(false);
+    }
     if (request !== latest.current) return;
     setItems((before) => [...(before ?? []), ...page.items]);
     setNext(page.nextCursor);
@@ -183,14 +197,18 @@ export function ProductPicker({
               const already = isAlreadyIn?.(product) ?? false;
               const isPicked = picked.has(product.id);
               return (
+                // The whole row is the checkbox's hit area for the mouse; keyboards and
+                // screen readers use the checkbox itself, so the row stays presentational.
                 <div
                   key={product.id}
+                  role="presentation"
                   className="picker-row"
                   data-disabled={already || undefined}
                   data-picked={isPicked || undefined}
                   onClick={() => !already && toggle(product)}
                 >
-                  <div onClick={(e) => e.stopPropagation()}>
+                  {/* The checkbox toggles itself; the row mustn't toggle it back. */}
+                  <div role="presentation" onClick={(e) => e.stopPropagation()}>
                     <CheckboxInput
                       label={`Pick ${product.title}`}
                       isLabelHidden

@@ -30,7 +30,7 @@ export default async function CategoryPage({
       .then(loaded),
   ]);
   // Ancestors come nearest first; a breadcrumb reads from the top.
-  const trail = [...category.ancestors].reverse();
+  const trail = category.ancestors.toReversed();
 
   return (
     <Section padding={6}>

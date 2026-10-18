@@ -10,9 +10,9 @@ const regionNames = new Intl.DisplayNames("en", { type: "region", fallback: "non
 
 /** The flag emoji of a two-letter code (its regional indicator symbols). */
 export function flag(code: string): string {
-  return String.fromCodePoint(
-    ...[...code.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65),
-  );
+  const letters = code.toUpperCase();
+  const symbol = (i: number) => 0x1f1e6 + letters.charCodeAt(i) - 65;
+  return String.fromCodePoint(symbol(0), symbol(1));
 }
 
 /** "Croatia": `Intl`'s name, else the API's, else the code itself. */
@@ -39,7 +39,9 @@ export function currencyOptions(codes: string[]): { value: string; label: string
 export function countryOptions(countries: Country[]): { value: string; label: string }[] {
   return countries
     .map((c) => ({ value: c.code, label: countryLabel(c.code, countries) }))
-    .sort((a, b) => countryName(a.value, countries).localeCompare(countryName(b.value, countries)));
+    .toSorted((a, b) =>
+      countryName(a.value, countries).localeCompare(countryName(b.value, countries)),
+    );
 }
 
 /** The countries `markets` sell to, each with its market's name, leaving out `except`. */

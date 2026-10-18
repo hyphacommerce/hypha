@@ -253,8 +253,8 @@ function AppDialog({
   const [name, setName] = useState(app?.name ?? "");
   const [key, setKey] = useState<string>();
   const [webhookUrl, setWebhookUrl] = useState(app?.webhook?.url ?? "");
-  const [timeout, setTimeoutMs] = useState(String(app?.webhook?.timeout_ms ?? 10000));
-  const [patterns, setPatterns] = useState(app?.subscriptions.join(", ") ?? "");
+  const [timeout, setTimeoutMs] = useState(() => String(app?.webhook?.timeout_ms ?? 10000));
+  const [patterns, setPatterns] = useState(() => app?.subscriptions.join(", ") ?? "");
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   const shownKey =

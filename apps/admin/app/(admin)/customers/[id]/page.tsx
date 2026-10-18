@@ -17,20 +17,21 @@ type Address = AdminSchemas["AddressResponse"];
 
 /** An address as it would be written on a parcel. */
 function AddressLines({ address, country }: { address: Address; country: string }) {
-  const lines = [
-    [address.first_name, address.last_name].filter(Boolean).join(" "),
-    address.company,
-    address.line1,
-    address.line2,
-    [address.postal_code, address.city].filter(Boolean).join(" "),
-    address.province,
+  // Each line by what it holds, which is also its key; blank ones are left out.
+  const lines = Object.entries({
+    name: [address.first_name, address.last_name].filter(Boolean).join(" "),
+    company: address.company,
+    line1: address.line1,
+    line2: address.line2,
+    city: [address.postal_code, address.city].filter(Boolean).join(" "),
+    province: address.province,
     country,
-    address.phone,
-  ].filter(Boolean);
+    phone: address.phone,
+  }).filter(([, line]) => line);
   return (
     <VStack gap={0.5}>
-      {lines.map((line, i) => (
-        <Text key={`${i}-${line}`} color={i === 0 ? "primary" : "secondary"}>
+      {lines.map(([part, line], i) => (
+        <Text key={part} color={i === 0 ? "primary" : "secondary"}>
           {line}
         </Text>
       ))}

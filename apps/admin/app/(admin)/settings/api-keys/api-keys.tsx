@@ -133,7 +133,7 @@ function CreateKeyDialog({
   const [kind, setKind] = useState<"secret" | "publishable">("secret");
   const [name, setName] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
-  const [channel, setChannel] = useState<string | undefined>(Object.keys(channels)[0]);
+  const [channel, setChannel] = useState<string | undefined>(() => Object.keys(channels)[0]);
   const [token, setToken] = useState<string>();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -191,7 +191,9 @@ function CreateKeyDialog({
             <SegmentedControl
               label="Kind"
               value={kind}
-              onChange={(value) => setKind(value as "secret" | "publishable")}
+              onChange={(value) => {
+                if (value === "secret" || value === "publishable") setKind(value);
+              }}
             >
               <SegmentedControlItem value="secret" label="Secret" />
               <SegmentedControlItem value="publishable" label="Publishable" />

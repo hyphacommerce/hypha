@@ -130,7 +130,7 @@ export function ProductsTable({
       label: "Category",
       options: Object.entries(categories)
         .map(([value, label]) => ({ value, label }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
+        .toSorted((a, b) => a.label.localeCompare(b.label)),
     },
     {
       kind: "select",
@@ -210,7 +210,7 @@ export function ProductsTable({
         <BulkOutcomeBanner outcome={outcome} noun="product" onClose={() => setOutcome(undefined)} />
       )}
       <ResourceTable<Product>
-        bulkActions={(selected, clear) => (
+        renderBulkActions={(selected, clear) => (
           <ProductBulkActions
             selected={selected}
             clear={clear}

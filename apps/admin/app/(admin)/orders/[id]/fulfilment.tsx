@@ -60,7 +60,9 @@ function TrackingList({
   return (
     <VStack gap={3}>
       {rows.map((row, index) => (
-        // Rows have no ID of their own; their place in the list is what they are.
+        // Rows have no ID of their own; their place in the list is what they are, and
+        // every field is controlled, so a removed row can't leave its text behind.
+        // oxlint-disable-next-line react/no-array-index-key
         <VStack key={index} gap={2}>
           <HStack gap={3} wrap="wrap" vAlign="end">
             <TextInput

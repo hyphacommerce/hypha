@@ -24,13 +24,23 @@ export function IndexStatus({ status: initial }: { status: SearchStatus }) {
 
   useEffect(() => {
     if (!isBusy) return;
-    const timer = setTimeout(async () => {
+    // Each look waits for the last answer, so a slow one never overlaps the next; an
+    // answer that arrives after the page stopped waiting is dropped.
+    let isWaiting = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const look = async () => {
       const result = await indexStatus();
+      if (!isWaiting) return;
       if (result.status) setStatus(result.status);
       setError(result.error);
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [status, isBusy]);
+      timer = setTimeout(() => void look(), 2000);
+    };
+    timer = setTimeout(() => void look(), 2000);
+    return () => {
+      isWaiting = false;
+      clearTimeout(timer);
+    };
+  }, [isBusy]);
 
   const rebuild = () =>
     startTransition(async () => {

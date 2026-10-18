@@ -82,8 +82,21 @@ export async function sessionClient() {
   return client;
 }
 
-/** Reads made once per request, by loader (`perRequest`). */
-const requestReads = new WeakMap<object, Map<object, Promise<unknown>>>();
+/**
+ * The current reads of each request, by its headers object: a fresh object per request,
+ * replaced after a write so the reads made before it are no longer found.
+ */
+const requestReads = new WeakMap<object, object>();
+
+async function readsOfRequest(): Promise<object> {
+  const scope = await headers();
+  let reads = requestReads.get(scope);
+  if (!reads) {
+    reads = {};
+    requestReads.set(scope, reads);
+  }
+  return reads;
+}
 
 /**
  * `load`, run at most once per request: the layout's parts, the page and its parts
@@ -93,18 +106,14 @@ const requestReads = new WeakMap<object, Map<object, Promise<unknown>>>();
  * and vinext alike) keys the memo instead, so nothing outlives the request.
  */
 function perRequest<T>(load: () => Promise<T>): () => Promise<T> {
-  const slot = {};
+  // Each loader keeps its own answers, so each map holds one type.
+  const answers = new WeakMap<object, Promise<T>>();
   return async () => {
-    const scope = await headers();
-    let reads = requestReads.get(scope);
-    if (!reads) {
-      reads = new Map();
-      requestReads.set(scope, reads);
-    }
-    let read = reads.get(slot) as Promise<T> | undefined;
+    const reads = await readsOfRequest();
+    let read = answers.get(reads);
     if (!read) {
       read = load();
-      reads.set(slot, read);
+      answers.set(reads, read);
     }
     return read;
   };
@@ -227,6 +236,13 @@ export function loaded<T>(result: { data?: T; error?: ApiError; response: Respon
   );
 }
 
+/** A number among an error's `details`, if the API sent one under `key`. */
+function numberDetail(details: unknown, key: string): number | undefined {
+  if (typeof details !== "object" || details === null || !(key in details)) return undefined;
+  const value: unknown = Reflect.get(details, key);
+  return typeof value === "number" ? value : undefined;
+}
+
 /** A message for the person at the screen, by the API's stable error code. */
 export function describe(error: ApiError): string {
   switch (error.code) {
@@ -331,7 +347,7 @@ export function describe(error: ApiError): string {
     case "media_not_configured":
       return "File storage isn't set up for this store yet.";
     case "over_fulfilled": {
-      const left = (error.details as { unfulfilled?: number } | null)?.unfulfilled;
+      const left = numberDetail(error.details, "unfulfilled");
       return left === undefined
         ? "That's more than is left to ship."
         : `That's more than is left to ship: ${left} of that item.`;
@@ -398,7 +414,7 @@ export function describe(error: ApiError): string {
     case "invalid_payment_transition":
       return "The payment can't change that way any more. Reload the order.";
     case "rate_limited": {
-      const secs = (error.details as { retry_after_secs?: number } | null)?.retry_after_secs;
+      const secs = numberDetail(error.details, "retry_after_secs");
       return secs ? `Too many attempts. Try again in ${secs} seconds.` : "Too many attempts.";
     }
     default:

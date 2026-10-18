@@ -812,8 +812,8 @@ function SellStep({
   // Until one is picked, the newest product not yet on the channel, worked out on every
   // render: the list changes as the previous steps' saves come back.
   const [picked, setProduct] = useState<string>();
-  const unpublished = data.products.filter((p) => !channel || !p.channels.includes(channel));
-  const product = picked ?? unpublished[0]?.id ?? data.products[0]?.id;
+  const unpublished = data.products.find((p) => !channel || !p.channels.includes(channel));
+  const product = picked ?? unpublished?.id ?? data.products[0]?.id;
   const [keyName, setKeyName] = useState("Storefront");
   const [token, setToken] = useState<string>();
   const published = useSave(onSaved);

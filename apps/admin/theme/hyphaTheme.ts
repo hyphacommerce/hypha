@@ -11,9 +11,35 @@ import { neutralTheme } from "@astryxdesign/theme-neutral";
 /** A palette's steps, 50 to 950, from the brand book. */
 type Scale = Record<50 | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | 950, string>;
 
-function scale(hexes: string[]): Scale {
-  const steps = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const;
-  return Object.fromEntries(steps.map((step, i) => [step, hexes[i]])) as Scale;
+/** The eleven hexes, lightest first: a palette with a step missing doesn't compile. */
+type Hexes = [
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+];
+
+function scale([s50, s100, s200, s300, s400, s500, s600, s700, s800, s900, s950]: Hexes): Scale {
+  return {
+    50: s50,
+    100: s100,
+    200: s200,
+    300: s300,
+    400: s400,
+    500: s500,
+    600: s600,
+    700: s700,
+    800: s800,
+    900: s900,
+    950: s950,
+  };
 }
 
 /** Foxfire: brand-400 is the fill, always with brand-950 ink on it. */

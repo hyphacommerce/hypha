@@ -74,7 +74,7 @@ export function NewProductForm() {
             options={currencyCodes(currencies)}
             hasSearch
             value={currency}
-            onChange={(value) => setCurrency(value as Currency)}
+            onChange={(value) => setCurrency(value)}
           />
         </div>
         <HStack gap={2} hAlign="end">

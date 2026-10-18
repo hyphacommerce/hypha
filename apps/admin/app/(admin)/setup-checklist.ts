@@ -23,21 +23,27 @@ export type SetupStep = {
   isDone: boolean;
 };
 
-export async function setupSteps(): Promise<SetupStep[]> {
+/** Which steps are done. */
+export async function setupDone(): Promise<Record<SetupKey, boolean>> {
   const client = await sessionClient();
   // One read (design note 0025, §6): the API checks each step with the caller's scopes.
   const { data } = await client.GET("/admin/setup/checklist");
-  const done = data ?? {
-    store: false,
-    market: false,
-    shipping: false,
-    payment: false,
-    product: false,
-    stock: false,
-    publish: false,
-    key: false,
-  };
+  return (
+    data ?? {
+      store: false,
+      market: false,
+      shipping: false,
+      payment: false,
+      product: false,
+      stock: false,
+      publish: false,
+      key: false,
+    }
+  );
+}
 
+export async function setupSteps(): Promise<SetupStep[]> {
+  const done = await setupDone();
   return [
     {
       key: "store",

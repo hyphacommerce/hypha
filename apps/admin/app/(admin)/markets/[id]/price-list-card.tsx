@@ -273,7 +273,7 @@ function AttachForm({
 }
 
 function AdjustmentForm({ market, list }: { market: Market; list: PriceList }) {
-  const [percent, setPercent] = useState(percentOf(list.adjustment_bps));
+  const [percent, setPercent] = useState(() => percentOf(list.adjustment_bps));
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   const bps = parsePercent(percent);

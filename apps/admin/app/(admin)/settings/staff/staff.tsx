@@ -41,17 +41,19 @@ export function Staff({
   invites,
   roles,
   canInvite,
+  now,
 }: {
   users: User[];
   invites: Invite[];
   roles: Role[];
   canInvite: boolean;
+  /** When the page was read (ms since the epoch), for which invites have expired. */
+  now: number;
 }) {
   const [inviting, setInviting] = useState<{ email: string; role?: string }>();
   const roleName = new Map(roles.map((r) => [r.id, r.name]));
   const memberCount = new Map<string, number>();
   for (const u of users) memberCount.set(u.role, (memberCount.get(u.role) ?? 0) + 1);
-  const now = Date.now();
 
   const userColumns: TableColumn<User>[] = [
     { key: "name", header: "Name" },

@@ -33,9 +33,11 @@ import { canMarkPaid, providerLabel } from "@/lib/payments";
 import { CancelOrderButton, FulfilButton, type Place, ShipmentsCard } from "./fulfilment";
 import { MarkPaid } from "./mark-paid";
 
+const RATE = new Intl.NumberFormat("en-IE", { maximumFractionDigits: 4 });
+
 /** "25%" from parts per million (250000). */
 function percent(ppm: number): string {
-  return `${new Intl.NumberFormat("en-IE", { maximumFractionDigits: 4 }).format(ppm / 10_000)}%`;
+  return `${RATE.format(ppm / 10_000)}%`;
 }
 
 /** "1 item", "3 items". */
@@ -73,7 +75,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const order = loaded(found);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
   const fulfillments = shipments.data?.items ?? [];
-  const places: Place[] = (locations.data?.items ?? []).map(({ id, name }) => ({ id, name }));
+  const places: Place[] = (locations.data?.items ?? []).map((l) => ({ id: l.id, name: l.name }));
   const cancelled = order.cancelled_at !== null && order.cancelled_at !== undefined;
   const canFulfil =
     !cancelled && order.unfulfilled.length > 0 && places.length > 0 && shipments.data;
@@ -396,7 +398,7 @@ function PaymentCard({ order, currencies }: { order: Order; currencies: Currenci
 
 /** What happened to the order, oldest first: what the order and its shipments record. */
 function TimelineCard({ events }: { events: { at: string; what: string }[] }) {
-  const sorted = [...events].sort((a, b) => a.at.localeCompare(b.at));
+  const sorted = events.toSorted((a, b) => a.at.localeCompare(b.at));
   return (
     <Card>
       <VStack gap={3}>

@@ -53,7 +53,7 @@ export function CategoriesCard({
               placeholder="Add to categories"
               options={options}
               value={draft.categories}
-              onChange={(categories) => onChange({ categories: [...categories].sort() })}
+              onChange={(categories) => onChange({ categories: categories.toSorted() })}
               hasSearch
               triggerDisplay="count"
               formatValue={(items) =>

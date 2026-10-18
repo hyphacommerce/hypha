@@ -15,7 +15,7 @@ export type Currencies = Readonly<Record<string, number>>;
 
 /** Every currency code, sorted, for pickers. */
 export function currencyCodes(currencies: Currencies): string[] {
-  return Object.keys(currencies).sort();
+  return Object.keys(currencies).toSorted();
 }
 
 /**

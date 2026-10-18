@@ -40,7 +40,7 @@ class Tally {
   }
 
   sorted(): Counted[] {
-    return [...this.counts.values()].sort(
+    return [...this.counts.values()].toSorted(
       (a, b) => b.count - a.count || a.value.localeCompare(b.value),
     );
   }

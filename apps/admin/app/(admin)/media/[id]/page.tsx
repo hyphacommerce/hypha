@@ -29,6 +29,8 @@ function FilePreview({ asset }: { asset: Asset }) {
         />
       );
     case "video":
+      // A preview of the merchant's own upload: there are no caption files to offer.
+      // oxlint-disable-next-line jsx-a11y/media-has-caption
       return <video src={asset.url} controls style={{ maxWidth: "100%", maxHeight: 520 }} />;
     case "file":
       return (
