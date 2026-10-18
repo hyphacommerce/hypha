@@ -601,3 +601,50 @@ events, `docs/apps/elements.md`).
   location) isn't customer data and is sent whole.
 - **Actors:** writes by an app's token are stamped `Actor::App(AppId)` in the outbox
   and idempotency records like any actor (`AppId` is `Copy`).
+
+## As built: app UI and the proxy (§5–§8, §10 item 4)
+
+- **Targets** are a closed catalog (`hypha_apps::Target`; `AdminTarget` /
+  `StorefrontTarget` in the OpenAPI documents). Manifests may still name targets this
+  build doesn't know (a newer app): they're listed nowhere. Pages fill `apps.page`, or
+  `settings.app` with `nav: "settings"`; blocks fill the object targets; actions those
+  and `payment`; elements the storefront ones. A contribution is listed and usable only
+  for an app installed through OAuth, enabled, whose grant reads the target's object
+  (`orders:read` for order and payment targets, `products:read`, `customers:read`,
+  `carts:read`); the staff member needs that scope too, and `apps:read`.
+- **Discovery:** `GET /admin/app-extensions?target=` answers flat lists (`apps`, `pages`,
+  `blocks`, `actions`, `settings`) with absolute URLs; an action that names a `point`
+  (`payments.refund`) is listed with it and runs through that point's route, not the
+  actions route (`409 app_action_has_point`). `GET /storefront/app-extensions?target=`
+  (`stores:read`, every publishable key) answers `elements` and `proxies`.
+  `GET /admin/app-extensions/origins` lists `server.admin_url`'s origin.
+- **Session tokens:** `POST /admin/app-extensions/{app}/session` (staff sessions only):
+  HS256 under the app's secret, claims `iss` (the base URL as the OAuth metadata
+  derives it), `aud`, `sub` (the user), `store`, `scope` (the grant ∩ the staff member's
+  scopes), `iat`, `exp` (+60 s), `jti`. Rust and `@hypha/app` share a test vector.
+- **Actions** are the extension point `admin.action` v1 (`openapi/extensions.json`,
+  10 s, fail closed): `POST <action url>` with `{action, target, context, input?, staff?,
+  scope}`, answered `{message?, refresh, navigate?}`; recorded in the call log.
+- **Blocks:** Hypha `GET`s the block URL with the context as query parameters and in
+  `Hypha-Context`, plus `Hypha-Store`, `Hypha-Staff`, `Hypha-Scopes`, `Hypha-Target`,
+  `Hypha-Block` and, for staff, a session token in `Authorization`; it checks the answer
+  against the block format v1 (the Rust port runs `packages/app-blocks`' fixtures) and
+  returns `{app, id, target, tree}`. Recorded as `admin.block` v1; nothing cached.
+- **Forwarded calls are signed twice:** `Hypha-Signature` over the body (as every call)
+  and `Hypha-Context-Signature` (`t=…,v1=HMAC("<t>.<METHOD>\n" + sorted
+  "<name>:<value>\n" of every other `Hypha-*` header)`), so the context can't be
+  changed in transit; `@hypha/app`'s `verifyForwardedRequest` checks both.
+- **The proxy:** `/admin/apps/{key}/proxy/{path}` (`apps:read`; the manifest's new
+  `admin.proxy`) and `/storefront/apps/{key}/proxy/{path}` (`stores:read`), GET, POST,
+  PUT, PATCH and DELETE. The path (as sent; no `.`/`..` segments, `400
+  invalid_proxy_path`) and query go after the proxy URL; `Hypha-Path` repeats them.
+  Admin context: `Hypha-Store`, `Hypha-Scopes`, `Hypha-Staff` and a session token for
+  staff. Storefront context: `Hypha-Store`, `Hypha-Channel`, and with `X-Hypha-Cart`
+  (a cart of the key's channel) `Hypha-Cart`, `Hypha-Country`, `Hypha-Customer`. IDs
+  only: no personal data is forwarded (AP10). Bodies and answers at most 1 MiB, 10 s;
+  only the status, `Content-Type` and body come back.
+- **Refresh:** `POST /admin/apps/{key}/refresh` (`apps:write`, or the app's own token)
+  applies the manifest's registrations; dropped scopes leave the grant at once; new ones
+  make an authorization request without a PKCE challenge (migration 0052): approving it
+  widens the grant and sends the browser to the app's `app_url` (no code: the app then
+  gets tokens with the new scopes from `/oauth/authorize`, approved at once).
