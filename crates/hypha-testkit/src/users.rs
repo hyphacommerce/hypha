@@ -1,7 +1,7 @@
 //! In-memory repos for `hypha-users`.
 
 use hypha_auth::TokenHash;
-use hypha_core::{Email, InviteId, RepoError, RoleId, UserId};
+use hypha_core::{Email, InviteId, RepoError, RoleId, UserId, Versioned};
 use hypha_users::{Invite, InviteRepo, Role, RoleRepo, User, UserRepo, keys};
 
 use crate::table::Table;
@@ -131,6 +131,10 @@ impl InMemoryInviteRepo {
 }
 
 impl InviteRepo for InMemoryInviteRepo {
+    async fn get(&self, id: InviteId) -> Result<Option<Invite>, RepoError> {
+        Ok(self.invites.get(&id))
+    }
+
     async fn get_by_email(&self, email: &Email) -> Result<Option<Invite>, RepoError> {
         Ok(self.invites.find(|i| i.email() == email))
     }
@@ -152,5 +156,16 @@ impl InviteRepo for InMemoryInviteRepo {
 
     async fn update(&self, invite: &mut Invite) -> Result<(), RepoError> {
         self.invites.update(invite.id(), invite, &unique_invite)
+    }
+
+    async fn delete(&self, invite: &Invite) -> Result<(), RepoError> {
+        let mut rows = self.invites.lock();
+        match rows.get(&invite.id()) {
+            Some(stored) if stored.version() == invite.version() => {
+                rows.remove(&invite.id());
+                Ok(())
+            }
+            _ => Err(RepoError::StaleVersion),
+        }
     }
 }

@@ -3,16 +3,18 @@
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_auth::{
-    HasIdentities, IdentityRepo, change_password, confirm_totp, disable_mfa,
-    regenerate_recovery_codes, start_totp,
+    HasIdentities, HasSessions, IdentityRepo, Session, change_password, confirm_totp, disable_mfa,
+    list_sessions, regenerate_recovery_codes, revoke_other_sessions, revoke_session, start_totp,
 };
-use hypha_core::{RoleId, Scope};
+use hypha_core::{RoleId, Scope, SessionId};
+use hypha_users::{HasUsers, StaffSession, rename_me};
 use serde::{Deserialize, Serialize};
 
-use super::staff::UserResponse;
+use super::{rfc3339, staff::UserResponse};
 use crate::{
     error::ApiError,
-    extract::{JsonBody, StaffCaller},
+    extract::{JsonBody, PathId, StaffCaller},
+    patch,
     state::{SharedState, Storage},
 };
 
@@ -43,13 +45,20 @@ pub async fn fetch<S: Storage>(
     staff: StaffCaller,
 ) -> Result<Json<MeResponse>, ApiError> {
     let (ports, staff) = staff.authenticate(&state).await?;
+    me_response(&ports, &staff).await.map(Json)
+}
+
+async fn me_response(
+    ports: &impl HasIdentities,
+    staff: &StaffSession,
+) -> Result<MeResponse, ApiError> {
     let identity = ports
         .identities()
         .get(staff.session.identity())
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::internal("session without identity"))?;
-    Ok(Json(MeResponse {
+    Ok(MeResponse {
         user: UserResponse::new(&staff.user)?,
         role: MeRole {
             id: staff.role.id(),
@@ -57,7 +66,133 @@ pub async fn fetch<S: Storage>(
         },
         scopes: staff.role.granted(),
         mfa_enabled: identity.mfa_enabled(),
+    })
+}
+
+/// JSON Merge Patch on the caller's own profile: only the fields sent change.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateMeRequest {
+    #[serde(default, deserialize_with = "patch::non_null")]
+    // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
+    #[schema(value_type = String, required = false)]
+    name: Option<String>,
+}
+
+/// Changes the caller's own name. Needs no scope: everyone may name themselves
+/// (changing someone else is `PATCH /admin/users/{id}`, with `users:write`).
+#[utoipa::path(
+    patch,
+    path = "/admin/me",
+    request_body = UpdateMeRequest,
+    responses((status = 200, description = "OK", body = MeResponse)),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
+pub async fn update<S: Storage>(
+    State(state): State<SharedState<S>>,
+    staff: StaffCaller,
+    body: JsonBody<UpdateMeRequest>,
+) -> Result<Json<MeResponse>, ApiError> {
+    let (ports, mut staff) = staff.authenticate(&state).await?;
+    let req = body.parse()?;
+    if let Some(name) = &req.name {
+        staff.user = rename_me(ports.users(), staff.user.id(), name).await?;
+    }
+    me_response(&ports, &staff).await.map(Json)
+}
+
+// ---------- sessions ----------
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct MySessionResponse {
+    id: SessionId,
+    /// Whether this is the session making the request.
+    current: bool,
+    /// When the login happened.
+    created_at: String,
+    /// When a request last used it, to within 15 minutes.
+    last_used_at: String,
+    expires_at: String,
+    /// The address the login came from, as the API saw it.
+    ip: Option<String>,
+    /// The login's `User-Agent`, for telling browsers apart.
+    user_agent: Option<String>,
+}
+
+impl MySessionResponse {
+    fn new(s: &Session, current: SessionId) -> Result<Self, ApiError> {
+        Ok(Self {
+            id: s.id(),
+            current: s.id() == current,
+            created_at: rfc3339(s.created_at())?,
+            last_used_at: rfc3339(s.last_used_at())?,
+            expires_at: rfc3339(s.expires_at())?,
+            ip: s.client().ip().map(str::to_string),
+            user_agent: s.client().user_agent().map(str::to_string),
+        })
+    }
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct MySessionListResponse {
+    /// Newest first. A person has a handful, so they come in one list.
+    items: Vec<MySessionResponse>,
+}
+
+/// The caller's signed-in sessions, this one included (`current`), newest first.
+#[utoipa::path(
+    get,
+    path = "/admin/me/sessions",
+    responses((status = 200, description = "OK", body = MySessionListResponse)),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
+pub async fn list_sessions_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    staff: StaffCaller,
+) -> Result<Json<MySessionListResponse>, ApiError> {
+    let (ports, staff) = staff.authenticate(&state).await?;
+    let sessions = list_sessions(ports.sessions(), &state.clock, &staff.session).await?;
+    Ok(Json(MySessionListResponse {
+        items: sessions
+            .iter()
+            .map(|s| MySessionResponse::new(s, staff.session.id()))
+            .collect::<Result<_, _>>()?,
     }))
+}
+
+/// Signs one of the caller's sessions out (their current one too: that's a logout).
+/// Anyone else's session is 404 `session_not_found`.
+#[utoipa::path(
+    delete,
+    path = "/admin/me/sessions/{id}",
+    params(("id" = SessionId, Path)),
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
+pub async fn revoke_session_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    staff: StaffCaller,
+    PathId(id): PathId<SessionId>,
+) -> Result<StatusCode, ApiError> {
+    let (ports, staff) = staff.authenticate(&state).await?;
+    revoke_session(ports.sessions(), &state.clock, &staff.session, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Signs out every session of the caller's but this one ("sign out everywhere else").
+#[utoipa::path(
+    post,
+    path = "/admin/me/sessions/revoke-others",
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-staff-session" = json!(true))),
+)]
+pub async fn revoke_other_sessions_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    staff: StaffCaller,
+) -> Result<StatusCode, ApiError> {
+    let (ports, staff) = staff.authenticate(&state).await?;
+    revoke_other_sessions(&ports, &state.clock, &staff.session).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

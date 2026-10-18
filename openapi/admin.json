@@ -3360,6 +3360,53 @@
         ],
         "type": "object"
       },
+      "InviteLookupRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "description": "The `hypha_inv_…` token from the invite's link. In the body, not the URL, so it\nstays out of access logs.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "InviteLookupResponse": {
+        "description": "What the invite page shows before anyone signs up: nothing more than the email's\nrecipient already knows.",
+        "properties": {
+          "email": {
+            "$ref": "#/components/schemas/Email",
+            "description": "Who the invite is for; the account will log in with it."
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "invited_by": {
+            "description": "The staff member who sent it, when there is one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "description": "The name of the role it gives.",
+            "type": "string"
+          },
+          "store_name": {
+            "description": "The store being joined.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "store_name",
+          "email",
+          "role",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "InviteRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3844,6 +3891,65 @@
         "required": [
           "amount",
           "currency"
+        ],
+        "type": "object"
+      },
+      "MySessionListResponse": {
+        "properties": {
+          "items": {
+            "description": "Newest first. A person has a handful, so they come in one list.",
+            "items": {
+              "$ref": "#/components/schemas/MySessionResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "MySessionResponse": {
+        "properties": {
+          "created_at": {
+            "description": "When the login happened.",
+            "type": "string"
+          },
+          "current": {
+            "description": "Whether this is the session making the request.",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SessionId"
+          },
+          "ip": {
+            "description": "The address the login came from, as the API saw it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_used_at": {
+            "description": "When a request last used it, to within 15 minutes.",
+            "type": "string"
+          },
+          "user_agent": {
+            "description": "The login's `User-Agent`, for telling browsers apart.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "current",
+          "created_at",
+          "last_used_at",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -6079,6 +6185,14 @@
         ],
         "type": "object"
       },
+      "SessionId": {
+        "description": "A SessionId: `sess_` and 32 hex digits.",
+        "examples": [
+          "sess_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^sess_[0-9a-f]{32}$",
+        "type": "string"
+      },
       "SessionResponse": {
         "properties": {
           "expires_at": {
@@ -7144,6 +7258,16 @@
           },
           "prices_include_tax": {
             "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateMeRequest": {
+        "additionalProperties": false,
+        "description": "JSON Merge Patch on the caller's own profile: only the fields sent change.",
+        "properties": {
+          "name": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -15400,6 +15524,212 @@
         ]
       }
     },
+    "/admin/invites/lookup": {
+      "post": {
+        "operationId": "admin.auth.lookup_invite",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteLookupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteLookupResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown, expired, accepted or revoked invite token (`invalid_token`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over a rate limit (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {}
+        ],
+        "summary": "The invite behind a token, for the page its link opens. Rate limited with accepting\n(per address), since both take a token.",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/admin/invites/{id}": {
+      "delete": {
+        "operationId": "admin.staff.revoke_invite",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/InviteId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Withdraws a pending invite: its link stops working. Needs every scope its role\ngrants, like inviting.",
+        "tags": [
+          "staff"
+        ],
+        "x-hypha-scopes": [
+          "users:write"
+        ]
+      }
+    },
     "/admin/locations": {
       "get": {
         "operationId": "admin.inventory.list_locations",
@@ -16505,6 +16835,121 @@
           "me"
         ],
         "x-hypha-staff-session": true
+      },
+      "patch": {
+        "operationId": "admin.me.update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes the caller's own name. Needs no scope: everyone may name themselves\n(changing someone else is `PATCH /admin/users/{id}`, with `users:write`).",
+        "tags": [
+          "me"
+        ],
+        "x-hypha-staff-session": true
       }
     },
     "/admin/me/mfa/recovery-codes": {
@@ -17072,6 +17517,213 @@
           }
         ],
         "summary": "Changes the password and logs out every other session.",
+        "tags": [
+          "me"
+        ],
+        "x-hypha-staff-session": true
+      }
+    },
+    "/admin/me/sessions": {
+      "get": {
+        "operationId": "admin.me.list_sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MySessionListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The caller's signed-in sessions, this one included (`current`), newest first.",
+        "tags": [
+          "me"
+        ],
+        "x-hypha-staff-session": true
+      }
+    },
+    "/admin/me/sessions/revoke-others": {
+      "post": {
+        "operationId": "admin.me.revoke_other_sessions",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Signs out every session of the caller's but this one (\"sign out everywhere else\").",
+        "tags": [
+          "me"
+        ],
+        "x-hypha-staff-session": true
+      }
+    },
+    "/admin/me/sessions/{id}": {
+      "delete": {
+        "operationId": "admin.me.revoke_session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SessionId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Signs one of the caller's sessions out (their current one too: that's a logout).\nAnyone else's session is 404 `session_not_found`.",
         "tags": [
           "me"
         ],

@@ -18,6 +18,42 @@ pub enum SessionState {
     Active { mfa_at: Option<Timestamp> },
 }
 
+/// What a session's owner sees to tell their sessions apart: the address and browser
+/// the login came from. Informational (the host reads it from the login request), so it
+/// is capped rather than validated: a longer user agent is cut, not refused.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionClient {
+    ip: Option<String>,
+    user_agent: Option<String>,
+}
+
+impl SessionClient {
+    /// Longest user agent kept, in characters.
+    pub const MAX_USER_AGENT: usize = 512;
+    /// Longest address kept, in characters (an IPv6 address with a zone fits).
+    pub const MAX_IP: usize = 64;
+
+    /// Blank values become `None`; long ones are cut to the caps above.
+    pub fn new(ip: Option<&str>, user_agent: Option<&str>) -> Self {
+        fn capped(value: Option<&str>, max: usize) -> Option<String> {
+            let value = value?.trim();
+            (!value.is_empty()).then(|| value.chars().take(max).collect())
+        }
+        Self {
+            ip: capped(ip, Self::MAX_IP),
+            user_agent: capped(user_agent, Self::MAX_USER_AGENT),
+        }
+    }
+
+    pub fn ip(&self) -> Option<&str> {
+        self.ip.as_deref()
+    }
+
+    pub fn user_agent(&self) -> Option<&str> {
+        self.user_agent.as_deref()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
     id: SessionId,
@@ -29,6 +65,8 @@ pub struct Session {
     created_at: Timestamp,
     expires_at: Timestamp,
     revoked_at: Option<Timestamp>,
+    client: SessionClient,
+    last_used_at: Timestamp,
 }
 
 impl Versioned for Session {
@@ -44,6 +82,10 @@ impl Versioned for Session {
 impl Session {
     /// Wrong second-factor codes before a pending session is revoked.
     pub const MAX_ATTEMPTS: u32 = 5;
+
+    /// How stale `last_used_at` may get before a request records its use again: one
+    /// write per session per this long, not one per request (design note 0008, §9).
+    pub const USE_RESOLUTION: Duration = Duration::from_secs(15 * 60);
 
     /// A logged-in session, lasting `lifetime` (`AuthSettings::session_lifetime`).
     pub fn active(
@@ -65,6 +107,8 @@ impl Session {
             created_at: now,
             expires_at: now.plus(lifetime),
             revoked_at: None,
+            client: SessionClient::default(),
+            last_used_at: now,
         }
     }
 
@@ -88,7 +132,15 @@ impl Session {
             created_at: now,
             expires_at: now.plus(window),
             revoked_at: None,
+            client: SessionClient::default(),
+            last_used_at: now,
         }
+    }
+
+    /// Where the login came from, for listing sessions; set before the first write
+    /// (`SessionRepo::update` keeps the inserted one).
+    pub fn set_client(&mut self, client: SessionClient) {
+        self.client = client;
     }
 
     pub fn id(&self) -> SessionId {
@@ -121,6 +173,26 @@ impl Session {
 
     pub fn revoked_at(&self) -> Option<Timestamp> {
         self.revoked_at
+    }
+
+    pub fn client(&self) -> &SessionClient {
+        &self.client
+    }
+
+    /// When a request last used the session, to within `USE_RESOLUTION`; when it was
+    /// created until then.
+    pub fn last_used_at(&self) -> Timestamp {
+        self.last_used_at
+    }
+
+    /// Whether a request at `now` should record its use (`SessionRepo::record_use`).
+    pub fn use_is_stale(&self, now: Timestamp) -> bool {
+        now >= self.last_used_at.plus(Self::USE_RESOLUTION)
+    }
+
+    /// Records a use at `now`; never moves back.
+    pub fn record_use(&mut self, now: Timestamp) {
+        self.last_used_at = self.last_used_at.max(now);
     }
 
     /// Neither revoked nor expired.
@@ -172,6 +244,8 @@ impl Session {
             created_at: self.created_at,
             expires_at: self.expires_at,
             revoked_at: self.revoked_at,
+            client: self.client.clone(),
+            last_used_at: self.last_used_at,
         }
     }
 
@@ -186,6 +260,8 @@ impl Session {
             created_at: s.created_at,
             expires_at: s.expires_at,
             revoked_at: s.revoked_at,
+            client: s.client,
+            last_used_at: s.last_used_at,
         }
     }
 }
@@ -203,6 +279,8 @@ pub struct SessionSnapshot {
     pub created_at: Timestamp,
     pub expires_at: Timestamp,
     pub revoked_at: Option<Timestamp>,
+    pub client: SessionClient,
+    pub last_used_at: Timestamp,
 }
 
 #[cfg(test)]
@@ -262,6 +340,33 @@ mod tests {
         s.record_failed_attempt(NOW);
         assert_eq!(s.revoked_at(), Some(NOW));
         assert!(!s.is_live(NOW));
+    }
+
+    #[test]
+    fn a_use_is_recorded_once_per_resolution() {
+        let mut s = pending();
+        let later = NOW.plus(Session::USE_RESOLUTION);
+        assert!(!s.use_is_stale(later.plus_secs(-1)));
+        assert!(s.use_is_stale(later));
+        s.record_use(later);
+        assert_eq!(s.last_used_at(), later);
+        s.record_use(NOW);
+        assert_eq!(s.last_used_at(), later);
+    }
+
+    #[test]
+    fn a_client_drops_blanks_and_cuts_long_values() {
+        let long = "x".repeat(SessionClient::MAX_USER_AGENT + 1);
+        let c = SessionClient::new(Some("  "), Some(&long));
+        assert_eq!(c.ip(), None);
+        assert_eq!(
+            c.user_agent().map(|ua| ua.chars().count()),
+            Some(SessionClient::MAX_USER_AGENT)
+        );
+        assert_eq!(
+            SessionClient::new(Some(" 10.0.0.1 "), None).ip(),
+            Some("10.0.0.1")
+        );
     }
 
     #[test]

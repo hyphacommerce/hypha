@@ -23,9 +23,10 @@ pub use commands::{
     AuthEnv, ChannelDirectory, CommandError, CreateApiKey, LoginStep, MfaMethod, TotpSetup,
     authenticate_api_key, authenticate_session, change_password, check_password, confirm_totp,
     create_api_key, disable_mfa, finish_login, get_api_key, hash_new_password, list_api_keys,
-    logout, new_active_session, open_session, prepare_login, regenerate_recovery_codes,
-    require_grantable, reset_password, revoke_api_key, session_token_hash, start_password_reset,
-    start_totp, withdraw_password_resets,
+    list_sessions, logout, new_active_session, open_session, prepare_login, record_session_use,
+    regenerate_recovery_codes, require_grantable, reset_password, revoke_api_key,
+    revoke_other_sessions, revoke_session, session_token_hash, start_password_reset, start_totp,
+    withdraw_password_resets,
 };
 pub use error::{ApiKeyError, IdentityError, RestoreError};
 pub use identity::{
@@ -39,6 +40,6 @@ pub use repo::{
     PasswordResetRepo, SessionRepo, StageIdentities, StagePasswordResets, StageSessions, keys,
 };
 pub use secret_box::{SealError, Sealed, SecretBox, XChaChaBox};
-pub use session::{Session, SessionSnapshot, SessionState};
+pub use session::{Session, SessionClient, SessionSnapshot, SessionState};
 pub use settings::{AuthSettings, HasAuthSettings};
 pub use token::{NewToken, TokenHash, TokenKind};

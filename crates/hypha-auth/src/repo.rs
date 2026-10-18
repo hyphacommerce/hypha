@@ -46,8 +46,21 @@ pub trait SessionRepo {
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<Session>, RepoError>;
     /// Enforces `SESSION_ID` and `SESSION_TOKEN`.
     async fn insert(&self, session: &mut Session) -> Result<(), RepoError>;
-    /// Enforces `SESSION_TOKEN` (activation swaps the token).
+    /// Enforces `SESSION_TOKEN` (activation swaps the token). The client stays as
+    /// inserted, and `last_used_at` never moves back: a copy loaded before a recorded
+    /// use keeps the later time.
     async fn update(&self, session: &mut Session) -> Result<(), RepoError>;
+    /// Every session of `identity` neither revoked nor expired at `now`, pending ones
+    /// too, newest first: what its owner lists (a handful).
+    async fn live_for_identity(
+        &self,
+        identity: IdentityId,
+        now: Timestamp,
+    ) -> Result<Vec<Session>, RepoError>;
+    /// Sets the session's `last_used_at` to `at` if that is later, without moving its
+    /// version: a use isn't a change, so it never makes a concurrent update stale. A
+    /// missing session is no error (it may have just been pruned).
+    async fn record_use(&self, id: SessionId, at: Timestamp) -> Result<(), RepoError>;
     /// Deletes up to `limit` sessions that ended (expired or revoked) before `before`;
     /// returns how many.
     async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError>;

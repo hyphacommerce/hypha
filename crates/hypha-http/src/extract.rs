@@ -20,7 +20,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use hypha_apps::HasApps;
-use hypha_auth::{HasApiKeys, TokenKind, authenticate_api_key};
+use hypha_auth::{HasApiKeys, HasSessions, TokenKind, authenticate_api_key};
 use hypha_core::ActingAs;
 use hypha_core::{Clock, Ctx, IdempotencyRequest};
 use hypha_oauth::{HasOAuthTokens, authenticate_access_token};
@@ -204,7 +204,9 @@ fn credential(parts: &Parts) -> Result<Credential, ApiError> {
 }
 
 impl Credential {
-    async fn authenticate<P: HasStaffSessions + HasApiKeys + HasOAuthTokens + HasApps>(
+    async fn authenticate<
+        P: HasStaffSessions + HasSessions + HasApiKeys + HasOAuthTokens + HasApps,
+    >(
         &self,
         ports: &P,
         clock: &impl Clock,

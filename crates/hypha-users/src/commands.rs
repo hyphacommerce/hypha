@@ -3,8 +3,9 @@
 
 use hypha_auth::{
     AuthEnv, HasIdentities, HasPasswordResets, HasSessions, Identity, IdentityRepo, LoginStep,
-    NewToken, Password, Principal, PrincipalKind, Session, StageIdentities, StagePasswordResets,
-    StageSessions, TokenHash, TokenKind, hash_new_password, new_active_session, require_grantable,
+    NewToken, Password, Principal, PrincipalKind, Session, SessionClient, StageIdentities,
+    StagePasswordResets, StageSessions, TokenHash, TokenKind, hash_new_password,
+    new_active_session, record_session_use, require_grantable,
 };
 use hypha_core::{
     Actor, AuthError, Clock, Ctx, Email, EmailError, ErrorCode, HasBatch, IdGenerator, IdentityId,
@@ -106,6 +107,8 @@ pub enum CommandError {
     LastOwner,
     #[error("the session belongs to no staff member")]
     NotStaff,
+    #[error("invite {0} not found")]
+    InviteNotFound(InviteId),
 }
 
 impl ErrorCode for CommandError {
@@ -125,6 +128,7 @@ impl ErrorCode for CommandError {
             CommandError::UserExists(_) => "user_exists",
             CommandError::LastOwner => "last_owner",
             CommandError::NotStaff => "invalid_token",
+            CommandError::InviteNotFound(_) => "invite_not_found",
         }
     }
 }
@@ -374,6 +378,27 @@ pub async fn update_user<S: StaffPorts>(
     Ok(user)
 }
 
+/// Renames the staff member `me` (the caller's own user, from their session): no scope
+/// needed, since everyone may name themselves. Retried when the user moved meanwhile (a
+/// login writes the user too).
+pub async fn rename_me<R: UserRepo>(
+    users: &R,
+    me: UserId,
+    name: &str,
+) -> Result<User, CommandError> {
+    const ROUNDS: usize = 3;
+    for _ in 0..ROUNDS {
+        let mut user = load_user(users, me).await?;
+        user.rename(name)?;
+        match users.update(&mut user).await {
+            Ok(()) => return Ok(user),
+            Err(RepoError::StaleVersion) => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(RepoError::StaleVersion.into())
+}
+
 // ---------- invites ----------
 
 pub struct InviteUser {
@@ -463,6 +488,74 @@ pub struct AcceptInvite {
     pub token: String,
     pub name: String,
     pub password: String,
+    /// Where the request came from, for the session it opens.
+    pub client: SessionClient,
+}
+
+/// What an invite's link shows before it is accepted (`lookup_invite`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InviteDetails {
+    pub invite: Invite,
+    /// The role it gives.
+    pub role: Role,
+    /// Who sent it, when a staff member did and they still exist.
+    pub inviter: Option<User>,
+}
+
+/// The invite behind `token`, for the page its link opens: the email, the role, who
+/// sent it and until when it works. Needs no credentials, the token being one, so it
+/// answers `invalid_token` for anything not usable (unknown, expired, accepted or
+/// revoked), like accepting would.
+pub async fn lookup_invite<S: HasInvites + HasRoles + HasUsers>(
+    ports: &S,
+    clock: &impl Clock,
+    token: &str,
+) -> Result<InviteDetails, CommandError> {
+    if TokenKind::of(token) != Some(TokenKind::Invite) {
+        return Err(hypha_auth::CommandError::InvalidToken.into());
+    }
+    let invite = ports
+        .invites()
+        .get_by_token(TokenHash::of(token))
+        .await?
+        .filter(|i| i.is_usable(clock.now()))
+        .ok_or(hypha_auth::CommandError::InvalidToken)?;
+    let role = load_role(ports.roles(), invite.role()).await?;
+    let inviter = match invite.invited_by() {
+        Actor::User(id) => ports.users().get(id).await?,
+        _ => None,
+    };
+    Ok(InviteDetails {
+        invite,
+        role,
+        inviter,
+    })
+}
+
+/// Withdraws a pending invite: its link stops working, and the email can be invited
+/// afresh. Like inviting, it needs every scope the invite's role grants, so nobody
+/// cancels an invite more powerful than themselves. An accepted invite is a user now
+/// (disable them instead), so it reads as not found.
+pub async fn revoke_invite<S: HasInvites + HasRoles>(
+    ctx: &Ctx,
+    ports: &S,
+    id: InviteId,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::UsersWrite)?;
+    let invite = ports
+        .invites()
+        .get(id)
+        .await?
+        .filter(|i| i.accepted_at().is_none())
+        .ok_or(CommandError::InviteNotFound(id))?;
+    // A role that's gone grants nothing, so anyone with `users:write` may clean it up.
+    if let Some(role) = ports.roles().get(invite.role()).await? {
+        require_grantable(ctx, &role.granted())?;
+    }
+    // Accepted or renewed meanwhile is `StaleVersion` (`concurrent_modification`): a
+    // renewal is someone's newer invite, not this one.
+    ports.invites().delete(&invite).await?;
+    Ok(())
 }
 
 /// Creates the invited user with their password and logs them in, all in one batch, so
@@ -501,6 +594,7 @@ pub async fn accept_invite<S: StaffPorts>(
         hash_new_password(env, &password).await?,
     );
     let (mut session, token) = new_active_session(&identity, env);
+    session.set_client(input.client);
     invite.accept(now);
 
     let mut batch = ports.batch();
@@ -537,6 +631,7 @@ pub async fn login<S: StaffPorts>(
     env: &impl AuthEnv,
     email: &str,
     password: &str,
+    client: &SessionClient,
 ) -> Result<LoginStep, CommandError> {
     let identity = hypha_auth::check_password(
         ports.identities(),
@@ -553,6 +648,7 @@ pub async fn login<S: StaffPorts>(
             return Err(hypha_auth::CommandError::InvalidCredentials.into());
         };
         let mut step = hypha_auth::prepare_login(&identity, env);
+        step.session_mut().set_client(client.clone());
         let mut batch = ports.batch();
         batch.update_user(&mut user);
         batch.insert_session(step.session_mut());
@@ -581,15 +677,16 @@ pub struct StaffSession {
 ///
 /// One read: the session, its user and their role come together
 /// (`StaffSessionRepo::staff_session_by_token`), so every staff request costs one round
-/// trip before its own work.
-pub async fn authenticate_staff<S: HasStaffSessions>(
+/// trip before its own work; and a write once per `Session::USE_RESOLUTION` recording
+/// that the session is in use.
+pub async fn authenticate_staff<S: HasStaffSessions + HasSessions>(
     ports: &S,
     clock: &impl Clock,
     token: &str,
 ) -> Result<StaffSession, CommandError> {
     let hash = hypha_auth::session_token_hash(token)?;
     let StaffSessionRecord {
-        session,
+        mut session,
         user,
         role,
     } = ports
@@ -600,6 +697,7 @@ pub async fn authenticate_staff<S: HasStaffSessions>(
         .ok_or(hypha_auth::CommandError::InvalidToken)?;
     let user = user.filter(User::is_active).ok_or(CommandError::NotStaff)?;
     let role = role.ok_or(CommandError::RoleNotFound(user.role()))?;
+    record_session_use(ports.sessions(), clock, &mut session).await?;
     let ctx = Ctx::new(Actor::User(user.id()), role.granted());
     Ok(StaffSession {
         ctx,

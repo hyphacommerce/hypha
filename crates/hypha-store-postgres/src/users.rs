@@ -419,6 +419,11 @@ async fn select_invite(
 }
 
 impl<C: PgConnection> InviteRepo for PgStore<C> {
+    async fn get(&self, id: InviteId) -> Result<Option<Invite>, RepoError> {
+        let mut conn = self.conn().await;
+        select_invite(&conn.db(), "id = $1", &id.as_uuid(), Type::UUID).await
+    }
+
     async fn get_by_email(&self, email: &Email) -> Result<Option<Invite>, RepoError> {
         let mut conn = self.conn().await;
         select_invite(&conn.db(), "email = $1", &email.as_str(), Type::TEXT).await
@@ -458,6 +463,25 @@ impl<C: PgConnection> InviteRepo for PgStore<C> {
         let s = invite.snapshot();
         let version = in_transaction!(self, |tx| update_invite(tx, &s).await)?;
         invite.set_version(version);
+        Ok(())
+    }
+
+    async fn delete(&self, invite: &Invite) -> Result<(), RepoError> {
+        let mut conn = self.conn().await;
+        let deleted = conn
+            .db()
+            .execute_typed(
+                "DELETE FROM invites WHERE id = $1 AND version = $2",
+                &[
+                    (&invite.id().as_uuid(), Type::UUID),
+                    (&version_to_db(invite.version())?, Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        if deleted == 0 {
+            return Err(RepoError::StaleVersion);
+        }
         Ok(())
     }
 }

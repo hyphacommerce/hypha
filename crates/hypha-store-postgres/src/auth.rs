@@ -4,8 +4,8 @@
 use hypha_auth::{
     ApiKey, ApiKeyKind, ApiKeyRepo, ApiKeySnapshot, CredentialKind, Identity, IdentityRepo,
     IdentitySnapshot, PasswordReset, PasswordResetRepo, PasswordResetSnapshot, Principal,
-    PrincipalKind, Session, SessionRepo, SessionSnapshot, SessionState, StoredCredential,
-    TokenHash,
+    PrincipalKind, Session, SessionClient, SessionRepo, SessionSnapshot, SessionState,
+    StoredCredential, TokenHash,
 };
 use hypha_core::{
     ApiKeyId, ChannelId, IdentityId, PasswordResetId, RepoError, SessionId, Timestamp, UserId,
@@ -225,8 +225,16 @@ const SESSION_PLAIN: &[&str] = &[
     "token_hash",
     "state",
     "failed_attempts",
+    "client_ip",
+    "user_agent",
 ];
-const SESSION_TIMESTAMPS: &[&str] = &["mfa_at", "created_at", "expires_at", "revoked_at"];
+const SESSION_TIMESTAMPS: &[&str] = &[
+    "mfa_at",
+    "created_at",
+    "expires_at",
+    "revoked_at",
+    "last_used_at",
+];
 
 fn session_columns() -> String {
     prefixed_columns("sessions", "", SESSION_PLAIN, SESSION_TIMESTAMPS)
@@ -245,6 +253,8 @@ pub(crate) fn session_from(row: Prefixed<'_>) -> Result<Session, RepoError> {
     let principal_kind: String = row.col("principal_kind")?;
     let state: String = row.col("state")?;
     let failed: i32 = row.col("failed_attempts")?;
+    let ip: Option<String> = row.col("client_ip")?;
+    let user_agent: Option<String> = row.col("user_agent")?;
     let state = match state.as_str() {
         "pending" => SessionState::Pending {
             failed_attempts: u32::try_from(failed).map_err(corrupt)?,
@@ -264,6 +274,8 @@ pub(crate) fn session_from(row: Prefixed<'_>) -> Result<Session, RepoError> {
         created_at: Timestamp::from_unix_micros(row.col("created_at")?),
         expires_at: Timestamp::from_unix_micros(row.col("expires_at")?),
         revoked_at: opt_ts(row.col("revoked_at")?),
+        client: SessionClient::new(ip.as_deref(), user_agent.as_deref()),
+        last_used_at: Timestamp::from_unix_micros(row.col("last_used_at")?),
     }))
 }
 
@@ -338,8 +350,52 @@ impl<C: PgConnection> SessionRepo for PgStore<C> {
 
     async fn update(&self, session: &mut Session) -> Result<(), RepoError> {
         let s = session.snapshot();
-        let version = in_transaction!(self, |tx| update_session(tx, &s).await)?;
+        let (version, last_used_at) = in_transaction!(self, |tx| update_session(tx, &s).await)?;
         session.set_version(version);
+        session.record_use(last_used_at);
+        Ok(())
+    }
+
+    async fn live_for_identity(
+        &self,
+        identity: IdentityId,
+        now: Timestamp,
+    ) -> Result<Vec<Session>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM sessions
+                     WHERE identity_id = $1 AND revoked_at IS NULL AND expires_at > {}
+                     ORDER BY created_at DESC, id DESC",
+                    session_columns(),
+                    ts(2)
+                ),
+                &[
+                    (&identity.as_uuid(), Type::UUID),
+                    (&now.unix_micros(), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(session_from_row)
+            .collect()
+    }
+
+    async fn record_use(&self, id: SessionId, at: Timestamp) -> Result<(), RepoError> {
+        let mut conn = self.conn().await;
+        conn.db()
+            .execute_typed(
+                &format!(
+                    "UPDATE sessions SET last_used_at = {at}
+                     WHERE id = $1 AND last_used_at < {at}",
+                    at = ts(2)
+                ),
+                &[(&id.as_uuid(), Type::UUID), (&at.unix_micros(), Type::INT8)],
+            )
+            .await
+            .map_err(repo_error)?;
         Ok(())
     }
 }
@@ -355,12 +411,13 @@ pub(crate) async fn insert_session(
             &format!(
                 "INSERT INTO sessions (id, version, identity_id, principal_kind, principal_id,
                      token_hash, state, failed_attempts, mfa_at, created_at, expires_at,
-                     revoked_at)
-                 VALUES ($1, 1, $2, $3, $4, $5, $6, $7, {}, {}, {}, {})",
+                     revoked_at, client_ip, user_agent, last_used_at)
+                 VALUES ($1, 1, $2, $3, $4, $5, $6, $7, {}, {}, {}, {}, $12, $13, {})",
                 ts(8),
                 ts(9),
                 ts(10),
-                ts(11)
+                ts(11),
+                ts(14)
             ),
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -374,6 +431,9 @@ pub(crate) async fn insert_session(
                 (&s.created_at.unix_micros(), Type::INT8),
                 (&s.expires_at.unix_micros(), Type::INT8),
                 (&opt_micros(s.revoked_at), Type::INT8),
+                (&s.client.ip(), Type::TEXT),
+                (&s.client.user_agent(), Type::TEXT),
+                (&s.last_used_at.unix_micros(), Type::INT8),
             ],
         )
         .await
@@ -381,20 +441,26 @@ pub(crate) async fn insert_session(
     Ok(())
 }
 
+/// Returns the new version and the stored `last_used_at`, which a recorded use may have
+/// moved past the snapshot's (`SessionRepo::update`).
 pub(crate) async fn update_session(
     client: &impl Queries,
     s: &SessionSnapshot,
-) -> Result<Version, RepoError> {
+) -> Result<(Version, Timestamp), RepoError> {
     let (state, failed, mfa_at) = state_to_db(s.state);
     let row = client
         .query_typed_opt(
             &format!(
                 "UPDATE sessions SET version = version + 1, token_hash = $3, state = $4,
-                     failed_attempts = $5, mfa_at = {}, expires_at = {}, revoked_at = {}
-                 WHERE id = $1 AND version = $2 RETURNING version",
+                     failed_attempts = $5, mfa_at = {}, expires_at = {}, revoked_at = {},
+                     last_used_at = GREATEST(last_used_at, {})
+                 WHERE id = $1 AND version = $2
+                 RETURNING version, {}",
                 ts(6),
                 ts(7),
-                ts(8)
+                ts(8),
+                ts(9),
+                micros("last_used_at")
             ),
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -405,6 +471,7 @@ pub(crate) async fn update_session(
                 (&mfa_at, Type::INT8),
                 (&s.expires_at.unix_micros(), Type::INT8),
                 (&opt_micros(s.revoked_at), Type::INT8),
+                (&s.last_used_at.unix_micros(), Type::INT8),
             ],
         )
         .await
@@ -412,7 +479,10 @@ pub(crate) async fn update_session(
     let Some(row) = row else {
         return Err(RepoError::StaleVersion);
     };
-    version_from_db(col(&row, "version")?)
+    Ok((
+        version_from_db(col(&row, "version")?)?,
+        Timestamp::from_unix_micros(col(&row, "last_used_at")?),
+    ))
 }
 
 /// `StageSessions::revoke_sessions` inside the batch's transaction.

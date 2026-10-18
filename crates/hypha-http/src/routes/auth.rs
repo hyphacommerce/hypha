@@ -3,17 +3,24 @@
 //! So they are rate limited (design note 0009): per client IP before the body is even
 //! parsed, per email right after, and both before any hashing, storage or email.
 
-use axum::{Json, extract::State, http::StatusCode};
-use hypha_auth::{
-    HasSessions, LoginStep, MfaMethod, NewToken, Session, finish_login, logout, reset_password,
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, StatusCode, header::USER_AGENT},
 };
-use hypha_core::Email;
-use hypha_users::{AcceptInvite, accept_invite, login, request_password_reset};
+use hypha_auth::{
+    HasSessions, LoginStep, MfaMethod, NewToken, Session, SessionClient, finish_login, logout,
+    reset_password,
+};
+use hypha_core::{Actor, Ctx, Email, Scope};
+use hypha_users::{
+    AcceptInvite, InviteDetails, accept_invite, login, lookup_invite, request_password_reset,
+};
 use serde::{Deserialize, Serialize};
 
-use super::{rfc3339, staff::UserResponse};
+use super::{rfc3339, staff::UserResponse, stores::read_store};
 use crate::{
-    client_ip::ClientIp,
+    client_ip::{ClientAddr, ClientIp},
     error::{ApiError, ApiErrorBody},
     extract::{JsonBody, StaffCaller},
     rate_limit::{Rule, enforce, pair_key},
@@ -26,6 +33,13 @@ use crate::{
 /// applies, while the address limit still does.
 fn limit_email(raw: &str) -> Option<Email> {
     Email::new(raw).ok()
+}
+
+/// Where a login request came from, kept on the session it opens so its owner can
+/// tell their sessions apart (`GET /admin/me/sessions`).
+fn session_client(addr: &ClientAddr, headers: &HeaderMap) -> SessionClient {
+    let user_agent = headers.get(USER_AGENT).and_then(|v| v.to_str().ok());
+    SessionClient::new(Some(&addr.0.to_string()), user_agent)
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -89,6 +103,8 @@ pub enum LoginResponse {
 pub async fn login_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
+    addr: ClientAddr,
+    headers: HeaderMap,
     body: JsonBody<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     enforce(&state.limiter, Rule::LoginIp, &ip).await?;
@@ -104,7 +120,8 @@ pub async fn login_handler<S: Storage>(
         enforce(&state.limiter, Rule::LoginEmail, email.as_str()).await?;
     }
     let ports = state.public_ports().await?;
-    let step = login(&ports, &state.env, &req.email, &req.password).await?;
+    let client = session_client(&addr, &headers);
+    let step = login(&ports, &state.env, &req.email, &req.password, &client).await?;
     Ok(Json(match step {
         LoginStep::Authenticated { session, token } => LoginResponse::Authenticated {
             session: SessionResponse::new(&session, &token)?,
@@ -264,6 +281,8 @@ pub struct AcceptedResponse {
 pub async fn accept_invite_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
+    addr: ClientAddr,
+    headers: HeaderMap,
     body: JsonBody<AcceptInviteRequest>,
 ) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
     enforce(&state.limiter, Rule::InviteIp, &ip).await?;
@@ -273,6 +292,7 @@ pub async fn accept_invite_handler<S: Storage>(
         token: req.token,
         name: req.name,
         password: req.password,
+        client: session_client(&addr, &headers),
     };
     let (user, session, token) = accept_invite(&ports, &state.env, input).await?;
     let response = AcceptedResponse {
@@ -280,6 +300,69 @@ pub async fn accept_invite_handler<S: Storage>(
         session: SessionResponse::new(&session, &token)?,
     };
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InviteLookupRequest {
+    /// The `hypha_inv_…` token from the invite's link. In the body, not the URL, so it
+    /// stays out of access logs.
+    token: String,
+}
+
+/// What the invite page shows before anyone signs up: nothing more than the email's
+/// recipient already knows.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct InviteLookupResponse {
+    /// The store being joined.
+    store_name: String,
+    /// Who the invite is for; the account will log in with it.
+    email: Email,
+    /// The name of the role it gives.
+    role: String,
+    /// The staff member who sent it, when there is one.
+    invited_by: Option<String>,
+    expires_at: String,
+}
+
+impl InviteLookupResponse {
+    fn new(store_name: String, d: &InviteDetails) -> Result<Self, ApiError> {
+        Ok(Self {
+            store_name,
+            email: d.invite.email().clone(),
+            role: d.role.name().to_string(),
+            invited_by: d.inviter.as_ref().map(|u| u.name().to_string()),
+            expires_at: rfc3339(d.invite.expires_at())?,
+        })
+    }
+}
+
+/// The invite behind a token, for the page its link opens. Rate limited with accepting
+/// (per address), since both take a token.
+#[utoipa::path(
+    post,
+    path = "/admin/invites/lookup",
+    request_body = InviteLookupRequest,
+    responses((status = 200, description = "OK", body = InviteLookupResponse), (status = 401, description = "An unknown, expired, accepted or revoked invite token (`invalid_token`).", body = ApiErrorBody), (status = 429, description = "Over a rate limit (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    security(()),
+)]
+pub async fn lookup_invite_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
+    body: JsonBody<InviteLookupRequest>,
+) -> Result<Json<InviteLookupResponse>, ApiError> {
+    enforce(&state.limiter, Rule::InviteIp, &ip).await?;
+    let req = body.parse()?;
+    let ports = state.public_ports().await?;
+    let details = lookup_invite(&ports, &state.clock, &req.token).await?;
+    // The store's current name (it may have changed since setup); the route itself
+    // needs no credentials, so the read runs as the system, for this one scope.
+    let ctx = Ctx::new(Actor::System, vec![Scope::StoresRead]);
+    let store = read_store(&state, &ctx, ports).await?;
+    Ok(Json(InviteLookupResponse::new(
+        store.name().to_string(),
+        &details,
+    )?))
 }
 
 #[cfg(test)]
