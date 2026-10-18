@@ -9,8 +9,7 @@
 // the order, if this browser already holds its token).
 
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import type { NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 
 import { api, loadCountries } from "@/lib/api";
 import { COUNTRY_COOKIE } from "@/lib/routing";
@@ -18,6 +17,16 @@ import { link, mode, rememberOrder } from "@/lib/site";
 
 /** Per request: it reads the order with the link's token. */
 export const dynamic = "force-dynamic";
+
+/**
+ * A redirect to a path on this site, with a relative `Location` that the browser
+ * resolves against the address it asked for. Not `redirect()`, which makes it absolute
+ * from the request this server saw: behind a proxy that ends TLS (a VPS's Caddy), that's
+ * `http://`, an extra hop out of HTTPS.
+ */
+function to(path: string): NextResponse {
+  return new NextResponse(null, { status: 307, headers: { location: path } });
+}
 
 // An email's link can only be a GET. Its one effect, keeping a token that already reads
 // the order, is safe to repeat; a forged visit gives a browser the forger's own order.
@@ -27,15 +36,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // The confirmation without a country: the proxy puts it in the shopper's.
   const fallback = `/order/${encodeURIComponent(id)}/confirmed`;
   const token = request.nextUrl.searchParams.get("token");
-  if (!token) redirect(fallback);
+  if (!token) return to(fallback);
   const { data: order } = await api().GET("/storefront/orders/{id}", {
     params: { path: { id }, query: { token } },
   });
-  if (!order) redirect(fallback);
+  if (!order) return to(fallback);
   await rememberOrder(order.id, token);
   const sold = (await loadCountries()).some((c) => c.country === order.country);
   // A country no market sells to any more has no folder: the shopper's one, then.
-  if (!sold) redirect(fallback);
+  if (!sold) return to(fallback);
   // A single tree takes the country from its cookie: the order's, so its page shows
   // the order's country and money.
   if (mode() === "single") {
@@ -45,5 +54,5 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       maxAge: 60 * 60 * 24 * 365,
     });
   }
-  redirect(link(order.country, `/order/${order.id}/confirmed`));
+  return to(link(order.country, `/order/${order.id}/confirmed`));
 }
