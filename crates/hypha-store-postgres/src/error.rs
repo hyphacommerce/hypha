@@ -11,6 +11,7 @@ use hypha_fulfillment::keys as fulfillment_keys;
 use hypha_inventory::repo::keys as inventory_keys;
 use hypha_markets::repo::keys as market_keys;
 use hypha_media::repo::keys as media_keys;
+use hypha_notifications::keys as notification_keys;
 use hypha_orders::repo::keys as order_keys;
 use hypha_payments::keys as payment_keys;
 use hypha_products::repo::keys as product_keys;
@@ -69,6 +70,16 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("fulfillments_pkey", fulfillment_keys::FULFILLMENT_ID),
     ("payment_methods_pkey", payment_keys::PAYMENT_METHOD_ID),
     ("payments_pkey", payment_keys::PAYMENT_ID),
+    (
+        "notification_templates_pkey",
+        notification_keys::TEMPLATE_KEY,
+    ),
+    ("notification_settings_pkey", notification_keys::SETTINGS),
+    ("notifications_pkey", notification_keys::NOTIFICATION_ID),
+    (
+        "notification_message",
+        notification_keys::NOTIFICATION_MESSAGE,
+    ),
     ("identities_pkey", auth_keys::IDENTITY_ID),
     ("identity_principal", auth_keys::IDENTITY_PRINCIPAL),
     ("identity_login", auth_keys::IDENTITY_LOGIN),

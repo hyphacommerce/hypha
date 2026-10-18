@@ -50,9 +50,9 @@ pub use idempotency::{
 pub use ids::{
     AddressId, AgentId, ApiKeyId, AssetId, CartId, CatalogId, CategoryId, ChannelId, CustomerId,
     DeliveryId, EventId, FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId, LocationId,
-    MarketId, OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId, PaymentId,
-    PaymentMethodId, PriceListId, ProductId, RoleId, SessionId, ShippingGroupId, ShippingOptionId,
-    ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId, VariantId,
+    MarketId, NotificationId, OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId,
+    PaymentId, PaymentMethodId, PriceListId, ProductId, RoleId, SessionId, ShippingGroupId,
+    ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId, VariantId,
 };
 pub use language::{Language, LanguageError};
 pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};

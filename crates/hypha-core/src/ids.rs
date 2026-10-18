@@ -151,6 +151,8 @@ define_id!(ShippingGroupId, "shgrp");
 // Outbox events and their deliveries (design note 0016): IDs the admin and webhooks show.
 define_id!(EventId, "evt");
 define_id!(DeliveryId, "dlv");
+// Emails sent and their records (design note 0028).
+define_id!(NotificationId, "ntf");
 
 #[cfg(test)]
 mod tests {

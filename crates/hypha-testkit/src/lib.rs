@@ -18,6 +18,7 @@ mod inventory_items;
 mod locations;
 mod markets;
 mod media;
+mod notifications;
 mod orders;
 mod outbox;
 mod payments;
@@ -51,6 +52,10 @@ pub use inventory_items::InMemoryInventoryItemRepo;
 pub use locations::InMemoryLocationRepo;
 pub use markets::InMemoryMarketRepo;
 pub use media::{InMemoryAssetRepo, InMemoryBlobStore};
+pub use notifications::{
+    InMemoryEmailSender, InMemoryNotificationRepo, InMemoryNotificationSettingsRepo,
+    InMemoryNotificationTemplateRepo,
+};
 pub use orders::InMemoryOrderRepo;
 pub use outbox::InMemoryOutbox;
 pub use payments::{InMemoryPaymentMethodRepo, InMemoryPaymentRepo};

@@ -16,6 +16,9 @@ use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
 use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
+use hypha_notifications::{
+    NotificationSettings, NotificationSettingsSnapshot, StageNotificationSettings,
+};
 use hypha_orders::{Order, OrderSnapshot, StageOrders};
 use hypha_payments::{Payment, PaymentSnapshot, StagePayments};
 use hypha_products::{Product, ProductSnapshot, StageProducts};
@@ -45,6 +48,7 @@ use crate::{
         add_catalog_products, remove_catalog_products, remove_fixed_prices, set_fixed_prices,
     },
     media::replace_usages,
+    notifications::{insert_settings, update_settings},
     orders::{insert_order, update_order},
     outbox::insert_events,
     payments::{insert_payment, update_payment},
@@ -107,6 +111,8 @@ enum Staged {
     CategoryProducts(CategoryId, Vec<ProductId>, bool),
     /// Fixed prices set (`Some` price) or removed (`None`), per variant.
     FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
+    NewNotificationSettings(NotificationSettingsSnapshot),
+    NotificationSettings(NotificationSettingsSnapshot),
     /// Events about the aggregate staged just before, with the version that write gives
     /// it, or staged on their own (`StageEvents`, no version).
     Events(Vec<PendingEvent>, Option<Version>),
@@ -129,37 +135,39 @@ impl Staged {
             Staged::NewCart(_) => 6,
             Staged::Cart(_) => 7,
             Staged::Product(_) => 8,
-            Staged::AssetUsages(..) => 9,
-            Staged::NewCustomer(_) => 10,
-            Staged::NewRole(_) => 11,
-            Staged::Role(_) => 12,
-            Staged::NewUser(_) => 13,
-            Staged::User(_) => 14,
-            Staged::Invite(_) => 15,
-            Staged::NewIdentity(_) => 16,
-            Staged::Identity(_) => 17,
-            Staged::NewSession(_) => 18,
-            Staged::Session(_) => 19,
-            Staged::SessionRevocation(..) => 20,
-            Staged::NewPasswordReset(_) => 21,
-            Staged::PasswordReset(_) => 22,
-            Staged::UsedUpResets(..) => 23,
+            // The one settings row, before the usages staged with it (its logo's).
+            Staged::NewNotificationSettings(_) | Staged::NotificationSettings(_) => 9,
+            Staged::AssetUsages(..) => 10,
+            Staged::NewCustomer(_) => 11,
+            Staged::NewRole(_) => 12,
+            Staged::Role(_) => 13,
+            Staged::NewUser(_) => 14,
+            Staged::User(_) => 15,
+            Staged::Invite(_) => 16,
+            Staged::NewIdentity(_) => 17,
+            Staged::Identity(_) => 18,
+            Staged::NewSession(_) => 19,
+            Staged::Session(_) => 20,
+            Staged::SessionRevocation(..) => 21,
+            Staged::NewPasswordReset(_) => 22,
+            Staged::PasswordReset(_) => 23,
+            Staged::UsedUpResets(..) => 24,
             // Categories before their membership (a new one must exist first).
-            Staged::NewCategory(_) => 24,
-            Staged::Category(_) => 25,
-            Staged::DeletedCategory(_) => 26,
-            Staged::CategoryProducts(..) => 27,
+            Staged::NewCategory(_) => 25,
+            Staged::Category(_) => 26,
+            Staged::DeletedCategory(_) => 27,
+            Staged::CategoryProducts(..) => 28,
             // Set-based writes (memberships, fixed prices, tax classes): one statement
             // each, whatever the number of rows.
-            Staged::CatalogProducts(..) => 28,
-            Staged::Publications(..) => 29,
-            Staged::FixedPrices(..) => 30,
-            Staged::TaxAssignment(..) => 31,
-            Staged::Idempotency(_) => 32,
-            Staged::InventoryItem(_) => 33,
-            Staged::DeletedInventoryItem(_) => 34,
+            Staged::CatalogProducts(..) => 29,
+            Staged::Publications(..) => 30,
+            Staged::FixedPrices(..) => 31,
+            Staged::TaxAssignment(..) => 32,
+            Staged::Idempotency(_) => 33,
+            Staged::InventoryItem(_) => 34,
+            Staged::DeletedInventoryItem(_) => 35,
             // Inserts into a table nothing else locks: anywhere would do.
-            Staged::Events(..) => 35,
+            Staged::Events(..) => 36,
         }
     }
 
@@ -476,6 +484,10 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::Product(s) => {
                         update_product(&db, &s).await?;
                     }
+                    Staged::NewNotificationSettings(s) => insert_settings(&db, &s).await?,
+                    Staged::NotificationSettings(s) => {
+                        update_settings(&db, &s).await?;
+                    }
                     Staged::AssetUsages(owner, usages) => {
                         replace_usages(&db, &owner, &usages).await?
                     }
@@ -574,6 +586,20 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         let ended = end_transaction(tx, written).await;
         self.transaction_ended(ended.is_ok());
         ended
+    }
+}
+
+impl StageNotificationSettings for PgBatch {
+    fn insert_notification_settings(&mut self, settings: &mut NotificationSettings) {
+        stamp_insert(settings, self.now);
+        self.stage(Staged::NewNotificationSettings(settings.snapshot()));
+        settings.set_version(Version::NEW.next());
+    }
+
+    fn update_notification_settings(&mut self, settings: &mut NotificationSettings) {
+        stamp_update(settings, self.now);
+        self.stage(Staged::NotificationSettings(settings.snapshot()));
+        settings.set_version(settings.version().next());
     }
 }
 

@@ -309,3 +309,36 @@ async fn category_repo() {
     let Some(url) = database_url() else { return };
     contract::category_repo(async || fresh_store(&url, "contract_categories").await).await;
 }
+
+#[tokio::test]
+async fn notification_template_repo() {
+    let Some(url) = database_url() else { return };
+    contract::notification_template_repo(async || {
+        fresh_store(&url, "contract_notification_templates").await
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn notification_settings_repo() {
+    let Some(url) = database_url() else { return };
+    contract::notification_settings_repo(async || {
+        fresh_store(&url, "contract_notification_settings").await
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn notification_repo() {
+    let Some(url) = database_url() else { return };
+    contract::notification_repo(async || fresh_store(&url, "contract_notifications").await).await;
+}
+
+#[tokio::test]
+async fn notification_settings_batch() {
+    let Some(url) = database_url() else { return };
+    contract::notification_settings_batch(async || {
+        fresh_store(&url, "contract_notification_settings_batch").await
+    })
+    .await;
+}

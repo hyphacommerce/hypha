@@ -23,6 +23,7 @@ pub struct UsageOwner {
 impl UsageOwner {
     pub const PRODUCT: &str = "product";
     pub const CATEGORY: &str = "category";
+    pub const NOTIFICATION_SETTINGS: &str = "notification_settings";
 
     /// `kind` is lowercase ASCII letters, digits and `_`, starting with a letter; `id`
     /// is any text without whitespace or `:`.
@@ -52,6 +53,15 @@ impl UsageOwner {
         Self {
             kind: Self::CATEGORY.to_string(),
             id: id.to_string(),
+        }
+    }
+
+    /// The store's notification settings, whose logo is an asset (design note 0028,
+    /// §2): one per store, so its ID is fixed.
+    pub fn notification_settings() -> Self {
+        Self {
+            kind: Self::NOTIFICATION_SETTINGS.to_string(),
+            id: "store".to_string(),
         }
     }
 
@@ -92,6 +102,8 @@ impl UsageRole {
     pub const GALLERY: &str = "gallery";
     /// A category's image.
     pub const IMAGE: &str = "image";
+    /// The logo in the store's emails.
+    pub const LOGO: &str = "logo";
 
     pub fn new(role: &str) -> Result<Self, MediaError> {
         if !is_name(role) {
@@ -110,6 +122,10 @@ impl UsageRole {
 
     pub fn image() -> Self {
         Self(Self::IMAGE.to_string())
+    }
+
+    pub fn logo() -> Self {
+        Self(Self::LOGO.to_string())
     }
 
     pub fn as_str(&self) -> &str {

@@ -68,6 +68,11 @@ pub struct InMemoryPorts {
     // Search's queue and settings (design note 0019); the engine is passed apart.
     pub search_queue: InMemorySearchQueue,
     pub search_settings: InMemorySearchSettingsRepo,
+    // Email templates, settings and the record of messages (design note 0028); the
+    // sender is passed apart.
+    pub notification_templates: crate::InMemoryNotificationTemplateRepo,
+    pub notification_settings: crate::InMemoryNotificationSettingsRepo,
+    pub notifications: crate::InMemoryNotificationRepo,
 }
 
 impl Default for InMemoryPorts {
@@ -108,8 +113,32 @@ impl Default for InMemoryPorts {
             categories,
             search_queue: InMemorySearchQueue::default(),
             search_settings: InMemorySearchSettingsRepo::sharing(&outbox),
+            notification_templates: crate::InMemoryNotificationTemplateRepo::sharing(&outbox),
+            notification_settings: crate::InMemoryNotificationSettingsRepo::sharing(&outbox),
+            notifications: crate::InMemoryNotificationRepo::sharing(&outbox),
             outbox,
         }
+    }
+}
+
+impl hypha_notifications::HasNotificationTemplates for InMemoryPorts {
+    type NotificationTemplates = crate::InMemoryNotificationTemplateRepo;
+    fn notification_templates(&self) -> &crate::InMemoryNotificationTemplateRepo {
+        &self.notification_templates
+    }
+}
+
+impl hypha_notifications::HasNotificationSettings for InMemoryPorts {
+    type NotificationSettings = crate::InMemoryNotificationSettingsRepo;
+    fn notification_settings(&self) -> &crate::InMemoryNotificationSettingsRepo {
+        &self.notification_settings
+    }
+}
+
+impl hypha_notifications::HasNotifications for InMemoryPorts {
+    type Notifications = crate::InMemoryNotificationRepo;
+    fn notifications(&self) -> &crate::InMemoryNotificationRepo {
+        &self.notifications
     }
 }
 

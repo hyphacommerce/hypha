@@ -31,6 +31,7 @@ mod idempotency;
 mod inventory;
 mod markets;
 mod media;
+mod notifications;
 mod orders;
 mod outbox;
 mod payments;
@@ -55,6 +56,10 @@ pub use idempotency::idempotency_repo;
 pub use inventory::{inventory_item_repo, location_repo};
 pub use markets::{catalog_repo, market_repo, price_list_repo};
 pub use media::{asset_repo, blob_store};
+pub use notifications::{
+    notification_repo, notification_settings_batch, notification_settings_repo,
+    notification_template_repo,
+};
 pub use orders::order_repo;
 pub use outbox::outbox;
 pub use payments::{payment_batch, payment_method_delete, payment_method_repo, payment_repo};

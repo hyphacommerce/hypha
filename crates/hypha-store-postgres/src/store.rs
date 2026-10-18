@@ -381,6 +381,9 @@ accessors! {
     hypha_search_index::HasSearchSettings => SearchSettings, search_settings;
     hypha_channels::HasChannels => Channels, channels;
     hypha_categories::HasCategories => Categories, categories;
+    hypha_notifications::HasNotificationTemplates => NotificationTemplates, notification_templates;
+    hypha_notifications::HasNotificationSettings => NotificationSettings, notification_settings;
+    hypha_notifications::HasNotifications => Notifications, notifications;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

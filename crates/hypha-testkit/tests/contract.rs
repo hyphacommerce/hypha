@@ -278,3 +278,31 @@ fn payment_repo() {
 fn payment_batch() {
     block_on(contract::payment_batch(async || InMemoryPorts::default()));
 }
+
+#[test]
+fn notification_template_repo() {
+    block_on(contract::notification_template_repo(async || {
+        hypha_testkit::InMemoryNotificationTemplateRepo::default()
+    }));
+}
+
+#[test]
+fn notification_settings_repo() {
+    block_on(contract::notification_settings_repo(async || {
+        hypha_testkit::InMemoryNotificationSettingsRepo::default()
+    }));
+}
+
+#[test]
+fn notification_repo() {
+    block_on(contract::notification_repo(async || {
+        hypha_testkit::InMemoryNotificationRepo::default()
+    }));
+}
+
+#[test]
+fn notification_settings_batch() {
+    block_on(contract::notification_settings_batch(async || {
+        InMemoryPorts::default()
+    }));
+}

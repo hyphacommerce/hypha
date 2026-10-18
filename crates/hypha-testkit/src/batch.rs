@@ -15,6 +15,9 @@ use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys
 use hypha_inventory::{InventoryItem, StageInventoryItems};
 use hypha_markets::{StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
+use hypha_notifications::{
+    NotificationSettings, StageNotificationSettings, keys as notification_keys,
+};
 use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
 use hypha_payments::{Payment, StagePayments, keys as payment_keys};
 use hypha_products::{Product, StageProducts};
@@ -80,6 +83,8 @@ enum Staged {
     CategoryProducts(CategoryId, Vec<ProductId>, bool),
     TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
     FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
+    NewNotificationSettings(NotificationSettings),
+    NotificationSettings(NotificationSettings),
     Events(Vec<PendingEvent>, Option<Version>),
 }
 
@@ -351,6 +356,8 @@ impl HasBatch for InMemoryPorts {
         let fixed_prices_before = fixed_prices.clone();
         let mut tax_classes = self.tax_classes.lock_assignments();
         let tax_classes_before = tax_classes.clone();
+        let mut notification_settings = self.notification_settings.settings.lock();
+        let notification_settings_before = notification_settings.clone();
         let before = (
             orders.clone(),
             carts.clone(),
@@ -601,6 +608,19 @@ impl HasBatch for InMemoryPorts {
                             };
                         }
                     }
+                    Staged::NewNotificationSettings(mut settings) => insert_row(
+                        &mut notification_settings,
+                        (),
+                        &mut settings,
+                        notification_keys::SETTINGS,
+                        &no_unique_keys,
+                    )?,
+                    Staged::NotificationSettings(mut settings) => update_row(
+                        &mut notification_settings,
+                        (),
+                        &mut settings,
+                        &no_unique_keys,
+                    )?,
                     Staged::Events(staged, version) => events.push((staged, version)),
                 }
             }
@@ -622,9 +642,24 @@ impl HasBatch for InMemoryPorts {
             *category_members = category_members_before;
             *fixed_prices = fixed_prices_before;
             *tax_classes = tax_classes_before;
+            *notification_settings = notification_settings_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written
+    }
+}
+
+impl StageNotificationSettings for InMemoryBatch {
+    fn insert_notification_settings(&mut self, settings: &mut NotificationSettings) {
+        stamp_insert(settings, self.now);
+        self.stage(Staged::NewNotificationSettings(settings.clone()));
+        settings.set_version(Version::NEW.next());
+    }
+
+    fn update_notification_settings(&mut self, settings: &mut NotificationSettings) {
+        stamp_update(settings, self.now);
+        self.stage(Staged::NotificationSettings(settings.clone()));
+        settings.set_version(settings.version().next());
     }
 }
 

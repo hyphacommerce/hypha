@@ -88,6 +88,13 @@ pub enum Scope {
     PaymentsRead,
     #[serde(rename = "payments:write")]
     PaymentsWrite,
+    /// The emails a store sends (design note 0028, NT10): templates, branding, sender
+    /// and staff recipients, and the record of what was sent. Resending one is
+    /// `notifications:write`.
+    #[serde(rename = "notifications:read")]
+    NotificationsRead,
+    #[serde(rename = "notifications:write")]
+    NotificationsWrite,
 }
 
 impl Scope {
@@ -129,6 +136,8 @@ impl Scope {
             Scope::ChannelsWrite => "channels:write",
             Scope::PaymentsRead => "payments:read",
             Scope::PaymentsWrite => "payments:write",
+            Scope::NotificationsRead => "notifications:read",
+            Scope::NotificationsWrite => "notifications:write",
         }
     }
 
@@ -154,6 +163,7 @@ impl Scope {
             Scope::FulfillmentsRead => Some(Scope::FulfillmentsWrite),
             Scope::ChannelsRead => Some(Scope::ChannelsWrite),
             Scope::PaymentsRead => Some(Scope::PaymentsWrite),
+            Scope::NotificationsRead => Some(Scope::NotificationsWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -171,7 +181,8 @@ impl Scope {
             | Scope::AppsWrite
             | Scope::FulfillmentsWrite
             | Scope::ChannelsWrite
-            | Scope::PaymentsWrite => None,
+            | Scope::PaymentsWrite
+            | Scope::NotificationsWrite => None,
         }
     }
 
@@ -187,7 +198,7 @@ impl Scope {
         Scope::Checkout,
     ];
 
-    pub const ALL: [Scope; 35] = [
+    pub const ALL: [Scope; 37] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -223,6 +234,8 @@ impl Scope {
         Scope::ChannelsWrite,
         Scope::PaymentsRead,
         Scope::PaymentsWrite,
+        Scope::NotificationsRead,
+        Scope::NotificationsWrite,
     ];
 }
 

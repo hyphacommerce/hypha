@@ -30,6 +30,7 @@ mod inventory;
 mod markets;
 mod media;
 mod migrate;
+mod notifications;
 mod orders;
 mod outbox;
 mod payments;
