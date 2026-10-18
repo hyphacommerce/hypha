@@ -2,8 +2,9 @@
 //! change that recorded them.
 
 use hypha_core::{
-    ActingAs, Actor, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, OutboxRepo,
-    Outcome, Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
+    ActingAs, Actor, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, EventRoute,
+    OutboxRepo, Outcome, Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp,
+    Version,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -146,14 +147,15 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
         &self,
         limit: u32,
         now: Timestamp,
-        destinations: &(dyn Fn(&str) -> Vec<String> + Sync),
+        destinations: &(dyn Fn(&EventRoute<'_>) -> Vec<String> + Sync),
     ) -> Result<u32, RepoError> {
         let now = now.unix_micros();
         in_transaction!(self, |tx| {
             // SKIP LOCKED: two dispatchers split the work instead of waiting on each other.
             let claimed = tx
                 .query_typed(
-                    "SELECT seq, type FROM outbox_events WHERE fanned_out_at IS NULL
+                    "SELECT seq, type, subject_type, subject_id FROM outbox_events
+                     WHERE fanned_out_at IS NULL
                      ORDER BY seq LIMIT $1 FOR UPDATE SKIP LOCKED",
                     &[(&i64::from(limit), Type::INT8)],
                 )
@@ -166,9 +168,13 @@ impl<C: PgConnection> OutboxRepo for PgStore<C> {
             let (mut delivery_seqs, mut targets) = (Vec::new(), Vec::new());
             for row in &claimed {
                 let seq: i64 = col(row, "seq")?;
-                let event_type: &str = col(row, "type")?;
+                let route = EventRoute {
+                    event_type: col(row, "type")?,
+                    subject_kind: col(row, "subject_type")?,
+                    subject_id: col(row, "subject_id")?,
+                };
                 seqs.push(seq);
-                for destination in destinations(event_type) {
+                for destination in destinations(&route) {
                     delivery_seqs.push(seq);
                     targets.push(destination);
                 }

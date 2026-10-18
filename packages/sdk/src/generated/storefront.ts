@@ -418,6 +418,12 @@ export interface components {
             market: components["schemas"]["MarketId"];
             order?: components["schemas"]["OrderId"] | null;
             payment_method?: components["schemas"]["PaymentMethodId"] | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
             /**
              * @description The groups of lines that ship together, each needing a chosen option before
@@ -711,6 +717,12 @@ export interface components {
             number: number;
             /** @description RFC 3339, UTC. */
             placed_at: string;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
             /** @description How each group of lines ships, as charged. */
             shipping_lines: components["schemas"]["OrderShippingLineResponse"][];
@@ -806,10 +818,6 @@ export interface components {
             postal_code?: string | null;
             province?: string | null;
         };
-        /**
-         * @description A postal address as the API writes it. The Admin and Storefront APIs' address
-         *     responses are this type too, so every channel spells addresses one way.
-         */
         PostalAddressResponse: {
             city: string;
             company?: string | null;
@@ -821,6 +829,12 @@ export interface components {
             phone?: string | null;
             postal_code?: string | null;
             province?: string | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
         };
         /**
          * @description A ProductId: `prod_` and 32 hex digits.

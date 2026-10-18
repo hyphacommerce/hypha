@@ -352,6 +352,9 @@ fn old_events_are_pruned_after_thirty_days() {
 fn app(key: &str, subscriptions: &[&str], webhook: bool) -> App {
     App::new(NewApp {
         key: AppKey::new(key).unwrap(),
+        id: hypha_core::AppId::from_uuid(uuid::Uuid::from_u128(
+            key.bytes().fold(7u128, |a, b| a * 31 + u128::from(b)),
+        )),
         name: key.to_string(),
         secret: Sealed::from_bytes(vec![1, 2, 3]),
         webhook: webhook.then(|| Webhook::new("https://erp.example/hooks", None).unwrap()),

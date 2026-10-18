@@ -551,6 +551,8 @@ pub struct RateLimits {
     pub shipping_quotes_cart: Quota,
     /// Creating carts, per client address.
     pub cart_create_ip: Quota,
+    /// The OAuth endpoints (authorize, token, revoke), per client address.
+    pub oauth_ip: Quota,
 }
 
 /// The starting numbers from design note 0009, section 3.
@@ -570,13 +572,15 @@ impl Default for RateLimits {
             shipping_quotes_cart: quota(10, 2),
             // A shopper makes a cart or two; a page reloading makes a few more.
             cart_create_ip: quota(20, 3),
+            // An app installs or refreshes now and then; a stuck client loops.
+            oauth_ip: quota(20, 3),
         }
     }
 }
 
 impl RateLimits {
     /// Every limit with its key, for the checks.
-    pub(crate) fn all(&self) -> [(&'static str, Quota); 10] {
+    pub(crate) fn all(&self) -> [(&'static str, Quota); 11] {
         [
             ("login_ip", self.login_ip),
             ("login_email_from_ip", self.login_email_from_ip),
@@ -588,6 +592,7 @@ impl RateLimits {
             ("invite_ip", self.invite_ip),
             ("shipping_quotes_cart", self.shipping_quotes_cart),
             ("cart_create_ip", self.cart_create_ip),
+            ("oauth_ip", self.oauth_ip),
         ]
     }
 }

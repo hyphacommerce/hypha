@@ -4,7 +4,7 @@ use hypha_core::Stamped;
 
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AddressId, AddressParts, CountryCode, CustomerId, Email, Keyset, SortKey};
+use hypha_core::{AddressId, AddressParts, CountryCode, CustomerId, Email, Keyset, Scope, SortKey};
 use hypha_customers::{
     CreateCustomer, Customer, CustomerSort, CustomerSummary, HasCustomers, SaveAddress,
     SavedAddress, UpdateCustomer, add_address, create_customer, get_customer, list_customers,
@@ -17,6 +17,7 @@ use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
     patch,
+    redact::{self, Family, Redacted},
     state::{SharedState, Storage},
 };
 
@@ -102,6 +103,12 @@ pub struct CustomerResponse {
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
     updated_at: String,
+    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
+    /// app without the matching `customer_data:*` scope. They are absent from the
+    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -117,6 +124,12 @@ pub struct AddressResponse {
     postal_code: Option<String>,
     country: CountryCode,
     phone: Option<String>,
+    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
+    /// app without the matching `customer_data:*` scope. They are absent from the
+    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
 }
 
 impl From<&SavedAddress> for AddressResponse {
@@ -134,6 +147,7 @@ impl From<&SavedAddress> for AddressResponse {
             postal_code: p.postal_code.clone(),
             country: saved.address.country(),
             phone: p.phone.clone(),
+            redacted: None,
         }
     }
 }
@@ -152,6 +166,7 @@ impl CustomerResponse {
             default_shipping_address: c.default_shipping(),
             default_billing_address: c.default_billing(),
             addresses: c.addresses().iter().map(AddressResponse::from).collect(),
+            redacted: None,
         })
     }
 }
@@ -170,6 +185,12 @@ pub struct CustomerSummaryResponse {
     created_at: String,
     /// When the customer last changed, RFC 3339 in UTC.
     updated_at: String,
+    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
+    /// app without the matching `customer_data:*` scope. They are absent from the
+    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
 }
 
 impl CustomerSummaryResponse {
@@ -184,6 +205,7 @@ impl CustomerSummaryResponse {
             address_count: c.address_count as u64,
             created_at,
             updated_at,
+            redacted: None,
         })
     }
 }
@@ -196,7 +218,9 @@ type CustomerSummaryPage = PageResponse<CustomerSummaryResponse>;
 #[into_params(parameter_in = Query)]
 pub struct CustomerFilters {
     /// Only customers whose email, first or last name or phone contains this text,
-    /// ignoring case. Up to 255 characters; blank filters nothing.
+    /// ignoring case. Up to 255 characters; blank filters nothing. A caller that isn't
+    /// a staff session needs `customer_data:name`, `:email` and `:phone` for it
+    /// (sorting by email or name, the matching one).
     q: Option<String>,
     #[param(inline)]
     sort: Option<CustomerSortDto>,
@@ -247,10 +271,31 @@ pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     query: ListQuery<CustomerFilters>,
-) -> Result<Json<CustomerSummaryPage>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, filters, scope) = query.parse_sorted()?;
     let sort = filters.sort();
+    // Searching or sorting by a personal field tells what it holds: only for callers
+    // who may see it (design note 0029, AP10).
+    if filters.q.as_deref().is_some_and(|q| !q.trim().is_empty()) {
+        redact::require_fields(
+            &ctx,
+            &[
+                Scope::CustomerDataName,
+                Scope::CustomerDataEmail,
+                Scope::CustomerDataPhone,
+            ],
+        )?;
+    }
+    match sort {
+        CustomerSort::EmailAsc | CustomerSort::EmailDesc => {
+            redact::require_fields(&ctx, &[Scope::CustomerDataEmail])?
+        }
+        CustomerSort::NameAsc | CustomerSort::NameDesc => {
+            redact::require_fields(&ctx, &[Scope::CustomerDataName])?
+        }
+        CustomerSort::Newest | CustomerSort::Oldest => {}
+    }
     let page = list_customers(&ctx, ports.customers(), filters.q, sort, page).await?;
     let items = page
         .items
@@ -258,7 +303,7 @@ pub async fn list<S: Storage>(
         .cloned()
         .map(CustomerSummaryResponse::new)
         .collect::<Result<_, _>>()?;
-    Ok(Json(PageResponse::sorted(
+    let page = PageResponse::sorted(
         &page,
         &scope,
         |c| Keyset {
@@ -266,7 +311,8 @@ pub async fn list<S: Storage>(
             id: c.id,
         },
         items,
-    )?))
+    )?;
+    Ok(Json(redact::page(&ctx, Family::Customer, page)?))
 }
 
 /// Creates a customer.
@@ -281,7 +327,7 @@ pub async fn create<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateCustomerRequest>,
-) -> Result<(StatusCode, Json<CustomerResponse>), ApiError> {
+) -> Result<(StatusCode, Json<Redacted>), ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = CreateCustomer {
@@ -291,7 +337,14 @@ pub async fn create<S: Storage>(
         phone: req.phone,
     };
     let customer = create_customer(&ctx, ports.customers(), &state.ids, input).await?;
-    Ok((StatusCode::CREATED, Json(CustomerResponse::new(&customer)?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(redact::one(
+            &ctx,
+            Family::Customer,
+            CustomerResponse::new(&customer)?,
+        )?),
+    ))
 }
 
 /// A customer with their address book.
@@ -306,10 +359,14 @@ pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<CustomerId>,
-) -> Result<Json<CustomerResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = get_customer(&ctx, ports.customers(), id).await?;
-    Ok(Json(CustomerResponse::new(&customer)?))
+    Ok(Json(redact::one(
+        &ctx,
+        Family::Customer,
+        CustomerResponse::new(&customer)?,
+    )?))
 }
 
 /// Changes a customer's details (JSON Merge Patch).
@@ -326,7 +383,7 @@ pub async fn update<S: Storage>(
     caller: Caller,
     PathId(id): PathId<CustomerId>,
     body: JsonBody<UpdateCustomerRequest>,
-) -> Result<Json<CustomerResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = UpdateCustomer {
@@ -336,7 +393,11 @@ pub async fn update<S: Storage>(
         phone: req.phone,
     };
     let customer = update_customer(&ctx, ports.customers(), id, input).await?;
-    Ok(Json(CustomerResponse::new(&customer)?))
+    Ok(Json(redact::one(
+        &ctx,
+        Family::Customer,
+        CustomerResponse::new(&customer)?,
+    )?))
 }
 
 /// Adds an address to a customer's address book.
@@ -353,11 +414,18 @@ pub async fn add_address_handler<S: Storage>(
     caller: Caller,
     PathId(id): PathId<CustomerId>,
     body: JsonBody<AddressRequest>,
-) -> Result<(StatusCode, Json<CustomerResponse>), ApiError> {
+) -> Result<(StatusCode, Json<Redacted>), ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let customer = add_address(&ctx, ports.customers(), &state.ids, id, req.into()).await?;
-    Ok((StatusCode::CREATED, Json(CustomerResponse::new(&customer)?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(redact::one(
+            &ctx,
+            Family::Customer,
+            CustomerResponse::new(&customer)?,
+        )?),
+    ))
 }
 
 /// Replaces a saved address.
@@ -374,11 +442,15 @@ pub async fn update_address_handler<S: Storage>(
     caller: Caller,
     PathId((id, address)): PathId<(CustomerId, AddressId)>,
     body: JsonBody<AddressRequest>,
-) -> Result<Json<CustomerResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let customer = update_address(&ctx, ports.customers(), id, address, req.into()).await?;
-    Ok(Json(CustomerResponse::new(&customer)?))
+    Ok(Json(redact::one(
+        &ctx,
+        Family::Customer,
+        CustomerResponse::new(&customer)?,
+    )?))
 }
 
 /// Removes a saved address.
@@ -393,8 +465,12 @@ pub async fn remove_address_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId((id, address)): PathId<(CustomerId, AddressId)>,
-) -> Result<Json<CustomerResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = remove_address(&ctx, ports.customers(), id, address).await?;
-    Ok(Json(CustomerResponse::new(&customer)?))
+    Ok(Json(redact::one(
+        &ctx,
+        Family::Customer,
+        CustomerResponse::new(&customer)?,
+    )?))
 }

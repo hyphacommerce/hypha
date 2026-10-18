@@ -67,6 +67,12 @@ pub struct CartResponse {
     country: CountryCode,
     /// Who to contact about the order; required at checkout.
     email: Option<Email>,
+    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
+    /// app without the matching `customer_data:*` scope. They are absent from the
+    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
     customer: Option<CustomerId>,
     /// The order this cart was checked out as; `null` while it can still change.
     order: Option<OrderId>,
@@ -211,6 +217,7 @@ impl From<&PricedCart> for CartResponse {
             currency: cart.currency,
             country: cart.country,
             email: cart.email.clone(),
+            redacted: None,
             customer: cart.customer,
             order: cart.order,
             taxes_included: cart.taxes_included,
@@ -400,13 +407,17 @@ pub async fn set_customer<S: Storage>(
     caller: Caller,
     PathId(id): PathId<CartId>,
     body: JsonBody<SetCustomerRequest>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Json<crate::redact::Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
-    Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
-    ))
+    let cart = cart_response(&priced, &ports, state.media.as_deref()).await?;
+    // The admin surface: personal data per the caller (design note 0029, AP10).
+    Ok(Json(crate::redact::one(
+        &ctx,
+        crate::redact::Family::Order,
+        cart,
+    )?))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

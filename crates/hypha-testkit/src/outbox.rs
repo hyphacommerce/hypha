@@ -4,8 +4,9 @@ use std::{
 };
 
 use hypha_core::{
-    ActingAs, Actor, Clock, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, OutboxRepo,
-    Outcome, Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp, Version,
+    ActingAs, Actor, Clock, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, EventRoute,
+    OutboxRepo, Outcome, Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp,
+    Version,
 };
 use uuid::Uuid;
 
@@ -168,18 +169,30 @@ impl OutboxRepo for InMemoryOutbox {
         &self,
         limit: u32,
         now: Timestamp,
-        destinations: &(dyn Fn(&str) -> Vec<String> + Sync),
+        destinations: &(dyn Fn(&EventRoute<'_>) -> Vec<String> + Sync),
     ) -> Result<u32, RepoError> {
         let mut state = self.inner.lock().unwrap();
-        let claimed: Vec<(i64, String)> = state
+        let claimed: Vec<(i64, String, String, Uuid)> = state
             .events
             .iter()
             .filter(|e| !state.fanned_out.contains(&e.seq))
             .take(limit as usize)
-            .map(|e| (e.seq, e.event_type.clone()))
+            .map(|e| {
+                (
+                    e.seq,
+                    e.event_type.clone(),
+                    e.subject_kind.clone(),
+                    e.subject_id,
+                )
+            })
             .collect();
-        for (seq, event_type) in &claimed {
-            for destination in destinations(event_type) {
+        for (seq, event_type, subject_kind, subject_id) in &claimed {
+            let route = EventRoute {
+                event_type,
+                subject_kind,
+                subject_id: *subject_id,
+            };
+            for destination in destinations(&route) {
                 let exists = state
                     .deliveries
                     .iter()

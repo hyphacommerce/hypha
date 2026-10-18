@@ -1,0 +1,365 @@
+{
+  "$defs": {
+    "AdminAction": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "point": {
+          "description": "The extension point the action calls (`payments.capture`); this or `url`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "url": {
+          "description": "The app's own URL the action calls; this or `point`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "target",
+        "label"
+      ],
+      "type": "object"
+    },
+    "AdminBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "target": {
+          "description": "The slot it fills (`order.payment`): admins show the targets they implement.",
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "target",
+        "url"
+      ],
+      "type": "object"
+    },
+    "AdminPage": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Lowercase letters, digits, `-` and `_`; unique among the app's pages.",
+          "type": "string"
+        },
+        "nav": {
+          "description": "Where an admin lists it (`apps`, `settings`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "url"
+      ],
+      "type": "object"
+    },
+    "ManifestAdmin": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "default": [],
+          "description": "Buttons (`payment`, …) that call the app.",
+          "items": {
+            "$ref": "#/$defs/AdminAction"
+          },
+          "type": "array"
+        },
+        "blocks": {
+          "default": [],
+          "description": "Blocks on admin pages (`order.payment`, …), answered as UI trees.",
+          "items": {
+            "$ref": "#/$defs/AdminBlock"
+          },
+          "type": "array"
+        },
+        "pages": {
+          "default": [],
+          "description": "Full pages under the app (`apps.page`), in an iframe.",
+          "items": {
+            "$ref": "#/$defs/AdminPage"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ManifestExtensionPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "point": {
+          "description": "The point's name: `payments.start`.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Where Hypha calls it.",
+          "type": "string"
+        },
+        "version": {
+          "description": "The contract's version the app implements, from 1.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "point",
+        "version",
+        "url"
+      ],
+      "type": "object"
+    },
+    "ManifestSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "additionalProperties": true,
+          "description": "A JSON Schema (an object) for the app's settings form.",
+          "type": "object"
+        },
+        "secret_fields": {
+          "default": [],
+          "description": "Fields of the form that hold secrets: shown masked.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "type": "object"
+    },
+    "ManifestStorefront": {
+      "additionalProperties": false,
+      "properties": {
+        "elements": {
+          "default": [],
+          "description": "Web components a storefront may load.",
+          "items": {
+            "$ref": "#/$defs/StorefrontElement"
+          },
+          "type": "array"
+        },
+        "proxy": {
+          "description": "The app's endpoint behind `/storefront/apps/{app}/proxy/…`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ManifestWebhooks": {
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "description": "Event types (`order.placed`), every type of a kind (`product.*`) or `*`. 1 to 50.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "url": {
+          "description": "Where Hypha POSTs events, signed with the app's secret.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "events"
+      ],
+      "type": "object"
+    },
+    "StorefrontElement": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "module": {
+          "description": "The ES module that defines the element.",
+          "type": "string"
+        },
+        "tag": {
+          "description": "The custom element's tag: lowercase, with a `-` (`stripe-payment`).",
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "target",
+        "module",
+        "tag"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://hypha.dev/schemas/app-manifest/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "An app manifest as written (`hypha-app.json`). URLs other than `app_url` may be\nrelative: they resolve against `app_url`. Fields not listed here are refused, so a\ntypo is caught rather than ignored.",
+  "properties": {
+    "$schema": {
+      "description": "`https://hypha.dev/schemas/app-manifest/1.json`, for editors.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "admin": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ManifestAdmin"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the app adds to an admin."
+    },
+    "app_url": {
+      "description": "The app's base URL (`https://`, or `http://localhost` in development): every\nrelative URL below resolves against it.",
+      "type": "string"
+    },
+    "extension_points": {
+      "default": [],
+      "description": "The extension points the app implements (`payments.start` v1, …).",
+      "items": {
+        "$ref": "#/$defs/ManifestExtensionPoint"
+      },
+      "type": "array"
+    },
+    "icon": {
+      "description": "A square image, shown beside its name.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key": {
+      "description": "The app's key: `app_` and lowercase letters, digits and underscores, at most 64\ncharacters. The same in every store that installs it.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name, as staff see it on the consent screen and in the admin.",
+      "type": "string"
+    },
+    "privacy_url": {
+      "description": "The app's privacy policy, linked from the consent screen.",
+      "type": "string"
+    },
+    "publisher": {
+      "description": "Who makes it, shown on the consent screen.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "redirect_uris": {
+      "description": "Where Hypha may send the browser back after consent: `/oauth/authorize`'s\n`redirect_uri` must be one of these exactly. 1 to 10.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scope_reasons": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "description": "Why the app needs a scope, shown on the consent screen. Required for every\n`customer_data:*` scope it asks for.",
+      "type": "object"
+    },
+    "scopes": {
+      "default": [],
+      "description": "The scopes the app asks for (`orders:read`, `customer_data:email`, …).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "settings": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ManifestSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A settings form any admin can render without the app's own page."
+    },
+    "storefront": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ManifestStorefront"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the app adds to a storefront."
+    },
+    "version": {
+      "description": "The app's own version (`1.2.0`), shown to staff.",
+      "type": "string"
+    },
+    "webhooks": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ManifestWebhooks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where the app's webhooks go and which events it wants."
+    }
+  },
+  "required": [
+    "key",
+    "name",
+    "version",
+    "app_url",
+    "redirect_uris",
+    "privacy_url"
+  ],
+  "title": "Hypha app manifest",
+  "type": "object"
+}

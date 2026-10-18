@@ -49,6 +49,7 @@ lettre = { version = "0.11.23", default-features = false, features = ["smtp-tran
 serde_json.workspace = true
 
 [dev-dependencies]
+url = "2.5"
 # The route tests (`route_tests.rs`).
 hypha-auth = { path = "../hypha-auth" }
 hypha-apps = { path = "../hypha-apps" }

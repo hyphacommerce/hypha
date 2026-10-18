@@ -19,9 +19,11 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
+use hypha_apps::HasApps;
 use hypha_auth::{HasApiKeys, TokenKind, authenticate_api_key};
 use hypha_core::ActingAs;
 use hypha_core::{Clock, Ctx, IdempotencyRequest};
+use hypha_oauth::{HasOAuthTokens, authenticate_access_token};
 use hypha_users::{HasStaffSessions, StaffSession, authenticate_staff};
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
@@ -107,6 +109,8 @@ pub struct PathId<T>(pub T);
 /// - `Authorization: Bearer hypha_sess_…`: a staff session, with the scopes of the
 ///   user's role, read fresh on every request;
 /// - `Authorization: Bearer hypha_sk_…` or `hypha_pk_…`: an API key with its scopes;
+/// - `Authorization: Bearer hypha_at_…`: an app's OAuth access token (design note 0029),
+///   with its grant's scopes, read fresh on every request;
 /// - `X-Publishable-Key: hypha_pk_…`: a publishable key, for storefronts that will later
 ///   send a customer's session in `Authorization` beside it.
 ///
@@ -141,7 +145,11 @@ impl Surface for Admin {
     fn admit(kind: Option<TokenKind>, publishable_header: bool) -> Result<(), ApiError> {
         match kind {
             Some(TokenKind::PublishableKey) => Err(ApiError::admin_credentials_required()),
-            Some(TokenKind::Session | TokenKind::SecretKey) if !publishable_header => Ok(()),
+            Some(TokenKind::Session | TokenKind::SecretKey | TokenKind::AccessToken)
+                if !publishable_header =>
+            {
+                Ok(())
+            }
             _ => Err(hypha_auth::CommandError::InvalidToken.into()),
         }
     }
@@ -151,7 +159,7 @@ impl Surface for Storefront {
     fn admit(kind: Option<TokenKind>, _publishable_header: bool) -> Result<(), ApiError> {
         match kind {
             Some(TokenKind::PublishableKey) => Ok(()),
-            Some(TokenKind::Session | TokenKind::SecretKey) => {
+            Some(TokenKind::Session | TokenKind::SecretKey | TokenKind::AccessToken) => {
                 Err(ApiError::publishable_key_required())
             }
             _ => Err(hypha_auth::CommandError::InvalidToken.into()),
@@ -196,7 +204,7 @@ fn credential(parts: &Parts) -> Result<Credential, ApiError> {
 }
 
 impl Credential {
-    async fn authenticate<P: HasStaffSessions + HasApiKeys>(
+    async fn authenticate<P: HasStaffSessions + HasApiKeys + HasOAuthTokens + HasApps>(
         &self,
         ports: &P,
         clock: &impl Clock,
@@ -210,6 +218,11 @@ impl Credential {
             }
             Some(TokenKind::SecretKey) if !self.publishable_header => Ok(Authenticated::Key(
                 authenticate_api_key(ports.api_keys(), token).await?,
+            )),
+            // An app's OAuth access token (design note 0029): the grant's scopes, read
+            // fresh on every request, as `Actor::App`.
+            Some(TokenKind::AccessToken) if !self.publishable_header => Ok(Authenticated::Key(
+                authenticate_access_token(ports, clock, token).await?,
             )),
             Some(TokenKind::PublishableKey) => {
                 let now = clock.now();

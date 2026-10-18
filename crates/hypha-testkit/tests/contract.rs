@@ -225,6 +225,11 @@ fn app_repo() {
 }
 
 #[test]
+fn oauth_repos() {
+    block_on(contract::oauth_repos(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn app_deliveries() {
     block_on(contract::app_deliveries(async || InMemoryPorts::default()));
 }

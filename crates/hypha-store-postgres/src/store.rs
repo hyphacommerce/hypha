@@ -377,6 +377,9 @@ accessors! {
     hypha_shipping::HasAppProviders => AppProviders, app_providers;
     hypha_core::HasOutbox => Outbox, outbox;
     hypha_apps::HasApps => Apps, apps;
+    hypha_oauth::HasOAuthRequests => OAuthRequests, oauth_requests;
+    hypha_oauth::HasOAuthCodes => OAuthCodes, oauth_codes;
+    hypha_oauth::HasOAuthTokens => OAuthTokens, oauth_tokens;
     hypha_search_index::HasSearchQueue => SearchQueue, search_queue;
     hypha_search_index::HasSearchSettings => SearchSettings, search_settings;
     hypha_channels::HasChannels => Channels, channels;

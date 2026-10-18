@@ -53,6 +53,8 @@ pub struct InMemoryPorts {
     pub shipping_zones: InMemoryShippingZoneRepo,
     pub app_providers: InMemoryAppProviderRepo,
     pub apps: InMemoryAppRepo,
+    /// OAuth's requests, codes and tokens (design note 0029), linked to `apps`.
+    pub oauth: crate::InMemoryOAuth,
     // Staff and keys live in the store's database (design note 0006, T4).
     pub identities: InMemoryIdentityRepo,
     pub sessions: InMemorySessionRepo,
@@ -83,7 +85,7 @@ pub struct InMemoryPorts {
 impl Default for InMemoryPorts {
     fn default() -> Self {
         let outbox = InMemoryOutbox::default();
-        let (apps, app_providers) = crate::apps::linked(&outbox);
+        let (apps, app_providers, oauth) = crate::apps::linked(&outbox);
         let (payment_methods, payments) = crate::payments::linked(&outbox);
         let channels = InMemoryChannelRepo::sharing(&outbox);
         let categories = InMemoryCategoryRepo::sharing(&outbox);
@@ -107,6 +109,7 @@ impl Default for InMemoryPorts {
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
             app_providers,
             apps,
+            oauth,
             identities: InMemoryIdentityRepo::default(),
             sessions: InMemorySessionRepo::default(),
             api_keys: InMemoryApiKeyRepo::default(),
@@ -125,6 +128,27 @@ impl Default for InMemoryPorts {
             stores: crate::InMemoryStoreRepo::sharing(&outbox),
             outbox,
         }
+    }
+}
+
+impl hypha_oauth::HasOAuthRequests for InMemoryPorts {
+    type OAuthRequests = crate::InMemoryOAuth;
+    fn oauth_requests(&self) -> &crate::InMemoryOAuth {
+        &self.oauth
+    }
+}
+
+impl hypha_oauth::HasOAuthCodes for InMemoryPorts {
+    type OAuthCodes = crate::InMemoryOAuth;
+    fn oauth_codes(&self) -> &crate::InMemoryOAuth {
+        &self.oauth
+    }
+}
+
+impl hypha_oauth::HasOAuthTokens for InMemoryPorts {
+    type OAuthTokens = crate::InMemoryOAuth;
+    fn oauth_tokens(&self) -> &crate::InMemoryOAuth {
+        &self.oauth
     }
 }
 

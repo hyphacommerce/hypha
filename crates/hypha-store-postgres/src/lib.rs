@@ -32,6 +32,7 @@ mod markets;
 mod media;
 mod migrate;
 mod notifications;
+mod oauth;
 mod orders;
 mod outbox;
 mod payments;

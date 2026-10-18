@@ -933,8 +933,11 @@ dependencies = [
  "hypha-core",
  "hypha-testkit",
  "pollster",
+ "schemars",
+ "serde",
  "serde_json",
  "thiserror",
+ "url",
  "uuid",
 ]
 
@@ -1153,6 +1156,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 
@@ -1212,6 +1216,7 @@ dependencies = [
  "hypha-media",
  "hypha-merchandising",
  "hypha-notifications",
+ "hypha-oauth",
  "hypha-order-actions",
  "hypha-orders",
  "hypha-payments",
@@ -1338,6 +1343,22 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-oauth"
+version = "0.1.0"
+dependencies = [
+ "hypha-apps",
+ "hypha-auth",
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "url",
  "uuid",
 ]
 
@@ -1469,6 +1490,7 @@ dependencies = [
  "hypha-markets",
  "hypha-media",
  "hypha-notifications",
+ "hypha-oauth",
  "hypha-order-actions",
  "hypha-orders",
  "hypha-payments",
@@ -1541,6 +1563,7 @@ dependencies = [
  "hypha-markets",
  "hypha-media",
  "hypha-notifications",
+ "hypha-oauth",
  "hypha-orders",
  "hypha-payments",
  "hypha-products",

@@ -1,6 +1,6 @@
 use hypha_core::{
     ActingAs, Actor, BasisPoints, CatalogId, Currency, DeliveryOutcome, DeliveryStatus, Event,
-    HasBatch, HasOutbox, MarketId, Money, OutboxRepo, Outcome, PageLimit, PageRequest,
+    EventRoute, HasBatch, HasOutbox, MarketId, Money, OutboxRepo, Outcome, PageLimit, PageRequest,
     PendingEvent, Price, PriceListId, ProductId, RepoError, StageEvents, StoredEvent, Subject,
     Timestamp, UserId, VariantId, Version, Versioned,
 };
@@ -312,16 +312,18 @@ fn at(secs: i64) -> Timestamp {
     Timestamp::from_unix_micros(1_800_000_000_000_000).plus_secs(secs)
 }
 
-/// `handler:audit` for every event, `handler:search` for products' too.
-fn routes(event_type: &str) -> Vec<String> {
+/// `handler:audit` for every event, `handler:search` for products' too: by type,
+/// and the subject must come along (an app's own events are routed by it).
+fn routes(route: &EventRoute<'_>) -> Vec<String> {
     let mut to = vec!["handler:audit".to_string()];
-    if event_type.starts_with("product.") {
+    if route.event_type.starts_with("product.") {
+        assert_eq!(route.subject_kind, "product", "fan-out passes the subject");
         to.push("handler:search".to_string());
     }
     to
 }
 
-fn audit_only(_: &str) -> Vec<String> {
+fn audit_only(_: &EventRoute<'_>) -> Vec<String> {
     vec!["handler:audit".to_string()]
 }
 

@@ -157,6 +157,16 @@
               }
             ]
           },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "shipping_address": {
             "oneOf": [
               {
@@ -957,6 +967,16 @@
             "description": "RFC 3339, UTC.",
             "type": "string"
           },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "shipping_address": {
             "oneOf": [
               {
@@ -1273,7 +1293,6 @@
         "type": "object"
       },
       "PostalAddressResponse": {
-        "description": "A postal address as the API writes it. The Admin and Storefront APIs' address\nresponses are this type too, so every channel spells addresses one way.",
         "properties": {
           "city": {
             "type": "string"
@@ -1320,6 +1339,16 @@
           "province": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
               "null"
             ]
           }

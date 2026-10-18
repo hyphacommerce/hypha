@@ -150,6 +150,16 @@ impl<T: SignalsDispatch + ?Sized> SignalsDispatch for &T {
     }
 }
 
+/// What fan-out routes an event by: its type, and what it's about. Most destinations
+/// only look at the type; an app's own lifecycle events (`app.uninstalled`, design note
+/// 0029) go only to the app they're about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventRoute<'a> {
+    pub event_type: &'a str,
+    pub subject_kind: &'a str,
+    pub subject_id: Uuid,
+}
+
 /// An event as the outbox holds it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredEvent {
@@ -278,13 +288,14 @@ pub trait OutboxRepo {
 
     /// Claims up to `limit` events not fanned out yet (oldest first, skipping ones
     /// another claim holds), adds a pending delivery due at `now` for each destination
-    /// `destinations` names for the event's type, and marks them fanned out. Returns how
-    /// many events it fanned out. Running it again for an event adds nothing.
+    /// `destinations` names for the event (`EventRoute`: its type and subject), and marks
+    /// them fanned out. Returns how many events it fanned out. Running it again for an
+    /// event adds nothing.
     async fn fan_out(
         &self,
         limit: u32,
         now: Timestamp,
-        destinations: &(dyn Fn(&str) -> Vec<String> + Sync),
+        destinations: &(dyn Fn(&EventRoute<'_>) -> Vec<String> + Sync),
     ) -> Result<u32, RepoError>;
 
     /// Whether an event is waiting to be fanned out (`fan_out` would find one to claim,

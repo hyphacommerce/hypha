@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use hypha_core::{
     AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, Keyset, LocationId,
-    MarketId, Money, OrderId, OrderLineId, ProductId, ShippingGroupId, ShippingOptionId, SortKey,
-    TaxClassId, TaxRate, Timestamp, VariantId,
+    MarketId, Money, OrderId, OrderLineId, ProductId, Scope, ShippingGroupId, ShippingOptionId,
+    SortKey, TaxClassId, TaxRate, Timestamp, VariantId,
 };
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_order_actions::{
@@ -34,6 +34,7 @@ use crate::{
     extract::{Caller, JsonBody, KeyedJson, PathId, Query, Storefront, idempotent_response},
     media::Media,
     rate_limit::{self, Rule},
+    redact::{self, Family, Redacted},
     state::{SharedState, Storage},
 };
 
@@ -151,6 +152,12 @@ pub struct OrderResponse {
     country: CountryCode,
     customer: CustomerId,
     email: Email,
+    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
+    /// app without the matching `customer_data:*` scope. They are absent from the
+    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
     financial_status: FinancialStatusDto,
     fulfillment_status: FulfillmentStatusDto,
     /// Whether line prices include tax (the market decided, at checkout).
@@ -254,6 +261,7 @@ impl OrderResponse {
             country: order.country(),
             customer: order.customer(),
             email: order.email().clone(),
+            redacted: None,
             financial_status: order.financial_status().into(),
             fulfillment_status: order.fulfillment_status().into(),
             taxes_included: order.taxes_included(),
@@ -494,6 +502,12 @@ pub struct OrderSummaryResponse {
     channel: ChannelId,
     customer: CustomerId,
     email: Email,
+    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
+    /// app without the matching `customer_data:*` scope. They are absent from the
+    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
     country: CountryCode,
     financial_status: FinancialStatusDto,
     fulfillment_status: FulfillmentStatusDto,
@@ -513,6 +527,7 @@ impl OrderSummaryResponse {
             channel: o.channel,
             customer: o.customer,
             email: o.email,
+            redacted: None,
             country: o.country,
             financial_status: o.financial_status.into(),
             fulfillment_status: o.fulfillment_status.into(),
@@ -555,7 +570,8 @@ impl From<FulfillmentStatusDto> for FulfillmentStatus {
 #[into_params(parameter_in = Query)]
 pub struct OrderFilters {
     /// The order's number (`1001` or `#1001`), or text its email contains, ignoring case.
-    /// Up to 255 characters; blank filters nothing.
+    /// Up to 255 characters; blank filters nothing. Searching by email takes
+    /// `customer_data:email` for callers that aren't staff sessions.
     q: Option<String>,
     /// Only orders in this payment status; repeat for any of several.
     #[serde(default)]
@@ -651,9 +667,20 @@ pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     query: ListQuery<OrderFilters>,
-) -> Result<Json<OrderPage>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, filters, scope) = query.parse_sorted()?;
+    // Text other than a number searches emails: only for callers who may see them
+    // (design note 0029, AP10).
+    if let Some(q) = filters.q.as_deref().map(str::trim)
+        && !q.is_empty()
+        && !q
+            .trim_start_matches('#')
+            .chars()
+            .all(|c| c.is_ascii_digit())
+    {
+        redact::require_fields(&ctx, &[Scope::CustomerDataEmail])?;
+    }
     let sort = filters.sort();
     let input = ListOrders {
         filter: filters.input()?,
@@ -666,7 +693,7 @@ pub async fn list<S: Storage>(
         .cloned()
         .map(OrderSummaryResponse::new)
         .collect::<Result<_, _>>()?;
-    Ok(Json(PageResponse::sorted(
+    let page = PageResponse::sorted(
         &page,
         &scope,
         |o| Keyset {
@@ -674,7 +701,8 @@ pub async fn list<S: Storage>(
             id: o.id,
         },
         items,
-    )?))
+    )?;
+    Ok(Json(redact::page(&ctx, Family::Order, page)?))
 }
 
 /// Units of a line still to ship, and where they wait (design note 0018, FU4).
@@ -740,11 +768,15 @@ pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<OrderId>,
-) -> Result<Json<AdminOrderResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let view = order_view(&ctx, &ports, id).await?;
     let order = OrderResponse::with_images(&view.order, &ports, state.media.as_deref()).await?;
-    Ok(Json(AdminOrderResponse::new(&view, order)?))
+    Ok(Json(redact::one(
+        &ctx,
+        Family::Order,
+        AdminOrderResponse::new(&view, order)?,
+    )?))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -775,7 +807,7 @@ pub async fn cancel<S: Storage>(
     caller: Caller,
     PathId(id): PathId<OrderId>,
     body: JsonBody<CancelOrderRequest>,
-) -> Result<Json<AdminOrderResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = CancelOrder {
@@ -793,7 +825,11 @@ pub async fn cancel<S: Storage>(
         unfulfilled: Vec::new(),
         payments: done.payments,
     };
-    Ok(Json(AdminOrderResponse::new(&view, response)?))
+    Ok(Json(redact::one(
+        &ctx,
+        Family::Order,
+        AdminOrderResponse::new(&view, response)?,
+    )?))
 }
 
 #[derive(Deserialize, Default, utoipa::ToSchema)]
@@ -827,7 +863,7 @@ pub async fn mark_paid<S: Storage>(
     caller: Caller,
     PathId(id): PathId<OrderId>,
     body: JsonBody<Option<MarkPaidRequest>>,
-) -> Result<Json<AdminOrderResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse_optional()?.flatten().unwrap_or_default();
     let input = MarkPaid {
@@ -837,5 +873,9 @@ pub async fn mark_paid<S: Storage>(
     let done = record_paid(&ctx, &ports, &state.ids, &state.clock, input).await?;
     let view = view_of(&ports, done.order, done.payments).await?;
     let order = OrderResponse::with_images(&view.order, &ports, state.media.as_deref()).await?;
-    Ok(Json(AdminOrderResponse::new(&view, order)?))
+    Ok(Json(redact::one(
+        &ctx,
+        Family::Order,
+        AdminOrderResponse::new(&view, order)?,
+    )?))
 }

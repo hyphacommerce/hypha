@@ -18,6 +18,7 @@ hypha-fulfillment = { path = "../hypha-fulfillment" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
 hypha-apps = { path = "../hypha-apps" }
+hypha-oauth = { path = "../hypha-oauth" }
 hypha-media = { path = "../hypha-media" }
 hypha-shipping = { path = "../hypha-shipping" }
 hypha-search-index = { path = "../hypha-search-index" }

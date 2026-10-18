@@ -38,6 +38,9 @@ use hypha_notifications::{OutgoingEmail, Sent};
 use crate::platform::{Background, UuidV7Ids};
 use crate::storage::{PgDatabase, PgStorage};
 
+// Apps installed through OAuth, and personal data (design note 0029).
+mod oauth;
+
 const OWNER_EMAIL: &str = "owner@example.com";
 const OWNER_PASSWORD: &str = "owner password";
 

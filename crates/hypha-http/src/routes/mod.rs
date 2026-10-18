@@ -20,6 +20,7 @@ pub mod inventory;
 pub mod markets;
 pub mod me;
 pub mod notifications;
+pub mod oauth;
 pub mod orders;
 pub mod page;
 pub mod payments;
@@ -67,6 +68,11 @@ macro_rules! route_table {
             [hidden, GET, "/health", health::check],
             [hidden, GET, "/admin/openapi.json", openapi::admin_document],
             [hidden, GET, "/storefront/openapi.json", openapi::storefront_document],
+            // OAuth for apps (design note 0029): public, documented by their RFCs
+            [hidden, GET, "/oauth/authorize", oauth::authorize_handler],
+            [hidden, POST, "/oauth/token", oauth::token_handler],
+            [hidden, POST, "/oauth/revoke", oauth::revoke_handler],
+            [hidden, GET, "/.well-known/oauth-authorization-server", oauth::metadata],
 
             // ---------- admin ----------
             [admin, GET, "/admin/store", stores::fetch],
@@ -207,6 +213,11 @@ macro_rules! route_table {
             [admin, GET, "/admin/apps/{key}/extension-calls", apps::extension_calls],
             [admin, POST, "/admin/apps/{key}/deliveries/{id}/retry", apps::retry],
             [admin, GET, "/admin/events/{id}", apps::event],
+            // installing apps (design note 0029)
+            [admin, PATCH, "/admin/apps/{key}/grant", apps::narrow],
+            [admin, GET, "/admin/oauth/requests/{id}", oauth::fetch_request],
+            [admin, POST, "/admin/oauth/requests/{id}/approve", oauth::approve_request],
+            [admin, POST, "/admin/oauth/requests/{id}/deny", oauth::deny_request],
             // inventory
             [admin, GET, "/admin/locations", inventory::list_locations_handler],
             [admin, POST, "/admin/locations", inventory::create_location_handler],

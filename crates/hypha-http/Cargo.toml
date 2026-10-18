@@ -31,6 +31,7 @@ hypha-media = { path = "../hypha-media" }
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-shipping = { path = "../hypha-shipping" }
 hypha-apps = { path = "../hypha-apps" }
+hypha-oauth = { path = "../hypha-oauth" }
 hypha-notifications = { path = "../hypha-notifications" }
 hypha-extensions = { path = "../hypha-extensions", features = ["openapi"] }
 hypha-mail = { path = "../hypha-mail" }

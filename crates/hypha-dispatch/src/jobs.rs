@@ -5,8 +5,8 @@
 use hypha_apps::{App, AppKey, AppRepo, HasApps, Webhook};
 use hypha_auth::{HasSessions, SessionRepo};
 use hypha_core::{
-    Clock, Delivery, DeliveryOutcome, EventHandlers, HasIdempotency, HasOutbox, IdempotencyRepo,
-    OutboxRepo, Outcome, Progress, RepoError,
+    Clock, Delivery, DeliveryOutcome, EventHandlers, EventRoute, HasIdempotency, HasOutbox,
+    IdempotencyRepo, OutboxRepo, Outcome, Progress, RepoError,
 };
 
 use core::time::Duration;
@@ -38,8 +38,9 @@ pub trait WebhookSender {
 pub const LONGEST_RUN: Duration = Duration::from_secs(Webhook::MAX_TIMEOUT_MS as u64 / 1000 + 15);
 
 /// Fans out events not fanned out yet: a pending delivery for each destination that
-/// wants them, the `handlers` (`handler:<name>`) and every app subscribed to the event's
-/// type (`app:<key>`, `App::wants`) as the apps are now. `handlers` are `Sync` because
+/// wants them, the `handlers` (`handler:<name>`) and every app that wants the event
+/// (`app:<key>`, `App::wants_event`: subscribed to its type and granted what it's
+/// about, or the app an `app.*` event is about) as the apps are now. `handlers` are `Sync` because
 /// the outbox may hold their routing across an await (a host's futures must be `Send`).
 /// With no event waiting (`has_unfanned`), that one read is all: the apps aren't read.
 pub async fn fan_out<S: HasOutbox + HasApps>(
@@ -52,15 +53,15 @@ pub async fn fan_out<S: HasOutbox + HasApps>(
         return Ok(Progress::of(0, settings.batch));
     }
     let apps = ports.apps().list().await?;
-    let destinations = |event_type: &str| {
+    let destinations = |route: &EventRoute<'_>| {
         let mut to: Vec<String> = handlers
-            .wanting(event_type)
+            .wanting(route.event_type)
             .into_iter()
             .map(|name| format!("{HANDLER}{name}"))
             .collect();
         to.extend(
             apps.iter()
-                .filter(|app| app.wants(event_type))
+                .filter(|app| app.wants_event(route))
                 .map(|app| app.key().destination()),
         );
         to
@@ -106,7 +107,7 @@ pub enum Prepared {
     Handler,
     /// A webhook to this app: `send` it, no ports needed (don't hold a connection over
     /// the HTTP call, EV9).
-    Webhook(App),
+    Webhook(Box<App>),
     /// Decided already (the app is gone, say).
     Done(DeliveryOutcome),
 }
@@ -122,7 +123,7 @@ pub async fn prepare<S: HasApps>(
     match delivery.destination.split_once(':') {
         Some((kind, _)) if format!("{kind}:") == HANDLER => Prepared::Handler,
         Some(("app", key)) => match load_app(ports, key).await {
-            Ok(app) => Prepared::Webhook(app),
+            Ok(app) => Prepared::Webhook(Box::new(app)),
             Err(failure) => Prepared::Done(outcome(Err(failure), clock, settings, delivery)),
         },
         _ => Prepared::Done(outcome(
