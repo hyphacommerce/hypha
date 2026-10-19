@@ -10,11 +10,21 @@
 //!
 //! A co-located app (design note 0029, §9) calls through a binding too, without the key
 //! (apps are untrusted): its calls carry no `CF-Connecting-IP` (Cloudflare sets it on
-//! every request from the internet), and they share one address, as our own Workers'
-//! calls made for no client do, rather than fail for want of one.
+//! every request from the internet), and they share one address, `BOUND_APPS`, rather
+//! than fail for want of one. Not the one our own Workers' calls made for no client
+//! share (`OUR_WORKERS`): rate limits key by address (an IPv6 one by its /64), so an
+//! app spending its limit can't spend our Workers' too.
 //! Portable, so its tests run natively.
 
 use std::net::{IpAddr, Ipv6Addr};
+
+/// The address our own Workers' calls made for no client share (`::`).
+pub const OUR_WORKERS: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+
+/// The address calls from co-located apps through their bindings share: in the
+/// discard-only prefix `100::/64` (RFC 6666), so it's no client's and its /64 isn't
+/// `OUR_WORKERS`'.
+pub const BOUND_APPS: IpAddr = IpAddr::V6(Ipv6Addr::new(0x100, 0, 0, 0, 0, 0, 0, 1));
 
 /// The header our Workers send the caller key in.
 pub const CALLER_HEADER: &str = "x-hypha-caller";
@@ -44,13 +54,13 @@ pub fn client_address(
             forwarded_for
                 .and_then(|f| f.rsplit(',').next())
                 .and_then(|ip| ip.trim().parse().ok())
-                .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+                .unwrap_or(OUR_WORKERS),
         )
     } else {
         match connecting_ip {
             Some(ip) => ip.trim().parse().ok(),
             // Only a Service Binding's call lacks it: a co-located app's.
-            None => Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+            None => Some(BOUND_APPS),
         }
     }
 }
@@ -73,7 +83,7 @@ mod tests {
 
     #[test]
     fn a_bound_app_without_the_key_shares_one_address_whatever_it_forwards() {
-        let shared = Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+        let shared = Some(BOUND_APPS);
         assert_eq!(client_address(false, None, Some("198.51.100.1")), shared);
         assert_eq!(client_address(false, None, None), shared);
     }
@@ -91,9 +101,20 @@ mod tests {
 
     #[test]
     fn from_our_workers_without_a_client_every_call_shares_one_address() {
-        let shared = Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+        let shared = Some(OUR_WORKERS);
         assert_eq!(client_address(true, Some("203.0.113.7"), None), shared);
         assert_eq!(client_address(true, None, Some("not an ip")), shared);
+    }
+
+    #[test]
+    fn bound_apps_and_our_workers_without_a_client_count_in_different_buckets() {
+        let apps = client_address(false, None, None).unwrap();
+        let ours = client_address(true, None, None).unwrap();
+        assert_ne!(apps, ours);
+        // Limits key IPv6 by its /64: the buckets differ there too.
+        use hypha_http::client_ip::limit_key;
+        assert_ne!(limit_key(apps), limit_key(ours));
+        assert_eq!(limit_key(apps), "100::/64");
     }
 
     #[test]
