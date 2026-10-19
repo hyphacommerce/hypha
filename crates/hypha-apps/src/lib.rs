@@ -24,7 +24,8 @@ pub use blocks::{BlockCheck, BlockProblem, MAX_BLOCK_DEPTH, check_block};
 pub use targets::{ContextKey, ExtensionContext, Surface, Target};
 pub use ui::{
     AdminContributions, PageContribution, StorefrontContributions, admin_contributions,
-    find_action, find_block, find_proxy, scopes_for, session_app, storefront_contributions,
+    find_action, find_block, find_proxy, may_use_on, scopes_for, session_app, spore_contributes,
+    spore_for_ui, storefront_contributions,
 };
 
 pub use app::{

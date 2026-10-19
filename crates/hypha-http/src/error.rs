@@ -1145,6 +1145,7 @@ impl ApiError {
         use hypha_apps::AppError as E;
         let status = match &e {
             E::NotInstalled | E::EndpointsFromManifest(_) | E::BuiltIn(_) => StatusCode::CONFLICT,
+            E::Disabled(_) => StatusCode::FORBIDDEN,
             E::IncompleteManifest | E::NotASpore(_) => return Self::internal(e),
             _ => StatusCode::UNPROCESSABLE_ENTITY,
         };

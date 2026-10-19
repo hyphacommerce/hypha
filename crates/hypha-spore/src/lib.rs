@@ -22,7 +22,7 @@
 //! Reaching past this crate into an internal one works (they're published) but comes
 //! with no stability promise.
 
-pub use hypha_spore_core::{Spore, SporeEnv, SporeError};
+pub use hypha_spore_core::{Spore, SporeEnv, SporeError, SporeUi};
 
 /// Building a spore: its environment and what it can fail with.
 pub mod env {
@@ -34,6 +34,14 @@ pub mod env {
 /// (`outbound.allow_private`).
 pub mod client {
     pub use hypha_spore_core::{HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse};
+}
+
+/// What a spore adds to admins (design note 0030, §7): blocks (format v1 trees) and
+/// actions on the targets apps use, answered in-process (`SporeUi`, implemented next
+/// to `Spore`; `impl<P> SporeUi<P> for MySpore {}` for none).
+pub mod ui {
+    pub use hypha_apps::{ExtensionContext, Target};
+    pub use hypha_spore_core::{SporeUi, UiAction, UiAnswer, UiBlock, UiCall, UiError};
 }
 
 /// A spore's settings (design note 0030, §8): the problems its `check_settings`

@@ -5,6 +5,7 @@
 //! The stock build has no spores.
 
 use axum::{Json, extract::State};
+use hypha_apps::Target;
 use hypha_core::{EventHandler, Scope, StoredEvent};
 use hypha_http::__private::utoipa;
 use hypha_http::error::ApiError;
@@ -13,7 +14,10 @@ use hypha_http::state::{SharedState, Storage};
 use hypha_payments::{
     NextAction, PaymentError, PaymentProvider, PaymentRequest, ProviderKey, Started, no_settings,
 };
-use hypha_spore_core::{Spore, SporeEnv, SporeError};
+use hypha_products::{HasProducts, ProductRepo};
+use hypha_spore_core::{
+    Spore, SporeEnv, SporeError, SporeUi, UiAction, UiAnswer, UiBlock, UiCall, UiError,
+};
 use hypha_store_postgres::{Migration, MigrationSet};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -137,6 +141,74 @@ impl Spore for TestSpore {
 
     fn handlers(&self) -> (Noop,) {
         (Noop,)
+    }
+}
+
+/// A block and an action on a product, and a block that answers a broken tree.
+impl<P: HasProducts> SporeUi<P> for TestSpore {
+    fn blocks() -> Vec<UiBlock> {
+        vec![
+            UiBlock {
+                id: "notes",
+                target: Target::ProductDetails,
+            },
+            UiBlock {
+                id: "broken",
+                target: Target::ProductDetails,
+            },
+        ]
+    }
+
+    fn actions() -> Vec<UiAction> {
+        vec![UiAction {
+            id: "greet",
+            target: Target::ProductDetails,
+            label: "Greet",
+            input_schema: None,
+        }]
+    }
+
+    async fn block(&self, id: &str, call: UiCall<'_>, ports: &P) -> Result<Value, UiError> {
+        let product = call.context.product.ok_or(UiError::NotFound)?;
+        match id {
+            "notes" => {
+                let product = ports
+                    .products()
+                    .get(product)
+                    .await
+                    .map_err(|e| UiError::Failed(e.to_string()))?
+                    .ok_or_else(|| UiError::Failed("no such product".to_string()))?;
+                Ok(json!({
+                    "version": 1,
+                    "root": {
+                        "type": "card",
+                        "title": "Test spore",
+                        "children": [
+                            { "type": "text", "value": format!("Notes on {}", product.title()) }
+                        ]
+                    }
+                }))
+            }
+            "broken" => Ok(json!({ "version": 1 })),
+            _ => Err(UiError::NotFound),
+        }
+    }
+
+    async fn action(
+        &self,
+        id: &str,
+        call: UiCall<'_>,
+        _: Option<Value>,
+        _: &P,
+    ) -> Result<UiAnswer, UiError> {
+        match id {
+            "greet" => Ok(UiAnswer {
+                message: Some(format!("{}, as {:?}", self.greeting, call.ctx.scopes())),
+                refresh: true,
+                navigate: None,
+            }),
+            _ => Err(UiError::NotFound),
+        }
     }
 }
 

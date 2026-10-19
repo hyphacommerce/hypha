@@ -47,6 +47,9 @@ pub enum AppError {
     /// Syncing a spore's registration onto an app that isn't one (a host bug).
     #[error("{0} is not a spore")]
     NotASpore(AppKey),
+    /// A spore staff disabled: its routes and UI answer nothing (design note 0030, §3).
+    #[error("{0} is disabled")]
+    Disabled(AppKey),
 }
 
 impl ErrorCode for AppError {
@@ -68,6 +71,7 @@ impl ErrorCode for AppError {
             AppError::EndpointsFromManifest(_) => "endpoints_from_manifest",
             AppError::BuiltIn(_) => "app_built_in",
             AppError::NotASpore(_) => "internal_error",
+            AppError::Disabled(_) => "app_disabled",
         }
     }
 }

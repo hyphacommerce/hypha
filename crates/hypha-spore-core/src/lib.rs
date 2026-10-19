@@ -16,6 +16,9 @@ use hypha_payments::{PaymentProviders, ProviderKey};
 use hypha_store_postgres::MigrationSet;
 
 pub mod env;
+pub mod ui;
+
+pub use ui::{SporeContributions, SporeUi, UiAction, UiAnswer, UiBlock, UiCall, UiError};
 
 pub use env::{
     BoxFuture, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, SettingsError,
@@ -77,9 +80,30 @@ pub trait Spore: Sized + Send + Sync + 'static {
 }
 
 /// What the HTTP layer asks of a host's built spores, in-process, by key (design note
-/// 0030, §7–§8): their settings forms and checks. `P` is the host's ports (what their
-/// UI reads with). Implemented for `()` and the tuples `SporeSet` is.
+/// 0030, §7–§8): their settings forms and checks, and their UI. `P` is the host's ports
+/// (what their UI reads with). Implemented for `()` and the tuples `SporeSet` is, whose
+/// spores implement `SporeUi<P>`.
+#[allow(async_fn_in_trait)]
 pub trait SporeRuntime<P>: Send + Sync + 'static {
+    /// What each spore adds to admins, in order.
+    fn contributions(&self) -> Vec<SporeContributions>;
+    /// The spore `key`'s block `id`; `None` for no such spore.
+    async fn block(
+        &self,
+        key: &AppKey,
+        id: &str,
+        call: UiCall<'_>,
+        ports: &P,
+    ) -> Option<Result<serde_json::Value, UiError>>;
+    /// Runs the spore `key`'s action `id`; `None` for no such spore.
+    async fn action(
+        &self,
+        key: &AppKey,
+        id: &str,
+        call: UiCall<'_>,
+        input: Option<serde_json::Value>,
+        ports: &P,
+    ) -> Option<Result<UiAnswer, UiError>>;
     /// The built spore called `name`, as `Any` (`spore::<T>` downcasts it): how a
     /// spore's routes reach their spore.
     fn find(&self, name: &str) -> Option<&dyn Any>;
@@ -105,6 +129,31 @@ impl<P> SporeRuntime<P> for () {
         None
     }
 
+    fn contributions(&self) -> Vec<SporeContributions> {
+        Vec::new()
+    }
+
+    async fn block(
+        &self,
+        _: &AppKey,
+        _: &str,
+        _: UiCall<'_>,
+        _: &P,
+    ) -> Option<Result<serde_json::Value, UiError>> {
+        None
+    }
+
+    async fn action(
+        &self,
+        _: &AppKey,
+        _: &str,
+        _: UiCall<'_>,
+        _: Option<serde_json::Value>,
+        _: &P,
+    ) -> Option<Result<UiAnswer, UiError>> {
+        None
+    }
+
     fn settings_schema(&self, _: &AppKey) -> Option<SettingsSchema> {
         None
     }
@@ -127,7 +176,49 @@ fn is<S: Spore>(key: &AppKey) -> bool {
 macro_rules! tuple_runtime {
     ($($s:ident),+) => {
         #[allow(non_snake_case)]
-        impl<P, $($s: Spore),+> SporeRuntime<P> for ($($s,)+) {
+        impl<P, $($s: Spore + SporeUi<P>),+> SporeRuntime<P> for ($($s,)+) {
+            fn contributions(&self) -> Vec<SporeContributions> {
+                vec![$(SporeContributions {
+                    name: $s::NAME,
+                    title: $s::title(),
+                    blocks: <$s as SporeUi<P>>::blocks(),
+                    actions: <$s as SporeUi<P>>::actions(),
+                }),+]
+            }
+
+            async fn block(
+                &self,
+                key: &AppKey,
+                id: &str,
+                call: UiCall<'_>,
+                ports: &P,
+            ) -> Option<Result<serde_json::Value, UiError>> {
+                let ($($s,)+) = self;
+                $(
+                    if is::<$s>(key) {
+                        return Some($s.block(id, call, ports).await);
+                    }
+                )+
+                None
+            }
+
+            async fn action(
+                &self,
+                key: &AppKey,
+                id: &str,
+                call: UiCall<'_>,
+                input: Option<serde_json::Value>,
+                ports: &P,
+            ) -> Option<Result<UiAnswer, UiError>> {
+                let ($($s,)+) = self;
+                $(
+                    if is::<$s>(key) {
+                        return Some($s.action(id, call, input, ports).await);
+                    }
+                )+
+                None
+            }
+
             fn find(&self, name: &str) -> Option<&dyn Any> {
                 let ($($s,)+) = self;
                 $(
@@ -512,6 +603,8 @@ mod tests {
         fn handlers(&self) {}
     }
 
+    impl<P> SporeUi<P> for Paying {}
+
     /// A spore whose name and migrations are wrong.
     struct Broken;
 
@@ -541,6 +634,8 @@ mod tests {
 
         fn handlers(&self) {}
     }
+
+    impl<P> SporeUi<P> for Broken {}
 
     #[test]
     fn no_spores_add_nothing() {

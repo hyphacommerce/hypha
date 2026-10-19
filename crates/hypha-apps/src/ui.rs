@@ -190,6 +190,41 @@ async fn installed<R: AppRepo>(apps: &R, key: &str) -> Result<App, CommandError>
     Ok(app)
 }
 
+/// Whether the spore `app` (design note 0030) contributes to `target` for discovery: its
+/// grant (its declared scopes) reads the target's object, as an app's must.
+pub fn spore_contributes(app: &App, target: Target) -> bool {
+    app.enabled() && granted(app, target)
+}
+
+/// The spore under `key`, for using one of its blocks or actions (design note 0030,
+/// §7): the caller needs `apps:read`; a key that's no spore of this store is
+/// `app_not_found`; one staff disabled is `app_disabled`.
+pub async fn spore_for_ui<R: AppRepo>(ctx: &Ctx, apps: &R, key: &str) -> Result<App, CommandError> {
+    ctx.require(Scope::AppsRead)?;
+    let not_found = || CommandError::AppNotFound(key.to_string());
+    let parsed = crate::AppKey::new(key).map_err(|_| not_found())?;
+    if parsed.kind() != crate::AppKind::Spore {
+        return Err(not_found());
+    }
+    let app = apps.get(&parsed).await?.ok_or_else(not_found)?;
+    if !app.enabled() {
+        return Err(AppError::Disabled(parsed).into());
+    }
+    Ok(app)
+}
+
+/// `target`'s object may be read by the app (its grant) and by the caller, and
+/// `context` fits it: what using a block or action needs, an app's or a spore's.
+pub fn may_use_on(
+    ctx: &Ctx,
+    app: &App,
+    target: Target,
+    context: &ExtensionContext,
+) -> Result<(), CommandError> {
+    may_use(ctx, app, target)?;
+    context.check(target).map_err(CommandError::InvalidContext)
+}
+
 /// `target`'s object may be read by the app (its grant) and by the caller.
 fn may_use(ctx: &Ctx, app: &App, target: Target) -> Result<(), CommandError> {
     if let Some(scope) = target.scope() {

@@ -355,3 +355,140 @@ async fn a_disabled_spores_handlers_wait_on_the_retry_schedule() {
         Some("spore_test is disabled")
     );
 }
+
+#[tokio::test]
+async fn a_spores_blocks_actions_and_settings_form_are_discovered_beside_apps() {
+    let app = app_with_spores::<WithTestSpore>(Config::defaults()).await;
+    let (status, found) = send(&app, "GET", "/admin/app-extensions", None).await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(
+        found["apps"],
+        json!([{ "key": "spore_test", "name": "Test spore", "icon": null }])
+    );
+    assert_eq!(
+        found["blocks"],
+        json!([
+            {
+                "app": "spore_test", "id": "notes", "target": "product.details",
+                "url": "/admin/app-extensions/blocks/spore_test/notes"
+            },
+            {
+                "app": "spore_test", "id": "broken", "target": "product.details",
+                "url": "/admin/app-extensions/blocks/spore_test/broken"
+            }
+        ])
+    );
+    assert_eq!(
+        found["actions"],
+        json!([{
+            "app": "spore_test", "id": "greet", "label": "Greet", "target": "product.details",
+            "input_schema": null, "point": null
+        }])
+    );
+    assert_eq!(found["settings"][0]["app"], "spore_test");
+    assert_eq!(found["settings"][0]["secret_fields"], json!(["api_key"]));
+    assert_eq!(found["settings"][0]["proxy"], false);
+    // By target: an order has none of the spore's.
+    let (_, orders) = send(
+        &app,
+        "GET",
+        "/admin/app-extensions?target=order.details",
+        None,
+    )
+    .await;
+    assert_eq!(orders["apps"], json!([]));
+
+    // Disabled, it isn't discovered, and its block and action answer 403.
+    set_enabled(&app, false).await;
+    let (_, found) = send(&app, "GET", "/admin/app-extensions", None).await;
+    assert_eq!(
+        (&found["apps"], &found["blocks"], &found["settings"]),
+        (&json!([]), &json!([]), &json!([]))
+    );
+    let product = create_product(&app, "spore-ui-off").await;
+    let path = format!("/admin/app-extensions/blocks/spore_test/notes?product_id={product}");
+    let (status, body) = send(&app, "GET", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "app_disabled")
+    );
+}
+
+#[tokio::test]
+async fn a_spores_block_and_action_are_answered_in_process() {
+    let app = app_with_spores::<WithTestSpore>(Config::defaults()).await;
+    let product = create_product(&app, "spore-ui").await;
+
+    let path = format!("/admin/app-extensions/blocks/spore_test/notes?product_id={product}");
+    let (status, block) = send(&app, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{block}");
+    assert_eq!(
+        (&block["app"], &block["id"], &block["target"]),
+        (
+            &json!("spore_test"),
+            &json!("notes"),
+            &json!("product.details")
+        )
+    );
+    assert_eq!(block["tree"]["version"], 1);
+    assert!(
+        block["tree"]["root"]["children"][0]["value"]
+            .as_str()
+            .unwrap()
+            .starts_with("Notes on "),
+        "{block}"
+    );
+
+    // A tree that isn't v1 is the spore's failure, as an app's would be.
+    let path = format!("/admin/app-extensions/blocks/spore_test/broken?product_id={product}");
+    let (status, body) = send(&app, "GET", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_GATEWAY, "app_unavailable"),
+        "{body}"
+    );
+    // The target's context is checked, and unknown blocks are 404.
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/admin/app-extensions/blocks/spore_test/notes",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_extension_context"
+        )
+    );
+    let path = format!("/admin/app-extensions/blocks/spore_test/nope?product_id={product}");
+    let (status, body) = send(&app, "GET", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "app_extension_not_found")
+    );
+
+    // The action runs as the spore, with its scopes as far as the caller holds them.
+    let body = json!({ "context": { "product_id": product } }).to_string();
+    let (status, answer) = send(
+        &app,
+        "POST",
+        "/admin/app-extensions/actions/spore_test/greet",
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["message"], "hello, as [ProductsRead]");
+    assert_eq!(answer["refresh"], true);
+
+    // A caller who can't read products can't use a product block.
+    let reader = key(
+        &app,
+        json!({ "kind": "secret", "name": "Apps only", "scopes": ["apps:read"] }),
+    )
+    .await;
+    let path = format!("/admin/app-extensions/blocks/spore_test/notes?product_id={product}");
+    let (status, body) = send_as(&app, &reader, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+}

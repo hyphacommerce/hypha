@@ -30,11 +30,12 @@ use axum::{
 };
 use hypha_apps::{
     App, ExtensionContext, Surface, Target, admin_contributions, check_block, find_action,
-    find_block, find_proxy, open_secret, scopes_for, session_app, storefront_contributions,
+    find_block, find_proxy, may_use_on, open_secret, scopes_for, session_app, spore_contributes,
+    spore_for_ui, storefront_contributions,
 };
 use hypha_core::{
-    Actor, CartId, Clock, Ctx, CustomerId, FulfillmentId, IdGenerator, OAuthRequestId, OrderId,
-    PaymentId, ProductId, Scope,
+    Actor, AppKey, AppKind, CartId, Clock, Ctx, CustomerId, FulfillmentId, IdGenerator,
+    OAuthRequestId, OrderId, PaymentId, ProductId, Scope,
 };
 use hypha_extensions::{
     ActionContext, AdminActionRequest, CallOutcome, Endpoint, ExtensionError, HasExtensionCalls,
@@ -296,6 +297,14 @@ pub async fn list_admin<S: Storage>(
         actions: Vec::new(),
         settings: Vec::new(),
     };
+    add_spores(
+        &state,
+        &ctx,
+        &ports,
+        q.target.map(Into::into),
+        &mut response,
+    )
+    .await?;
     for c in found {
         let key = c.app.key().to_string();
         response.apps.push(ExtensionApp::new(&c.app));
@@ -337,6 +346,216 @@ pub async fn list_admin<S: Storage>(
         }
     }
     Ok(Json(response))
+}
+
+/// What the spores built into the API add (design note 0030, §7), merged into the
+/// apps' answer: blocks, actions and settings forms of enabled spores whose declared
+/// scopes read the target's object. A spore's block is fetched through the same blocks
+/// route (`url` names it), its settings saved through `PUT /admin/apps/{key}/settings`
+/// (`proxy` is false).
+async fn add_spores<S: Storage>(
+    state: &AppState<S>,
+    ctx: &Ctx,
+    ports: &S::Ports<'_>,
+    target: Option<Target>,
+    response: &mut AdminExtensionsResponse,
+) -> Result<(), ApiError> {
+    use hypha_apps::{AppRepo, HasApps};
+    use hypha_spore_core::SporeRuntime;
+    let spores = state.storage.spores();
+    for c in SporeRuntime::<S::Ports<'static>>::contributions(spores) {
+        let key = AppKey::of_spore(c.name).map_err(ApiError::internal)?;
+        let Some(app) = ports.apps().get(&key).await.map_err(ApiError::internal)? else {
+            continue;
+        };
+        let wanted = |t: Target| target.is_none_or(|w| w == t) && spore_contributes(&app, t);
+        let blocks: Vec<BlockExtension> = c
+            .blocks
+            .iter()
+            .filter(|b| b.target.takes_blocks() && wanted(b.target))
+            .map(|b| {
+                Ok(BlockExtension {
+                    app: key.to_string(),
+                    id: b.id.to_string(),
+                    target: admin_target(b.target)?,
+                    url: format!("/admin/app-extensions/blocks/{key}/{}", b.id),
+                })
+            })
+            .collect::<Result<_, ApiError>>()?;
+        let actions: Vec<ActionExtension> = c
+            .actions
+            .iter()
+            .filter(|a| a.target.takes_actions() && wanted(a.target))
+            .map(|a| {
+                Ok(ActionExtension {
+                    app: key.to_string(),
+                    id: a.id.to_string(),
+                    label: a.label.to_string(),
+                    target: admin_target(a.target)?,
+                    input_schema: a.input_schema.clone(),
+                    point: None,
+                })
+            })
+            .collect::<Result<_, ApiError>>()?;
+        let settings = SporeRuntime::<S::Ports<'static>>::settings_schema(spores, &key)
+            .filter(|_| app.enabled() && target.is_none_or(|t| t == Target::SettingsApp))
+            .map(|schema| SettingsExtension {
+                app: key.to_string(),
+                secret_fields: schema.secrets().map(str::to_string).collect(),
+                schema: schema.json().clone(),
+                proxy: false,
+            });
+        if blocks.is_empty() && actions.is_empty() && settings.is_none() {
+            continue;
+        }
+        // Spores' blocks and actions need the caller to read their apps (`apps:read`),
+        // as apps' do.
+        ctx.require(Scope::AppsRead)
+            .map_err(hypha_apps::CommandError::from)?;
+        response.apps.push(ExtensionApp {
+            key: key.to_string(),
+            name: app.name().to_string(),
+            icon: None,
+        });
+        response.blocks.extend(blocks);
+        response.actions.extend(actions);
+        response.settings.extend(settings);
+    }
+    Ok(())
+}
+
+/// Whether `key` names a spore (`spore_<name>`), whose blocks and actions are answered
+/// in-process.
+fn is_spore(key: &str) -> bool {
+    AppKey::new(key).is_ok_and(|k| k.kind() == AppKind::Spore)
+}
+
+/// The spore `app` acting for the caller: its app, with its scopes as far as the caller
+/// holds them, as an app's session token carries.
+fn spore_ctx(ctx: &Ctx, app: &App) -> Ctx {
+    Ctx::new(Actor::App(app.id()), scopes_for(ctx, app))
+}
+
+/// A spore's block (design note 0030, §7): asked in-process, checked as an app's.
+async fn spore_block<S: Storage>(
+    state: &AppState<S>,
+    ctx: &Ctx,
+    ports: &S::Ports<'_>,
+    key: &str,
+    id: &str,
+    context: &ExtensionContext,
+) -> Result<BlockResponse, ApiError> {
+    use hypha_apps::HasApps;
+    use hypha_spore_core::{SporeRuntime, UiCall, UiError};
+    let app = spore_for_ui(ctx, ports.apps(), key).await?;
+    let not_found = || hypha_apps::CommandError::ExtensionNotFound {
+        app: app.key().clone(),
+        id: id.to_string(),
+    };
+    let spores = state.storage.spores();
+    let target = SporeRuntime::<S::Ports<'static>>::contributions(spores)
+        .into_iter()
+        .filter(|c| app.key().as_str().strip_prefix("spore_") == Some(c.name))
+        .flat_map(|c| c.blocks)
+        .find(|b| b.id == id && b.target.takes_blocks())
+        .map(|b| b.target)
+        .ok_or_else(not_found)?;
+    may_use_on(ctx, &app, target, context)?;
+    let acting = spore_ctx(ctx, &app);
+    let call = UiCall {
+        target,
+        context,
+        ctx: &acting,
+        staff: staff_of(ctx),
+    };
+    let answer = SporeRuntime::block(spores, app.key(), id, call, ports)
+        .await
+        .ok_or_else(|| hypha_apps::CommandError::AppNotFound(key.to_string()))?;
+    let unavailable = |reason: String| ExtensionError::Unavailable {
+        app: app.key().clone(),
+        point: BLOCK_POINT,
+        reason,
+    };
+    let tree = match answer {
+        Ok(tree) => tree,
+        Err(UiError::NotFound) => return Err(not_found().into()),
+        Err(UiError::Failed(reason)) => return Err(unavailable(reason).into()),
+    };
+    let check = check_block(&tree);
+    if let Some(problem) = check.errors.first() {
+        let reason = format!(
+            "not a block v1: {}: {} ({} problem(s))",
+            problem.path,
+            problem.message,
+            check.errors.len()
+        );
+        tracing::warn!(app = %app.key(), "blocks: a spore's invalid tree: {reason}");
+        return Err(ExtensionError::Invalid {
+            app: app.key().clone(),
+            point: BLOCK_POINT,
+            reason,
+        }
+        .into());
+    }
+    Ok(BlockResponse {
+        app: app.key().to_string(),
+        id: id.to_string(),
+        target: admin_target(target)?,
+        tree,
+    })
+}
+
+/// A spore's action (design note 0030, §7): run in-process.
+async fn spore_action<S: Storage>(
+    state: &AppState<S>,
+    ctx: &Ctx,
+    ports: &S::Ports<'_>,
+    key: &str,
+    id: &str,
+    context: &ExtensionContext,
+    input: Option<serde_json::Value>,
+) -> Result<ActionResultResponse, ApiError> {
+    use hypha_apps::HasApps;
+    use hypha_extensions::ExtensionPoint;
+    use hypha_spore_core::{SporeRuntime, UiCall, UiError};
+    let app = spore_for_ui(ctx, ports.apps(), key).await?;
+    let not_found = || hypha_apps::CommandError::ExtensionNotFound {
+        app: app.key().clone(),
+        id: id.to_string(),
+    };
+    let spores = state.storage.spores();
+    let target = SporeRuntime::<S::Ports<'static>>::contributions(spores)
+        .into_iter()
+        .filter(|c| app.key().as_str().strip_prefix("spore_") == Some(c.name))
+        .flat_map(|c| c.actions)
+        .find(|a| a.id == id && a.target.takes_actions())
+        .map(|a| a.target)
+        .ok_or_else(not_found)?;
+    may_use_on(ctx, &app, target, context)?;
+    let acting = spore_ctx(ctx, &app);
+    let call = UiCall {
+        target,
+        context,
+        ctx: &acting,
+        staff: staff_of(ctx),
+    };
+    let answer = SporeRuntime::action(spores, app.key(), id, call, input, ports)
+        .await
+        .ok_or_else(|| hypha_apps::CommandError::AppNotFound(key.to_string()))?;
+    match answer {
+        Ok(answer) => Ok(ActionResultResponse {
+            message: answer.message,
+            refresh: answer.refresh,
+            navigate: answer.navigate,
+        }),
+        Err(UiError::NotFound) => Err(not_found().into()),
+        Err(UiError::Failed(reason)) => Err(ExtensionError::Unavailable {
+            app: app.key().clone(),
+            point: RunAdminAction::NAME,
+            reason,
+        }
+        .into()),
+    }
 }
 
 /// A web component an app adds to a storefront (`docs/apps/elements.md`).
@@ -611,6 +830,10 @@ pub async fn run_action<S: Storage>(
         .into());
     }
     let context = req.context.domain();
+    if is_spore(&key) {
+        let answer = spore_action(&state, &ctx, &ports, &key, &id, &context, req.input).await?;
+        return Ok(Json(answer));
+    }
     let (app, url, target) = find_action(&ctx, ports.apps(), &key, &id, &context).await?;
     let secret = open_secret(&state.env, &app).map_err(ApiError::internal)?;
     let request = AdminActionRequest {
@@ -695,6 +918,10 @@ pub async fn fetch_block<S: Storage>(
     use hypha_apps::HasApps;
     let (ports, ctx) = caller.authenticate(&state).await?;
     let context = query.parse()?.domain();
+    if is_spore(&key) {
+        let block = spore_block(&state, &ctx, &ports, &key, &id, &context).await?;
+        return Ok(Json(block));
+    }
     let (app, block, target) = find_block(&ctx, ports.apps(), &key, &id, &context).await?;
     let secret = open_secret(&state.env, &app).map_err(ApiError::internal)?;
     let pairs: Vec<(&str, String)> = context
