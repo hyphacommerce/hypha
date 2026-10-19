@@ -786,3 +786,86 @@ gaps; each is fixed as described.
 - **For custom admins:** `docs/apps/admin-integration.md` (discovery, blocks, pages and
   the bridge, actions, the consent page's contract, the install convention, private
   apps).
+
+## As built: first-party apps deployed alongside (§9, AP8)
+
+- **What a deployment lists:** `hypha.json`'s `apps`, `[{name, git, rev, domain?}]`
+  (plus, on Cloudflare, `d1Id` and `deployed`, kept by the deploy). A first-party name
+  alone (`"stripe"`, `"meilisearch"`) stands for its repository
+  (`git@github.com:invocation97/hypha-app-<name>.git`) and is pinned to its head by
+  the next deploy. `hypha init --apps stripe,meilisearch` asks each one's domain
+  (`<name>.<domain>` by default; `hypha.json` gained `domain` and `acmeEmail`); `hypha
+  apps add <stripe|meilisearch|git url> [--rev] [--name] [--domain]` pins the remote's
+  head (`git ls-remote`) or the commit, branch or tag given; `apps update [name]
+  [--rev]` moves the pin; `apps remove` takes it out (its Worker and D1 database, or
+  its volume, stay, and so does the store's installation). An app named `hypha` is
+  refused (below).
+- **Building on the operator's machine:** each app is cloned with this machine's git
+  credentials into `<deployment>/.build/apps/<name>`, checked out at its commit
+  (fetched by ID when the clone lacks it), next to `.build/apps/hypha`, a symlink (a
+  junction on Windows) to the Hypha checkout the CLI runs from: the apps link the SDK
+  as `link:../hypha/packages/*`, so that path resolves here, until the packages are on
+  a registry. Then `pnpm install --frozen-lockfile` (Hypha's own first when its
+  `node_modules` is missing).
+- **The app's repository says what the CLI needs** (`profileOf`), so an app built like
+  the first-party ones needs no CLI change: the Dockerfile's `EXPOSE` (the port Caddy
+  proxies to; 3000 without) and `VOLUME` (kept in a named volume), the wrangler
+  template (`wrangler.example.toml` or `wrangler.toml.example`), whether it names a
+  `HYPHA_API` binding (it then takes one, with `HYPHA_API_URL`), its allowed-APIs
+  variable (`HYPHA_API_ALLOWLIST` in Stripe's, `HYPHA_API_URLS` in Meilisearch's: set
+  to this deployment's API, so a co-located instance installs only into its own store),
+  and its `build:node` script.
+- **Secrets:** `APP_<NAME>_ENCRYPTION_KEY` in the deployment's `.env`, made once (by
+  `init`, `apps add` or the deploy), kept by `init --force`, given to the app as its
+  `APP_ENCRYPTION_KEY`. Losing it loses what the app sealed (tokens, the app secret,
+  Stripe's keys).
+- **Cloudflare:** after the API Worker answers, each app is its own Worker,
+  `<name>-app-<app>`, on its custom domain, configured from its own template (entry,
+  flags, crons and other variables kept; `name`, `account_id`, `workers_dev = false`,
+  `routes`, `APP_URL`, the allowlist, the D1 database and, when offered, `[[services]]
+  HYPHA_API` → the API Worker written in; `.hypha-wrangler.toml` in the clone), with
+  its D1 database (`<name>-app-<app>`, found by `d1 list` or created; its ID kept) and
+  `APP_ENCRYPTION_KEY` through `--secrets-file`. The deploy token needs **D1 (edit)**
+  (added to the form's permissions; checked when the deployment has apps).
+- **Hypha → app over the binding:** the API Worker binds to each app Worker that
+  exists (`[[services]] binding = "APP_<NAME>"`) and names them in
+  `HYPHA_APP_BINDINGS` (`stripe.example.com=APP_STRIPE,…`). `hypha-host-workers`'
+  outbound `HostCalls` (`app_bindings.rs`, portable and unit tested) sends a call whose
+  URL's host is a bound app's (on the scheme's own port) through that binding
+  (`Fetcher::fetch` with the same request and abort signal); every other host, and a
+  binding the Worker lacks (logged), goes by `fetch` as before. The URL, headers and
+  signatures are untouched: the call is prepared and signed before the transport is
+  chosen, and the app sees its public URL. Extension points, webhooks, blocks, actions
+  and the proxy all go out through `HostCalls`, so all take it. A binding to a Worker
+  that doesn't exist fails the API's deploy, so an app's first deploy is followed by a
+  second API deploy that adds its binding (`deployed` in `hypha.json` remembers it).
+  The admin and the storefront get no bindings of their own to the apps: what they ask
+  of an app (blocks, actions, the proxy, §8) goes through the API, so over its binding.
+- **App → Hypha over the binding:** an app called through a binding sends no
+  `CF-Connecting-IP`, and it isn't given the caller key (apps are untrusted, AP1). So
+  `peer.rs` now gives a call with neither the key nor `CF-Connecting-IP` (only a
+  Service Binding's) the unspecified address, one rate-limit bucket for those calls,
+  instead of no peer at all (which made the public routes, `/oauth/token` included,
+  answer 500).
+- **A server:** the app's Node bundle is built here (`pnpm build:node`), then its own
+  Dockerfile where the API's image is built (on the server over SSH, or here and
+  copied with `--build-on here`). `compose.apps.yaml` (written every deploy, read after
+  `compose.yaml` through `.env`'s `COMPOSE_FILE` and `COMPOSE_PATH_SEPARATOR`) runs
+  `app-<name>` (`APP_URL`, `APP_ENCRYPTION_KEY`, `PORT`, the allowlist; its data
+  volume) on the deployment's network and mounts `apps.caddy` into Caddy, whose sites
+  proxy each domain to its container; the Caddyfile imports it (`import
+  /etc/caddy/apps.caddy`, appended once to a Caddyfile from before). Hypha calls the
+  apps at their public URLs: an internal address would be refused by the outbound
+  policy (private addresses), and Caddy already serves them. The DNS check before a
+  deploy includes the apps' domains. `hypha logs app-<name>`.
+- **On this machine** (`--target local`): `*.hypha.localhost` is every container's own
+  loopback, so `compose.apps.yaml` makes the API's and the apps' domains network
+  aliases of Caddy, and `.env` gets `HYPHA_ALLOW_PRIVATE_CALLBACKS=true` (Caddy is a
+  private address); `http://*.localhost` app URLs are what Hypha's manifest rules allow.
+- **Installing:** after deploying, for each app the store hasn't installed (`GET
+  /admin/apps` with the owner's login from `.env`, or `HYPHA_ADMIN_KEY`; the key from
+  `<app_url>/manifest.json`, `app_<name>` when it doesn't answer), the CLI prints and,
+  in a terminal without `--yes`, opens `<app_url>/install?api=<the API's public URL>`;
+  the staff member approves on the consent page as for any app. `hypha apps install
+  [name]` does the same later; `hypha apps status` shows each app's commit, URL,
+  whether it answers and whether it's installed (exit 1 when one isn't).
