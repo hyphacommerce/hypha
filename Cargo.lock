@@ -1180,6 +1180,7 @@ dependencies = [
  "hypha-notifications",
  "hypha-payments",
  "hypha-search",
+ "hypha-spore-core",
  "hypha-store-postgres",
  "hypha-store-s3",
  "hypha-stores",

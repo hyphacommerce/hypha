@@ -16,6 +16,17 @@
 //!
 //! The portable parts (`app_bindings`, `ids`, `limiter`, `marks`, `peer`, `schedule`) build natively, so their
 //! tests run with the workspace's; the rest is Workers only.
+//!
+//! Like the native host, it's a library plus a macro (design note 0030, §9):
+//! `hypha_host_workers::worker! { spores: [...] }` declares the deployment's type, expands
+//! its router with the concrete spore types (axum must prove the handlers' futures
+//! `Send`, which it can only do for concrete types) and the Worker's `fetch` and
+//! `scheduled` events, which run `fetch::<Deployment>` and `scheduled::<Deployment>`.
+//! This crate's own Worker is `worker! { spores: [] }`, behind the default `stock`
+//! feature; a deployment with spores builds its own crate (which depends on `worker`
+//! too, since `#[event]` names it) with `default-features = false`, so the events are
+//! exported once. The database is set up by a native host built with the same spores
+//! (its `setup` migrates and registers them).
 
 pub mod app_bindings;
 pub mod ids;
@@ -38,7 +49,99 @@ mod platform;
 mod storage;
 
 #[cfg(target_arch = "wasm32")]
+pub use handlers::CoreHandlers;
+#[cfg(target_arch = "wasm32")]
+pub use payments::CoreProviders;
+#[cfg(target_arch = "wasm32")]
+pub use storage::{HandlersOf, ProvidersOf, WorkersPorts, WorkersStorage};
+#[cfg(target_arch = "wasm32")]
+pub use worker_main::{fetch, scheduled};
+
+/// A Worker's deployment: the spores it's built with, and its router expanded for them
+/// with concrete types. Written by `deployment!` (and `worker!`), never by hand.
+#[cfg(target_arch = "wasm32")]
+pub trait Deployment: Sized + 'static {
+    /// `()` for none, or a tuple of spores (`hypha_spore_core::SporeSet`). Their
+    /// handlers must run on this host's ports.
+    type Spores: hypha_spore_core::SporeSet<Handlers: hypha_core::EventHandlers<WorkersPorts>>;
+
+    /// `hypha_http::router!` for this deployment's storage.
+    fn router() -> axum::Router<hypha_http::state::SharedState<WorkersStorage<Self>>>;
+}
+
+/// What the macros' expansions name.
+#[cfg(target_arch = "wasm32")]
+#[doc(hidden)]
+pub mod __private {
+    pub use axum::Router;
+    pub use axum::body::Body;
+    pub use axum::http::Response;
+    pub use hypha_http;
+    pub use hypha_http::state::SharedState;
+}
+
+/// Declares a Worker's deployment: an uninhabited type implementing `Deployment` for
+/// `spores` (`worker!` declares one named `Deployment`).
+#[macro_export]
+macro_rules! deployment {
+    ($vis:vis enum $name:ident { spores: [$($spore:ty),* $(,)?] $(,)? }) => {
+        /// The spores this Worker is built with (`hypha_host_workers::Deployment`).
+        $vis enum $name {}
+
+        impl $crate::Deployment for $name {
+            type Spores = ($($spore,)*);
+
+            fn router() -> $crate::__private::Router<
+                $crate::__private::SharedState<$crate::WorkersStorage<Self>>,
+            > {
+                $crate::__private::hypha_http::router!($crate::WorkersStorage<$name>)
+            }
+        }
+    };
+}
+
+/// The Worker, built with `spores` (design note 0030, §9): its crate's whole `lib.rs`
+/// (`crate-type = ["cdylib"]`, depending on `worker` and on this crate with
+/// `default-features = false`).
+///
+/// ```ignore
+/// hypha_host_workers::worker! { spores: [hypha_spore_stripe::Stripe] }
+/// ```
+#[macro_export]
+macro_rules! worker {
+    (spores: [$($spore:ty),* $(,)?] $(,)?) => {
+        $crate::deployment! { enum Deployment { spores: [$($spore),*] } }
+
+        #[::worker::event(fetch)]
+        async fn fetch(
+            req: ::worker::HttpRequest,
+            env: ::worker::Env,
+            ctx: ::worker::Context,
+        ) -> ::worker::Result<$crate::__private::Response<$crate::__private::Body>> {
+            $crate::fetch::<Deployment>(req, env, ctx).await
+        }
+
+        #[::worker::event(scheduled)]
+        async fn scheduled(
+            tick: ::worker::ScheduledEvent,
+            env: ::worker::Env,
+            ctx: ::worker::ScheduleContext,
+        ) {
+            $crate::scheduled::<Deployment>(tick, env, ctx).await
+        }
+    };
+}
+
+/// The stock Worker: no spores. In a module of its own, so its `Deployment` type doesn't
+/// meet the trait; the events it exports are the Worker's wherever they're declared.
+#[cfg(all(target_arch = "wasm32", feature = "stock"))]
+mod stock {
+    crate::worker! { spores: [] }
+}
+
+#[cfg(target_arch = "wasm32")]
 mod worker_main {
+    use std::any::Any;
     use std::cell::{Cell, RefCell};
     use std::pin::Pin;
     use std::rc::Rc;
@@ -60,9 +163,10 @@ mod worker_main {
     use hypha_stores::StoreRepo;
     use tower_service::Service;
     use worker::{
-        Context, Env, HttpRequest, KvStore, RateLimiter, ScheduleContext, ScheduledEvent, event,
+        Context, Env, HttpRequest, KvStore, RateLimiter, ScheduleContext, ScheduledEvent,
     };
 
+    use crate::Deployment;
     use crate::email;
     use crate::limiter::IsolateLimiter;
     use crate::marks::{self, After, Marks, Run};
@@ -84,15 +188,17 @@ mod worker_main {
     const STEP_TIME: Duration = Duration::from_secs(5);
 
     /// What an isolate builds once and keeps.
-    struct Isolate {
-        state: SharedState<WorkersStorage>,
+    struct Isolate<D: Deployment> {
+        state: SharedState<WorkersStorage<D>>,
         app: Router,
         /// The deployment's caller key (`HYPHA_CALLER_KEY`): the admin and storefront
         /// Workers send it, so their shoppers' addresses are believed (`peer`).
         caller_key: Option<String>,
     }
 
-    type Setup = Shared<LocalBoxFuture<'static, Result<Rc<Isolate>, String>>>;
+    /// An isolate's setup, its `Isolate<D>` as `Any`: a `thread_local` can't be generic,
+    /// and a Worker is built with one deployment, so the downcast always holds.
+    type Setup = Shared<LocalBoxFuture<'static, Result<Rc<dyn Any>, String>>>;
 
     thread_local! {
         /// The isolate's setup: shared, so concurrent first events wait for one.
@@ -163,10 +269,18 @@ mod worker_main {
 
     /// The isolate, set up by its first event. A failed setup is tried again by the
     /// next event.
-    async fn isolate(env: &Env) -> Result<Rc<Isolate>, String> {
+    async fn isolate<D: Deployment>(env: &Env) -> Result<Rc<Isolate<D>>, String> {
         let setup = ISOLATE.with_borrow_mut(|slot| {
-            slot.get_or_insert_with(|| set_up(env.clone()).boxed_local().shared())
-                .clone()
+            slot.get_or_insert_with(|| {
+                let env = env.clone();
+                async move {
+                    let isolate: Rc<dyn Any> = set_up::<D>(env).await?;
+                    Ok(isolate)
+                }
+                .boxed_local()
+                .shared()
+            })
+            .clone()
         });
         let isolate = setup.clone().await;
         // Only this setup: another event may have started a newer one meanwhile.
@@ -177,13 +291,15 @@ mod worker_main {
                 }
             });
         }
-        isolate
+        isolate?
+            .downcast::<Isolate<D>>()
+            .map_err(|_| "the isolate was set up for another deployment".to_string())
     }
 
     /// Reads the configuration (design note 0026, W11: `HYPHA_CONFIG` holds the TOML
     /// itself, under the Worker's variables, as `hypha-config` reads the environment
     /// natively), finds the store and builds the state and the router.
-    async fn set_up(env: Env) -> Result<Rc<Isolate>, String> {
+    async fn set_up<D: Deployment>(env: Env) -> Result<Rc<Isolate<D>>, String> {
         let level = env_string(&env, "HYPHA_LOG")
             .and_then(|l| l.parse().ok())
             .unwrap_or(tracing::Level::INFO);
@@ -238,11 +354,8 @@ mod worker_main {
             &runtime,
         ));
         // An isolate's `env` is the same bindings for every event, so one is kept.
-        let storage = WorkersStorage::new(
-            env.clone(),
-            runtime.clock.clone(),
-            crate::handlers::handlers(Arc::clone(&mail)),
-        );
+        let storage =
+            WorkersStorage::<D>::new(env.clone(), runtime.clock.clone(), Arc::clone(&mail));
         let limiter = Arc::new(IsolateLimiter::new(&config.rate_limits));
         let bindings = Arc::new(rate_limit_bindings(&env));
         let clock = runtime.clock.clone();
@@ -284,7 +397,9 @@ mod worker_main {
             host,
             config,
         ));
-        let app = hypha_http::router!(WorkersStorage).with_state(Arc::clone(&state));
+        // Expanded for the concrete deployment (`worker!`): axum can only prove its
+        // handlers' futures `Send` there.
+        let app = D::router().with_state(Arc::clone(&state));
         Ok(Rc::new(Isolate {
             state,
             app,
@@ -347,9 +462,14 @@ mod worker_main {
             .unwrap_or_default()
     }
 
-    #[event(fetch)]
-    async fn fetch(mut req: HttpRequest, env: Env, ctx: Context) -> worker::Result<Response<Body>> {
-        let isolate = match isolate(&env).await {
+    /// The `fetch` handler of a Worker built with `D`'s spores (`worker!`'s
+    /// `#[event(fetch)]`).
+    pub async fn fetch<D: Deployment>(
+        mut req: HttpRequest,
+        env: Env,
+        ctx: Context,
+    ) -> worker::Result<Response<Body>> {
+        let isolate = match isolate::<D>(&env).await {
             Ok(isolate) => isolate,
             Err(e) => return Ok(unavailable(&e)),
         };
@@ -421,13 +541,12 @@ mod worker_main {
         Ok(response)
     }
 
-    /// The cron tick (every minute, `wrangler.toml`): dispatch, search sync and sending
-    /// emails when
-    /// KV's marks say there's work (or on the safety net's ticks), the others on the
-    /// ticks that start their interval (`schedule::due`).
-    #[event(scheduled)]
-    async fn scheduled(tick: ScheduledEvent, env: Env, ctx: ScheduleContext) {
-        let isolate = match isolate(&env).await {
+    /// The cron tick (every minute, `wrangler.toml`; `worker!`'s `#[event(scheduled)]`):
+    /// dispatch, search sync and sending emails when KV's marks say there's work (or on
+    /// the safety net's ticks), the others on the ticks that start their interval
+    /// (`schedule::due`).
+    pub async fn scheduled<D: Deployment>(tick: ScheduledEvent, env: Env, ctx: ScheduleContext) {
+        let isolate = match isolate::<D>(&env).await {
             Ok(isolate) => isolate,
             Err(e) => {
                 worker::console_error!("{e}");
@@ -504,9 +623,9 @@ mod worker_main {
 
     /// Runs `step` while it says there's more, up to `MAX_STEPS` and, with one, until
     /// `deadline`; says whether it found work and whether it left some.
-    async fn steps<F: Future<Output = Step>>(
+    async fn steps<D: Deployment, F: Future<Output = Step>>(
         job: &str,
-        state: &AppState<WorkersStorage>,
+        state: &AppState<WorkersStorage<D>>,
         deadline: Option<Timestamp>,
         step: impl Fn() -> F,
     ) -> Run {
@@ -539,7 +658,7 @@ mod worker_main {
     /// worked. A mark marked again while this run held it waits for the next run, which
     /// natively is the next timer but here may be the safety net's tick (W7); marks
     /// another run holds are that run's to finish, so the next step finds none and stops.
-    async fn search_step(state: &AppState<WorkersStorage>) -> Step {
+    async fn search_step<D: Deployment>(state: &AppState<WorkersStorage<D>>) -> Step {
         let ran = jobs::search_sync(state).await?;
         if ran.more || ran.idle {
             return Ok(ran);
@@ -578,9 +697,9 @@ mod worker_main {
 
     /// Writes what a run says to (`marks::after`); `known` is the `due` mark KV holds,
     /// as far as this isolate knows, so the same one isn't written again.
-    async fn mark(
+    async fn mark<D: Deployment>(
         kv: &KvStore,
-        state: &AppState<WorkersStorage>,
+        state: &AppState<WorkersStorage<D>>,
         after: After,
         known: Option<u64>,
     ) {

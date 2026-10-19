@@ -2,33 +2,62 @@
 //! which Hyperdrive's pool next to the database makes cheap; no statement cache (each
 //! connection is used once). Migrations aren't run here (W9: `setup` from the CLI).
 
-use hypha_core::StoreId;
+use std::sync::Arc;
+
+use hypha_core::{StoreId, Union};
 use hypha_http::error::ApiError;
 use hypha_http::host::HostClock;
+use hypha_http::mail::MailHost;
 use hypha_http::state::{SharedState, Storage};
+use hypha_spore_core::SporeSet;
 use hypha_store_postgres::PgStore;
 use tokio_postgres::Client;
 use worker::Env;
 use worker::send::SendFuture;
 
+use crate::Deployment;
+use crate::handlers::CoreHandlers;
+use crate::payments::CoreProviders;
+
 /// The Hyperdrive binding's name in `wrangler.toml`.
 pub const HYPERDRIVE: &str = "HYPERDRIVE";
 
-pub struct WorkersStorage {
+/// A request's ports: a store on its own connection.
+pub type WorkersPorts = PgStore<Client>;
+
+/// The handlers of a Worker built with `D`'s spores: its own, then theirs.
+pub type HandlersOf<D> = Union<(
+    CoreHandlers,
+    <<D as Deployment>::Spores as SporeSet>::Handlers,
+)>;
+
+/// The payment providers of a Worker built with `D`'s spores: its own, then theirs.
+pub type ProvidersOf<D> = Union<(
+    CoreProviders,
+    <<D as Deployment>::Spores as SporeSet>::PaymentProviders,
+)>;
+
+/// The storage of a Worker built with `D`'s spores (`worker!`): the bindings, and the
+/// handlers and payment providers its spores join.
+pub struct WorkersStorage<D: Deployment> {
     env: Env,
     /// What the stores stamp writes with (design note 0016, Q3).
     clock: HostClock,
-    /// Built at setup (`handlers::handlers`): the `Mailer` holds the host's mail
-    /// environment.
-    handlers: crate::handlers::Handlers,
+    /// Built at setup: the `Mailer` holds the host's mail environment.
+    handlers: HandlersOf<D>,
+    payments: ProvidersOf<D>,
 }
 
-impl WorkersStorage {
-    pub fn new(env: Env, clock: HostClock, handlers: crate::handlers::Handlers) -> Self {
+impl<D: Deployment> WorkersStorage<D> {
+    /// Builds the spores (`SporeSet::build`) and joins what they contribute to the
+    /// host's own handlers and providers.
+    pub fn new(env: Env, clock: HostClock, mail: Arc<MailHost>) -> Self {
+        let (handlers, payments) = <D::Spores as SporeSet>::build();
         Self {
             env,
             clock,
-            handlers,
+            handlers: Union((crate::handlers::core_handlers(mail), handlers)),
+            payments: Union((crate::payments::CORE_PROVIDERS, payments)),
         }
     }
 
@@ -73,12 +102,12 @@ async fn connect(env: &Env) -> Result<Client, String> {
     Ok(client)
 }
 
-impl Storage for WorkersStorage {
+impl<D: Deployment> Storage for WorkersStorage<D> {
     type Ports<'a> = PgStore<Client>;
     type Directory<'a> = PgStore<Client>;
     type Search<'p> = &'p PgStore<Client>;
-    type Handlers = crate::handlers::Handlers;
-    type Payments = crate::payments::PaymentProviders;
+    type Handlers = HandlersOf<D>;
+    type Payments = ProvidersOf<D>;
 
     /// Each `ports()` is a new connection: a dispatch step opens one, not one per
     /// delivery.
@@ -101,16 +130,16 @@ impl Storage for WorkersStorage {
         ports
     }
 
-    fn handlers(&self) -> &crate::handlers::Handlers {
+    fn handlers(&self) -> &HandlersOf<D> {
         &self.handlers
     }
 
-    fn payment_providers(&self) -> &crate::payments::PaymentProviders {
-        &crate::payments::PAYMENT_PROVIDERS
+    fn payment_providers(&self) -> &ProvidersOf<D> {
+        &self.payments
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {
-        let background = std::sync::Arc::clone(&state);
+        let background = Arc::clone(&state);
         let work = hypha_http::routes::password_reset_in_background(state, email);
         if !background.background.spawn(work) {
             tracing::warn!("password reset request dropped");

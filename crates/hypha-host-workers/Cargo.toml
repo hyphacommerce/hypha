@@ -23,6 +23,8 @@ url = "2.5"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 hypha-dispatch = { path = "../hypha-dispatch" }
 hypha-payments = { path = "../hypha-payments" }
+# The spores a deployment is built with (design note 0030, `worker!`).
+hypha-spore-core = { path = "../hypha-spore-core" }
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-search = { path = "../hypha-search" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
@@ -42,6 +44,12 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 getrandom = { version = "0.4", features = ["wasm_js"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+
+# `stock`: this crate exports the stock Worker's events (`worker! { spores: [] }`). A
+# deployment's own crate turns it off and invokes `worker!` with its spores.
+[features]
+default = ["stock"]
+stock = []
 
 [dev-dependencies]
 toml = "0.9"
