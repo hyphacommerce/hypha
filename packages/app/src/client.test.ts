@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { HyphaClient, NotInstalledError, memoryTokenStore } from "./client.ts";
+import {
+  HyphaClient,
+  NotInstalledError,
+  REFRESH_LOCK,
+  memoryTokenStore,
+  type TokenStore,
+} from "./client.ts";
 
 const API = "https://api.shop.example";
 const MANIFEST = "https://app.example/hypha-app.json";
@@ -28,6 +34,8 @@ function fakeApi() {
         refresh_token: `r${generation}`,
         expires_in: 3600,
         scope: "orders:read",
+        store: "store_1",
+        issuer: API,
       });
     }
     const authorization = request.headers.get("authorization");
@@ -45,7 +53,14 @@ function fakeApi() {
   };
 }
 
-const fresh = { accessToken: "a1", refreshToken: "r1", expiresAt: 10_000_000, scopes: [] };
+const fresh = {
+  accessToken: "a1",
+  refreshToken: "r1",
+  expiresAt: 10_000_000,
+  scopes: [],
+  store: "store_1",
+  issuer: API,
+};
 
 test("sends the stored access token", async () => {
   const api = fakeApi();
@@ -139,4 +154,47 @@ test("no tokens is NotInstalledError", async () => {
     tokens: memoryTokenStore(),
   });
   await assert.rejects(client.fetch("/admin/orders"), NotInstalledError);
+});
+
+/** `store`, noting each lock taken in `locks`. */
+function recordingLocks(store: TokenStore, locks: string[]): TokenStore {
+  return {
+    get: () => store.get(),
+    set: (tokens) => store.set(tokens),
+    withLock: (key, fn) => {
+      locks.push(key);
+      return store.withLock ? store.withLock(key, fn) : fn();
+    },
+  };
+}
+
+test("two clients sharing a locked store refresh once: the second uses the pair the first stored", async () => {
+  const api = fakeApi();
+  const locks: string[] = [];
+  const locked = recordingLocks(memoryTokenStore({ ...fresh, expiresAt: 0 }), locks);
+  const options = { apiUrl: API, manifestUrl: MANIFEST, tokens: locked, fetch: api.fetch };
+  // Two processes' clients: no shared single-flight, only the store's lock.
+  const first = new HyphaClient({ ...options, now: () => 0 });
+  const second = new HyphaClient({ ...options, now: () => 0 });
+  const answers = await Promise.all([first.fetch("/admin/orders"), second.fetch("/admin/orders")]);
+  assert.deepEqual(
+    answers.map((r) => r.status),
+    [200, 200],
+  );
+  assert.equal(api.refreshes, 1);
+  assert.deepEqual(locks, [REFRESH_LOCK, REFRESH_LOCK]);
+});
+
+test("a 401's refresh runs under the lock too", async () => {
+  const api = fakeApi();
+  const locks: string[] = [];
+  const client = new HyphaClient({
+    apiUrl: API,
+    manifestUrl: MANIFEST,
+    tokens: recordingLocks(memoryTokenStore({ ...fresh, accessToken: "a0" }), locks),
+    fetch: api.fetch,
+    now: () => 0,
+  });
+  assert.equal((await client.fetch("/admin/orders")).status, 200);
+  assert.deepEqual(locks, [REFRESH_LOCK]);
 });

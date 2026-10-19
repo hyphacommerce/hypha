@@ -35,6 +35,7 @@ export {
 export {
   HyphaClient,
   NotInstalledError,
+  REFRESH_LOCK,
   memoryTokenStore,
   type HyphaClientOptions,
   type TokenStore,
@@ -54,9 +55,24 @@ export {
   type ExtensionHandler,
   type ExtensionHandlerFn,
   type ExtensionHandlerOptions,
+  type SecretLookup,
+  type SecretSource,
 } from "./extensions.ts";
+export {
+  webhookHandler,
+  parseEnvelope,
+  EVENT_ID_HEADER,
+  EVENT_TYPE_HEADER,
+  DELIVERY_ID_HEADER,
+  type WebhookEnvelope,
+  type WebhookSubject,
+  type WebhookActor,
+  type WebhookContext,
+  type WebhookDedupe,
+  type WebhookHandlerOptions,
+} from "./webhooks.ts";
 export type { ExtensionPoints } from "./generated/extensions.ts";
-// The hand-written bodies, by name (the generated ones are reached through `PointRequest`).
+// The points' bodies by name: aliases of the generated contract (`PointRequest<…>`).
 export type {
   Money,
   PostalAddress,
@@ -69,6 +85,8 @@ export type {
   PaymentActionResponse,
   SearchQueryRequest,
   SearchQueryResponse,
+  AdminActionRequest,
+  AdminActionResponse,
 } from "./points.ts";
 export {
   verifySessionToken,

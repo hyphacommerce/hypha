@@ -22,7 +22,8 @@ export type ExtensionPointName =
   | "payments.capture"
   | "payments.void"
   | "payments.refund"
-  | "search.query";
+  | "search.query"
+  | "admin.action";
 
 /** The admin targets (§5). */
 export type AdminTarget =
@@ -131,8 +132,8 @@ export interface AppManifest {
   privacy_url: string;
   /** Who publishes the app, shown on the consent screen. */
   publisher?: string;
-  /** An icon URL for the consent screen and app lists. */
-  icon_url?: string;
+  /** A square image's URL for the consent screen and app lists. */
+  icon?: string;
   webhooks?: ManifestWebhooks;
   extension_points?: ManifestExtensionPoint[];
   settings?: ManifestSettings;

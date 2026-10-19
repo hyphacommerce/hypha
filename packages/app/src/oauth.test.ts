@@ -89,6 +89,8 @@ test("exchanging a code posts the form and returns tokens and the app secret", a
       expires_in: 3600,
       refresh_token: "hypha_rt_1",
       scope: "orders:read customer_data:email",
+      store: "store_1",
+      issuer: API,
       app_secret: "hypha_shs_x",
     }),
   );
@@ -106,6 +108,8 @@ test("exchanging a code posts the form and returns tokens and the app secret", a
     refreshToken: "hypha_rt_1",
     expiresAt: 1_000 + 3_600_000,
     scopes: ["orders:read", "customer_data:email"],
+    store: "store_1",
+    issuer: API,
     appSecret: "hypha_shs_x",
   });
   const [request] = seen;
@@ -124,7 +128,14 @@ test("exchanging a code posts the form and returns tokens and the app secret", a
 
 test("refreshing returns the rotated refresh token", async () => {
   const { fetch, seen } = fakeFetch(() =>
-    Response.json({ access_token: "a2", refresh_token: "r2", expires_in: 60, scope: "" }),
+    Response.json({
+      access_token: "a2",
+      refresh_token: "r2",
+      expires_in: 60,
+      scope: "",
+      store: "store_1",
+      issuer: API,
+    }),
   );
   const tokens = await refresh({
     apiUrl: API,
@@ -138,6 +149,8 @@ test("refreshing returns the rotated refresh token", async () => {
     refreshToken: "r2",
     expiresAt: 60_000,
     scopes: [],
+    store: "store_1",
+    issuer: API,
   });
   const form = new URLSearchParams(await seen[0].text());
   assert.equal(form.get("grant_type"), "refresh_token");
@@ -158,12 +171,17 @@ test("RFC 6749 errors become OAuthError", async () => {
   );
 });
 
-test("an answer without tokens is invalid_response", async () => {
-  const { fetch } = fakeFetch(() => Response.json({ token_type: "Bearer" }));
-  await assert.rejects(
-    refresh({ apiUrl: API, manifestUrl: MANIFEST, refreshToken: "r1", fetch }),
-    (error: unknown) => error instanceof OAuthError && error.code === "invalid_response",
-  );
+test("an answer without tokens, or without its store and issuer, is invalid_response", async () => {
+  for (const body of [
+    { token_type: "Bearer" },
+    { access_token: "a", refresh_token: "r", expires_in: 60, scope: "" },
+  ]) {
+    const { fetch } = fakeFetch(() => Response.json(body));
+    await assert.rejects(
+      refresh({ apiUrl: API, manifestUrl: MANIFEST, refreshToken: "r1", fetch }),
+      (error: unknown) => error instanceof OAuthError && error.code === "invalid_response",
+    );
+  }
 });
 
 test("revoke posts the token", async () => {

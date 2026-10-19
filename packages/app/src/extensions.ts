@@ -62,9 +62,31 @@ export class ExtensionError extends Error {
   }
 }
 
+/** What a `secret` callback gets to pick the installation's secret, before verifying. */
+export interface SecretLookup {
+  request: Request;
+  /** The body as received (already read: don't read `request`'s again). */
+  rawBody: Uint8Array;
+  /** `Hypha-Store` (`store_…`), unverified until the signature checks out. */
+  store: string | undefined;
+}
+
+/** The app's secret, or a lookup for apps with several installations (by `store`). */
+export type SecretSource =
+  | string
+  | ((lookup: SecretLookup) => string | undefined | Promise<string | undefined>);
+
+/** Reads `source` for one request; `undefined` when there's none (a 401). */
+export async function resolveSecret(
+  source: SecretSource,
+  lookup: SecretLookup,
+): Promise<string | undefined> {
+  return typeof source === "function" ? await source(lookup) : source;
+}
+
 export interface ExtensionHandlerOptions {
   /** The app's secret (from the first token exchange). A function for apps with several installations. */
-  secret: string | ((request: Request) => string | undefined | Promise<string | undefined>);
+  secret: SecretSource;
   // A handler per point; `ExtensionHandler<any>` keeps each one's own types.
   // oxlint-disable-next-line typescript/no-explicit-any -- a list of handlers for different points
   handlers: readonly ExtensionHandler<any>[];
@@ -87,8 +109,8 @@ export function extensionHandler(
   return async (request) => {
     if (request.method !== "POST") return failure(405, "method_not_allowed", "use POST");
     const raw = new Uint8Array(await request.arrayBuffer());
-    const secret =
-      typeof options.secret === "function" ? await options.secret(request) : options.secret;
+    const store = request.headers.get(STORE_HEADER) ?? undefined;
+    const secret = await resolveSecret(options.secret, { request, rawBody: raw, store });
     const signed =
       secret !== undefined &&
       (await verifySignature(secret, request.headers.get(SIGNATURE_HEADER), raw, {
@@ -114,7 +136,7 @@ export function extensionHandler(
       point: handler.point,
       version,
       idempotencyKey: request.headers.get(IDEMPOTENCY_HEADER) ?? undefined,
-      store: request.headers.get(STORE_HEADER) ?? undefined,
+      store,
       request,
     };
     try {

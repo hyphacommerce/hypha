@@ -104,7 +104,10 @@ test("only POST", async () => {
 
 test("the secret may be looked up per request", async () => {
   const perStore = extensionHandler({
-    secret: (request) => (request.headers.get("Hypha-Store") === "store_1" ? SECRET : undefined),
+    secret: ({ store, rawBody }) => {
+      assert.equal(new TextDecoder().decode(rawBody), JSON.stringify(startBody));
+      return store === "store_1" ? SECRET : undefined;
+    },
     handlers: [start],
   });
   const text = JSON.stringify(startBody);
@@ -120,4 +123,16 @@ test("the secret may be looked up per request", async () => {
     }),
   );
   assert.equal(response.status, 401);
+  const ok = await perStore(
+    new Request("https://app.example/x", {
+      method: "POST",
+      headers: {
+        "Hypha-Signature": await signRequest(SECRET, text),
+        "Hypha-Extension": "payments.start",
+        "Hypha-Store": "store_1",
+      },
+      body: text,
+    }),
+  );
+  assert.equal(ok.status, 200);
 });

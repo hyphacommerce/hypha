@@ -15,6 +15,13 @@ export interface TokenSet {
   expiresAt: number;
   /** The scopes granted, which may be fewer than asked for. */
   scopes: string[];
+  /**
+   * The store the tokens are for (`store_…`), as webhooks and extension calls name it in
+   * `Hypha-Store`: key the installation by it.
+   */
+  store: string;
+  /** The API's base URL (the authorization server's `issuer`): where to call and refresh. */
+  issuer: string;
 }
 
 /** What the first code exchange returns: the tokens and, on first install, the app secret. */
@@ -188,15 +195,17 @@ async function tokenRequest(
 }
 
 function toTokenSet(body: Record<string, unknown>, now: (() => number) | undefined): TokenSet {
-  const { access_token, refresh_token, expires_in, scope } = body;
+  const { access_token, refresh_token, expires_in, scope, store, issuer } = body;
   if (
     typeof access_token !== "string" ||
     typeof refresh_token !== "string" ||
-    typeof expires_in !== "number"
+    typeof expires_in !== "number" ||
+    typeof store !== "string" ||
+    typeof issuer !== "string"
   ) {
     throw new OAuthError(
       "invalid_response",
-      "missing access_token, refresh_token or expires_in",
+      "missing access_token, refresh_token, expires_in, store or issuer",
       200,
     );
   }
@@ -205,6 +214,8 @@ function toTokenSet(body: Record<string, unknown>, now: (() => number) | undefin
     refreshToken: refresh_token,
     expiresAt: (now ?? Date.now)() + expires_in * 1000,
     scopes: typeof scope === "string" ? scope.split(" ").filter(Boolean) : [],
+    store,
+    issuer,
   };
 }
 
