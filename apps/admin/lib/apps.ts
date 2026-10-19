@@ -21,7 +21,8 @@ export function appState(app: App & { manifest?: { url: string } | null }): AppS
   if (isBuiltIn(app)) {
     return app.enabled
       ? {
-          label: "Built in",
+          // The "Built in" badge sits beside the name; the status says whether it runs.
+          label: "On",
           variant: "success",
           description: "Built into this store's API by its operator.",
         }

@@ -16,7 +16,8 @@ export function SporeSwitch({ appKey, isEnabled }: { appKey: string; isEnabled: 
   return (
     <VStack gap={2} hAlign="end">
       <Switch
-        label="On"
+        // The setting, not one of its states: "On" stayed "On" when it was off.
+        label="Enabled"
         value={isEnabled}
         changeAction={async (enabled) => setError((await setAppEnabled(appKey, enabled)).error)}
       />

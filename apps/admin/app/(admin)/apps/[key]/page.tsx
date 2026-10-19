@@ -179,10 +179,16 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
 
         <Panel
           title="Customers' personal data"
-          description="Without these scopes Hypha leaves names, emails, phone numbers and addresses out of everything the app reads or receives."
+          description={
+            builtIn
+              ? "A built-in app runs inside the API and reads what it needs there, personal data included: these are the kinds it declares it uses."
+              : "Without these scopes Hypha leaves names, emails, phone numbers and addresses out of everything the app reads or receives."
+          }
         >
           {personal.length === 0 ? (
-            <Text color="secondary">This app sees no personal data.</Text>
+            <Text color="secondary">
+              {builtIn ? "It declares no use of personal data." : "This app sees no personal data."}
+            </Text>
           ) : (
             <VStack gap={2}>
               {personal.map((scope) => (
