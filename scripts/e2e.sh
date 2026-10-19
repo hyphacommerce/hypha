@@ -1352,6 +1352,14 @@ contains "the courier from shipping is one" '"key":"app_courier","kind":"app","n
 step "get the app" 200 - "$BASE/admin/apps/app_erp"
 contains "with its webhook, without its secret" "\"webhook\":{\"url\":\"$HOOK_URL\",\"timeout_ms\":2000}"
 step "an unknown app" 404 app_not_found "$BASE/admin/apps/app_none"
+# Spores' settings (design note 0030, §8): the stock build has no spores, so only the
+# refusals are checked here; the route tests build a host with one.
+step "settings of a spore this build doesn't have" 404 app_not_found "$BASE/admin/apps/spore_none/settings"
+step "an app keeps its own settings" 404 app_not_found "$BASE/admin/apps/app_erp/settings"
+step "saving them for no spore" 404 app_not_found -X PUT "$BASE/admin/apps/spore_none/settings" \
+    -H "$JSON" -d '{"settings":{}}'
+step "a spore's block, without the spore" 404 app_not_found "$BASE/admin/app-extensions/blocks/spore_none/notes"
+step "nor routes under a spore's prefix" 404 route_not_found "$BASE/admin/spores/none/anything"
 step "a product the app hears about" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"webhook-mug","title":"Webhook mug","price":{"amount":1000,"currency":"EUR"}}'
 if [[ -n $HOOKS ]]; then

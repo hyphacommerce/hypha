@@ -688,6 +688,70 @@ mod tests {
         assert!(check_config::<(Paying,)>(&BTreeMap::new()).is_empty());
     }
 
+    /// A spore whose settings form an admin couldn't draw.
+    struct Unformed;
+
+    impl Spore for Unformed {
+        const NAME: &'static str = "unformed";
+        const SCOPES: &'static [Scope] = &[];
+
+        fn title() -> &'static str {
+            "Unformed"
+        }
+
+        fn migrations() -> MigrationSet {
+            MigrationSet {
+                module: "spore_unformed",
+                migrations: &[],
+            }
+        }
+
+        fn new(_: SporeEnv) -> Result<Self, SporeError> {
+            Ok(Unformed)
+        }
+
+        fn settings_schema() -> Option<serde_json::Value> {
+            Some(serde_json::json!({
+                "type": "object",
+                "properties": { "nested": { "type": "object" } }
+            }))
+        }
+
+        type PaymentProviders = ();
+        type Handlers = ();
+
+        fn payment_providers(&self) {}
+
+        fn handlers(&self) {}
+    }
+
+    impl<P> SporeUi<P> for Unformed {}
+
+    #[test]
+    fn a_settings_schema_outside_the_subset_is_reported() {
+        assert_eq!(
+            check::<(Unformed,)>(),
+            [
+                "spore \"unformed\": its settings schema: nested: \"type\" is string, integer, number or boolean"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_built_set_finds_its_spores_by_name_and_answers_for_their_keys() {
+        let built = <(Paying,)>::build(&env::testing::host(), &BTreeMap::new()).unwrap();
+        assert!(spore::<Paying, ()>(&built.spores).is_some());
+        assert!(spore::<Broken, ()>(&built.spores).is_none());
+        let key = AppKey::of_spore("pay").unwrap();
+        assert_eq!(
+            SporeRuntime::<()>::settings_schema(&built.spores, &key),
+            None
+        );
+        let contributions = SporeRuntime::<()>::contributions(&built.spores);
+        assert_eq!(contributions[0].name, "pay");
+        assert!(contributions[0].blocks.is_empty());
+    }
+
     #[test]
     fn a_bad_name_a_repeat_and_a_wrong_module_are_all_reported() {
         assert_eq!(
