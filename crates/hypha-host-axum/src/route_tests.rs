@@ -5875,7 +5875,11 @@ async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
         json["payment"]["status"], "authorized",
         "until the app reports"
     );
-    assert_eq!(saw.lock().unwrap()[1].2, format!("{payment}:capture"));
+    let sent_key = saw.lock().unwrap()[1].2.clone();
+    assert!(
+        sent_key.starts_with(&format!("{payment}:capture:")),
+        "{sent_key}"
+    );
     let (status, json) = report(
         &app,
         &payment,
@@ -5886,6 +5890,34 @@ async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["financial_status"], "paid");
     assert_eq!(json["payment"]["paid_at"], "2026-10-18T12:00:00Z");
+
+    // The payment alone, as on its order; reading it is reading the order.
+    let path = format!("/admin/payments/{payment}");
+    let (status, alone) = send(&app, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{alone}");
+    assert_eq!(
+        (&alone["order"], &alone["status"], &alone["reference"]),
+        (&json!(order), &json!("paid"), &json!("pi_test"))
+    );
+    assert_eq!(alone["provider"], "app_card");
+    assert_eq!(alone["method_name"], "Card");
+    assert!(alone["updated_at"].is_string());
+    let reader = key(
+        &app,
+        json!({"kind": "secret", "name": "r", "scopes": ["payments:read"]}),
+    )
+    .await;
+    let (status, body) = send_as(&app, &reader, "GET", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+    let missing = "/admin/payments/pay_00000000000000000000000000000000";
+    let (status, body) = send(&app, "GET", missing, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "payment_not_found")
+    );
 
     // The provider refuses a refund; then the app reports one it made itself, once.
     let refund = format!("/admin/payments/{payment}/refund");

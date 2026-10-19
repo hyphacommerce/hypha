@@ -5455,7 +5455,7 @@
         "type": "object"
       },
       "PaymentResponse": {
-        "description": "A payment as the admin sees it on an order.",
+        "description": "A payment as the admin sees it on an order, and alone (`GET /admin/payments/{id}`).",
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money"
@@ -5492,6 +5492,10 @@
               "null"
             ]
           },
+          "order": {
+            "$ref": "#/components/schemas/OrderId",
+            "description": "The order it collects for."
+          },
           "paid_at": {
             "description": "When the money was collected, RFC 3339 in UTC.",
             "type": [
@@ -5517,6 +5521,10 @@
           "status": {
             "$ref": "#/components/schemas/PaymentStatusDto"
           },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
+          },
           "voided_at": {
             "description": "When it was voided, RFC 3339 in UTC.",
             "type": [
@@ -5527,11 +5535,13 @@
         },
         "required": [
           "id",
+          "order",
           "provider",
           "amount",
           "status",
           "refunded",
-          "created_at"
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -22663,6 +22673,95 @@
         ]
       }
     },
+    "/admin/payments/{id}": {
+      "get": {
+        "operationId": "admin.payments.fetch_payment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One payment: where it stands, what was collected and given back, the provider's\nreference. A payment app reads the payment it was asked to start or act on;\nreading an order's payments is `orders:read`, like the order.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "orders:read"
+        ]
+      }
+    },
     "/admin/payments/{id}/capture": {
       "post": {
         "operationId": "admin.payments.capture",
@@ -22676,7 +22775,7 @@
             }
           },
           {
-            "description": "Passed to the app, so a retried action is done once.",
+            "description": "Passed to the app, so a retried action is done once. Without one, each request is a new attempt with its own key (`<payment>:<action>:<uuid>`).",
             "in": "header",
             "name": "Idempotency-Key",
             "required": false,
@@ -22805,7 +22904,7 @@
             "bearer": []
           }
         ],
-        "summary": "Asks the payment's app to capture an authorized payment (`payments.capture`). 202:\nthe app accepted; the payment becomes `paid` when the app reports it. Refused by the\nprovider: `409 payment_refused` with its `reason`. Not authorized: `409\ninvalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the\napp gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,\nis passed to the app.",
+        "summary": "Asks the payment's app to capture an authorized payment (`payments.capture`). 202:\nthe app accepted; the payment becomes `paid` when the app reports it. Refused by the\nprovider: `409 payment_refused` with its `reason`. Not authorized: `409\ninvalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the\napp gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,\nis passed to the app (retry a timed-out request with the same one); without it each\nrequest is a new attempt with its own key, so asking again after a refusal is asked\nanew, not answered with the refusal.",
         "tags": [
           "payments"
         ],
@@ -22986,7 +23085,7 @@
             }
           },
           {
-            "description": "Passed to the app, so a retried refund gives back once.",
+            "description": "Passed to the app, so a retried refund gives back once. Without one, each request is a new attempt with its own key.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": false,
@@ -23137,7 +23236,7 @@
             }
           },
           {
-            "description": "Passed to the app, so a retried action is done once.",
+            "description": "Passed to the app, so a retried action is done once. Without one, each request is a new attempt with its own key (`<payment>:<action>:<uuid>`).",
             "in": "header",
             "name": "Idempotency-Key",
             "required": false,

@@ -18,8 +18,8 @@ pub mod repo;
 
 pub use commands::{
     ActOnPayment, Acted, CommandError, CreatePaymentMethod, UpdatePaymentMethod, act_on_payment,
-    create_payment_method, delete_payment_method, get_payment_method, list_payment_methods,
-    update_payment_method,
+    create_payment_method, delete_payment_method, get_payment, get_payment_method,
+    list_payment_methods, update_payment_method,
 };
 pub use error::PaymentError;
 pub use events::{

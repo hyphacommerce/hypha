@@ -1755,6 +1755,27 @@ export interface paths {
         patch: operations["admin.payments.update"];
         trace?: never;
     };
+    "/admin/payments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One payment: where it stands, what was collected and given back, the provider's
+         *     reference. A payment app reads the payment it was asked to start or act on;
+         *     reading an order's payments is `orders:read`, like the order.
+         */
+        get: operations["admin.payments.fetch_payment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/payments/{id}/capture": {
         parameters: {
             query?: never;
@@ -1770,7 +1791,9 @@ export interface paths {
          *     provider: `409 payment_refused` with its `reason`. Not authorized: `409
          *     invalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the
          *     app gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,
-         *     is passed to the app.
+         *     is passed to the app (retry a timed-out request with the same one); without it each
+         *     request is a new attempt with its own key, so asking again after a refusal is asked
+         *     anew, not answered with the refusal.
          */
         post: operations["admin.payments.capture"];
         delete?: never;
@@ -4407,7 +4430,7 @@ export interface components {
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
         };
-        /** @description A payment as the admin sees it on an order. */
+        /** @description A payment as the admin sees it on an order, and alone (`GET /admin/payments/{id}`). */
         PaymentResponse: {
             amount: components["schemas"]["Money"];
             /** @description When it was created, RFC 3339 in UTC. */
@@ -4418,6 +4441,8 @@ export interface components {
             method?: components["schemas"]["PaymentMethodId"] | null;
             /** @description The method's name when the payment was made. */
             method_name?: string | null;
+            /** @description The order it collects for. */
+            order: components["schemas"]["OrderId"];
             /** @description When the money was collected, RFC 3339 in UTC. */
             paid_at?: string | null;
             /** @description `manual`, or the key of the app that collects it. */
@@ -4427,6 +4452,8 @@ export interface components {
             /** @description What was given back. */
             refunded: components["schemas"]["Money"];
             status: components["schemas"]["PaymentStatusDto"];
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
             /** @description When it was voided, RFC 3339 in UTC. */
             voided_at?: string | null;
         };
@@ -16349,11 +16376,78 @@ export interface operations {
             };
         };
     };
+    "admin.payments.fetch_payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.payments.capture": {
         parameters: {
             query?: never;
             header?: {
-                /** @description Passed to the app, so a retried action is done once. */
+                /** @description Passed to the app, so a retried action is done once. Without one, each request is a new attempt with its own key (`<payment>:<action>:<uuid>`). */
                 "Idempotency-Key"?: string | null;
             };
             path: {
@@ -16575,7 +16669,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Passed to the app, so a retried refund gives back once. */
+                /** @description Passed to the app, so a retried refund gives back once. Without one, each request is a new attempt with its own key. */
                 "Idempotency-Key"?: string | null;
             };
             path: {
@@ -16685,7 +16779,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Passed to the app, so a retried action is done once. */
+                /** @description Passed to the app, so a retried action is done once. Without one, each request is a new attempt with its own key (`<payment>:<action>:<uuid>`). */
                 "Idempotency-Key"?: string | null;
             };
             path: {

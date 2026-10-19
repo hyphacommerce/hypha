@@ -347,7 +347,65 @@ fn an_accepted_capture_waits_for_the_providers_report() {
     assert_eq!(acted.payment.status(), PaymentStatus::Authorized);
     let asked = gateway.asked.borrow();
     assert_eq!(asked[0].reference.as_deref(), Some("pi_1"));
-    assert_eq!(asked[0].idempotency_key, format!("{id}:capture"));
+    assert!(
+        asked[0]
+            .idempotency_key
+            .starts_with(&format!("{id}:capture:")),
+        "{}",
+        asked[0].idempotency_key
+    );
+}
+
+#[test]
+fn each_attempt_without_a_key_gets_its_own_and_a_given_key_is_passed_on() {
+    use hypha_payments::{ActOnPayment, PaymentAction};
+    let ports = InMemoryPorts::default();
+    let gateway = Gateway::default();
+    let ids = SequentialIds::default();
+    let id = gateway_payment(&ports, |p| {
+        p.authorize(Some("pi_1".to_string())).unwrap();
+    });
+    let attempt = |key: Option<&str>| {
+        block_on(hypha_payments::act_on_payment(
+            &Ctx::system(),
+            &ports,
+            &ids,
+            &(&gateway,),
+            ActOnPayment {
+                payment: id,
+                action: PaymentAction::Void,
+                amount: None,
+                idempotency_key: key.map(str::to_string),
+            },
+        ))
+        .unwrap()
+    };
+    attempt(None);
+    attempt(None);
+    attempt(Some("staff-click-1"));
+    let keys: Vec<String> = gateway
+        .asked
+        .borrow()
+        .iter()
+        .map(|r| r.idempotency_key.clone())
+        .collect();
+    // A refused void retried by staff isn't the provider's replay of the refusal.
+    assert_ne!(keys[0], keys[1]);
+    assert!(keys[0].starts_with(&format!("{id}:void:")), "{}", keys[0]);
+    assert_eq!(keys[2], "staff-click-1");
+}
+
+#[test]
+fn a_payment_is_read_with_orders_read() {
+    let ports = InMemoryPorts::default();
+    let id = gateway_payment(&ports, |_| {});
+    let payment = block_on(hypha_payments::get_payment(&Ctx::system(), &ports, id)).unwrap();
+    assert_eq!(payment.id(), id);
+    let missing = PaymentId::from_uuid(Uuid::from_u128(99));
+    assert_eq!(
+        block_on(hypha_payments::get_payment(&Ctx::system(), &ports, missing)),
+        Err(CommandError::PaymentNotFound(missing))
+    );
 }
 
 #[test]

@@ -296,10 +296,12 @@ impl From<PaymentStatus> for PaymentStatusDto {
     }
 }
 
-/// A payment as the admin sees it on an order.
+/// A payment as the admin sees it on an order, and alone (`GET /admin/payments/{id}`).
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PaymentResponse {
     id: PaymentId,
+    /// The order it collects for.
+    order: OrderId,
     /// The method it was made with; `null` for money staff recorded on an order placed
     /// without one.
     method: Option<PaymentMethodId>,
@@ -321,13 +323,16 @@ pub struct PaymentResponse {
     voided_at: Option<String>,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
+    /// When it last changed, RFC 3339 in UTC.
+    updated_at: String,
 }
 
 impl PaymentResponse {
     pub(crate) fn new(p: &Payment) -> Result<Self, ApiError> {
-        let (created_at, _) = stamp_times(p.stamps())?;
+        let (created_at, updated_at) = stamp_times(p.stamps())?;
         Ok(Self {
             id: p.id(),
+            order: p.order(),
             method: p.method(),
             method_name: p.method_name().map(str::to_string),
             provider: p.provider().to_string(),
@@ -339,6 +344,7 @@ impl PaymentResponse {
             paid_at: p.paid_at().map(rfc3339).transpose()?,
             voided_at: p.voided_at().map(rfc3339).transpose()?,
             created_at,
+            updated_at,
         })
     }
 
@@ -547,6 +553,26 @@ pub async fn report_event<S: Storage>(
     ))
 }
 
+/// One payment: where it stands, what was collected and given back, the provider's
+/// reference. A payment app reads the payment it was asked to start or act on;
+/// reading an order's payments is `orders:read`, like the order.
+#[utoipa::path(
+    get,
+    path = "/admin/payments/{id}",
+    params(("id" = PaymentId, Path)),
+    responses((status = 200, description = "OK", body = PaymentResponse)),
+    extensions(("x-hypha-scopes" = json!(["orders:read"]))),
+)]
+pub async fn fetch_payment<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<PaymentId>,
+) -> Result<Json<PaymentResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let payment = hypha_payments::get_payment(&ctx, &ports, id).await?;
+    Ok(Json(PaymentResponse::new(&payment)?))
+}
+
 /// A capture or a void: of the whole payment, so the body is `{}`.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -602,11 +628,13 @@ async fn act<S: Storage>(
 /// provider: `409 payment_refused` with its `reason`. Not authorized: `409
 /// invalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the
 /// app gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,
-/// is passed to the app.
+/// is passed to the app (retry a timed-out request with the same one); without it each
+/// request is a new attempt with its own key, so asking again after a refusal is asked
+/// anew, not answered with the refusal.
 #[utoipa::path(
     post,
     path = "/admin/payments/{id}/capture",
-    params(("id" = PaymentId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Passed to the app, so a retried action is done once.")),
+    params(("id" = PaymentId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Passed to the app, so a retried action is done once. Without one, each request is a new attempt with its own key (`<payment>:<action>:<uuid>`).")),
     request_body = WholePaymentRequest,
     responses((status = 202, description = "Accepted", body = PaymentActionAcceptedResponse)),
     extensions(("x-hypha-scopes" = json!(["orders:write"]))),
@@ -627,7 +655,7 @@ pub async fn capture<S: Storage>(
 #[utoipa::path(
     post,
     path = "/admin/payments/{id}/void",
-    params(("id" = PaymentId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Passed to the app, so a retried action is done once.")),
+    params(("id" = PaymentId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Passed to the app, so a retried action is done once. Without one, each request is a new attempt with its own key (`<payment>:<action>:<uuid>`).")),
     request_body = WholePaymentRequest,
     responses((status = 202, description = "Accepted", body = PaymentActionAcceptedResponse)),
     extensions(("x-hypha-scopes" = json!(["orders:write"]))),
@@ -649,7 +677,7 @@ pub async fn void<S: Storage>(
 #[utoipa::path(
     post,
     path = "/admin/payments/{id}/refund",
-    params(("id" = PaymentId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Passed to the app, so a retried refund gives back once.")),
+    params(("id" = PaymentId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Passed to the app, so a retried refund gives back once. Without one, each request is a new attempt with its own key.")),
     request_body = RefundRequest,
     responses((status = 202, description = "Accepted", body = PaymentActionAcceptedResponse)),
     extensions(("x-hypha-scopes" = json!(["orders:write"]))),

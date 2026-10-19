@@ -90,6 +90,22 @@ pub async fn get_payment_method<S: HasPaymentMethods>(
     load(ports.payment_methods(), id).await
 }
 
+/// One payment, as the order shows it (`orders:read`: reading an order's payments is
+/// reading the order, design note 0027, PA9). A payment app looks up the payment it was
+/// asked to start or act on.
+pub async fn get_payment<S: HasPayments>(
+    ctx: &Ctx,
+    ports: &S,
+    id: PaymentId,
+) -> Result<Payment, CommandError> {
+    ctx.require(Scope::OrdersRead)?;
+    ports
+        .payments()
+        .get(id)
+        .await?
+        .ok_or(CommandError::PaymentNotFound(id))
+}
+
 /// A new method as a client sends it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatePaymentMethod {
@@ -230,9 +246,10 @@ pub struct ActOnPayment {
     /// For a refund, how much in the payment's minor units; `None` for all that's left.
     /// Captures and voids are of the whole payment.
     pub amount: Option<i64>,
-    /// The caller's `Idempotency-Key`, passed on to the provider so a retried refund
-    /// gives back once. Without one, a capture or void is keyed by the payment (there's
-    /// one of each), and a refund by a new ID.
+    /// The caller's `Idempotency-Key`, passed on to the provider so a retried action is
+    /// done once. Without one, each attempt gets a new key (`<payment>:<action>:<id>`):
+    /// a key per payment would make the provider replay a refused attempt's answer to
+    /// every later one.
     pub idempotency_key: Option<String>,
 }
 
@@ -304,11 +321,9 @@ pub async fn act_on_payment<S: HasPayments, P: PaymentProviders>(
         }
         .into());
     }
-    let idempotency_key = match (input.idempotency_key, input.action) {
-        (Some(key), _) => key,
-        (None, PaymentAction::Refund) => format!("{}:refund:{}", payment.id(), ids.new_uuid()),
-        (None, action) => format!("{}:{action}", payment.id()),
-    };
+    let idempotency_key = input
+        .idempotency_key
+        .unwrap_or_else(|| format!("{}:{}:{}", payment.id(), input.action, ids.new_uuid()));
     let request = ActionRequest {
         action: input.action,
         payment: payment.id(),

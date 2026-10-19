@@ -170,6 +170,7 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/payment-methods/{id}", payments::update],
             [admin, DELETE, "/admin/payment-methods/{id}", payments::delete],
             // an app's payments (design note 0029, §3.1)
+            [admin, GET, "/admin/payments/{id}", payments::fetch_payment],
             [admin, POST, "/admin/payments/{id}/events", payments::report_event],
             [admin, POST, "/admin/payments/{id}/capture", payments::capture],
             [admin, POST, "/admin/payments/{id}/void", payments::void],
