@@ -11,6 +11,7 @@ import { appStatuses, staffFor } from "../app-install.ts";
 import {
   type AppEntry,
   appDomain,
+  appDomainOf,
   appUrl,
   appWorkerName,
   checkAppName,
@@ -31,7 +32,6 @@ import {
 import { dirArg, guarded } from "./shared.ts";
 import { openInBrowser } from "./token.ts";
 
-const DOMAIN = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/;
 
 /** `rev` as a commit: a full commit ID as given, else a branch or tag asked of the remote. */
 export async function resolveRev(git: string, rev: string | undefined): Promise<string> {
@@ -128,8 +128,8 @@ export const apps = defineCommand({
             );
           }
           if (args.domain) {
-            const domain = args.domain.toLowerCase();
-            if (!DOMAIN.test(domain)) throw new Error(`--domain: ${args.domain} isn't a domain`);
+            const domain = appDomainOf(args.domain);
+            if (!domain) throw new Error(`--domain: ${args.domain} isn't a domain`);
             entry.domain = domain;
           }
           entry.rev = await resolveRev(entry.git, args.rev);

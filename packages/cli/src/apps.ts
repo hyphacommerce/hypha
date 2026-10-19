@@ -50,6 +50,15 @@ export function checkAppName(name: string): string | undefined {
 /** A full commit ID. */
 const REV = /^[0-9a-f]{40}$/;
 
+/** A domain name, lowercase (the API Worker's `HYPHA_APP_BINDINGS` takes no other). */
+const DOMAIN = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/;
+
+/** `domain` as an app's domain: trimmed and lowercased, or `undefined` if it isn't one. */
+export function appDomainOf(domain: string): string | undefined {
+  const lower = domain.trim().toLowerCase();
+  return DOMAIN.test(lower) ? lower : undefined;
+}
+
 /** `hypha.json`'s `apps`, each a name (a first-party app) or an entry, checked. */
 export function normalizeApps(raw: unknown, where: string): AppEntry[] {
   if (!Array.isArray(raw)) throw new Error(`${where}: \`apps\` is a list`);
@@ -75,6 +84,14 @@ export function normalizeApps(raw: unknown, where: string): AppEntry[] {
     }
     const wrong = checkAppName(entry.name);
     if (wrong) throw new Error(`${where}: app ${JSON.stringify(entry.name)}: ${wrong}`);
+    if (entry.domain !== undefined) {
+      const domain = typeof entry.domain === "string" ? appDomainOf(entry.domain) : undefined;
+      if (!domain)
+        throw new Error(
+          `${where}: app ${entry.name}: \`domain\` ${JSON.stringify(entry.domain)} isn't a domain name (like stripe.example.com: no scheme, port or path)`,
+        );
+      entry.domain = domain;
+    }
     if (entry.rev !== undefined && !REV.test(entry.rev))
       throw new Error(`${where}: app ${entry.name}: \`rev\` is a full commit ID (40 hex digits)`);
     if (out.some((a) => a.name === entry.name))

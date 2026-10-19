@@ -97,6 +97,19 @@ test("an unknown name, a short commit, a twice-listed app or the SDK's link name
   );
 });
 
+test("an app's domain in hypha.json is lowercased, and one that isn't a domain is refused", () => {
+  assert.deepEqual(
+    normalizeApps([{ name: "stripe", domain: " Pay.Example.COM " }], "hypha.json"),
+    [{ name: "stripe", git: "git@github.com:invocation97/hypha-app-stripe.git", domain: "pay.example.com" }],
+  );
+  for (const domain of ["https://pay.example.com", "pay.example.com:8443", "pay.example.com/x", "pay", "", 42]) {
+    assert.throws(
+      () => normalizeApps([{ name: "stripe", domain }], "hypha.json"),
+      /hypha\.json: app stripe: `domain` .* isn't a domain name/,
+    );
+  }
+});
+
 test("an app from a git URL is named after its repository, without the hypha-app- prefix", () => {
   assert.deepEqual(entryFor("git@github.com:acme/hypha-app-reviews.git"), {
     name: "reviews",
