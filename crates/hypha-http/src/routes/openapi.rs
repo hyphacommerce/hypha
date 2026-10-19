@@ -102,7 +102,10 @@ pub struct Row {
     /// `<surface>.<module>.<name>` (`admin.products.create`). Part of the API once
     /// clients generate from the documents: a change shows up in the committed files.
     pub operation_id: String,
-    pub tag: &'static str,
+    pub tag: String,
+    /// Needs no credentials whatever its annotation says: a spore's public route
+    /// (design note 0030, §7).
+    pub public: bool,
     /// What the handler's `#[utoipa::path]` says (checked against `method` and `path`).
     pub annotated_path: fn() -> String,
     pub annotated_methods: fn() -> Vec<HttpMethod>,
@@ -129,7 +132,8 @@ macro_rules! openapi_rows {
                     stringify!($module),
                     stringify!($func),
                 ),
-                tag: stringify!($module),
+                tag: stringify!($module).to_string(),
+                public: false,
                 annotated_path: <super::$module::[<__path_ $func>] as utoipa::Path>::path,
                 annotated_methods: <super::$module::[<__path_ $func>] as utoipa::Path>::methods,
                 operation: <super::$module::[<__path_ $func>] as utoipa::Path>::operation,
@@ -292,18 +296,24 @@ fn secured(op: &Operation) -> bool {
 
 /// The document for `doc`, built from the route table.
 pub fn document(doc: Doc) -> OpenApi {
+    document_with(doc, Vec::new())
+}
+
+/// The document for `doc`, built from the route table and `extra` rows: a build's
+/// spores' routes (design note 0030, §7), tagged by spore.
+pub fn document_with(doc: Doc, extra: Vec<Row>) -> OpenApi {
     let (scheme_name, scheme) = doc.security_scheme();
     let mut paths = Paths::new();
     let mut schemas: Vec<(String, RefOr<Schema>)> =
         vec![(ApiErrorBody::name().to_string(), ApiErrorBody::schema())];
-    for row in rows().into_iter().filter(|r| r.doc == doc) {
+    for row in rows().into_iter().chain(extra).filter(|r| r.doc == doc) {
         // The annotation repeats the table's path; they must agree (also a test).
         debug_assert_eq!((row.annotated_path)(), row.path, "{}", row.operation_id);
         debug_assert_eq!((row.annotated_methods)().len(), 1, "{}", row.operation_id);
         let mut op = (row.operation)();
         op.operation_id = Some(row.operation_id.clone());
-        op.tags = Some(vec![row.tag.to_string()]);
-        let secured = secured(&op);
+        op.tags = Some(vec![row.tag.clone()]);
+        let secured = !row.public && secured(&op);
         if secured {
             op.security = Some(vec![SecurityRequirement::new(
                 scheme_name,
@@ -334,6 +344,11 @@ pub fn document(doc: Doc) -> OpenApi {
 /// The document as the committed file holds it: pretty JSON and a final newline.
 pub fn document_json(doc: Doc) -> String {
     pretty(document(doc))
+}
+
+/// `document_with` as a file.
+pub fn document_json_with(doc: Doc, extra: Vec<Row>) -> String {
+    pretty(document_with(doc, extra))
 }
 
 /// `api` as a committed file: open enums marked, pretty JSON and a final newline.

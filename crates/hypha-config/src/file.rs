@@ -568,6 +568,9 @@ pub struct RateLimits {
     pub cart_create_ip: Quota,
     /// The OAuth endpoints (authorize, token, revoke), per client address.
     pub oauth_ip: Quota,
+    /// Spores' public routes (`/spores/<name>/…`: a payment provider's webhooks), per
+    /// client address, all spores together.
+    pub spore_public: Quota,
 }
 
 /// The starting numbers from design note 0009, section 3.
@@ -589,13 +592,18 @@ impl Default for RateLimits {
             cart_create_ip: quota(20, 3),
             // An app installs or refreshes now and then; a stuck client loops.
             oauth_ip: quota(20, 3),
+            // A provider sends webhooks in bursts, from a few addresses.
+            spore_public: Quota {
+                burst: 120,
+                per: Dur(Duration::from_millis(250)),
+            },
         }
     }
 }
 
 impl RateLimits {
     /// Every limit with its key, for the checks.
-    pub(crate) fn all(&self) -> [(&'static str, Quota); 11] {
+    pub(crate) fn all(&self) -> [(&'static str, Quota); 12] {
         [
             ("login_ip", self.login_ip),
             ("login_email_from_ip", self.login_email_from_ip),
@@ -608,6 +616,7 @@ impl RateLimits {
             ("shipping_quotes_cart", self.shipping_quotes_cart),
             ("cart_create_ip", self.cart_create_ip),
             ("oauth_ip", self.oauth_ip),
+            ("spore_public", self.spore_public),
         ]
     }
 }

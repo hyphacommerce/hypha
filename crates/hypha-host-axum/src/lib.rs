@@ -27,6 +27,16 @@ mod handlers_test;
 mod limiter;
 mod payments;
 mod platform;
+// A spore for the route tests, and its routes, declared at the crate root as
+// `spore_routes!` asks (and before `route_tests`, which names the macro it defines).
+#[cfg(test)]
+mod test_spore;
+#[cfg(test)]
+hypha_http::spore_routes! { crate::test_spore_routes for crate::test_spore::TestSpore:
+    [public, GET, "/spores/test/hello", test_spore::hello],
+    [admin, GET, "/admin/spores/test/settings", test_spore::settings],
+    [storefront, GET, "/storefront/spores/test/greeting", test_spore::storefront_greeting],
+}
 #[cfg(test)]
 mod route_tests;
 mod runner;
@@ -47,8 +57,12 @@ pub trait Deployment: Sized + 'static {
     type Spores: SporeSet<Handlers: EventHandlers<PgPorts>>
         + hypha_spore_core::SporeRuntime<PgPorts>;
 
-    /// `hypha_http::router!` for this deployment's storage.
+    /// `hypha_http::router!` for this deployment's storage, with its spores' routes
+    /// (`spore_routes!`).
     fn router() -> axum::Router<SharedState<PgStorage<Self>>>;
+
+    /// Its spores' routes as OpenAPI rows (the `openapi` command documents them).
+    fn spore_rows() -> Vec<hypha_http::routes::openapi::Row>;
 
     /// One dispatch step (`hypha_http::jobs::dispatch`), which runs the handlers.
     fn dispatch(state: SharedState<PgStorage<Self>>) -> BoxFuture<Step>;
@@ -59,6 +73,27 @@ pub fn migrations<D: Deployment>() -> Vec<MigrationSet> {
     let mut sets = vec![CORE];
     sets.extend(<D::Spores as SporeSet>::migrations());
     sets
+}
+
+/// Routes listed for a spore the build doesn't have (`routes: [...]` naming another
+/// spore's macro than the `spores` listed): what's wrong, one line each.
+pub fn check_routes<D: Deployment>() -> Vec<String> {
+    let names: Vec<String> = <D::Spores as SporeSet>::registrations()
+        .iter()
+        .map(|s| format!("spore_{}", s.name))
+        .collect();
+    let mut problems: Vec<String> = D::spore_rows()
+        .iter()
+        .filter(|row| !names.contains(&row.tag))
+        .map(|row| {
+            format!(
+                "route {} {} is {}'s, a spore this build doesn't list",
+                row.method, row.path, row.tag
+            )
+        })
+        .collect();
+    problems.dedup();
+    problems
 }
 
 /// What the macros' expansions name, so a deployment crate needs no dependency but
@@ -72,17 +107,24 @@ pub mod __private {
     pub use hypha_http::state::SharedState;
 }
 
-/// Declares a deployment: an uninhabited type implementing `Deployment` for `spores`.
+/// Declares a deployment: an uninhabited type implementing `Deployment` for `spores`,
+/// with the route macros of those that have routes (`spore_routes!`; optional).
 ///
 /// ```ignore
-/// hypha_host_axum::deployment! { pub enum WithStripe { spores: [hypha_spore_stripe::Stripe] } }
+/// hypha_host_axum::deployment! { pub enum WithStripe {
+///     spores: [hypha_spore_stripe::Stripe],
+///     routes: [hypha_spore_stripe::stripe_routes],
+/// } }
 /// ```
 ///
 /// `host!` declares one named `Deployment`; tests declare their own to build a host with
 /// test spores.
 #[macro_export]
 macro_rules! deployment {
-    ($vis:vis enum $name:ident { spores: [$($spore:ty),* $(,)?] $(,)? }) => {
+    ($vis:vis enum $name:ident {
+        spores: [$($spore:ty),* $(,)?]
+        $(, routes: [$($($routes:ident)::+),* $(,)?])? $(,)?
+    }) => {
         /// The spores this host is built with (`hypha_host_axum::Deployment`).
         $vis enum $name {}
 
@@ -93,6 +135,14 @@ macro_rules! deployment {
                 $crate::__private::SharedState<$crate::PgStorage<Self>>,
             > {
                 $crate::__private::hypha_http::router!($crate::PgStorage<$name>)
+                    $($(.merge($($routes)::+!(router $crate::PgStorage<$name>)))*)?
+            }
+
+            fn spore_rows() -> ::std::vec::Vec<$crate::__private::hypha_http::routes::openapi::Row> {
+                #[allow(unused_mut)]
+                let mut rows = ::std::vec::Vec::new();
+                $($(rows.extend($($routes)::+!(rows));)*)?
+                rows
             }
 
             fn dispatch(
@@ -114,10 +164,14 @@ macro_rules! deployment {
 /// ```
 ///
 /// `spores: []` is the stock host. It declares a type named `Deployment` and `fn main`.
+/// Spores with routes add their route macros: `routes: [hypha_spore_stripe::stripe_routes]`.
 #[macro_export]
 macro_rules! host {
-    (spores: [$($spore:ty),* $(,)?] $(,)?) => {
-        $crate::deployment! { enum Deployment { spores: [$($spore),*] } }
+    (spores: [$($spore:ty),* $(,)?] $(, routes: [$($($routes:ident)::+),* $(,)?])? $(,)?) => {
+        $crate::deployment! { enum Deployment {
+            spores: [$($spore),*],
+            routes: [$($($($routes)::+),*)?],
+        } }
 
         fn main() {
             $crate::run::<Deployment>();

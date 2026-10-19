@@ -244,6 +244,15 @@ impl ApiError {
         )
     }
 
+    /// A spore's route while staff have the spore disabled (design note 0030, §3).
+    pub fn app_disabled(key: &hypha_core::AppKey) -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "app_disabled",
+            format!("{key} is disabled"),
+        )
+    }
+
     pub fn route_not_found() -> Self {
         Self::new(StatusCode::NOT_FOUND, "route_not_found", "no such route")
     }

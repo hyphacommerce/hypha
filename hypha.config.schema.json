@@ -148,6 +148,10 @@
         "shipping_quotes_cart": {
           "burst": 10,
           "per": "2s"
+        },
+        "spore_public": {
+          "burst": 120,
+          "per": "250ms"
         }
       }
     },
@@ -630,6 +634,14 @@
           "default": {
             "burst": 10,
             "per": "2s"
+          }
+        },
+        "spore_public": {
+          "description": "Spores' public routes (`/spores/<name>/…`: a payment provider's webhooks), per\nclient address, all spores together.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 120,
+            "per": "250ms"
           }
         }
       },

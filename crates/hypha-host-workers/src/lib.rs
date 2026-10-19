@@ -82,10 +82,14 @@ pub mod __private {
 }
 
 /// Declares a Worker's deployment: an uninhabited type implementing `Deployment` for
-/// `spores` (`worker!` declares one named `Deployment`).
+/// `spores`, with the route macros of those that have routes (`spore_routes!`;
+/// optional), as the native host's (`worker!` declares one named `Deployment`).
 #[macro_export]
 macro_rules! deployment {
-    ($vis:vis enum $name:ident { spores: [$($spore:ty),* $(,)?] $(,)? }) => {
+    ($vis:vis enum $name:ident {
+        spores: [$($spore:ty),* $(,)?]
+        $(, routes: [$($($routes:ident)::+),* $(,)?])? $(,)?
+    }) => {
         /// The spores this Worker is built with (`hypha_host_workers::Deployment`).
         $vis enum $name {}
 
@@ -96,6 +100,7 @@ macro_rules! deployment {
                 $crate::__private::SharedState<$crate::WorkersStorage<Self>>,
             > {
                 $crate::__private::hypha_http::router!($crate::WorkersStorage<$name>)
+                    $($(.merge($($routes)::+!(router $crate::WorkersStorage<$name>)))*)?
             }
         }
     };
@@ -110,8 +115,11 @@ macro_rules! deployment {
 /// ```
 #[macro_export]
 macro_rules! worker {
-    (spores: [$($spore:ty),* $(,)?] $(,)?) => {
-        $crate::deployment! { enum Deployment { spores: [$($spore),*] } }
+    (spores: [$($spore:ty),* $(,)?] $(, routes: [$($($routes:ident)::+),* $(,)?])? $(,)?) => {
+        $crate::deployment! { enum Deployment {
+            spores: [$($spore),*],
+            routes: [$($($($routes)::+),*)?],
+        } }
 
         #[::worker::event(fetch)]
         async fn fetch(

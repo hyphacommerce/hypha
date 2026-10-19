@@ -38,9 +38,6 @@ use hypha_notifications::{OutgoingEmail, Sent};
 use crate::platform::{Background, UuidV7Ids};
 use crate::storage::PgDatabase;
 
-/// The stock host's storage (no spores).
-type PgStorage = crate::storage::PgStorage<crate::Stock>;
-
 // Apps installed through OAuth, and personal data (design note 0029).
 mod app_extensions;
 mod oauth;
@@ -52,11 +49,11 @@ const OWNER_PASSWORD: &str = "owner password";
 
 /// The app on a fresh schema, with its owner (`OWNER_EMAIL`), and a secret key with every scope
 /// that `send` uses unless a test picks other credentials.
-struct TestApp {
+struct TestApp<D: crate::Deployment = crate::Stock> {
     router: Router,
     admin_key: String,
     /// The app's state, for checks the API doesn't expose (the outbox).
-    state: hypha_http::state::SharedState<PgStorage>,
+    state: hypha_http::state::SharedState<crate::storage::PgStorage<D>>,
     /// What the app's email sender was given (a recording sender, never SMTP, whatever
     /// `.cargo/config.toml` says), oldest first.
     emails: Arc<Mutex<Vec<OutgoingEmail>>>,
@@ -174,7 +171,22 @@ async fn app_logging_emails() -> TestApp {
 }
 
 /// `app_from`, sending with `sender` (`None`: the recording one, `TestApp::emails`).
-async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMail>) -> TestApp {
+async fn app_sending_with(config: Config, media: bool, sender: Option<HostMail>) -> TestApp {
+    app_for::<crate::Stock>(config, media, sender).await
+}
+
+/// The app built with `D`'s spores (design note 0030, §10: `TestApp::with_spores`'s
+/// form here): their migrations, apps, routes, handlers and settings, under `config`.
+async fn app_with_spores<D: crate::Deployment>(config: Config) -> TestApp<D> {
+    app_for::<D>(config, false, None).await
+}
+
+/// `app_sending_with` for a host built with `D`'s spores.
+async fn app_for<D: crate::Deployment>(
+    mut config: Config,
+    media: bool,
+    sender: Option<HostMail>,
+) -> TestApp<D> {
     // Warnings and errors (a 500's cause is only logged) go to the test's output, which
     // a failing test prints: in CI, that's the only place to see them.
     let _ = tracing_subscriber::fmt()
@@ -192,7 +204,7 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
         &fresh_schema().await,
         &config.database,
         runtime.clock.clone(),
-        &crate::migrations::<crate::Stock>(),
+        &crate::migrations::<D>(),
     )
     .await
     .unwrap();
@@ -225,7 +237,9 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
     let client = crate::calls::client(outbound).unwrap();
     let spores =
         hypha_http::spores::spore_host(&env, crate::calls::host_calls(client.clone()), outbound);
-    let storage = PgStorage::new(db, Arc::clone(&mail), &spores, &config.spores).unwrap();
+    let storage =
+        crate::storage::PgStorage::<D>::new(db, Arc::clone(&mail), &spores, &config.spores)
+            .unwrap();
     let host = HostParts {
         env,
         background: Background::default().host(),
@@ -245,6 +259,8 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
         host,
         config,
     ));
+    // As `prepare` does at startup.
+    crate::start::register_spores(&state).await.unwrap();
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {
         email: OWNER_EMAIL.to_string(),
@@ -272,7 +288,7 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
         .await
         .unwrap();
     TestApp {
-        router: hypha_http::router!(PgStorage)
+        router: D::router()
             .layer(axum::middleware::from_fn(crate::start::record_peer))
             .with_state(state.clone())
             .layer(MockConnectInfo(SocketAddr::from(PEER))),
@@ -284,14 +300,19 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
 
 /// Sends one request with the admin key and returns the status and the JSON body
 /// (`null` if empty).
-async fn send(app: &TestApp, method: &str, uri: &str, body: Option<&str>) -> (StatusCode, Value) {
+async fn send<D: crate::Deployment>(
+    app: &TestApp<D>,
+    method: &str,
+    uri: &str,
+    body: Option<&str>,
+) -> (StatusCode, Value) {
     let auth = format!("Bearer {}", app.admin_key);
     send_with(app, &[(AUTHORIZATION.as_str(), &auth)], method, uri, body).await
 }
 
 /// Like `send`, as `token` (a session or key) instead of the admin key.
-async fn send_as(
-    app: &TestApp,
+async fn send_as<D: crate::Deployment>(
+    app: &TestApp<D>,
     token: &str,
     method: &str,
     uri: &str,
@@ -302,8 +323,8 @@ async fn send_as(
 }
 
 /// Sends one request with exactly `headers` (no credentials unless among them).
-async fn send_with(
-    app: &TestApp,
+async fn send_with<D: crate::Deployment>(
+    app: &TestApp<D>,
     headers: &[(&str, &str)],
     method: &str,
     uri: &str,
@@ -1851,7 +1872,7 @@ async fn owner_session(app: &TestApp) -> String {
 }
 
 /// Creates a key as the admin; returns its token.
-async fn key(app: &TestApp, body: Value) -> String {
+async fn key<D: crate::Deployment>(app: &TestApp<D>, body: Value) -> String {
     let (status, created) = send(app, "POST", "/admin/api-keys", Some(&body.to_string())).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     created["token"].as_str().unwrap().to_string()
@@ -2052,7 +2073,7 @@ async fn pay_on_delivery(app: &TestApp, pk: &str, cart_path: &str) {
     assert_eq!(status, StatusCode::OK, "{cart}");
 }
 
-async fn publishable(app: &TestApp) -> String {
+async fn publishable<D: crate::Deployment>(app: &TestApp<D>) -> String {
     let body = json!({
         "kind": "publishable",
         "name": "Storefront",
@@ -2070,7 +2091,7 @@ async fn publish(app: &TestApp, products: &[&str]) {
 }
 
 /// The channel every store starts with (migration 0036).
-async fn online_store(app: &TestApp) -> String {
+async fn online_store<D: crate::Deployment>(app: &TestApp<D>) -> String {
     let (_, channels) = send(app, "GET", "/admin/channels", None).await;
     channels["items"][0]["id"].as_str().unwrap().to_string()
 }

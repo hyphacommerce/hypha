@@ -86,6 +86,11 @@ name = "RL_OAUTH_IP"
 namespace_id = "1010"
 simple = { limit = 40, period = 60 }
 
+[[ratelimits]]
+name = "RL_SPORE_PUBLIC"
+namespace_id = "1011"
+simple = { limit = 360, period = 60 }
+
 # One tick a minute (W6): dispatch and search sync when the marks say so, prune and the media sweep
 # on the ticks that start their `jobs.<job>.interval` (hourly by default).
 [triggers]

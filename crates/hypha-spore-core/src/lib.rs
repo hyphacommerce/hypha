@@ -7,6 +7,7 @@
 //! providers and event handlers. The `hypha-spore` facade re-exports it with everything
 //! else a spore may use; spores depend on that.
 
+use std::any::Any;
 use std::collections::BTreeMap;
 
 use hypha_apps::{SettingsProblem, SettingsSchema, SporeRegistration};
@@ -79,6 +80,9 @@ pub trait Spore: Sized + Send + Sync + 'static {
 /// 0030, §7–§8): their settings forms and checks. `P` is the host's ports (what their
 /// UI reads with). Implemented for `()` and the tuples `SporeSet` is.
 pub trait SporeRuntime<P>: Send + Sync + 'static {
+    /// The built spore called `name`, as `Any` (`spore::<T>` downcasts it): how a
+    /// spore's routes reach their spore.
+    fn find(&self, name: &str) -> Option<&dyn Any>;
     /// The spore `key`'s settings schema; `None` for no such spore, or one without
     /// settings. (Checked at startup, so a spore's parses.)
     fn settings_schema(&self, key: &AppKey) -> Option<SettingsSchema>;
@@ -90,7 +94,17 @@ pub trait SporeRuntime<P>: Send + Sync + 'static {
     ) -> Result<(), Vec<SettingsProblem>>;
 }
 
+/// The built spore `T` in `spores`, if the host has it: what a spore's route handlers
+/// call (through `hypha_http::spores::spore`) to reach their spore.
+pub fn spore<T: Spore, P>(spores: &impl SporeRuntime<P>) -> Option<&T> {
+    spores.find(T::NAME)?.downcast_ref()
+}
+
 impl<P> SporeRuntime<P> for () {
+    fn find(&self, _: &str) -> Option<&dyn Any> {
+        None
+    }
+
     fn settings_schema(&self, _: &AppKey) -> Option<SettingsSchema> {
         None
     }
@@ -114,6 +128,16 @@ macro_rules! tuple_runtime {
     ($($s:ident),+) => {
         #[allow(non_snake_case)]
         impl<P, $($s: Spore),+> SporeRuntime<P> for ($($s,)+) {
+            fn find(&self, name: &str) -> Option<&dyn Any> {
+                let ($($s,)+) = self;
+                $(
+                    if $s::NAME == name {
+                        return Some($s);
+                    }
+                )+
+                None
+            }
+
             fn settings_schema(&self, key: &AppKey) -> Option<SettingsSchema> {
                 $(
                     if is::<$s>(key) {

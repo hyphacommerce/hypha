@@ -54,11 +54,15 @@ pub enum Rule {
     /// address (design note 0029): they need no credentials, and token guessing must be
     /// slow.
     OAuthIp,
+    /// A spore's public routes (`/spores/<name>/…`, design note 0030, §7), per client
+    /// address: one rule for every spore, so a build's spores don't change a Worker's
+    /// Rate Limiting bindings.
+    SporePublic,
 }
 
 impl Rule {
     /// In declaration order: an in-memory limiter can index by `rule as usize`.
-    pub const ALL: [Rule; 11] = [
+    pub const ALL: [Rule; 12] = [
         Rule::LoginIp,
         Rule::LoginEmailFromIp,
         Rule::LoginEmail,
@@ -70,6 +74,7 @@ impl Rule {
         Rule::ShippingQuotesCart,
         Rule::CartCreateIp,
         Rule::OAuthIp,
+        Rule::SporePublic,
     ];
 
     /// The rule's key under `[rate_limits]` (`login_ip`): a contract with operators,
@@ -87,6 +92,7 @@ impl Rule {
             Rule::ShippingQuotesCart => "shipping_quotes_cart",
             Rule::CartCreateIp => "cart_create_ip",
             Rule::OAuthIp => "oauth_ip",
+            Rule::SporePublic => "spore_public",
         }
     }
 
@@ -106,6 +112,7 @@ impl Rule {
             Rule::ShippingQuotesCart => "RL_SHIPPING_QUOTES_CART",
             Rule::CartCreateIp => "RL_CART_CREATE_IP",
             Rule::OAuthIp => "RL_OAUTH_IP",
+            Rule::SporePublic => "RL_SPORE_PUBLIC",
         }
     }
 
@@ -125,6 +132,7 @@ impl Rule {
             Rule::ShippingQuotesCart => 8,
             Rule::CartCreateIp => 9,
             Rule::OAuthIp => 10,
+            Rule::SporePublic => 11,
         }
     }
 
@@ -152,6 +160,7 @@ impl Rule {
             Rule::ShippingQuotesCart => limits.shipping_quotes_cart,
             Rule::CartCreateIp => limits.cart_create_ip,
             Rule::OAuthIp => limits.oauth_ip,
+            Rule::SporePublic => limits.spore_public,
         };
         (quota.burst, quota.per.0)
     }

@@ -98,8 +98,13 @@ pub mod postgres {
 /// `Ctx`.
 #[cfg(feature = "http")]
 pub mod http {
+    /// For `#[utoipa::path]` and `#[derive(utoipa::ToSchema)]` on a spore's handlers and
+    /// DTOs (`use hypha_spore::http::utoipa;`), which the host's `openapi` command reads.
+    pub use hypha_http::__private::utoipa;
     pub use hypha_http::error::ApiError;
     pub use hypha_http::extract::{Admin, Caller, JsonBody, PathId, Query, Storefront};
+    pub use hypha_http::spore_routes;
+    pub use hypha_http::spores::{SporeSurface, spore};
     pub use hypha_http::state::{AppState, SharedState, Storage};
 }
 

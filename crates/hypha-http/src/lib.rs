@@ -32,3 +32,14 @@ pub mod shipping;
 pub mod spores;
 pub mod state;
 pub mod webhooks;
+
+/// What the macros' expansions (`spore_routes!`) name, so a spore or host crate needs no
+/// dependency of its own on them.
+#[doc(hidden)]
+pub mod __private {
+    pub use axum::Router;
+    pub use axum::extract::{Request, State};
+    pub use hypha_spore_core::Spore;
+    pub use pastey;
+    pub use utoipa;
+}

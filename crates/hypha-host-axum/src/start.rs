@@ -28,14 +28,16 @@ use crate::{Deployment, calls, email, platform, runner};
 
 /// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
 /// `openapi`) and exits (design note 0010, S6). Run it after changing routes or DTOs;
-/// a test fails while the committed files are out of date.
-fn write_openapi(dir: &str) -> std::io::Result<()> {
+/// a test fails while the committed files are out of date. A build with spores
+/// documents their routes too, a tag per spore (design note 0030, §7); the committed
+/// files are the stock build's.
+fn write_openapi<D: Deployment>(dir: &str) -> std::io::Result<()> {
     use hypha_http::routes::openapi::{
-        Doc, EXTENSIONS_FILE, document_json, extensions_document_json,
+        Doc, EXTENSIONS_FILE, document_json_with, extensions_document_json,
     };
     std::fs::create_dir_all(dir)?;
     let documents = Doc::ALL
-        .map(|doc| (doc.file_name(), document_json(doc)))
+        .map(|doc| (doc.file_name(), document_json_with(doc, D::spore_rows())))
         .into_iter()
         .chain([(EXTENSIONS_FILE, extensions_document_json())]);
     for (file, json) in documents {
@@ -135,7 +137,7 @@ async fn main<D: Deployment>() {
     match args.get(1).map(String::as_str) {
         Some("openapi") => {
             let dir = args.get(2).map_or("openapi", String::as_str);
-            if let Err(e) = write_openapi(dir) {
+            if let Err(e) = write_openapi::<D>(dir) {
                 eprintln!("cannot write the OpenAPI documents: {e}");
                 std::process::exit(1);
             }
@@ -218,6 +220,7 @@ async fn main<D: Deployment>() {
     // stops the build here, before anything is migrated.
     let mut problems = hypha_spore_core::check::<D::Spores>();
     problems.extend(hypha_spore_core::check_config::<D::Spores>(&config.spores));
+    problems.extend(crate::check_routes::<D>());
     if !problems.is_empty() {
         tracing::error!("this build's spores:\n{}", problems.join("\n"));
         std::process::exit(1);
@@ -320,7 +323,9 @@ async fn ensure_search_index<S: Storage>(state: &AppState<S>) -> Result<(), Stri
 
 /// Each spore this host is built with gets its app (design note 0030, §3), as the system:
 /// created with its scopes the first time, its title and scopes brought up to date after.
-async fn register_spores<D: Deployment>(state: &AppState<PgStorage<D>>) -> Result<(), String> {
+pub(crate) async fn register_spores<D: Deployment>(
+    state: &AppState<PgStorage<D>>,
+) -> Result<(), String> {
     use hypha_apps::HasApps;
     let spores = <D::Spores as SporeSet>::registrations();
     if spores.is_empty() {
