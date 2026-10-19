@@ -802,7 +802,7 @@ async fn the_admin_reads_its_whole_setup() {
     assert!(countries.contains(&json!({"code": "RS", "name": "Serbia"})));
 }
 
-async fn create_product(app: &TestApp, handle: &str) -> String {
+async fn create_product<D: crate::Deployment>(app: &TestApp<D>, handle: &str) -> String {
     let body = json!({
         "handle": handle,
         "title": handle,

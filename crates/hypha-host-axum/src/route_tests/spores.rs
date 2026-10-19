@@ -299,3 +299,59 @@ async fn only_a_built_in_spore_with_a_schema_has_settings_and_they_need_apps_sco
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 }
+
+#[tokio::test]
+async fn a_disabled_spores_payment_provider_is_unavailable() {
+    let app = app_with_spores::<WithTestSpore>(Config::defaults()).await;
+    let method = |name: &str| json!({ "provider": "spore_test", "name": name }).to_string();
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/payment-methods",
+        Some(&method("Test pay")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    set_enabled(&app, false).await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/payment-methods",
+        Some(&method("Test pay 2")),
+    )
+    .await;
+    assert_eq!(code(&body), "payment_provider_unknown", "{status} {body}");
+    set_enabled(&app, true).await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/payment-methods",
+        Some(&method("Test pay 3")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+}
+
+#[tokio::test]
+async fn a_disabled_spores_handlers_wait_on_the_retry_schedule() {
+    use hypha_core::{HasOutbox, OutboxRepo, PageRequest};
+    let app = app_with_spores::<WithTestSpore>(Config::defaults()).await;
+    set_enabled(&app, false).await;
+    create_product(&app, "spore-gated").await;
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let ports = app.state.public_ports().await.unwrap();
+    let deliveries = ports
+        .outbox()
+        .deliveries_to("handler:spore_test_noop", None, PageRequest::default())
+        .await
+        .unwrap();
+    let delivery = deliveries
+        .items
+        .first()
+        .expect("a delivery to the spore's handler");
+    assert_eq!(delivery.status, hypha_core::DeliveryStatus::Pending);
+    assert_eq!(
+        delivery.last_error.as_deref(),
+        Some("spore_test is disabled")
+    );
+}

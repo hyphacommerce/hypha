@@ -1,5 +1,6 @@
 //! A spore for the route tests (design note 0030): one table, one event handler, a
-//! configuration section, settings with a secret, and a route on each surface
+//! payment provider, a configuration section, settings with a secret, a block and an
+//! action, and a route on each surface
 //! (`crate::test_spore_routes`, declared at the crate root as `spore_routes!` asks).
 //! The stock build has no spores.
 
@@ -9,6 +10,9 @@ use hypha_http::__private::utoipa;
 use hypha_http::error::ApiError;
 use hypha_http::extract::{Caller, Storefront};
 use hypha_http::state::{SharedState, Storage};
+use hypha_payments::{
+    NextAction, PaymentError, PaymentProvider, PaymentRequest, ProviderKey, Started, no_settings,
+};
 use hypha_spore_core::{Spore, SporeEnv, SporeError};
 use hypha_store_postgres::{Migration, MigrationSet};
 use serde::{Deserialize, Serialize};
@@ -28,6 +32,26 @@ impl<P> EventHandler<P> for Noop {
 
     async fn handle(&self, _: &P, _: &StoredEvent) -> Result<(), String> {
         Ok(())
+    }
+}
+
+/// Collects by asking the buyer to pay the test spore.
+pub struct TestProvider;
+
+impl PaymentProvider for TestProvider {
+    fn key(&self) -> ProviderKey {
+        ProviderKey::new("spore_test").unwrap_or_else(|_| unreachable!("a spore key"))
+    }
+
+    fn check_settings(&self, settings: &Value) -> Result<(), PaymentError> {
+        no_settings(&self.key(), settings)
+    }
+
+    async fn start(&self, _: &PaymentRequest) -> Result<Started, PaymentError> {
+        Ok(Started {
+            next_action: NextAction::Instructions("pay the test spore".to_string()),
+            reference: None,
+        })
     }
 }
 
@@ -104,10 +128,12 @@ impl Spore for TestSpore {
         }
     }
 
-    type PaymentProviders = ();
+    type PaymentProviders = (TestProvider,);
     type Handlers = (Noop,);
 
-    fn payment_providers(&self) {}
+    fn payment_providers(&self) -> (TestProvider,) {
+        (TestProvider,)
+    }
 
     fn handlers(&self) -> (Noop,) {
         (Noop,)

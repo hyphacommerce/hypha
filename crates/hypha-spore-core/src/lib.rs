@@ -10,8 +10,8 @@
 use std::any::Any;
 use std::collections::BTreeMap;
 
-use hypha_apps::{SettingsProblem, SettingsSchema, SporeRegistration};
-use hypha_core::{AppKey, Scope, Union};
+use hypha_apps::{AppRepo, HasApps, SettingsProblem, SettingsSchema, SporeRegistration};
+use hypha_core::{AppKey, EventHandlers, Scope, StoredEvent, Union};
 use hypha_payments::{PaymentProviders, ProviderKey};
 use hypha_store_postgres::MigrationSet;
 
@@ -173,6 +173,49 @@ tuple_runtime!(A, B, C, D, E, F);
 tuple_runtime!(A, B, C, D, E, F, G);
 tuple_runtime!(A, B, C, D, E, F, G, H);
 
+/// A spore's event handlers, run only while staff have the spore enabled (design note
+/// 0030, §3): a delivery to one of them while it's disabled fails with "spore … is
+/// disabled" and waits on the retry schedule, as a disabled app's webhooks do (0016:
+/// `jobs.dispatch` retries for `webhooks.give_up_after`, 72 hours by default). Fan-out
+/// still makes the deliveries, so events that happen while it's off reach it once it's
+/// back within that window; after it they fail for good, as any delivery does.
+pub struct Gated<H> {
+    name: &'static str,
+    handlers: H,
+}
+
+impl<H> Gated<H> {
+    /// `handlers`, gated on the spore `name`'s app.
+    pub fn new(name: &'static str, handlers: H) -> Self {
+        Self { name, handlers }
+    }
+}
+
+impl<P: HasApps + ?Sized, H: EventHandlers<P>> EventHandlers<P> for Gated<H> {
+    fn names(&self) -> Vec<&'static str> {
+        self.handlers.names()
+    }
+
+    fn wanting(&self, event_type: &str) -> Vec<&'static str> {
+        self.handlers.wanting(event_type)
+    }
+
+    async fn run(&self, name: &str, ports: &P, event: &StoredEvent) -> Option<Result<(), String>> {
+        if !self.handlers.names().contains(&name) {
+            return None;
+        }
+        let key = match AppKey::of_spore(self.name) {
+            Ok(key) => key,
+            Err(e) => return Some(Err(e.to_string())),
+        };
+        match ports.apps().get(&key).await {
+            Ok(Some(app)) if app.enabled() => self.handlers.run(name, ports, event).await,
+            Ok(_) => Some(Err(format!("{key} is disabled"))),
+            Err(e) => Some(Err(e.to_string())),
+        }
+    }
+}
+
 /// What `SporeSet::build` makes: the spores themselves (the set's own type, a tuple of
 /// built spores), and what they contribute, each one set.
 pub struct Built<S: SporeSet> {
@@ -259,7 +302,7 @@ macro_rules! tuple_spores {
     ($($s:ident),+) => {
         #[allow(non_snake_case)]
         impl<$($s: Spore),+> SporeSet for ($($s,)+) {
-            type Handlers = Union<($($s::Handlers,)+)>;
+            type Handlers = Union<($(Gated<$s::Handlers>,)+)>;
             type PaymentProviders = Union<($($s::PaymentProviders,)+)>;
 
             fn registrations() -> Vec<SporeRegistration> {
@@ -284,7 +327,7 @@ macro_rules! tuple_spores {
             ) -> Result<Built<Self>, SporeStartError> {
                 $(let $s = build_one::<$s>(host, config)?;)+
                 Ok(Built {
-                    handlers: Union(($($s.handlers(),)+)),
+                    handlers: Union(($(Gated::new($s::NAME, $s.handlers()),)+)),
                     payment_providers: Union(($($s.payment_providers(),)+)),
                     spores: ($($s,)+),
                 })

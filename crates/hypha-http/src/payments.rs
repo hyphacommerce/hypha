@@ -36,6 +36,31 @@ impl<P, B> HostPayments<'_, P, B>
 where
     P: HasApps + HasExtensionEndpoints + HasExtensionCalls,
 {
+    /// Whether `key` is a spore's provider whose spore staff have disabled (design note
+    /// 0030, §3): it then reports unavailable and collects nothing, as a disabled app's.
+    /// The spore is the one the key belongs to (`spore_stripe` or `spore_stripe_…`).
+    async fn spore_disabled(&self, key: &ProviderKey) -> Result<bool, RepoError> {
+        use hypha_apps::AppRepo;
+        if key.is_manual() || key.app().is_some() {
+            return Ok(false);
+        }
+        let apps = self.ports.apps().list().await?;
+        let owner = apps
+            .iter()
+            .find(|app| app.kind() == hypha_core::AppKind::Spore && key.belongs_to(app.key()));
+        Ok(!owner.is_some_and(|app| app.enabled()))
+    }
+
+    /// `spore_disabled` for start and act, as a provider failure when it can't tell.
+    async fn spore_off(&self, key: &ProviderKey) -> Result<bool, PaymentError> {
+        self.spore_disabled(key)
+            .await
+            .map_err(|e| PaymentError::ProviderFailed {
+                provider: key.clone(),
+                reason: e.to_string(),
+            })
+    }
+
     /// Where `app` answers `point`, when it's installed, enabled and does.
     async fn endpoint(
         &self,
@@ -109,6 +134,7 @@ where
     async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
         match key.app() {
             Some(app) => self.endpoints.answers(&app, PaymentsStart::NAME).await,
+            None if self.spore_disabled(key).await? => Ok(false),
             None => self.built_in.available(key).await,
         }
     }
@@ -131,6 +157,9 @@ where
         payment: &PaymentRequest,
     ) -> Result<Started, PaymentError> {
         let Some(app) = key.app() else {
+            if self.spore_off(key).await? {
+                return Err(PaymentError::UnknownProvider(key.clone()));
+            }
             return self.built_in.start(key, payment).await;
         };
         let endpoint = self
@@ -189,6 +218,12 @@ where
         request: &ActionRequest,
     ) -> Result<ActionAnswer, PaymentError> {
         let Some(app) = key.app() else {
+            if self.spore_off(key).await? {
+                return Err(PaymentError::ActionUnsupported {
+                    provider: key.clone(),
+                    action: request.action,
+                });
+            }
             return self.built_in.act(key, request).await;
         };
         match request.action {
