@@ -9,7 +9,7 @@ use hypha_http::host::{HostMail, MailQueued};
 use hypha_http::mail::{MailHost, MailParts};
 use hypha_http::state::OrderTokens;
 use hypha_payments::PaymentProviders;
-use hypha_spore_core::SporeSet;
+use hypha_spore_core::{Built, SporeSet};
 
 use crate::{Deployment, PgPorts, Stock};
 
@@ -28,10 +28,18 @@ fn mail() -> Arc<MailHost> {
     ))
 }
 
+/// The stock build's spores, built on a test host.
+fn built() -> Built<<Stock as Deployment>::Spores> {
+    <<Stock as Deployment>::Spores as SporeSet>::build(
+        &hypha_spore_core::env::testing::host(),
+        &Default::default(),
+    )
+    .unwrap()
+}
+
 #[test]
 fn handler_names_are_unique_snake_case() {
-    let (spores, _) = <<Stock as Deployment>::Spores as SporeSet>::build();
-    let handlers = Union((crate::handlers::core_handlers(mail()), spores));
+    let handlers = Union((crate::handlers::core_handlers(mail()), built().handlers));
     let names = EventHandlers::<PgPorts>::names(&handlers);
     let unique: HashSet<_> = names.iter().collect();
     assert_eq!(unique.len(), names.len(), "{names:?}");
@@ -48,8 +56,7 @@ fn handler_names_are_unique_snake_case() {
 
 #[test]
 fn provider_keys_are_unique() {
-    let (_, spores) = <<Stock as Deployment>::Spores as SporeSet>::build();
-    let keys = Union((crate::payments::CORE_PROVIDERS, spores)).keys();
+    let keys = Union((crate::payments::CORE_PROVIDERS, built().payment_providers)).keys();
     let unique: HashSet<_> = keys.iter().collect();
     assert_eq!(unique.len(), keys.len(), "{keys:?}");
 }

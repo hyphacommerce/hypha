@@ -359,9 +359,30 @@ mod worker_main {
             },
             &runtime,
         ));
+        // A section for a spore this Worker wasn't built with is a mistake, as natively.
+        let problems = hypha_spore_core::check_config::<D::Spores>(&config.spores);
+        if !problems.is_empty() {
+            return Err(problems.join("\n"));
+        }
+        // Each spore is built with the host's capabilities and its `[spores.<name>]`
+        // section (design note 0030, §4); its HTTP goes through `fetch`, as apps' calls.
+        let outbound = hypha_http::outbound::OutboundPolicy {
+            allow_private: config.allow_private_callbacks,
+        };
+        let spores = hypha_http::spores::spore_host(
+            &env_ports,
+            platform::host_calls(env.clone(), app_bindings.clone()),
+            outbound,
+        );
         // An isolate's `env` is the same bindings for every event, so one is kept.
-        let storage =
-            WorkersStorage::<D>::new(env.clone(), runtime.clock.clone(), Arc::clone(&mail));
+        let storage = WorkersStorage::<D>::new(
+            env.clone(),
+            runtime.clock.clone(),
+            Arc::clone(&mail),
+            &spores,
+            &config.spores,
+        )
+        .map_err(|e| e.to_string())?;
         {
             use hypha_core::EventHandlers;
             use hypha_http::state::Storage;

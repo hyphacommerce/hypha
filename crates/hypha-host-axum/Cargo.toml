@@ -51,9 +51,14 @@ rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", 
 lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "pool", "hostname", "builder", "tokio1-rustls", "aws-lc-rs", "rustls-platform-verifier"] }
 # `config rate-limits` prints JSON.
 serde_json.workspace = true
+# Spores' configuration sections (`[spores.<name>]`).
+toml = "0.9"
 
 [dev-dependencies]
 url = "2.5"
+# A test host for building spores (`hypha_spore_core::env::testing`).
+hypha-spore-core = { path = "../hypha-spore-core", features = ["testing"] }
+serde.workspace = true
 # The route tests (`route_tests.rs`).
 hypha-auth = { path = "../hypha-auth" }
 hypha-markets = { path = "../hypha-markets" }

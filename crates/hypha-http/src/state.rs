@@ -141,6 +141,12 @@ impl HostEnv {
         self
     }
 
+    /// The `SecretBox` under `HYPHA_SECRET_KEY`, for what shares it (spores' secrets,
+    /// design note 0030, §8).
+    pub fn secret_box(&self) -> &XChaChaBox {
+        &self.secret_box
+    }
+
     /// What signs orders' access tokens, for the emails' links (`MailHost`).
     pub fn order_tokens(&self) -> &OrderTokens {
         &self.order_tokens

@@ -13,6 +13,7 @@ pub mod file;
 pub mod units;
 
 use core::time::Duration;
+use std::collections::BTreeMap;
 
 use hypha_auth::AuthSettings;
 use hypha_categories::CategorySettings;
@@ -51,6 +52,10 @@ pub struct Config {
     pub extensions: ExtensionSettings,
     pub jobs: JobsConfig,
     pub rate_limits: RateLimits,
+    /// Each spore's section, `[spores.<name>]` (design note 0030, §8), as written: the
+    /// spore reads its own when the host builds it, and the host refuses a section for a
+    /// spore it wasn't built with.
+    pub spores: BTreeMap<String, toml::Table>,
     /// The file with the environment applied, for `Config::to_toml`.
     effective: File,
 }
@@ -889,6 +894,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             ),
         },
         rate_limits: file.rate_limits.clone(),
+        spores: file.spores.clone(),
         effective: file.clone(),
     }
 }
@@ -1478,6 +1484,20 @@ mod tests {
         let printed = config.to_toml();
         assert!(printed.contains("session_lifetime = \"90s\""), "{printed}");
         assert_eq!(Config::load(Some(&printed), no_env), Ok(config));
+    }
+
+    #[test]
+    fn each_spores_section_is_kept_as_written_and_printed() {
+        let text = "[spores.test]\napi_base = \"http://localhost:9\"\nretries = 3\n";
+        let config = Config::load(Some(text), no_env).unwrap();
+        let section = &config.spores["test"];
+        assert_eq!(section["api_base"].as_str(), Some("http://localhost:9"));
+        assert_eq!(section["retries"].as_integer(), Some(3));
+        let printed = config.to_toml();
+        assert!(printed.contains("[spores.test]"), "{printed}");
+        assert_eq!(Config::load(Some(&printed), no_env), Ok(config));
+        assert!(Config::defaults().spores.is_empty());
+        assert!(!Config::defaults().to_toml().contains("spores"));
     }
 
     #[test]

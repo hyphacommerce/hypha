@@ -219,11 +219,13 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
         },
         &runtime,
     ));
-    let storage = PgStorage::new(db, Arc::clone(&mail));
-    let client = crate::calls::client(hypha_http::outbound::OutboundPolicy {
+    let outbound = hypha_http::outbound::OutboundPolicy {
         allow_private: config.allow_private_callbacks,
-    })
-    .unwrap();
+    };
+    let client = crate::calls::client(outbound).unwrap();
+    let spores =
+        hypha_http::spores::spore_host(&env, crate::calls::host_calls(client.clone()), outbound);
+    let storage = PgStorage::new(db, Arc::clone(&mail), &spores, &config.spores).unwrap();
     let host = HostParts {
         env,
         background: Background::default().host(),

@@ -26,6 +26,8 @@ hypha-apps = { path = "../hypha-apps" }
 hypha-payments = { path = "../hypha-payments" }
 # The spores a deployment is built with (design note 0030, `worker!`).
 hypha-spore-core = { path = "../hypha-spore-core" }
+# Spores' configuration sections (`[spores.<name>]`).
+toml = "0.9"
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-search = { path = "../hypha-search" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }

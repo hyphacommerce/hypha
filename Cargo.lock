@@ -1151,10 +1151,12 @@ dependencies = [
  "reqwest",
  "rustls",
  "rustls-platform-verifier",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
+ "toml",
  "tower",
  "tower-http",
  "tracing",
@@ -1230,6 +1232,7 @@ dependencies = [
  "hypha-search",
  "hypha-search-index",
  "hypha-shipping",
+ "hypha-spore-core",
  "hypha-store-s3",
  "hypha-stores",
  "hypha-tax",
@@ -1487,7 +1490,12 @@ dependencies = [
  "hypha-core",
  "hypha-payments",
  "hypha-store-postgres",
+ "pollster",
+ "serde",
  "serde_json",
+ "thiserror",
+ "toml",
+ "uuid",
 ]
 
 [[package]]

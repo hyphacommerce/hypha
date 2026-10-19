@@ -216,7 +216,8 @@ async fn main<D: Deployment>() {
     };
     // A spore's name is its key, its migration module and its tables' prefix: a bad one
     // stops the build here, before anything is migrated.
-    let problems = hypha_spore_core::check::<D::Spores>();
+    let mut problems = hypha_spore_core::check::<D::Spores>();
+    problems.extend(hypha_spore_core::check_config::<D::Spores>(&config.spores));
     if !problems.is_empty() {
         tracing::error!("this build's spores:\n{}", problems.join("\n"));
         std::process::exit(1);
@@ -453,7 +454,16 @@ pub(crate) async fn prepare<D: Deployment>(
         },
         &runtime,
     ));
-    let storage = PgStorage::<D>::new(db, Arc::clone(&mail));
+    // Each spore is built with the host's capabilities and its `[spores.<name>]` section
+    // (design note 0030, §4); its HTTP goes through the client apps are called with.
+    let spores = hypha_http::spores::spore_host(&env, calls::host_calls(client.clone()), outbound);
+    let storage = match PgStorage::<D>::new(db, Arc::clone(&mail), &spores, &config.spores) {
+        Ok(storage) => storage,
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+    };
     if let Err(e) = check_unique(&storage) {
         tracing::error!("{e}");
         std::process::exit(1);

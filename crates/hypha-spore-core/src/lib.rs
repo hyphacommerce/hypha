@@ -2,22 +2,32 @@
 //! external apps of design note 0029. This crate is the `Spore` trait a spore implements
 //! and `SporeSet`, the list of spores a host is built with (`host! { spores: [...] }`).
 //!
-//! It's the minimum the hosts need (step 2 of 0030's build order): what a spore is
-//! called, the scopes it acts with, its tables, and what it adds to the host's payment
-//! providers and event handlers. The `hypha-spore` facade (step 3) re-exports it with
-//! everything else a spore may use; spores should depend on that, once it exists.
+//! It's what the hosts need: what a spore is called, the scopes it acts with, its
+//! tables, how it's built (`SporeEnv`, `env.rs`), and what it adds to the host's payment
+//! providers and event handlers. The `hypha-spore` facade re-exports it with everything
+//! else a spore may use; spores depend on that.
+
+use std::collections::BTreeMap;
 
 use hypha_apps::SporeRegistration;
 use hypha_core::{AppKey, Scope, Union};
 use hypha_payments::{PaymentProviders, ProviderKey};
 use hypha_store_postgres::MigrationSet;
 
-/// One spore. Built once at startup; everything it contributes goes into the host's
-/// tuples (static dispatch, so `Send` stays provable on the native host).
-pub trait Spore: Sized + 'static {
+pub mod env;
+
+pub use env::{
+    BoxFuture, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, SporeEnv, SporeError,
+    SporeHost, SporeHttp, SporeStartError,
+};
+
+/// One spore. Built once at startup and kept for the host's life, shared by every
+/// request (so `Send + Sync`); everything it contributes goes into the host's tuples
+/// (static dispatch, so `Send` stays provable on the native host).
+pub trait Spore: Sized + Send + Sync + 'static {
     /// `stripe`: its app key (`spore_stripe`, design note 0030, §3), its migration module
-    /// and table prefix (`spore_stripe`, `spore_stripe_*`). A contract: never rename one
-    /// that has shipped.
+    /// and table prefix (`spore_stripe`, `spore_stripe_*`), its configuration section
+    /// (`[spores.stripe]`). A contract: never rename one that has shipped.
     const NAME: &'static str;
     /// What it may do, as `Actor::App` (SP2): its grant, shown to staff.
     const SCOPES: &'static [Scope];
@@ -29,9 +39,10 @@ pub trait Spore: Sized + 'static {
     /// core's; `MigrationSet { module: "spore_<NAME>", migrations: &[] }` for none.
     fn migrations() -> MigrationSet;
 
-    /// Builds it, at startup. (The host's environment, its configuration section and
-    /// secrets come with step 3: design note 0030, §4 and §8.)
-    fn new() -> Self;
+    /// Builds it, at startup, with the host's environment and its own section of
+    /// `hypha.config.toml` (`[spores.<NAME>]`, empty without one). An error stops the
+    /// host from starting, naming the spore.
+    fn new(env: SporeEnv) -> Result<Self, SporeError>;
 
     /// The payment providers it adds (design note 0027): a tuple of `PaymentProvider`s,
     /// `()` for none. Keys are `spore_<NAME>` (or `spore_<NAME>_…`) and unique in the
@@ -47,10 +58,19 @@ pub trait Spore: Sized + 'static {
     fn handlers(&self) -> Self::Handlers;
 }
 
+/// What `SporeSet::build` makes: the spores themselves (the set's own type, a tuple of
+/// built spores), and what they contribute, each one set.
+pub struct Built<S: SporeSet> {
+    pub spores: S,
+    pub handlers: S::Handlers,
+    pub payment_providers: S::PaymentProviders,
+}
+
 /// The spores a host is built with: `()` for none, or a tuple of `Spore`s, which
-/// `host! { spores: [A, B] }` writes as `(A, B)`. Their providers and handlers are each
-/// one set (`Union`), joined to the host's own.
-pub trait SporeSet: 'static {
+/// `host! { spores: [A, B] }` writes as `(A, B)`; built, the same tuple holds the
+/// spores. Their providers and handlers are each one set (`Union`), joined to the
+/// host's own.
+pub trait SporeSet: Sized + Send + Sync + 'static {
     /// Every spore's handlers, in order.
     type Handlers: Send + Sync + 'static;
     /// Every spore's payment providers, in order.
@@ -60,11 +80,28 @@ pub trait SporeSet: 'static {
     fn registrations() -> Vec<SporeRegistration>;
     /// Their migrations, in order, to apply after core's.
     fn migrations() -> Vec<MigrationSet>;
-    /// Builds each spore once and takes what it contributes.
-    fn build() -> (Self::Handlers, Self::PaymentProviders);
+    /// Builds each spore once, in order, with its environment from `host` and its
+    /// section of `config` (`[spores.<name>]`), and takes what it contributes. The first
+    /// spore that fails stops it.
+    fn build(
+        host: &SporeHost,
+        config: &BTreeMap<String, toml::Table>,
+    ) -> Result<Built<Self>, SporeStartError>;
     /// What's wrong with the providers `build` gave: a key that isn't its spore's
     /// (`spore_<NAME>` or `spore_<NAME>_…`), which payments would never route to it.
     fn check_providers(providers: &Self::PaymentProviders) -> Vec<String>;
+}
+
+/// Builds the spore `S` with its section of `config`.
+fn build_one<S: Spore>(
+    host: &SporeHost,
+    config: &BTreeMap<String, toml::Table>,
+) -> Result<S, SporeStartError> {
+    let section = config.get(S::NAME).cloned().unwrap_or_default();
+    S::new(host.env(S::NAME, section)).map_err(|error| SporeStartError {
+        spore: S::NAME,
+        error,
+    })
 }
 
 impl SporeSet for () {
@@ -79,8 +116,15 @@ impl SporeSet for () {
         Vec::new()
     }
 
-    fn build() -> ((), ()) {
-        ((), ())
+    fn build(
+        _: &SporeHost,
+        _: &BTreeMap<String, toml::Table>,
+    ) -> Result<Built<()>, SporeStartError> {
+        Ok(Built {
+            spores: (),
+            handlers: (),
+            payment_providers: (),
+        })
     }
 
     fn check_providers(_: &()) -> Vec<String> {
@@ -109,12 +153,16 @@ macro_rules! tuple_spores {
                 vec![$($s::migrations()),+]
             }
 
-            fn build() -> (Self::Handlers, Self::PaymentProviders) {
-                $(let $s = $s::new();)+
-                (
-                    Union(($($s.handlers(),)+)),
-                    Union(($($s.payment_providers(),)+)),
-                )
+            fn build(
+                host: &SporeHost,
+                config: &BTreeMap<String, toml::Table>,
+            ) -> Result<Built<Self>, SporeStartError> {
+                $(let $s = build_one::<$s>(host, config)?;)+
+                Ok(Built {
+                    handlers: Union(($($s.handlers(),)+)),
+                    payment_providers: Union(($($s.payment_providers(),)+)),
+                    spores: ($($s,)+),
+                })
             }
 
             fn check_providers(providers: &Self::PaymentProviders) -> Vec<String> {
@@ -145,6 +193,18 @@ fn foreign_keys(name: &str, keys: &[ProviderKey]) -> Vec<String> {
     keys.iter()
         .filter(|key| !key.belongs_to(&owner))
         .map(|key| format!("spore {name:?}: payment provider {key} isn't {owner} or {owner}_…"))
+        .collect()
+}
+
+/// What's wrong with `hypha.config.toml`'s `[spores.*]` sections for a host built with
+/// `S`: a section for a spore this build doesn't have (a typo, or a spore removed from
+/// the build). Empty when all is well; the host refuses to start otherwise.
+pub fn check_config<S: SporeSet>(config: &BTreeMap<String, toml::Table>) -> Vec<String> {
+    let names: Vec<&str> = S::registrations().iter().map(|s| s.name).collect();
+    config
+        .keys()
+        .filter(|name| !names.contains(&name.as_str()))
+        .map(|name| format!("[spores.{name}]: this build has no spore {name:?}"))
         .collect()
 }
 
@@ -257,8 +317,14 @@ mod tests {
             }
         }
 
-        fn new() -> Self {
-            Paying
+        fn new(env: SporeEnv) -> Result<Self, SporeError> {
+            match env.config().get("refuse") {
+                Some(_) => Err(SporeError::Config {
+                    key: Some("refuse".to_string()),
+                    message: "refused".to_string(),
+                }),
+                None => Ok(Paying),
+            }
         }
 
         type PaymentProviders = (Pay,);
@@ -289,8 +355,8 @@ mod tests {
             }
         }
 
-        fn new() -> Self {
-            Broken
+        fn new(_: SporeEnv) -> Result<Self, SporeError> {
+            Ok(Broken)
         }
 
         type PaymentProviders = ();
@@ -322,8 +388,34 @@ mod tests {
         let migrations = Set::migrations();
         assert_eq!(migrations[0].module, "spore_pay");
         assert!(check::<Set>().is_empty());
-        let (_, providers) = Set::build();
-        assert_eq!(providers.keys(), [ProviderKey::new("spore_pay").unwrap()]);
+        let built = Set::build(&env::testing::host(), &BTreeMap::new()).unwrap();
+        assert_eq!(
+            built.payment_providers.keys(),
+            [ProviderKey::new("spore_pay").unwrap()]
+        );
+    }
+
+    #[test]
+    fn a_spore_that_fails_to_build_stops_the_set_naming_it() {
+        let config = BTreeMap::from([("pay".to_string(), "refuse = true".parse().unwrap())]);
+        let error = <(Paying,)>::build(&env::testing::host(), &config).err();
+        assert_eq!(
+            error.map(|e| e.to_string()),
+            Some("spore \"pay\": refuse: refused".to_string())
+        );
+    }
+
+    #[test]
+    fn a_section_for_a_spore_the_build_lacks_is_reported() {
+        let config = BTreeMap::from([
+            ("pay".to_string(), toml::Table::new()),
+            ("stripe".to_string(), toml::Table::new()),
+        ]);
+        assert_eq!(
+            check_config::<(Paying,)>(&config),
+            ["[spores.stripe]: this build has no spore \"stripe\""]
+        );
+        assert!(check_config::<(Paying,)>(&BTreeMap::new()).is_empty());
     }
 
     #[test]
@@ -356,8 +448,8 @@ mod tests {
             }
         }
 
-        fn new() -> Self {
-            PayLink
+        fn new(_: SporeEnv) -> Result<Self, SporeError> {
+            Ok(PayLink)
         }
 
         type PaymentProviders = ();
@@ -386,8 +478,8 @@ mod tests {
             }
         }
 
-        fn new() -> Self {
-            Rogue
+        fn new(_: SporeEnv) -> Result<Self, SporeError> {
+            Ok(Rogue)
         }
 
         type PaymentProviders = (Pay,);
@@ -410,12 +502,16 @@ mod tests {
     #[test]
     fn a_provider_under_another_spores_key_is_reported() {
         type Set = (Rogue,);
-        let (_, providers) = Set::build();
+        let providers = Set::build(&env::testing::host(), &BTreeMap::new())
+            .unwrap()
+            .payment_providers;
         assert_eq!(
             Set::check_providers(&providers),
             ["spore \"rogue\": payment provider spore_pay isn't spore_rogue or spore_rogue_…"]
         );
-        let (_, providers) = <(Paying,)>::build();
+        let providers = <(Paying,)>::build(&env::testing::host(), &BTreeMap::new())
+            .unwrap()
+            .payment_providers;
         assert!(<(Paying,)>::check_providers(&providers).is_empty());
     }
 
@@ -436,7 +532,9 @@ mod tests {
 
     #[test]
     fn a_built_host_reports_repeated_names_and_keys() {
-        let (_, providers) = <(Paying,)>::build();
+        let providers = <(Paying,)>::build(&env::testing::host(), &BTreeMap::new())
+            .unwrap()
+            .payment_providers;
         let manual = ProviderKey::manual();
         assert_eq!(
             check_built::<(Paying,)>(

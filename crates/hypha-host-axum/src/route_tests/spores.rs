@@ -28,8 +28,18 @@ impl<P> EventHandler<P> for Noop {
     }
 }
 
-/// One table, one handler, no payment providers.
-struct TestSpore;
+/// Its section of `hypha.config.toml`, `[spores.test]`.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TestConfig {
+    #[serde(default)]
+    greeting: Option<String>,
+}
+
+/// One table, one handler, no payment providers; it reads its configuration section.
+struct TestSpore {
+    greeting: String,
+}
 
 impl Spore for TestSpore {
     const NAME: &'static str = "test";
@@ -50,8 +60,11 @@ impl Spore for TestSpore {
         }
     }
 
-    fn new() -> Self {
-        TestSpore
+    fn new(env: hypha_spore_core::SporeEnv) -> Result<Self, hypha_spore_core::SporeError> {
+        let config: TestConfig = env.config_as()?;
+        Ok(TestSpore {
+            greeting: config.greeting.unwrap_or_else(|| "hello".to_string()),
+        })
     }
 
     type PaymentProviders = ();
@@ -65,6 +78,52 @@ impl Spore for TestSpore {
 }
 
 crate::deployment! { enum WithTestSpore { spores: [TestSpore] } }
+
+/// The test spore built from `toml` (its `hypha.config.toml`), on a fresh schema.
+async fn storage_from(toml: &str) -> Result<crate::PgStorage<WithTestSpore>, String> {
+    let config = Config::load(Some(toml), |_| None).map_err(|e| e.to_string())?;
+    let runtime = crate::platform::runtime();
+    let db = PgDatabase::connect(
+        &fresh_schema().await,
+        &config.database,
+        runtime.clock.clone(),
+        &crate::migrations::<WithTestSpore>(),
+    )
+    .await?;
+    let env = HostEnv::new([7; 32], config.auth, runtime.clone());
+    let outbound = hypha_http::outbound::OutboundPolicy::default();
+    let client = crate::calls::client(outbound)?;
+    let spores = hypha_http::spores::spore_host(&env, crate::calls::host_calls(client), outbound);
+    let mail = Arc::new(MailHost::new(
+        MailParts {
+            sender: HostMail::log(),
+            from: config.email.from.clone(),
+            store: hypha_core::StoreId::from_uuid(uuid::Uuid::nil()),
+            admin_url: None,
+            order_tokens: env.order_tokens().clone(),
+            media: None,
+            queued: MailQueued::none(),
+        },
+        &runtime,
+    ));
+    crate::PgStorage::<WithTestSpore>::new(db, mail, &spores, &config.spores)
+        .map_err(|e| e.to_string())
+}
+
+#[tokio::test]
+async fn a_spore_reads_its_section_and_one_it_refuses_stops_the_host() {
+    let storage = storage_from("[spores.test]\ngreeting = \"hi\"")
+        .await
+        .unwrap();
+    let (spore,) = storage.spores();
+    assert_eq!(spore.greeting, "hi");
+    let refused = storage_from("[spores.test]\ngreting = \"hi\"").await.err();
+    let refused = refused.unwrap_or_default();
+    assert!(
+        refused.starts_with("spore \"test\": unknown field `greting`"),
+        "{refused}"
+    );
+}
 
 #[tokio::test]
 async fn a_host_built_with_a_spore_migrates_registers_and_runs_it() {

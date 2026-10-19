@@ -160,6 +160,14 @@
         "trusted_proxies": []
       }
     },
+    "spores": {
+      "description": "Settings for the spores this API is built with (design note 0030, §8): one table\nper spore, `[spores.<name>]`, read by the spore itself; its keys are the spore's\nto document. A table for a spore the build doesn't have stops startup.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
     "webhooks": {
       "$ref": "#/$defs/Webhooks",
       "default": {

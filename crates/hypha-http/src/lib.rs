@@ -29,5 +29,6 @@ pub mod routes;
 pub mod search_app;
 pub mod session_token;
 pub mod shipping;
+pub mod spores;
 pub mod state;
 pub mod webhooks;

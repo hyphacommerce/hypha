@@ -2,6 +2,7 @@
 //! connections, each keeping its prepared statements (design note 0025, §6), migrated
 //! on startup. One `PgStore` per request.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use hypha_core::{StoreId, Union};
@@ -9,7 +10,7 @@ use hypha_http::error::ApiError;
 use hypha_http::host::HostClock;
 use hypha_http::mail::MailHost;
 use hypha_http::state::{SharedState, Storage};
-use hypha_spore_core::SporeSet;
+use hypha_spore_core::{SporeHost, SporeSet, SporeStartError};
 use hypha_store_postgres::{
     MigrationSet, PgConnection, PgStore, StatementCache, database_config, migrate,
 };
@@ -181,18 +182,32 @@ pub struct PgStorage<D: Deployment> {
     /// Built at startup: the `Mailer` holds the host's mail environment.
     handlers: HandlersOf<D>,
     payments: ProvidersOf<D>,
+    /// The spores themselves, built at startup.
+    spores: D::Spores,
 }
 
 impl<D: Deployment> PgStorage<D> {
-    /// Builds the spores (`SporeSet::build`) and joins what they contribute to the host's
-    /// own handlers and providers.
-    pub fn new(db: PgDatabase, mail: Arc<MailHost>) -> Self {
-        let (handlers, payments) = <D::Spores as SporeSet>::build();
-        Self {
+    /// Builds the spores (`SporeSet::build`, each with its environment from `spores` and
+    /// its section of `config`, `[spores.<name>]`) and joins what they contribute to the
+    /// host's own handlers and providers. A spore that fails to build is the error.
+    pub fn new(
+        db: PgDatabase,
+        mail: Arc<MailHost>,
+        spores: &SporeHost,
+        config: &BTreeMap<String, toml::Table>,
+    ) -> Result<Self, SporeStartError> {
+        let built = <D::Spores as SporeSet>::build(spores, config)?;
+        Ok(Self {
             db,
-            handlers: Union((crate::handlers::core_handlers(mail), handlers)),
-            payments: Union((crate::payments::CORE_PROVIDERS, payments)),
-        }
+            handlers: Union((crate::handlers::core_handlers(mail), built.handlers)),
+            payments: Union((crate::payments::CORE_PROVIDERS, built.payment_providers)),
+            spores: built.spores,
+        })
+    }
+
+    /// The spores this host was built with, built.
+    pub fn spores(&self) -> &D::Spores {
+        &self.spores
     }
 
     async fn store(&self) -> Result<PgPorts, ApiError> {

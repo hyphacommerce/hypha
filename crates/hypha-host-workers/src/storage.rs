@@ -2,6 +2,7 @@
 //! which Hyperdrive's pool next to the database makes cheap; no statement cache (each
 //! connection is used once). Migrations aren't run here (W9: `setup` from the CLI).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use hypha_core::{StoreId, Union};
@@ -9,7 +10,7 @@ use hypha_http::error::ApiError;
 use hypha_http::host::HostClock;
 use hypha_http::mail::MailHost;
 use hypha_http::state::{SharedState, Storage};
-use hypha_spore_core::SporeSet;
+use hypha_spore_core::{SporeHost, SporeSet, SporeStartError};
 use hypha_store_postgres::PgStore;
 use tokio_postgres::Client;
 use worker::Env;
@@ -46,19 +47,34 @@ pub struct WorkersStorage<D: Deployment> {
     /// Built at setup: the `Mailer` holds the host's mail environment.
     handlers: HandlersOf<D>,
     payments: ProvidersOf<D>,
+    /// The spores themselves, built at setup.
+    spores: D::Spores,
 }
 
 impl<D: Deployment> WorkersStorage<D> {
-    /// Builds the spores (`SporeSet::build`) and joins what they contribute to the
-    /// host's own handlers and providers.
-    pub fn new(env: Env, clock: HostClock, mail: Arc<MailHost>) -> Self {
-        let (handlers, payments) = <D::Spores as SporeSet>::build();
-        Self {
+    /// Builds the spores (`SporeSet::build`, each with its environment from `spores` and
+    /// its section of `config`) and joins what they contribute to the host's own
+    /// handlers and providers. A spore that fails to build is the error.
+    pub fn new(
+        env: Env,
+        clock: HostClock,
+        mail: Arc<MailHost>,
+        spores: &SporeHost,
+        config: &BTreeMap<String, toml::Table>,
+    ) -> Result<Self, SporeStartError> {
+        let built = <D::Spores as SporeSet>::build(spores, config)?;
+        Ok(Self {
             env,
             clock,
-            handlers: Union((crate::handlers::core_handlers(mail), handlers)),
-            payments: Union((crate::payments::CORE_PROVIDERS, payments)),
-        }
+            handlers: Union((crate::handlers::core_handlers(mail), built.handlers)),
+            payments: Union((crate::payments::CORE_PROVIDERS, built.payment_providers)),
+            spores: built.spores,
+        })
+    }
+
+    /// The spores this Worker was built with, built.
+    pub fn spores(&self) -> &D::Spores {
+        &self.spores
     }
 
     async fn store(&self) -> Result<PgStore<Client>, ApiError> {

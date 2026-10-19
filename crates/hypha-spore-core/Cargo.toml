@@ -13,9 +13,19 @@ hypha-core.workspace = true
 hypha-apps = { path = "../hypha-apps" }
 hypha-payments = { path = "../hypha-payments" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+# A spore's section of `hypha.config.toml`, as written (design note 0030, §8).
+toml = "0.9"
+
+# `testing`: a `SporeHost` with deterministic ports, for spores' own tests.
+[features]
+testing = []
 
 [dev-dependencies]
-serde_json.workspace = true
+pollster = "0.4"
 
 [lints]
 workspace = true

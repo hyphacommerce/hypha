@@ -5,6 +5,7 @@
 //!
 //! Key names are a contract with operators (CF6): never rename one once released.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use hypha_auth::AuthSettings;
@@ -22,7 +23,7 @@ use crate::units::{Dur, Size};
 /// Hypha's settings for one deployment. Secrets (`DATABASE_URL`, `HYPHA_SECRET_KEY`, the
 /// S3 keys, the email provider's password or key) stay in environment variables and
 /// have no key here.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 #[schemars(title = "hypha.config.toml")]
 pub struct File {
@@ -36,6 +37,12 @@ pub struct File {
     pub webhooks: Webhooks,
     pub jobs: Jobs,
     pub rate_limits: RateLimits,
+    /// Settings for the spores this API is built with (design note 0030, §8): one table
+    /// per spore, `[spores.<name>]`, read by the spore itself; its keys are the spore's
+    /// to document. A table for a spore the build doesn't have stops startup.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(with = "BTreeMap<String, serde_json::Map<String, serde_json::Value>>")]
+    pub spores: BTreeMap<String, toml::Table>,
 }
 
 /// The HTTP server.

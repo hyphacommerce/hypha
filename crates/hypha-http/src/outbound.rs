@@ -286,6 +286,17 @@ pub fn prepare_get(
 /// `2130706433`, `0x7f.0.0.1`, a trailing dot, percent-encoding, `\@`) comes out as the
 /// address it will connect to. `Ok(None)` for a name (the host's resolver checks those);
 /// a URL that doesn't parse is refused rather than passed on.
+/// Refuses `url` when it can't be parsed, or its host is an IP literal `policy` doesn't
+/// allow (names are the host's resolver's to check): what every call checks first.
+pub fn check_literal(policy: OutboundPolicy, url: &str) -> Result<(), CallError> {
+    match literal_ip(url)? {
+        Some(ip) if !policy.allows(ip) => Err(CallError::Failed(
+            "the URL is not a public address".to_string(),
+        )),
+        _ => Ok(()),
+    }
+}
+
 fn literal_ip(raw: &str) -> Result<Option<IpAddr>, CallError> {
     let parsed = url::Url::parse(raw)
         .map_err(|_| CallError::Failed("the URL can't be parsed".to_string()))?;
