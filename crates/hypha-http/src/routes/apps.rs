@@ -22,7 +22,7 @@ use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
     patch,
-    state::{SharedState, Storage},
+    state::{AppState, SharedState, Storage},
     webhooks::{EventActor, EventEnvelope, actor_of},
 };
 
@@ -103,6 +103,10 @@ pub struct AppResponse {
     /// When it was uninstalled (it then only gets `app.uninstalled`); `DELETE` again
     /// removes it.
     uninstalled_at: Option<String>,
+    /// A spore this API isn't built with any more (taken out of the deployment, design
+    /// note 0030, Q7): its app, settings and tables stay, and it does nothing until a
+    /// build has it again. Always `false` for an external app.
+    missing: bool,
     /// Where its events go; `null` when it takes none.
     webhook: Option<WebhookDto>,
     /// Event types it gets: exact (`order.placed`), a kind (`product.*`) or `*`.
@@ -123,6 +127,7 @@ impl AppResponse {
             installed: app.is_installed(),
             grant: app.grant().map(GrantResponse::new).transpose()?,
             uninstalled_at: app.uninstalled_at().map(rfc3339).transpose()?,
+            missing: false,
             webhook: app.webhook().map(|w| WebhookDto {
                 url: w.url.as_str().to_string(),
                 timeout_ms: Some(w.timeout_ms),
@@ -209,12 +214,31 @@ pub async fn list<S: Storage>(
 ) -> Result<Json<AppList>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let apps = list_apps(&ctx, ports.apps()).await?;
+    let built = built_spores(&state);
     Ok(Json(AppList {
         items: apps
             .iter()
-            .map(AppResponse::new)
+            .map(|app| AppResponse::new(app).map(|r| r.missing_from(app, &built)))
             .collect::<Result<_, _>>()?,
     }))
+}
+
+/// The spores this API is built with, by key (`spore_stripe`).
+fn built_spores<S: Storage>(state: &AppState<S>) -> Vec<String> {
+    use hypha_spore_core::SporeRuntime;
+    SporeRuntime::<S::Ports<'static>>::contributions(state.storage.spores())
+        .into_iter()
+        .map(|c| format!("spore_{}", c.name))
+        .collect()
+}
+
+impl AppResponse {
+    /// `missing` for a spore's app this build lacks.
+    fn missing_from(mut self, app: &App, built: &[String]) -> Self {
+        self.missing =
+            app.kind() == AppKind::Spore && !built.iter().any(|k| k == app.key().as_str());
+        self
+    }
 }
 
 /// The manifest an app was installed from.
@@ -339,7 +363,9 @@ pub async fn fetch<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let app = get_app(&ctx, ports.apps(), &key).await?;
     let history = request_history(&ctx, &ports, app.key()).await?;
-    Ok(Json(AppDetailResponse::new(&app, &history)?))
+    let mut detail = AppDetailResponse::new(&app, &history)?;
+    detail.app = detail.app.missing_from(&app, &built_spores(&state));
+    Ok(Json(detail))
 }
 
 /// The scopes to keep.

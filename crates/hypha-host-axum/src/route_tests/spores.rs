@@ -517,3 +517,45 @@ async fn a_spores_block_and_action_are_answered_in_process() {
     let (status, body) = send_as(&app, &reader, "GET", &path, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 }
+
+#[tokio::test]
+async fn a_spore_this_build_lacks_is_listed_as_missing() {
+    // A stock host whose database has a spore's app (an earlier build had it).
+    let app = app().await;
+    {
+        let ports = app.state.public_ports().await.unwrap();
+        let spore = hypha_apps::SporeRegistration {
+            name: "gone",
+            title: "Gone",
+            scopes: &[],
+        };
+        hypha_apps::register_spore(
+            &hypha_core::Ctx::system(),
+            ports.apps(),
+            &app.state.env,
+            &app.state.env,
+            spore,
+        )
+        .await
+        .unwrap();
+    }
+    let (status, list) = send(&app, "GET", "/admin/apps", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let gone = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["key"] == "spore_gone")
+        .unwrap();
+    assert_eq!(
+        (gone["kind"].as_str(), gone["missing"].as_bool()),
+        (Some("spore"), Some(true))
+    );
+    let (_, detail) = send(&app, "GET", "/admin/apps/spore_gone", None).await;
+    assert_eq!(detail["missing"], true, "{detail}");
+
+    // A host built with it doesn't.
+    let built = app_with_spores::<WithTestSpore>(Config::defaults()).await;
+    let (_, detail) = send(&built, "GET", "/admin/apps/spore_test", None).await;
+    assert_eq!(detail["missing"], false, "{detail}");
+}

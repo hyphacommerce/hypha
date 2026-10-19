@@ -2867,6 +2867,12 @@ export interface components {
              *     only enable or disable a spore.
              */
             kind: components["schemas"]["AppKind"];
+            /**
+             * @description A spore this API isn't built with any more (taken out of the deployment, design
+             *     note 0030, Q7): its app, settings and tables stay, and it does nothing until a
+             *     build has it again. Always `false` for an external app.
+             */
+            missing: boolean;
             name: string;
             /** @description Event types it gets: exact (`order.placed`), a kind (`product.*`) or `*`. */
             subscriptions: string[];

@@ -18,6 +18,14 @@ export function isBuiltIn(app: Pick<App, "kind">): boolean {
 
 /** Where an app stands: installed through OAuth, made by hand, built in, uninstalled, or off. */
 export function appState(app: App & { manifest?: { url: string } | null }): AppState {
+  if (isBuiltIn(app) && app.missing) {
+    return {
+      label: "Not built in",
+      variant: "warning",
+      description:
+        "Taken out of this API's build: its settings and data stay, and it does nothing until a build has it again.",
+    };
+  }
   if (isBuiltIn(app)) {
     return app.enabled
       ? {
