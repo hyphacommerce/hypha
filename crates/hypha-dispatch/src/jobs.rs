@@ -122,7 +122,7 @@ pub async fn prepare<S: HasApps>(
 ) -> Prepared {
     match delivery.destination.split_once(':') {
         Some((kind, _)) if format!("{kind}:") == HANDLER => Prepared::Handler,
-        Some(("app", key)) => match load_app(ports, key).await {
+        Some(("app", key)) => match load_app(ports, key, delivery).await {
             Ok(app) => Prepared::Webhook(Box::new(app)),
             Err(failure) => Prepared::Done(outcome(Err(failure), clock, settings, delivery)),
         },
@@ -210,9 +210,15 @@ fn outcome(
     }
 }
 
-/// App `key` as it is now, if it can take a webhook. A disabled app's deliveries wait on
-/// the retry schedule, so pausing an app for a while keeps its backlog.
-async fn load_app<S: HasApps>(ports: &S, key: &str) -> Result<App, Failure> {
+/// App `key` as it is now, if it can take `delivery` now. A disabled app's deliveries
+/// wait on the retry schedule, so pausing an app for a while keeps its backlog. One that
+/// may no longer receive the event (uninstalled, its grant narrowed so it no longer
+/// reads what the event is about, unsubscribed from the type: `App::wants_event`, as
+/// fan-out asked when the delivery was made) fails for good at once, with why: a
+/// delivery queued or retrying from before the change must not reach it. What the
+/// event's payload shows is decided when it's sent, by the grant then (the host's
+/// `WebhookSender` redacts, design note 0029, AP10).
+async fn load_app<S: HasApps>(ports: &S, key: &str, delivery: &Delivery) -> Result<App, Failure> {
     let gone = || Failure::Final(format!("there is no app {key}"));
     let key = AppKey::new(key).map_err(|_| gone())?;
     let app = ports
@@ -227,7 +233,29 @@ async fn load_app<S: HasApps>(ports: &S, key: &str) -> Result<App, Failure> {
     if app.webhook().is_none() {
         return Err(Failure::Final(format!("app {key} has no webhook")));
     }
+    let event = &delivery.event;
+    let route = EventRoute {
+        event_type: &event.event_type,
+        subject_kind: &event.subject_kind,
+        subject_id: event.subject_id,
+    };
+    if !app.wants_event(&route) {
+        return Err(Failure::Final(no_longer_wanted(&app, &route)));
+    }
     Ok(app)
+}
+
+/// Why `app` may no longer receive `route`'s event, for the admin's delivery list.
+fn no_longer_wanted(app: &App, route: &EventRoute<'_>) -> String {
+    let key = app.key();
+    let event = route.event_type;
+    if app.uninstalled_at().is_some() {
+        format!("app {key} is uninstalled: it no longer receives {event}")
+    } else if !app.wants(event) {
+        format!("app {key} is no longer subscribed to {event}")
+    } else {
+        format!("app {key}'s grant no longer covers {event}")
+    }
 }
 
 /// Records how the deliveries `run` went. Short, like `lease_due`.

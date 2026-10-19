@@ -487,6 +487,136 @@ fn a_webhook_with_nowhere_to_go_fails_at_once_and_a_paused_app_waits() {
     );
 }
 
+/// An app installed from a manifest (`products:read` granted) subscribed to
+/// `product.variant_removed`.
+fn installed(key: &str) -> App {
+    let manifest = serde_json::json!({
+        "key": key,
+        "name": key,
+        "version": "1.0.0",
+        "app_url": "https://erp.example",
+        "redirect_uris": ["/callback"],
+        "scopes": ["products:read", "orders:read"],
+        "privacy_url": "/privacy",
+        "webhooks": { "url": "/hooks", "events": ["product.variant_removed"] }
+    });
+    let manifest = hypha_apps::AppManifest::parse_from(
+        manifest.to_string().as_bytes(),
+        hypha_apps::ManifestSource::Served,
+    )
+    .unwrap();
+    App::install(
+        hypha_core::AppId::from_uuid(Uuid::from_u128(
+            key.bytes().fold(11u128, |a, b| a * 31 + u128::from(b)),
+        )),
+        Sealed::from_bytes(vec![1, 2, 3]),
+        hypha_apps::InstalledManifest {
+            url: "https://erp.example/hypha-app.json".to_string(),
+            manifest,
+            fetched_at: FixedClock::DEFAULT,
+        },
+        hypha_apps::Grant::new(
+            &[
+                hypha_core::Scope::ProductsRead,
+                hypha_core::Scope::OrdersRead,
+            ],
+            hypha_core::Actor::System,
+            FixedClock::DEFAULT,
+        ),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_queued_delivery_the_app_may_no_longer_receive_fails_for_good_with_why() {
+    let ports = world();
+    let clock = FixedClock::default();
+    for mut app in [
+        installed("app_narrowed"),
+        installed("app_removed"),
+        app("app_unsubscribed", &["product.variant_removed"], true),
+    ] {
+        block_on(ports.apps.insert(&mut app)).unwrap();
+    }
+    remove(&ports, small());
+    block_on(fan_out(&ports, &clock, &settings(), &HANDLERS)).unwrap();
+    assert_eq!(app_deliveries(&ports).len(), 3, "each wanted it then");
+
+    // Between fanning out and sending, each app changes.
+    let get = |key: &str| {
+        block_on(ports.apps.get(&AppKey::new(key).unwrap()))
+            .unwrap()
+            .unwrap()
+    };
+    let mut narrowed = get("app_narrowed");
+    narrowed
+        .narrow_grant(
+            &[hypha_core::Scope::OrdersRead],
+            hypha_core::Actor::System,
+            clock.now(),
+        )
+        .unwrap();
+    block_on(ports.apps.update(&mut narrowed)).unwrap();
+    let mut removed = get("app_removed");
+    removed.uninstall(clock.now()).unwrap();
+    block_on(ports.apps.update(&mut removed)).unwrap();
+    let mut unsubscribed = get("app_unsubscribed");
+    unsubscribed
+        .set_subscriptions(vec!["order.*".to_string()])
+        .unwrap();
+    block_on(ports.apps.update(&mut unsubscribed)).unwrap();
+
+    let webhooks = Webhooks::default();
+    dispatch_with(&ports, &clock, &webhooks);
+    // Only the uninstalled app's own `app.uninstalled` (its last webhook) goes out; the
+    // grant change's `app.grant_changed` goes to the narrowed app.
+    let mut sent = webhooks.sent.borrow().clone();
+    sent.sort();
+    assert_eq!(
+        sent,
+        [
+            ("app_narrowed".to_string(), "app.grant_changed".to_string()),
+            ("app_removed".to_string(), "app.uninstalled".to_string()),
+        ]
+    );
+    let mut variant_removed: Vec<_> = app_deliveries(&ports)
+        .into_iter()
+        .filter(|d| d.1 == "failed")
+        .collect();
+    variant_removed.sort();
+    assert_eq!(
+        variant_removed,
+        [
+            (
+                "app:app_narrowed".to_string(),
+                "failed",
+                1,
+                Some(
+                    "app app_narrowed's grant no longer covers product.variant_removed".to_string()
+                )
+            ),
+            (
+                "app:app_removed".to_string(),
+                "failed",
+                1,
+                Some(
+                    "app app_removed is uninstalled: it no longer receives product.variant_removed"
+                        .to_string()
+                )
+            ),
+            (
+                "app:app_unsubscribed".to_string(),
+                "failed",
+                1,
+                Some(
+                    "app app_unsubscribed is no longer subscribed to product.variant_removed"
+                        .to_string()
+                )
+            ),
+        ]
+    );
+}
+
 #[test]
 fn a_delivery_starts_only_with_time_left_on_its_lease() {
     let ports = world();
