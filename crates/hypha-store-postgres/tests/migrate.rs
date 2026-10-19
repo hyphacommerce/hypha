@@ -558,3 +558,145 @@ async fn orders_marked_paid_before_payments_get_their_payment() {
         .get(0);
     assert!(below);
 }
+
+// ---------- what a spore's migrations may do (design note 0030, §5) ----------
+
+/// A spore that keeps to its own: tables, an index, a sequence, a function, a trigger on
+/// its table, and keys into core's that cascade or set null.
+const WELL_BEHAVED: MigrationSet = MigrationSet {
+    module: "spore_tidy",
+    migrations: &[Migration {
+        version: 1,
+        name: "own",
+        sql: "CREATE TABLE spore_tidy_notes (
+                  id uuid PRIMARY KEY,
+                  product_id uuid REFERENCES products (id) ON DELETE CASCADE,
+                  store_id uuid REFERENCES stores (id) ON DELETE SET NULL,
+                  body text NOT NULL
+              );
+              CREATE INDEX spore_tidy_notes_product ON spore_tidy_notes (product_id);
+              CREATE SEQUENCE spore_tidy_seq;
+              CREATE FUNCTION spore_tidy_touch() RETURNS trigger LANGUAGE plpgsql
+                  AS $$ BEGIN RETURN NEW; END $$;
+              CREATE TRIGGER touch BEFORE UPDATE ON spore_tidy_notes
+                  FOR EACH ROW EXECUTE FUNCTION spore_tidy_touch();",
+    }],
+};
+
+#[tokio::test]
+async fn a_spore_that_keeps_to_its_own_tables_migrates() {
+    let Some(mut client) = fresh_schema("migrate_spore_tidy").await else {
+        return;
+    };
+    migrate(&mut client, &[CORE, WELL_BEHAVED]).await.unwrap();
+    client
+        .query_typed("SELECT count(*) FROM spore_tidy_notes", &[])
+        .await
+        .expect("the spore's table exists");
+}
+
+/// A spore set of one migration, `sql`.
+fn spore(sql: &'static str) -> MigrationSet {
+    MigrationSet {
+        module: "spore_rogue",
+        migrations: Box::leak(Box::new([Migration {
+            version: 1,
+            name: "rogue",
+            sql,
+        }])),
+    }
+}
+
+/// Migrates core, then `sql` as a spore's: the problems reported, and whether the
+/// migration was left unapplied.
+async fn refused(schema: &str, sql: &'static str) -> Option<Vec<String>> {
+    let mut client = fresh_schema(schema).await?;
+    migrate(&mut client, &[CORE]).await.unwrap();
+    let problems = match migrate(&mut client, &[CORE, spore(sql)]).await {
+        Err(MigrateError::SporeObjects {
+            module,
+            version,
+            problems,
+        }) => {
+            assert_eq!((module.as_str(), version), ("spore_rogue", 1));
+            problems
+        }
+        other => panic!("expected the spore's migration refused, got {other:?}"),
+    };
+    // Rolled back: nothing of it stays, and it isn't recorded.
+    assert_eq!(applied(&client).await, core_rows());
+    Some(problems)
+}
+
+#[tokio::test]
+async fn a_spore_table_without_its_prefix_is_refused() {
+    let Some(problems) = refused(
+        "migrate_rogue_name",
+        "CREATE TABLE notes (id uuid PRIMARY KEY)",
+    )
+    .await
+    else {
+        return;
+    };
+    assert!(
+        problems.contains(&"table \"notes\" is not named spore_rogue_*".to_string()),
+        "{problems:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_spore_key_that_could_block_a_core_delete_is_refused() {
+    let Some(problems) = refused(
+        "migrate_rogue_fk",
+        "CREATE TABLE spore_rogue_notes (
+             id uuid PRIMARY KEY,
+             product_id uuid REFERENCES products (id)
+         )",
+    )
+    .await
+    else {
+        return;
+    };
+    assert_eq!(
+        problems,
+        [
+            "foreign key \"spore_rogue_notes_product_id_fkey\" on \"spore_rogue_notes\" references \"products\" without ON DELETE CASCADE or SET NULL"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_spore_trigger_or_column_on_a_core_table_is_refused() {
+    let Some(problems) = refused(
+        "migrate_rogue_core",
+        "CREATE FUNCTION spore_rogue_audit() RETURNS trigger LANGUAGE plpgsql
+             AS $$ BEGIN RETURN NEW; END $$;
+         CREATE TRIGGER spore_rogue_audit AFTER INSERT ON products
+             FOR EACH ROW EXECUTE FUNCTION spore_rogue_audit();
+         ALTER TABLE products ADD COLUMN spore_rogue_rating integer;",
+    )
+    .await
+    else {
+        return;
+    };
+    assert_eq!(
+        problems,
+        [
+            "column \"spore_rogue_rating\" was added to \"products\", a table that isn't the spore's",
+            "trigger \"spore_rogue_audit\" was added to \"products\", a table that isn't the spore's",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_spore_dropping_a_core_table_is_refused() {
+    let Some(problems) = refused("migrate_rogue_drop", "DROP TABLE idempotency_keys").await else {
+        return;
+    };
+    assert!(
+        problems.contains(
+            &"table \"idempotency_keys\" was dropped, and it isn't the spore's".to_string()
+        ),
+        "{problems:?}"
+    );
+}

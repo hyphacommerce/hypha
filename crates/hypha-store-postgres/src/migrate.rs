@@ -326,6 +326,14 @@ pub enum MigrateError {
         module: String,
         version: i32,
     },
+    /// A spore's migration created something not named `spore_<name>_*`, touched a
+    /// table outside its prefix, or added a foreign key that could block a core delete
+    /// (design note 0030, §5). It was rolled back.
+    SporeObjects {
+        module: String,
+        version: i32,
+        problems: Vec<String>,
+    },
 }
 
 impl fmt::Display for MigrateError {
@@ -355,6 +363,16 @@ impl fmt::Display for MigrateError {
                 f,
                 "the database has migration {module}/{version}, which this code doesn't \
                  know: it was migrated by a newer Hypha"
+            ),
+            MigrateError::SporeObjects {
+                module,
+                version,
+                problems,
+            } => write!(
+                f,
+                "migration {module}/{version} reaches outside the spore's own tables, so it \
+                 was not applied: {}",
+                problems.join("; ")
             ),
         }
     }
@@ -478,6 +496,7 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
     .await;
     finish(tx, prepared).await?;
 
+    let modules: Vec<&str> = sets.iter().map(|s| s.module).collect();
     for set in sets {
         for migration in set.migrations {
             let tx = client.transaction().await?;
@@ -524,7 +543,26 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
                     }
                 }
                 None => {
+                    // A spore's migration may only touch what's its own (design note
+                    // 0030, §5): the catalog before and after says what it did.
+                    let spore = set.module.starts_with("spore_");
+                    let before = match spore {
+                        true => Some(crate::spore_check::snapshot(&tx).await?),
+                        false => None,
+                    };
                     tx.batch_execute(migration.sql).await?;
+                    if let Some(before) = before {
+                        let after = crate::spore_check::snapshot(&tx).await?;
+                        let problems =
+                            crate::spore_check::problems(set.module, &modules, &before, &after);
+                        if !problems.is_empty() {
+                            return Err(MigrateError::SporeObjects {
+                                module: set.module.to_string(),
+                                version: migration.version,
+                                problems,
+                            });
+                        }
+                    }
                     tx.query_typed(
                         "INSERT INTO schema_migrations (module, version, name, checksum)
                          VALUES ($1, $2, $3, $4)",
