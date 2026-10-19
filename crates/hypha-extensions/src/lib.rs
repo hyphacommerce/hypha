@@ -14,8 +14,9 @@ pub mod points;
 pub mod record;
 
 pub use call::{
-    Answer, EXTENSION_HEADER, EXTENSION_VERSION_HEADER, Endpoint, ExtensionCaller,
+    Answer, EXTENSION_HEADER, EXTENSION_VERSION_HEADER, Endpoint, ExtensionCaller, Finished,
     IDEMPOTENCY_KEY_HEADER, MAX_ANSWER_BYTES, OutgoingCall, STORE_HEADER, TransportError, call,
+    record_call,
 };
 pub use error::{CommandError, ExtensionError};
 pub use point::{Answered, ExtensionPoint, OnFailure, apply_policy};

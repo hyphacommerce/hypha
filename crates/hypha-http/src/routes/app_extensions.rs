@@ -33,12 +33,12 @@ use hypha_apps::{
     find_block, find_proxy, open_secret, scopes_for, session_app, storefront_contributions,
 };
 use hypha_core::{
-    Actor, CartId, Clock, Ctx, CustomerId, ExtensionCallId, FulfillmentId, IdGenerator,
-    OAuthRequestId, OrderId, PaymentId, ProductId, Scope,
+    Actor, CartId, Clock, Ctx, CustomerId, FulfillmentId, IdGenerator, OAuthRequestId, OrderId,
+    PaymentId, ProductId, Scope,
 };
 use hypha_extensions::{
-    ActionContext, AdminActionRequest, CallOutcome, Endpoint, ExtensionCall, ExtensionCallRepo,
-    ExtensionError, HasExtensionCalls, RunAdminAction, call,
+    ActionContext, AdminActionRequest, CallOutcome, Endpoint, ExtensionError, HasExtensionCalls,
+    RunAdminAction, call,
 };
 use hypha_oauth::{Refreshed, refresh_manifest};
 use serde::{Deserialize, Serialize};
@@ -736,33 +736,30 @@ pub async fn fetch_block<S: Storage>(
         },
     )
     .await;
-    let judged = judge_block(&app, sent);
     let ended = state.clock.now();
-    let (outcome, status, error) = match &judged {
-        Ok(_) => (CallOutcome::Ok, Some(200), None),
-        Err((outcome, status, reason)) => (*outcome, *status, Some(reason.clone())),
+    let (status, judged) = judge_block(&app, sent);
+    let (outcome, error) = match &judged {
+        Ok(_) => (CallOutcome::Ok, None),
+        Err((outcome, reason)) => (*outcome, Some(reason.clone())),
     };
-    let record = ExtensionCall {
-        id: ExtensionCallId::from_uuid(state.ids.new_uuid()),
-        app: app.key().clone(),
-        point: BLOCK_POINT.to_string(),
-        version: 1,
-        started_at: started,
-        duration_ms: u32::try_from((ended.unix_micros() - started.unix_micros()).max(0) / 1000)
-            .unwrap_or(u32::MAX),
-        outcome,
-        status: status.or(if outcome == CallOutcome::Ok {
-            Some(200)
-        } else {
-            None
-        }),
-        error,
-        correlation: context.correlation(),
-    };
-    if let Err(e) = ports.extension_calls().insert(&record).await {
-        tracing::warn!(app = %app.key(), error = %e, "blocks: the call couldn't be recorded");
-    }
-    let tree = judged.map_err(|(outcome, _, reason)| {
+    let correlation = context.correlation();
+    hypha_extensions::record_call(
+        ports.extension_calls(),
+        &state.ids,
+        hypha_extensions::Finished {
+            app: app.key(),
+            point: BLOCK_POINT,
+            version: 1,
+            started_at: started,
+            ended_at: ended,
+            outcome,
+            status,
+            error,
+            correlation: correlation.as_deref(),
+        },
+    )
+    .await;
+    let tree = judged.map_err(|(outcome, reason)| {
         let app = app.key().clone();
         ApiError::from(match outcome {
             CallOutcome::Timeout => ExtensionError::Timeout {
@@ -789,34 +786,45 @@ pub async fn fetch_block<S: Storage>(
     }))
 }
 
-/// What a block's answer means: the checked tree, or the outcome, status and reason to
-/// record.
+/// What a block's answer means: its HTTP status when there was an answer (whatever
+/// it was, for the call log), and the checked tree, or the outcome and reason to record.
+#[allow(clippy::type_complexity)]
 fn judge_block(
     app: &App,
     sent: Result<crate::outbound::OutboundAnswer, CallError>,
-) -> Result<serde_json::Value, (CallOutcome, Option<u16>, String)> {
+) -> (
+    Option<u16>,
+    Result<serde_json::Value, (CallOutcome, String)>,
+) {
     let answer = match sent {
         Ok(answer) => answer,
         Err(CallError::Timeout) => {
             let reason = format!("no answer within {} ms", BLOCK_TIMEOUT.as_millis());
-            return Err((CallOutcome::Timeout, None, reason));
+            return (None, Err((CallOutcome::Timeout, reason)));
         }
         Err(CallError::TooLarge) => {
             let reason = format!(
                 "answered more than {} bytes",
                 hypha_extensions::MAX_ANSWER_BYTES
             );
-            return Err((CallOutcome::Invalid, None, reason));
+            return (None, Err((CallOutcome::Invalid, reason)));
         }
-        Err(CallError::Failed(reason)) => return Err((CallOutcome::Failed, None, reason)),
+        Err(CallError::Failed(reason)) => return (None, Err((CallOutcome::Failed, reason))),
     };
     let status = Some(answer.status);
     if !(200..300).contains(&answer.status) {
         let reason = format!("answered HTTP {}", answer.status);
-        return Err((CallOutcome::Failed, status, reason));
+        return (status, Err((CallOutcome::Failed, reason)));
     }
-    let tree: serde_json::Value = serde_json::from_slice(&answer.body)
-        .map_err(|e| (CallOutcome::Invalid, status, format!("not JSON: {e}")))?;
+    let tree = match serde_json::from_slice::<serde_json::Value>(&answer.body) {
+        Ok(tree) => tree,
+        Err(e) => {
+            return (
+                status,
+                Err((CallOutcome::Invalid, format!("not JSON: {e}"))),
+            );
+        }
+    };
     let check = check_block(&tree);
     if let Some(problem) = check.errors.first() {
         let reason = format!(
@@ -826,9 +834,9 @@ fn judge_block(
             check.errors.len()
         );
         tracing::info!(app = %app.key(), "blocks: an invalid tree: {reason}");
-        return Err((CallOutcome::Invalid, status, reason));
+        return (status, Err((CallOutcome::Invalid, reason)));
     }
-    Ok(tree)
+    (status, Ok(tree))
 }
 
 // ---------- the proxy ----------

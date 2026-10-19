@@ -125,23 +125,66 @@ pub async fn call<P: ExtensionPoint>(
         Err(Judged::Timeout(reason)) => (CallOutcome::Timeout, Some(reason.clone())),
         Err(Judged::Invalid(reason)) => (CallOutcome::Invalid, Some(reason.clone())),
     };
-    let record = ExtensionCall {
-        id: ExtensionCallId::from_uuid(env.new_uuid()),
-        app: endpoint.app.clone(),
-        point: P::NAME.to_string(),
-        version: P::VERSION,
-        started_at,
-        duration_ms: duration_ms(started_at, ended_at),
-        outcome,
-        status,
-        error,
-        correlation: correlation.map(str::to_string),
+    record_call(
+        recorder,
+        env,
+        Finished {
+            app: endpoint.app,
+            point: P::NAME,
+            version: P::VERSION,
+            started_at,
+            ended_at,
+            outcome,
+            status,
+            error,
+            correlation,
+        },
+    )
+    .await;
+    result.map_err(|judged| judged.into_error(endpoint.app, P::NAME))
+}
+
+/// A call to an app that's over, as the call log keeps it: by `call`, and by the host
+/// for calls that aren't a point's request and response (blocks, `admin.block`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Finished<'a> {
+    pub app: &'a AppKey,
+    pub point: &'a str,
+    pub version: u16,
+    pub started_at: Timestamp,
+    pub ended_at: Timestamp,
+    pub outcome: CallOutcome,
+    /// The answer's HTTP status, when there was an answer (whatever it was).
+    pub status: Option<u16>,
+    pub error: Option<String>,
+    /// The cart, order or payment it was for.
+    pub correlation: Option<&'a str>,
+}
+
+/// Records `finished` in the call log (its duration in whole milliseconds, 0 if the
+/// clock went back). One that can't be recorded is traced, not returned: the log is for
+/// looking back, not part of the flow.
+pub async fn record_call(
+    recorder: &impl ExtensionCallRepo,
+    ids: &impl IdGenerator,
+    finished: Finished<'_>,
+) {
+    let call = ExtensionCall {
+        id: ExtensionCallId::from_uuid(ids.new_uuid()),
+        app: finished.app.clone(),
+        point: finished.point.to_string(),
+        version: finished.version,
+        started_at: finished.started_at,
+        duration_ms: duration_ms(finished.started_at, finished.ended_at),
+        outcome: finished.outcome,
+        status: finished.status,
+        error: finished.error,
+        correlation: finished.correlation.map(str::to_string),
     };
-    if let Err(e) = recorder.insert(&record).await {
-        tracing::warn!(app = %endpoint.app, point = P::NAME, error = %e,
+    if let Err(e) = recorder.insert(&call).await {
+        tracing::warn!(app = %finished.app, point = finished.point, error = %e,
             "extensions: the call couldn't be recorded");
     }
-    result.map_err(|judged| judged.into_error(endpoint.app, P::NAME))
 }
 
 /// A failed call, with the reason recorded.

@@ -103,7 +103,12 @@ async fn ui_app(scopes: &[&str]) -> (String, Manifest, Seen) {
                     let tree = json!({ "version": 1, "root": { "type": "card", "title": "Paid",
                         "children": [{ "type": "badge", "value": "captured", "tone": "success" },
                                      { "type": "sparkles" }] } });
-                    ([(CONTENT_TYPE, "application/json")], tree.to_string())
+                    // A 2xx other than 200: the call log keeps the status answered.
+                    (
+                        StatusCode::NON_AUTHORITATIVE_INFORMATION,
+                        [(CONTENT_TYPE, "application/json")],
+                        tree.to_string(),
+                    )
                 }
             }),
         )
@@ -424,6 +429,19 @@ async fn admins_discover_open_run_and_fetch_what_an_app_adds() {
     assert_eq!(
         claims(bearer.strip_prefix("Bearer ").unwrap(), &secret)["sub"],
         user.as_str()
+    );
+    let (_, calls) = send(
+        &app,
+        "GET",
+        "/admin/apps/app_ui/extension-calls?limit=1",
+        None,
+    )
+    .await;
+    let call = &calls["items"][0];
+    assert_eq!(
+        (&call["point"], &call["outcome"], &call["status"]),
+        (&json!("admin.block"), &json!("ok"), &json!(203)),
+        "{calls}"
     );
     let (status, body) = send_as(
         &app,
