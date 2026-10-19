@@ -80,16 +80,22 @@ export const deploy = defineCommand({
         p.intro("hypha deploy → Cloudflare");
         const env = await loadEnv(dir);
         const cf = deployment.cloudflare;
-        if (cf && !env.get("CLOUDFLARE_API_TOKEN") && apps(deployment).length > 0) {
-          // A deployment made before the token, or one whose token was removed: ask
-          // here rather than send the person through `init` again.
+        const known = env.get("CLOUDFLARE_API_TOKEN");
+        const colocated = Boolean(deployment.apps?.length);
+        // A deployment made before the token, or one whose token was removed: ask here
+        // rather than send the person through `init` again. With co-located apps, check
+        // the token we have too, before anything deploys: an older token lacks D1, and
+        // finding out at the first app's database would leave a half-done deploy.
+        if (cf && ((!known && apps(deployment).length > 0) || colocated)) {
           const { token, checked } = await obtainToken({
             name: cf.name,
             domain: deployment.domains.api,
+            // The token `.env` has is checked as is, never asked for again.
+            given: known,
             accountId: cf.accountId,
             zoneId: cf.zoneId,
             quiet: args.yes,
-            apps: Boolean(deployment.apps?.length),
+            apps: colocated,
           });
           env.set("CLOUDFLARE_API_TOKEN", token);
           await saveEnv(dir, env);
