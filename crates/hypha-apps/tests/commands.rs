@@ -80,6 +80,14 @@ fn bad_input_is_refused_before_anything_is_stored() {
             },
             "invalid_app_key",
         ),
+        // Spores are built into the API (design note 0030, SP3), never registered.
+        (
+            CreateApp {
+                key: "spore_erp".to_string(),
+                ..erp()
+            },
+            "spore_key_reserved",
+        ),
         (
             CreateApp {
                 subscriptions: vec!["orders".to_string()],

@@ -1,21 +1,24 @@
 //! Payment providers (design note 0027, §3; 0029, §3.1): who collects a payment.
 //! `manual` is built in (cash on delivery, bank transfer: staff record what happened);
 //! an app collects through the extension points `payments.start`, `.capture`, `.void`
-//! and `.refund` under its own key (`app_stripe`). The host lists the providers it was
-//! built with in its `payments.rs`, a tuple like its event handlers (static dispatch, so
-//! futures stay provably `Send` on concrete types), and answers for apps itself.
+//! and `.refund` under its own key (`app_stripe`); a spore implements `PaymentProvider`
+//! in-process under its key (`spore_stripe`, design note 0030, SP1). The host lists the
+//! providers it was built with (manual and the spores') in its `payments.rs`, a tuple
+//! like its event handlers (static dispatch, so futures stay provably `Send` on concrete
+//! types), and answers for apps itself.
 
 use std::fmt;
 
 use hypha_core::{
-    AppKey, ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId, PaymentMethodId,
-    RepoError,
+    AppKey, AppKind, ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId,
+    PaymentMethodId, RepoError,
 };
 
 use crate::PaymentError;
 
-/// Which provider: `manual`, or an app's key `app_<name>` (the name is lowercase ASCII
-/// letters, digits and `_`, starting with a letter; design note 0029, §10 item 5).
+/// Which provider: `manual`, an app's key `app_<name>` or a spore's `spore_<name>` (the
+/// name is lowercase ASCII letters, digits and `_`, starting with a letter; design notes
+/// 0029, §10 item 5, and 0030, SP3).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProviderKey(String);
 
@@ -47,9 +50,12 @@ impl ProviderKey {
         self.0 == Self::MANUAL
     }
 
-    /// The app that collects for this provider; `None` for `manual`.
+    /// The external app that collects for this provider, through the payment points;
+    /// `None` for one the host was built with (`manual`, a spore's).
     pub fn app(&self) -> Option<AppKey> {
-        AppKey::new(&self.0).ok()
+        AppKey::new(&self.0)
+            .ok()
+            .filter(|key| key.kind() == AppKind::App)
     }
 
     pub fn as_str(&self) -> &str {
@@ -357,16 +363,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keys_are_manual_or_an_app() {
+    fn keys_are_manual_an_app_or_a_spore() {
         assert_eq!(ProviderKey::new("manual").map(|k| k.is_manual()), Ok(true));
         let stripe = ProviderKey::new("app_stripe").unwrap();
         assert_eq!(stripe.to_string(), "app_stripe");
         assert_eq!(stripe.app(), Some(AppKey::new("app_stripe").unwrap()));
         assert_eq!(ProviderKey::manual().app(), None);
+        // A spore's provider is built in: no app to call.
+        let spore = ProviderKey::new("spore_stripe").unwrap();
+        assert_eq!(spore.to_string(), "spore_stripe");
+        assert_eq!(spore.app(), None);
         for bad in [
             "",
             "stripe",
-            "spore_stripe",
+            "spores_stripe",
             "app_",
             "app_9x",
             "app_Stripe",

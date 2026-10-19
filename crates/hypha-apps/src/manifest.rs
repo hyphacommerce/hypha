@@ -395,7 +395,7 @@ impl AppManifest {
     ) -> Result<Self, ManifestError> {
         let mut c = Checker::default();
 
-        let key = AppKey::new(&document.key)
+        let key = AppKey::new_app(&document.key)
             .map_err(|e| c.add("key", e.to_string()))
             .ok();
         c.text("name", &document.name, Self::MAX_NAME_LEN);
@@ -792,6 +792,20 @@ mod tests {
             .into_iter()
             .map(|p| (p.path, p.message))
             .collect()
+    }
+
+    #[test]
+    fn a_manifest_cant_name_a_spore() {
+        let mut manifest = stripe();
+        manifest["key"] = json!("spore_stripe");
+        assert_eq!(
+            problems(manifest),
+            vec![(
+                "key".to_string(),
+                "spore_stripe is a spore's key: spores are built into the API, apps are \"app_<name>\""
+                    .to_string()
+            )]
+        );
     }
 
     #[test]
