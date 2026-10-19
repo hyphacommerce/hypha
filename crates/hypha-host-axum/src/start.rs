@@ -1,3 +1,7 @@
+//! What the host binary does (`host!`'s `main`): the subcommands (`setup`, `config`,
+//! `openapi`), then startup (configuration, migrations, the store, the owner, the
+//! location, the search index) and serving, for a deployment's spores (`Deployment`).
+
 use std::sync::Arc;
 
 use axum::Router;
@@ -15,22 +19,10 @@ use hypha_http::mail::{MailHost, MailParts};
 use hypha_http::rate_limit::{RateLimiter, Rule};
 use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, SharedState, Storage};
 
-mod calls;
-mod email;
-mod handlers;
-#[cfg(test)]
-mod handlers_test;
-mod limiter;
-mod payments;
-mod platform;
-#[cfg(test)]
-mod route_tests;
-mod runner;
-mod storage;
-
-use limiter::MemoryRateLimiter;
-use platform::Background;
-use storage::{PgDatabase, PgStorage};
+use crate::limiter::MemoryRateLimiter;
+use crate::platform::Background;
+use crate::storage::{PgDatabase, PgStorage};
+use crate::{Deployment, calls, email, platform, runner};
 
 /// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
 /// `openapi`) and exits (design note 0010, S6). Run it after changing routes or DTOs;
@@ -120,8 +112,23 @@ fn config_command(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() {
+/// The binary: `host!`'s `main`. Runs on a multi-threaded Tokio runtime, as
+/// `#[tokio::main]` would.
+pub fn run<D: Deployment>() {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("cannot start the Tokio runtime: {e}");
+            std::process::exit(1);
+        }
+    };
+    runtime.block_on(main::<D>());
+}
+
+async fn main<D: Deployment>() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("openapi") => {
@@ -206,7 +213,10 @@ async fn main() {
         std::process::exit(1);
     };
     let runtime = platform::runtime();
-    let db = match PgDatabase::connect(&url, &config.database, runtime.clock.clone()).await {
+    let migrations = crate::migrations::<D>();
+    let db = match PgDatabase::connect(&url, &config.database, runtime.clock.clone(), &migrations)
+        .await
+    {
         Ok(db) => db,
         Err(e) => {
             tracing::error!("{e}");
@@ -215,7 +225,7 @@ async fn main() {
     };
     tracing::info!("storage: Postgres (migrations applied)");
     let env = HostEnv::new(secret_key, config.auth, runtime.clone());
-    let prepared = prepare(db, env, mail_sender, runtime, config).await;
+    let prepared = prepare::<D>(db, env, mail_sender, runtime, config).await;
     if setup_only {
         tracing::info!("setup done: migrations, the store, the owner, the location, search");
         return;
@@ -300,8 +310,8 @@ async fn ensure_search_index<S: Storage>(state: &AppState<S>) -> Result<(), Stri
 
 /// What a start prepares before serving: the state, with the store, the owner, the
 /// default location and the search index set up, and the host pieces `serve` runs.
-struct Prepared {
-    state: SharedState<PgStorage>,
+struct Prepared<D: Deployment> {
+    state: SharedState<PgStorage<D>>,
     background: Background,
     limiter: Arc<MemoryRateLimiter>,
     wake: runner::Wake,
@@ -311,13 +321,13 @@ struct Prepared {
 /// deployment), the media bucket if asked for, the owner, the default location and the
 /// search index; then the handlers, whose `Mailer` needs the store. Migrations ran in
 /// `PgDatabase::connect`. Exits on failure.
-async fn prepare(
+async fn prepare<D: Deployment>(
     db: PgDatabase,
     env: HostEnv,
     mail_sender: HostMail,
     runtime: Runtime,
     config: Config,
-) -> Prepared {
+) -> Prepared<D> {
     let ids = runtime.ids.clone();
     // One store per deployment (design note 0006, model A): created on first start.
     let name = std::env::var("HYPHA_STORE_NAME").unwrap_or_else(|_| "My store".to_string());
@@ -395,7 +405,7 @@ async fn prepare(
         },
         &runtime,
     ));
-    let storage = PgStorage::new(db, handlers::handlers(Arc::clone(&mail)));
+    let storage = PgStorage::<D>::new(db, Arc::clone(&mail));
     let host = HostParts {
         env,
         background: background.host(),
@@ -433,7 +443,7 @@ async fn prepare(
     }
 }
 
-async fn serve(prepared: Prepared) {
+async fn serve<D: Deployment>(prepared: Prepared<D>) {
     let Prepared {
         state,
         background,
@@ -459,7 +469,7 @@ async fn serve(prepared: Prepared) {
     }
     let grace = config.server.shutdown_grace;
     let addr = config.server.bind.clone();
-    let router: Router<_> = hypha_http::router!(PgStorage);
+    let router: Router<_> = D::router();
     let app = router
         .layer(axum::middleware::from_fn(record_peer))
         .layer(TraceLayer::new_for_http())
@@ -496,7 +506,7 @@ async fn serve(prepared: Prepared) {
 
 /// Records each request's peer address (`hypha_http::client_ip::PeerAddr`) from the
 /// socket (`into_make_service_with_connect_info`; tests set it with `MockConnectInfo`).
-async fn record_peer(
+pub(crate) async fn record_peer(
     axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
     mut request: axum::extract::Request,
     next: axum::middleware::Next,
@@ -508,7 +518,7 @@ async fn record_peer(
 }
 
 /// The in-memory limiter as `AppState`'s `HostLimiter`.
-fn host_limiter(limiter: Arc<MemoryRateLimiter>) -> HostLimiter {
+pub(crate) fn host_limiter(limiter: Arc<MemoryRateLimiter>) -> HostLimiter {
     HostLimiter::new(move |rule, key| {
         let limiter = Arc::clone(&limiter);
         Box::pin(async move { limiter.check(rule, &key).await })

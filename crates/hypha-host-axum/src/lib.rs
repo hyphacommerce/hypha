@@ -1,0 +1,129 @@
+//! Hypha's native host (design note 0026, W3) as a library plus a macro (design note
+//! 0030, §9): a binary is `hypha_host_axum::host! { spores: [...] }`, which expands, for
+//! the spores listed, the deployment's type (`Deployment`), its router and its dispatch
+//! job, and a `main` that runs `start::run`. Our own binary (`main.rs`) lists none, so
+//! the stock build is what it always was; a deployment with spores is a small crate
+//! `hypha deploy` generates (0030, §9).
+//!
+//! Why a macro rather than a generic `run::<Spores>()`: axum must prove every handler's
+//! future `Send`, and with our `Send`-free repository and provider traits the compiler
+//! can only do that for concrete types (the reason `hypha_http::router!` exists). So
+//! what touches the spores' providers and handlers across an `.await` (the router, the
+//! dispatch job) is expanded in the caller's crate with the concrete spore types; the
+//! rest (startup, serving, the other jobs) is generic over `Deployment`.
+
+use hypha_core::EventHandlers;
+use hypha_http::host::BoxFuture;
+use hypha_http::jobs::Step;
+use hypha_http::state::SharedState;
+use hypha_spore_core::SporeSet;
+use hypha_store_postgres::{CORE, MigrationSet};
+
+mod calls;
+mod email;
+mod handlers;
+#[cfg(test)]
+mod handlers_test;
+mod limiter;
+mod payments;
+mod platform;
+#[cfg(test)]
+mod route_tests;
+mod runner;
+mod start;
+mod storage;
+
+pub use handlers::CoreHandlers;
+pub use payments::CoreProviders;
+pub use start::run;
+pub use storage::{HandlersOf, PgDatabase, PgPorts, PgStorage, PooledClient, ProvidersOf};
+
+/// A deployment: the spores a host is built with, and what must be expanded for them
+/// with concrete types (see the crate's docs). Written by `deployment!` (and `host!`),
+/// never by hand.
+pub trait Deployment: Sized + 'static {
+    /// `()` for none, or a tuple of spores (`hypha_spore_core::SporeSet`). Their
+    /// handlers must run on this host's ports.
+    type Spores: SporeSet<Handlers: EventHandlers<PgPorts>>;
+
+    /// `hypha_http::router!` for this deployment's storage.
+    fn router() -> axum::Router<SharedState<PgStorage<Self>>>;
+
+    /// One dispatch step (`hypha_http::jobs::dispatch`), which runs the handlers.
+    fn dispatch(state: SharedState<PgStorage<Self>>) -> BoxFuture<Step>;
+}
+
+/// Core's migrations, then each spore's (design note 0030, SP4), in the order listed.
+pub fn migrations<D: Deployment>() -> Vec<MigrationSet> {
+    let mut sets = vec![CORE];
+    sets.extend(<D::Spores as SporeSet>::migrations());
+    sets
+}
+
+/// What the macros' expansions name, so a deployment crate needs no dependency but
+/// this one.
+#[doc(hidden)]
+pub mod __private {
+    pub use axum::Router;
+    pub use hypha_http;
+    pub use hypha_http::host::BoxFuture;
+    pub use hypha_http::jobs::Step;
+    pub use hypha_http::state::SharedState;
+}
+
+/// Declares a deployment: an uninhabited type implementing `Deployment` for `spores`.
+///
+/// ```ignore
+/// hypha_host_axum::deployment! { pub enum WithStripe { spores: [hypha_spore_stripe::Stripe] } }
+/// ```
+///
+/// `host!` declares one named `Deployment`; tests declare their own to build a host with
+/// test spores.
+#[macro_export]
+macro_rules! deployment {
+    ($vis:vis enum $name:ident { spores: [$($spore:ty),* $(,)?] $(,)? }) => {
+        /// The spores this host is built with (`hypha_host_axum::Deployment`).
+        $vis enum $name {}
+
+        impl $crate::Deployment for $name {
+            type Spores = ($($spore,)*);
+
+            fn router() -> $crate::__private::Router<
+                $crate::__private::SharedState<$crate::PgStorage<Self>>,
+            > {
+                $crate::__private::hypha_http::router!($crate::PgStorage<$name>)
+            }
+
+            fn dispatch(
+                state: $crate::__private::SharedState<$crate::PgStorage<Self>>,
+            ) -> $crate::__private::BoxFuture<$crate::__private::Step> {
+                ::std::boxed::Box::pin(async move {
+                    $crate::__private::hypha_http::jobs::dispatch(&state).await
+                })
+            }
+        }
+    };
+}
+
+/// The native host's binary, built with `spores` (design note 0030, §9): its whole
+/// `main.rs`.
+///
+/// ```ignore
+/// hypha_host_axum::host! { spores: [hypha_spore_stripe::Stripe] }
+/// ```
+///
+/// `spores: []` is the stock host. It declares a type named `Deployment` and `fn main`.
+#[macro_export]
+macro_rules! host {
+    (spores: [$($spore:ty),* $(,)?] $(,)?) => {
+        $crate::deployment! { enum Deployment { spores: [$($spore),*] } }
+
+        fn main() {
+            $crate::run::<Deployment>();
+        }
+    };
+}
+
+// The stock deployment, for this crate's own tests (the binary declares its own).
+#[cfg(test)]
+deployment! { pub(crate) enum Stock { spores: [] } }

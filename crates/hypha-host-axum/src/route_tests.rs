@@ -36,7 +36,10 @@ use hypha_http::state::{AppState, HostEnv, HostParts};
 use hypha_notifications::{OutgoingEmail, Sent};
 
 use crate::platform::{Background, UuidV7Ids};
-use crate::storage::{PgDatabase, PgStorage};
+use crate::storage::PgDatabase;
+
+/// The stock host's storage (no spores).
+type PgStorage = crate::storage::PgStorage<crate::Stock>;
 
 // Apps installed through OAuth, and personal data (design note 0029).
 mod app_extensions;
@@ -187,6 +190,7 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
         &fresh_schema().await,
         &config.database,
         runtime.clock.clone(),
+        &crate::migrations::<crate::Stock>(),
     )
     .await
     .unwrap();
@@ -213,7 +217,7 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
         },
         &runtime,
     ));
-    let storage = PgStorage::new(db, crate::handlers::handlers(Arc::clone(&mail)));
+    let storage = PgStorage::new(db, Arc::clone(&mail));
     let client = crate::calls::client(hypha_http::outbound::OutboundPolicy {
         allow_private: config.allow_private_callbacks,
     })
@@ -221,7 +225,7 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
     let host = HostParts {
         env,
         background: Background::default().host(),
-        limiter: crate::host_limiter(Arc::new(crate::limiter::MemoryRateLimiter::new(
+        limiter: crate::start::host_limiter(Arc::new(crate::limiter::MemoryRateLimiter::new(
             &config.rate_limits,
         ))),
         after_writes: AfterWrites::none(),
@@ -265,7 +269,7 @@ async fn app_sending_with(mut config: Config, media: bool, sender: Option<HostMa
         .unwrap();
     TestApp {
         router: hypha_http::router!(PgStorage)
-            .layer(axum::middleware::from_fn(crate::record_peer))
+            .layer(axum::middleware::from_fn(crate::start::record_peer))
             .with_state(state.clone())
             .layer(MockConnectInfo(SocketAddr::from(PEER))),
         admin_key: token.expose().to_string(),

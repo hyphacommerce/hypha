@@ -17,6 +17,8 @@ hypha-config = { path = "../hypha-config" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-search-index = { path = "../hypha-search-index" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
+# The spores a deployment is built with (design note 0030, `host!`).
+hypha-spore-core = { path = "../hypha-spore-core" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-users = { path = "../hypha-users" }

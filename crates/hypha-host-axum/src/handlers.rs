@@ -1,6 +1,8 @@
 //! The event handlers the native host runs (design note 0019, section 5): the composition
-//! root for in-process destinations. A crate or spore with a handler adds it to the
-//! tuple; the dispatcher runs whatever is here and knows none of them.
+//! root for core's in-process destinations. A domain crate with a handler adds it to the
+//! tuple; a spore contributes its own (`Spore::Handlers`), joined to these by
+//! `PgStorage` (design note 0030, §4). The dispatcher runs whatever it's given and knows
+//! none of them.
 
 use std::sync::Arc;
 
@@ -10,17 +12,18 @@ use hypha_mail::Mailer;
 use hypha_merchandising::CategoryImageCleanup;
 use hypha_search::SearchIndexer;
 
-/// Every handler, in no particular order (names must be unique; a test checks).
-pub type Handlers = (
+/// Core's handlers, in no particular order (names must be unique, spores' included; a
+/// test and startup check).
+pub type CoreHandlers = (
     VariantCleanup,
     SearchIndexer,
     CategoryImageCleanup,
     Mailer<Arc<MailHost>>,
 );
 
-/// The handlers, built at startup: the `Mailer` holds the host's mail environment (the
+/// Core's handlers, built at startup: the `Mailer` holds the host's mail environment (the
 /// sender, the store, the links), which exists only once the store is known.
-pub fn handlers(mail: Arc<MailHost>) -> Handlers {
+pub fn core_handlers(mail: Arc<MailHost>) -> CoreHandlers {
     (
         VariantCleanup,
         SearchIndexer,

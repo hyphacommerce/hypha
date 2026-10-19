@@ -20,6 +20,7 @@ use tokio::{
     task::JoinHandle,
 };
 
+use crate::Deployment;
 use crate::limiter::MemoryRateLimiter;
 use crate::storage::PgStorage;
 
@@ -68,8 +69,12 @@ impl Wake {
     }
 }
 
-/// Starts the jobs for a Postgres host.
-pub fn start(state: SharedState<PgStorage>, wake: Wake, limiter: Arc<MemoryRateLimiter>) -> Jobs {
+/// Starts the jobs for a Postgres host built with `D`'s spores.
+pub fn start<D: Deployment>(
+    state: SharedState<PgStorage<D>>,
+    wake: Wake,
+    limiter: Arc<MemoryRateLimiter>,
+) -> Jobs {
     let (stop, stopped) = watch::channel(false);
     let mut tasks = Vec::new();
 
@@ -93,7 +98,9 @@ pub fn start(state: SharedState<PgStorage>, wake: Wake, limiter: Arc<MemoryRateL
                 let s = Arc::clone(&s);
                 let search = Arc::clone(&search);
                 async move {
-                    let ran = jobs::dispatch(&s).await;
+                    // Expanded for the concrete deployment (`host!`): its handlers' futures
+                    // are only provably `Send` there.
+                    let ran = D::dispatch(s).await;
                     // Its handlers may have marked products for search.
                     if matches!(ran, Ok(r) if !r.idle) {
                         search.notify_one();

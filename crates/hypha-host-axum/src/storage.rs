@@ -4,11 +4,19 @@
 
 use std::sync::Arc;
 
-use hypha_core::StoreId;
+use hypha_core::{StoreId, Union};
 use hypha_http::error::ApiError;
 use hypha_http::host::HostClock;
+use hypha_http::mail::MailHost;
 use hypha_http::state::{SharedState, Storage};
-use hypha_store_postgres::{CORE, PgConnection, PgStore, StatementCache, database_config, migrate};
+use hypha_spore_core::SporeSet;
+use hypha_store_postgres::{
+    MigrationSet, PgConnection, PgStore, StatementCache, database_config, migrate,
+};
+
+use crate::Deployment;
+use crate::handlers::CoreHandlers;
+use crate::payments::CoreProviders;
 
 /// A pooled connection: deadpool-postgres's client, with the statements prepared on it
 /// (design note 0025, §6), kept as long as the connection.
@@ -94,12 +102,14 @@ pub struct PgDatabase {
 }
 
 impl PgDatabase {
-    /// Opens a connection pool (`[database]`) and applies pending migrations.
-    /// `clock` stamps what the stores write (design note 0016, Q3).
+    /// Opens a connection pool (`[database]`) and applies pending `migrations` (core's,
+    /// then each spore's: `crate::migrations`). `clock` stamps what the stores write
+    /// (design note 0016, Q3).
     pub async fn connect(
         url: &str,
         settings: &hypha_config::DatabaseConfig,
         clock: HostClock,
+        migrations: &[MigrationSet],
     ) -> Result<Self, String> {
         use deadpool::{Runtime, managed::Pool};
         use deadpool_postgres::{Manager, ManagerConfig, RecyclingMethod};
@@ -134,7 +144,7 @@ impl PgDatabase {
             .get()
             .await
             .map_err(|e| format!("cannot connect to Postgres: {e}"))?;
-        migrate(&mut conn.client, &[CORE])
+        migrate(&mut conn.client, migrations)
             .await
             .map_err(|e| format!("migrations failed: {e}"))?;
         Ok(Self { pool, clock })
@@ -149,56 +159,77 @@ impl PgDatabase {
     }
 }
 
-pub struct PgStorage {
+/// A request's ports: a store on a pooled connection.
+pub type PgPorts = PgStore<PooledClient>;
+
+/// The handlers of a host built with `D`'s spores: its own, then theirs.
+pub type HandlersOf<D> = Union<(
+    CoreHandlers,
+    <<D as Deployment>::Spores as SporeSet>::Handlers,
+)>;
+
+/// The payment providers of a host built with `D`'s spores: its own, then theirs.
+pub type ProvidersOf<D> = Union<(
+    CoreProviders,
+    <<D as Deployment>::Spores as SporeSet>::PaymentProviders,
+)>;
+
+/// The storage of a host built with `D`'s spores (`host!`): the pool, and the handlers
+/// and payment providers its spores join.
+pub struct PgStorage<D: Deployment> {
     db: PgDatabase,
-    /// Built at startup (`handlers::handlers`): the `Mailer` holds the host's mail
-    /// environment.
-    handlers: crate::handlers::Handlers,
+    /// Built at startup: the `Mailer` holds the host's mail environment.
+    handlers: HandlersOf<D>,
+    payments: ProvidersOf<D>,
 }
 
-impl PgStorage {
-    pub fn new(db: PgDatabase, handlers: crate::handlers::Handlers) -> Self {
-        Self { db, handlers }
+impl<D: Deployment> PgStorage<D> {
+    /// Builds the spores (`SporeSet::build`) and joins what they contribute to the host's
+    /// own handlers and providers.
+    pub fn new(db: PgDatabase, mail: Arc<MailHost>) -> Self {
+        let (handlers, payments) = <D::Spores as SporeSet>::build();
+        Self {
+            db,
+            handlers: Union((crate::handlers::core_handlers(mail), handlers)),
+            payments: Union((crate::payments::CORE_PROVIDERS, payments)),
+        }
     }
 
-    async fn store(&self) -> Result<PgStore<PooledClient>, ApiError> {
+    async fn store(&self) -> Result<PgPorts, ApiError> {
         self.db.store().await
     }
 }
 
-impl Storage for PgStorage {
-    type Ports<'a> = PgStore<PooledClient>;
-    type Directory<'a> = PgStore<PooledClient>;
-    type Search<'p> = &'p PgStore<PooledClient>;
-    type Handlers = crate::handlers::Handlers;
-    type Payments = crate::payments::PaymentProviders;
+impl<D: Deployment> Storage for PgStorage<D> {
+    type Ports<'a> = PgPorts;
+    type Directory<'a> = PgPorts;
+    type Search<'p> = &'p PgPorts;
+    type Handlers = HandlersOf<D>;
+    type Payments = ProvidersOf<D>;
 
-    async fn ports(&self, _store: StoreId) -> Result<PgStore<PooledClient>, ApiError> {
+    async fn ports(&self, _store: StoreId) -> Result<PgPorts, ApiError> {
         self.store().await
     }
 
-    async fn directory(&self) -> Result<PgStore<PooledClient>, ApiError> {
+    async fn directory(&self) -> Result<PgPorts, ApiError> {
         self.store().await
     }
 
     /// The stores table is in the store's database (model A).
-    fn directory_in<'p>(
-        &'p self,
-        ports: &'p PgStore<PooledClient>,
-    ) -> Option<&'p PgStore<PooledClient>> {
+    fn directory_in<'p>(&'p self, ports: &'p PgPorts) -> Option<&'p PgPorts> {
         Some(ports)
     }
 
-    fn search<'p>(&'p self, ports: &'p PgStore<PooledClient>) -> &'p PgStore<PooledClient> {
+    fn search<'p>(&'p self, ports: &'p PgPorts) -> &'p PgPorts {
         ports
     }
 
-    fn handlers(&self) -> &crate::handlers::Handlers {
+    fn handlers(&self) -> &HandlersOf<D> {
         &self.handlers
     }
 
-    fn payment_providers(&self) -> &crate::payments::PaymentProviders {
-        &crate::payments::PAYMENT_PROVIDERS
+    fn payment_providers(&self) -> &ProvidersOf<D> {
+        &self.payments
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {
