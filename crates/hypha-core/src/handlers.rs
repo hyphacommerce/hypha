@@ -5,7 +5,8 @@
 //!
 //! A set is a tuple of handlers, `(VariantCleanup, SearchIndexer)`: static dispatch, so
 //! a host on concrete ports can still prove the futures `Send` (a `dyn` handler couldn't
-//! have a generic `async fn`).
+//! have a generic `async fn`). A host with spores (design note 0030, §4) joins its own
+//! set and each spore's in a `Union`: `Union((core, stripe, ()))` reads as one set.
 
 use crate::StoredEvent;
 
@@ -102,6 +103,68 @@ tuple_handlers!(A, B, C, D, E, F, G, H, I, J);
 tuple_handlers!(A, B, C, D, E, F, G, H, I, J, K);
 tuple_handlers!(A, B, C, D, E, F, G, H, I, J, K, L);
 
+/// Several sets read as one, in order: `Union((core, (stripe_handler,), ()))`. A host
+/// joins its own set and each spore's this way (design note 0030, §4), so the dispatcher
+/// and checkout never see the nesting. A wrapper rather than plain tuples of tuples: a
+/// tuple of handlers is a set already, and a tuple of sets can't be one too without the
+/// two impls overlapping (another crate may implement `EventHandler<ItsPorts>` for a
+/// tuple).
+///
+/// `hypha_payments::PaymentProviders` reads it the same way. Names (and provider keys)
+/// must be unique across the whole union; the hosts check at startup.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Union<T>(pub T);
+
+/// `EventHandlers` for a union of 1 to 12 sets: each set's handlers, in order.
+macro_rules! union_handlers {
+    ($($s:ident),+) => {
+        #[allow(non_snake_case)]
+        impl<P: ?Sized, $($s: EventHandlers<P>),+> EventHandlers<P> for Union<($($s,)+)> {
+            fn names(&self) -> Vec<&'static str> {
+                let Union(($($s,)+)) = self;
+                let mut names = Vec::new();
+                $(names.extend($s.names());)+
+                names
+            }
+
+            fn wanting(&self, event_type: &str) -> Vec<&'static str> {
+                let Union(($($s,)+)) = self;
+                let mut names = Vec::new();
+                $(names.extend($s.wanting(event_type));)+
+                names
+            }
+
+            async fn run(
+                &self,
+                name: &str,
+                ports: &P,
+                event: &StoredEvent,
+            ) -> Option<Result<(), String>> {
+                let Union(($($s,)+)) = self;
+                $(
+                    if let Some(ran) = $s.run(name, ports, event).await {
+                        return Some(ran);
+                    }
+                )+
+                None
+            }
+        }
+    };
+}
+
+union_handlers!(A);
+union_handlers!(A, B);
+union_handlers!(A, B, C);
+union_handlers!(A, B, C, D);
+union_handlers!(A, B, C, D, E);
+union_handlers!(A, B, C, D, E, F);
+union_handlers!(A, B, C, D, E, F, G);
+union_handlers!(A, B, C, D, E, F, G, H);
+union_handlers!(A, B, C, D, E, F, G, H, I);
+union_handlers!(A, B, C, D, E, F, G, H, I, J);
+union_handlers!(A, B, C, D, E, F, G, H, I, J, K);
+union_handlers!(A, B, C, D, E, F, G, H, I, J, K, L);
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -190,6 +253,34 @@ mod tests {
         assert!(ports.borrow().is_empty());
         assert_eq!(
             pollster::block_on(().run("gone", &ports, &event("x"))),
+            None
+        );
+    }
+
+    type Ports = RefCell<Vec<String>>;
+
+    #[test]
+    fn a_union_reads_as_one_set_in_order() {
+        let union = Union((set(), (), (Named("spore", &["order.placed"]),)));
+        assert_eq!(
+            EventHandlers::<Ports>::names(&union),
+            ["cleanup", "search", "spore"]
+        );
+        let wanting = |t| EventHandlers::<Ports>::wanting(&union, t);
+        assert_eq!(wanting("product.variant_removed"), ["cleanup", "search"]);
+        assert_eq!(wanting("order.placed"), ["spore"]);
+    }
+
+    #[test]
+    fn a_union_runs_the_named_handler_in_whichever_set_has_it() {
+        let union = Union((set(), Union(((), (Named("spore", &[]),)))));
+        let ports = RefCell::new(Vec::new());
+        let ran = pollster::block_on(union.run("spore", &ports, &event("order.placed")));
+        assert_eq!(ran, Some(Ok(())));
+        assert_eq!(ports.into_inner(), ["spore order.placed"]);
+        let ports = RefCell::new(Vec::new());
+        assert_eq!(
+            pollster::block_on(union.run("gone", &ports, &event("x"))),
             None
         );
     }

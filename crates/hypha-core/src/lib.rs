@@ -44,7 +44,7 @@ pub use events::{
 };
 pub use financial::FinancialStatus;
 pub use handle::{Handle, HandleError};
-pub use handlers::{EventHandler, EventHandlers};
+pub use handlers::{EventHandler, EventHandlers, Union};
 pub use idempotency::{
     HasIdempotency, IdempotencyError, IdempotencyKey, IdempotencyRecord, IdempotencyRepo,
     IdempotencyRequest, Idempotent, StageIdempotency, earlier_id, earlier_result,

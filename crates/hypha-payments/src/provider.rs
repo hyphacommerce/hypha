@@ -11,7 +11,7 @@ use std::fmt;
 
 use hypha_core::{
     AppKey, AppKind, ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId,
-    PaymentMethodId, RepoError,
+    PaymentMethodId, RepoError, Union,
 };
 
 use crate::PaymentError;
@@ -236,6 +236,9 @@ pub fn no_settings(
 /// `PaymentProvider`s, found by key) and, in a host, the store's payment apps.
 #[allow(async_fn_in_trait)]
 pub trait PaymentProviders {
+    /// The keys of the providers this build has, in order (apps aren't listed: they're
+    /// found when asked). Each must be unique; the hosts check at startup.
+    fn keys(&self) -> Vec<ProviderKey>;
     /// Whether `key` can collect payments now: a provider this build has, or an
     /// installed, enabled app that implements `payments.start`.
     async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError>;
@@ -261,6 +264,10 @@ pub trait PaymentProviders {
 }
 
 impl<T: PaymentProviders + ?Sized> PaymentProviders for &T {
+    fn keys(&self) -> Vec<ProviderKey> {
+        (**self).keys()
+    }
+
     async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
         (**self).available(key).await
     }
@@ -296,6 +303,11 @@ macro_rules! tuple_providers {
     ($($p:ident),+) => {
         #[allow(non_snake_case)]
         impl<$($p: PaymentProvider),+> PaymentProviders for ($($p,)+) {
+            fn keys(&self) -> Vec<ProviderKey> {
+                let ($($p,)+) = self;
+                vec![$($p.key()),+]
+            }
+
             async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
                 let ($($p,)+) = self;
                 Ok(false $(|| &$p.key() == key)+)
@@ -354,6 +366,111 @@ tuple_providers!(A, B, C, D, E);
 tuple_providers!(A, B, C, D, E, F);
 tuple_providers!(A, B, C, D, E, F, G);
 tuple_providers!(A, B, C, D, E, F, G, H);
+
+/// No providers: a spore that contributes none (design note 0030, §4).
+impl PaymentProviders for () {
+    fn keys(&self) -> Vec<ProviderKey> {
+        Vec::new()
+    }
+
+    async fn available(&self, _: &ProviderKey) -> Result<bool, RepoError> {
+        Ok(false)
+    }
+
+    fn check_settings(&self, key: &ProviderKey, _: &serde_json::Value) -> Result<(), PaymentError> {
+        Err(PaymentError::UnknownProvider(key.clone()))
+    }
+
+    async fn start(&self, key: &ProviderKey, _: &PaymentRequest) -> Result<Started, PaymentError> {
+        Err(PaymentError::UnknownProvider(key.clone()))
+    }
+
+    async fn act(
+        &self,
+        key: &ProviderKey,
+        _: &ActionRequest,
+    ) -> Result<ActionAnswer, PaymentError> {
+        Err(PaymentError::UnknownProvider(key.clone()))
+    }
+}
+
+/// `PaymentProviders` for a union of 1 to 8 sets (`hypha_core::Union`): a host's own
+/// providers and each spore's, read as one set, the first set with the key answering
+/// (design note 0030, §4).
+macro_rules! union_providers {
+    ($($s:ident),+) => {
+        #[allow(non_snake_case)]
+        impl<$($s: PaymentProviders),+> PaymentProviders for Union<($($s,)+)> {
+            fn keys(&self) -> Vec<ProviderKey> {
+                let Union(($($s,)+)) = self;
+                let mut keys = Vec::new();
+                $(keys.extend($s.keys());)+
+                keys
+            }
+
+            async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
+                let Union(($($s,)+)) = self;
+                $(
+                    if $s.keys().contains(key) {
+                        return $s.available(key).await;
+                    }
+                )+
+                Ok(false)
+            }
+
+            fn check_settings(
+                &self,
+                key: &ProviderKey,
+                settings: &serde_json::Value,
+            ) -> Result<(), PaymentError> {
+                let Union(($($s,)+)) = self;
+                $(
+                    if $s.keys().contains(key) {
+                        return $s.check_settings(key, settings);
+                    }
+                )+
+                Err(PaymentError::UnknownProvider(key.clone()))
+            }
+
+            async fn start(
+                &self,
+                key: &ProviderKey,
+                payment: &PaymentRequest,
+            ) -> Result<Started, PaymentError> {
+                let Union(($($s,)+)) = self;
+                $(
+                    if $s.keys().contains(key) {
+                        return $s.start(key, payment).await;
+                    }
+                )+
+                Err(PaymentError::UnknownProvider(key.clone()))
+            }
+
+            async fn act(
+                &self,
+                key: &ProviderKey,
+                request: &ActionRequest,
+            ) -> Result<ActionAnswer, PaymentError> {
+                let Union(($($s,)+)) = self;
+                $(
+                    if $s.keys().contains(key) {
+                        return $s.act(key, request).await;
+                    }
+                )+
+                Err(PaymentError::UnknownProvider(key.clone()))
+            }
+        }
+    };
+}
+
+union_providers!(A);
+union_providers!(A, B);
+union_providers!(A, B, C);
+union_providers!(A, B, C, D);
+union_providers!(A, B, C, D, E);
+union_providers!(A, B, C, D, E, F);
+union_providers!(A, B, C, D, E, F, G);
+union_providers!(A, B, C, D, E, F, G, H);
 
 #[cfg(test)]
 mod tests {
@@ -484,6 +601,62 @@ mod tests {
         assert_eq!(
             pollster::block_on(providers.start(&ProviderKey::manual(), &request(Some("x")))),
             Ok(instructions("x"))
+        );
+    }
+
+    /// A spore's provider, answering with its own name.
+    struct Spore;
+
+    impl PaymentProvider for Spore {
+        fn key(&self) -> ProviderKey {
+            ProviderKey::new("spore_test").unwrap()
+        }
+
+        fn check_settings(&self, _: &serde_json::Value) -> Result<(), PaymentError> {
+            Ok(())
+        }
+
+        async fn start(&self, _: &PaymentRequest) -> Result<Started, PaymentError> {
+            Ok(instructions("spore"))
+        }
+    }
+
+    #[test]
+    fn nothing_has_no_providers() {
+        assert_eq!(().keys(), []);
+        assert_eq!(
+            pollster::block_on(().available(&ProviderKey::manual())),
+            Ok(false)
+        );
+        assert_eq!(
+            pollster::block_on(().start(&ProviderKey::manual(), &request(None))),
+            Err(PaymentError::UnknownProvider(ProviderKey::manual()))
+        );
+    }
+
+    #[test]
+    fn a_union_reads_as_one_set() {
+        let spore = Spore.key();
+        let providers = Union(((ManualProvider,), (), Union(((Spore,),))));
+        assert_eq!(providers.keys(), [ProviderKey::manual(), spore.clone()]);
+        assert_eq!(pollster::block_on(providers.available(&spore)), Ok(true));
+        assert_eq!(
+            pollster::block_on(providers.start(&spore, &request(Some("x")))),
+            Ok(instructions("spore"))
+        );
+        assert_eq!(
+            pollster::block_on(providers.start(&ProviderKey::manual(), &request(Some("x")))),
+            Ok(instructions("x"))
+        );
+        assert_eq!(
+            providers.check_settings(&spore, &serde_json::json!({"a": 1})),
+            Ok(())
+        );
+        let stripe = ProviderKey::new("app_stripe").unwrap();
+        assert_eq!(pollster::block_on(providers.available(&stripe)), Ok(false));
+        assert_eq!(
+            pollster::block_on(providers.start(&stripe, &request(None))),
+            Err(PaymentError::UnknownProvider(stripe))
         );
     }
 }

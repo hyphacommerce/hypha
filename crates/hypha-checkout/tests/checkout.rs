@@ -951,6 +951,9 @@ struct Counting<P> {
 }
 
 impl<P: hypha_payments::PaymentProviders> hypha_payments::PaymentProviders for Counting<P> {
+    fn keys(&self) -> Vec<ProviderKey> {
+        self.inner.keys()
+    }
     async fn available(&self, key: &ProviderKey) -> Result<bool, hypha_core::RepoError> {
         self.asked.borrow_mut().push(key.clone());
         self.inner.available(key).await

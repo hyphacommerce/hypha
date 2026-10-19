@@ -101,6 +101,11 @@ where
     P: HasApps + HasExtensionEndpoints + HasExtensionCalls,
     B: PaymentProviders,
 {
+    /// The built-in ones'; apps are found when asked.
+    fn keys(&self) -> Vec<ProviderKey> {
+        self.built_in.keys()
+    }
+
     async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
         match key.app() {
             Some(app) => self.endpoints.answers(&app, PaymentsStart::NAME).await,
