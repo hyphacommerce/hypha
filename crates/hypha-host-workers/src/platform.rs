@@ -18,8 +18,14 @@ use hypha_http::state::Runtime;
 use hypha_store_s3::{HttpRequest, HttpResponse};
 use uuid::Uuid;
 use worker::send::SendFuture;
-use worker::{AbortController, Date, Delay, Fetch, Headers, Request, RequestInit, RequestRedirect};
+use worker::wasm_bindgen::JsCast;
+use worker::wasm_bindgen_futures::JsFuture;
+use worker::{
+    AbortController, AbortSignal, Date, Delay, Env, Fetch, Fetcher, Headers, Request, RequestInit,
+    RequestRedirect, web_sys, worker_sys,
+};
 
+use crate::app_bindings::AppBindings;
 use crate::ids::V7State;
 
 /// Time from JavaScript's `Date.now()` (`SystemTime::now()` panics on this target). Its
@@ -66,12 +72,43 @@ pub fn runtime() -> Runtime {
 
 /// Calls to merchant URLs through `fetch`. Literal private addresses are refused before
 /// (`outbound::prepare`); a Worker's `fetch` can't reach private networks by name
-/// either, except in `wrangler dev`.
-pub fn host_calls() -> HostCalls {
-    HostCalls::new(|call| Box::pin(SendFuture::new(send_call(call))))
+/// either, except in `wrangler dev`. A call to a co-located app's host goes through its
+/// Service Binding instead (`app_bindings`), the same request (URL, headers, signature)
+/// on Cloudflare's network; a binding the Worker lacks falls back to `fetch`.
+pub fn host_calls(env: Env, apps: AppBindings) -> HostCalls {
+    HostCalls::new(move |call| {
+        let via = apps.binding_for(&call.url).and_then(|name| {
+            env.service(name)
+                .inspect_err(|_| {
+                    tracing::warn!(
+                        binding = name,
+                        "outbound call: no such Service Binding; sent by fetch"
+                    )
+                })
+                .ok()
+        });
+        Box::pin(SendFuture::new(send_call(call, via)))
+    })
 }
 
-async fn send_call(call: OutboundCall) -> Result<OutboundAnswer, CallError> {
+/// `request` through `via` (a Service Binding) or the internet, aborted by `signal`.
+async fn fetch(
+    request: Request,
+    signal: &AbortSignal,
+    via: Option<&Fetcher>,
+) -> worker::Result<worker::Response> {
+    let Some(fetcher) = via else {
+        return Fetch::Request(request).send_with_signal(signal).await;
+    };
+    let init = web_sys::RequestInit::new();
+    init.set_signal(Some(&**signal));
+    let fetcher: worker_sys::Fetcher = fetcher.clone().into_rpc();
+    let promise = fetcher.fetch_with_init(request.inner(), &init)?;
+    let response: web_sys::Response = JsFuture::from(promise).await?.dyn_into()?;
+    Ok(response.into())
+}
+
+async fn send_call(call: OutboundCall, via: Option<Fetcher>) -> Result<OutboundAnswer, CallError> {
     let failed = |what: &str| CallError::Failed(what.to_string());
     let method = match call.method {
         Method::Get => worker::Method::Get,
@@ -98,11 +135,10 @@ async fn send_call(call: OutboundCall) -> Result<OutboundAnswer, CallError> {
     let request = Request::new_with_init(&call.url, &init).map_err(|_| failed("invalid URL"))?;
     let controller = AbortController::default();
     let signal = controller.signal();
-    let fetch = Fetch::Request(request);
     let url = call.url.clone();
     let answer = async {
-        let mut response = fetch.send_with_signal(&signal).await.map_err(|e| {
-            tracing::warn!(url, error = %e, "outbound call: unreachable");
+        let mut response = fetch(request, &signal, via.as_ref()).await.map_err(|e| {
+            tracing::warn!(url, binding = via.is_some(), error = %e, "outbound call: unreachable");
             failed("unreachable")
         })?;
         let status = response.status_code();

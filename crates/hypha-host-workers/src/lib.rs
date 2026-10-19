@@ -14,9 +14,10 @@
 //! through `MailQueued`) and on a cron tick that touches the database only when
 //! KV's marks say there's work (W7, `marks`), so an idle serverless database can sleep.
 //!
-//! The portable parts (`ids`, `limiter`, `marks`, `schedule`) build natively, so their
+//! The portable parts (`app_bindings`, `ids`, `limiter`, `marks`, `peer`, `schedule`) build natively, so their
 //! tests run with the workspace's; the rest is Workers only.
 
+pub mod app_bindings;
 pub mod ids;
 pub mod limiter;
 pub mod marks;
@@ -197,6 +198,10 @@ mod worker_main {
             .map_err(|e| format!("HYPHA_SECRET_KEY: {e}"))?;
         // Built now so a missing key (or `smtp`) stops setup.
         let mail_sender = email::email_sender(&config.email, |name| env_string(&env, name))?;
+        // Co-located apps' hosts and their Service Bindings (design note 0029, §9).
+        let app_bindings = crate::app_bindings::AppBindings::parse(
+            &env_string(&env, crate::app_bindings::VAR).unwrap_or_default(),
+        )?;
         let runtime = platform::runtime();
         // One store per deployment (design note 0006, model A), made by setup.
         let stores = crate::storage::store(&env, &runtime.clock)
@@ -267,7 +272,7 @@ mod worker_main {
                 })
             }),
             after_writes: AfterWrites::new(mark_written),
-            calls: platform::host_calls(),
+            calls: platform::host_calls(env.clone(), app_bindings),
             media,
             mail,
             publishable_keys: Default::default(),

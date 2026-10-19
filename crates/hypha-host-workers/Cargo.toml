@@ -9,13 +9,14 @@ description = "Hypha's API on Cloudflare Workers (design note 0026): hypha-http'
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# The portable parts (`ids`, `limiter`, `marks`, `schedule`) build natively, so their tests run with the
+# The portable parts (`app_bindings`, `ids`, `limiter`, `marks`, `peer`, `schedule`) build natively, so their tests run with the
 # workspace's.
 [dependencies]
 hypha-http = { path = "../hypha-http" }
 hypha-core.workspace = true
 hypha-config = { path = "../hypha-config" }
 uuid = { workspace = true }
+url = "2.5"
 
 # The Worker itself: `cargo build --target wasm32-unknown-unknown -p hypha-host-workers`
 # and `worker-build` build it.

@@ -7,6 +7,11 @@
 //!
 //! Not the binding's props, which would need no secret: Cloudflare drops them when the
 //! called Worker has a placement, and the API's is next to its database (W12).
+//!
+//! A co-located app (design note 0029, §9) calls through a binding too, without the key
+//! (apps are untrusted): its calls carry no `CF-Connecting-IP` (Cloudflare sets it on
+//! every request from the internet), and they share one address, as our own Workers'
+//! calls made for no client do, rather than fail for want of one.
 //! Portable, so its tests run natively.
 
 use std::net::{IpAddr, Ipv6Addr};
@@ -42,7 +47,11 @@ pub fn client_address(
                 .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
         )
     } else {
-        connecting_ip?.trim().parse().ok()
+        match connecting_ip {
+            Some(ip) => ip.trim().parse().ok(),
+            // Only a Service Binding's call lacks it: a co-located app's.
+            None => Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+        }
     }
 }
 
@@ -58,7 +67,20 @@ mod tests {
 
     #[test]
     fn from_the_internet_a_forwarded_header_is_ignored() {
-        assert_eq!(client_address(false, None, Some("198.51.100.1")), None);
+        let ip = client_address(false, Some("203.0.113.7"), Some("198.51.100.1"));
+        assert_eq!(ip, "203.0.113.7".parse().ok());
+    }
+
+    #[test]
+    fn a_bound_app_without_the_key_shares_one_address_whatever_it_forwards() {
+        let shared = Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+        assert_eq!(client_address(false, None, Some("198.51.100.1")), shared);
+        assert_eq!(client_address(false, None, None), shared);
+    }
+
+    #[test]
+    fn a_connecting_address_that_isnt_one_is_none() {
+        assert_eq!(client_address(false, Some("garbage"), None), None);
     }
 
     #[test]
