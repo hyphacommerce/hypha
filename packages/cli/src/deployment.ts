@@ -7,6 +7,7 @@ import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { normalizeApps } from "./apps.ts";
+import { type SporeEntry, normalizeSpores } from "./spores.ts";
 
 export const STATE_FILE = "hypha.json";
 export const ENV_FILE = ".env";
@@ -68,6 +69,9 @@ export interface Deployment {
    * a pinned commit, `hypha apps add|update` (apps.ts). In the file, a first-party
    * app's name alone (`"stripe"`) stands for its repository, unpinned until a deploy. */
   apps?: AppEntry[];
+  /** Spores compiled into the API (design note 0030, §9): a first-party name alone
+   * (`"stripe"`), or a crate (`spores.ts`). `hypha spores add|remove`. */
+  spores?: SporeEntry[];
 }
 
 /** An app deployed with the deployment (design note 0029, §9). */
@@ -110,6 +114,7 @@ export async function loadDeployment(dir: string): Promise<Deployment> {
     );
   }
   if (d.apps !== undefined) d.apps = normalizeApps(d.apps, join(dir, STATE_FILE));
+  if (d.spores !== undefined) d.spores = normalizeSpores(d.spores, join(dir, STATE_FILE));
   return d;
 }
 

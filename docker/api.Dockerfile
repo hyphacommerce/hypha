@@ -5,13 +5,26 @@
 # rebuild compiles only what changed.
 
 FROM rust:1.99-trixie AS build
+# Spores (design note 0030, §9), as `hypha deploy` passes them: this repository's own as
+# the host's features (`SPORE_FEATURES=spore-stripe`), or a deployment's host crate
+# (`HOST_CRATE=.hypha-build/<deployment>/host`, written by the CLI) when it has others.
+ARG SPORE_FEATURES=""
+ARG HOST_CRATE=""
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p hypha-host-axum \
-    && cp target/release/hypha-host-axum /hypha-api
+    if [ -n "$HOST_CRATE" ]; then \
+        # Not --locked: its lock is the checkout's, plus the deployment's own spores.
+        CARGO_TARGET_DIR=/src/target cargo build --release \
+            --manifest-path "$HOST_CRATE/Cargo.toml" \
+        && cp target/release/hypha-deployment /hypha-api; \
+    else \
+        cargo build --release --locked -p hypha-host-axum \
+            ${SPORE_FEATURES:+--features "$SPORE_FEATURES"} \
+        && cp target/release/hypha-host-axum /hypha-api; \
+    fi
 
 FROM debian:trixie-slim
 # The OS trust store: Postgres with `sslmode=require` and HTTPS calls (S3, webhooks)

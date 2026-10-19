@@ -8,18 +8,36 @@ import { join } from "node:path";
 import { type AppEntry, imageTag, service } from "./apps.ts";
 import type { App, Deployment } from "./deployment.ts";
 import { type Machine, pipe, run } from "./shell.ts";
+import { type SporeEntry, sporeFeatures } from "./spores.ts";
 import { REPO } from "./templates.ts";
 
 /** An image: its Dockerfile and build context (absolute paths). */
-export type Image = { name: string; tag: string; dockerfile: string; context: string; app?: App };
+export type Image = {
+  name: string;
+  tag: string;
+  dockerfile: string;
+  context: string;
+  app?: App;
+  /** More `--build-arg`s (`SPORE_FEATURES=…`, `HOST_CRATE=…`). */
+  args?: string[];
+};
 
-export function images(apps: App[]): Image[] {
+/** The images: the API, built with the deployment's spores (design note 0030, §9: its
+ * first-party ones as features, or `hostCrate`, its own host crate, when it has others),
+ * and the apps. */
+export function images(apps: App[], spores: SporeEntry[] = [], hostCrate?: string): Image[] {
+  const features = sporeFeatures(spores);
   return [
     {
       name: "api",
       tag: "hypha-api:current",
       dockerfile: join(REPO, "docker/api.Dockerfile"),
       context: REPO,
+      args: hostCrate
+        ? [`HOST_CRATE=${hostCrate}`]
+        : features
+          ? [`SPORE_FEATURES=${features}`]
+          : [],
     },
     ...apps.map((app) => ({
       name: app,
@@ -50,6 +68,7 @@ export function buildArgs(image: Image): string[] {
     "-t",
     image.tag,
     ...(image.app ? ["--build-arg", `APP=${image.app}`] : []),
+    ...(image.args ?? []).flatMap((arg) => ["--build-arg", arg]),
     image.context,
   ];
 }

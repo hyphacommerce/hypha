@@ -3,6 +3,8 @@
 /.dev-secret-key
 # Deployments `pnpm hypha init` writes: they hold secrets.
 /hypha-deploy*/
+# Deployments' own host crates (`hypha deploy` with spores from outside, design note 0030).
+/.hypha-build/
 # TypeScript apps and packages (design note 0011)
 node_modules/
 dist/

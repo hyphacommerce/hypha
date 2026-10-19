@@ -39,6 +39,7 @@ import {
 } from "../deployment.ts";
 import { appImage, build, images } from "../images.ts";
 import { CommandFailed, type Machine, run } from "../shell.ts";
+import { needsHostCrate, writeHostCrate } from "../spores.ts";
 import { appsCaddy } from "../templates.ts";
 import { ensureEncryptionKeys, offerInstalls, pinUnpinned } from "./apps.ts";
 import { connectStorefront, syncWebhook } from "../storefront.ts";
@@ -157,7 +158,11 @@ export const deploy = defineCommand({
       }
 
       if (!args["skip-build"]) {
-        for (const image of images(apps(d))) {
+        // Spores from outside this repository need a host crate of the deployment's own
+        // (design note 0030, §9); this repository's are the host's features.
+        const spores = d.spores ?? [];
+        const hostCrate = needsHostCrate(spores) ? await writeHostCrate(dir, spores) : undefined;
+        for (const image of images(apps(d), spores, hostCrate)) {
           p.log.step(
             `Building ${image.tag}${machine.ssh ? (d.buildOn === "server" ? " on the server" : " here") : ""}…`,
           );

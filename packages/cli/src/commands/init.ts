@@ -45,6 +45,7 @@ import {
   type SmtpTls,
 } from "../templates.ts";
 import { ensureEncryptionKeys } from "./apps.ts";
+import { type SporeEntry, normalizeSpores } from "../spores.ts";
 import { ask, dirArg, guarded, setUnattended } from "./shared.ts";
 import { obtainToken } from "./token.ts";
 
@@ -191,6 +192,11 @@ export const init = defineCommand({
       description:
         "Apps deployed alongside, comma-separated: stripe, meilisearch (none for none; more with `hypha apps add`)",
     },
+    spores: {
+      type: "string",
+      description:
+        "Spores compiled into the API, comma-separated: stripe (none for none; more with `hypha spores add`)",
+    },
     yes: { type: "boolean", alias: "y", description: "Don't ask: defaults for what isn't given" },
     force: {
       type: "boolean",
@@ -322,6 +328,8 @@ export const init = defineCommand({
       };
       const chosenApps = await askApps(args, d, earlierState?.apps);
       if (chosenApps) d.apps = chosenApps;
+      const chosenSpores = chooseSpores(args, earlierState?.spores);
+      if (chosenSpores) d.spores = chosenSpores;
       const env = setEmailSecret(newEnv(d, { email, storeName }), emailSettings);
       // Written again (new domains, say): the server's data was made with these, so they
       // stay, and so do the owner and the storefront's keys.
@@ -407,6 +415,7 @@ type CloudflareArgs = {
   "r2-secret-access-key"?: string;
   media?: boolean;
   apps?: string;
+  spores?: string;
 } & EmailArgs;
 
 /**
@@ -545,6 +554,8 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     : earlierState?.apps?.map(({ d1Id: _d1, deployed: _deployed, ...rest }) => rest);
   const chosenApps = await askApps(args, d, keptApps);
   if (chosenApps) d.apps = chosenApps;
+  const chosenSpores = chooseSpores(args, earlierState?.spores);
+  if (chosenSpores) d.spores = chosenSpores;
   const env = setEmailSecret(
     newCloudflareEnv({ email, storeName }, databaseUrl, {
       token,
@@ -737,6 +748,22 @@ function emailLine(email: EmailSettings): string {
     case "smtp":
       return `SMTP ${email.host}:${email.port}, from ${email.from}`;
   }
+}
+
+/** The spores to compile into the API (design note 0030, §9): `--spores` (`none` for
+ * none), else the earlier list with `--force`, else none. Not asked: `hypha spores add`
+ * adds one later. */
+export function chooseSpores(
+  args: { spores?: string },
+  earlier: SporeEntry[] | undefined,
+): SporeEntry[] | undefined {
+  if (args.spores === undefined) return earlier;
+  if (args.spores.trim() === "none") return undefined;
+  const names = args.spores
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return normalizeSpores(names, "--spores");
 }
 
 /** The co-located apps in the summary. */

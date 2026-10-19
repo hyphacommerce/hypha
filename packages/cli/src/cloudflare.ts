@@ -50,6 +50,7 @@ import {
 } from "./apps.ts";
 import { connectStorefront, type StorefrontKeys, syncWebhook } from "./storefront.ts";
 import { run } from "./shell.ts";
+import { needsHostCrate, sporeFeatures } from "./spores.ts";
 import { REPO } from "./templates.ts";
 
 /** The generated configuration, next to `hypha.json`. */
@@ -178,7 +179,8 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
     `routes = [{ pattern = ${str(d.domains.api)}, custom_domain = true }]`,
     "",
     "[build]",
-    'command = "worker-build --release"',
+    // This repository's spores are the Worker's features (design note 0030, §9).
+    `command = ${str(`worker-build --release${workerFeatures(d)}`)}`,
     // Absolute: wrangler runs the build from its own working directory, reading `cwd`
     // as given (unlike `main`, which is relative to this file).
     `cwd = ${str(WORKER_CRATE)}`,
@@ -331,6 +333,10 @@ export async function deployCloudflare(
   if (!databaseUrl || problem) throw new Error(`.env: DATABASE_URL should be ${problem}`);
   const secretKey = env.get("HYPHA_SECRET_KEY");
   if (!secretKey) throw new Error(".env: HYPHA_SECRET_KEY is missing");
+  if (needsHostCrate(d.spores ?? []))
+    throw new Error(
+      "hypha.json: spores from outside this repository aren't built for Cloudflare yet (a Worker crate of the deployment's own): deploy them to a server, or list only this repository's",
+    );
   const keyId = env.get("R2_ACCESS_KEY_ID");
   const keySecret = env.get("R2_SECRET_ACCESS_KEY");
   const media = Boolean(keyId && keySecret);
@@ -770,6 +776,12 @@ function pick(env: EnvFile, keys: string[]): Record<string, string> {
   return out;
 }
 
+/** ` --features spore-stripe,…` for `worker-build`: the Worker's first-party spores. */
+export function workerFeatures(d: Deployment): string {
+  const features = sporeFeatures(d.spores ?? []);
+  return features ? ` --features ${features}` : "";
+}
+
 /** The tools on this machine: wrangler (logged in, or `CLOUDFLARE_API_TOKEN`), cargo,
  * and `worker-build` with the wasm target. */
 export function hereTools(dir: string, d: Deployment, env: EnvFile): Tools {
@@ -787,7 +799,10 @@ export function hereTools(dir: string, d: Deployment, env: EnvFile): Tools {
       return run("wrangler", args, { capture, cwd: REPO, env: auth() });
     },
     async buildHost() {
-      await run("cargo", ["build", "--release", "-p", "hypha-host-axum"], {
+      // Built with the deployment's spores: `setup` migrates and registers them.
+      const features = sporeFeatures(d.spores ?? []);
+      const featureArgs = features ? ["--features", features] : [];
+      await run("cargo", ["build", "--release", "-p", "hypha-host-axum", ...featureArgs], {
         cwd: REPO,
         capture: true,
       });
