@@ -53,6 +53,8 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
         return_url: return_url.map(str::to_string),
         instructions: payment.instructions().map(str::to_string),
         settings,
+        // The host fills a spore provider's (design note 0030, §8).
+        store_settings: serde_json::Map::new(),
     };
     let started = providers.start(payment.provider(), &request).await?;
     if started.reference.is_some() {

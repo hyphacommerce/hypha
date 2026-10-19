@@ -34,7 +34,7 @@ pub struct HostPayments<'a, P, B> {
 
 impl<P, B> HostPayments<'_, P, B>
 where
-    P: HasApps + HasExtensionEndpoints + HasExtensionCalls,
+    P: HasApps + HasExtensionEndpoints + HasExtensionCalls + hypha_apps::HasSporeSettings,
 {
     /// Whether `key` is a spore's provider whose spore staff have disabled (design note
     /// 0030, §3): it then reports unavailable and collects nothing, as a disabled app's.
@@ -46,14 +46,29 @@ where
         Ok(!hypha_apps::spore_enabled(self.ports.apps(), key.as_str()).await?)
     }
 
-    /// `spore_disabled` for start and act, as a provider failure when it can't tell.
-    async fn spore_off(&self, key: &ProviderKey) -> Result<bool, PaymentError> {
-        self.spore_disabled(key)
+    /// A spore provider's store settings (design note 0030, §8): its spore's, secret
+    /// fields opened, for the provider (`PaymentRequest::store_settings`); empty before
+    /// the merchant saves any. `None` while the spore is off or not set up (it then
+    /// collects nothing, as a disabled app).
+    async fn spore_settings(
+        &self,
+        key: &ProviderKey,
+    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, PaymentError> {
+        let failed = |reason: String| PaymentError::ProviderFailed {
+            provider: key.clone(),
+            reason,
+        };
+        let spore = hypha_apps::spore_of(self.ports.apps(), key.as_str())
             .await
-            .map_err(|e| PaymentError::ProviderFailed {
-                provider: key.clone(),
-                reason: e.to_string(),
-            })
+            .map_err(|e| failed(e.to_string()))?;
+        let Some(spore) = spore.filter(|app| app.enabled()) else {
+            return Ok(None);
+        };
+        let settings =
+            hypha_apps::read_spore_settings(self.ports, self.env.secret_box(), spore.key())
+                .await
+                .map_err(|e| failed(e.to_string()))?;
+        Ok(Some(settings.unwrap_or_default()))
     }
 
     /// Where `app` answers `point`, when it's installed, enabled and does.
@@ -118,7 +133,7 @@ where
 
 impl<P, B> PaymentProviders for HostPayments<'_, P, B>
 where
-    P: HasApps + HasExtensionEndpoints + HasExtensionCalls,
+    P: HasApps + HasExtensionEndpoints + HasExtensionCalls + hypha_apps::HasSporeSettings,
     B: PaymentProviders,
 {
     /// The built-in ones'; apps are found when asked.
@@ -152,10 +167,17 @@ where
         payment: &PaymentRequest,
     ) -> Result<Started, PaymentError> {
         let Some(app) = key.app() else {
-            if self.spore_off(key).await? {
-                return Err(PaymentError::UnknownProvider(key.clone()));
+            if key.is_manual() {
+                return self.built_in.start(key, payment).await;
             }
-            return self.built_in.start(key, payment).await;
+            let Some(settings) = self.spore_settings(key).await? else {
+                return Err(PaymentError::UnknownProvider(key.clone()));
+            };
+            let request = PaymentRequest {
+                store_settings: settings,
+                ..payment.clone()
+            };
+            return self.built_in.start(key, &request).await;
         };
         let endpoint = self
             .endpoint(key, &app, PaymentsStart::NAME)
@@ -213,13 +235,20 @@ where
         request: &ActionRequest,
     ) -> Result<ActionAnswer, PaymentError> {
         let Some(app) = key.app() else {
-            if self.spore_off(key).await? {
+            if key.is_manual() {
+                return self.built_in.act(key, request).await;
+            }
+            let Some(settings) = self.spore_settings(key).await? else {
                 return Err(PaymentError::ActionUnsupported {
                     provider: key.clone(),
                     action: request.action,
                 });
-            }
-            return self.built_in.act(key, request).await;
+            };
+            let request = ActionRequest {
+                store_settings: settings,
+                ..request.clone()
+            };
+            return self.built_in.act(key, &request).await;
         };
         match request.action {
             PaymentAction::Capture => self.act_at::<PaymentsCapture>(key, &app, request).await,

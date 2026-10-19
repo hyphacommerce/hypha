@@ -255,8 +255,8 @@ function MethodDialog({
   const [kind, setKind] = useState<Kind>({ preset: PAYMENT_PRESETS[0] });
   const kindName = kind.app ? kind.app.name : kind.preset.name;
   const kindValue = kind.app ? `app:${kind.app.key}` : kind.preset.value;
-  // An app's method collects the money itself: no instructions to show the shopper.
-  const isApp = method ? method.provider.startsWith("app_") : Boolean(kind.app);
+  // An app's or spore's method collects the money itself: no instructions to show.
+  const isApp = method ? method.provider !== "manual" : Boolean(kind.app);
   const [form, setForm] = useState<MethodInput>({
     name: method?.name ?? PAYMENT_PRESETS[0].name,
     instructions: method?.instructions ?? "",
@@ -299,7 +299,7 @@ function MethodDialog({
           method
             ? "Orders already placed keep the name and instructions they were placed with."
             : kind.app
-              ? `The shopper pays at checkout through ${kind.app.name}; the app reports the payment.`
+              ? `The shopper pays at checkout through ${kind.app.name}, which reports the payment.`
               : "A manual method: the shopper pays you directly, and you mark the order paid."
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
@@ -320,7 +320,9 @@ function MethodDialog({
                 ...paymentApps.map((app) => ({
                   value: `app:${app.key}`,
                   label: app.name,
-                  description: `Taken by the ${app.name} app: the shopper pays at checkout.`,
+                  description: app.isBuiltIn
+                    ? `${app.name}, built into the API: the shopper pays at checkout.`
+                    : `Taken by the ${app.name} app: the shopper pays at checkout.`,
                 })),
               ]}
               value={kindValue}

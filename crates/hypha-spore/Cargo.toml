@@ -19,6 +19,8 @@ hypha-order-actions = { path = "../hypha-order-actions" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
 hypha-http = { path = "../hypha-http", optional = true }
 hypha-testkit = { path = "../hypha-testkit", optional = true }
+# Logging, through the host's subscriber: `hypha_spore::tracing::warn!(…)`.
+tracing = "0.1"
 
 [features]
 # The storage kit: `hypha_spore::postgres`.

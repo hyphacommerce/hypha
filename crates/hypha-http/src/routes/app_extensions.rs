@@ -385,7 +385,7 @@ async fn add_spores<S: Storage>(
                     label: a.label.to_string(),
                     target: admin_target(a.target)?,
                     input_schema: a.input_schema.clone(),
-                    point: None,
+                    point: a.point.map(str::to_string),
                 })
             })
             .collect::<Result<_, ApiError>>()?;
@@ -457,17 +457,28 @@ async fn spore_ui<S: Storage>(
                 .blocks
                 .into_iter()
                 .find(|b| b.id == id && b.target.takes_blocks())
-                .map(|b| b.target),
+                .map(|b| (b.target, None)),
             SporeUiKind::Action => c
                 .actions
                 .into_iter()
                 .find(|a| a.id == id && a.target.takes_actions())
-                .map(|a| a.target),
+                .map(|a| (a.target, a.point)),
         })
         .ok_or_else(|| hypha_apps::CommandError::ExtensionNotFound {
             app: app.key().clone(),
             id: id.to_string(),
         })?;
+    let (target, point) = target;
+    // An action standing for a payment point runs through the payment's route, as an
+    // app's does.
+    if let Some(point) = point {
+        return Err(hypha_apps::CommandError::ActionHasPoint {
+            app: app.key().clone(),
+            id: id.to_string(),
+            point: point.to_string(),
+        }
+        .into());
+    }
     may_use_on(ctx, &app, target, context)?;
     let acting = spore_ctx(ctx, &app);
     Ok((app, target, acting))
@@ -615,16 +626,19 @@ pub struct StorefrontExtensionsResponse {
 pub async fn list_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
+    issuer: crate::routes::oauth::Issuer,
     query: Query<StorefrontTargetQuery>,
 ) -> Result<Json<StorefrontExtensionsResponse>, ApiError> {
     use hypha_apps::HasApps;
     let (ports, ctx) = caller.authenticate(&state).await?;
     let q = query.parse()?;
-    let found = storefront_contributions(&ctx, ports.apps(), q.target.map(Into::into)).await?;
+    let target = q.target.map(Into::into);
+    let found = storefront_contributions(&ctx, ports.apps(), target).await?;
     let mut response = StorefrontExtensionsResponse {
         elements: Vec::new(),
         proxies: Vec::new(),
     };
+    add_spore_elements(&state, &ports, target, &issuer.0, &mut response).await?;
     for c in found {
         let key = c.app.key().to_string();
         for (e, t) in c.elements {
@@ -641,6 +655,48 @@ pub async fn list_storefront<S: Storage>(
         }
     }
     Ok(Json(response))
+}
+
+/// What enabled spores add to storefronts (design note 0030, §7): their elements for
+/// `target`, each module served by one of the spore's own storefront routes at the API's
+/// public address (`base`, as the OAuth issuer is found).
+async fn add_spore_elements<S: Storage>(
+    state: &AppState<S>,
+    ports: &S::Ports<'_>,
+    target: Option<Target>,
+    base: &str,
+    response: &mut StorefrontExtensionsResponse,
+) -> Result<(), ApiError> {
+    use hypha_apps::HasApps;
+    use hypha_spore_core::SporeRuntime;
+    let spores = state.storage.spores();
+    for c in SporeRuntime::<S::Ports<'static>>::contributions(spores) {
+        let wanted: Vec<_> = c
+            .elements
+            .iter()
+            .filter(|e| target.is_none_or(|t| t == e.target))
+            .collect();
+        if wanted.is_empty() {
+            continue;
+        }
+        let key = AppKey::of_spore(c.name).map_err(ApiError::internal)?;
+        let enabled = hypha_apps::spore_enabled(ports.apps(), key.as_str())
+            .await
+            .map_err(ApiError::internal)?;
+        if !enabled {
+            continue;
+        }
+        for e in wanted {
+            response.elements.push(ElementExtension {
+                app: key.to_string(),
+                id: e.id.to_string(),
+                target: storefront_target(e.target)?,
+                tag: e.tag.to_string(),
+                module: format!("{}{}", base.trim_end_matches('/'), e.path),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The origins an app's embedded pages may be framed by.

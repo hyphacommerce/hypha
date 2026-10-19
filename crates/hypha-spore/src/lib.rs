@@ -24,6 +24,10 @@
 
 pub use hypha_spore_core::{Spore, SporeEnv, SporeError, SporeUi};
 
+/// Logging (`hypha_spore::tracing::warn!(…)`): through the host's subscriber, natively
+/// and on Workers.
+pub use tracing;
+
 /// Building a spore: its environment and what it can fail with.
 pub mod env {
     pub use hypha_spore_core::{SettingsError, SporeEnv, SporeError};
@@ -33,7 +37,9 @@ pub mod env {
 /// answer capped, no redirects followed, the operator's address policy applied
 /// (`outbound.allow_private`).
 pub mod client {
-    pub use hypha_spore_core::{HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse};
+    pub use hypha_spore_core::{
+        BoxFuture, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse,
+    };
 }
 
 /// What a spore adds to admins (design note 0030, §7): blocks (format v1 trees) and
@@ -41,7 +47,7 @@ pub mod client {
 /// to `Spore`; `impl<P> SporeUi<P> for MySpore {}` for none).
 pub mod ui {
     pub use hypha_apps::{ExtensionContext, Target};
-    pub use hypha_spore_core::{SporeUi, UiAction, UiAnswer, UiBlock, UiCall, UiError};
+    pub use hypha_spore_core::{SporeUi, UiAction, UiAnswer, UiBlock, UiCall, UiElement, UiError};
 }
 
 /// A spore's settings (design note 0030, §8): the problems its `check_settings`
@@ -54,8 +60,9 @@ pub mod settings {
 /// Hypha's shared types and generic ports: no domain logic.
 pub mod core {
     pub use hypha_core::{
-        Actor, AppId, AppKey, AuthError, CartId, Clock, Ctx, Currency, CustomerId, ErrorCode,
-        EventHandler, EventId, FulfillmentId, IdGenerator, Money, MoneyError, OrderId, OrderLineId,
+        ActingAs, Actor, AppId, AppKey, AuthError, CartId, ChannelId, Clock, CountryCode, Ctx,
+        Currency, CustomerId, Email, ErrorCode, Event, EventHandler, EventId, FulfillmentId,
+        IdGenerator, IdempotencyRequest, MarketId, Money, MoneyError, OrderId, OrderLineId,
         PaymentId, PaymentMethodId, ProductId, Random, RepoError, Scope, SealError, Sealed,
         SecretBox, StoredEvent, Timestamp, VariantId,
     };
@@ -81,7 +88,8 @@ pub mod payments {
 /// Orders: reading them.
 pub mod orders {
     pub use hypha_orders::{
-        FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderLine, OrderRepo, get_order,
+        FinancialStatus, FulfillmentStatus, HasOrders, Order, OrderCancelled, OrderLine, OrderRepo,
+        get_order,
     };
 }
 
@@ -106,6 +114,9 @@ pub mod postgres {
 /// `Ctx`.
 #[cfg(feature = "http")]
 pub mod http {
+    /// The web framework handlers are written with (extractors such as the raw body and
+    /// headers a provider's webhook verifies), at the version the host uses.
+    pub use hypha_http::__private::axum;
     /// For `#[utoipa::path]` and `#[derive(utoipa::ToSchema)]` on a spore's handlers and
     /// DTOs (`use hypha_spore::http::utoipa;`), which the host's `openapi` command reads.
     pub use hypha_http::__private::utoipa;
@@ -121,5 +132,21 @@ pub mod http {
 #[cfg(feature = "testing")]
 pub mod testing {
     pub use hypha_spore_core::env::testing::host;
+    pub use hypha_spore_core::{SporeHost, SporeHttp};
     pub use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds, TestEnv};
+
+    use hypha_spore_core::SporeEnv;
+
+    /// The spore `name`'s environment on the test host, with no configuration; its HTTP
+    /// answers 204 to everything.
+    pub fn env(name: &'static str) -> SporeEnv {
+        host().env(name, Default::default())
+    }
+
+    /// The same with its HTTP answered by `http` (a fake of the service it calls).
+    pub fn env_with_http(name: &'static str, http: SporeHttp) -> SporeEnv {
+        let mut host = host();
+        host.http = http;
+        host.env(name, Default::default())
+    }
 }

@@ -1813,6 +1813,27 @@ export interface paths {
         patch: operations["admin.payments.update"];
         trace?: never;
     };
+    "/admin/payment-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The providers a payment method may name now: `manual`, each enabled spore's (design
+         *     note 0030), and each installed, enabled app answering `payments.start`. What an
+         *     admin offers when creating a method.
+         */
+        get: operations["admin.payments.list_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/payments/{id}": {
         parameters: {
             query?: never;
@@ -4509,6 +4530,24 @@ export interface components {
             settings: Record<string, never>;
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
+        };
+        /**
+         * @description Who a payment provider is.
+         *
+         *     Known values: `manual`, `spore`, `app`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PaymentProviderKind: string;
+        PaymentProviderListResponse: {
+            /** @description `manual` first, then the spores' providers, then the apps', by key. */
+            items: components["schemas"]["PaymentProviderResponse"][];
+        };
+        PaymentProviderResponse: {
+            /** @description What a payment method names as its `provider`. */
+            key: string;
+            kind: components["schemas"]["PaymentProviderKind"];
+            /** @description The app's or spore's name; "Manual" for `manual`. */
+            name: string;
         };
         /** @description A payment as the admin sees it on an order, and alone (`GET /admin/payments/{id}`). */
         PaymentResponse: {
@@ -16792,6 +16831,53 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.payments.list_providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentProviderListResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

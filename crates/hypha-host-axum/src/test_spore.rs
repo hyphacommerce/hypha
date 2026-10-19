@@ -165,6 +165,7 @@ impl<P: HasProducts> SporeUi<P> for TestSpore {
             target: Target::ProductDetails,
             label: "Greet",
             input_schema: None,
+            point: None,
         }]
     }
 

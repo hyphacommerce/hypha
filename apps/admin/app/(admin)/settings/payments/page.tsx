@@ -61,23 +61,14 @@ export default async function PaymentsSettingsPage() {
 }
 
 /**
- * The installed, enabled apps a method can name as its provider: those whose
- * registrations include `payments.start`. Without `apps:read` there are none to offer;
- * the manual kinds still are.
+ * What a method can name as its provider besides the manual kinds: the API's list
+ * (`GET /admin/payment-providers`), the enabled spores built into it (Stripe) and the
+ * installed, enabled apps answering `payments.start`. Without `payments:read` there are
+ * none to offer; the manual kinds still are.
  */
 async function loadPaymentApps(client: Awaited<ReturnType<typeof sessionClient>>) {
-  const { data } = await client.GET("/admin/apps");
-  const candidates = (data?.items ?? []).filter((app) => app.enabled && app.installed);
-  const registered = await Promise.all(
-    candidates.map(async (app): Promise<PaymentApp | null> => {
-      const { data: points } = await client.GET("/admin/apps/{key}/extension-points", {
-        params: { path: { key: app.key } },
-      });
-      const takesPayments = (points?.extension_points ?? []).some(
-        (p) => p.point === "payments.start",
-      );
-      return takesPayments ? { key: app.key, name: app.name } : null;
-    }),
-  );
-  return registered.filter((app) => app !== null);
+  const { data } = await client.GET("/admin/payment-providers");
+  return (data?.items ?? [])
+    .filter((p) => p.kind !== "manual")
+    .map((p): PaymentApp => ({ key: p.key, name: p.name, isBuiltIn: p.kind === "spore" }));
 }

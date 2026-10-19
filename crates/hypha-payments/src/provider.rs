@@ -110,6 +110,11 @@ pub struct PaymentRequest {
     pub instructions: Option<String>,
     /// The method's provider settings.
     pub settings: serde_json::Value,
+    /// The provider's store-wide settings, filled by the host for a spore's provider
+    /// (design note 0030, §8: what the merchant saved for the spore, secret fields
+    /// opened, such as Stripe's secret key); empty for `manual` and for apps, which keep
+    /// their own. In memory only, for the provider: never stored or logged.
+    pub store_settings: serde_json::Map<String, serde_json::Value>,
 }
 
 /// What a provider answered to a start: what the shopper does next, and its own ID for
@@ -175,6 +180,9 @@ pub struct ActionRequest {
     pub reference: Option<String>,
     /// The same for every retry of this action, so a provider does it once.
     pub idempotency_key: String,
+    /// As `PaymentRequest::store_settings`: a spore provider's settings, filled by the
+    /// host; empty otherwise.
+    pub store_settings: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Whether the provider took the action. Accepted isn't done: the payment moves when
@@ -581,6 +589,7 @@ mod tests {
             return_url: None,
             instructions: instructions.map(str::to_string),
             settings: serde_json::json!({}),
+            store_settings: serde_json::Map::new(),
         }
     }
 
@@ -612,6 +621,7 @@ mod tests {
             amount: None,
             reference: None,
             idempotency_key: "k".to_string(),
+            store_settings: serde_json::Map::new(),
         };
         assert_eq!(
             pollster::block_on(ManualProvider.act(&action)),

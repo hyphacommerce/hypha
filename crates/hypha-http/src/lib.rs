@@ -37,6 +37,7 @@ pub mod webhooks;
 /// dependency of its own on them.
 #[doc(hidden)]
 pub mod __private {
+    pub use axum;
     pub use axum::Router;
     pub use axum::extract::{Request, State};
     pub use hypha_spore_core::Spore;

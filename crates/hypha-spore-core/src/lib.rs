@@ -18,7 +18,9 @@ use hypha_store_postgres::MigrationSet;
 pub mod env;
 pub mod ui;
 
-pub use ui::{SporeContributions, SporeUi, UiAction, UiAnswer, UiBlock, UiCall, UiError};
+pub use ui::{
+    SporeContributions, SporeUi, UiAction, UiAnswer, UiBlock, UiCall, UiElement, UiError,
+};
 
 pub use env::{
     BoxFuture, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, SettingsError,
@@ -183,6 +185,7 @@ macro_rules! tuple_runtime {
                     title: $s::title(),
                     blocks: <$s as SporeUi<P>>::blocks(),
                     actions: <$s as SporeUi<P>>::actions(),
+                    elements: <$s as SporeUi<P>>::elements(),
                 }),+]
             }
 

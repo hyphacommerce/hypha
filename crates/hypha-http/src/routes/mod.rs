@@ -164,6 +164,7 @@ macro_rules! route_table {
             [admin, POST, "/admin/orders/{id}/paid", orders::mark_paid],
             [admin, POST, "/admin/orders/{id}/cancel", orders::cancel],
             // payment methods (design note 0027)
+            [admin, GET, "/admin/payment-providers", payments::list_providers],
             [admin, GET, "/admin/payment-methods", payments::list],
             [admin, POST, "/admin/payment-methods", payments::create],
             [admin, GET, "/admin/payment-methods/{id}", payments::fetch],

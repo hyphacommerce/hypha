@@ -93,6 +93,97 @@ pub async fn list<S: Storage>(
     }))
 }
 
+/// Who a payment provider is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[schema(as = PaymentProviderKind)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKindDto {
+    /// Built in: staff record the money (`manual`).
+    Manual,
+    /// A spore built into the API (design note 0030).
+    Spore,
+    /// An installed app answering `payments.start` (design note 0029, §3.1).
+    App,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct PaymentProviderResponse {
+    /// What a payment method names as its `provider`.
+    key: String,
+    /// The app's or spore's name; "Manual" for `manual`.
+    name: String,
+    kind: ProviderKindDto,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct PaymentProviderListResponse {
+    /// `manual` first, then the spores' providers, then the apps', by key.
+    items: Vec<PaymentProviderResponse>,
+}
+
+/// The providers a payment method may name now: `manual`, each enabled spore's (design
+/// note 0030), and each installed, enabled app answering `payments.start`. What an
+/// admin offers when creating a method.
+#[utoipa::path(
+    get,
+    path = "/admin/payment-providers",
+    responses((status = 200, description = "OK", body = PaymentProviderListResponse)),
+    extensions(("x-hypha-scopes" = json!(["payments:read"]))),
+)]
+pub async fn list_providers<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<PaymentProviderListResponse>, ApiError> {
+    use hypha_apps::{AppRepo, HasApps};
+    use hypha_core::{AppKind, AppPoints};
+    use hypha_extensions::ExtensionPoint;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    ctx.require(hypha_core::Scope::PaymentsRead)
+        .map_err(hypha_payments::CommandError::from)?;
+    let mut items = Vec::new();
+    let mut spores = Vec::new();
+    for key in hypha_payments::PaymentProviders::keys(state.storage.payment_providers()) {
+        if key.is_manual() {
+            items.push(PaymentProviderResponse {
+                key: key.to_string(),
+                name: "Manual".to_string(),
+                kind: ProviderKindDto::Manual,
+            });
+            continue;
+        }
+        let spore = hypha_apps::spore_of(ports.apps(), key.as_str())
+            .await
+            .map_err(ApiError::internal)?;
+        if let Some(spore) = spore.filter(|app| app.enabled()) {
+            spores.push(PaymentProviderResponse {
+                key: key.to_string(),
+                name: spore.name().to_string(),
+                kind: ProviderKindDto::Spore,
+            });
+        }
+    }
+    spores.sort_by(|a, b| a.key.cmp(&b.key));
+    items.extend(spores);
+    let endpoints = state.app_endpoints(&ports);
+    for app in ports.apps().list().await.map_err(ApiError::internal)? {
+        if app.kind() != AppKind::App || !app.enabled() {
+            continue;
+        }
+        let answers = endpoints
+            .answers(app.key(), hypha_extensions::PaymentsStart::NAME)
+            .await
+            .map_err(ApiError::internal)?;
+        if answers {
+            items.push(PaymentProviderResponse {
+                key: app.key().to_string(),
+                name: app.name().to_string(),
+                kind: ProviderKindDto::App,
+            });
+        }
+    }
+    Ok(Json(PaymentProviderListResponse { items }))
+}
+
 fn default_true() -> bool {
     true
 }

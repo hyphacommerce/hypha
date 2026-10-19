@@ -188,6 +188,20 @@ impl SporeEnv {
         self.name
     }
 
+    /// Its app's ID (design note 0030, §3), what it acts as (`Actor::App`) when it calls
+    /// commands itself, outside a request a caller made (a provider's webhook): `None`
+    /// before the host registered it.
+    pub async fn app_id<P: hypha_apps::HasApps + ?Sized>(
+        &self,
+        ports: &P,
+    ) -> Result<Option<hypha_core::AppId>, hypha_core::RepoError> {
+        use hypha_apps::AppRepo;
+        let Ok(key) = AppKey::of_spore(self.name) else {
+            return Ok(None);
+        };
+        Ok(ports.apps().get(&key).await?.map(|app| app.id()))
+    }
+
     /// Its section of `hypha.config.toml`, `[spores.<name>]`, as written: operator
     /// settings (an API base for tests, a timeout), never the merchant's (those are its
     /// settings, design note 0030, §8) and never secrets.

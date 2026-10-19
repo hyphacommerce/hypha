@@ -39,12 +39,18 @@ export const PAYMENT_PRESETS: PaymentPreset[] = [
 
 /** An installed app that takes payments: it registers `payments.start` (design note
  * 0029, §3.1), so a method can name it as its provider. */
-export type PaymentApp = { key: string; name: string };
+/** A provider a method can name besides `manual`: an app's, or a built-in spore's. */
+export type PaymentApp = { key: string; name: string; isBuiltIn: boolean };
 
-/** What a provider key reads as: "Manual", or the app's name from its key (`app_stripe`). */
+/**
+ * What a provider key reads as: "Manual", or the app's or spore's name from its key
+ * (`app_stripe`, `spore_stripe`).
+ */
 export function providerLabel(provider: string): string {
   if (provider === "manual") return "Manual";
-  return provider.startsWith("app_") ? provider.slice("app_".length) : provider;
+  for (const prefix of ["app_", "spore_"])
+    if (provider.startsWith(prefix)) return provider.slice(prefix.length);
+  return provider;
 }
 
 /**

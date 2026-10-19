@@ -25,6 +25,26 @@ pub struct UiAction {
     pub label: &'static str,
     /// A JSON Schema for a form shown before running it, when it takes input.
     pub input_schema: Option<Value>,
+    /// The payment point it stands for (`payments.capture`, `.void`, `.refund`), as an
+    /// app's manifest names one: admins run it through the payment's own route
+    /// (`POST /admin/payments/{id}/capture`), which reaches the spore's provider, and
+    /// show it only when the payment's status allows. `None` for an action the spore
+    /// runs itself (`SporeUi::action`).
+    pub point: Option<&'static str>,
+}
+
+/// A web component a spore adds to storefronts (design note 0030, §7; 0029, §7): its
+/// tag, the storefront target it's for (`checkout.payment` for a payment widget), and
+/// the path of the spore's own storefront route that serves its ES module
+/// (`/storefront/spores/stripe/elements/payment.js`), which storefronts load from the
+/// API's public address. The route must answer `Access-Control-Allow-Origin: *`: a
+/// module loads cross-origin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiElement {
+    pub id: &'static str,
+    pub target: Target,
+    pub tag: &'static str,
+    pub path: &'static str,
 }
 
 /// One request for a block or an action.
@@ -87,6 +107,11 @@ pub trait SporeUi<P> {
         Vec::new()
     }
 
+    /// Its storefront elements.
+    fn elements() -> Vec<UiElement> {
+        Vec::new()
+    }
+
     /// The block `id`'s tree for `call` (format v1: `{"version": 1, "root": …}`).
     async fn block(&self, id: &str, call: UiCall<'_>, ports: &P) -> Result<Value, UiError> {
         let _ = (id, call, ports);
@@ -113,4 +138,5 @@ pub struct SporeContributions {
     pub title: &'static str,
     pub blocks: Vec<UiBlock>,
     pub actions: Vec<UiAction>,
+    pub elements: Vec<UiElement>,
 }

@@ -5484,6 +5484,52 @@
         ],
         "type": "object"
       },
+      "PaymentProviderKind": {
+        "description": "Who a payment provider is.\n\nKnown values: `manual`, `spore`, `app`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "manual",
+          "spore",
+          "app"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "PaymentProviderListResponse": {
+        "properties": {
+          "items": {
+            "description": "`manual` first, then the spores' providers, then the apps', by key.",
+            "items": {
+              "$ref": "#/components/schemas/PaymentProviderResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "PaymentProviderResponse": {
+        "properties": {
+          "key": {
+            "description": "What a payment method names as its `provider`.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PaymentProviderKind"
+          },
+          "name": {
+            "description": "The app's or spore's name; \"Manual\" for `manual`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "kind"
+        ],
+        "type": "object"
+      },
       "PaymentResponse": {
         "description": "A payment as the admin sees it on an order, and alone (`GET /admin/payments/{id}`).",
         "properties": {
@@ -23196,6 +23242,65 @@
         ],
         "x-hypha-scopes": [
           "payments:write"
+        ]
+      }
+    },
+    "/admin/payment-providers": {
+      "get": {
+        "operationId": "admin.payments.list_providers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentProviderListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The providers a payment method may name now: `manual`, each enabled spore's (design\nnote 0030), and each installed, enabled app answering `payments.start`. What an\nadmin offers when creating a method.",
+        "tags": [
+          "payments"
+        ],
+        "x-hypha-scopes": [
+          "payments:read"
         ]
       }
     },
