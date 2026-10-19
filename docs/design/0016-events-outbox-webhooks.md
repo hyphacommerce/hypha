@@ -332,6 +332,8 @@ pub struct App {
   - `Hypha-Event-Id`
   - `Hypha-Event-Type`
   - `Hypha-Delivery-Id` (stable across retries)
+  - `Hypha-Store` (the store's ID, added with 0029: an app installed in several stores
+    picks its secret by it)
 
   Any 2xx within the timeout (default 10 s) counts as success. The answer is read up to
   the same 256 KiB cap and ignored.
@@ -353,9 +355,11 @@ As built (2026-10-16):
   and go when the app is deleted. The host's `HostRates` reads both. A disabled app
   quotes no rates.
 - **The envelope** adds the subject's version (`subject: {type, id, version}`, EV7). The
-  actor is `{type, id}`, with a null `id` for the system. Subject IDs are prefixed for the
-  catalog's kinds; any other kind (a spore's) keeps its bare UUID. `GET /admin/events/{id}`
-  returns the same envelope.
+  actor is `{type, id}`, with a null `id` for the system. Subject IDs are prefixed for
+  every kind with an ID type (`channel`, `category`, `location`, `fulfillment` and
+  `payment` were added on 2026-10-19, 0029's last as-built section: they had gone out as
+  bare UUIDs); a kind without one (`search_settings`, the nil UUID) keeps its bare UUID.
+  `GET /admin/events/{id}` returns the same envelope.
 - **A delivery to an app without a webhook fails for good at once**, rather than being
   retried for 3 days; the admin can retry it once the webhook is back. A disabled app's
   deliveries wait on the retry schedule instead, so pausing an app keeps its backlog.

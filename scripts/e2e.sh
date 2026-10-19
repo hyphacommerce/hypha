@@ -843,6 +843,10 @@ PY
     step "the app reports it paid" 200 - -X POST "$PAYMENTS/events" -H "$JSON" \
         -H 'idempotency-key: evt_e2e_2' -d '{"type":"paid","occurred_at":"2026-10-18T12:00:00Z"}'
     contains "the order is paid" '"financial_status":"paid"'
+    step "the payment alone" 200 - "$PAYMENTS"
+    contains "with its order and status" "\"order\":\"$CARD_ORDER\",\"method\":\"$CARD\",\"method_name\":\"Card\",\"provider\":\"app_pay\""
+    contains "paid" '"status":"paid"'
+    step "an unknown payment alone" 404 payment_not_found "$BASE/admin/payments/pay_00000000000000000000000000000000"
     step "a refund the app doesn't answer" 409 payment_action_unsupported -X POST "$PAYMENTS/refund" \
         -H "$JSON" -d '{"amount":300}'
     step "a refund of more than was paid" 422 invalid_refund_amount -X POST "$PAYMENTS/events" -H "$JSON" \
@@ -1313,7 +1317,9 @@ class Hook(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("content-length", 0)))
         with open(out, "ab") as f:
-            f.write(self.headers.get("hypha-event-type", "").encode() + b" " + body + b"\n")
+            event = self.headers.get("hypha-event-type", "").encode()
+            store = self.headers.get("hypha-store", "").encode()
+            f.write(event + b" " + store + b" " + body + b"\n")
         self.send_response(204)
         self.end_headers()
 
@@ -1351,6 +1357,12 @@ if [[ -n $HOOKS ]]; then
         echo "ok   the receiver got the envelope"
     else
         echo "FAIL the receiver got the envelope: $(cat "$HOOKS_FILE")"
+        FAILED=$((FAILED + 1))
+    fi
+    if grep -Eq '^product\.created store_[0-9a-f]{32} ' "$HOOKS_FILE"; then
+        echo "ok   with the store in Hypha-Store"
+    else
+        echo "FAIL with the store in Hypha-Store: $(cat "$HOOKS_FILE")"
         FAILED=$((FAILED + 1))
     fi
 else
@@ -1421,6 +1433,9 @@ if [[ -n $HOOKS ]]; then
     step "the owner approves" 200 - -X POST "$BASE/admin/oauth/requests/$REQUEST/approve"
     CODE=$(sed -E 's/.*[?&]code=(hypha_ac_[0-9a-f]+).*/\1/' <<<"$BODY")
     step "a request is answered once" 409 oauth_request_decided -X POST "$BASE/admin/oauth/requests/$REQUEST/approve"
+    step "approved, the app hears nothing before it has its secret" 200 - \
+        "$BASE/admin/apps/app_e2e_helper/deliveries"
+    contains "no deliveries yet" '"items":[]'
     exchange() {
         curl -s -w '\n%{http_code}' -X POST "$BASE/oauth/token" \
             --data-urlencode grant_type=authorization_code --data-urlencode "code=$CODE" \
@@ -1440,6 +1455,12 @@ if [[ -n $HOOKS ]]; then
     contains "as invalid_grant" '"error":"invalid_grant"'
     oauth_step "the code for tokens" 200 "$(exchange "$VERIFIER")"
     contains "with the app's secret, once" '"app_secret":"hypha_as_'
+    contains "the store it's installed in" '"store":"store_'
+    contains "and the API's base URL" "\"issuer\":\"$BASE\""
+    APP_TOKEN_BODY=$BODY
+    wait_for "now it hears it's installed" "$BASE/admin/apps/app_e2e_helper/deliveries?status=succeeded" \
+        '"event_type":"app.installed"'
+    BODY=$APP_TOKEN_BODY
     APP_TOKEN=$(sed -E 's/.*"access_token":"(hypha_at_[0-9a-f]+)".*/\1/' <<<"$BODY")
     REFRESH=$(sed -E 's/.*"refresh_token":"(hypha_rt_[0-9a-f]+)".*/\1/' <<<"$BODY")
     OWNER_AUTH=("${AUTH[@]}")
@@ -1459,6 +1480,7 @@ if [[ -n $HOOKS ]]; then
     oauth_step "refresh rotates" 200 "$(curl -s -w '\n%{http_code}' -X POST "$BASE/oauth/token" \
         --data-urlencode grant_type=refresh_token --data-urlencode "refresh_token=$REFRESH")"
     NEW_TOKEN=$(sed -E 's/.*"access_token":"(hypha_at_[0-9a-f]+)".*/\1/' <<<"$BODY")
+    contains "a refresh names the store too" '"store":"store_'
     oauth_step "the old refresh token again is theft" 400 "$(curl -s -w '\n%{http_code}' -X POST "$BASE/oauth/token" \
         --data-urlencode grant_type=refresh_token --data-urlencode "refresh_token=$REFRESH")"
     AUTH=(-H "authorization: Bearer $NEW_TOKEN")

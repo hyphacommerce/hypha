@@ -141,7 +141,9 @@ one by key.
 A provider that fails to start (Stripe down) leaves the order placed and the payment
 `pending`; the storefront can ask again (`POST /storefront/orders/{id}/payment`, with
 the order's access token), which a later provider note details. For `manual` it can't
-fail.
+fail. As built (0029): a `failed` payment is final, as at Stripe; asking again after one
+makes a new payment with the same method (a new ID, so a new idempotency key at the
+provider), while a `pending` one is started again under its own ID.
 
 ## 5. Recording and voiding
 

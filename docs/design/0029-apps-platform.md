@@ -560,7 +560,9 @@ events, `docs/apps/elements.md`).
   the result); `409 payment_refused` with `details.reason`; `409
   payment_action_unsupported` for `manual` or an app without that point. Captures and
   voids are whole; the idempotency key sent to the app is the request's
-  `Idempotency-Key`, else `<payment>:capture` / `:void`.
+  `Idempotency-Key`, else a new one per request, `<payment>:<action>:<uuid>` (a key per
+  payment, as first built, made a provider replay a refused attempt to every later one;
+  see the last as-built section).
 - **Search:** `SearchSettings::search_app` (`PATCH /admin/search/settings`, checked
   through core's `AppPoints` port: `search_app_unavailable`). `/storefront/search` then
   uses `AppSearch`, a `SearchIndex` that asks the app and builds Hypha's own documents
@@ -648,3 +650,75 @@ events, `docs/apps/elements.md`).
   make an authorization request without a PKCE challenge (migration 0052): approving it
   widens the grant and sends the browser to the app's `app_url` (no code: the app then
   gets tokens with the new scopes from `/oauth/authorize`, approved at once).
+
+## As built: what the first-party apps needed (2026-10-19)
+
+Building the Stripe and Meilisearch apps against the API and `@hypha/app` found these
+gaps; each is fixed as described.
+
+- **The token response names the installation:** every `POST /oauth/token` answer (code
+  and refresh) has `store` (`store_…`, as `Hypha-Store` names it) and `issuer` (the API's
+  base URL, as the RFC 8414 metadata derives it from the request), so an app keys an
+  installation by them without a second call. `@hypha/app`'s `TokenSet` (and
+  `InstallTokens`) carry `store` and `issuer`; `exchangeCode` and `refresh` refuse an
+  answer without them (`invalid_response`).
+- **Webhooks name the store:** every delivery sends `Hypha-Store` (extension calls,
+  blocks and the proxy already did), so an app installed in several stores picks the
+  secret before verifying.
+- **Every subject kind with an ID type is prefixed** in the envelope's `subject.id`:
+  `channel` (`chan_`), `category` (`pcat_`), `location` (`loc_`), `fulfillment`
+  (`ful_`) and `payment` (`pay_`) joined the list (they went out as bare UUIDs). Only a
+  kind without an ID type keeps the bare UUID: `search_settings`, the store's one set,
+  whose subject is the nil UUID. *A change to a published envelope* (0016 §8): a
+  consumer that parsed those kinds' bare UUIDs must read the prefixed form. A test in
+  `webhooks.rs` lists every domain's subject constant with its prefix, so a new kind
+  can't go out bare.
+- **`app.installed` waits for the code exchange.** The app gets its secret in the first
+  token response, so an `app.installed` recorded at approval reached it before it could
+  verify the signature. `App::install` and `App::reinstall` no longer record it;
+  `exchange_code` does, through `App::installed`, in the batch that uses the code, when
+  the code is an installation's first (`first_install`). Another event in that window
+  (approval to exchange: a redirect, seconds) is still fanned out by the grant; the app,
+  holding no secret yet, answers 401 and the delivery is retried on the schedule, so it
+  arrives after the app can verify it. *Chosen over postponing deliveries per app*, which
+  needs a stored "secret handed over" flag and a dispatcher rule, for the same outcome.
+- **`GET /admin/payments/{id}`** (`orders:read`: reading an order's payments is reading
+  the order, as `Scope`'s docs and 0027 PA9 say; `payments:read` is the methods'
+  settings) answers the payment as orders show it, which gained `order` and
+  `updated_at`. A payment app looks up the payment it was asked to start or act on.
+- **Payment actions get a key per attempt.** Without an `Idempotency-Key`, capture, void
+  and refund send the app `<payment>:<action>:<uuid>`, new per request (refunds already
+  did). The old default, `<payment>:capture` / `:void`, made a provider that keys by it
+  (Stripe) answer a staff member's second try with the first try's refusal. A client
+  retrying a timed-out request sends its own `Idempotency-Key`.
+- **A `failed` payment is final** (Stripe's model, 0027 §2: `failed` moves nowhere).
+  The storefront starts paying again with `POST /storefront/orders/{id}/payment?token=`,
+  which makes a new payment with the same method and starts it (a new payment ID, so the
+  provider sees a new idempotency key); a `pending` payment is started again under its
+  own ID (the same key, so the provider answers the same intent). A payment app reports
+  `failed` only when the provider's attempt is over (a declined PaymentIntent the
+  shopper may retry with another card stays `pending` at Stripe: report nothing then).
+- **The SDK (`@hypha/app`):**
+  - the manifest type matches `ManifestDocument` (which denies unknown fields): `icon`,
+    not `icon_url`; `ExtensionPointName` has `admin.action`. `manifest.test.ts` types a
+    sample with every field (`DeepRequired<AppManifest>`), validates it with ajv against
+    `docs/apps/manifest.schema.json`, and checks it has every property the schema lists;
+  - the bodies' names (`SearchQueryRequest`, `PaymentsStartRequest`, `Money`,
+    `NextAction`, …) alias the generated contract (`PointRequest<"search.query">`,
+    `components["schemas"]`); the hand-written ones, which had drifted, are gone, and
+    `generate` fails without `openapi/extensions.json` instead of falling back to them;
+  - `extensionHandler`'s `secret` callback gets `{request, rawBody, store}` (the body
+    read once, `store` from `Hypha-Store`);
+  - `TokenStore.withLock(key, fn)` (optional): `HyphaClient` refreshes inside it, on
+    both paths (an expiring token and a 401), and reads the tokens again inside, so a
+    process that waited uses the pair another stored. `memoryTokenStore` has an
+    in-process lock;
+  - `webhookHandler({secret, onEvent, dedupe?})`: verifies `Hypha-Signature`, parses a
+    typed `WebhookEnvelope` (`webhooks.rs`'s `EventEnvelope`: `subject.version` and
+    `actor.id` are `null` when absent, never missing), skips a delivery `dedupe.seen`
+    knows, and answers 204, 401 `invalid_signature`, 400 `invalid_request`, or 500
+    `handler_failed` when `onEvent` throws (so Hypha retries).
+- **The bridge's `origin`:** an admin embedding a page adds `origin=<its origin>` to the
+  iframe's URL; the page checks it against `GET /admin/app-extensions/origins` (its
+  backend reads it with the installation's token) before creating its bridge and asking
+  for a session token (`docs/apps/bridge.md`).

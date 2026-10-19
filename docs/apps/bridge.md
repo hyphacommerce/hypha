@@ -14,6 +14,20 @@ The admin loads the app's page in
         sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
 ```
 
+The admin adds one query parameter to the page's URL, `origin`: its own origin
+(`scheme://host[:port]`), so the page knows which `hostOrigin` to create its bridge
+with:
+
+```
+https://app.example/hypha/admin?origin=https%3A%2F%2Fadmin.shop.example
+```
+
+The parameter is only a claim: anyone can open the page with any `origin`. Before
+creating the bridge the page checks it against `GET /admin/app-extensions/origins` (the
+store's admin origins; any admin caller may read it, so the app's backend reads it with
+the installation's access token, and the page asks its backend) and refuses to start
+when it isn't listed. Only then does it create the bridge and ask for a session token.
+
 The app should send `Content-Security-Policy: frame-ancestors <the admin origins it
 trusts>`; `GET /admin/app-extensions/origins` lists a store's admin origins.
 
@@ -97,7 +111,8 @@ Codes are stable; messages are for humans.
   used and is refused as either origin, as are `null` and anything with a path.
 - An origin is `scheme://host[:port]`, compared as a string: the app's origin is the
   origin of the iframe's `src`; the admin's is where the admin is served (the app learns
-  it from the store's admin origins, or a query parameter it then checks against them).
+  it from the `origin` query parameter, which it checks against the store's admin
+  origins).
 - **What the app can't do:** read the admin's DOM, cookies or staff session (the sandbox
   and the origin boundary), choose where the admin navigates outside its own page, or
   put markup in a toast (plain text only).
