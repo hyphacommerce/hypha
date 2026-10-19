@@ -138,8 +138,9 @@ function fakeDocument() {
     setAttribute(name: string, value: string) {
       this.attributes.set(name, value);
     }
-    append(child: FakeElement) {
+    appendChild(child: FakeElement) {
       this.children.push(child);
+      return child;
     }
   }
   const document = {
