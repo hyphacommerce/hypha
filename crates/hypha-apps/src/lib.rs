@@ -16,6 +16,7 @@ pub mod events;
 pub mod fetch;
 pub mod manifest;
 pub mod repo;
+pub mod spore_settings;
 pub mod targets;
 pub mod ui;
 
@@ -48,3 +49,8 @@ pub use manifest::{
     ManifestSource, PRIVATE_CLIENT_PREFIX, is_private_client, private_client_id,
 };
 pub use repo::{AppRepo, HasApps, StageApps, keys};
+pub use spore_settings::{
+    HasSporeSettings, SECRET_MARKER, SettingsProblem, SettingsReadError, SettingsSchema,
+    SettingsView, SporeSettings, SporeSettingsRepo, get_spore_settings, read_spore_settings,
+    save_spore_settings,
+};

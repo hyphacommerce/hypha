@@ -29,6 +29,7 @@ mod price_lists;
 mod products;
 mod search;
 mod shipping;
+mod spore_settings;
 mod stores;
 mod table;
 mod tax_classes;
@@ -73,6 +74,7 @@ pub use search::{
     InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo, search_fixture,
 };
 pub use shipping::{InMemoryAppProviderRepo, InMemoryShippingZoneRepo, NoRateProviders};
+pub use spore_settings::InMemorySporeSettingsRepo;
 pub use stores::InMemoryStoreRepo;
 pub use tax_classes::InMemoryTaxClassRepo;
 pub use tax_regions::InMemoryTaxRegionRepo;

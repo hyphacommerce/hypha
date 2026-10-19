@@ -205,11 +205,6 @@ impl<D: Deployment> PgStorage<D> {
         })
     }
 
-    /// The spores this host was built with, built.
-    pub fn spores(&self) -> &D::Spores {
-        &self.spores
-    }
-
     async fn store(&self) -> Result<PgPorts, ApiError> {
         self.db.store().await
     }
@@ -221,6 +216,7 @@ impl<D: Deployment> Storage for PgStorage<D> {
     type Search<'p> = &'p PgPorts;
     type Handlers = HandlersOf<D>;
     type Payments = ProvidersOf<D>;
+    type Spores = D::Spores;
 
     async fn ports(&self, _store: StoreId) -> Result<PgPorts, ApiError> {
         self.store().await
@@ -245,6 +241,10 @@ impl<D: Deployment> Storage for PgStorage<D> {
 
     fn payment_providers(&self) -> &ProvidersOf<D> {
         &self.payments
+    }
+
+    fn spores(&self) -> &D::Spores {
+        &self.spores
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {

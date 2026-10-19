@@ -41,6 +41,7 @@ mod payments;
 mod products;
 mod search;
 mod shipping;
+mod spore_settings;
 mod staff_batch;
 mod stores;
 mod tax;
@@ -72,6 +73,7 @@ pub use payments::{payment_batch, payment_method_delete, payment_method_repo, pa
 pub use products::{product_list, product_repo};
 pub use search::{search_index, search_queue, search_settings_repo};
 pub use shipping::{app_provider_repo, shipping_zone_repo};
+pub use spore_settings::spore_settings_repo;
 pub use staff_batch::staff_batch;
 pub use stores::store_repo;
 pub use tax::{tax_class_repo, tax_region_repo};

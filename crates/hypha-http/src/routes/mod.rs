@@ -227,6 +227,9 @@ macro_rules! route_table {
             [admin, GET, "/admin/apps/{key}/extension-points", apps::extension_points],
             [admin, PUT, "/admin/apps/{key}/extension-points", apps::set_extension_points],
             [admin, POST, "/admin/apps/{key}/deliveries/{id}/retry", apps::retry],
+            // a spore's settings (design note 0030, §8)
+            [admin, GET, "/admin/apps/{key}/settings", apps::settings],
+            [admin, PUT, "/admin/apps/{key}/settings", apps::save_settings],
             [admin, GET, "/admin/events/{id}", apps::event],
             // installing apps (design note 0029)
             [admin, PATCH, "/admin/apps/{key}/grant", apps::narrow],

@@ -415,6 +415,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/apps/{key}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A spore's settings (design note 0030, §8) and the form for them: the values the
+         *     merchant set, secret fields as `{"set": …}` only. For a spore built into the API;
+         *     an app keeps its own settings (`app_not_found` for an app key), and a spore that
+         *     takes none is `app_settings_not_found`.
+         */
+        get: operations["admin.apps.settings"];
+        /**
+         * Saves a spore's settings (design note 0030, §8): checked against its schema, then by
+         *     the spore itself (422 `settings_invalid`, every problem in `details.errors` with the
+         *     field as its `path`); secret fields are sealed under `HYPHA_SECRET_KEY` and never
+         *     answered.
+         */
+        put: operations["admin.apps.save_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/assets": {
         parameters: {
             query?: never;
@@ -4874,6 +4902,10 @@ export interface components {
             /** @description Absent or `null`: the text is made from the HTML. */
             text?: string | null;
         };
+        SaveSporeSettingsRequest: {
+            /** @description The whole form. A secret field left out keeps its value, `null` clears it. */
+            settings: Record<string, never>;
+        };
         /**
          * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
@@ -5145,6 +5177,24 @@ export interface components {
             options: components["schemas"]["ShippingOptionResponse"][];
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
+        };
+        /** @description A spore's settings, with the form to edit them. */
+        SporeSettingsResponse: {
+            /** @description `spore_<name>`. */
+            app: string;
+            /**
+             * @description The spore's JSON Schema for the form: scalar fields only (`string`, `integer`,
+             *     `number`, `boolean`, with `enum`, lengths and bounds); a secret one is marked
+             *     `"x-hypha-secret": true`.
+             */
+            schema: Record<string, never>;
+            /**
+             * @description The values as set. A secret field is never shown: it's `{"set": true}` once set,
+             *     `{"set": false}` before.
+             */
+            settings: Record<string, never>;
+            /** @description When they were last saved; `null` before the first save. */
+            updated_at?: string | null;
         };
         StartTotpRequest: {
             /**
@@ -7864,6 +7914,182 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example spore_stripe */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SporeSettingsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.apps.save_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example spore_stripe */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveSporeSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SporeSettingsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

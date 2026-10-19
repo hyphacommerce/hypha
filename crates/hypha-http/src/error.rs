@@ -1098,9 +1098,24 @@ impl From<hypha_apps::CommandError> for ApiError {
             | E::DeliveryNotFound { .. }
             | E::EventNotFound(_)
             | E::ExtensionNotFound { .. }
-            | E::ProxyNotFound(_) => StatusCode::NOT_FOUND,
+            | E::ProxyNotFound(_)
+            | E::SettingsNotFound(_) => StatusCode::NOT_FOUND,
             E::AppExists(_) | E::ActionHasPoint { .. } => StatusCode::CONFLICT,
             E::InvalidContext(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            // A spore's settings (design note 0030, §8): every problem in
+            // `details.errors` (`[{"path", "message"}]`, the field as the path), as a
+            // manifest's.
+            E::SettingsInvalid(problems) => {
+                let details = json!({
+                    "errors": problems
+                        .iter()
+                        .map(|p| json!({"path": p.field, "message": p.message}))
+                        .collect::<Vec<_>>()
+                });
+                return Self::domain(StatusCode::UNPROCESSABLE_ENTITY, e)
+                    .with_details(Some(details));
+            }
+            E::Seal(_) => return Self::internal(e),
             E::App(inner) => return Self::from_app(inner.clone()),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(

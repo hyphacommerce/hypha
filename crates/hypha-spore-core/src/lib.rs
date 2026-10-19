@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use hypha_apps::SporeRegistration;
+use hypha_apps::{SettingsProblem, SettingsSchema, SporeRegistration};
 use hypha_core::{AppKey, Scope, Union};
 use hypha_payments::{PaymentProviders, ProviderKey};
 use hypha_store_postgres::MigrationSet;
@@ -44,6 +44,23 @@ pub trait Spore: Sized + Send + Sync + 'static {
     /// host from starting, naming the spore.
     fn new(env: SporeEnv) -> Result<Self, SporeError>;
 
+    /// Its settings form (design note 0030, §8): a JSON Schema of scalar fields
+    /// (`hypha_apps::SettingsSchema`'s subset, checked when the host starts), secret
+    /// ones marked `"x-hypha-secret": true`. `None` (the default): it takes no settings.
+    fn settings_schema() -> Option<serde_json::Value> {
+        None
+    }
+
+    /// Its own check of settings that fit the schema, secrets in plain text (a Stripe
+    /// key starts with `sk_`): every problem, by field. Runs before they're saved.
+    fn check_settings(
+        &self,
+        settings: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), Vec<SettingsProblem>> {
+        let _ = settings;
+        Ok(())
+    }
+
     /// The payment providers it adds (design note 0027): a tuple of `PaymentProvider`s,
     /// `()` for none. Keys are `spore_<NAME>` (or `spore_<NAME>_…`) and unique in the
     /// host.
@@ -57,6 +74,80 @@ pub trait Spore: Sized + Send + Sync + 'static {
     fn payment_providers(&self) -> Self::PaymentProviders;
     fn handlers(&self) -> Self::Handlers;
 }
+
+/// What the HTTP layer asks of a host's built spores, in-process, by key (design note
+/// 0030, §7–§8): their settings forms and checks. `P` is the host's ports (what their
+/// UI reads with). Implemented for `()` and the tuples `SporeSet` is.
+pub trait SporeRuntime<P>: Send + Sync + 'static {
+    /// The spore `key`'s settings schema; `None` for no such spore, or one without
+    /// settings. (Checked at startup, so a spore's parses.)
+    fn settings_schema(&self, key: &AppKey) -> Option<SettingsSchema>;
+    /// The spore `key`'s own check of settings (`Spore::check_settings`).
+    fn check_settings(
+        &self,
+        key: &AppKey,
+        settings: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), Vec<SettingsProblem>>;
+}
+
+impl<P> SporeRuntime<P> for () {
+    fn settings_schema(&self, _: &AppKey) -> Option<SettingsSchema> {
+        None
+    }
+
+    fn check_settings(
+        &self,
+        _: &AppKey,
+        _: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), Vec<SettingsProblem>> {
+        Ok(())
+    }
+}
+
+/// Whether `key` is the spore `S`'s.
+fn is<S: Spore>(key: &AppKey) -> bool {
+    key.as_str().strip_prefix("spore_") == Some(S::NAME)
+}
+
+/// `SporeRuntime` for tuples of 1 to 8 spores.
+macro_rules! tuple_runtime {
+    ($($s:ident),+) => {
+        #[allow(non_snake_case)]
+        impl<P, $($s: Spore),+> SporeRuntime<P> for ($($s,)+) {
+            fn settings_schema(&self, key: &AppKey) -> Option<SettingsSchema> {
+                $(
+                    if is::<$s>(key) {
+                        return $s::settings_schema().and_then(|s| SettingsSchema::parse(s).ok());
+                    }
+                )+
+                None
+            }
+
+            fn check_settings(
+                &self,
+                key: &AppKey,
+                settings: &serde_json::Map<String, serde_json::Value>,
+            ) -> Result<(), Vec<SettingsProblem>> {
+                let ($($s,)+) = self;
+                $(
+                    if is::<$s>(key) {
+                        return $s.check_settings(settings);
+                    }
+                )+
+                Ok(())
+            }
+        }
+    };
+}
+
+tuple_runtime!(A);
+tuple_runtime!(A, B);
+tuple_runtime!(A, B, C);
+tuple_runtime!(A, B, C, D);
+tuple_runtime!(A, B, C, D, E);
+tuple_runtime!(A, B, C, D, E, F);
+tuple_runtime!(A, B, C, D, E, F, G);
+tuple_runtime!(A, B, C, D, E, F, G, H);
 
 /// What `SporeSet::build` makes: the spores themselves (the set's own type, a tuple of
 /// built spores), and what they contribute, each one set.
@@ -80,6 +171,8 @@ pub trait SporeSet: Sized + Send + Sync + 'static {
     fn registrations() -> Vec<SporeRegistration>;
     /// Their migrations, in order, to apply after core's.
     fn migrations() -> Vec<MigrationSet>;
+    /// Each spore's name and settings schema as written, in order.
+    fn settings_schemas() -> Vec<(&'static str, Option<serde_json::Value>)>;
     /// Builds each spore once, in order, with its environment from `host` and its
     /// section of `config` (`[spores.<name>]`), and takes what it contributes. The first
     /// spore that fails stops it.
@@ -113,6 +206,10 @@ impl SporeSet for () {
     }
 
     fn migrations() -> Vec<MigrationSet> {
+        Vec::new()
+    }
+
+    fn settings_schemas() -> Vec<(&'static str, Option<serde_json::Value>)> {
         Vec::new()
     }
 
@@ -151,6 +248,10 @@ macro_rules! tuple_spores {
 
             fn migrations() -> Vec<MigrationSet> {
                 vec![$($s::migrations()),+]
+            }
+
+            fn settings_schemas() -> Vec<(&'static str, Option<serde_json::Value>)> {
+                vec![$(($s::NAME, $s::settings_schema())),+]
             }
 
             fn build(
@@ -241,6 +342,13 @@ pub fn check<S: SporeSet>() -> Vec<String> {
             }
         }
         seen.push(spore.name);
+    }
+    for (name, schema) in S::settings_schemas() {
+        if let Some(Err(errors)) = schema.map(SettingsSchema::parse) {
+            for e in errors {
+                problems.push(format!("spore {name:?}: its settings schema: {e}"));
+            }
+        }
     }
     for (spore, set) in S::registrations().iter().zip(S::migrations()) {
         let module = format!("spore_{}", spore.name);

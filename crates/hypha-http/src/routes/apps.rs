@@ -827,3 +827,121 @@ pub async fn set_extension_points<S: Storage>(
         hypha_apps::set_extension_endpoints(&ctx, &ports, &key, inputs, &registrable()).await?;
     Ok(Json(ExtensionEndpointsDto::of(endpoints)))
 }
+
+// ---------- a spore's settings (design note 0030, §8) ----------
+
+/// A spore's settings, with the form to edit them.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct SporeSettingsResponse {
+    /// `spore_<name>`.
+    app: String,
+    /// The spore's JSON Schema for the form: scalar fields only (`string`, `integer`,
+    /// `number`, `boolean`, with `enum`, lengths and bounds); a secret one is marked
+    /// `"x-hypha-secret": true`.
+    #[schema(value_type = Object)]
+    schema: serde_json::Value,
+    /// The values as set. A secret field is never shown: it's `{"set": true}` once set,
+    /// `{"set": false}` before.
+    #[schema(value_type = Object)]
+    settings: serde_json::Map<String, serde_json::Value>,
+    /// When they were last saved; `null` before the first save.
+    updated_at: Option<String>,
+}
+
+impl SporeSettingsResponse {
+    fn new(
+        key: &str,
+        schema: &hypha_apps::SettingsSchema,
+        view: hypha_apps::SettingsView,
+    ) -> Result<Self, ApiError> {
+        Ok(Self {
+            app: key.to_string(),
+            schema: schema.json().clone(),
+            settings: view.values,
+            updated_at: view.stamps.map(|s| rfc3339(s.updated_at)).transpose()?,
+        })
+    }
+}
+
+/// The schema of the spore `key` (in this host's build), `None` for none.
+fn settings_schema<S: Storage>(
+    state: &SharedState<S>,
+    key: &str,
+) -> Option<hypha_apps::SettingsSchema> {
+    use hypha_spore_core::SporeRuntime;
+    let key = hypha_apps::AppKey::new(key).ok()?;
+    SporeRuntime::<S::Ports<'static>>::settings_schema(state.storage.spores(), &key)
+}
+
+/// A spore's settings (design note 0030, §8) and the form for them: the values the
+/// merchant set, secret fields as `{"set": …}` only. For a spore built into the API;
+/// an app keeps its own settings (`app_not_found` for an app key), and a spore that
+/// takes none is `app_settings_not_found`.
+#[utoipa::path(
+    get,
+    path = "/admin/apps/{key}/settings",
+    params(("key" = String, Path, pattern = "^spore_[a-z][a-z0-9_]*$", example = "spore_stripe")),
+    responses((status = 200, description = "OK", body = SporeSettingsResponse)),
+    extensions(("x-hypha-scopes" = json!(["apps:read"]))),
+)]
+pub async fn settings<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(key): PathId<String>,
+) -> Result<Json<SporeSettingsResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let schema = settings_schema(&state, &key);
+    let view = hypha_apps::get_spore_settings(&ctx, &ports, &key, schema.as_ref()).await?;
+    let schema = schema.ok_or_else(|| ApiError::internal("a spore's schema went missing"))?;
+    Ok(Json(SporeSettingsResponse::new(&key, &schema, view)?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SaveSporeSettingsRequest {
+    /// The whole form. A secret field left out keeps its value, `null` clears it.
+    #[schema(value_type = Object)]
+    settings: serde_json::Value,
+}
+
+/// Saves a spore's settings (design note 0030, §8): checked against its schema, then by
+/// the spore itself (422 `settings_invalid`, every problem in `details.errors` with the
+/// field as its `path`); secret fields are sealed under `HYPHA_SECRET_KEY` and never
+/// answered.
+#[utoipa::path(
+    put,
+    path = "/admin/apps/{key}/settings",
+    params(("key" = String, Path, pattern = "^spore_[a-z][a-z0-9_]*$", example = "spore_stripe")),
+    request_body = SaveSporeSettingsRequest,
+    responses((status = 200, description = "OK", body = SporeSettingsResponse)),
+    extensions(("x-hypha-scopes" = json!(["apps:write"]))),
+)]
+pub async fn save_settings<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(key): PathId<String>,
+    body: JsonBody<SaveSporeSettingsRequest>,
+) -> Result<Json<SporeSettingsResponse>, ApiError> {
+    use hypha_spore_core::SporeRuntime;
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let schema = settings_schema(&state, &key);
+    let spores = state.storage.spores();
+    let check =
+        |values: &serde_json::Map<String, serde_json::Value>| match hypha_apps::AppKey::new(&key) {
+            Ok(app) => SporeRuntime::<S::Ports<'static>>::check_settings(spores, &app, values),
+            Err(_) => Ok(()),
+        };
+    let view = hypha_apps::save_spore_settings(
+        &ctx,
+        &ports,
+        &state.env,
+        &key,
+        schema.as_ref(),
+        req.settings,
+        check,
+    )
+    .await?;
+    let schema = schema.ok_or_else(|| ApiError::internal("a spore's schema went missing"))?;
+    Ok(Json(SporeSettingsResponse::new(&key, &schema, view)?))
+}

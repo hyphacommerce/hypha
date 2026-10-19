@@ -82,6 +82,8 @@ pub struct InMemoryPorts {
     // The store itself (design note 0006, model A: its row is in its own database), so
     // the ports are its directory too, as a host's are.
     pub stores: crate::InMemoryStoreRepo,
+    /// Spores' settings (design note 0030, §8).
+    pub spore_settings: crate::InMemorySporeSettingsRepo,
 }
 
 impl Default for InMemoryPorts {
@@ -129,6 +131,7 @@ impl Default for InMemoryPorts {
             extension_calls: crate::InMemoryExtensionCallRepo::default(),
             extension_endpoints,
             stores: crate::InMemoryStoreRepo::sharing(&outbox),
+            spore_settings: crate::InMemorySporeSettingsRepo::sharing(&outbox),
             outbox,
         }
     }
@@ -453,6 +456,13 @@ impl hypha_core::AppPoints for InMemoryPorts {
             scope: k.scope,
         };
         Ok(hypha_apps::find_endpoint(self, app, point).await?.is_some())
+    }
+}
+
+impl hypha_apps::HasSporeSettings for InMemoryPorts {
+    type SporeSettings = crate::InMemorySporeSettingsRepo;
+    fn spore_settings(&self) -> &crate::InMemorySporeSettingsRepo {
+        &self.spore_settings
     }
 }
 

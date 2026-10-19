@@ -72,11 +72,6 @@ impl<D: Deployment> WorkersStorage<D> {
         })
     }
 
-    /// The spores this Worker was built with, built.
-    pub fn spores(&self) -> &D::Spores {
-        &self.spores
-    }
-
     async fn store(&self) -> Result<PgStore<Client>, ApiError> {
         store(&self.env, &self.clock).await
     }
@@ -124,6 +119,7 @@ impl<D: Deployment> Storage for WorkersStorage<D> {
     type Search<'p> = &'p PgStore<Client>;
     type Handlers = HandlersOf<D>;
     type Payments = ProvidersOf<D>;
+    type Spores = D::Spores;
 
     /// Each `ports()` is a new connection: a dispatch step opens one, not one per
     /// delivery.
@@ -152,6 +148,10 @@ impl<D: Deployment> Storage for WorkersStorage<D> {
 
     fn payment_providers(&self) -> &ProvidersOf<D> {
         &self.payments
+    }
+
+    fn spores(&self) -> &D::Spores {
+        &self.spores
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {

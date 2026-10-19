@@ -232,6 +232,13 @@ fn app_repo() {
 }
 
 #[test]
+fn spore_settings_repo() {
+    block_on(contract::spore_settings_repo(async || {
+        hypha_testkit::InMemorySporeSettingsRepo::default()
+    }));
+}
+
+#[test]
 fn oauth_repos() {
     block_on(contract::oauth_repos(async || InMemoryPorts::default()));
 }

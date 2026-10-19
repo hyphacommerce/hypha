@@ -49,6 +49,23 @@ pub enum CommandError {
         id: String,
         point: String,
     },
+    /// The spore takes no settings (design note 0030, §8).
+    #[error("{0} has no settings")]
+    SettingsNotFound(AppKey),
+    /// Settings that break the spore's schema or its own check, every problem.
+    #[error("invalid settings: {}", list_problems(.0))]
+    SettingsInvalid(Vec<crate::spore_settings::SettingsProblem>),
+    /// A stored secret setting didn't open (another `HYPHA_SECRET_KEY`).
+    #[error(transparent)]
+    Seal(hypha_core::SealError),
+}
+
+fn list_problems(problems: &[crate::spore_settings::SettingsProblem]) -> String {
+    problems
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 impl ErrorCode for CommandError {
@@ -65,6 +82,9 @@ impl ErrorCode for CommandError {
             CommandError::ProxyNotFound(_) => "app_proxy_not_found",
             CommandError::InvalidContext(_) => "invalid_extension_context",
             CommandError::ActionHasPoint { .. } => "app_action_has_point",
+            CommandError::SettingsNotFound(_) => "app_settings_not_found",
+            CommandError::SettingsInvalid(_) => "settings_invalid",
+            CommandError::Seal(_) => "internal_error",
         }
     }
 }

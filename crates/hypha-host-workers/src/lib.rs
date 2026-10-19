@@ -63,7 +63,8 @@ pub use worker_main::{fetch, scheduled};
 pub trait Deployment: Sized + 'static {
     /// `()` for none, or a tuple of spores (`hypha_spore_core::SporeSet`). Their
     /// handlers must run on this host's ports.
-    type Spores: hypha_spore_core::SporeSet<Handlers: hypha_core::EventHandlers<WorkersPorts>>;
+    type Spores: hypha_spore_core::SporeSet<Handlers: hypha_core::EventHandlers<WorkersPorts>>
+        + hypha_spore_core::SporeRuntime<WorkersPorts>;
 
     /// `hypha_http::router!` for this deployment's storage.
     fn router() -> axum::Router<hypha_http::state::SharedState<WorkersStorage<Self>>>;

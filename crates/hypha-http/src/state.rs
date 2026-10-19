@@ -475,6 +475,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_oauth::HasOAuthCodes
         + hypha_oauth::HasOAuthTokens
         + hypha_apps::HasExtensionEndpoints
+        + hypha_apps::HasSporeSettings
         + hypha_search_index::HasSearchQueue
         + hypha_search_index::HasSearchSettings
         + hypha_channels::HasChannels
@@ -509,6 +510,9 @@ pub trait Storage: Send + Sync + 'static {
     /// the host lists in its `payments.rs`, next to `handlers.rs`. Checkout and the
     /// method commands find one by key.
     type Payments: hypha_payments::PaymentProviders + Send + Sync + 'static;
+    /// The spores this host was built with, built (design note 0030): what the routes
+    /// ask in-process (settings forms, UI). `()` for none.
+    type Spores: for<'a> hypha_spore_core::SporeRuntime<Self::Ports<'a>>;
 
     /// Whether a dispatch step keeps one set of ports for all its work (`jobs::dispatch`)
     /// rather than getting them for each delivery and letting them go before a webhook
@@ -548,6 +552,9 @@ pub trait Storage: Send + Sync + 'static {
     /// The payment providers (`Self::Payments`); usually `&PAYMENT_PROVIDERS`, a
     /// `const`.
     fn payment_providers(&self) -> &Self::Payments;
+
+    /// The spores (`Self::Spores`), built at startup.
+    fn spores(&self) -> &Self::Spores;
 
     /// Runs a password reset request as background work (`AppState::background`), so the
     /// response doesn't wait for it (design note 0008, section 5); dropped and logged

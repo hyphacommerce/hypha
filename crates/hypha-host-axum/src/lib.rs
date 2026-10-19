@@ -44,7 +44,8 @@ pub use storage::{HandlersOf, PgDatabase, PgPorts, PgStorage, PooledClient, Prov
 pub trait Deployment: Sized + 'static {
     /// `()` for none, or a tuple of spores (`hypha_spore_core::SporeSet`). Their
     /// handlers must run on this host's ports.
-    type Spores: SporeSet<Handlers: EventHandlers<PgPorts>>;
+    type Spores: SporeSet<Handlers: EventHandlers<PgPorts>>
+        + hypha_spore_core::SporeRuntime<PgPorts>;
 
     /// `hypha_http::router!` for this deployment's storage.
     fn router() -> axum::Router<SharedState<PgStorage<Self>>>;

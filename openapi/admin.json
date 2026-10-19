@@ -6614,6 +6614,19 @@
         ],
         "type": "object"
       },
+      "SaveSporeSettingsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "settings": {
+            "description": "The whole form. A secret field left out keeps its value, `null` clears it.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "settings"
+        ],
+        "type": "object"
+      },
       "Scope": {
         "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -7370,6 +7383,36 @@
           "options",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "SporeSettingsResponse": {
+        "description": "A spore's settings, with the form to edit them.",
+        "properties": {
+          "app": {
+            "description": "`spore_<name>`.",
+            "type": "string"
+          },
+          "schema": {
+            "description": "The spore's JSON Schema for the form: scalar fields only (`string`, `integer`,\n`number`, `boolean`, with `enum`, lengths and bounds); a secret one is marked\n`\"x-hypha-secret\": true`.",
+            "type": "object"
+          },
+          "settings": {
+            "description": "The values as set. A secret field is never shown: it's `{\"set\": true}` once set,\n`{\"set\": false}` before.",
+            "type": "object"
+          },
+          "updated_at": {
+            "description": "When they were last saved; `null` before the first save.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "app",
+          "schema",
+          "settings"
         ],
         "type": "object"
       },
@@ -11627,6 +11670,236 @@
           }
         ],
         "summary": "Replaces the signing secret and returns the new one, once. Calls signed with the old\none stop verifying at once.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      }
+    },
+    "/admin/apps/{key}/settings": {
+      "get": {
+        "operationId": "admin.apps.settings",
+        "parameters": [
+          {
+            "example": "spore_stripe",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^spore_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SporeSettingsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A spore's settings (design note 0030, §8) and the form for them: the values the\nmerchant set, secret fields as `{\"set\": …}` only. For a spore built into the API;\nan app keeps its own settings (`app_not_found` for an app key), and a spore that\ntakes none is `app_settings_not_found`.",
+        "tags": [
+          "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:read"
+        ]
+      },
+      "put": {
+        "operationId": "admin.apps.save_settings",
+        "parameters": [
+          {
+            "example": "spore_stripe",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^spore_[a-z][a-z0-9_]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveSporeSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SporeSettingsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Saves a spore's settings (design note 0030, §8): checked against its schema, then by\nthe spore itself (422 `settings_invalid`, every problem in `details.errors` with the\nfield as its `path`); secret fields are sealed under `HYPHA_SECRET_KEY` and never\nanswered.",
         "tags": [
           "apps"
         ],

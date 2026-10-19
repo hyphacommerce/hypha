@@ -269,6 +269,13 @@ async fn app_repo() {
 }
 
 #[tokio::test]
+async fn spore_settings_repo() {
+    let Some(url) = database_url() else { return };
+    contract::spore_settings_repo(async || fresh_store(&url, "contract_spore_settings").await)
+        .await;
+}
+
+#[tokio::test]
 async fn oauth_repos() {
     let Some(url) = database_url() else { return };
     contract::oauth_repos(async || fresh_store(&url, "contract_oauth").await).await;
