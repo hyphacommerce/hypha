@@ -13,6 +13,7 @@ import {
   type BuildOn,
   type Deployment,
   ENV_FILE,
+  type EnvFile,
   loadDeployment,
   loadEnv,
   saveDeployment,
@@ -21,6 +22,14 @@ import {
   type Target,
   url,
 } from "../deployment.ts";
+import {
+  type AppEntry,
+  appUrl,
+  ENCRYPTION_KEY_VAR,
+  entryFor,
+  FIRST_PARTY,
+  remoteHead,
+} from "../apps.ts";
 import { checkR2Keys, isTokenValue, r2KeysOf } from "../cloudflare-token.ts";
 import { BLOCK, checkDatabaseUrl } from "../cloudflare.ts";
 import {
@@ -35,6 +44,7 @@ import {
   setEmailSecret,
   type SmtpTls,
 } from "../templates.ts";
+import { ensureEncryptionKeys } from "./apps.ts";
 import { ask, dirArg, guarded, setUnattended } from "./shared.ts";
 import { obtainToken } from "./token.ts";
 
@@ -176,6 +186,11 @@ export const init = defineCommand({
     },
     "smtp-username": { type: "string", description: "smtp: the login, if it needs one" },
     "smtp-password": { type: "string", description: "smtp: the login's password" },
+    apps: {
+      type: "string",
+      description:
+        "Apps deployed alongside, comma-separated: stripe, meilisearch (none for none; more with `hypha apps add`)",
+    },
     yes: { type: "boolean", alias: "y", description: "Don't ask: defaults for what isn't given" },
     force: {
       type: "boolean",
@@ -220,6 +235,7 @@ export const init = defineCommand({
 
       let ssh: string | undefined;
       let domains: Deployment["domains"];
+      let apex = "hypha.localhost";
       let buildOn: BuildOn = "server";
       if (target === "vps") {
         ssh = await ask(args.ssh, undefined, () =>
@@ -235,6 +251,7 @@ export const init = defineCommand({
           )
         ).toLowerCase();
         if (checkDomain(domain)) throw new Error(`--domain: ${domain} isn't a domain`);
+        apex = domain;
         const sub = async (flag: string | undefined, label: string, fallback: string) => {
           const value = await ask(flag, fallback, () =>
             p.text({ message: label, initialValue: fallback, validate: checkDomain }),
@@ -288,6 +305,10 @@ export const init = defineCommand({
       );
       const emailSettings = await askEmail(args, target, domains.storefront ?? domains.api);
 
+      const acme = args["acme-email"] === "none" ? undefined : args["acme-email"] || email;
+      const earlierState = args.force
+        ? await loadDeployment(dir).catch(() => undefined)
+        : undefined;
       const d: Deployment = {
         version: 1,
         target,
@@ -296,7 +317,11 @@ export const init = defineCommand({
         buildOn,
         scheme: target === "vps" ? "https" : "http",
         domains,
+        domain: apex,
+        ...(acme ? { acmeEmail: acme } : {}),
       };
+      const chosenApps = await askApps(args, d, earlierState?.apps);
+      if (chosenApps) d.apps = chosenApps;
       const env = setEmailSecret(newEnv(d, { email, storeName }), emailSettings);
       // Written again (new domains, say): the server's data was made with these, so they
       // stay, and so do the owner and the storefront's keys.
@@ -307,7 +332,8 @@ export const init = defineCommand({
           if (value !== undefined && value !== "" && env.get(key) !== undefined)
             env.set(key, value);
         }
-      const acme = args["acme-email"] === "none" ? undefined : args["acme-email"] || email;
+      keepAppKeys(earlier, env);
+      ensureEncryptionKeys(d, env);
 
       await mkdir(join(dir, "seaweedfs"), { recursive: true, mode: 0o700 });
       await chmod(dir, 0o700);
@@ -325,7 +351,7 @@ export const init = defineCommand({
       await chmod(join(dir, "seaweedfs", "s3.json"), 0o644);
       await writeFile(
         join(dir, ".gitignore"),
-        `# Secrets: never commit these.\n${ENV_FILE}\nseaweedfs/\n`,
+        `# Secrets: never commit these.\n${ENV_FILE}\nseaweedfs/\n# The co-located apps' clones (hypha deploy makes them again).\n.build/\n`,
       );
 
       const lines = [
@@ -334,6 +360,7 @@ export const init = defineCommand({
         ...(domains.storefront ? [`Storefront ${url(d, domains.storefront)}`] : []),
         `Files      ${url(d, domains.media)}`,
         `Emails     ${emailLine(emailSettings)}`,
+        ...appLines(d),
       ];
       p.note(lines.join("\n"), `Written to ${dir}`);
       if (target === "vps") {
@@ -379,6 +406,7 @@ type CloudflareArgs = {
   "r2-access-key-id"?: string;
   "r2-secret-access-key"?: string;
   media?: boolean;
+  apps?: string;
 } & EmailArgs;
 
 /**
@@ -442,6 +470,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   // `--force` keeps, else derived from the deploy token if it may use R2.
   const r2Flag = (args["r2-access-key-id"] ?? "").trim();
   const earlierEnv = args.force ? await loadEnv(dir).catch(() => undefined) : undefined;
+  const earlierState = args.force ? await loadDeployment(dir).catch(() => undefined) : undefined;
   const keptR2 = earlierEnv?.get("R2_ACCESS_KEY_ID") ? earlierEnv : undefined;
   const wantsMedia = args.media !== false;
 
@@ -454,6 +483,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     accountId: args["account-id"],
     zoneId: args["zone-id"],
     quiet: args.yes,
+    apps: Boolean(args.apps && args.apps !== "none") || Boolean(earlierState?.apps?.length),
   });
 
   let r2 = { id: "", secret: "" };
@@ -488,7 +518,6 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   const emailSettings = await askEmail(args, "cloudflare", domains.storefront ?? domains.api);
 
   // Written again: keep what Cloudflare already holds (the resources' IDs).
-  const earlierState = args.force ? await loadDeployment(dir).catch(() => undefined) : undefined;
   const earlier = earlierState?.cloudflare?.name === name ? earlierState.cloudflare : undefined;
   const d: Deployment = {
     version: 1,
@@ -497,6 +526,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     buildOn: "here",
     scheme: "https",
     domains,
+    domain,
     cloudflare: {
       name,
       accountId: checked.accountId,
@@ -509,6 +539,12 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
       ...(earlier?.cacheKvId ? { cacheKvId: earlier.cacheKvId } : {}),
     },
   };
+  // Under another name, an app's Worker and database are other ones: made again.
+  const keptApps = earlier
+    ? earlierState?.apps
+    : earlierState?.apps?.map(({ d1Id: _d1, deployed: _deployed, ...rest }) => rest);
+  const chosenApps = await askApps(args, d, keptApps);
+  if (chosenApps) d.apps = chosenApps;
   const env = setEmailSecret(
     newCloudflareEnv({ email, storeName }, databaseUrl, {
       token,
@@ -532,6 +568,8 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
       if (!given.has(key) && value !== undefined && value !== "" && env.get(key) !== undefined)
         env.set(key, value);
     }
+  keepAppKeys(earlierEnv, env);
+  ensureEncryptionKeys(d, env);
 
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await chmod(dir, 0o700);
@@ -541,7 +579,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
   await writeFile(join(dir, "hypha.config.schema.json"), await configSchema());
   await writeFile(
     join(dir, ".gitignore"),
-    `# Secrets: never commit these.\n${ENV_FILE}\n.secrets*.json\n.cors.json\n`,
+    `# Secrets: never commit these.\n${ENV_FILE}\n.secrets*.json\n.cors.json\n# The co-located apps' clones (hypha deploy makes them again).\n.build/\n`,
   );
 
   p.note(
@@ -552,6 +590,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
       `Files      ${media ? url(d, domains.media) : "off (no R2 keys)"}`,
       `Emails     ${emailLine(emailSettings)}`,
       `Database   ${new URL(databaseUrl).host}`,
+      ...appLines(d),
     ].join("\n"),
     `Written to ${dir}`,
   );
@@ -698,4 +737,99 @@ function emailLine(email: EmailSettings): string {
     case "smtp":
       return `SMTP ${email.host}:${email.port}, from ${email.from}`;
   }
+}
+
+/** The co-located apps in the summary. */
+function appLines(d: Deployment): string[] {
+  return (d.apps ?? []).map((a) => `${a.name.padEnd(10)} ${appUrl(d, a)}`);
+}
+
+/** Keeps every app's encryption key from the earlier `.env` (`--force`): without it the
+ * app loses what it sealed. */
+function keepAppKeys(earlier: EnvFile | undefined, env: EnvFile): void {
+  if (!earlier) return;
+  for (const key of earlier.keys().filter((k) => ENCRYPTION_KEY_VAR.test(k))) {
+    const value = earlier.get(key);
+    if (value && !env.get(key)) env.set(key, value);
+  }
+}
+
+/**
+ * The first-party apps to deploy alongside (design note 0029, §9): `--apps`, else asked
+ * (none by default), each pinned to its repository's head and on `<name>.<domain>`
+ * unless another domain is given. With `--force`, the earlier list stays unless `--apps`
+ * replaces it (an app kept keeps its commit, domain and resources). `undefined`: none.
+ */
+async function askApps(
+  args: { apps?: string; yes?: boolean },
+  d: Deployment,
+  earlier: AppEntry[] | undefined,
+): Promise<AppEntry[] | undefined> {
+  if (args.apps === undefined && earlier) return earlier;
+  let names: string[];
+  if (args.apps !== undefined) {
+    names =
+      args.apps === "none"
+        ? []
+        : args.apps
+            .split(",")
+            .map((n) => n.trim())
+            .filter(Boolean);
+  } else if (args.yes || !process.stdin.isTTY) {
+    names = [];
+  } else {
+    const answer = await p.multiselect({
+      message: "Deploy apps alongside? (each installed afterwards on its consent page)",
+      options: Object.keys(FIRST_PARTY).map((name) => ({
+        value: name,
+        label: name,
+        hint: name === "stripe" ? "card payments" : "search through Meilisearch",
+      })),
+      required: false,
+    });
+    if (p.isCancel(answer)) {
+      p.cancel("Cancelled.");
+      process.exit(1);
+    }
+    names = answer;
+  }
+  if (names.length === 0) return undefined;
+  const out: AppEntry[] = [];
+  for (const name of names) {
+    if (!FIRST_PARTY[name])
+      throw new Error(
+        `--apps: ${name} isn't a first-party app (${Object.keys(FIRST_PARTY).join(", ")}); add others with \`hypha apps add <git url>\``,
+      );
+    const kept = earlier?.find((a) => a.name === name);
+    if (kept) {
+      out.push(kept);
+      continue;
+    }
+    const entry = entryFor(name);
+    const fallback = `${name}.${d.domain}`;
+    const domain =
+      d.target === "local"
+        ? fallback
+        : (
+            await ask(undefined, fallback, () =>
+              p.text({
+                message: `The ${name} app's address`,
+                initialValue: fallback,
+                validate: checkDomain,
+              }),
+            )
+          ).toLowerCase();
+    if (checkDomain(domain)) throw new Error(`the ${name} app's address: ${domain} isn't a domain`);
+    if (domain !== fallback) entry.domain = domain;
+    try {
+      entry.rev = await remoteHead(entry.git);
+    } catch (e) {
+      // Pinned by the first deploy instead (its head then).
+      p.log.warn(
+        `Couldn't read ${entry.git}'s head (${e instanceof Error ? e.message.split("\n")[0] : String(e)}): \`hypha deploy\` pins it`,
+      );
+    }
+    out.push(entry);
+  }
+  return out;
 }

@@ -4,6 +4,7 @@ import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 
 import { healthy, waitForAnswer } from "../api.ts";
+import { appUrl, appWorkerName } from "../apps.ts";
 import { appWorker, workerName } from "../cloudflare.ts";
 import { apps, type Deployment, loadDeployment, loadEnv, url } from "../deployment.ts";
 import { quote, run } from "../shell.ts";
@@ -29,10 +30,17 @@ export const status = defineCommand({
             `${appWorker(deployment, app)}  ${target} ${answers ? "answers" : "doesn't answer"}`,
           );
         }
+        for (const entry of deployment.apps ?? []) {
+          const answers = await waitForAnswer(`${appUrl(deployment, entry)}/health`, 1);
+          ok &&= answers;
+          p.log.step(
+            `${appWorkerName(deployment, entry)}  ${appUrl(deployment, entry)} ${answers ? "answers" : "doesn't answer"}`,
+          );
+        }
         p.outro(
           ok
-            ? "Everything answers"
-            : "Something doesn't answer: see `hypha logs <api|admin|storefront>`",
+            ? "Everything answers (whether the apps are installed: `hypha apps status`)"
+            : "Something doesn't answer: see `hypha logs <api|admin|storefront|app>`",
         );
         if (!ok) process.exitCode = 1;
         return;
@@ -49,7 +57,8 @@ export const status = defineCommand({
 export const logs = defineCommand({
   meta: {
     name: "logs",
-    description: "A service's logs (api, admin, storefront, caddy, postgres, s3), or all",
+    description:
+      "A service's logs (api, admin, storefront, caddy, postgres, s3, app-<name>), or all",
   },
   args: {
     dir: dirArg,
@@ -86,5 +95,10 @@ function cloudflareWorker(d: Deployment, service: string | undefined): string {
     if (!d.domains[service]) throw new Error(`this deployment has no ${service}`);
     return appWorker(d, service);
   }
-  throw new Error(`on Cloudflare, logs are per Worker: api, admin or storefront (not ${service})`);
+  // A co-located app, by its name or its server's service name (`app-stripe`).
+  const app = (d.apps ?? []).find((a) => service === a.name || service === `app-${a.name}`);
+  if (app) return appWorkerName(d, app);
+  throw new Error(
+    `on Cloudflare, logs are per Worker: api, admin, storefront${(d.apps ?? []).map((a) => `, ${a.name}`).join("")} (not ${service})`,
+  );
 }

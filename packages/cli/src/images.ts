@@ -5,33 +5,52 @@
 
 import { join } from "node:path";
 
+import { type AppEntry, imageTag, service } from "./apps.ts";
 import type { App, Deployment } from "./deployment.ts";
 import { type Machine, pipe, run } from "./shell.ts";
 import { REPO } from "./templates.ts";
 
-export type Image = { name: string; tag: string; dockerfile: string; app?: App };
+/** An image: its Dockerfile and build context (absolute paths). */
+export type Image = { name: string; tag: string; dockerfile: string; context: string; app?: App };
 
 export function images(apps: App[]): Image[] {
   return [
-    { name: "api", tag: "hypha-api:current", dockerfile: "docker/api.Dockerfile" },
+    {
+      name: "api",
+      tag: "hypha-api:current",
+      dockerfile: join(REPO, "docker/api.Dockerfile"),
+      context: REPO,
+    },
     ...apps.map((app) => ({
       name: app,
       tag: `hypha-${app}:current`,
-      dockerfile: "docker/app.Dockerfile",
+      dockerfile: join(REPO, "docker/app.Dockerfile"),
+      context: REPO,
       app,
     })),
   ];
 }
 
-function buildArgs(image: Image): string[] {
+/** A co-located app's image (design note 0029, §9): its own Dockerfile, in its clone,
+ * which holds the Node bundle built here (`apps.ts`). */
+export function appImage(entry: AppEntry, clone: string): Image {
+  return {
+    name: service(entry),
+    tag: imageTag(entry),
+    dockerfile: join(clone, "Dockerfile"),
+    context: clone,
+  };
+}
+
+export function buildArgs(image: Image): string[] {
   return [
     "build",
     "-f",
-    join(REPO, image.dockerfile),
+    image.dockerfile,
     "-t",
     image.tag,
     ...(image.app ? ["--build-arg", `APP=${image.app}`] : []),
-    REPO,
+    image.context,
   ];
 }
 

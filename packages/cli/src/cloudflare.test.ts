@@ -13,9 +13,14 @@ import {
   type Tools,
   wranglerToml,
 } from "./cloudflare.ts";
+import { profileOf } from "./apps.ts";
+import { MEILI_TEMPLATE } from "./fixtures.ts";
 import { type Deployment, EnvFile, loadDeployment, saveDeployment } from "./deployment.ts";
 import { systemEnv } from "./shell.ts";
 import { REPO } from "./templates.ts";
+
+const D1_ID = "0f2c7a1e-5b3d-4c8e-9a6f-1d2e3f405162";
+const REV = "a".repeat(40);
 
 const DB = "postgres://hypha:secret@ep-quiet-sky.eu-central-1.aws.neon.tech/hypha?sslmode=require";
 const PLAIN = "postgres://hypha:secret@ep-quiet-sky.eu-central-1.aws.neon.tech/hypha";
@@ -132,11 +137,14 @@ function fakeTools(): {
   tools: Tools;
   calls: string[];
   secrets: string[];
+  /** Each `wrangler deploy`'s configuration, in order. */
+  configs: string[];
   hostEnvs: Record<string, string>[];
   apps: Record<string, Deployed>;
 } {
   const calls: string[] = [];
   const secrets: string[] = [];
+  const configs: string[] = [];
   const hostEnvs: Record<string, string>[] = [];
   const deployedApps: Record<string, Deployed> = {};
   let namespaces = 0;
@@ -149,9 +157,13 @@ function fakeTools(): {
       if (command.startsWith("hyperdrive create")) return `Created\n{ "id": "${"1".repeat(32)}" }`;
       if (command === "kv namespace list") return "[]";
       if (command === "kv namespace create") return `id = "${String(2 + namespaces++).repeat(32)}"`;
+      if (command === "d1 list --json") return "[]";
+      if (command.startsWith("d1 create"))
+        return `✅ Created\n[[d1_databases]]\nbinding = "DB"\ndatabase_id = "${D1_ID}"`;
       if (args[0] === "deploy") {
         const file = args[args.indexOf("--secrets-file") + 1];
         secrets.push(await readFile(file, "utf8"));
+        configs.push(await readFile(args[args.indexOf("--config") + 1], "utf8"));
       }
       return "";
     },
@@ -187,8 +199,13 @@ function fakeTools(): {
       calls.push(`deploy app ${app}`);
       deployedApps[app] = { env, secrets: JSON.parse(await readFile(secretsFile, "utf8")) };
     },
+    async prepareApp(entry) {
+      calls.push(`prepare ${entry.name} ${entry.rev}`);
+      const clone = await mkdtemp(join(tmpdir(), `hypha-app-${entry.name}-`));
+      return { clone, profile: profileOf({ wrangler: MEILI_TEMPLATE, dockerfile: "EXPOSE 8787" }) };
+    },
   };
-  return { tools, calls, secrets, hostEnvs, apps: deployedApps };
+  return { tools, calls, secrets, configs, hostEnvs, apps: deployedApps };
 }
 
 async function folder(d: Deployment, r2 = true): Promise<{ dir: string; env: EnvFile }> {
@@ -432,4 +449,119 @@ test("without an API token, the apps can't deploy and nothing starts", async () 
   const { tools, calls } = fakeTools();
   await assert.rejects(deployCloudflare(dir, d, env, tools), /CLOUDFLARE_API_TOKEN/);
   assert.deepEqual(calls, []);
+});
+
+test("the API binds to each co-located app's Worker and names their hosts", () => {
+  const file = wranglerToml(deployment(), {
+    dir: join(REPO, "hypha-deploy"),
+    accountId: "a".repeat(32),
+    databaseUrl: DB,
+    hyperdriveId: "h".repeat(32),
+    kvId: "k".repeat(32),
+    config: "",
+    bindings: [],
+    compatibilityDate: "2026-10-01",
+    media: false,
+    apps: [
+      { host: "stripe.example.com", binding: "APP_STRIPE", worker: "hypha-app-stripe" },
+      { host: "search.example.com", binding: "APP_MEILISEARCH", worker: "hypha-app-meilisearch" },
+    ],
+  });
+  assert.match(file, /\[\[services\]\]\nbinding = "APP_STRIPE"\nservice = "hypha-app-stripe"\n/);
+  assert.match(
+    file,
+    /\[\[services\]\]\nbinding = "APP_MEILISEARCH"\nservice = "hypha-app-meilisearch"\n/,
+  );
+  assert.match(
+    file,
+    /^HYPHA_APP_BINDINGS = "stripe\.example\.com=APP_STRIPE,search\.example\.com=APP_MEILISEARCH"$/m,
+  );
+  // Without apps, neither.
+  assert.doesNotMatch(toml(deployment()), /HYPHA_APP_BINDINGS|\[\[services\]\]/);
+});
+
+test("a new app gets its D1 database and Worker after the API, then the API is bound to it", async () => {
+  const d = deployment();
+  Object.assign(d.cloudflare!, {
+    accountId: "a".repeat(32),
+    hyperdriveId: "1".repeat(32),
+    kvId: "2".repeat(32),
+  });
+  d.apps = [
+    { name: "meilisearch", git: "git@example.com:a/b.git", rev: REV, domain: "search.example.com" },
+  ];
+  const { dir, env } = await folder(d, false);
+  const { tools, calls, secrets, configs } = fakeTools();
+  await deployCloudflare(dir, d, env, tools);
+  const apiDeploy = `wrangler deploy --config ${join(dir, "wrangler.toml")} --secrets-file ${join(dir, ".secrets.json")}`;
+  const appDeploy = calls.find((c) => c.includes(".hypha-wrangler.toml"))!;
+  assert.ok(appDeploy, "the app was deployed");
+  assert.deepEqual(
+    calls.filter(
+      (c) => c.startsWith("prepare") || c.includes(" d1 ") || c.startsWith("wrangler deploy"),
+    ),
+    [
+      `prepare meilisearch ${REV}`,
+      apiDeploy,
+      "wrangler d1 list --json",
+      "wrangler d1 create hypha-app-meilisearch",
+      appDeploy,
+      apiDeploy,
+    ],
+  );
+  assert.ok(calls.includes("reach https://search.example.com/health"));
+  // The first API deploy can't bind a Worker that isn't there yet; the second does.
+  assert.doesNotMatch(configs[0], /APP_MEILISEARCH/);
+  assert.match(configs[2], /binding = "APP_MEILISEARCH"\nservice = "hypha-app-meilisearch"/);
+  assert.match(configs[2], /^HYPHA_APP_BINDINGS = "search\.example\.com=APP_MEILISEARCH"$/m);
+  // The app's own configuration: its template, made this deployment's.
+  const app = configs[1];
+  assert.match(app, /^name = "hypha-app-meilisearch"$/m);
+  assert.match(app, /^main = "src\/hosts\/worker\.ts"$/m);
+  assert.match(app, /^compatibility_flags = \["nodejs_compat"\]$/m);
+  assert.match(app, /^routes = \[\{ pattern = "search\.example\.com", custom_domain = true \}\]$/m);
+  assert.match(app, /^APP_URL = "https:\/\/search\.example\.com"$/m);
+  assert.match(app, /^HYPHA_API_URLS = "https:\/\/api\.example\.com"$/m);
+  assert.match(app, /^HYPHA_API_URL = "https:\/\/api\.example\.com"$/m);
+  assert.match(app, new RegExp(`^database_id = "${D1_ID}"$`, "m"));
+  assert.match(app, /\[\[services\]\]\nbinding = "HYPHA_API"\nservice = "hypha-api"/);
+  // Its encryption key, made once and kept in .env, went as its secret.
+  const key = EnvFile.parse(await readFile(join(dir, ".env"), "utf8")).get(
+    "APP_MEILISEARCH_ENCRYPTION_KEY",
+  );
+  assert.match(key ?? "", /^[0-9a-f]{64}$/);
+  assert.deepEqual(JSON.parse(secrets[1]), { APP_ENCRYPTION_KEY: key });
+  const saved = await loadDeployment(dir);
+  assert.deepEqual(saved.apps?.[0], { ...d.apps[0], d1Id: D1_ID, deployed: true });
+  assert.ok(!(await readdir(dir)).some((f) => f.startsWith(".secrets")));
+});
+
+test("an app deployed before is bound from the API's first deploy, and nothing is made again", async () => {
+  const d = deployment();
+  Object.assign(d.cloudflare!, {
+    accountId: "a".repeat(32),
+    hyperdriveId: "1".repeat(32),
+    kvId: "2".repeat(32),
+  });
+  d.apps = [
+    { name: "meilisearch", git: "git@example.com:a/b.git", rev: REV, d1Id: D1_ID, deployed: true },
+  ];
+  const { dir, env } = await folder(d, false);
+  env.set("APP_MEILISEARCH_ENCRYPTION_KEY", "e".repeat(64));
+  const { tools, calls, configs, secrets } = fakeTools();
+  await deployCloudflare(dir, d, env, tools);
+  assert.ok(!calls.some((c) => c.includes(" d1 ")));
+  assert.equal(configs.length, 2);
+  assert.match(configs[0], /^HYPHA_APP_BINDINGS = "meilisearch\.example\.com=APP_MEILISEARCH"$/m);
+  assert.deepEqual(JSON.parse(secrets[1]), { APP_ENCRYPTION_KEY: "e".repeat(64) });
+});
+
+test("an app without a wrangler template stops the deploy before anything changes", async () => {
+  const d = deployment();
+  d.apps = [{ name: "plain", git: "git@example.com:a/plain.git", rev: REV }];
+  const { dir, env } = await folder(d, false);
+  const { tools, calls } = fakeTools();
+  tools.prepareApp = async () => ({ clone: dir, profile: profileOf({}) });
+  await assert.rejects(deployCloudflare(dir, d, env, tools), /no wrangler template/);
+  assert.ok(!calls.some((c) => c.includes("deploy") || c.startsWith("host")));
 });

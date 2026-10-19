@@ -78,6 +78,18 @@ test("R2 is tried, and required only when asked", async () => {
   assert.equal((await checkToken("t", "example.com", { media: false }, cloudflare().get)).r2, true);
 });
 
+test("D1 is required only when apps are deployed alongside", async () => {
+  const { get, asked } = cloudflare({ refused: ["/accounts/acc/d1"] });
+  const without = await checkToken("t", "example.com", { media: false }, get);
+  assert.deepEqual(without.missing, []);
+  assert.ok(!asked.some((path) => path.includes("/d1/")));
+  const { missing } = await checkToken("t", "example.com", { media: false, apps: true }, get);
+  assert.deepEqual(
+    missing.map((m) => m.split(" (")[0]),
+    ["D1"],
+  );
+});
+
 test("R2's keys from a token: its ID and the SHA-256 of its value, user or account token", async () => {
   const user = (async (input: RequestInfo | URL) =>
     urlOf(input).endsWith("/user/tokens/verify")

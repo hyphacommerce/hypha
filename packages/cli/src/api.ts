@@ -154,8 +154,13 @@ export async function waitForHealth(d: Deployment, seconds: number): Promise<boo
 }
 
 /** Polls `target` until it answers anything but a server error, or `seconds` pass: a new
- * app's custom domain (its DNS record and certificate) can take a minute or two. */
-export async function waitForAnswer(target: string, seconds: number): Promise<boolean> {
+ * app's custom domain (its DNS record and certificate) can take a minute or two. With
+ * a deployment on this machine, through 127.0.0.1. */
+export async function waitForAnswer(
+  target: string,
+  seconds: number,
+  d?: Deployment,
+): Promise<boolean> {
   const until = Date.now() + seconds * 1000;
   const parsed = new URL(target);
   const request = parsed.protocol === "https:" ? httpsRequest : httpRequest;
@@ -163,7 +168,11 @@ export async function waitForAnswer(target: string, seconds: number): Promise<bo
     const status = await new Promise<number>((resolve) => {
       const req = request(
         parsed,
-        { method: "GET", timeout: 15_000, lookup: freshLookup },
+        {
+          method: "GET",
+          timeout: 15_000,
+          lookup: d?.target === "local" ? loopback : freshLookup,
+        },
         (res) => {
           res.resume();
           resolve(res.statusCode ?? 0);
@@ -189,6 +198,11 @@ export class Staff {
     this.token = token;
   }
 
+  /** An API key's or an existing session's token (`hypha_sk_…`, `hypha_sess_…`). */
+  static withToken(d: Deployment, token: string): Staff {
+    return new Staff(d, token);
+  }
+
   static async login(d: Deployment, email: string, password: string): Promise<Staff> {
     const { status, body } = await send(d, "POST", "/admin/auth/login", { email, password });
     if (status !== 200) throw new ApiError("POST", "/admin/auth/login", status, body);
@@ -208,4 +222,38 @@ export class Staff {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the caller names the route's documented answer
     return answer as T;
   }
+}
+
+/** `GET target` as JSON (an app's manifest): its body, or `undefined` when it doesn't
+ * answer 200 with JSON. On this machine, through 127.0.0.1 like the API's calls. */
+export async function getJson(d: Deployment, target: string): Promise<unknown> {
+  const parsed = new URL(target);
+  const request = parsed.protocol === "https:" ? httpsRequest : httpRequest;
+  return new Promise((resolve) => {
+    const req = request(
+      parsed,
+      {
+        method: "GET",
+        timeout: 15_000,
+        headers: { accept: "application/json" },
+        lookup: d.target === "local" ? loopback : freshLookup,
+      },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => (text += chunk));
+        res.on("end", () => {
+          if (res.statusCode !== 200) return resolve(undefined);
+          try {
+            resolve(JSON.parse(text));
+          } catch {
+            resolve(undefined);
+          }
+        });
+      },
+    );
+    req.on("timeout", () => req.destroy(new Error("timed out")));
+    req.on("error", () => resolve(undefined));
+    req.end();
+  });
 }

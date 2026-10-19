@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { type AppEntry, type AppProfile, appDomain, CADDY_IMPORT, service } from "./apps.ts";
 import { apps, type Deployment, EnvFile, type Target, url } from "./deployment.ts";
 
 const TEMPLATES = join(import.meta.dirname, "..", "templates");
@@ -26,12 +27,7 @@ export function configSchema(): Promise<string> {
  * server. */
 export function caddyfile(d: Deployment, acmeEmail?: string): string {
   const site = (host: string, upstream: string, compress: boolean) =>
-    [
-      `${url(d, host)} {`,
-      ...(compress ? ["\tencode zstd gzip"] : []),
-      `\treverse_proxy ${upstream}`,
-      "}",
-    ].join("\n");
+    caddySite(d, host, upstream, compress);
   // Let's Encrypt writes to the email before a certificate expires (Caddy renews them
   // first); without one, certificates are issued all the same.
   const global =
@@ -53,6 +49,33 @@ export function caddyfile(d: Deployment, acmeEmail?: string): string {
     ...global,
     "",
     sites.join("\n\n"),
+    "",
+    "# The co-located apps' sites (design note 0029, §9), written by `hypha deploy`.",
+    CADDY_IMPORT,
+    "",
+  ].join("\n");
+}
+
+/** One Caddy site: `host` to `upstream`, compressed or not. */
+export function caddySite(d: Deployment, host: string, upstream: string, compress = true): string {
+  return [
+    `${url(d, host)} {`,
+    ...(compress ? ["\tencode zstd gzip"] : []),
+    `\treverse_proxy ${upstream}`,
+    "}",
+  ].join("\n");
+}
+
+/** The apps' Caddy sites, each to its container's port. */
+export function appsCaddy(
+  d: Deployment,
+  coLocated: { entry: AppEntry; profile: AppProfile }[],
+): string {
+  return [
+    "# Written by `hypha deploy` from hypha.json's apps (design note 0029, §9).",
+    ...coLocated.map(({ entry, profile }) =>
+      ["", caddySite(d, appDomain(d, entry), `${service(entry)}:${profile.port}`)].join("\n"),
+    ),
     "",
   ].join("\n");
 }

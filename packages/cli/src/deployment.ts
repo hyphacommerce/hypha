@@ -6,6 +6,8 @@
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { normalizeApps } from "./apps.ts";
+
 export const STATE_FILE = "hypha.json";
 export const ENV_FILE = ".env";
 
@@ -57,6 +59,32 @@ export interface Deployment {
   };
   /** With `target: "cloudflare"`. */
   cloudflare?: Cloudflare;
+  /** The domain the others go under (`example.com`): co-located apps default to
+   * `<name>.<domain>`. Older deployments lack it (taken from the API's then). */
+  domain?: string;
+  /** For Let's Encrypt's notices: `hypha deploy` writes the apps' Caddy sites with it. */
+  acmeEmail?: string;
+  /** Apps deployed alongside (design note 0029, §9): each built from its repository at
+   * a pinned commit, `hypha apps add|update` (apps.ts). In the file, a first-party
+   * app's name alone (`"stripe"`) stands for its repository, unpinned until a deploy. */
+  apps?: AppEntry[];
+}
+
+/** An app deployed with the deployment (design note 0029, §9). */
+export interface AppEntry {
+  /** Names its Worker (`<name>-app-<name>`), container (`app-<name>`), domain and
+   * encryption key (`APP_<NAME>_ENCRYPTION_KEY` in `.env`). */
+  name: string;
+  /** Its repository, cloned with this machine's git credentials. */
+  git: string;
+  /** The commit it's built from (`hypha apps update` moves it). */
+  rev?: string;
+  /** Its domain; `<name>.<domain>` by default. */
+  domain?: string;
+  /** On Cloudflare: its D1 database, made by the first deploy. */
+  d1Id?: string;
+  /** On Cloudflare: its Worker exists, so the API may bind to it. */
+  deployed?: boolean;
 }
 
 export function apps(d: Deployment): App[] {
@@ -81,6 +109,7 @@ export async function loadDeployment(dir: string): Promise<Deployment> {
       `${join(dir, STATE_FILE)}: version ${JSON.stringify(d.version)} is newer than this CLI`,
     );
   }
+  if (d.apps !== undefined) d.apps = normalizeApps(d.apps, join(dir, STATE_FILE));
   return d;
 }
 
@@ -123,6 +152,11 @@ export class EnvFile {
     }
     while (isBlank(lines.at(-1))) lines.pop();
     return new EnvFile(lines);
+  }
+
+  /** The variables' names, in order. */
+  keys(): string[] {
+    return this.lines.flatMap((l) => ("key" in l ? [l.key] : []));
   }
 
   get(key: string): string | undefined {

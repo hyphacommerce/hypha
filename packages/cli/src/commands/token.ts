@@ -21,6 +21,8 @@ export type TokenOptions = {
   zoneId?: string;
   /** Don't open the browser (`--yes`). */
   quiet?: boolean;
+  /** Apps are deployed alongside, so the token needs D1 too. */
+  apps?: boolean;
 };
 
 export async function obtainToken(o: TokenOptions): Promise<{ token: string; checked: Checked }> {
@@ -49,6 +51,7 @@ export async function obtainToken(o: TokenOptions): Promise<{ token: string; che
         accountId: o.accountId,
         zoneId: o.zoneId,
         media: false,
+        apps: o.apps,
       });
     } catch (e) {
       spin.error("The token won't do");

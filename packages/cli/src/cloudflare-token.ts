@@ -58,6 +58,7 @@ export const PERMISSIONS: { key: string; type: "read" | "edit"; why: string }[] 
   { key: "zone", type: "read", why: "finding the domain" },
   { key: "workers_routes", type: "edit", why: "the Workers' custom domains" },
   { key: "dns", type: "edit", why: "the custom domains' records" },
+  { key: "d1", type: "edit", why: "the co-located apps' databases (design note 0029, §9)" },
 ];
 
 /** The permissions as the form names them, for telling the person what to add. */
@@ -71,6 +72,7 @@ const NAMES: Record<string, string> = {
   zone: "Zone",
   workers_routes: "Workers Routes",
   dns: "DNS",
+  d1: "D1",
 };
 
 /** The dashboard's create-token page, filled in with `PERMISSIONS`. */
@@ -126,6 +128,7 @@ export async function checkToken(
     accountId?: string;
     zoneId?: string;
     /** R2 is required, not just tried. */ media: boolean;
+    /** Apps are deployed alongside: D1 is required. */ apps?: boolean;
   },
   get: typeof fetch = fetch,
 ): Promise<Checked> {
@@ -176,6 +179,11 @@ export async function checkToken(
   for (const [path, key] of probes) {
     if ((await call<unknown>(get, token, path)) === null) missing.push(lacking(key));
   }
+  if (
+    options.apps &&
+    (await call<unknown>(get, token, `/accounts/${accountId}/d1/database?per_page=1`)) === null
+  )
+    missing.push(lacking("d1"));
   const r2 = (await call<unknown>(get, token, `/accounts/${accountId}/r2/buckets`)) !== null;
   if (options.media && !r2) missing.push(lacking("workers_r2"));
   return { accountId, zoneId, missing, r2 };

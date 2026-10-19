@@ -5,12 +5,27 @@
 
 import { resolve4, resolve6 } from "node:dns/promises";
 import { isIP } from "node:net";
-import { resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 
-import { Staff, waitForHealth } from "../api.ts";
+import { Staff, waitForAnswer, waitForHealth } from "../api.ts";
+import {
+  APPS_CADDY_FILE,
+  type AppEntry,
+  type AppProfile,
+  appDomain,
+  appUrl,
+  CADDY_IMPORT,
+  checkout,
+  cloneDir,
+  COMPOSE_APPS_FILE,
+  composeApps,
+  readProfile,
+  service,
+} from "../apps.ts";
 import { deployCloudflare, hereTools } from "../cloudflare.ts";
 import {
   apps,
@@ -22,8 +37,10 @@ import {
   saveEnv,
   url,
 } from "../deployment.ts";
-import { build, images } from "../images.ts";
-import { CommandFailed, type Machine } from "../shell.ts";
+import { appImage, build, images } from "../images.ts";
+import { CommandFailed, type Machine, run } from "../shell.ts";
+import { appsCaddy } from "../templates.ts";
+import { ensureEncryptionKeys, offerInstalls, pinUnpinned } from "./apps.ts";
 import { connectStorefront, syncWebhook } from "../storefront.ts";
 import { dirArg, guarded, open } from "./shared.ts";
 import { obtainToken } from "./token.ts";
@@ -32,7 +49,9 @@ import { obtainToken } from "./token.ts";
 const FILES = [
   ENV_FILE,
   "compose.yaml",
+  COMPOSE_APPS_FILE,
   "Caddyfile",
+  APPS_CADDY_FILE,
   "hypha.config.toml",
   "hypha.config.schema.json",
   "seaweedfs/s3.json",
@@ -56,6 +75,7 @@ export const deploy = defineCommand({
     guarded(async () => {
       const dir = args.dir;
       const deployment = await loadDeployment(dir);
+      await pinUnpinned(dir, deployment);
       if (deployment.target === "cloudflare") {
         p.intro("hypha deploy → Cloudflare");
         const env = await loadEnv(dir);
@@ -69,6 +89,7 @@ export const deploy = defineCommand({
             accountId: cf.accountId,
             zoneId: cf.zoneId,
             quiet: args.yes,
+            apps: Boolean(deployment.apps?.length),
           });
           env.set("CLOUDFLARE_API_TOKEN", token);
           await saveEnv(dir, env);
@@ -77,7 +98,12 @@ export const deploy = defineCommand({
             await saveDeployment(dir, deployment);
           }
         }
-        await deployCloudflare(resolve(dir), deployment, env, hereTools(deployment, env));
+        await deployCloudflare(
+          resolve(dir),
+          deployment,
+          env,
+          hereTools(resolve(dir), deployment, env),
+        );
         const password = env.get("HYPHA_OWNER_PASSWORD");
         const lines = [
           `API        ${url(deployment, deployment.domains.api)}`,
@@ -94,7 +120,10 @@ export const deploy = defineCommand({
             `Log in as ${env.get("HYPHA_OWNER_EMAIL")} with ${password}`,
             "(then change it)",
           );
+        for (const entry of deployment.apps ?? [])
+          lines.splice(lines.length, 0, `${entry.name.padEnd(10)} ${appUrl(deployment, entry)}`);
         p.note(lines.join("\n"), "Deployed");
+        await offerInstalls(deployment, env, { quiet: args.yes });
         p.outro("Done.");
         return;
       }
@@ -103,6 +132,24 @@ export const deploy = defineCommand({
 
       await preflight(d, machine, Boolean(args.yes), !args["skip-build"]);
 
+      // The co-located apps (design note 0029, §9): cloned, installed and bundled here,
+      // their images built where the API's are.
+      const coLocated: { entry: AppEntry; clone: string; profile: AppProfile }[] = [];
+      for (const entry of d.apps ?? []) {
+        const clone = cloneDir(resolve(dir), entry);
+        if (!args["skip-build"]) {
+          p.log.step(`Preparing the ${entry.name} app (${entry.rev!.slice(0, 12)})…`);
+          await checkout(resolve(dir), entry);
+        }
+        const profile = await readProfile(clone);
+        if (!profile.nodeBuild && !args["skip-build"]) {
+          throw new Error(
+            `the ${entry.name} app has no \`build:node\` script: it can't be built for a container`,
+          );
+        }
+        coLocated.push({ entry, clone, profile });
+      }
+
       if (!args["skip-build"]) {
         for (const image of images(apps(d))) {
           p.log.step(
@@ -110,7 +157,16 @@ export const deploy = defineCommand({
           );
           await build(d, machine, image);
         }
+        for (const { entry, clone } of coLocated) {
+          await run("pnpm", ["run", "build:node"], { cwd: clone, capture: true });
+          const image = appImage(entry, clone);
+          p.log.step(
+            `Building ${image.tag}${machine.ssh ? (d.buildOn === "server" ? " on the server" : " here") : ""}…`,
+          );
+          await build(d, machine, image);
+        }
       }
+      await writeServerApps(resolve(dir), d, coLocated);
 
       const spin = p.spinner();
       spin.start("Copying the deployment and starting it");
@@ -163,10 +219,19 @@ export const deploy = defineCommand({
         }
       }
 
+      for (const { entry } of coLocated) {
+        const target = `${appUrl(d, entry)}/health`;
+        if (!(await waitForAnswer(target, 120, d)))
+          p.log.warn(
+            `The ${entry.name} app doesn't answer at ${target}: see \`hypha logs ${service(entry)}\``,
+          );
+      }
+
       const lines = [
         `API        ${url(d, d.domains.api)}`,
         ...(d.domains.admin ? [`Admin      ${url(d, d.domains.admin)}`] : []),
         ...(d.domains.storefront ? [`Storefront ${url(d, d.domains.storefront)}`] : []),
+        ...coLocated.map(({ entry }) => `${entry.name.padEnd(10)} ${appUrl(d, entry)}`),
       ];
       const password = env.get("HYPHA_OWNER_PASSWORD");
       if (password)
@@ -176,9 +241,41 @@ export const deploy = defineCommand({
           "(then change it)",
         );
       p.note(lines.join("\n"), "Deployed");
+      await offerInstalls(d, env, { quiet: args.yes });
       p.outro("Done.");
     }),
 });
+
+/**
+ * The co-located apps' part of a server's files: `compose.apps.yaml` (their containers,
+ * read after `compose.yaml` through `.env`'s COMPOSE_FILE), `apps.caddy` (their sites,
+ * which the Caddyfile imports), their encryption keys in `.env`, and on this machine
+ * calls to private addresses allowed (the apps are other containers). Written on every
+ * deploy, with no apps too, so a removed app's container goes (`--remove-orphans`).
+ */
+export async function writeServerApps(
+  dir: string,
+  d: Deployment,
+  coLocated: { entry: AppEntry; profile: AppProfile }[],
+): Promise<void> {
+  await writeFile(join(dir, COMPOSE_APPS_FILE), composeApps(d, coLocated));
+  await writeFile(join(dir, APPS_CADDY_FILE), appsCaddy(d, coLocated));
+  const caddyfile = await readFile(join(dir, "Caddyfile"), "utf8");
+  if (!caddyfile.split("\n").includes(CADDY_IMPORT)) {
+    // A Caddyfile from before the apps: the import goes at its end, the rest as it was.
+    await writeFile(
+      join(dir, "Caddyfile"),
+      `${caddyfile.trimEnd()}\n\n# The co-located apps' sites (design note 0029, §9), written by \`hypha deploy\`.\n${CADDY_IMPORT}\n`,
+    );
+  }
+  const env = await loadEnv(dir);
+  const before = env.toString();
+  env.set("COMPOSE_FILE", `compose.yaml:${COMPOSE_APPS_FILE}`).set("COMPOSE_PATH_SEPARATOR", ":");
+  ensureEncryptionKeys(d, env);
+  if (d.target === "local" && coLocated.length > 0)
+    env.set("HYPHA_ALLOW_PRIVATE_CALLBACKS", "true");
+  if (env.toString() !== before) await saveEnv(dir, env);
+}
 
 /** Checks the server before anything is built: SSH, Docker (offering to install it),
  * and that the domains point at it. */
@@ -237,7 +334,10 @@ async function preflight(
   const host = machine.ssh.split("@").pop()!;
   const serverIps = isIP(host) ? [host] : await addresses(host);
   const wrong: string[] = [];
-  for (const domain of Object.values(d.domains)) {
+  for (const domain of [
+    ...Object.values(d.domains),
+    ...(d.apps ?? []).map((a) => appDomain(d, a)),
+  ]) {
     if (!domain) continue;
     const ips = await addresses(domain);
     if (!ips.some((ip) => serverIps.includes(ip)))
