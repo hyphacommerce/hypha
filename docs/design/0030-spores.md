@@ -503,7 +503,8 @@ directly (bypasses workflow rules such as the order's derived `financial_status`
 boxed async writes in the batch (`!Send` on Workers, and no typed test double).
 
 **Q3. Routes.** *As recommended:* `spore_routes!` expanded by the generated host, under
-`/spores/<name>/` prefixes.
+`/spores/<name>/` prefixes. *As built:* the host lists each spore's route macro
+(`routes: [...]`) beside `spores`, and public routes share `Rule::SporePublic`.
 
 **Q4. The facade.** *As recommended:* `hypha-spore`, 0.x with breaking changes on minor
 versions, a changelog per release.
@@ -546,7 +547,11 @@ app), email senders (already compiled in: they become spores' to add), tax engin
    Cargo features for first-party spores in this workspace (§9).
 3. `hypha-spore` facade, the migration check (§5), `spore_routes!`, `SporeUi` and the
    two-source UI discovery, core's `spore_settings` with sealed fields and the admin's
-   settings form for spores.
+   settings form for spores. *Done* (see "As built: step 3"), with step 2's leftovers:
+   `SporeEnv`, enable/disable honoured by providers, handlers, routes and UI, and the
+   route tests' `app_with_spores::<D>()`. Still left: the `missing` mark (Q7), Cargo
+   features for first-party spores (§9), storefront elements from spores, the batch
+   slot and `consistent_read!` for spores (§6.2, with their first user).
 4. `spores/stripe` behind `--features spore-stripe`, with command tests, Postgres and
    route tests; `scripts/e2e.sh` steps for its routes (with a fake Stripe, as the app's
    tests use).
@@ -557,6 +562,108 @@ app), email senders (already compiled in: they become spores' to add), tax engin
 
 The batch slot (§6.2) and `also` hooks (§6.3) are built by the first spore that needs
 them, not in this list.
+
+## As built: step 3 (facade, migration check, settings, routes, UI)
+
+- **`SporeEnv` (§4).** `Spore::new(env: SporeEnv) -> Result<Self, SporeError>`. The
+  env is the spore's clock, ID generator, randomness, `SecretBox` (it implements those
+  ports, so `&env` goes wherever a command asks) and HTTP client
+  (`hypha_spore_core::HttpClient`: method, URL, headers, body, timeout, answer cap). The
+  HTTP is the host's outbound client for apps (`hypha_http::spores::spore_host` over
+  `HostCalls`): no redirects, natively only public addresses unless
+  `outbound.allow_private`. Not the media storage's `HttpClient`, which has no request
+  body. Its `[spores.<name>]` table comes from `hypha.config.toml` as written
+  (`config()`, `config_as::<T>()`); `hypha-config` keeps every `spores.*` table as is
+  (`Config::spores`) and the host refuses one for a spore it wasn't built with.
+  `SporeSet::build(host, config)` builds them in order; the first `SporeError` stops
+  startup as `spore "stripe": <error>` (natively and on Workers). The built spores are
+  kept (`Storage::spores()`, the same tuple type), and a route handler reaches its own
+  with `hypha_http::spores::spore::<Stripe, S>(&state)` (an `Any` downcast by name).
+- **The migration check (§5)** is in `migrate` (`spore_check.rs`): for each new
+  migration of a `spore_*` set, the current schema's catalog (relations with the table
+  an index is on, types, functions, triggers, rules, policies, constraints, columns) is
+  read before and after it, in its transaction. Problems roll it back and stop startup
+  and `setup`, naming each object: anything not named `spore_<name>_*` (the longest
+  module prefix wins, so `spore_a_b_*` isn't `spore_a`'s), an index, trigger, rule,
+  policy, constraint or column added to a table outside the prefix, a foreign key from
+  its tables to another table that isn't `CASCADE`/`SET NULL`, anything outside the
+  prefix dropped. Only the current schema is read (other schemas may be other
+  databases', as the route tests' are). Tested on Postgres with a well-behaved spore
+  and four rogue ones.
+- **Settings (§8).** `spore_settings` (migration 0056: key, version, JSON), repository
+  `SporeSettingsRepo` / `HasSporeSettings` in `hypha-apps` (contract scenario
+  `spore_settings_repo`, in memory and on Postgres; no outbox events). The schema is a
+  subset of JSON Schema, `hypha_apps::SettingsSchema`: an object of scalar fields
+  (`string`, `integer`, `number`, `boolean`; `enum`, `minLength`/`maxLength`,
+  `minimum`/`maximum`, `title`, `description`, `default`, `examples`, `format`,
+  `required`, `additionalProperties: false`), checked when the host starts so every
+  admin can draw it; not a general validator (no `pattern`, nesting or `oneOf`). `PUT
+  /admin/apps/{key}/settings` (`{"settings": {…}}`, `apps:write`) checks the schema,
+  then `Spore::check_settings` with secrets in plain text, then seals the
+  `"x-hypha-secret": true` fields with the host's `SecretBox`, context
+  `spore_<name>/<field>`, stored as `{"sealed": "<hex>"}`. A secret left out keeps its
+  value, `null` clears it. `GET` (`apps:read`) and the `PUT` answer `{app, schema,
+  settings, updated_at}`, secrets as `{"set": bool}`. A key that's no spore of this
+  build (or an app) is `404 app_not_found`, a spore without a schema
+  `app_settings_not_found`, bad values `422 settings_invalid` with
+  `details.errors: [{path: field, message}]`. The spore reads them through
+  `env.settings::<T>(&ports)`.
+- **The facade, `hypha-spore` 0.1.0 (SP6).** Root: `Spore`, `SporeEnv`, `SporeError`,
+  `SporeUi`. Modules: `env`, `client` (HTTP), `settings`, `ui`, `core` (IDs, money,
+  `Ctx`/`Scope`, time, ports, `EventHandler`), `migrations`, `payments` (the provider
+  port, reading payments and methods), `orders` (reading), `order_actions`
+  (`record_payment_event`); features `postgres` (`PgStore`, `Queries`, `Db`,
+  `PgConnection`, `spore_repo_error`; `PgStore::conn()` became public for spores'
+  repositories), `http` (`Caller`, `JsonBody`, `PathId`, `Query`, `ApiError`, the state
+  types, `spore_routes!`, `spore`, `utoipa`) and `testing` (in-memory ports, clocks,
+  IDs, a `SporeHost`). No `Stage*` trait of a core aggregate. It builds for wasm with
+  every feature (in CI's list).
+- **Routes (§7).** `hypha_http::spore_routes! { crate::stripe_routes for Stripe: [public,
+  POST, "/spores/stripe/webhook", webhook::receive], … }`, invoked at the spore's crate
+  root (handler paths are from there, `module::handler`, as `route_table!`'s). A `const`
+  assertion checks each path is under its surface's prefix and the spore's name when
+  the spore builds; a test keeps core's routes out of the three prefixes, so a spore
+  can't shadow a core route. It defines the exported macro `stripe_routes!` (`router
+  <storage>`, `rows`), which `host! { spores: [Stripe], routes:
+  [hypha_spore_stripe::stripe_routes] }` and `worker!` expand with the concrete storage
+  and merge into the router; startup refuses routes of a spore not in the list. The
+  `routes` list is apart from `spores` because a `macro_rules!` can't find a macro from
+  a type. Each route is wrapped (`hypha_http::spores::gate`): public ones are rate
+  limited per client address by `Rule::SporePublic` (`[rate_limits] spore_public`,
+  120 then one every 250 ms; binding `RL_SPORE_PUBLIC`, slot 11, in `wrangler.toml`),
+  then every one answers `403 app_disabled` while the spore is off (one read of its app
+  per request). Handlers carry `#[utoipa::path]`; the host's `openapi` command
+  documents them under the tag `spore_<name>`, operation IDs
+  `<surface>.spore_<name>.<handler>`, public ones in the admin document without
+  credentials. The committed documents (the stock build) only changed for the settings
+  routes and the blocks and actions routes' `app` pattern, which takes `spore_` keys.
+- **UI (§7).** `SporeUi<P>` (next to `Spore`, `P` the host's ports): `blocks()` and
+  `actions()` declare `(id, target)` (and an action's label and input schema), `block`
+  and `action` answer with a `UiCall` (the target, the context, the staff member, and
+  a `Ctx` that is the spore's app acting with its scopes as far as the caller holds
+  them, as an app's session token). `GET /admin/app-extensions` merges enabled spores'
+  blocks, actions and settings forms (`url` is the blocks route, `proxy` false;
+  `secret_fields` from the schema) where their declared scopes read the target, as
+  apps' grants must. The blocks and actions routes answer a `spore_` key in-process:
+  `app_disabled` (403) when off, the caller and the spore must read the target, the
+  tree is checked with `check_block` (an invalid one, or `UiError::Failed`, is `502
+  app_unavailable`), nothing is written to the extension call log (no call left the
+  process). No embedded pages, session tokens or proxy for spores (Q9); no storefront
+  elements yet.
+- **Enable and disable** (step 2's leftover). Providers: `HostPayments` reports a
+  disabled spore's provider unavailable (so new methods with it are refused), `start`
+  is `payment_provider_unknown`, actions `payment_action_unsupported`, as a disabled
+  app's. Handlers: each spore's set is wrapped in `Gated`; fan-out still makes their
+  deliveries, and running one while the spore is off fails with "spore_<name> is
+  disabled", retried on the dispatcher's schedule like a disabled app's webhook
+  (72 hours by default), so nothing that happened while it was off is lost if it's
+  turned back on within that window; after it they're failed like any delivery.
+  Routes and UI: above.
+- **Tests.** The test spore (`hypha-host-axum`'s `src/test_spore.rs`: a table, a
+  handler, a payment provider, a config section, settings with a secret, a block, a
+  broken block, an action, a route per surface) runs in `route_tests/spores.rs` on a
+  host built with it (`app_with_spores::<D>()`, the `TestApp::with_spores!` of §10 as a
+  generic function: `TestApp<D>` and the send helpers are generic over the deployment).
 
 ## As built: step 2 (hosts as libraries)
 
