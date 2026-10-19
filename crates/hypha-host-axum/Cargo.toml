@@ -19,6 +19,8 @@ hypha-search-index = { path = "../hypha-search-index" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
 # The spores a deployment is built with (design note 0030, `host!`).
 hypha-spore-core = { path = "../hypha-spore-core" }
+# Registering each spore's app at startup.
+hypha-apps = { path = "../hypha-apps" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-users = { path = "../hypha-users" }
@@ -54,7 +56,6 @@ serde_json.workspace = true
 url = "2.5"
 # The route tests (`route_tests.rs`).
 hypha-auth = { path = "../hypha-auth" }
-hypha-apps = { path = "../hypha-apps" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-products = { path = "../hypha-products" }
 jiff = "0.2"

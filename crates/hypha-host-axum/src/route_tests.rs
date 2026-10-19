@@ -44,6 +44,8 @@ type PgStorage = crate::storage::PgStorage<crate::Stock>;
 // Apps installed through OAuth, and personal data (design note 0029).
 mod app_extensions;
 mod oauth;
+// A host built with a spore (design note 0030).
+mod spores;
 
 const OWNER_EMAIL: &str = "owner@example.com";
 const OWNER_PASSWORD: &str = "owner password";

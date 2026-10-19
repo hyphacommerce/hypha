@@ -22,6 +22,8 @@ use hypha_http::state::{AppState, HostEnv, HostParts, Runtime, SharedState, Stor
 use crate::limiter::MemoryRateLimiter;
 use crate::platform::Background;
 use crate::storage::{PgDatabase, PgStorage};
+use hypha_spore_core::SporeSet;
+
 use crate::{Deployment, calls, email, platform, runner};
 
 /// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
@@ -212,6 +214,13 @@ async fn main<D: Deployment>() {
         );
         std::process::exit(1);
     };
+    // A spore's name is its key, its migration module and its tables' prefix: a bad one
+    // stops the build here, before anything is migrated.
+    let problems = hypha_spore_core::check::<D::Spores>();
+    if !problems.is_empty() {
+        tracing::error!("this build's spores:\n{}", problems.join("\n"));
+        std::process::exit(1);
+    }
     let runtime = platform::runtime();
     let migrations = crate::migrations::<D>();
     let db = match PgDatabase::connect(&url, &config.database, runtime.clock.clone(), &migrations)
@@ -308,10 +317,56 @@ async fn ensure_search_index<S: Storage>(state: &AppState<S>) -> Result<(), Stri
     Ok(())
 }
 
+/// Each spore this host is built with gets its app (design note 0030, §3), as the system:
+/// created with its scopes the first time, its title and scopes brought up to date after.
+async fn register_spores<D: Deployment>(state: &AppState<PgStorage<D>>) -> Result<(), String> {
+    use hypha_apps::HasApps;
+    let spores = <D::Spores as SporeSet>::registrations();
+    if spores.is_empty() {
+        return Ok(());
+    }
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "cannot reach storage")?;
+    for spore in spores {
+        let app =
+            hypha_apps::register_spore(&Ctx::system(), ports.apps(), &state.env, &state.env, spore)
+                .await
+                .map_err(|e| format!("spore {:?}: {e}", spore.name))?;
+        tracing::info!(app = %app.key(), enabled = app.enabled(), "spore");
+    }
+    Ok(())
+}
+
+/// Handler names and provider keys are how deliveries and payment methods find them, so
+/// two alike (a spore's and core's, or two spores') would be ambiguous: the host refuses.
+fn check_unique<D: Deployment>(storage: &PgStorage<D>) -> Result<(), String> {
+    use hypha_core::EventHandlers;
+    use hypha_payments::PaymentProviders;
+    let names = EventHandlers::<crate::PgPorts>::names(storage.handlers());
+    let keys = storage.payment_providers().keys();
+    let mut problems = repeated("event handler", &names);
+    problems.extend(repeated("payment provider", &keys));
+    match problems.is_empty() {
+        true => Ok(()),
+        false => Err(problems.join("\n")),
+    }
+}
+
+/// A line for each item that's in `list` more than once.
+fn repeated<T: PartialEq + std::fmt::Display>(what: &str, list: &[T]) -> Vec<String> {
+    list.iter()
+        .enumerate()
+        .filter(|(i, item)| list[..*i].contains(item))
+        .map(|(_, item)| format!("{what} {item} is built in twice"))
+        .collect()
+}
+
 /// What a start prepares before serving: the state, with the store, the owner, the
 /// default location and the search index set up, and the host pieces `serve` runs.
-struct Prepared<D: Deployment> {
-    state: SharedState<PgStorage<D>>,
+pub(crate) struct Prepared<D: Deployment> {
+    pub(crate) state: SharedState<PgStorage<D>>,
     background: Background,
     limiter: Arc<MemoryRateLimiter>,
     wake: runner::Wake,
@@ -319,9 +374,9 @@ struct Prepared<D: Deployment> {
 
 /// Everything a start does before listening, which `setup` does alone: the store (one per
 /// deployment), the media bucket if asked for, the owner, the default location and the
-/// search index; then the handlers, whose `Mailer` needs the store. Migrations ran in
-/// `PgDatabase::connect`. Exits on failure.
-async fn prepare<D: Deployment>(
+/// search index; then the handlers, whose `Mailer` needs the store, and each spore's app.
+/// Migrations ran in `PgDatabase::connect`. Exits on failure.
+pub(crate) async fn prepare<D: Deployment>(
     db: PgDatabase,
     env: HostEnv,
     mail_sender: HostMail,
@@ -406,6 +461,10 @@ async fn prepare<D: Deployment>(
         &runtime,
     ));
     let storage = PgStorage::<D>::new(db, Arc::clone(&mail));
+    if let Err(e) = check_unique(&storage) {
+        tracing::error!("{e}");
+        std::process::exit(1);
+    }
     let host = HostParts {
         env,
         background: background.host(),
@@ -423,6 +482,10 @@ async fn prepare<D: Deployment>(
         host,
         config,
     ));
+    if let Err(e) = register_spores(&state).await {
+        tracing::error!("spore setup failed: {e}");
+        std::process::exit(1);
+    }
     if let Err(e) = ensure_owner(&state).await {
         tracing::error!("owner setup failed: {e}");
         std::process::exit(1);
@@ -555,4 +618,18 @@ async fn shutdown_signal() {
         () = terminate => {},
     }
     tracing::info!("shutting down: finishing in-flight requests");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_repeat_is_reported_once_per_extra_copy() {
+        assert_eq!(
+            repeated("event handler", &["search_index", "mailer", "search_index"]),
+            ["event handler search_index is built in twice"]
+        );
+        assert!(repeated("payment provider", &["manual", "spore_stripe"]).is_empty());
+    }
 }
