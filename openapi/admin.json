@@ -23535,7 +23535,7 @@
             "bearer": []
           }
         ],
-        "summary": "Asks the payment's app to capture an authorized payment (`payments.capture`). 202:\nthe app accepted; the payment becomes `paid` when the app reports it. Refused by the\nprovider: `409 payment_refused` with its `reason`. Not authorized: `409\ninvalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the\napp gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,\nis passed to the app (retry a timed-out request with the same one); without it each\nrequest is a new attempt with its own key, so asking again after a refusal is asked\nanew, not answered with the refusal.",
+        "summary": "Asks the payment's app to capture an authorized payment (`payments.capture`). 202:\nthe app accepted; the payment becomes `paid` when the app reports it, or at once (in\nthe answer's `payment`) when a provider built into the API says it's done (a spore,\ndesign note 0030). Refused by the\nprovider: `409 payment_refused` with its `reason`. Not authorized: `409\ninvalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the\napp gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,\nis passed to the app (retry a timed-out request with the same one); without it each\nrequest is a new attempt with its own key, so asking again after a refusal is asked\nanew, not answered with the refusal.",
         "tags": [
           "payments"
         ],

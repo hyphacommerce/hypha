@@ -708,17 +708,90 @@ async fn act<S: Storage>(
         idempotency_key,
     };
     let acted = act_on_payment(ctx, ports, &state.ids, &state.payments(ports), input).await?;
+    let payment = match acted.completed {
+        true => record_completed(state, ports, &acted, action, amount)
+            .await
+            .unwrap_or(acted.payment),
+        false => acted.payment,
+    };
     Ok((
         StatusCode::ACCEPTED,
         Json(PaymentActionAcceptedResponse {
             reference: acted.reference,
-            payment: PaymentResponse::new(&acted.payment)?,
+            payment: PaymentResponse::new(&payment)?,
         }),
     ))
 }
 
+/// What a spore's provider did already (`ActionAnswer::Completed`: Stripe's capture
+/// answered `succeeded`), recorded at once as its spore (design note 0030), so staff
+/// see the payment move now; the provider's own report later changes nothing (the same
+/// state, or the refund's ID counted). The payment as it is after; `None` (logged) when
+/// it couldn't be recorded: the provider's report is the backstop.
+async fn record_completed<S: Storage>(
+    state: &SharedState<S>,
+    ports: &S::Ports<'_>,
+    acted: &hypha_payments::Acted,
+    action: PaymentAction,
+    amount: Option<i64>,
+) -> Option<Payment> {
+    use hypha_core::{ActingAs, Actor, Ctx, IdempotencyRequest, Scope};
+    let payment = &acted.payment;
+    let spore = hypha_apps::spore_of(
+        hypha_apps::HasApps::apps(ports),
+        payment.provider().as_str(),
+    )
+    .await
+    .ok()
+    .flatten()?;
+    let left = payment.amount().amount() - payment.refunded().amount();
+    let (kind, amount) = match action {
+        PaymentAction::Capture => (PaymentEventKind::Paid, None),
+        PaymentAction::Void => (PaymentEventKind::Voided, None),
+        PaymentAction::Refund => match amount {
+            Some(a) if a < left => (PaymentEventKind::PartiallyRefunded, Some(a)),
+            Some(a) => (PaymentEventKind::Refunded, Some(a)),
+            None => (PaymentEventKind::Refunded, None),
+        },
+    };
+    let reference = acted.reference.clone();
+    let key = format!(
+        "{}:{action}:completed:{}",
+        payment.id(),
+        reference.as_deref().unwrap_or_default()
+    );
+    let fingerprint = {
+        use sha2::Digest;
+        sha2::Sha256::digest(format!("{kind:?}|{amount:?}|{reference:?}").as_bytes()).into()
+    };
+    let input = PaymentEvent {
+        payment: payment.id(),
+        kind,
+        amount,
+        reference,
+        occurred_at: None,
+        idempotency: Some(IdempotencyRequest { key, fingerprint }),
+    };
+    let actor = Actor::App(spore.id());
+    ports.act_as(actor);
+    let ctx = Ctx::new(actor, vec![Scope::PaymentsWrite]);
+    match record_payment_event(&ctx, ports, &state.clock, input).await {
+        Ok(done) => done
+            .value
+            .payments
+            .into_iter()
+            .find(|p| p.id() == payment.id()),
+        Err(e) => {
+            tracing::warn!(payment = %payment.id(), "recording what the provider completed failed: {e}");
+            None
+        }
+    }
+}
+
 /// Asks the payment's app to capture an authorized payment (`payments.capture`). 202:
-/// the app accepted; the payment becomes `paid` when the app reports it. Refused by the
+/// the app accepted; the payment becomes `paid` when the app reports it, or at once (in
+/// the answer's `payment`) when a provider built into the API says it's done (a spore,
+/// design note 0030). Refused by the
 /// provider: `409 payment_refused` with its `reason`. Not authorized: `409
 /// invalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the
 /// app gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,

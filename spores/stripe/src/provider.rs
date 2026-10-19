@@ -170,7 +170,9 @@ impl PaymentProvider for StripeProvider {
         let amount =
             |money: Money| to_stripe(money.amount(), &money.currency().to_string()).map(Form::from);
         let stripe = self.client(secret_key);
-        let done: Result<String, StripeError> = match request.action {
+        // The ID and whether Stripe's answer says it's done (a capture `succeeded`, a cancel
+        // `canceled`, a refund `succeeded`): then Hypha records it at once.
+        let done: Result<(String, bool), StripeError> = match request.action {
             PaymentAction::Capture => {
                 let params = match request.amount.map(amount).transpose() {
                     Ok(Some(form)) => vec![("amount_to_capture", form)],
@@ -184,12 +186,12 @@ impl PaymentProvider for StripeProvider {
                 stripe
                     .capture_payment_intent(reference, &params, &idempotency_key)
                     .await
-                    .map(|intent| intent.id)
+                    .map(|intent| (intent.id, intent.status == "succeeded"))
             }
             PaymentAction::Void => stripe
                 .cancel_payment_intent(reference, &idempotency_key)
                 .await
-                .map(|intent| intent.id),
+                .map(|intent| (intent.id, intent.status == "canceled")),
             PaymentAction::Refund => {
                 let mut params: Vec<(&str, Form)> = vec![
                     ("payment_intent", reference.into()),
@@ -213,11 +215,14 @@ impl PaymentProvider for StripeProvider {
                 stripe
                     .create_refund(&params, &idempotency_key)
                     .await
-                    .map(|refund| refund.id)
+                    .map(|refund| (refund.id, refund.status == "succeeded"))
             }
         };
         match done {
-            Ok(reference) => Ok(ActionAnswer::Accepted {
+            Ok((reference, true)) => Ok(ActionAnswer::Completed {
+                reference: Some(reference),
+            }),
+            Ok((reference, false)) => Ok(ActionAnswer::Accepted {
                 reference: Some(reference),
             }),
             Err(e) if e.is_refusal() => Ok(ActionAnswer::Refused { reason: e.message }),

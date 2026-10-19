@@ -260,6 +260,9 @@ pub struct ActOnPayment {
 pub struct Acted {
     pub payment: Payment,
     pub reference: Option<String>,
+    /// The provider says it's done already (`ActionAnswer::Completed`): the caller
+    /// records it (`hypha_order_actions::record_payment_event`).
+    pub completed: bool,
 }
 
 /// Asks `input.payment`'s provider to capture, void or refund it (`orders:write`: what
@@ -338,7 +341,16 @@ pub async fn act_on_payment<S: HasPayments, P: PaymentProviders>(
         store_settings: serde_json::Map::new(),
     };
     match providers.act(payment.provider(), &request).await? {
-        ActionAnswer::Accepted { reference } => Ok(Acted { payment, reference }),
+        ActionAnswer::Accepted { reference } => Ok(Acted {
+            payment,
+            reference,
+            completed: false,
+        }),
+        ActionAnswer::Completed { reference } => Ok(Acted {
+            payment,
+            reference,
+            completed: true,
+        }),
         ActionAnswer::Refused { reason } => Err(CommandError::PaymentRefused {
             payment: payment.id(),
             reason,

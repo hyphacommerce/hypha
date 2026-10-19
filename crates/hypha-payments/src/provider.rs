@@ -192,6 +192,14 @@ pub enum ActionAnswer {
     Accepted {
         reference: Option<String>,
     },
+    /// Done already, as the provider's answer says (Stripe's capture answered
+    /// `succeeded`): the host records it at once (design note 0030), so the payment
+    /// moves without waiting for the provider's report, which then changes nothing. For
+    /// a refund, `reference` is the refund's own ID. Only a provider built in answers it;
+    /// an app's answers are `Accepted` or `Refused` (its wire contract).
+    Completed {
+        reference: Option<String>,
+    },
     /// The provider said no, in words staff are shown.
     Refused {
         reason: String,

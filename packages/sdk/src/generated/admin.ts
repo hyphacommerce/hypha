@@ -1866,7 +1866,9 @@ export interface paths {
         put?: never;
         /**
          * Asks the payment's app to capture an authorized payment (`payments.capture`). 202:
-         *     the app accepted; the payment becomes `paid` when the app reports it. Refused by the
+         *     the app accepted; the payment becomes `paid` when the app reports it, or at once (in
+         *     the answer's `payment`) when a provider built into the API says it's done (a spore,
+         *     design note 0030). Refused by the
          *     provider: `409 payment_refused` with its `reason`. Not authorized: `409
          *     invalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the
          *     app gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,

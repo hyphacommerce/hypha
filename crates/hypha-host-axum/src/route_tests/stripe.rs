@@ -359,8 +359,8 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
         "{text}"
     );
 
-    // Staff capture through the payment's route; Stripe's webhook then makes it paid,
-    // and a redelivery of that event changes nothing.
+    // Staff capture through the payment's route: Stripe's answer says it's done, so the
+    // payment is paid at once; Stripe's webhook and its redelivery then change nothing.
     let (status, json) = send(
         &app,
         "POST",
@@ -369,6 +369,7 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{json}");
+    assert_eq!(json["payment"]["status"], "paid", "{json}");
     assert_eq!(fake.lock().unwrap().intents["pi_1"]["status"], "succeeded");
     let succeeded = json!({ "id": "pi_1", "metadata": intent["metadata"] });
     let (status, outcome) = deliver(
@@ -388,7 +389,8 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
     assert_eq!(status, StatusCode::OK);
     assert_eq!(payment_status(&app, &payment).await, "paid");
 
-    // A partial refund: Stripe makes it, and its charge.refunded counts it once.
+    // A partial refund: Stripe's answer says it's done, so it counts at once, and its
+    // charge.refunded (twice) counts it no more: the refund's ID was counted.
     let (status, json) = send(
         &app,
         "POST",
@@ -397,6 +399,7 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{json}");
+    assert_eq!(json["payment"]["status"], "partially_refunded", "{json}");
     let charge = json!({ "id": "ch_1", "payment_intent": "pi_1", "amount": 3000, "currency": "eur", "refunded": false });
     for event in ["evt_refund", "evt_refund_again"] {
         let (status, outcome) = deliver(&app, event, "charge.refunded", charge.clone()).await;

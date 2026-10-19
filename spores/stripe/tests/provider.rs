@@ -201,15 +201,17 @@ fn capture_void_and_refund_call_stripe_under_a_key_per_attempt() {
         ),
     });
     let provider = provider(http);
+    // Stripe's answers say the capture and the refund are done: Hypha records them at
+    // once. The fake's cancel answers `succeeded`, not `canceled`: only accepted.
     assert_eq!(
         block_on(provider.act(&action(PaymentAction::Capture, None, Some("pi_1")))),
-        Ok(ActionAnswer::Accepted {
+        Ok(ActionAnswer::Completed {
             reference: Some("pi_1".to_string())
         })
     );
     assert_eq!(
         block_on(provider.act(&action(PaymentAction::Refund, Some(500), Some("pi_1")))),
-        Ok(ActionAnswer::Accepted {
+        Ok(ActionAnswer::Completed {
             reference: Some("re_9".to_string())
         })
     );
