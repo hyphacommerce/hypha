@@ -6,7 +6,9 @@
 
 use hypha_cart::{CartPorts, CartRepo, HasCarts, PricedCart, price_for_checkout};
 use hypha_core::{CartId, Ctx, PaymentMethodId, Scope};
-use hypha_payments::{HasPaymentMethods, PaymentMethod, PaymentMethodRepo, PaymentProviders};
+use hypha_payments::{
+    HasPaymentMethods, PaymentMethod, PaymentMethodRepo, PaymentProviders, ProviderKey,
+};
 
 use crate::CommandError;
 
@@ -37,13 +39,34 @@ pub async fn cart_payment_methods<S: HasCarts + HasPaymentMethods, P: PaymentPro
         // Another channel's cart reads as missing (design note 0020).
         .filter(|cart| cart.visible_in(ctx.channel()))
         .ok_or(CommandError::CartNotFound(id))?;
-    let mut methods = Vec::new();
-    for method in ports.payment_methods().list().await? {
-        if offered(&method, cart.market(), cart.channel(), providers).await? {
-            methods.push(method);
+    let methods = ports.payment_methods().list().await?;
+    // Each provider asked once (an app's check reads the app and its registrations),
+    // however many methods name it, and only for methods offered here at all.
+    let mut available: Vec<(&ProviderKey, bool)> = Vec::new();
+    let mut offered_here = Vec::new();
+    for (i, method) in methods.iter().enumerate() {
+        if !method.offered_in(cart.market(), cart.channel()) {
+            continue;
+        }
+        let key = method.provider();
+        let yes = match available.iter().find(|(k, _)| *k == key) {
+            Some((_, yes)) => *yes,
+            None => {
+                let yes = providers.available(key).await?;
+                available.push((key, yes));
+                yes
+            }
+        };
+        if yes {
+            offered_here.push(i);
         }
     }
-    Ok(methods)
+    Ok(methods
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| offered_here.contains(i))
+        .map(|(_, m)| m)
+        .collect())
 }
 
 /// Sets how the buyer will pay (`carts:write`), or clears it with `None`: a method that
