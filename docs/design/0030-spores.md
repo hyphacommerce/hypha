@@ -1,6 +1,6 @@
 # 0030: Spores beside apps: in-process Rust extensions, built into the deployment
 
-- **Status:** Proposed (2026-10-19). Amends 0029's AP1, AP8 and §12. Danilo found that
+- **Status:** Accepted (2026-10-19); built (steps 1 to 6, see the "As built" sections). Amends 0029's AP1, AP8 and §12. Danilo found that
   apps alone make some extensions harder than they should be: a payment provider has to
   be hosted as its own service (a Worker with its own D1 database, or a container), with
   its own OAuth installation, encrypted token store and webhook plumbing, for what is a
@@ -554,14 +554,126 @@ app), email senders (already compiled in: they become spores' to add), tax engin
    slot and `consistent_read!` for spores (§6.2, with their first user).
 4. `spores/stripe` behind `--features spore-stripe`, with command tests, Postgres and
    route tests; `scripts/e2e.sh` steps for its routes (with a fake Stripe, as the app's
-   tests use).
+   tests use). *Done* (see "As built: step 4"), with the `missing` mark (Q7), the
+   first-party features (§9) and storefront elements from spores. The e2e script runs
+   the stock build, which has no spores: the Stripe spore's routes are covered by route
+   tests against a fake Stripe, and were walked through in a browser.
 5. The CLI: `hypha.json` `spores`, the generated host crate for both targets,
-   `hypha spores …`, `init --spores`.
+   `hypha spores …`, `init --spores`. *Done* (see "As built: step 5"), the generated
+   crate for a server only: a spore from outside this repository is refused on
+   Cloudflare for now.
 6. Docs: `docs/spores/` (writing a spore, the facade, the template), 0029 amended, the
-   Stripe app's README pointing at the spore.
+   Stripe app's README pointing at the spore. *Done*, but for the Stripe app's README
+   (its own repository) and a `cargo generate` template.
 
 The batch slot (§6.2) and `also` hooks (§6.3) are built by the first spore that needs
 them, not in this list.
+
+## As built: step 5 (the CLI)
+
+- `hypha.json` gains `spores`: a first-party name alone (`"stripe"`, this repository's
+  `spores/<name>`), or `{name, crate, spore, routes?, git+rev | version | path}` for one
+  from outside (`spore` the Rust path of its `Spore` type, `routes` of its route macro).
+  Checked as the hosts check names (`[a-z][a-z0-9_]*`, none listed twice, none extending
+  another), on load and by every command (`packages/cli/src/spores.ts`).
+- `hypha spores list|add|remove` (`commands/spores.ts`) and `hypha init --spores stripe`
+  (`none` clears; absent keeps the earlier list with `--force`). Removing one leaves its
+  app, settings and tables (the app is listed `missing`).
+- **This repository's spores are features** of both hosts (`spore-<name>`), so a
+  deployment with only those builds the stock crates: the API image gets
+  `--build-arg SPORE_FEATURES=spore-stripe` (`docker/api.Dockerfile` passes it to
+  `cargo build --features`); on Cloudflare the native setup tool is built with them
+  (it migrates and registers the spores) and the Worker's build command is
+  `worker-build --release --features spore-stripe`. `HYPHA_SPORES=stripe pnpm dev` (and
+  `pnpm prod`) does the same locally.
+- **A spore from outside needs the deployment's own host crate**: `hypha deploy` writes
+  it next to this checkout, so Docker's build context holds both
+  (`.hypha-build/<deployment folder>/host`, git-ignored): its own `[workspace]`,
+  `hypha-host-axum` and every spore as dependencies (path ones resolved against the
+  deployment folder; a path outside this checkout can't build in Docker), `main.rs` the
+  `host!` line, and its `Cargo.lock` seeded once from the checkout's, so Hypha's own
+  dependencies resolve as they're tested (built without `--locked`: the spores' own
+  dependencies are added). The Dockerfile builds it with `HOST_CRATE`. Checked by
+  `cargo check` on a generated crate naming the Stripe spore as an outside crate.
+- **Not built:** a Worker crate of the deployment's own, so a spore from outside on
+  Cloudflare is refused with a message; `cargo generate`'s template.
+
+## As built: step 4 (the Stripe spore)
+
+- **`spores/stripe`** (`hypha-spore-stripe`, a workspace member: `members` gained
+  `spores/*`), ported from `hypha-app-stripe` without its plumbing (no OAuth, token
+  store, encryption key, database or settings page):
+  - `provider.rs`: `StripeProvider` (`spore_stripe`): a start creates a PaymentIntent
+    (amount in Stripe's units, `capture_method` from the settings, automatic payment
+    methods, the buyer's email for the receipt, the payment, order and number in its
+    metadata; idempotency key: the payment's ID, so a start asked again answers the same
+    intent; a canceled one is refused) and answers `ClientWidget { stripe-payment, props }`
+    with the intent as the payment's `reference`. Capture, void and refund call Stripe
+    under `<payment>:<action>:<Hypha's key>`; Stripe's no is `Refused` with its message,
+    its outage a failure. No settings on a method: the keys are the spore's.
+  - `webhook.rs`: `POST /spores/stripe/webhook` (public): the signing secret from the
+    settings (`400` without one), the signature checked (five minutes' tolerance),
+    `payment_intent.succeeded` → paid, `.amount_capturable_updated` → authorized,
+    `.payment_failed` → failed only when the intent is `canceled`, `.canceled` → voided,
+    `charge.refunded` → one report per refund that gave money back, its `re_…` the
+    reference and key, the last of a full refund `refunded`. Each recorded with
+    `record_payment_event` as the spore's app, under the event's ID (refunds: their own)
+    with a fingerprint: a redelivery replays. Storage failing answers 500 (Stripe
+    retries); a move the payment can't make is logged and answered 200.
+  - `cancel.rs`: on `order.cancelled`, each Stripe payment of the order whose intent is
+    still cancelable is canceled at Stripe (idempotently).
+  - `ui.rs`: the `order.payment` block (Stripe's status, amounts, capture mode, the
+    intent, a dashboard link, Capture/Void/Refund buttons by status) and three actions
+    standing for the payment points.
+  - `element.rs`: `GET /spores/stripe/elements/payment.js`, the app's element bundle as
+    is (`element/payment-element.ts` and its build; the bundle is excluded from
+    formatting and linting), with `Access-Control-Allow-Origin: *`.
+  - No tables (`MigrationSet` empty): the payment's `reference` is the intent, the
+    intent's metadata names the payment, and core's idempotency keys dedupe events.
+  - Settings: `secret_key` and `webhook_secret` sealed, `publishable_key`,
+    `capture_mode`; checked (`sk_`/`rk_`, `pk_`, `whsec_`, test and live keys not mixed).
+    Operator configuration: `[spores.stripe] api_base` (tests point it at a fake).
+- **What core gained for it** (each usable by any spore):
+  - `PaymentRequest::store_settings` / `ActionRequest::store_settings`: a provider has no
+    ports, so `HostPayments` fills a spore provider's with its spore's settings, secrets
+    opened (empty for `manual` and apps); a disabled or unregistered spore's provider is
+    unknown, as before.
+  - `ActionAnswer::Completed`: a provider built in may say the action is done already
+    (Stripe's answer says `succeeded`); the payment routes then record it at once as the
+    provider's spore (`record_completed`), so staff see the payment paid, voided or
+    refunded without waiting for the webhook, which then changes nothing. Apps' wire
+    contract is unchanged.
+  - `UiAction::point`: a spore's action may stand for a payment point; admins run it
+    through the payment's route, and running it as an action is refused
+    (`app_action_has_point`), as for apps.
+  - `SporeUi::elements` (`UiElement { id, target, tag, path }`): storefront elements,
+    listed by `GET /storefront/app-extensions` beside apps' with the module at the API's
+    public address (`Issuer`, as the OAuth issuer), for enabled spores.
+  - `GET /admin/payment-providers` (`payments:read`): `manual`, each enabled spore's
+    providers and each payment app, with kinds; the admin's payment kinds read it (one
+    call instead of one per app).
+  - The facade: `axum` and `tracing` re-exports, `IdempotencyRequest`, `Event`,
+    `ActingAs`, `OrderCancelled`, a few IDs, `SporeEnv::app_id` (what a spore acts as
+    outside a request), and test environments with a fake HTTP
+    (`testing::env_with_http`).
+  - First-party spores as Cargo features (`spore-stripe` on both hosts), and Q7: a
+    spore's app this build lacks is `missing` in app responses (worked out per request),
+    "Not built in" in the admin.
+- **Tests:** amounts, signatures, form encoding, settings checks and the event
+  mapping (unit); the provider's requests and answers against a fake (`tests/`); a host
+  built with the spore against a fake Stripe server: checkout through webhooks, capture,
+  refund, redeliveries, a forged signature, the block, the element, a cancelled order,
+  no keys, disabled (route tests, `route_tests/stripe.rs`).
+- **Browser** (a host with the spore, the seeded demo store, a fake Stripe): settings
+  saved (the spore's own check shown on the field), secrets write-only and clearable, a
+  Stripe payment method added, checkout mounting `<stripe-payment>` from the API (with
+  fake keys Stripe.js refuses the element, as it should), webhooks moving the payment,
+  Capture and Refund from the block. Found and fixed there: a secret's description hid
+  whether it was set; a captured payment stayed authorized until the webhook
+  (`Completed`).
+- **Left:** a real card through Stripe's test mode (needs test keys), the settings form's
+  field order (JSON objects lose it in the API: fields read alphabetically), and the
+  TypeScript app's README pointing at the spore.
 
 ## As built: step 3 (facade, migration check, settings, routes, UI)
 

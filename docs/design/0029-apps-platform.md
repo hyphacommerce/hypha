@@ -1,5 +1,7 @@
 # 0029: The apps platform: extension points, installation, and app UI in any admin or storefront
 
+- **Amended by 0030** (2026-10-19): spores are back beside apps, a trusted, compiled-in
+  way to implement the same contracts (AP1, AP8 for Stripe, §12).
 - **Status:** Accepted (2026-10-18). Replaces the spore design this note first held
   (compiled-in Rust extensions, 0002 §6): Danilo asked how Shopify lets apps change its
   behaviour, and whether that model fits a headless Hypha better. It does: this note
@@ -37,7 +39,7 @@ Meilisearch are apps and third parties can build the same way in any language.
 
 | | Decision |
 | --- | --- |
-| AP1 | **Apps are the one public extension model.** An app is an external service (any language, any host), untrusted by design: it acts through scoped credentials, is called through signed contracts, and its UI runs sandboxed or is rendered by the host. No compiled-in third-party code (spores are dropped; §12 keeps a custom-host escape hatch). *Hard to reverse (the platform's trust model)* |
+| AP1 | *Amended by 0030: apps are the public extension model for services; spores, compiled into the API, are the trusted one, on the same contracts.* **Apps are the one public extension model.** An app is an external service (any language, any host), untrusted by design: it acts through scoped credentials, is called through signed contracts, and its UI runs sandboxed or is rendered by the host. No compiled-in third-party code (spores are dropped; §12 keeps a custom-host escape hatch). *Hard to reverse (the platform's trust model)* |
 | AP2 | **Five channels, no others**: the Admin API (and Storefront API) with the app's scopes; webhooks (exist); **extension points**, synchronous calls Hypha makes to an app mid-flow; **app endpoints** reached through Hypha (an app proxy, §8); **UI extensions** (§6–§7). Everything an app contributes is declared in its manifest |
 | AP3 | **An extension point is a published, versioned contract**: a name (`payments.start`), a version, request and response types (Rust DTOs, documented in a third OpenAPI document, `openapi/extensions.json`), a timeout, a failure policy (fail closed, or fall back to the default), an idempotency key, and the existing request signature (0015 §5, 0016 §8). Hypha calls, logs every call (admin-visible), and never runs app code. *Hard to reverse (contracts apps are written against)* |
 | AP4 | **The manifest** (`hypha-app.json`, served by the app at a URL or uploaded) declares identity, the scopes it asks for, webhook subscriptions, the extension points it implements (with their versions and URLs), its UI extensions, its proxy path and its settings schema. Hypha validates it against a published JSON Schema. *Hard to reverse (format)* |
@@ -45,7 +47,7 @@ Meilisearch are apps and third parties can build the same way in any language.
 | AP10 | **Personal data has its own scopes.** `orders:read` or `customers:read` give an app the records without personal fields; names, emails, phone numbers and addresses need `customer_data:name`, `:email`, `:phone`, `:address` (Shopify's protected customer data, per field). Without them those fields are absent from API responses, webhook payloads and extension-point requests to that app, so the consent screen says precisely which personal data an app sees. Staff sessions are unaffected. *Decided (Q1's intent); hard to reverse (scope names, the redaction contract)* |
 | AP6 | **UI extensions come in three forms, each usable by any frontend**, from most portable to most integrated: **data and actions** (rendered generically from schemas), **declarative blocks** (a small JSON UI tree the host renders with its own components), and **embedded pages** (the app's own page in an iframe with a postMessage bridge). Storefronts add **elements**: web components loaded from the app. Every frontend discovers them through the API. *Hard to reverse (slot names, the block format, the bridge protocol)* |
 | AP7 | **App data lives on core objects as metafields** (0002 §3's custom fields, built for this): namespaced by app (`app_reviews.rating`), typed, with read and write access by surface, so a storefront shows an app's data without calling the app |
-| AP8 | **First-party apps are apps**: Stripe (payments) and Meilisearch (search) are built against the same public contracts, in their own repositories, and `hypha deploy` can deploy them next to the API (a Worker reached through a Service Binding on Cloudflare, a container on a VPS) so an operator still runs one command and no request leaves the deployment unless the app itself calls out |
+| AP8 | *Amended by 0030 (SP9): Stripe is a spore, recommended; the Stripe app stays as the example of an external payment app. Meilisearch stays an app.* **First-party apps are apps**: Stripe (payments) and Meilisearch (search) are built against the same public contracts, in their own repositories, and `hypha deploy` can deploy them next to the API (a Worker reached through a Service Binding on Cloudflare, a container on a VPS) so an operator still runs one command and no request leaves the deployment unless the app itself calls out |
 | AP9 | **Shipping rates move onto the mechanism** as the extension point `shipping.rates` v1 (today's callback is its v1 body, unchanged on the wire), so there is one way Hypha calls apps |
 
 ## 1. What others do
@@ -406,6 +408,9 @@ implement an extension point (wasmtime natively; Cloudflare's Worker Loader or a
 interpreter inside the Worker), when discounts arrive.
 
 ## 12. What replaces spores
+
+*Superseded by design note 0030 (spores beside apps): the escape hatch below became a
+mechanism, `host! { spores: [...] }`, and the `spore_` keys are used again.*
 
 Spores (compiled-in Rust) are dropped as a public mechanism. What they would have given,
 and its replacement:
