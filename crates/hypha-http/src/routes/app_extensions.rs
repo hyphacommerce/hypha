@@ -459,7 +459,7 @@ pub struct SessionTokenResponse {
 #[utoipa::path(
     post,
     path = "/admin/app-extensions/{app}/session",
-    params(("app" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_stripe")),
+    params(("app" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_stripe")),
     responses((status = 200, description = "OK", body = SessionTokenResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:read"]))),
 )]
@@ -588,7 +588,7 @@ pub struct ActionResultResponse {
     post,
     path = "/admin/app-extensions/actions/{app}/{id}",
     params(
-        ("app" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_stripe"),
+        ("app" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_stripe"),
         ("id" = String, Path, example = "capture"),
     ),
     request_body = RunActionRequest,
@@ -678,7 +678,7 @@ pub struct BlockResponse {
     get,
     path = "/admin/app-extensions/blocks/{app}/{id}",
     params(
-        ("app" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_stripe"),
+        ("app" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_stripe"),
         ("id" = String, Path, example = "payment"),
         ExtensionContextDto,
     ),
@@ -1073,7 +1073,7 @@ macro_rules! proxy_handlers {
             $verb,
             path = $path,
             params(
-                ("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_reviews"),
+                ("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_reviews"),
                 ("path" = String, Path, example = "settings", description = "The rest of the path, sent on to the app (`a/b?c=d` too); it may hold slashes."),
             ),
             responses(
@@ -1152,7 +1152,7 @@ pub struct RefreshResponse {
 #[utoipa::path(
     post,
     path = "/admin/apps/{key}/refresh",
-    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp")),
+    params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_erp")),
     responses((status = 200, description = "OK", body = RefreshResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
 )]

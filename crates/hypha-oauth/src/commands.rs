@@ -914,6 +914,8 @@ pub async fn refresh_manifest<S: OAuthPorts>(
     if is_app && ctx.actor() != Actor::App(app.id()) {
         ctx.require(Scope::AppsWrite)?;
     }
+    // A spore has no manifest: its registrations are the build's.
+    app.require_external()?;
     let (Some(installed), true) = (app.manifest().cloned(), app.is_installed()) else {
         return Err(hypha_apps::AppError::NotInstalled.into());
     };

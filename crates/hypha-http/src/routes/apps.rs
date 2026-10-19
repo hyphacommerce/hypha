@@ -327,7 +327,7 @@ fn json(part: &impl Serialize) -> serde_json::Value {
 #[utoipa::path(
     get,
     path = "/admin/apps/{key}",
-    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp")),
+    params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_erp")),
     responses((status = 200, description = "OK", body = AppDetailResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:read"]))),
 )]
@@ -357,7 +357,7 @@ pub struct NarrowGrantRequest {
 #[utoipa::path(
     patch,
     path = "/admin/apps/{key}/grant",
-    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp")),
+    params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_erp")),
     request_body = NarrowGrantRequest,
     responses((status = 200, description = "OK", body = AppResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
@@ -397,7 +397,7 @@ pub struct UpdateAppRequest {
 #[utoipa::path(
     patch,
     path = "/admin/apps/{key}",
-    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp")),
+    params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_erp")),
     request_body = UpdateAppRequest,
     responses((status = 200, description = "OK", body = AppResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
@@ -428,7 +428,7 @@ pub async fn update<S: Storage>(
 #[utoipa::path(
     delete,
     path = "/admin/apps/{key}",
-    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp")),
+    params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_erp")),
     responses((status = 204, description = "No content")),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
 )]
@@ -447,7 +447,7 @@ pub async fn delete<S: Storage>(
 #[utoipa::path(
     post,
     path = "/admin/apps/{key}/secret",
-    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp")),
+    params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_erp")),
     responses((status = 200, description = "OK", body = AppSecretResponse)),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),
 )]
@@ -548,7 +548,7 @@ type DeliveryPage = PageResponse<DeliveryResponse>;
     get,
     path = "/admin/apps/{key}/deliveries",
     params(
-        ("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp"),
+        ("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_erp"),
         PageParams,
         DeliveryFilters,
     ),
@@ -647,7 +647,7 @@ type ExtensionCallPage = PageResponse<ExtensionCallResponse>;
     get,
     path = "/admin/apps/{key}/extension-calls",
     params(
-        ("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp"),
+        ("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_erp"),
         PageParams,
     ),
     responses((status = 200, description = "OK", body = ExtensionCallPage)),
@@ -679,7 +679,7 @@ pub async fn extension_calls<S: Storage>(
     post,
     path = "/admin/apps/{key}/deliveries/{id}/retry",
     params(
-        ("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_erp"),
+        ("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_erp"),
         ("id" = DeliveryId, Path),
     ),
     responses((status = 200, description = "OK", body = DeliveryResponse)),
@@ -778,7 +778,7 @@ fn registrable() -> Vec<hypha_apps::KnownPoint> {
 #[utoipa::path(
     get,
     path = "/admin/apps/{key}/extension-points",
-    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_stripe")),
+    params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_stripe")),
     responses((status = 200, description = "OK", body = ExtensionEndpointsDto)),
     extensions(("x-hypha-scopes" = json!(["apps:read"]))),
 )]
@@ -801,7 +801,7 @@ pub async fn extension_points<S: Storage>(
 #[utoipa::path(
     put,
     path = "/admin/apps/{key}/extension-points",
-    params(("key" = String, Path, pattern = "^app_[a-z][a-z0-9_]*$", example = "app_stripe")),
+    params(("key" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_stripe")),
     request_body = ExtensionEndpointsDto,
     responses((status = 200, description = "OK", body = ExtensionEndpointsDto)),
     extensions(("x-hypha-scopes" = json!(["apps:write"]))),

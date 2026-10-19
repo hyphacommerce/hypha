@@ -2429,7 +2429,7 @@
             "name": "key",
             "required": true,
             "schema": {
-              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
           },
@@ -2541,7 +2541,7 @@
             "name": "key",
             "required": true,
             "schema": {
-              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
           },
@@ -2643,7 +2643,7 @@
             "name": "key",
             "required": true,
             "schema": {
-              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
           },
@@ -2755,7 +2755,7 @@
             "name": "key",
             "required": true,
             "schema": {
-              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
           },
@@ -2867,7 +2867,7 @@
             "name": "key",
             "required": true,
             "schema": {
-              "pattern": "^app_[a-z][a-z0-9_]*$",
+              "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
           },

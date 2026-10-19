@@ -49,6 +49,9 @@ pub enum AppKeyError {
         "{0:?} is not an app key: \"app_\" or \"spore_\" and lowercase letters, digits and underscores"
     )]
     Invalid(String),
+    /// Not an external app's key, where only one belongs (creating an app, a manifest).
+    #[error("{0:?} is not an app key: \"app_\" and lowercase letters, digits and underscores")]
+    InvalidApp(String),
     /// A spore's key where only an external app's belongs (creating an app, a manifest):
     /// spores are built into the API, not registered.
     #[error("{0} is a spore's key: spores are built into the API, apps are \"app_<name>\"")]
@@ -58,7 +61,7 @@ pub enum AppKeyError {
 impl crate::ErrorCode for AppKeyError {
     fn code(&self) -> &'static str {
         match self {
-            AppKeyError::Invalid(_) => "invalid_app_key",
+            AppKeyError::Invalid(_) | AppKeyError::InvalidApp(_) => "invalid_app_key",
             AppKeyError::SporeKey(_) => "spore_key_reserved",
         }
     }
@@ -85,7 +88,7 @@ impl AppKey {
 
     /// An external app's key only: what staff create and manifests name.
     pub fn new_app(key: &str) -> Result<Self, AppKeyError> {
-        let parsed = Self::new(key)?;
+        let parsed = Self::new(key).map_err(|_| AppKeyError::InvalidApp(key.to_string()))?;
         match parsed.kind() {
             AppKind::App => Ok(parsed),
             AppKind::Spore => Err(AppKeyError::SporeKey(parsed)),
@@ -173,6 +176,11 @@ mod tests {
     #[test]
     fn only_an_app_key_is_an_app_key_where_apps_are_registered() {
         assert!(AppKey::new_app("app_stripe").is_ok());
+        // The message offers only what's accepted there.
+        assert_eq!(
+            AppKey::new_app("erp"),
+            Err(AppKeyError::InvalidApp("erp".to_string()))
+        );
         assert_eq!(
             AppKey::new_app("spore_stripe"),
             Err(AppKeyError::SporeKey(AppKey::of_spore("stripe").unwrap()))

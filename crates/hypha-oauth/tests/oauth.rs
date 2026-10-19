@@ -825,3 +825,37 @@ fn an_upload_is_checked_like_a_manifest_and_needs_apps_write() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn a_spore_has_no_manifest_to_refresh_nor_tokens_to_revoke() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let spore = hypha_apps::SporeRegistration {
+        name: "pay",
+        title: "Pay",
+        scopes: &[Scope::PaymentsWrite],
+    };
+    block_on(hypha_apps::register_spore(
+        &Ctx::system(),
+        &ports.apps,
+        &env,
+        &env,
+        spore,
+    ))
+    .unwrap();
+    let built_in = AppError::BuiltIn(AppKey::of_spore("pay").unwrap());
+    assert_eq!(
+        block_on(refresh_manifest(
+            &owner(),
+            &ports,
+            &fetcher(ALL),
+            &env,
+            "spore_pay"
+        ))
+        .map(|_| ()),
+        Err(CommandError::App(built_in.clone()))
+    );
+    assert_eq!(
+        block_on(hypha_oauth::uninstall(&owner(), &ports, &env, "spore_pay")),
+        Err(CommandError::App(built_in))
+    );
+}
