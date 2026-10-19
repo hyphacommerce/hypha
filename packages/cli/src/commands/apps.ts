@@ -32,7 +32,6 @@ import {
 import { dirArg, guarded } from "./shared.ts";
 import { openInBrowser } from "./token.ts";
 
-
 /** `rev` as a commit: a full commit ID as given, else a branch or tag asked of the remote. */
 export async function resolveRev(git: string, rev: string | undefined): Promise<string> {
   if (rev && /^[0-9a-f]{40}$/.test(rev)) return rev;
