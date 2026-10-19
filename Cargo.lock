@@ -1170,6 +1170,7 @@ dependencies = [
  "axum",
  "futures-util",
  "getrandom 0.4.3",
+ "hypha-apps",
  "hypha-config",
  "hypha-core",
  "hypha-dispatch",

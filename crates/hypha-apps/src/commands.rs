@@ -208,11 +208,28 @@ pub struct SporeRegistration {
     pub scopes: &'static [Scope],
 }
 
+/// Whether a spore's app is set up as this build declares it (a spore's, with its title
+/// and scopes): what a host that registers nothing asks (the Worker: the native host's
+/// `setup` registers, design note 0030, §9), so a Worker built with other spores than
+/// its database was set up with refuses to serve.
+pub async fn spore_registered<R: AppRepo>(
+    apps: &R,
+    spore: SporeRegistration,
+) -> Result<bool, CommandError> {
+    let key = AppKey::of_spore(spore.name).map_err(AppError::from)?;
+    let Some(app) = apps.get(&key).await? else {
+        return Ok(false);
+    };
+    let scopes = crate::normalize(spore.scopes);
+    Ok(app.name() == spore.title && app.grant().is_some_and(|g| g.scopes() == scopes))
+}
+
 /// Makes sure a spore built into this host has its app (at startup, as the host's
 /// `Ctx::system()`): created enabled with its scopes as its grant the first time
 /// (`app.installed`), its title and scopes brought up to date after (`app.grant_changed`
-/// when they changed). Whether it's enabled stays as staff left it. Two hosts starting
-/// at once both end with the one app.
+/// when they changed). Whether it's enabled stays as staff left it. Hosts starting at
+/// once (replicas of a rolling deploy) all end with the one app: an insert or update
+/// another made first is read again and brought up to date.
 pub async fn register_spore<R: AppRepo>(
     ctx: &Ctx,
     apps: &R,
@@ -239,16 +256,23 @@ pub async fn register_spore<R: AppRepo>(
             Err(e) => return Err(e.into()),
         }
     }
-    let mut app = apps
-        .get(&key)
-        .await?
-        .ok_or_else(|| CommandError::AppNotFound(key.to_string()))?;
-    let before = app.clone();
-    app.sync_spore(spore.title, spore.scopes, env.now())?;
-    if app != before {
-        apps.update(&mut app).await?;
+    // Each lost race means another host wrote it since; a few are plenty.
+    let mut tries = 0;
+    loop {
+        let mut app = apps
+            .get(&key)
+            .await?
+            .ok_or_else(|| CommandError::AppNotFound(key.to_string()))?;
+        let before = app.clone();
+        app.sync_spore(spore.title, spore.scopes, env.now())?;
+        if app == before {
+            return Ok(app);
+        }
+        match apps.update(&mut app).await {
+            Err(RepoError::StaleVersion) if tries < 3 => tries += 1,
+            written => return written.map(|()| app).map_err(Into::into),
+        }
     }
-    Ok(app)
 }
 
 /// An app's webhook deliveries, newest event first, only those in `status` when given.

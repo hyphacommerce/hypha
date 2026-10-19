@@ -22,6 +22,7 @@ url = "2.5"
 # and `worker-build` build it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 hypha-dispatch = { path = "../hypha-dispatch" }
+hypha-apps = { path = "../hypha-apps" }
 hypha-payments = { path = "../hypha-payments" }
 # The spores a deployment is built with (design note 0030, `worker!`).
 hypha-spore-core = { path = "../hypha-spore-core" }

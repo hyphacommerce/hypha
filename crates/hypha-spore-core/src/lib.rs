@@ -9,7 +9,7 @@
 
 use hypha_apps::SporeRegistration;
 use hypha_core::{AppKey, Scope, Union};
-use hypha_payments::PaymentProviders;
+use hypha_payments::{PaymentProviders, ProviderKey};
 use hypha_store_postgres::MigrationSet;
 
 /// One spore. Built once at startup; everything it contributes goes into the host's
@@ -62,6 +62,9 @@ pub trait SporeSet: 'static {
     fn migrations() -> Vec<MigrationSet>;
     /// Builds each spore once and takes what it contributes.
     fn build() -> (Self::Handlers, Self::PaymentProviders);
+    /// What's wrong with the providers `build` gave: a key that isn't its spore's
+    /// (`spore_<NAME>` or `spore_<NAME>_…`), which payments would never route to it.
+    fn check_providers(providers: &Self::PaymentProviders) -> Vec<String>;
 }
 
 impl SporeSet for () {
@@ -78,6 +81,10 @@ impl SporeSet for () {
 
     fn build() -> ((), ()) {
         ((), ())
+    }
+
+    fn check_providers(_: &()) -> Vec<String> {
+        Vec::new()
     }
 }
 
@@ -109,6 +116,13 @@ macro_rules! tuple_spores {
                     Union(($($s.payment_providers(),)+)),
                 )
             }
+
+            fn check_providers(providers: &Self::PaymentProviders) -> Vec<String> {
+                let Union(($($s,)+)) = providers;
+                let mut problems = Vec::new();
+                $(problems.extend(foreign_keys($s::NAME, &$s.keys()));)+
+                problems
+            }
         }
     };
 }
@@ -122,12 +136,26 @@ tuple_spores!(A, B, C, D, E, F);
 tuple_spores!(A, B, C, D, E, F, G);
 tuple_spores!(A, B, C, D, E, F, G, H);
 
+/// A line for each of `keys` that isn't the spore `name`'s.
+fn foreign_keys(name: &str, keys: &[ProviderKey]) -> Vec<String> {
+    let Ok(owner) = AppKey::of_spore(name) else {
+        // A bad name is `check`'s to report.
+        return Vec::new();
+    };
+    keys.iter()
+        .filter(|key| !key.belongs_to(&owner))
+        .map(|key| format!("spore {name:?}: payment provider {key} isn't {owner} or {owner}_…"))
+        .collect()
+}
+
 /// What's wrong with a host's spores, every problem: a name that can't be a key
-/// (`spore_<name>`), the same name twice, migrations under another module than
-/// `spore_<name>`. Empty when all is well; the host refuses to start otherwise.
+/// (`spore_<name>`), the same name twice, a name that extends another's with `_`
+/// (`stripe` and `stripe_link`: the first's `spore_stripe_*` tables and provider keys
+/// would take the second's), migrations under another module than `spore_<name>`. Empty
+/// when all is well; the host refuses to start otherwise.
 pub fn check<S: SporeSet>() -> Vec<String> {
     let mut problems = Vec::new();
-    let mut seen = Vec::new();
+    let mut seen: Vec<&str> = Vec::new();
     for spore in S::registrations() {
         if AppKey::of_spore(spore.name).is_err() {
             problems.push(format!(
@@ -137,6 +165,20 @@ pub fn check<S: SporeSet>() -> Vec<String> {
         }
         if seen.contains(&spore.name) {
             problems.push(format!("spore {:?}: listed twice", spore.name));
+        }
+        for other in &seen {
+            let (shorter, longer) = match spore.name.len() < other.len() {
+                true => (spore.name, *other),
+                false => (*other, spore.name),
+            };
+            if longer
+                .strip_prefix(shorter)
+                .is_some_and(|rest| rest.starts_with('_'))
+            {
+                problems.push(format!(
+                    "spore {longer:?}: its name extends spore {shorter:?}'s, whose tables and provider keys (spore_{shorter}_…) it would share"
+                ));
+            }
         }
         seen.push(spore.name);
     }
@@ -150,6 +192,30 @@ pub fn check<S: SporeSet>() -> Vec<String> {
         }
     }
     problems
+}
+
+/// What's wrong with a host once its sets are built, every problem: a handler name or
+/// provider key twice (deliveries and payment methods find them by it, so two alike
+/// would be ambiguous: the first in the union would take both), or a spore provider's
+/// key that isn't its spore's. Both hosts refuse to start (or serve) otherwise.
+pub fn check_built<S: SporeSet>(
+    handler_names: &[&str],
+    provider_keys: &[ProviderKey],
+    spore_providers: &S::PaymentProviders,
+) -> Vec<String> {
+    let mut problems = repeated("event handler", handler_names);
+    problems.extend(repeated("payment provider", provider_keys));
+    problems.extend(S::check_providers(spore_providers));
+    problems
+}
+
+/// A line for each item that's in `list` more than once.
+fn repeated<T: PartialEq + std::fmt::Display>(what: &str, list: &[T]) -> Vec<String> {
+    list.iter()
+        .enumerate()
+        .filter(|(i, item)| list[..*i].contains(item))
+        .map(|(_, item)| format!("{what} {item} is built in twice"))
+        .collect()
 }
 
 #[cfg(test)]
@@ -268,6 +334,119 @@ mod tests {
                 "spore \"pay\": listed twice",
                 "spore \"Broken\": not a valid name (lowercase letters, digits and _, starting with a letter)",
                 "spore \"Broken\": its migrations are module \"core\", not \"spore_Broken\"",
+            ]
+        );
+    }
+
+    /// A spore named `pay_link`, with no providers.
+    struct PayLink;
+
+    impl Spore for PayLink {
+        const NAME: &'static str = "pay_link";
+        const SCOPES: &'static [Scope] = &[];
+
+        fn title() -> &'static str {
+            "Pay link"
+        }
+
+        fn migrations() -> MigrationSet {
+            MigrationSet {
+                module: "spore_pay_link",
+                migrations: &[],
+            }
+        }
+
+        fn new() -> Self {
+            PayLink
+        }
+
+        type PaymentProviders = ();
+        type Handlers = ();
+
+        fn payment_providers(&self) {}
+
+        fn handlers(&self) {}
+    }
+
+    /// A spore that offers another spore's provider key.
+    struct Rogue;
+
+    impl Spore for Rogue {
+        const NAME: &'static str = "rogue";
+        const SCOPES: &'static [Scope] = &[];
+
+        fn title() -> &'static str {
+            "Rogue"
+        }
+
+        fn migrations() -> MigrationSet {
+            MigrationSet {
+                module: "spore_rogue",
+                migrations: &[],
+            }
+        }
+
+        fn new() -> Self {
+            Rogue
+        }
+
+        type PaymentProviders = (Pay,);
+        type Handlers = ();
+
+        fn payment_providers(&self) -> (Pay,) {
+            (Pay,)
+        }
+
+        fn handlers(&self) {}
+    }
+
+    #[test]
+    fn a_name_extending_another_is_reported_whichever_comes_first() {
+        let problem = "spore \"pay_link\": its name extends spore \"pay\"'s, whose tables and provider keys (spore_pay_…) it would share";
+        assert_eq!(check::<(Paying, PayLink)>(), [problem]);
+        assert_eq!(check::<(PayLink, Paying)>(), [problem]);
+    }
+
+    #[test]
+    fn a_provider_under_another_spores_key_is_reported() {
+        type Set = (Rogue,);
+        let (_, providers) = Set::build();
+        assert_eq!(
+            Set::check_providers(&providers),
+            ["spore \"rogue\": payment provider spore_pay isn't spore_rogue or spore_rogue_…"]
+        );
+        let (_, providers) = <(Paying,)>::build();
+        assert!(<(Paying,)>::check_providers(&providers).is_empty());
+    }
+
+    #[test]
+    fn each_repeat_is_reported_once_per_extra_copy() {
+        assert_eq!(
+            repeated(
+                "event handler",
+                &["search_index", "mailer", "search_index", "search_index"]
+            ),
+            [
+                "event handler search_index is built in twice",
+                "event handler search_index is built in twice",
+            ]
+        );
+        assert!(repeated("payment provider", &["manual", "spore_stripe"]).is_empty());
+    }
+
+    #[test]
+    fn a_built_host_reports_repeated_names_and_keys() {
+        let (_, providers) = <(Paying,)>::build();
+        let manual = ProviderKey::manual();
+        assert_eq!(
+            check_built::<(Paying,)>(
+                &["search_index", "spore_pay_audit", "search_index"],
+                &[manual.clone(), manual],
+                &providers,
+            ),
+            [
+                "event handler search_index is built in twice",
+                "payment provider manual is built in twice",
             ]
         );
     }

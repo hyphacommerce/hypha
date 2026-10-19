@@ -304,6 +304,12 @@ mod worker_main {
             .and_then(|l| l.parse().ok())
             .unwrap_or(tracing::Level::INFO);
         crate::log::init(level);
+        // The native host's checks (design note 0030): a bad spore list stops the
+        // isolate before it touches the database.
+        let problems = hypha_spore_core::check::<D::Spores>();
+        if !problems.is_empty() {
+            return Err(format!("this build's spores:\n{}", problems.join("\n")));
+        }
         let text = env_string(&env, "HYPHA_CONFIG").filter(|t| !t.trim().is_empty());
         let config = Config::load(text.as_deref(), |name| env_string(&env, name))
             .map_err(|e| format!("invalid configuration:\n{e}"))?;
@@ -356,6 +362,21 @@ mod worker_main {
         // An isolate's `env` is the same bindings for every event, so one is kept.
         let storage =
             WorkersStorage::<D>::new(env.clone(), runtime.clock.clone(), Arc::clone(&mail));
+        {
+            use hypha_core::EventHandlers;
+            use hypha_http::state::Storage;
+            use hypha_payments::PaymentProviders;
+            let names = EventHandlers::<crate::storage::WorkersPorts>::names(storage.handlers());
+            let providers = storage.payment_providers();
+            let problems = hypha_spore_core::check_built::<D::Spores>(
+                &names,
+                &providers.keys(),
+                &providers.0.1,
+            );
+            if !problems.is_empty() {
+                return Err(problems.join("\n"));
+            }
+        }
         let limiter = Arc::new(IsolateLimiter::new(&config.rate_limits));
         let bindings = Arc::new(rate_limit_bindings(&env));
         let clock = runtime.clock.clone();
@@ -397,6 +418,7 @@ mod worker_main {
             host,
             config,
         ));
+        spores_set_up::<D>(&state).await?;
         // Expanded for the concrete deployment (`worker!`): axum can only prove its
         // handlers' futures `Send` there.
         let app = D::router().with_state(Arc::clone(&state));
@@ -405,6 +427,36 @@ mod worker_main {
             app,
             caller_key: env_string(&env, "HYPHA_CALLER_KEY"),
         }))
+    }
+
+    /// A Worker registers nothing (it runs no migrations either): the native host's
+    /// `setup`, built with the same spores, did. One whose spores' apps aren't as this
+    /// build declares them (another list, a title or scopes changed since) refuses to
+    /// serve until `setup` runs with it.
+    async fn spores_set_up<D: Deployment>(
+        state: &AppState<WorkersStorage<D>>,
+    ) -> Result<(), String> {
+        use hypha_apps::HasApps;
+        let spores = <D::Spores as hypha_spore_core::SporeSet>::registrations();
+        if spores.is_empty() {
+            return Ok(());
+        }
+        let ports = state
+            .public_ports()
+            .await
+            .map_err(|_| "cannot reach the database".to_string())?;
+        for spore in spores {
+            let registered = hypha_apps::spore_registered(ports.apps(), spore)
+                .await
+                .map_err(|e| format!("spore {:?}: {e}", spore.name))?;
+            if !registered {
+                return Err(format!(
+                    "spore {:?} isn't set up as this build declares it: run `hypha-host-axum setup` built with the same spores first",
+                    spore.name
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Notes on the current event that a write gave the jobs work (events committed, a

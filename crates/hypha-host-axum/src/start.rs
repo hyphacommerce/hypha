@@ -340,27 +340,20 @@ async fn register_spores<D: Deployment>(state: &AppState<PgStorage<D>>) -> Resul
 }
 
 /// Handler names and provider keys are how deliveries and payment methods find them, so
-/// two alike (a spore's and core's, or two spores') would be ambiguous: the host refuses.
+/// two alike (a spore's and core's, or two spores') would be ambiguous, and a spore's
+/// provider under a key that isn't its own would never be reached: the host refuses
+/// (`hypha_spore_core::check_built`, which the Worker runs too).
 fn check_unique<D: Deployment>(storage: &PgStorage<D>) -> Result<(), String> {
     use hypha_core::EventHandlers;
     use hypha_payments::PaymentProviders;
     let names = EventHandlers::<crate::PgPorts>::names(storage.handlers());
-    let keys = storage.payment_providers().keys();
-    let mut problems = repeated("event handler", &names);
-    problems.extend(repeated("payment provider", &keys));
+    let providers = storage.payment_providers();
+    let problems =
+        hypha_spore_core::check_built::<D::Spores>(&names, &providers.keys(), &providers.0.1);
     match problems.is_empty() {
         true => Ok(()),
         false => Err(problems.join("\n")),
     }
-}
-
-/// A line for each item that's in `list` more than once.
-fn repeated<T: PartialEq + std::fmt::Display>(what: &str, list: &[T]) -> Vec<String> {
-    list.iter()
-        .enumerate()
-        .filter(|(i, item)| list[..*i].contains(item))
-        .map(|(_, item)| format!("{what} {item} is built in twice"))
-        .collect()
 }
 
 /// What a start prepares before serving: the state, with the store, the owner, the
@@ -618,18 +611,4 @@ async fn shutdown_signal() {
         () = terminate => {},
     }
     tracing::info!("shutting down: finishing in-flight requests");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn each_repeat_is_reported_once_per_extra_copy() {
-        assert_eq!(
-            repeated("event handler", &["search_index", "mailer", "search_index"]),
-            ["event handler search_index is built in twice"]
-        );
-        assert!(repeated("payment provider", &["manual", "spore_stripe"]).is_empty());
-    }
 }

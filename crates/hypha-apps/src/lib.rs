@@ -33,7 +33,7 @@ pub use app::{
 pub use commands::{
     CommandError, CreateApp, SECRET_PREFIX, SporeRegistration, UpdateApp, WebhookInput, create_app,
     delete_app, get_app, get_event, list_apps, list_deliveries, new_secret, open_secret,
-    register_spore, retry_delivery, rotate_app_secret, update_app,
+    register_spore, retry_delivery, rotate_app_secret, spore_registered, update_app,
 };
 pub use endpoints::{
     EndpointInput, ExtensionEndpoint, ExtensionEndpointRepo, HasExtensionEndpoints, KnownPoint,
