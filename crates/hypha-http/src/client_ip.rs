@@ -32,6 +32,11 @@ impl<'a> TrustedProxies<'a> {
         self.0.iter().any(|net| net.contains(&ip))
     }
 
+    /// Whether `peer` is one of these proxies, so what it says it forwarded is believed.
+    pub fn trusts(&self, peer: IpAddr) -> bool {
+        self.contains(canonical(peer))
+    }
+
     /// The client's address for a request from `peer` carrying `headers`.
     pub fn client(&self, peer: IpAddr, headers: &HeaderMap) -> IpAddr {
         let peer = canonical(peer);

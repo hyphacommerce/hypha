@@ -43,7 +43,7 @@ use hypha_extensions::{
 use hypha_oauth::{Refreshed, refresh_manifest};
 use serde::{Deserialize, Serialize};
 
-use super::{apps::AppResponse, oauth::issuer, rfc3339};
+use super::{apps::AppResponse, oauth::Issuer, rfc3339};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId, Query, StaffCaller, Storefront},
@@ -465,20 +465,15 @@ pub struct SessionTokenResponse {
 )]
 pub async fn session<S: Storage>(
     State(state): State<SharedState<S>>,
-    headers: HeaderMap,
+    Issuer(issuer): Issuer,
     caller: StaffCaller,
     PathId(key): PathId<String>,
 ) -> Result<Json<SessionTokenResponse>, ApiError> {
     use hypha_apps::HasApps;
     let (ports, staff) = caller.authenticate(&state).await?;
     let (app, scopes) = session_app(&staff.ctx, ports.apps(), &key).await?;
-    let (token, expires_at) = session_token(
-        &state,
-        &issuer(&headers),
-        &app,
-        staff.user.id().to_string(),
-        &scopes,
-    )?;
+    let (token, expires_at) =
+        session_token(&state, &issuer, &app, staff.user.id().to_string(), &scopes)?;
     Ok(Json(SessionTokenResponse {
         token,
         expires_at: rfc3339(expires_at)?,
@@ -692,7 +687,7 @@ pub struct BlockResponse {
 )]
 pub async fn fetch_block<S: Storage>(
     State(state): State<SharedState<S>>,
-    headers: HeaderMap,
+    Issuer(issuer): Issuer,
     caller: Caller,
     PathId((key, id)): PathId<(String, String)>,
     query: Query<ExtensionContextDto>,
@@ -722,7 +717,7 @@ pub async fn fetch_block<S: Storage>(
     forwarded.push(("accept".to_string(), "application/json".to_string()));
     if let Some(user) = staff_of(&ctx) {
         let scopes = scopes_for(&ctx, &app);
-        let (token, _) = session_token(&state, &issuer(&headers), &app, user.to_string(), &scopes)?;
+        let (token, _) = session_token(&state, &issuer, &app, user.to_string(), &scopes)?;
         forwarded.push(("authorization".to_string(), format!("Bearer {token}")));
     }
     let started = state.clock.now();
@@ -979,6 +974,7 @@ async fn forward<S: Storage>(
 
 async fn admin_proxy<S: Storage>(
     state: SharedState<S>,
+    issuer: String,
     caller: Caller,
     key: String,
     method: Method,
@@ -993,7 +989,7 @@ async fn admin_proxy<S: Storage>(
     let mut context = context_headers(&state, &ctx, &app);
     if let Some(user) = staff_of(&ctx) {
         let scopes = scopes_for(&ctx, &app);
-        let (token, _) = session_token(&state, &issuer(&headers), &app, user.to_string(), &scopes)?;
+        let (token, _) = session_token(&state, &issuer, &app, user.to_string(), &scopes)?;
         context.push(("authorization".to_string(), format!("Bearer {token}")));
     }
     forward(
@@ -1007,6 +1003,8 @@ pub const CART_HEADER: &str = "x-hypha-cart";
 
 async fn storefront_proxy<S: Storage>(
     state: SharedState<S>,
+    // Shoppers get no session token: nothing to issue.
+    _issuer: String,
     caller: Caller<Storefront>,
     key: String,
     method: Method,
@@ -1061,13 +1059,14 @@ macro_rules! proxy_handlers {
         )]
         pub async fn $name<S: Storage>(
             State(state): State<SharedState<S>>,
+            Issuer(issuer): Issuer,
             caller: $caller,
             PathId((key, _path)): PathId<(String, String)>,
             uri: Uri,
             headers: HeaderMap,
             body: Body,
         ) -> Result<Response, ApiError> {
-            $proxy(state, caller, key, Method::$method, uri, headers, body).await
+            $proxy(state, issuer, caller, key, Method::$method, uri, headers, body).await
         }
     )*};
 }

@@ -53,6 +53,13 @@ pub struct Server {
     /// token. `HYPHA_ADMIN_URL` wins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_url: Option<String>,
+    /// The API's public base URL (`https://api.shop.example`), as apps reach it: the
+    /// OAuth issuer and endpoints in its metadata, the `issuer` of token answers, the
+    /// `iss` of app session tokens, a private app's `token_endpoint`. Unset, it's
+    /// derived from each request: `X-Forwarded-Host` and `-Proto` from a trusted proxy
+    /// (`trusted_proxies`), else the `Host` header. `HYPHA_PUBLIC_URL` wins.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_url: Option<String>,
     /// The largest request body accepted: 1KiB to 64MiB. Files don't count: they're
     /// uploaded to storage directly. Below 256KiB, a product's longest description may
     /// not fit.
@@ -68,6 +75,7 @@ impl Default for Server {
             bind: "127.0.0.1:3000".to_string(),
             trusted_proxies: Vec::new(),
             admin_url: None,
+            public_url: None,
             max_body: Size(2 << 20),
             shutdown_grace: Dur(Duration::from_secs(10)),
         }

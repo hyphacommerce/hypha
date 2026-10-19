@@ -140,6 +140,9 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
     if (cf.zoneId) vars.push(["HYPHA_MEDIA_URL", url(d, d.domains.media)]);
   }
   if (d.domains.admin) vars.push(["HYPHA_ADMIN_URL", url(d, d.domains.admin)]);
+  // The OAuth issuer and the URLs apps are given (design note 0029): the API's public
+  // address, never one a request happened to name.
+  vars.push(["HYPHA_PUBLIC_URL", url(d, d.domains.api)]);
   const bound = input.apps ?? [];
   if (bound.length > 0)
     vars.push(["HYPHA_APP_BINDINGS", bound.map((a) => `${a.host}=${a.binding}`).join(",")]);

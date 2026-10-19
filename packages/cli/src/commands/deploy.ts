@@ -271,6 +271,9 @@ export async function writeServerApps(
   const env = await loadEnv(dir);
   const before = env.toString();
   env.set("COMPOSE_FILE", `compose.yaml:${COMPOSE_APPS_FILE}`).set("COMPOSE_PATH_SEPARATOR", ":");
+  // The API's public address (HYPHA_PUBLIC_URL in compose.yaml), for a `.env` from
+  // before it, and after the domain changed in hypha.json.
+  env.set("API_URL", url(d, d.domains.api));
   ensureEncryptionKeys(d, env);
   if (d.target === "local" && coLocated.length > 0)
     env.set("HYPHA_ALLOW_PRIVATE_CALLBACKS", "true");

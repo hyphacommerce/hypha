@@ -107,6 +107,7 @@ test("wrangler.toml binds Hyperdrive, KV and a rate limiter per rule, and is pla
     /^HYPHA_CONFIG = "\[rate_limits\.login_ip\]\\nburst = 20\\nper = \\"30s\\"\\n"$/m,
   );
   assert.match(file, /^HYPHA_ADMIN_URL = "https:\/\/admin\.example\.com"$/m);
+  assert.match(file, /^HYPHA_PUBLIC_URL = "https:\/\/api\.example\.com"$/m);
   assert.match(file, /^main = "\.\.\/crates\/hypha-host-workers\/build\/worker\/shim\.mjs"$/m);
   // Wherever wrangler runs from: it reads the build's cwd as given.
   assert.ok(file.includes(`cwd = ${JSON.stringify(join(REPO, "crates", "hypha-host-workers"))}`));

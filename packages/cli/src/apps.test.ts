@@ -263,6 +263,8 @@ test("a server's files gain the apps: compose reads both files, keys are made on
   assert.match(key ?? "", /^[0-9a-f]{64}$/);
   // A server's API calls only public addresses.
   assert.equal(env.get("HYPHA_ALLOW_PRIVATE_CALLBACKS"), undefined);
+  // Its public address (HYPHA_PUBLIC_URL), for a `.env` from before it.
+  assert.equal(env.get("API_URL"), "https://api.example.com");
   assert.match(await readFile(join(dir, "compose.apps.yaml"), "utf8"), /app-stripe:/);
   assert.match(await readFile(join(dir, "apps.caddy"), "utf8"), /reverse_proxy app-stripe:3000/);
   // With no apps, the files stay, empty of them: the container goes on the next `up`.

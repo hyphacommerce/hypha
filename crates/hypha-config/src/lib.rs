@@ -62,6 +62,8 @@ pub struct ServerConfig {
     pub trusted_proxies: Vec<IpNet>,
     /// Without a trailing `/`.
     pub admin_url: Option<String>,
+    /// The API's public base URL, without a trailing `/` (`server.public_url`).
+    pub public_url: Option<String>,
     pub max_body: usize,
     pub shutdown_grace: Duration,
 }
@@ -359,6 +361,10 @@ fn apply_env(
         file.server.admin_url = Some(url);
         set.push(("server.admin_url", "HYPHA_ADMIN_URL"));
     }
+    if let Some(url) = env("HYPHA_PUBLIC_URL") {
+        file.server.public_url = Some(url);
+        set.push(("server.public_url", "HYPHA_PUBLIC_URL"));
+    }
     if let Some(allow) = flag("HYPHA_ALLOW_PRIVATE_CALLBACKS", problems) {
         file.outbound.allow_private = allow;
     }
@@ -538,6 +544,10 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         .admin_url
         .as_deref()
         .map(|url| url.trim_end_matches('/').to_string());
+    let public_url = server
+        .public_url
+        .as_deref()
+        .map(|url| url.trim_end_matches('/').to_string());
 
     // Database.
     p.at_least(
@@ -553,6 +563,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
     let media = &file.media;
     for (key, url) in [
         ("server.admin_url", &server.admin_url),
+        ("server.public_url", &server.public_url),
         ("media.public_url", &media.public_url),
         ("media.s3.endpoint", &media.s3.endpoint),
     ] {
@@ -801,6 +812,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             bind: server.bind.clone(),
             trusted_proxies,
             admin_url,
+            public_url,
             max_body,
             shutdown_grace: server.shutdown_grace.0,
         },
@@ -1252,10 +1264,15 @@ mod tests {
                 ("HYPHA_S3_ENDPOINT", "http://localhost:9000"),
                 ("HYPHA_S3_BUCKET", "hypha"),
                 ("HYPHA_ADMIN_URL", "https://admin.example.com/"),
+                ("HYPHA_PUBLIC_URL", "https://api.example.com/"),
             ]),
         )
         .unwrap();
         assert_eq!(config.server.bind, "0.0.0.0:8080");
+        assert_eq!(
+            config.server.public_url.as_deref(),
+            Some("https://api.example.com")
+        );
         assert_eq!(
             config.server.trusted_proxies,
             [

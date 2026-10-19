@@ -20,10 +20,11 @@
 use axum::{
     Json,
     body::Bytes,
-    extract::{FromRequest, Request, State},
+    extract::{FromRequest, FromRequestParts, Request, State},
     http::{
         HeaderMap, HeaderValue, StatusCode,
         header::{CACHE_CONTROL, CONTENT_TYPE, HOST, LOCATION, PRAGMA},
+        request::Parts,
     },
     response::{IntoResponse, Response},
 };
@@ -36,8 +37,10 @@ use hypha_oauth::{
 use serde::{Deserialize, Serialize};
 
 use super::rfc3339;
+use std::net::IpAddr;
+
 use crate::{
-    client_ip::ClientIp,
+    client_ip::{ClientIp, PeerAddr, TrustedProxies},
     error::ApiError,
     extract::{Caller, JsonBody, PathId, Query, StaffCaller},
     rate_limit::{Rule, enforce},
@@ -309,7 +312,7 @@ fn required(value: Option<String>, name: &str) -> Result<String, TokenError> {
 pub async fn token_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
-    headers: HeaderMap,
+    Issuer(issuer): Issuer,
     body: FormBody<TokenRequest>,
 ) -> Result<Response, ApiError> {
     enforce(&state.limiter, Rule::OAuthIp, &ip).await?;
@@ -344,7 +347,7 @@ pub async fn token_handler<S: Storage>(
     Ok(match issued {
         Ok(tokens) => no_store(
             StatusCode::OK,
-            Json(TokenResponse::new(tokens, state.store, issuer(&headers))),
+            Json(TokenResponse::new(tokens, state.store, issuer)),
         ),
         Err(e) => oauth_error(e),
     })
@@ -408,26 +411,67 @@ pub struct ServerMetadata {
     client_id_metadata_document_supported: bool,
 }
 
-/// The API's own base URL, as the request reached it: `X-Forwarded-Proto` (from a proxy
-/// that ends TLS) or `https`, except `http` for a local host.
-pub(crate) fn issuer(headers: &HeaderMap) -> String {
-    let host = headers
-        .get("x-forwarded-host")
-        .or_else(|| headers.get(HOST))
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("localhost");
-    let local = host.starts_with("localhost")
-        || host.starts_with("127.0.0.1")
-        || host.starts_with("[::1]")
-        || host
-            .split(':')
-            .next()
-            .is_some_and(|h| h.ends_with(".localhost"));
-    let scheme = headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or(if local { "http" } else { "https" });
-    format!("{scheme}://{host}")
+/// The API's public base URL (`Issuer::of`), for a handler: the OAuth issuer and the
+/// URLs built on it.
+pub struct Issuer(pub String);
+
+impl Issuer {
+    /// `server.public_url` when configured. Otherwise as the request reached it:
+    /// `X-Forwarded-Host` and `X-Forwarded-Proto` only when `peer` (the socket's peer,
+    /// or `CF-Connecting-IP` on Workers) is a trusted proxy (`server.trusted_proxies`,
+    /// as `ClientIp` believes `X-Forwarded-For`); else the `Host` header, `http` for a
+    /// local host and `https` otherwise. Anyone can send `X-Forwarded-*`: believed from
+    /// anyone, a stranger would pick the issuer apps are told and the `iss` they check.
+    pub fn of(
+        server: &hypha_config::ServerConfig,
+        peer: Option<IpAddr>,
+        headers: &HeaderMap,
+    ) -> String {
+        if let Some(url) = &server.public_url {
+            return url.clone();
+        }
+        let header = |name| {
+            headers
+                .get(name)
+                .and_then(|v: &HeaderValue| v.to_str().ok())
+        };
+        let proxied =
+            peer.is_some_and(|peer| TrustedProxies::new(&server.trusted_proxies).trusts(peer));
+        let host = proxied
+            .then(|| header("x-forwarded-host"))
+            .flatten()
+            .or_else(|| header(HOST.as_str()))
+            .unwrap_or("localhost");
+        let local = host.starts_with("localhost")
+            || host.starts_with("127.0.0.1")
+            || host.starts_with("[::1]")
+            || host
+                .split(':')
+                .next()
+                .is_some_and(|h| h.ends_with(".localhost"));
+        let scheme = proxied
+            .then(|| header("x-forwarded-proto"))
+            .flatten()
+            .filter(|p| matches!(*p, "http" | "https"))
+            .unwrap_or(if local { "http" } else { "https" });
+        format!("{scheme}://{host}")
+    }
+}
+
+impl<S: Storage> FromRequestParts<SharedState<S>> for Issuer {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &SharedState<S>,
+    ) -> Result<Self, ApiError> {
+        let peer = parts.extensions.get::<PeerAddr>().map(|p| p.0);
+        Ok(Issuer(Issuer::of(
+            &state.config.server,
+            peer,
+            &parts.headers,
+        )))
+    }
 }
 
 /// The authorization server's metadata (RFC 8414).
@@ -438,8 +482,7 @@ pub(crate) fn issuer(headers: &HeaderMap) -> String {
     responses((status = 200, description = "OK", body = ServerMetadata)),
     security(()),
 )]
-pub async fn metadata<S: Storage>(headers: HeaderMap) -> Json<ServerMetadata> {
-    let base = issuer(&headers);
+pub async fn metadata<S: Storage>(Issuer(base): Issuer) -> Json<ServerMetadata> {
     Json(ServerMetadata {
         authorization_endpoint: format!("{base}/oauth/authorize"),
         token_endpoint: format!("{base}/oauth/token"),
@@ -696,13 +739,13 @@ pub async fn fetch_request<S: Storage>(
 )]
 pub async fn approve_request<S: Storage>(
     State(state): State<SharedState<S>>,
-    headers: HeaderMap,
+    Issuer(issuer): Issuer,
     caller: Caller,
     PathId(id): PathId<OAuthRequestId>,
 ) -> Result<Response, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let approval = approve(&ctx, &ports, &state.env, id).await?;
-    let answer = ConsentAnswer::from_approval(approval, &issuer(&headers));
+    let answer = ConsentAnswer::from_approval(approval, &issuer);
     // Credentials are in it: never cached (RFC 6749 §5.1's rule for token answers).
     Ok(no_store(StatusCode::OK, Json(answer)))
 }
@@ -797,14 +840,67 @@ pub async fn deny_request<S: Storage>(
 mod tests {
     use super::*;
 
+    fn server(public_url: Option<&str>, trusted: &[&str]) -> hypha_config::ServerConfig {
+        let mut server = hypha_config::Config::load(None, |_| None).unwrap().server;
+        server.public_url = public_url.map(str::to_string);
+        server.trusted_proxies = trusted.iter().map(|t| t.parse().unwrap()).collect();
+        server
+    }
+
+    fn ip(s: &str) -> Option<IpAddr> {
+        Some(s.parse().unwrap())
+    }
+
     #[test]
     fn the_issuer_is_the_host_the_request_reached() {
+        let open = server(None, &[]);
         let mut headers = HeaderMap::new();
         headers.insert(HOST, HeaderValue::from_static("api.shop.example"));
-        assert_eq!(issuer(&headers), "https://api.shop.example");
+        assert_eq!(
+            Issuer::of(&open, ip("203.0.113.9"), &headers),
+            "https://api.shop.example"
+        );
         headers.insert(HOST, HeaderValue::from_static("localhost:3000"));
-        assert_eq!(issuer(&headers), "http://localhost:3000");
-        headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
-        assert_eq!(issuer(&headers), "https://localhost:3000");
+        assert_eq!(
+            Issuer::of(&open, ip("127.0.0.1"), &headers),
+            "http://localhost:3000"
+        );
+    }
+
+    #[test]
+    fn forwarded_headers_are_believed_only_from_a_trusted_proxy() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("api:3000"));
+        headers.insert("x-forwarded-host", HeaderValue::from_static("evil.example"));
+        headers.insert("x-forwarded-proto", HeaderValue::from_static("http"));
+        // From anyone: ignored.
+        let open = server(None, &[]);
+        assert_eq!(
+            Issuer::of(&open, ip("203.0.113.9"), &headers),
+            "https://api:3000"
+        );
+        // From a trusted proxy: believed.
+        let behind = server(None, &["10.0.0.0/8"]);
+        assert_eq!(
+            Issuer::of(&behind, ip("10.1.2.3"), &headers),
+            "http://evil.example"
+        );
+        assert_eq!(
+            Issuer::of(&behind, ip("203.0.113.9"), &headers),
+            "https://api:3000"
+        );
+        assert_eq!(Issuer::of(&behind, None, &headers), "https://api:3000");
+    }
+
+    #[test]
+    fn a_configured_public_url_wins() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("api:3000"));
+        headers.insert("x-forwarded-host", HeaderValue::from_static("evil.example"));
+        let configured = server(Some("https://api.shop.example"), &["10.0.0.0/8"]);
+        assert_eq!(
+            Issuer::of(&configured, ip("10.1.2.3"), &headers),
+            "https://api.shop.example"
+        );
     }
 }

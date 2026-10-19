@@ -63,6 +63,8 @@ services:
       HYPHA_OWNER_PASSWORD: ${HYPHA_OWNER_PASSWORD:-}
       HYPHA_STORE_NAME: ${HYPHA_STORE_NAME:-My store}
       HYPHA_ADMIN_URL: ${ADMIN_URL:-}
+      # The API's public address: the OAuth issuer and the URLs apps are given.
+      HYPHA_PUBLIC_URL: ${API_URL:-}
       # Caddy, the admin and the storefront reach the API from this network; what they
       # put in X-Forwarded-For is believed from these addresses only.
       HYPHA_TRUSTED_PROXIES: ${HYPHA_NETWORK:-172.30.250.0/24}

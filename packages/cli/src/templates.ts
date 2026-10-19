@@ -219,6 +219,7 @@ export function newEnv(d: Deployment, owner: Owner): EnvFile {
     .set("HYPHA_STORE_NAME", owner.storeName)
     .comment("")
     .comment("Addresses (from hypha.json's domains).")
+    .set("API_URL", url(d, d.domains.api))
     .set("MEDIA_URL", url(d, d.domains.media))
     .set("MEDIA_HOST", d.domains.media)
     .set("ADMIN_URL", d.domains.admin ? url(d, d.domains.admin) : "")

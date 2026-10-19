@@ -747,6 +747,13 @@
           "$ref": "#/$defs/Size",
           "default": "2MiB"
         },
+        "public_url": {
+          "description": "The API's public base URL (`https://api.shop.example`), as apps reach it: the\nOAuth issuer and endpoints in its metadata, the `issuer` of token answers, the\n`iss` of app session tokens, a private app's `token_endpoint`. Unset, it's\nderived from each request: `X-Forwarded-Host` and `-Proto` from a trusted proxy\n(`trusted_proxies`), else the `Host` header. `HYPHA_PUBLIC_URL` wins.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "shutdown_grace": {
           "description": "How long stopping waits for jobs, and then for background work, to finish. At\nleast 1 second.",
           "$ref": "#/$defs/Duration",
