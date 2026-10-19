@@ -15,6 +15,7 @@ hypha-shipping = { path = "../hypha-shipping" }
 hypha-tax = { path = "../hypha-tax" }
 serde_json.workspace = true
 thiserror.workspace = true
+tracing = "0.1"
 
 [dev-dependencies]
 serde_json.workspace = true

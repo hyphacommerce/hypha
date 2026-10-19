@@ -944,6 +944,69 @@ fn a_cart_lists_the_methods_offered_to_it_by_position() {
     assert_eq!(ids, [cod, bank_transfer()]);
 }
 
+/// Providers that count which keys `available` was asked about.
+struct Counting<P> {
+    inner: P,
+    asked: std::cell::RefCell<Vec<ProviderKey>>,
+}
+
+impl<P: hypha_payments::PaymentProviders> hypha_payments::PaymentProviders for Counting<P> {
+    async fn available(&self, key: &ProviderKey) -> Result<bool, hypha_core::RepoError> {
+        self.asked.borrow_mut().push(key.clone());
+        self.inner.available(key).await
+    }
+    fn check_settings(
+        &self,
+        key: &ProviderKey,
+        settings: &serde_json::Value,
+    ) -> Result<(), hypha_payments::PaymentError> {
+        self.inner.check_settings(key, settings)
+    }
+    async fn start(
+        &self,
+        key: &ProviderKey,
+        payment: &hypha_payments::PaymentRequest,
+    ) -> Result<hypha_payments::Started, hypha_payments::PaymentError> {
+        self.inner.start(key, payment).await
+    }
+    async fn act(
+        &self,
+        key: &ProviderKey,
+        request: &hypha_payments::ActionRequest,
+    ) -> Result<hypha_payments::ActionAnswer, hypha_payments::PaymentError> {
+        self.inner.act(key, request).await
+    }
+}
+
+#[test]
+fn listing_a_carts_methods_asks_each_provider_once() {
+    let world = World::new();
+    let cart = world.cart();
+    let cod = add_cod(&world, 1600, vec![], 0);
+    let other = add_cod(&world, 1601, vec![], 2);
+    // Not offered in the cart's market: its provider needn't be asked for it.
+    add_cod(
+        &world,
+        1602,
+        vec![MarketId::from_uuid(Uuid::from_u128(4444))],
+        0,
+    );
+    let providers = Counting {
+        inner: (ManualProvider,),
+        asked: Default::default(),
+    };
+    let listed = block_on(cart_payment_methods(
+        &world.ports.storefront(),
+        &world.ports,
+        &providers,
+        cart,
+    ))
+    .unwrap();
+    let ids: Vec<PaymentMethodId> = listed.iter().map(PaymentMethod::id).collect();
+    assert_eq!(ids, [cod, bank_transfer(), other]);
+    assert_eq!(providers.asked.borrow().as_slice(), [ProviderKey::manual()]);
+}
+
 #[test]
 fn choosing_a_method_checks_it_is_offered() {
     let world = World::new();
@@ -1014,6 +1077,9 @@ fn a_checked_out_cart_keeps_its_method() {
 #[derive(Default)]
 struct CardApp {
     down: std::cell::Cell<bool>,
+    /// Answers a reference the payment can't keep, so storing it fails after the
+    /// commit, as a storage failure would.
+    bad_reference: std::cell::Cell<bool>,
     started: std::cell::RefCell<Vec<hypha_core::PaymentId>>,
 }
 
@@ -1045,7 +1111,11 @@ impl hypha_payments::PaymentProvider for &CardApp {
                 element: "card-payment".to_string(),
                 props,
             },
-            reference: Some(format!("pi_{}", payment.order_number)),
+            reference: Some(if self.bad_reference.get() {
+                "x".repeat(10_000)
+            } else {
+                format!("pi_{}", payment.order_number)
+            }),
         })
     }
 }
@@ -1106,6 +1176,44 @@ fn pay_again(
             return_url: None,
         },
     ))
+}
+
+#[test]
+fn a_reference_that_cant_be_stored_after_the_commit_doesnt_fail_checkout() {
+    let world = World::new();
+    let app = CardApp::default();
+    app.bad_reference.set(true);
+    let cart = world.cart();
+    pay_by_card(&world, cart);
+    let placed = check_out_by(&world, cart, &app);
+    // The order is placed and the shopper gets the provider's next action.
+    assert!(matches!(
+        placed.next_action,
+        Some(Ok(NextAction::ClientWidget { ref element, .. })) if element == "card-payment"
+    ));
+    let payment = placed.payment.unwrap();
+    assert_eq!(
+        payment.reference(),
+        None,
+        "the answer shows what was stored"
+    );
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(stored.reference(), None);
+    assert_eq!(stored.status(), PaymentStatus::Pending);
+    assert!(
+        block_on(world.orders.get(placed.order.id()))
+            .unwrap()
+            .is_some()
+    );
+
+    // Started again (the same key), the reference is stored then.
+    app.bad_reference.set(false);
+    let again = pay_again(&world, placed.order.id(), &app).unwrap();
+    let number = placed.order.number().value();
+    assert_eq!(
+        again.payment.unwrap().reference(),
+        Some(format!("pi_{number}").as_str())
+    );
 }
 
 #[test]

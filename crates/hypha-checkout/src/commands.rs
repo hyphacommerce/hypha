@@ -239,7 +239,8 @@ pub async fn checkout<
             Ok(placed) => {
                 let (order, mut payment, settings) = placed.value;
                 let next_action = match &mut payment {
-                    Some(p) => Some(start(ports, payments, &order, p, settings, return_url).await?),
+                    // After the commit: nothing here may fail the checkout.
+                    Some(p) => Some(start(ports, payments, &order, p, settings, return_url).await),
                     None => None,
                 };
                 return Ok(Idempotent::fresh(Placed {

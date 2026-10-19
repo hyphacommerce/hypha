@@ -21,8 +21,14 @@ use crate::{CheckoutPorts, CommandError, Placed};
 
 /// Asks `payment`'s provider to start collecting it, with its method's `settings`, and
 /// keeps the reference the provider answered with on the payment. The next action, or
-/// why there's none (`Err` inside: the provider failed, the payment stays `pending`);
-/// `Err` outside only when the reference couldn't be stored.
+/// why there's none (`Err`: the provider failed, the payment stays `pending`).
+///
+/// Never fails otherwise: it runs after the order and its payment are committed, so a
+/// storage failure here must not turn a placed order into a checkout error (the
+/// shopper would retry and find the cart completed). A reference that can't be stored
+/// is logged and left out: the provider answers the same one when the payment is
+/// started again (the same idempotency key, its ID), which stores it then, and the
+/// provider's reports carry it too (`record_payment_event`).
 pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
     ports: &S,
     providers: &Q,
@@ -30,11 +36,9 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
     payment: &mut Payment,
     settings: serde_json::Value,
     return_url: Option<&str>,
-) -> Result<Result<NextAction, PaymentError>, CommandError> {
+) -> Result<NextAction, PaymentError> {
     let Some(method) = payment.method() else {
-        return Ok(Err(PaymentError::UnknownProvider(
-            payment.provider().clone(),
-        )));
+        return Err(PaymentError::UnknownProvider(payment.provider().clone()));
     };
     let request = PaymentRequest {
         payment: payment.id(),
@@ -50,14 +54,20 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
         instructions: payment.instructions().map(str::to_string),
         settings,
     };
-    let started = match providers.start(payment.provider(), &request).await {
-        Ok(started) => started,
-        Err(e) => return Ok(Err(e)),
-    };
+    let started = providers.start(payment.provider(), &request).await?;
     if started.reference.is_some() {
-        keep_reference(ports, payment, started.reference).await?;
+        // As stored: the answer mustn't show a reference that wasn't kept.
+        let before = payment.clone();
+        if let Err(e) = keep_reference(ports, payment, started.reference).await {
+            tracing::warn!(
+                payment = %payment.id(),
+                error = %e,
+                "checkout: the provider's reference couldn't be stored; starting the payment again stores it"
+            );
+            *payment = before;
+        }
     }
-    Ok(Ok(started.next_action))
+    Ok(started.next_action)
 }
 
 /// Stores the provider's `reference` on `payment`, reloading it when the provider's own
@@ -109,19 +119,17 @@ pub(crate) async fn restart<S: HasPayments + HasPaymentMethods, Q: PaymentProvid
     match (method, payment.method()) {
         (Some(method), _) => {
             let settings = method.settings().clone();
-            start(ports, providers, order, payment, settings, return_url).await
+            Ok(start(ports, providers, order, payment, settings, return_url).await)
         }
-        _ if payment.provider().is_manual() => {
-            start(
-                ports,
-                providers,
-                order,
-                payment,
-                serde_json::Value::Null,
-                return_url,
-            )
-            .await
-        }
+        _ if payment.provider().is_manual() => Ok(start(
+            ports,
+            providers,
+            order,
+            payment,
+            serde_json::Value::Null,
+            return_url,
+        )
+        .await),
         (None, Some(id)) => Ok(Err(PaymentError::MethodUnavailable(id))),
         (None, None) => Ok(Err(PaymentError::UnknownProvider(
             payment.provider().clone(),
