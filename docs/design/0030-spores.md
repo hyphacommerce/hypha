@@ -539,7 +539,11 @@ app), email senders (already compiled in: they become spores' to add), tax engin
    has spores: calling it at startup, the `missing` mark (Q7), and enable/disable
    honoured by providers, handlers and UI discovery.
 2. Hosts as libraries: `host!` (and `worker!`) with an empty spore list producing
-   today's binaries, nested provider and handler tuples, the migration list.
+   today's binaries, nested provider and handler tuples, the migration list. *Done*
+   (see "As built: step 2" below), with the startup registration step 1 left. Left for
+   later: the `missing` mark (Q7); enable/disable honoured by providers, handlers and UI
+   discovery; the host's environment for `Spore::new`; `TestApp::with_spores!` (§10);
+   Cargo features for first-party spores in this workspace (§9).
 3. `hypha-spore` facade, the migration check (§5), `spore_routes!`, `SporeUi` and the
    two-source UI discovery, core's `spore_settings` with sealed fields and the admin's
    settings form for spores.
@@ -553,3 +557,39 @@ app), email senders (already compiled in: they become spores' to add), tax engin
 
 The batch slot (§6.2) and `also` hooks (§6.3) are built by the first spore that needs
 them, not in this list.
+
+## As built: step 2 (hosts as libraries)
+
+- **`hypha-spore-core`** holds `Spore` (`NAME`, `SCOPES`, `title()`, `migrations() ->
+  MigrationSet`, `new()`, `type PaymentProviders` / `type Handlers` with
+  `payment_providers()` / `handlers()`; `()` for none) and `SporeSet`, implemented for
+  `()` and tuples of up to 8 spores (registrations, migrations, `build()`), plus
+  `check()` (bad names, repeats, migrations under another module than `spore_<name>`).
+  Its own crate because core can name neither `MigrationSet` nor `PaymentProviders`; the
+  facade (step 3) re-exports it. `new()` takes no environment yet: §4's `SporeEnv` and
+  `SporeError` come with settings in step 3, and change the signature.
+- **Nested sets are a `hypha_core::Union`**, not bare tuples of tuples:
+  `Union((core, Union((a, b))))`. `EventHandlers` and `PaymentProviders` read a union as
+  one set (the first set with the name or key answers). Bare nesting can't work for
+  handlers: a tuple of handlers is already a set, and making a tuple of sets one too
+  overlaps, since another crate may implement `EventHandler<ItsPorts>` for a tuple.
+  `PaymentProviders` gained `keys()` and an impl for `()`.
+- **Native host:** `main.rs` is `hypha_host_axum::host! { spores: [] }`. `host!` uses
+  `deployment! { enum Deployment { spores: [...] } }`, which declares an uninhabited type
+  implementing `hypha_host_axum::Deployment` (`type Spores`, `router()`, `dispatch()`):
+  the two places that need `Send` proven for the concrete providers and handlers. The rest
+  (`start.rs`: subcommands, startup, serving, the other jobs) is generic over it.
+  `PgStorage<D>` joins core's handlers and providers with the spores'. A start migrates
+  `[CORE, spores' sets…]`, refuses bad spores before migrating and repeated handler
+  names or provider keys after building them, then registers each spore's app
+  (`register_spore` as `Ctx::system()`). A route test builds a host with a test-only spore
+  (`route_tests/spores.rs`).
+- **Workers host:** the same shape. `hypha_host_workers::worker! { spores: [...] }`
+  expands the deployment, its router and the `#[event(fetch)]` / `#[event(scheduled)]`
+  exports, which call the library's generic `fetch::<D>` / `scheduled::<D>`. The isolate's
+  setup is kept as `Rc<dyn Any>` (a `thread_local` can't be generic) and downcast to
+  `Isolate<D>`. The stock Worker is `worker! { spores: [] }` behind the crate's default
+  `stock` feature. A deployment's crate turns it off (`default-features = false`), so the
+  events are exported once, and depends on `worker` itself, since `#[event]` expands to
+  `::worker` paths. A Worker runs no migrations, so its database's `setup` must come from a
+  native host built with the same spore list (step 5's generated crate builds both).
