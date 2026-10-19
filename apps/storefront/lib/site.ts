@@ -2,6 +2,8 @@
 
 import { cookies } from "next/headers";
 
+import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+
 import { cartFlagCookie } from "./cart-flag";
 import { href, routing } from "./routing";
 
@@ -54,6 +56,63 @@ export async function rememberOrder(order: string, token: string) {
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
+}
+
+/**
+ * How checkout's payment started, when the confirmation page must finish it (design
+ * note 0029, §7: a payment app's `client_widget`, or a start that failed), kept for ten
+ * minutes so the page mounts the widget without starting the payment again. Too large
+ * for a cookie (an app's props over ~3 KB): not kept, and the page starts it again (the
+ * app sees the same idempotency key).
+ */
+export type PaymentStart = {
+  next_action: StorefrontSchemas["NextActionResponse"] | null;
+  /** The shopper's message for a start that failed (`payment_error`). */
+  error: string | null;
+};
+
+function paymentStartCookie(order: string): string {
+  return `order_pay_${order}`;
+}
+
+export async function rememberPaymentStart(order: string, start: PaymentStart) {
+  const value = JSON.stringify(start);
+  if (value.length > 3000) return;
+  (await cookies()).set(paymentStartCookie(order), value, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 10 * 60,
+  });
+}
+
+/** The kept start of `order`'s payment, if any. */
+export async function paymentStartOf(order: string): Promise<PaymentStart | null> {
+  const raw = (await cookies()).get(paymentStartCookie(order))?.value;
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || !("next_action" in parsed)) return null;
+    const error: unknown = Reflect.get(parsed, "error");
+    const next: unknown = Reflect.get(parsed, "next_action");
+    return {
+      next_action: isNextAction(next) ? next : null,
+      error: typeof error === "string" ? error : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isNextAction(value: unknown): value is StorefrontSchemas["NextActionResponse"] {
+  if (typeof value !== "object" || value === null) return false;
+  const type: unknown = Reflect.get(value, "type");
+  return type === "client_widget" || type === "redirect" || type === "instructions";
+}
+
+export async function forgetPaymentStart(order: string) {
+  (await cookies()).delete(paymentStartCookie(order));
 }
 
 export async function forgetCart(country: string) {

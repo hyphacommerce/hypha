@@ -34,6 +34,14 @@ pub enum CommandError {
     /// disabled or no longer installed: one answer for all.
     #[error("the token is invalid or expired")]
     InvalidToken,
+    /// A private app's manifest was uploaded, so there's no URL to refresh it from:
+    /// upload it again instead.
+    #[error("app {0} is private: upload its manifest again to change it")]
+    PrivateApp(AppKey),
+    /// An upload with the key of an app installed from a served manifest: the two
+    /// would be different apps under one key.
+    #[error("app {0} is installed from its manifest URL; an upload can't replace it")]
+    InstalledFromUrl(AppKey),
 }
 
 impl ErrorCode for CommandError {
@@ -50,6 +58,8 @@ impl ErrorCode for CommandError {
             CommandError::RequestDecided(_) => "oauth_request_decided",
             CommandError::CannotGrant(_) => "not_allowed_to_grant",
             CommandError::InvalidToken => "invalid_token",
+            CommandError::PrivateApp(_) => "app_is_private",
+            CommandError::InstalledFromUrl(_) => "app_installed_from_url",
         }
     }
 }

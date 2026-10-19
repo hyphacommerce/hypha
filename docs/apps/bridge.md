@@ -111,8 +111,11 @@ Codes are stable; messages are for humans.
   used and is refused as either origin, as are `null` and anything with a path.
 - An origin is `scheme://host[:port]`, compared as a string: the app's origin is the
   origin of the iframe's `src`; the admin's is where the admin is served (the app learns
-  it from the `origin` query parameter, which it checks against the store's admin
-  origins).
+  it from the store's admin origins, or from the `origin` query parameter the admin adds
+  to the page's URL, `?origin=https://admin.shop.example`, which the app checks against
+  `GET /admin/app-extensions/origins` before trusting it). An admin always adds
+  `origin`; after a `navigate` to `/settings`, our admin loads the page's URL with
+  `/settings` appended to its path (`https://app.example/hypha/admin/settings?origin=…`).
 - **What the app can't do:** read the admin's DOM, cookies or staff session (the sandbox
   and the origin boundary), choose where the admin navigates outside its own page, or
   put markup in a toast (plain text only).

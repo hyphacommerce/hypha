@@ -18,9 +18,11 @@ import type { ReactNode } from "react";
 import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
 import { actorLabel, appState, isPersonalDataScope, personalDataLabel } from "@/lib/apps";
+import { loadExtensions } from "@/lib/app-extensions";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
 
 import { AppActions } from "./app-actions";
+import { AppPageTabs } from "./app-pages";
 import { ReduceAccess } from "./reduce-access";
 
 const HISTORY_STATUS: Record<string, { label: string; variant: "success" | "warning" | "error" }> =
@@ -65,11 +67,16 @@ function Panel({
 
 /**
  * One app (design note 0029): what it may do, which personal data it sees, where its
- * events go, and how it was authorized. The apps platform's own pages for the app
- * (`apps.page`, `settings.app`, §5) will hang off this page.
+ * events go, and how it was authorized. The app's own pages (`apps.page`,
+ * `settings.app`, §5) are linked above, each at `/apps/{key}/pages/{id}`.
  */
 export default async function AppPage({ params }: { params: Promise<{ key: string }> }) {
-  const [{ key }, client, me] = await Promise.all([params, sessionClient(), requireStaff()]);
+  const [{ key }, client, me, extensions] = await Promise.all([
+    params,
+    sessionClient(),
+    requireStaff(),
+    loadExtensions(),
+  ]);
   const app = loaded(await client.GET("/admin/apps/{key}", { params: { path: { key } } }));
   const state = appState(app);
   const scopes = app.grant?.scopes ?? [];
@@ -97,6 +104,8 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
             )
           }
         />
+
+        <AppPageTabs appKey={app.key} pages={extensions.pages.filter((p) => p.app === app.key)} />
 
         <Panel
           title="Access"

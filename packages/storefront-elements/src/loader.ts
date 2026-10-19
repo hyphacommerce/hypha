@@ -125,6 +125,8 @@ export function mountElement(container: Element, { tag, props = {} }: MountOptio
     throw new ElementLoadError("invalid_tag", `not a custom element name: ${JSON.stringify(tag)}`);
   const element = container.ownerDocument.createElement(tag);
   setProps(element, props);
-  container.append(element);
+  // `appendChild`, not `append`: Cloudflare's Workers types (in a storefront's project)
+  // declare an HTMLRewriter `Element.append` that hides the DOM's.
+  container.appendChild(element);
   return element;
 }

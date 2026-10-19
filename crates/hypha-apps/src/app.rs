@@ -5,7 +5,7 @@ use hypha_core::{
 
 use crate::endpoints::ExtensionEndpoint;
 use crate::events::{APP, AppGrantChanged, AppInstalled, AppUninstalled};
-use crate::manifest::AppManifest;
+use crate::manifest::{AppManifest, ManifestSource};
 
 use crate::AppError;
 
@@ -604,8 +604,9 @@ impl App {
         })?;
         app.manifest = match (s.manifest_url, s.manifest, s.manifest_fetched_at) {
             (Some(url), Some(value), Some(fetched_at)) => Some(InstalledManifest {
+                manifest: AppManifest::from_value_of(value, ManifestSource::of_client(&url))
+                    .map_err(AppError::Manifest)?,
                 url,
-                manifest: AppManifest::from_value(value).map_err(AppError::Manifest)?,
                 fetched_at,
             }),
             (None, None, None) => None,

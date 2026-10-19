@@ -18,6 +18,7 @@ import type { ReactNode } from "react";
 
 import { Link } from "@astryxdesign/core/Link";
 
+import { AppActions, AppSlot } from "@/components/app-extensions/app-slot";
 import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -35,6 +36,7 @@ import {
   requireStaff,
   sessionClient,
 } from "@/lib/hypha";
+import { type Extensions, loadExtensions } from "@/lib/app-extensions";
 import { canMarkPaid, providerLabel } from "@/lib/payments";
 
 import { EmailsCard } from "./emails";
@@ -75,7 +77,8 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   // The emails need `notifications:read` and `orders:read` (they name the buyer); without
   // them the request is refused and the card isn't shown. The staff member is the
   // layout's read too.
-  const [found, shipments, locations, channelName, currencies, countries, emails, me] =
+  // What installed apps add here (design note 0029, §5) is one more read.
+  const [found, shipments, locations, channelName, currencies, countries, emails, me, extensions] =
     await Promise.all([
       client.GET("/admin/orders/{id}", { params: { path: { id } } }),
       client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
@@ -85,6 +88,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
       loadCountries(),
       client.GET("/admin/notifications", { params: { query: { order: id } } }),
       requireStaff(),
+      loadExtensions(),
     ]);
   const order = loaded(found);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
@@ -233,11 +237,19 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
               </VStack>
             </Card>
 
-            <PaymentCard order={order} currencies={currencies} />
+            <PaymentCard order={order} currencies={currencies} extensions={extensions} />
 
             {fulfillments.length > 0 && (
               <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
             )}
+            {fulfillments.map((f) => (
+              <AppSlot
+                key={f.id}
+                extensions={extensions}
+                target="order.fulfillment"
+                context={{ order_id: order.id, fulfillment_id: f.id }}
+              />
+            ))}
 
             {emails.data && (
               <EmailsCard
@@ -340,6 +352,12 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                 </MetadataList>
               </Card>
             )}
+
+            <AppSlot
+              extensions={extensions}
+              target="order.details"
+              context={{ order_id: order.id }}
+            />
           </div>
         </div>
       </VStack>
@@ -350,7 +368,15 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
 type Order = AdminSchemas["AdminOrderResponse"];
 
 /** How the order is paid for (design note 0027): each payment, newest first. */
-function PaymentCard({ order, currencies }: { order: Order; currencies: Currencies }) {
+function PaymentCard({
+  order,
+  currencies,
+  extensions,
+}: {
+  order: Order;
+  currencies: Currencies;
+  extensions: Extensions;
+}) {
   return (
     <Card>
       <VStack gap={3}>
@@ -409,6 +435,16 @@ function PaymentCard({ order, currencies }: { order: Order; currencies: Currenci
                     </Text>
                   </VStack>
                 )}
+                <AppActions
+                  extensions={extensions}
+                  target="payment"
+                  context={{ payment_id: payment.id, order_id: order.id }}
+                />
+                <AppSlot
+                  extensions={extensions}
+                  target="order.payment"
+                  context={{ order_id: order.id, payment_id: payment.id }}
+                />
               </VStack>
             ))}
           </VStack>

@@ -639,3 +639,115 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     assert_eq!(one["first_name"], "Piiana");
     assert!(one.get("redacted").is_none());
 }
+
+#[tokio::test]
+async fn a_private_apps_manifest_is_uploaded_and_its_approval_shows_its_credentials_once() {
+    let app = oauth_app().await;
+    let owner = owner_session(&app).await;
+    let manifest = json!({
+        "key": "app_rates",
+        "name": "Our rates",
+        "version": "1.0.0",
+        "app_url": "https://rates.internal.example",
+        "redirect_uris": [],
+        "scopes": ["shipping:read", "customer_data:address"],
+        "scope_reasons": { "customer_data:address": "quotes by postal code" },
+        "privacy_url": "/privacy"
+    });
+
+    // An API key can't install apps, even with apps:write.
+    let writer = key(
+        &app,
+        json!({"kind": "secret", "name": "w", "scopes": ["apps:write"]}),
+    )
+    .await;
+    let body = json!({ "manifest": manifest });
+    let (status, answer) = send_as(
+        &app,
+        &writer,
+        "POST",
+        "/admin/apps/private",
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&answer)),
+        (StatusCode::UNAUTHORIZED, "session_required")
+    );
+
+    let mut bad = manifest.clone();
+    bad["scope_reasons"] = json!({});
+    let (status, answer) = send_as(
+        &app,
+        &owner,
+        "POST",
+        "/admin/apps/private",
+        Some(&json!({ "manifest": bad }).to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&answer)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "manifest_invalid")
+    );
+    assert_eq!(answer["details"]["errors"][0]["path"], "scope_reasons");
+
+    let (status, created) = send_as(
+        &app,
+        &owner,
+        "POST",
+        "/admin/apps/private",
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let request = created["request"]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        created["consent_url"],
+        format!("http://admin.test/apps/consent?request={request}")
+    );
+    assert_eq!(created["request"]["app"]["private"], true);
+    assert_eq!(
+        created["request"]["app"]["client_id"],
+        "urn:hypha:private:app_rates"
+    );
+    assert_eq!(
+        created["request"]["personal_data"],
+        json!([{"scope": "customer_data:address", "reason": "quotes by postal code"}])
+    );
+
+    let path = format!("/admin/oauth/requests/{request}/approve");
+    let (status, answer) = send_as(&app, &owner, "POST", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["redirect_to"], Value::Null);
+    let credentials = &answer["credentials"];
+    assert_eq!(credentials["app"], "app_rates");
+    assert_eq!(
+        credentials["scopes"],
+        json!(["shipping:read", "customer_data:address"])
+    );
+    assert!(
+        credentials["token_endpoint"]
+            .as_str()
+            .unwrap()
+            .ends_with("/oauth/token")
+    );
+    assert!(
+        credentials["app_secret"]
+            .as_str()
+            .unwrap()
+            .starts_with("hypha_as_")
+    );
+    let access = credentials["access_token"].as_str().unwrap().to_string();
+    let (status, body) = send_as(&app, &access, "GET", "/admin/shipping-zones", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Installed under its URN: nothing to refresh from.
+    let (status, body) = send_as(&app, &owner, "POST", "/admin/apps/app_rates/refresh", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "app_is_private")
+    );
+    let (status, body) = send_as(&app, &owner, "GET", "/admin/apps/app_rates", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["installed"], true);
+}

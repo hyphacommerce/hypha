@@ -7,10 +7,12 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
+import { AppSlot } from "@/components/app-extensions/app-slot";
 import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { customerName, formatMoney } from "@/lib/format";
+import { loadExtensions } from "@/lib/app-extensions";
 import { loadCountries, loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
 
 type Address = AdminSchemas["AddressResponse"];
@@ -42,10 +44,11 @@ function AddressLines({ address, country }: { address: Address; country: string 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const [customer, countries, currencies] = await Promise.all([
+  const [customer, countries, currencies, extensions] = await Promise.all([
     client.GET("/admin/customers/{id}", { params: { path: { id } } }).then(loaded),
     loadCountries(),
     loadCurrencies(),
+    loadExtensions(),
   ]);
   // Their latest orders: the email search matches parts of addresses too, so keep the
   // ones with exactly theirs. Needs `orders:read`; without it the card says so.
@@ -157,6 +160,11 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 )}
               </VStack>
             </Card>
+            <AppSlot
+              extensions={extensions}
+              target="customer.details"
+              context={{ customer_id: customer.id }}
+            />
           </div>
         </div>
       </VStack>

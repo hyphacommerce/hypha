@@ -183,6 +183,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/apps/private": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Uploads a private app's manifest (a store's own integration with no public site,
+         *     design note 0029, §4.1): it becomes a pending authorization request for the consent
+         *     page, whose approval installs the app and answers with its tokens. Staff sessions
+         *     only (an API key can't install apps); `apps:write`. 422 `manifest_invalid` with
+         *     `details.errors`; 409 `app_installed_from_url` when the key is an app installed from
+         *     its manifest URL.
+         */
+        post: operations["admin.oauth.create_private"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/apps/{key}": {
         parameters: {
             query?: never;
@@ -1575,7 +1599,8 @@ export interface paths {
          * Approves a request: installs the app (or replaces its grant) with the scopes asked
          *     for. The staff member needs `apps:write` and every scope requested
          *     (`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten
-         *     minutes, `oauth_request_decided` once answered.
+         *     minutes, `oauth_request_decided` once answered. A private app's approval answers
+         *     with its `credentials` (and no `redirect_to`), shown this once.
          */
         post: operations["admin.oauth.approve_request"];
         delete?: never;
@@ -1593,7 +1618,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Denies a request; the app is told `access_denied`. */
+        /**
+         * Denies a request; the app is told `access_denied` (a private app's answer has no
+         *     `redirect_to`).
+         */
         post: operations["admin.oauth.deny_request"];
         delete?: never;
         options?: never;
@@ -3123,13 +3151,15 @@ export interface components {
             password: string;
             token: string;
         };
-        /** @description Where to send the browser after an answer. */
+        /** @description Where to send the browser after an answer, or a private app's credentials. */
         ConsentAnswer: {
+            credentials?: components["schemas"]["PrivateAppCredentials"] | null;
             /**
              * @description The app's redirect URI with `code` and `state` (approved), or `error=access_denied`
-             *     and `state` (denied). Navigate the browser there.
+             *     and `state` (denied): navigate the browser there. `null` when a private app was
+             *     approved: show `credentials` instead.
              */
-            redirect_to: string;
+            redirect_to?: string | null;
         };
         /** @description The app as its manifest describes it, for the consent page. */
         ConsentApp: {
@@ -3146,6 +3176,11 @@ export interface components {
             name: string;
             /** @description The app's privacy policy: link it. */
             privacy_url: string;
+            /**
+             * @description A private app (its manifest uploaded to this store): approving answers with its
+             *     credentials instead of a redirect.
+             */
+            private: boolean;
             publisher?: string | null;
             /** @description The app's own version. */
             version: string;
@@ -3165,7 +3200,7 @@ export interface components {
              *     apart, so staff see exactly which personal data the app will see.
              */
             personal_data: components["schemas"]["PersonalDataScope"][];
-            /** @description Where the browser goes after the answer. */
+            /** @description Where the browser goes after the answer; empty for a private app. */
             redirect_uri: string;
             /** @description Every scope asked for, in `Scope` order (personal-data ones included). */
             scopes: components["schemas"]["Scope"][];
@@ -4533,6 +4568,58 @@ export interface components {
             max: components["schemas"]["Money"];
             min: components["schemas"]["Money"];
         };
+        /**
+         * @description What a private app's integration needs to act, shown once (design note 0029, "As
+         *     built: the admin's app UI and private apps").
+         */
+        PrivateAppCredentials: {
+            /** @description `hypha_at_…`: send as `Authorization: Bearer`. An hour. */
+            access_token: string;
+            /** @description `app_<name>`. */
+            app: string;
+            /**
+             * @description `hypha_as_…`: verifies Hypha's webhook and extension-point signatures. Only when
+             *     the app is new (or installed again): an update keeps the secret it has.
+             */
+            app_secret?: string | null;
+            /**
+             * Format: int64
+             * @description Seconds the access token works.
+             */
+            expires_in: number;
+            /**
+             * @description `hypha_rt_…`: exchange at `token_endpoint` (`grant_type=refresh_token`) for a new
+             *     pair before it lapses in 30 days; each is used once.
+             */
+            refresh_token: string;
+            /** @description The granted scopes. */
+            scopes: components["schemas"]["Scope"][];
+            /** @description Where to refresh: this API's `/oauth/token`. */
+            token_endpoint: string;
+        };
+        /**
+         * @description `POST /admin/apps/private`'s body: a private app's manifest, as the JSON its
+         *     `hypha-app.json` would hold.
+         */
+        PrivateAppRequest: {
+            /**
+             * @description The manifest (design note 0029, §4). Checked like a served one, except that
+             *     `redirect_uris` may be empty.
+             */
+            manifest: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description A private app waiting for approval. */
+        PrivateAppResponse: {
+            /**
+             * @description The admin's consent page for it (`{server.admin_url}/apps/consent?request=<id>`),
+             *     `null` without `server.admin_url`.
+             */
+            consent_url?: string | null;
+            /** @description The authorization request, as `GET /admin/oauth/requests/{id}` shows it. */
+            request: components["schemas"]["ConsentRequestResponse"];
+        };
         ProductCategoriesRequest: {
             /** @description Every category the product should be in; it leaves the others. */
             categories: components["schemas"]["CategoryId"][];
@@ -4756,7 +4843,9 @@ export interface components {
              * @description The form's values when the action has an `input_schema`: an object, passed to
              *     the app as is (the app checks it).
              */
-            input?: Record<string, never> | null;
+            input?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** @description A template's sources (all of them: this replaces the stored ones). */
         SaveNotificationTemplateRequest: {
@@ -6235,6 +6324,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AppSecretResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.oauth.create_private": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrivateAppRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivateAppResponse"];
                 };
             };
             /** @description A body that isn't JSON (`malformed_json`). */

@@ -5,7 +5,9 @@ import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { AppElements } from "@/components/app-element";
 import { countryOf, loadProduct } from "@/lib/api";
+import { elementsFor } from "@/lib/app-elements";
 import { link } from "@/lib/site";
 
 import { ProductForm } from "./product-form";
@@ -42,9 +44,12 @@ export default async function ProductPage({ params }: Props) {
   const { country: folder, handle } = await params;
   // Both at once: the folder is the country's code (the proxy lets only sold-to
   // countries' folders through), and an unknown one 404s either way.
-  const [country, product] = await Promise.all([
+  const [country, product, appBlocks] = await Promise.all([
     countryOf(folder),
     load(handle, folder.toUpperCase()),
+    // What installed apps show on a product (design note 0029, §7): elements, loaded in
+    // the browser, so the page stays static.
+    elementsFor("product.block"),
   ]);
   const code = country.country;
 
@@ -68,6 +73,7 @@ export default async function ProductPage({ params }: Props) {
       ) : (
         <ProductForm product={product} digits={country.minor_units} />
       )}
+      <AppElements elements={appBlocks} props={{ productId: product.id }} />
     </VStack>
   );
 }

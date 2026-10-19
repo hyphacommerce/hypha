@@ -1170,7 +1170,10 @@ impl From<hypha_oauth::CommandError> for ApiError {
             E::InvalidToken => return hypha_auth::CommandError::InvalidToken.into(),
             // Requests and apps only arrive in URLs.
             E::AppNotFound(_) | E::RequestNotFound(_) => StatusCode::NOT_FOUND,
-            E::RequestExpired(_) | E::RequestDecided(_) => StatusCode::CONFLICT,
+            E::RequestExpired(_)
+            | E::RequestDecided(_)
+            | E::PrivateApp(_)
+            | E::InstalledFromUrl(_) => StatusCode::CONFLICT,
             E::Seal(_) | E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),

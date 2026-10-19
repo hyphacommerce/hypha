@@ -14,6 +14,9 @@ import { revalidateTag, unstable_cache, updateTag } from "next/cache";
 /** Seconds a read stays fresh, by path: live lists briefly, never what must be current. */
 function lifetime(path: string): number | null {
   if (/\/(status|me)$/.test(path) || path.includes("/auth/")) return null;
+  // An app's block is its answer now (design note 0029, §6.2: nothing cached), and a
+  // consent request's state must be current.
+  if (/^\/admin\/(app-extensions\/blocks|oauth\/requests)\//.test(path)) return null;
   if (/^\/admin\/(orders|fulfillments|apps\/[^/]+\/deliveries)/.test(path)) return 5;
   if (/^\/admin\/(currencies|countries)$/.test(path)) return 3600;
   return 30;

@@ -17,7 +17,18 @@ import { api, describe, loadCountries, shopperApi } from "@/lib/api";
 import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
-import { cartId, forgetCart, link, mode, rememberCart, rememberOrder } from "@/lib/site";
+import { paymentElementModule } from "@/lib/app-elements";
+import {
+  cartId,
+  forgetCart,
+  forgetPaymentStart,
+  link,
+  mode,
+  orderTokenCookie,
+  rememberCart,
+  rememberOrder,
+  rememberPaymentStart,
+} from "@/lib/site";
 
 /** What a refused action tells its form. */
 export type ActionResult = { error: string } | undefined;
@@ -226,13 +237,56 @@ export async function placeOrder(input: {
   await forgetCart(input.country);
   // A provider that pays on its own page sends the shopper there (design note 0027, §3);
   // instructions (cash on delivery, bank transfer) are on the confirmation, read from
-  // the order's payment. A payment app's widget (`client_widget`) needs the app's
-  // storefront element (design note 0029, §7), which this shop doesn't load yet.
+  // the order's payment. A payment app's widget (`client_widget`, design note 0029, §7)
+  // and a start that failed (`payment_error`: the order stands, the payment can start
+  // again) are finished on the confirmation page, which mounts the app's element.
   const next = data.next_action;
   // The URL is the API's answer (the provider's page), not the shopper's input.
   // react-doctor-disable-next-line react-doctor/clickjacking-redirect-risk
   if (next?.type === "redirect" && /^https?:\/\//.test(next.url)) redirect(next.url);
+  if (next?.type === "client_widget" || data.payment_error) {
+    await rememberPaymentStart(data.id, {
+      next_action: next ?? null,
+      error: data.payment_error ? describe(data.payment_error) : null,
+    });
+  }
   redirect(link(input.country, `/order/${data.id}/confirmed`));
+}
+
+/** What starting (or restarting) an order's payment answered, for the payment step. */
+export type PaymentStartResult = {
+  nextAction: StorefrontSchemas["NextActionResponse"] | null;
+  /** The shopper's message when it couldn't start. */
+  error: string | null;
+  /** The app element's module, for a `client_widget` (from the installed apps). */
+  module: string | null;
+};
+
+/**
+ * Starts an order's payment again (`POST /storefront/orders/{id}/payment`, design note
+ * 0027 §4): after checkout's start failed, the widget reported an error, or the page
+ * was opened without the start checkout answered. The order's access token comes from
+ * this buyer's cookie.
+ */
+export async function startPayment(input: { order: string }): Promise<PaymentStartResult> {
+  const token = (await cookies()).get(orderTokenCookie(input.order))?.value;
+  if (!token) return { nextAction: null, error: "Open this order from its email.", module: null };
+  const { data, error } = await api().POST("/storefront/orders/{id}/payment", {
+    params: { path: { id: input.order }, query: { token } },
+    body: {},
+  });
+  if (error) return { nextAction: null, error: describe(error), module: null };
+  const next = data.next_action ?? null;
+  return {
+    nextAction: next,
+    error: data.payment_error ? describe(data.payment_error) : null,
+    module: next?.type === "client_widget" ? await paymentElementModule(next.element) : null,
+  };
+}
+
+/** The widget said the shopper paid: the page no longer offers to start it. */
+export async function paymentConfirmed(input: { order: string }): Promise<void> {
+  await forgetPaymentStart(input.order);
 }
 
 /**

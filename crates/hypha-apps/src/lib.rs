@@ -45,5 +45,6 @@ pub use fetch::{FetchError, ManifestFetcher, fetch_manifest};
 pub use hypha_core::{AppKey, AppKeyError};
 pub use manifest::{
     AppManifest, MAX_MANIFEST_BYTES, ManifestDocument, ManifestError, ManifestProblem,
+    ManifestSource, PRIVATE_CLIENT_PREFIX, is_private_client, private_client_id,
 };
 pub use repo::{AppRepo, HasApps, StageApps, keys};

@@ -205,6 +205,12 @@ importers:
       '@heroicons/react':
         specifier: 2.2.0
         version: 2.2.0(react@19.3.1)
+      '@hypha/app-blocks':
+        specifier: workspace:*
+        version: link:../../packages/app-blocks
+      '@hypha/app-bridge-host':
+        specifier: workspace:*
+        version: link:../../packages/app-bridge-host
       '@hypha/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
@@ -329,6 +335,9 @@ importers:
       '@hypha/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@hypha/storefront-elements':
+        specifier: workspace:*
+        version: link:../../packages/storefront-elements
       '@stylexjs/stylex':
         specifier: 0.19.1
         version: 0.19.1

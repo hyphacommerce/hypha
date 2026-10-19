@@ -569,7 +569,7 @@ pub struct RunActionRequest {
     /// The form's values when the action has an `input_schema`: an object, passed to
     /// the app as is (the app checks it).
     #[serde(default)]
-    #[schema(required = false, value_type = Option<Object>)]
+    #[schema(required = false, value_type = Option<std::collections::HashMap<String, serde_json::Value>>)]
     input: Option<serde_json::Value>,
 }
 

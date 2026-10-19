@@ -2,7 +2,7 @@
 //! `/oauth/authorize`, waiting ten minutes for a staff member's answer on the consent
 //! page. Kept after the answer, as the app's request history.
 
-use hypha_apps::{AppManifest, normalize};
+use hypha_apps::{AppManifest, ManifestSource, is_private_client, normalize};
 use hypha_core::{Actor, AppKey, OAuthRequestId, Scope, Timestamp, Version, Versioned};
 
 use crate::error::CommandError;
@@ -135,6 +135,11 @@ impl AuthorizationRequest {
     pub fn client_id(&self) -> &str {
         &self.client_id
     }
+    /// Whether it's a private app's (its manifest uploaded): approving it answers with
+    /// the app's tokens rather than a redirect.
+    pub fn is_private(&self) -> bool {
+        is_private_client(&self.client_id)
+    }
     pub fn manifest(&self) -> &AppManifest {
         &self.manifest
     }
@@ -213,7 +218,9 @@ impl AuthorizationRequest {
 
     /// From storage, with the manifest's rules checked again.
     pub fn restore(s: RequestSnapshot) -> Result<Self, String> {
-        let manifest = AppManifest::from_value(s.manifest).map_err(|e| e.to_string())?;
+        let manifest =
+            AppManifest::from_value_of(s.manifest, ManifestSource::of_client(&s.client_id))
+                .map_err(|e| e.to_string())?;
         if manifest.key().as_str() != s.app {
             return Err(format!(
                 "request {} names another app than its manifest",
