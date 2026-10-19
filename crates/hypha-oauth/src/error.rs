@@ -42,6 +42,10 @@ pub enum CommandError {
     /// would be different apps under one key.
     #[error("app {0} is installed from its manifest URL; an upload can't replace it")]
     InstalledFromUrl(AppKey),
+    /// Approving a public app's request whose manifest URL (client ID) isn't the one
+    /// the app under that key is installed from: another manifest claiming the key.
+    #[error("app {0} is installed from another manifest URL")]
+    InstalledFromOtherUrl(AppKey),
 }
 
 impl ErrorCode for CommandError {
@@ -60,6 +64,7 @@ impl ErrorCode for CommandError {
             CommandError::InvalidToken => "invalid_token",
             CommandError::PrivateApp(_) => "app_is_private",
             CommandError::InstalledFromUrl(_) => "app_installed_from_url",
+            CommandError::InstalledFromOtherUrl(_) => "app_installed_from_other_url",
         }
     }
 }

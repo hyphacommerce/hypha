@@ -1173,7 +1173,8 @@ impl From<hypha_oauth::CommandError> for ApiError {
             E::RequestExpired(_)
             | E::RequestDecided(_)
             | E::PrivateApp(_)
-            | E::InstalledFromUrl(_) => StatusCode::CONFLICT,
+            | E::InstalledFromUrl(_)
+            | E::InstalledFromOtherUrl(_) => StatusCode::CONFLICT,
             E::Seal(_) | E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),

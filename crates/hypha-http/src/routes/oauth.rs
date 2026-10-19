@@ -683,7 +683,9 @@ pub async fn fetch_request<S: Storage>(
 /// Approves a request: installs the app (or replaces its grant) with the scopes asked
 /// for. The staff member needs `apps:write` and every scope requested
 /// (`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten
-/// minutes, `oauth_request_decided` once answered. A private app's approval answers
+/// minutes, `oauth_request_decided` once answered; `app_installed_from_other_url` (or,
+/// for an upload, `app_installed_from_url`) when the key is an app installed from
+/// another manifest URL since the request was made. A private app's approval answers
 /// with its `credentials` (and no `redirect_to`), shown this once.
 #[utoipa::path(
     post,

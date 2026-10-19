@@ -70,7 +70,7 @@ pub enum Authorized {
 
 /// Checks an authorization request against the app's manifest (fetched from
 /// `client_id`) and stores it for staff's consent; an app asking for no scope beyond
-/// its grant gets a code at once (fewer scopes apply at once, §4.1).
+/// its grant gets a code at once for the scopes it asked for, its grant untouched.
 pub async fn authorize<S: OAuthPorts>(
     ports: &S,
     fetcher: &impl ManifestFetcher,
@@ -185,33 +185,21 @@ pub async fn authorize<S: OAuthPorts>(
         expires_at: now.plus(REQUEST_LIFETIME),
     });
 
-    // Already granted at least this much: no consent needed.
-    if let (Some(mut app), Some(previous)) = (app, previous)
+    // Already granted at least this much: no consent needed. The code (and so the
+    // tokens) carries the scopes asked for, and the app is left exactly as it is: this
+    // route takes no credentials, so it must never change a grant or a manifest (a
+    // stranger could otherwise shrink an app's grant, or apply its manifest, by sending
+    // a browser here). Narrowing a grant is staff's `PATCH /admin/apps/{key}/grant`;
+    // applying a manifest is `refresh_manifest`.
+    if let (Some(app), Some(previous)) = (app, previous)
         && scopes.iter().all(|s| previous.contains(s))
     {
-        let grant = app.grant().cloned();
-        if let Some(grant) = grant
-            && grant.scopes() != scopes.as_slice()
-        {
-            app.set_grant(Grant::new(
-                &scopes,
-                grant.approved_by(),
-                grant.approved_at(),
-            ));
-        }
-        app.apply_manifest(InstalledManifest {
-            url: client_id,
-            manifest,
-            fetched_at: now,
-        })
-        .map_err(|e| refuse("server_error", e.to_string()))?;
         // Answered by the grant staff gave before: the app is its own approver here.
         request
             .decide(true, Actor::App(app.id()), now)
             .map_err(|e| refuse("server_error", e.to_string()))?;
         let (location, mut code) = new_code(&request, &challenge, false, env);
         let mut batch = ports.batch();
-        batch.update_app(&mut app);
         batch.insert_oauth_request(&mut request);
         batch.insert_oauth_code(&mut code);
         ports.commit(batch).await?;
@@ -362,6 +350,20 @@ pub async fn approve<S: OAuthPorts>(
     };
     let grant = Grant::new(request.scopes(), ctx.actor(), now);
     let app = ports.apps().get(request.app()).await?;
+    // The key is an app installed (or uninstalled, keeping its manifest) from another
+    // client ID since this was asked: two pending requests for one key from different
+    // manifests must not swap the installed one (`authorize` refuses such a request
+    // when the app is installed first; this is the other order).
+    if let Some(existing) = app.as_ref().and_then(|a| a.manifest())
+        && existing.url != request.client_id()
+    {
+        let key = request.app().clone();
+        return Err(if request.is_private() {
+            CommandError::InstalledFromUrl(key)
+        } else {
+            CommandError::InstalledFromOtherUrl(key)
+        });
+    }
     if request.is_private() {
         let key = request.app().clone();
         return approve_private(ports, env, request, app, installed, grant)
@@ -444,10 +446,6 @@ async fn approve_private<S: OAuthPorts>(
             (app, Some(secret))
         }
         Some(mut app) => {
-            // Installed from a served manifest since this was asked: not this upload's.
-            if app.manifest().is_some_and(|m| m.url != request.client_id()) {
-                return Err(CommandError::InstalledFromUrl(app.key().clone()));
-            }
             app.apply_manifest(installed)?;
             app.set_grant(grant);
             batch.update_app(&mut app);

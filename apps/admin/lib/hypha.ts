@@ -359,6 +359,8 @@ export function describe(error: ApiError): string {
       return "The app's manifest couldn't be read.";
     case "app_installed_from_url":
       return "An app with this key is installed from its own site; a private app needs another key.";
+    case "app_installed_from_other_url":
+      return "An app with this key is installed from another manifest URL, so this request can't replace it.";
     case "app_is_private":
       return "A private app changes by uploading its manifest again.";
     case "payment_refused": {

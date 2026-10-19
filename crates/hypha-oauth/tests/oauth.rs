@@ -371,7 +371,7 @@ fn a_request_waits_ten_minutes_for_one_answer() {
 }
 
 #[test]
-fn more_scopes_need_consent_and_fewer_apply_at_once() {
+fn more_scopes_need_consent_and_fewer_get_a_code_without_touching_the_grant() {
     let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
     let first = pending(&ports, &env, Some("orders:read"), &fetcher(ALL));
     let location = redirect(block_on(approve(&owner(), &ports, &env, first)));
@@ -406,7 +406,9 @@ fn more_scopes_need_consent_and_fewer_apply_at_once() {
     assert_eq!(tokens.app_secret, None, "only the first install shows it");
     assert_eq!(granted(&ports).len(), 3);
 
-    // Fewer: straight back to the app, and the grant narrows.
+    // Fewer: straight back to the app with a code for those scopes; the grant stays
+    // (this route takes no credentials: anyone could send a browser here).
+    let before = block_on(ports.apps.get(&key)).unwrap().unwrap();
     let location = match block_on(authorize(
         &ports,
         &fetcher(ALL),
@@ -418,18 +420,81 @@ fn more_scopes_need_consent_and_fewer_apply_at_once() {
         Authorized::Redirect(location) => location,
         other => panic!("{other:?}"),
     };
-    assert!(param(&location, "code").is_some());
-    assert_eq!(granted(&ports), vec![Scope::OrdersRead]);
+    let code = param(&location, "code").unwrap();
+    assert_eq!(granted(&ports).len(), 3, "the grant is untouched");
+    assert_eq!(
+        block_on(ports.apps.get(&key)).unwrap().unwrap(),
+        before,
+        "the app isn't written at all"
+    );
+    let tokens = block_on(exchange_code(&ports, &env, exchange(&code))).unwrap();
+    assert_eq!(
+        tokens.scopes,
+        vec![Scope::OrdersRead],
+        "the tokens have the subset"
+    );
+    let ctx = block_on(authenticate_access_token(
+        &ports,
+        &env,
+        tokens.access_token.expose(),
+    ))
+    .unwrap();
+    assert!(ctx.has_scope(Scope::OrdersRead));
+    assert!(!ctx.has_scope(Scope::CustomersRead));
     let types: Vec<String> = ports
         .outbox
         .events()
         .into_iter()
         .map(|e| e.event_type)
         .collect();
+    assert_eq!(types, vec!["app.installed", "app.grant_changed"]);
+}
+
+#[test]
+fn two_pending_requests_for_one_key_from_different_manifests_cant_swap_the_installed_one() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    const OTHER: &str = "https://impostor.example/hypha-app.json";
+    let mut other: serde_json::Value = serde_json::from_slice(&manifest(ALL)).unwrap();
+    other["app_url"] = "https://impostor.example".into();
+    let fetch = Manifests(HashMap::from([
+        (CLIENT.to_string(), manifest(ALL)),
+        (OTHER.to_string(), other.to_string().into_bytes()),
+    ]));
+    // Both asked while nothing is installed under the key.
+    let ours = pending(&ports, &env, None, &fetch);
+    let theirs = match block_on(authorize(
+        &ports,
+        &fetch,
+        &env,
+        AuthorizeInput {
+            client_id: Some(OTHER.to_string()),
+            redirect_uri: Some("https://impostor.example/callback".to_string()),
+            ..input(None)
+        },
+    ))
+    .unwrap()
+    {
+        Authorized::Consent(request) => request.id(),
+        other => panic!("{other:?}"),
+    };
+    redirect(block_on(approve(&owner(), &ports, &env, ours)));
+    let key = AppKey::new("app_shop").unwrap();
     assert_eq!(
-        types,
-        vec!["app.installed", "app.grant_changed", "app.grant_changed"]
+        block_on(approve(&owner(), &ports, &env, theirs)),
+        Err(CommandError::InstalledFromOtherUrl(key.clone()))
     );
+    let app = block_on(ports.apps.get(&key)).unwrap().unwrap();
+    assert_eq!(app.manifest().unwrap().url, CLIENT, "still ours");
+
+    // Uninstalled, the key keeps its manifest URL: the other still can't take it.
+    block_on(uninstall(&owner(), &ports, &env, "app_shop")).unwrap();
+    assert_eq!(
+        block_on(approve(&owner(), &ports, &env, theirs)),
+        Err(CommandError::InstalledFromOtherUrl(key.clone()))
+    );
+    let app = block_on(ports.apps.get(&key)).unwrap().unwrap();
+    assert_eq!(app.manifest().unwrap().url, CLIENT);
+    assert!(!app.is_installed(), "not installed again by the impostor");
 }
 
 #[test]
