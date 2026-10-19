@@ -5,8 +5,9 @@
 use core::time::Duration;
 
 use hypha_apps::{
-    App, AppManifest, AppRepo, Grant, InstalledManifest, ManifestFetcher, StageApps,
-    fetch_manifest, new_secret, normalize, open_secret,
+    App, AppManifest, AppRepo, Grant, InstalledManifest, ManifestFetcher, ManifestSource,
+    StageApps, fetch_manifest, is_private_client, new_secret, normalize, open_secret,
+    private_client_id,
 };
 use hypha_auth::{NewToken, TokenHash, TokenKind};
 use hypha_core::{
@@ -309,17 +310,40 @@ pub fn scope_diff(current: &[Scope], requested: &[Scope]) -> ScopeDiff {
     }
 }
 
+/// What approving a request gives the consent page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Approval {
+    /// Send the browser here: the app's redirect URI with a code (for a request a
+    /// manifest refresh started, the app's `app_url`, without one).
+    Redirect(String),
+    /// A private app (its manifest uploaded) has no redirect to take a code: its tokens
+    /// come back here, to show staff once, with its signing secret when the app is new.
+    Credentials {
+        app: AppKey,
+        tokens: Box<IssuedTokens>,
+    },
+}
+
+impl Approval {
+    /// Where to send the browser, unless it's a private app's credentials.
+    pub fn redirect_to(&self) -> Option<&str> {
+        match self {
+            Approval::Redirect(location) => Some(location),
+            Approval::Credentials { .. } => None,
+        }
+    }
+}
+
 /// Approves a request: installs the app (a new one gets its sealed secret, handed to
-/// it once with its first tokens) or replaces its grant, and returns where to send the
-/// browser: the app's redirect URI with a code (for a request a manifest refresh
-/// started, the app's `app_url`, without one). The staff member needs `apps:write` and
-/// every scope requested.
+/// it once with its first tokens) or replaces its grant. A public app's answer is where
+/// to send the browser; a private app's is its tokens (`Approval`). The staff member
+/// needs `apps:write` and every scope requested.
 pub async fn approve<S: OAuthPorts>(
     ctx: &Ctx,
     ports: &S,
     env: &impl OAuthEnv,
     id: OAuthRequestId,
-) -> Result<String, CommandError> {
+) -> Result<Approval, CommandError> {
     ctx.require(Scope::AppsWrite)?;
     let mut request = ports
         .oauth_requests()
@@ -337,8 +361,17 @@ pub async fn approve<S: OAuthPorts>(
         fetched_at: request.created_at(),
     };
     let grant = Grant::new(request.scopes(), ctx.actor(), now);
-    let mut batch = ports.batch();
     let app = ports.apps().get(request.app()).await?;
+    if request.is_private() {
+        let key = request.app().clone();
+        return approve_private(ports, env, request, app, installed, grant)
+            .await
+            .map(|tokens| Approval::Credentials {
+                app: key,
+                tokens: Box::new(tokens),
+            });
+    }
+    let mut batch = ports.batch();
     // Started by a manifest refresh (`refresh_manifest`): the app has no PKCE verifier
     // waiting, so it gets no code. The grant changes now; the app learns it from
     // `app.grant_changed` and asks `/oauth/authorize` for tokens with the new scopes,
@@ -352,7 +385,9 @@ pub async fn approve<S: OAuthPorts>(
         batch.update_app(&mut app);
         batch.update_oauth_request(&mut request);
         ports.commit(batch).await?;
-        return Ok(request.manifest().app_url().as_str().to_string());
+        return Ok(Approval::Redirect(
+            request.manifest().app_url().as_str().to_string(),
+        ));
     };
     let first_install = match app {
         None => {
@@ -378,17 +413,114 @@ pub async fn approve<S: OAuthPorts>(
     batch.update_oauth_request(&mut request);
     batch.insert_oauth_code(&mut code);
     ports.commit(batch).await?;
-    Ok(location)
+    Ok(Approval::Redirect(location))
+}
+
+/// Approving a private app's request: installs it (new, again after an uninstall, or a
+/// hand-made app taking its manifest) or replaces its grant, and issues a token pair at
+/// once, since there is no redirect to send a code to. A newly sealed secret comes
+/// back with the tokens, as a public app's first code exchange gives it; an app that
+/// keeps its secret (a hand-made one, or an update) gets none.
+async fn approve_private<S: OAuthPorts>(
+    ports: &S,
+    env: &impl OAuthEnv,
+    mut request: AuthorizationRequest,
+    app: Option<App>,
+    installed: InstalledManifest,
+    grant: Grant,
+) -> Result<IssuedTokens, CommandError> {
+    let mut batch = ports.batch();
+    let (app, app_secret) = match app {
+        None => {
+            let (secret, sealed) = new_secret(request.app(), env, env);
+            let mut app = App::install(AppId::from_uuid(env.new_uuid()), sealed, installed, grant)?;
+            batch.insert_app(&mut app);
+            (app, Some(secret))
+        }
+        Some(mut app) if app.uninstalled_at().is_some() => {
+            let (secret, sealed) = new_secret(request.app(), env, env);
+            app.reinstall(sealed, installed, grant)?;
+            batch.update_app(&mut app);
+            (app, Some(secret))
+        }
+        Some(mut app) => {
+            // Installed from a served manifest since this was asked: not this upload's.
+            if app.manifest().is_some_and(|m| m.url != request.client_id()) {
+                return Err(CommandError::InstalledFromUrl(app.key().clone()));
+            }
+            app.apply_manifest(installed)?;
+            app.set_grant(grant);
+            batch.update_app(&mut app);
+            (app, None)
+        }
+    };
+    let (access, refresh, mut token) = new_pair(env.new_uuid(), &app, request.scopes(), env);
+    batch.update_oauth_request(&mut request);
+    batch.insert_oauth_token(&mut token);
+    ports.commit(batch).await?;
+    Ok(IssuedTokens {
+        access_token: access,
+        refresh_token: refresh,
+        expires_in: ACCESS_TOKEN_LIFETIME.as_secs(),
+        scopes: request.scopes().to_vec(),
+        app_secret,
+    })
+}
+
+/// A private app's manifest, uploaded by staff (design note 0029, §4.1 "Private
+/// apps"): checked like a served one except that it may list no `redirect_uris`, and
+/// stored as a pending authorization request under the client ID
+/// `urn:hypha:private:<key>` for the consent page. Approving it installs the app and
+/// answers with its tokens (`Approval::Credentials`). A hand-made app (0016) with the
+/// same key becomes this private app on approval; one installed from a served manifest
+/// can't be replaced by an upload (`app_installed_from_url`).
+pub async fn request_private_app<S: OAuthPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    env: &impl OAuthEnv,
+    manifest: &[u8],
+) -> Result<AuthorizationRequest, CommandError> {
+    ctx.require(Scope::AppsWrite)?;
+    let manifest = AppManifest::parse_from(manifest, ManifestSource::Uploaded)
+        .map_err(hypha_apps::AppError::Manifest)?;
+    let client_id = private_client_id(manifest.key());
+    let app = ports.apps().get(manifest.key()).await?;
+    if let Some(installed) = app.as_ref().and_then(|a| a.manifest())
+        && installed.url != client_id
+    {
+        return Err(CommandError::InstalledFromUrl(manifest.key().clone()));
+    }
+    let previous = app
+        .as_ref()
+        .filter(|a| a.is_installed())
+        .and_then(|a| a.grant())
+        .map(|g| g.scopes().to_vec());
+    let now = env.now();
+    let mut request = AuthorizationRequest::new(NewRequest {
+        id: OAuthRequestId::from_uuid(env.new_uuid()),
+        client_id,
+        scopes: manifest.scopes().to_vec(),
+        manifest,
+        redirect_uri: String::new(),
+        state: None,
+        code_challenge: None,
+        previous_scopes: previous,
+        created_at: now,
+        expires_at: now.plus(REQUEST_LIFETIME),
+    });
+    ports.oauth_requests().insert(&mut request).await?;
+    Ok(request)
 }
 
 /// Denies a request; returns where to send the browser: the app's redirect URI with
-/// `error=access_denied` (a refresh's request: the app's `app_url`). The grant stays.
+/// `error=access_denied` (a refresh's request: the app's `app_url`; a private app's:
+/// nowhere, `None`). The grant stays.
 pub async fn deny<S: HasOAuthRequests>(
     ctx: &Ctx,
     ports: &S,
     clock: &impl Clock,
     id: OAuthRequestId,
-) -> Result<String, CommandError> {
+) -> Result<Option<String>, CommandError> {
     ctx.require(Scope::AppsWrite)?;
     let mut request = ports
         .oauth_requests()
@@ -397,9 +529,13 @@ pub async fn deny<S: HasOAuthRequests>(
         .ok_or(CommandError::RequestNotFound(id))?;
     request.decide(false, ctx.actor(), clock.now())?;
     ports.oauth_requests().update(&mut request).await?;
+    // A private app's: nobody waits anywhere; the admin stays where it is.
+    if request.is_private() {
+        return Ok(None);
+    }
     // A refresh's request: no app is waiting at its redirect URI.
     if request.code_challenge().is_none() {
-        return Ok(request.manifest().app_url().as_str().to_string());
+        return Ok(Some(request.manifest().app_url().as_str().to_string()));
     }
     let mut params = vec![
         ("error", "access_denied".to_string()),
@@ -411,7 +547,7 @@ pub async fn deny<S: HasOAuthRequests>(
     if let Some(state) = request.state() {
         params.push(("state", state.to_string()));
     }
-    Ok(with_params(request.redirect_uri(), &params))
+    Ok(Some(with_params(request.redirect_uri(), &params)))
 }
 
 /// An app's requests, newest first: its grant's history.
@@ -776,6 +912,10 @@ pub async fn refresh_manifest<S: OAuthPorts>(
     let (Some(installed), true) = (app.manifest().cloned(), app.is_installed()) else {
         return Err(hypha_apps::AppError::NotInstalled.into());
     };
+    // Nothing to fetch: a private app changes by uploading its manifest again.
+    if is_private_client(&installed.url) {
+        return Err(CommandError::PrivateApp(app.key().clone()));
+    }
     let manifest = fetch_manifest(fetcher, &installed.url).await?;
     let grant = app
         .grant()

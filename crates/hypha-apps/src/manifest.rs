@@ -22,6 +22,42 @@ pub const SCHEMA_URL: &str = "https://hypha.dev/schemas/app-manifest/1.json";
 /// The most a manifest may weigh: plenty for every registration an app has.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 
+/// The client ID of a private app (design note 0029, §4.1: a store's own integration,
+/// its manifest uploaded rather than served): `urn:hypha:private:<key>`. Not a URL, so
+/// neither `/oauth/authorize` nor a refresh can fetch it; such an app gets its tokens
+/// when staff approve it, not through a redirect.
+pub const PRIVATE_CLIENT_PREFIX: &str = "urn:hypha:private:";
+
+/// The client ID a private app with `key` is installed under.
+pub fn private_client_id(key: &AppKey) -> String {
+    format!("{PRIVATE_CLIENT_PREFIX}{key}")
+}
+
+/// Whether `client_id` (a manifest URL, or a private app's URN) names a private app.
+pub fn is_private_client(client_id: &str) -> bool {
+    client_id.starts_with(PRIVATE_CLIENT_PREFIX)
+}
+
+/// Where a manifest came from, which decides one rule: a served manifest (a public app,
+/// installed through OAuth's redirect) lists 1 to 10 `redirect_uris`; an uploaded one
+/// (a private app, which gets its tokens on approval) may list none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManifestSource {
+    Served,
+    Uploaded,
+}
+
+impl ManifestSource {
+    /// The source of a manifest installed under `client_id`.
+    pub fn of_client(client_id: &str) -> Self {
+        if is_private_client(client_id) {
+            ManifestSource::Uploaded
+        } else {
+            ManifestSource::Served
+        }
+    }
+}
+
 /// An app manifest as written (`hypha-app.json`). URLs other than `app_url` may be
 /// relative: they resolve against `app_url`. Fields not listed here are refused, so a
 /// typo is caught rather than ignored.
@@ -50,7 +86,8 @@ pub struct ManifestDocument {
     /// relative URL below resolves against it.
     pub app_url: String,
     /// Where Hypha may send the browser back after consent: `/oauth/authorize`'s
-    /// `redirect_uri` must be one of these exactly. 1 to 10.
+    /// `redirect_uri` must be one of these exactly. 1 to 10; none for a private app,
+    /// whose manifest is uploaded and which gets its tokens on approval.
     pub redirect_uris: Vec<String>,
     /// The scopes the app asks for (`orders:read`, `customer_data:email`, …).
     #[serde(default)]
@@ -262,6 +299,12 @@ impl AppManifest {
 
     /// Parses and checks a manifest's bytes (at most `MAX_MANIFEST_BYTES`).
     pub fn parse(bytes: &[u8]) -> Result<Self, ManifestError> {
+        Self::parse_from(bytes, ManifestSource::Served)
+    }
+
+    /// Parses and checks a manifest's bytes from `source` (an upload may list no
+    /// `redirect_uris`).
+    pub fn parse_from(bytes: &[u8], source: ManifestSource) -> Result<Self, ManifestError> {
         if bytes.len() > MAX_MANIFEST_BYTES {
             return Err(ManifestError::one(
                 "",
@@ -270,14 +313,24 @@ impl AppManifest {
         }
         let document: ManifestDocument = serde_json::from_slice(bytes)
             .map_err(|e| ManifestError::one("", format!("is not a manifest: {e}")))?;
-        Self::check(document)
+        Self::check(document, source)
     }
 
-    /// From a stored copy (`AppManifest::to_value`), with every rule checked again.
+    /// From a stored copy (`AppManifest::to_value`) of a served manifest, with every
+    /// rule checked again.
     pub fn from_value(value: serde_json::Value) -> Result<Self, ManifestError> {
+        Self::from_value_of(value, ManifestSource::Served)
+    }
+
+    /// From a stored copy of a manifest that came from `source`, with every rule
+    /// checked again.
+    pub fn from_value_of(
+        value: serde_json::Value,
+        source: ManifestSource,
+    ) -> Result<Self, ManifestError> {
         let document: ManifestDocument = serde_json::from_value(value)
             .map_err(|e| ManifestError::one("", format!("is not a manifest: {e}")))?;
-        Self::check(document)
+        Self::check(document, source)
     }
 
     /// The checked document as JSON (URLs absolute): what storage keeps and the admin
@@ -336,7 +389,10 @@ impl AppManifest {
             .map(|(url, events)| (url, &events[..]))
     }
 
-    fn check(mut document: ManifestDocument) -> Result<Self, ManifestError> {
+    fn check(
+        mut document: ManifestDocument,
+        source: ManifestSource,
+    ) -> Result<Self, ManifestError> {
         let mut c = Checker::default();
 
         let key = AppKey::new(&document.key)
@@ -399,12 +455,16 @@ impl AppManifest {
         resolve(&mut c, "privacy_url", &mut document.privacy_url);
 
         let mut redirect_uris = Vec::new();
-        if document.redirect_uris.is_empty()
+        let fewest = match source {
+            ManifestSource::Served => 1,
+            ManifestSource::Uploaded => 0,
+        };
+        if document.redirect_uris.len() < fewest
             || document.redirect_uris.len() > Self::MAX_REDIRECT_URIS
         {
             c.add(
                 "redirect_uris",
-                format!("lists 1 to {} URLs", Self::MAX_REDIRECT_URIS),
+                format!("lists {fewest} to {} URLs", Self::MAX_REDIRECT_URIS),
             );
         }
         for (n, uri) in document.redirect_uris.iter_mut().enumerate() {
@@ -868,6 +928,37 @@ mod tests {
         for bad in ["stripe", "Stripe-pay", "1x-pay", "x-", "-x", "x_y-z"] {
             assert!(!is_element_tag(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_served_manifest_needs_a_redirect_uri_and_an_uploaded_one_doesnt() {
+        let mut m = stripe();
+        m["redirect_uris"] = json!([]);
+        assert_eq!(
+            problems(m.clone()),
+            vec![(
+                "redirect_uris".to_string(),
+                "lists 1 to 10 URLs".to_string()
+            )]
+        );
+        let bytes = serde_json::to_vec(&m).unwrap();
+        let uploaded = AppManifest::parse_from(&bytes, ManifestSource::Uploaded).unwrap();
+        assert!(uploaded.redirect_uris().is_empty());
+        assert_eq!(
+            AppManifest::from_value_of(uploaded.to_value(), ManifestSource::Uploaded),
+            Ok(uploaded.clone())
+        );
+        assert!(AppManifest::from_value(uploaded.to_value()).is_err());
+    }
+
+    #[test]
+    fn private_client_ids_are_urns_of_the_key() {
+        let key = AppKey::new("app_rates").unwrap();
+        let id = private_client_id(&key);
+        assert_eq!(id, "urn:hypha:private:app_rates");
+        assert!(is_private_client(&id));
+        assert!(!is_private_client("https://rates.example/hypha-app.json"));
+        assert_eq!(ManifestSource::of_client(&id), ManifestSource::Uploaded);
     }
 
     /// The published schema (`docs/apps/manifest.schema.json`) is generated from

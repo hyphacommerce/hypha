@@ -307,7 +307,7 @@
       ]
     },
     "redirect_uris": {
-      "description": "Where Hypha may send the browser back after consent: `/oauth/authorize`'s\n`redirect_uri` must be one of these exactly. 1 to 10.",
+      "description": "Where Hypha may send the browser back after consent: `/oauth/authorize`'s\n`redirect_uri` must be one of these exactly. 1 to 10; none for a private app,\nwhose manifest is uploaded and which gets its tokens on approval.",
       "items": {
         "type": "string"
       },

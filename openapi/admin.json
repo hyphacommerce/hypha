@@ -1769,16 +1769,27 @@
         "type": "object"
       },
       "ConsentAnswer": {
-        "description": "Where to send the browser after an answer.",
+        "description": "Where to send the browser after an answer, or a private app's credentials.",
         "properties": {
+          "credentials": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrivateAppCredentials",
+                "description": "A private app's tokens (it has no redirect to take a code), present only in the\nanswer to its approval: show them once, like an API key."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "redirect_to": {
-            "description": "The app's redirect URI with `code` and `state` (approved), or `error=access_denied`\nand `state` (denied). Navigate the browser there.",
-            "type": "string"
+            "description": "The app's redirect URI with `code` and `state` (approved), or `error=access_denied`\nand `state` (denied): navigate the browser there. `null` when a private app was\napproved: show `credentials` instead.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "required": [
-          "redirect_to"
-        ],
         "type": "object"
       },
       "ConsentApp": {
@@ -1814,6 +1825,10 @@
             "description": "The app's privacy policy: link it.",
             "type": "string"
           },
+          "private": {
+            "description": "A private app (its manifest uploaded to this store): approving answers with its\ncredentials instead of a redirect.",
+            "type": "boolean"
+          },
           "publisher": {
             "type": [
               "string",
@@ -1832,7 +1847,8 @@
           "app_url",
           "privacy_url",
           "client_id",
-          "installed"
+          "installed",
+          "private"
         ],
         "type": "object"
       },
@@ -1870,7 +1886,7 @@
             "type": "array"
           },
           "redirect_uri": {
-            "description": "Where the browser goes after the answer.",
+            "description": "Where the browser goes after the answer; empty for a private app.",
             "type": "string"
           },
           "scopes": {
@@ -5790,6 +5806,90 @@
         ],
         "type": "object"
       },
+      "PrivateAppCredentials": {
+        "description": "What a private app's integration needs to act, shown once (design note 0029, \"As\nbuilt: the admin's app UI and private apps\").",
+        "properties": {
+          "access_token": {
+            "description": "`hypha_at_…`: send as `Authorization: Bearer`. An hour.",
+            "type": "string"
+          },
+          "app": {
+            "description": "`app_<name>`.",
+            "type": "string"
+          },
+          "app_secret": {
+            "description": "`hypha_as_…`: verifies Hypha's webhook and extension-point signatures. Only when\nthe app is new (or installed again): an update keeps the secret it has.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_in": {
+            "description": "Seconds the access token works.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "refresh_token": {
+            "description": "`hypha_rt_…`: exchange at `token_endpoint` (`grant_type=refresh_token`) for a new\npair before it lapses in 30 days; each is used once.",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "The granted scopes.",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          },
+          "token_endpoint": {
+            "description": "Where to refresh: this API's `/oauth/token`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "access_token",
+          "expires_in",
+          "refresh_token",
+          "token_endpoint",
+          "scopes"
+        ],
+        "type": "object"
+      },
+      "PrivateAppRequest": {
+        "additionalProperties": false,
+        "description": "`POST /admin/apps/private`'s body: a private app's manifest, as the JSON its\n`hypha-app.json` would hold.",
+        "properties": {
+          "manifest": {
+            "description": "The manifest (design note 0029, §4). Checked like a served one, except that\n`redirect_uris` may be empty.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "manifest"
+        ],
+        "type": "object"
+      },
+      "PrivateAppResponse": {
+        "description": "A private app waiting for approval.",
+        "properties": {
+          "consent_url": {
+            "description": "The admin's consent page for it (`{server.admin_url}/apps/consent?request=<id>`),\n`null` without `server.admin_url`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request": {
+            "$ref": "#/components/schemas/ConsentRequestResponse",
+            "description": "The authorization request, as `GET /admin/oauth/requests/{id}` shows it."
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "type": "object"
+      },
       "ProductCategoriesRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9569,6 +9669,125 @@
         "summary": "Registers an app. Its signing secret is returned here, once.",
         "tags": [
           "apps"
+        ],
+        "x-hypha-scopes": [
+          "apps:write"
+        ]
+      }
+    },
+    "/admin/apps/private": {
+      "post": {
+        "operationId": "admin.oauth.create_private",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrivateAppRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrivateAppResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Uploads a private app's manifest (a store's own integration with no public site,\ndesign note 0029, §4.1): it becomes a pending authorization request for the consent\npage, whose approval installs the app and answers with its tokens. Staff sessions\nonly (an API key can't install apps); `apps:write`. 422 `manifest_invalid` with\n`details.errors`; 409 `app_installed_from_url` when the key is an app installed from\nits manifest URL.",
+        "tags": [
+          "oauth"
         ],
         "x-hypha-scopes": [
           "apps:write"
@@ -21238,7 +21457,7 @@
             "bearer": []
           }
         ],
-        "summary": "Approves a request: installs the app (or replaces its grant) with the scopes asked\nfor. The staff member needs `apps:write` and every scope requested\n(`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten\nminutes, `oauth_request_decided` once answered.",
+        "summary": "Approves a request: installs the app (or replaces its grant) with the scopes asked\nfor. The staff member needs `apps:write` and every scope requested\n(`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten\nminutes, `oauth_request_decided` once answered. A private app's approval answers\nwith its `credentials` (and no `redirect_to`), shown this once.",
         "tags": [
           "oauth"
         ],
@@ -21337,7 +21556,7 @@
             "bearer": []
           }
         ],
-        "summary": "Denies a request; the app is told `access_denied`.",
+        "summary": "Denies a request; the app is told `access_denied` (a private app's answer has no\n`redirect_to`).",
         "tags": [
           "oauth"
         ],

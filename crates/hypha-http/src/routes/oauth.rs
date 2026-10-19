@@ -31,7 +31,7 @@ use hypha_core::{OAuthRequestId, Scope};
 use hypha_oauth::{
     AuthorizationRequest, AuthorizeError, AuthorizeInput, Authorized, CodeExchange, IssuedTokens,
     Refresh, TokenError, approve, authorize, deny, exchange_code, get_request, group_scopes,
-    reasons, refresh, revoke, scope_diff,
+    reasons, refresh, request_private_app, revoke, scope_diff,
 };
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +39,7 @@ use super::rfc3339;
 use crate::{
     client_ip::ClientIp,
     error::ApiError,
-    extract::{Caller, PathId, Query},
+    extract::{Caller, JsonBody, PathId, Query, StaffCaller},
     rate_limit::{Rule, enforce},
     state::{SharedState, Storage},
 };
@@ -463,6 +463,9 @@ pub struct ConsentApp {
     client_id: String,
     /// Whether the app is installed (a grant in force): then this is a change of scopes.
     installed: bool,
+    /// A private app (its manifest uploaded to this store): approving answers with its
+    /// credentials instead of a redirect.
+    private: bool,
 }
 
 /// Scopes of one area (`orders`), for the consent page.
@@ -516,7 +519,7 @@ pub struct ConsentRequestResponse {
     /// apart, so staff see exactly which personal data the app will see.
     personal_data: Vec<PersonalDataScope>,
     changes: ScopeChanges,
-    /// Where the browser goes after the answer.
+    /// Where the browser goes after the answer; empty for a private app.
     redirect_uri: String,
     created_at: String,
     /// The request can be answered until then (RFC 3339).
@@ -559,6 +562,7 @@ impl ConsentRequestResponse {
                 privacy_url: manifest.privacy_url().to_string(),
                 client_id: request.client_id().to_string(),
                 installed,
+                private: request.is_private(),
             },
             scopes: request.scopes().to_vec(),
             groups: groups
@@ -581,12 +585,61 @@ impl ConsentRequestResponse {
     }
 }
 
-/// Where to send the browser after an answer.
+/// Where to send the browser after an answer, or a private app's credentials.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct ConsentAnswer {
     /// The app's redirect URI with `code` and `state` (approved), or `error=access_denied`
-    /// and `state` (denied). Navigate the browser there.
-    redirect_to: String,
+    /// and `state` (denied): navigate the browser there. `null` when a private app was
+    /// approved: show `credentials` instead.
+    redirect_to: Option<String>,
+    /// A private app's tokens (it has no redirect to take a code), present only in the
+    /// answer to its approval: show them once, like an API key.
+    credentials: Option<PrivateAppCredentials>,
+}
+
+/// What a private app's integration needs to act, shown once (design note 0029, "As
+/// built: the admin's app UI and private apps").
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct PrivateAppCredentials {
+    /// `app_<name>`.
+    app: String,
+    /// `hypha_at_…`: send as `Authorization: Bearer`. An hour.
+    access_token: String,
+    /// Seconds the access token works.
+    expires_in: u64,
+    /// `hypha_rt_…`: exchange at `token_endpoint` (`grant_type=refresh_token`) for a new
+    /// pair before it lapses in 30 days; each is used once.
+    refresh_token: String,
+    /// Where to refresh: this API's `/oauth/token`.
+    token_endpoint: String,
+    /// The granted scopes.
+    scopes: Vec<Scope>,
+    /// `hypha_as_…`: verifies Hypha's webhook and extension-point signatures. Only when
+    /// the app is new (or installed again): an update keeps the secret it has.
+    app_secret: Option<String>,
+}
+
+impl ConsentAnswer {
+    fn from_approval(approval: hypha_oauth::Approval, base: &str) -> Self {
+        match approval {
+            hypha_oauth::Approval::Redirect(location) => Self {
+                redirect_to: Some(location),
+                credentials: None,
+            },
+            hypha_oauth::Approval::Credentials { app, tokens } => Self {
+                redirect_to: None,
+                credentials: Some(PrivateAppCredentials {
+                    app: app.to_string(),
+                    access_token: tokens.access_token.expose().to_string(),
+                    expires_in: tokens.expires_in,
+                    refresh_token: tokens.refresh_token.expose().to_string(),
+                    token_endpoint: format!("{base}/oauth/token"),
+                    scopes: tokens.scopes,
+                    app_secret: tokens.app_secret,
+                }),
+            },
+        }
+    }
 }
 
 /// An authorization request for the consent page: the app, the scopes grouped by area,
@@ -617,7 +670,8 @@ pub async fn fetch_request<S: Storage>(
 /// Approves a request: installs the app (or replaces its grant) with the scopes asked
 /// for. The staff member needs `apps:write` and every scope requested
 /// (`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten
-/// minutes, `oauth_request_decided` once answered.
+/// minutes, `oauth_request_decided` once answered. A private app's approval answers
+/// with its `credentials` (and no `redirect_to`), shown this once.
 #[utoipa::path(
     post,
     path = "/admin/oauth/requests/{id}/approve",
@@ -627,15 +681,83 @@ pub async fn fetch_request<S: Storage>(
 )]
 pub async fn approve_request<S: Storage>(
     State(state): State<SharedState<S>>,
+    headers: HeaderMap,
     caller: Caller,
     PathId(id): PathId<OAuthRequestId>,
-) -> Result<Json<ConsentAnswer>, ApiError> {
+) -> Result<Response, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let redirect_to = approve(&ctx, &ports, &state.env, id).await?;
-    Ok(Json(ConsentAnswer { redirect_to }))
+    let approval = approve(&ctx, &ports, &state.env, id).await?;
+    let answer = ConsentAnswer::from_approval(approval, &issuer(&headers));
+    // Credentials are in it: never cached (RFC 6749 §5.1's rule for token answers).
+    Ok(no_store(StatusCode::OK, Json(answer)))
 }
 
-/// Denies a request; the app is told `access_denied`.
+/// `POST /admin/apps/private`'s body: a private app's manifest, as the JSON its
+/// `hypha-app.json` would hold.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PrivateAppRequest {
+    /// The manifest (design note 0029, §4). Checked like a served one, except that
+    /// `redirect_uris` may be empty.
+    #[schema(value_type = Object)]
+    manifest: serde_json::Value,
+}
+
+/// A private app waiting for approval.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct PrivateAppResponse {
+    /// The authorization request, as `GET /admin/oauth/requests/{id}` shows it.
+    request: ConsentRequestResponse,
+    /// The admin's consent page for it (`{server.admin_url}/apps/consent?request=<id>`),
+    /// `null` without `server.admin_url`.
+    consent_url: Option<String>,
+}
+
+/// Uploads a private app's manifest (a store's own integration with no public site,
+/// design note 0029, §4.1): it becomes a pending authorization request for the consent
+/// page, whose approval installs the app and answers with its tokens. Staff sessions
+/// only (an API key can't install apps); `apps:write`. 422 `manifest_invalid` with
+/// `details.errors`; 409 `app_installed_from_url` when the key is an app installed from
+/// its manifest URL.
+#[utoipa::path(
+    post,
+    path = "/admin/apps/private",
+    request_body = PrivateAppRequest,
+    responses((status = 201, description = "Created", body = PrivateAppResponse)),
+    extensions(("x-hypha-scopes" = json!(["apps:write"]))),
+)]
+pub async fn create_private<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: StaffCaller,
+    body: JsonBody<PrivateAppRequest>,
+) -> Result<(StatusCode, Json<PrivateAppResponse>), ApiError> {
+    use hypha_core::Clock;
+    let (ports, staff) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    // The manifest as uploaded, byte for byte the JSON it was (within the size limit).
+    let bytes = serde_json::to_vec(&req.manifest).map_err(ApiError::internal)?;
+    let request = request_private_app(&staff.ctx, &ports, &state.env, &bytes).await?;
+    let app = {
+        use hypha_apps::{AppRepo, HasApps};
+        ports.apps().get(request.app()).await?
+    };
+    let consent_url = state
+        .config
+        .server
+        .admin_url
+        .as_ref()
+        .map(|base| format!("{base}/apps/consent?request={}", request.id()));
+    Ok((
+        StatusCode::CREATED,
+        Json(PrivateAppResponse {
+            request: ConsentRequestResponse::new(&request, app.as_ref(), state.clock.now())?,
+            consent_url,
+        }),
+    ))
+}
+
+/// Denies a request; the app is told `access_denied` (a private app's answer has no
+/// `redirect_to`).
 #[utoipa::path(
     post,
     path = "/admin/oauth/requests/{id}/deny",
@@ -650,7 +772,10 @@ pub async fn deny_request<S: Storage>(
 ) -> Result<Json<ConsentAnswer>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let redirect_to = deny(&ctx, &ports, &state.clock, id).await?;
-    Ok(Json(ConsentAnswer { redirect_to }))
+    Ok(Json(ConsentAnswer {
+        redirect_to,
+        credentials: None,
+    }))
 }
 
 #[cfg(test)]

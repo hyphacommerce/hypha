@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use hypha_apps::{AppError, AppRepo, ManifestFetcher};
 use hypha_core::{Actor, AppKey, AuthError, Clock, Ctx, OAuthRequestId, Scope, UserId};
 use hypha_oauth::{
-    AuthorizeError, AuthorizeInput, Authorized, CodeExchange, CommandError, Refresh, RequestStatus,
-    TokenError, Uninstalled, UnredirectableError, approve, authenticate_access_token, authorize,
-    deny, exchange_code, narrow_grant, pkce, refresh, revoke, uninstall,
+    Approval, AuthorizeError, AuthorizeInput, Authorized, CodeExchange, CommandError, Refresh,
+    RequestStatus, TokenError, Uninstalled, UnredirectableError, approve,
+    authenticate_access_token, authorize, deny, exchange_code, narrow_grant, pkce, refresh,
+    refresh_manifest, request_private_app, revoke, uninstall,
 };
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use pollster::block_on;
@@ -103,7 +104,7 @@ fn exchange(code: &str) -> CodeExchange {
 /// Installs the app with `ALL` and returns the first tokens' answer.
 fn install(ports: &InMemoryPorts, env: &TestEnv) -> hypha_oauth::IssuedTokens {
     let id = pending(ports, env, None, &fetcher(ALL));
-    let location = block_on(approve(&owner(), ports, env, id)).unwrap();
+    let location = redirect(block_on(approve(&owner(), ports, env, id)));
     let code = param(&location, "code").unwrap();
     block_on(exchange_code(ports, env, exchange(&code))).unwrap()
 }
@@ -116,7 +117,7 @@ fn later(env: &TestEnv, secs: i64) {
 fn the_whole_dance_installs_the_app_and_its_tokens_act_as_it() {
     let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
     let id = pending(&ports, &env, None, &fetcher(ALL));
-    let location = block_on(approve(&owner(), &ports, &env, id)).unwrap();
+    let location = redirect(block_on(approve(&owner(), &ports, &env, id)));
     assert!(location.starts_with(REDIRECT), "{location}");
     assert_eq!(param(&location, "state").as_deref(), Some("st4te"));
     let code = param(&location, "code").unwrap();
@@ -175,7 +176,7 @@ fn the_whole_dance_installs_the_app_and_its_tokens_act_as_it() {
 fn a_code_works_once_and_a_second_try_revokes_what_the_first_gave() {
     let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
     let id = pending(&ports, &env, None, &fetcher(ALL));
-    let location = block_on(approve(&owner(), &ports, &env, id)).unwrap();
+    let location = redirect(block_on(approve(&owner(), &ports, &env, id)));
     let code = param(&location, "code").unwrap();
     let first = block_on(exchange_code(&ports, &env, exchange(&code))).unwrap();
     assert_eq!(
@@ -198,7 +199,7 @@ fn a_code_works_once_and_a_second_try_revokes_what_the_first_gave() {
 fn a_code_needs_its_verifier_redirect_and_client_within_a_minute() {
     let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
     let id = pending(&ports, &env, None, &fetcher(ALL));
-    let location = block_on(approve(&owner(), &ports, &env, id)).unwrap();
+    let location = redirect(block_on(approve(&owner(), &ports, &env, id)));
     let code = param(&location, "code").unwrap();
     let grant = |why: &str| Err(TokenError::InvalidGrant(why.to_string()));
 
@@ -344,7 +345,9 @@ fn staff_must_hold_every_scope_they_approve() {
 fn a_request_waits_ten_minutes_for_one_answer() {
     let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
     let id = pending(&ports, &env, None, &fetcher(ALL));
-    let location = block_on(deny(&owner(), &ports, &env.clock, id)).unwrap();
+    let location = block_on(deny(&owner(), &ports, &env.clock, id))
+        .unwrap()
+        .unwrap();
     assert_eq!(param(&location, "error").as_deref(), Some("access_denied"));
     assert_eq!(param(&location, "state").as_deref(), Some("st4te"));
     assert_eq!(
@@ -369,7 +372,7 @@ fn a_request_waits_ten_minutes_for_one_answer() {
 fn more_scopes_need_consent_and_fewer_apply_at_once() {
     let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
     let first = pending(&ports, &env, Some("orders:read"), &fetcher(ALL));
-    let location = block_on(approve(&owner(), &ports, &env, first)).unwrap();
+    let location = redirect(block_on(approve(&owner(), &ports, &env, first)));
     let code = param(&location, "code").unwrap();
     block_on(exchange_code(&ports, &env, exchange(&code))).unwrap();
 
@@ -395,7 +398,7 @@ fn more_scopes_need_consent_and_fewer_apply_at_once() {
         vec![Scope::OrdersRead],
         "the old grant stands"
     );
-    let location = block_on(approve(&owner(), &ports, &env, more.id())).unwrap();
+    let location = redirect(block_on(approve(&owner(), &ports, &env, more.id())));
     let code = param(&location, "code").unwrap();
     let tokens = block_on(exchange_code(&ports, &env, exchange(&code))).unwrap();
     assert_eq!(tokens.app_secret, None, "only the first install shows it");
@@ -570,4 +573,188 @@ fn a_disabled_apps_tokens_stop_working() {
         )),
         Err(CommandError::InvalidToken)
     );
+}
+
+/// Where an approval sends the browser (a public app's).
+fn redirect(approval: Result<Approval, CommandError>) -> String {
+    match approval.unwrap() {
+        Approval::Redirect(location) => location,
+        other => panic!("expected a redirect, got {other:?}"),
+    }
+}
+
+/// A private app's manifest: uploaded, so it lists no redirect URIs.
+fn private_manifest(scopes: &[&str]) -> Vec<u8> {
+    let reasons = if scopes.contains(&"customer_data:address") {
+        serde_json::json!({ "customer_data:address": "quotes by postal code" })
+    } else {
+        serde_json::json!({})
+    };
+    serde_json::json!({
+        "key": "app_rates",
+        "name": "Our rates",
+        "version": "1.0.0",
+        "app_url": "https://rates.internal.example",
+        "redirect_uris": [],
+        "scopes": scopes,
+        "scope_reasons": reasons,
+        "privacy_url": "/privacy"
+    })
+    .to_string()
+    .into_bytes()
+}
+
+fn credentials(approval: Result<Approval, CommandError>) -> hypha_oauth::IssuedTokens {
+    match approval.unwrap() {
+        Approval::Credentials { tokens, .. } => *tokens,
+        other => panic!("expected credentials, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_uploaded_manifest_installs_a_private_app_with_its_tokens_on_approval() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let manifest = private_manifest(&["shipping:read", "customer_data:address"]);
+    let request = block_on(request_private_app(&owner(), &ports, &env, &manifest)).unwrap();
+    assert!(request.is_private());
+    assert_eq!(request.client_id(), "urn:hypha:private:app_rates");
+    assert_eq!(request.redirect_uri(), "");
+    assert_eq!(request.status(), RequestStatus::Pending);
+
+    let tokens = credentials(block_on(approve(&owner(), &ports, &env, request.id())));
+    assert!(
+        tokens
+            .app_secret
+            .as_deref()
+            .is_some_and(|s| s.starts_with("hypha_as_"))
+    );
+    assert_eq!(
+        tokens.scopes,
+        vec![Scope::ShippingRead, Scope::CustomerDataAddress]
+    );
+    let ctx = block_on(authenticate_access_token(
+        &ports,
+        &env.clock,
+        tokens.access_token.expose(),
+    ))
+    .unwrap();
+    assert!(matches!(ctx.actor(), Actor::App(_)));
+    assert!(ctx.has_scope(Scope::CustomerDataAddress));
+    // The refresh token rotates like any app's.
+    let refreshed = block_on(refresh(
+        &ports,
+        &env,
+        Refresh {
+            refresh_token: tokens.refresh_token.expose().to_string(),
+            client_id: Some("urn:hypha:private:app_rates".to_string()),
+            scope: None,
+        },
+    ))
+    .unwrap();
+    assert_eq!(refreshed.app_secret, None);
+    let app = block_on(ports.apps.get(&AppKey::new("app_rates").unwrap()))
+        .unwrap()
+        .unwrap();
+    assert!(app.is_installed());
+    assert_eq!(
+        app.manifest().map(|m| m.url.as_str()),
+        Some("urn:hypha:private:app_rates")
+    );
+}
+
+#[test]
+fn uploading_again_changes_a_private_apps_grant_and_issues_new_tokens_without_the_secret() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let first = block_on(request_private_app(
+        &owner(),
+        &ports,
+        &env,
+        &private_manifest(&["shipping:read"]),
+    ))
+    .unwrap();
+    credentials(block_on(approve(&owner(), &ports, &env, first.id())));
+
+    let more = block_on(request_private_app(
+        &owner(),
+        &ports,
+        &env,
+        &private_manifest(&["shipping:read", "customer_data:address"]),
+    ))
+    .unwrap();
+    assert_eq!(more.previous_scopes(), Some(&[Scope::ShippingRead][..]));
+    let tokens = credentials(block_on(approve(&owner(), &ports, &env, more.id())));
+    assert_eq!(tokens.app_secret, None, "the app keeps its secret");
+    assert_eq!(
+        tokens.scopes,
+        vec![Scope::ShippingRead, Scope::CustomerDataAddress]
+    );
+}
+
+#[test]
+fn a_private_upload_cant_take_a_served_apps_key_nor_be_refreshed() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    install(&ports, &env);
+    let mut taken: serde_json::Value =
+        serde_json::from_slice(&private_manifest(&["orders:read"])).unwrap();
+    taken["key"] = "app_shop".into();
+    assert_eq!(
+        block_on(request_private_app(
+            &owner(),
+            &ports,
+            &env,
+            taken.to_string().as_bytes()
+        )),
+        Err(CommandError::InstalledFromUrl(
+            AppKey::new("app_shop").unwrap()
+        ))
+    );
+
+    let request = block_on(request_private_app(
+        &owner(),
+        &ports,
+        &env,
+        &private_manifest(&["shipping:read"]),
+    ))
+    .unwrap();
+    credentials(block_on(approve(&owner(), &ports, &env, request.id())));
+    assert_eq!(
+        block_on(refresh_manifest(
+            &owner(),
+            &ports,
+            &fetcher(ALL),
+            &env,
+            "app_rates"
+        )),
+        Err(CommandError::PrivateApp(AppKey::new("app_rates").unwrap()))
+    );
+}
+
+#[test]
+fn an_upload_is_checked_like_a_manifest_and_needs_apps_write() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let reader = Ctx::new(owner().actor(), vec![Scope::AppsRead]);
+    assert_eq!(
+        block_on(request_private_app(
+            &reader,
+            &ports,
+            &env,
+            &private_manifest(&[])
+        )),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::AppsWrite
+        )))
+    );
+    // Personal data needs a reason, uploaded or not.
+    let bad = block_on(request_private_app(
+        &owner(),
+        &ports,
+        &env,
+        &private_manifest(&["customer_data:email"]),
+    ));
+    match bad {
+        Err(CommandError::App(AppError::Manifest(e))) => {
+            assert_eq!(e.problems[0].path, "scope_reasons");
+        }
+        other => panic!("{other:?}"),
+    }
 }

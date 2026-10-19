@@ -1628,6 +1628,30 @@ else
 fi
 
 echo
+echo "## private apps (design note 0029, §4.1)"
+PRIVATE_MANIFEST='{"key":"app_e2e_private","name":"E2E private","version":"1.0.0",
+ "app_url":"https://rates.e2e.example","redirect_uris":[],
+ "scopes":["shipping:read","customer_data:address"],
+ "scope_reasons":{"customer_data:address":"quotes by postal code"},"privacy_url":"/privacy"}'
+step "an upload is checked like a manifest" 422 manifest_invalid -X POST "$BASE/admin/apps/private" -H "$JSON" \
+    -d '{"manifest":{"key":"app_e2e_private","name":"E2E private","version":"1.0.0","app_url":"ftp://x","redirect_uris":[],"privacy_url":"/p"}}'
+step "upload a private app's manifest" 201 - -X POST "$BASE/admin/apps/private" -H "$JSON" \
+    -d "{\"manifest\":$PRIVATE_MANIFEST}"
+contains "under its URN" '"client_id":"urn:hypha:private:app_e2e_private"'
+PRIVATE_REQUEST=$(sed -E 's/.*"id":"(oareq_[0-9a-f]+)".*/\1/' <<<"$BODY")
+step "approving it answers with its credentials" 200 - -X POST "$BASE/admin/oauth/requests/$PRIVATE_REQUEST/approve"
+contains "and no redirect" '"redirect_to":null'
+contains "its secret, once" '"app_secret":"hypha_as_'
+PRIVATE_TOKEN=$(sed -E 's/.*"access_token":"(hypha_at_[0-9a-f]+)".*/\1/' <<<"$BODY")
+OWNER_AUTH=("${AUTH[@]}")
+AUTH=(-H "authorization: Bearer $PRIVATE_TOKEN")
+step "its token reads shipping" 200 - "$BASE/admin/shipping-zones"
+AUTH=("${OWNER_AUTH[@]}")
+step "a private app isn't refreshed" 409 app_is_private -X POST "$BASE/admin/apps/app_e2e_private/refresh"
+step "uninstall the private app" 204 - -X DELETE "$BASE/admin/apps/app_e2e_private"
+step "delete the private app" 204 - -X DELETE "$BASE/admin/apps/app_e2e_private"
+
+echo
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
 step "wrong method" 405 method_not_allowed -X DELETE "$BASE/admin/products/$MUG"

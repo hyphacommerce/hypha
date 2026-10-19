@@ -232,6 +232,7 @@ macro_rules! route_table {
             [admin, GET, "/admin/oauth/requests/{id}", oauth::fetch_request],
             [admin, POST, "/admin/oauth/requests/{id}/approve", oauth::approve_request],
             [admin, POST, "/admin/oauth/requests/{id}/deny", oauth::deny_request],
+            [admin, POST, "/admin/apps/private", oauth::create_private],
             [admin, POST, "/admin/apps/{key}/refresh", app_extensions::refresh],
             // app UI in any admin and storefront, the app proxy (design note 0029, §5-§8)
             [admin, GET, "/admin/app-extensions", app_extensions::list_admin],
