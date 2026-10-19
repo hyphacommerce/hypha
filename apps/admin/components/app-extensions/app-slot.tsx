@@ -39,7 +39,7 @@ export async function AppSlot({
           appKey={block.app}
           appName={block.appName}
           tree={block.tree}
-          actions={actions.filter((a) => a.app === block.app)}
+          actions={blockActions(extensions, block.app, target)}
           context={context}
           pagePath={appPagePath(extensions, block.app, "/")}
         />
@@ -47,6 +47,17 @@ export async function AppSlot({
       {withActions && <AppActionButtons actions={actions} context={context} appNames={appNames} />}
     </VStack>
   );
+}
+
+/**
+ * The actions a block's buttons may name: every action of its app, the block's own
+ * target's first. A block shows where the app chooses (`order.payment`) and its buttons
+ * often run actions registered for another target (Capture is a `payment` action, run
+ * through the payment's route): looking only in the block's target would miss them.
+ */
+function blockActions(extensions: Extensions, app: string, target: AdminTarget) {
+  const own = extensions.actions.filter((a) => a.app === app);
+  return [...own.filter((a) => a.target === target), ...own.filter((a) => a.target !== target)];
 }
 
 /** Just the apps' action buttons for a target (a payment's, beside its own). */
