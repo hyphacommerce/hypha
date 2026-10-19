@@ -60,17 +60,33 @@ function blockActions(extensions: Extensions, app: string, target: AdminTarget) 
   return [...own.filter((a) => a.target === target), ...own.filter((a) => a.target !== target)];
 }
 
+/**
+ * Whether a payment action fits the payment's status: capture and void act on money not
+ * yet collected, a refund on money that was. Other actions always show.
+ */
+function fitsPayment(point: string | null | undefined, status: string): boolean {
+  if (point === "payments.capture" || point === "payments.void")
+    return status === "pending" || status === "authorized";
+  if (point === "payments.refund") return status === "paid" || status === "partially_refunded";
+  return true;
+}
+
 /** Just the apps' action buttons for a target (a payment's, beside its own). */
 export function AppActions({
   extensions,
   target,
   context,
+  paymentStatus,
 }: {
   extensions: Extensions;
   target: AdminTarget;
   context: ExtensionContext;
+  /** On a payment: only the actions its status allows (no Capture on a paid one). */
+  paymentStatus?: string;
 }) {
-  const { actions } = forTarget(extensions, target);
+  const actions = forTarget(extensions, target).actions.filter(
+    (a) => paymentStatus === undefined || fitsPayment(a.point, paymentStatus),
+  );
   const appNames = Object.fromEntries(extensions.apps.map((a) => [a.key, a.name]));
   return <AppActionButtons actions={actions} context={context} appNames={appNames} />;
 }

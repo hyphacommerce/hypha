@@ -439,6 +439,7 @@ function PaymentCard({
                   extensions={extensions}
                   target="payment"
                   context={{ payment_id: payment.id, order_id: order.id }}
+                  paymentStatus={payment.status}
                 />
                 <AppSlot
                   extensions={extensions}
