@@ -78,7 +78,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ),
     ("notification_settings_pkey", notification_keys::SETTINGS),
     (
-        "spore_settings_key",
+        "built_in_settings_key",
         hypha_apps::spore_settings::keys::SPORE_SETTINGS,
     ),
     ("notifications_pkey", notification_keys::NOTIFICATION_ID),

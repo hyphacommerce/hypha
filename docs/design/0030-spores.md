@@ -365,7 +365,7 @@ storefront already trusts.
 
 ## 8. Settings and secrets
 
-Spores don't each build a settings store. Core gains one: `spore_settings` (one row per
+Spores don't each build a settings store. Core gains one: `built_in_settings` (one row per
 spore: its JSON, version-checked), written by `PUT /admin/apps/{key}/settings`
 (`apps:write`) for a spore key, which:
 
@@ -546,7 +546,7 @@ app), email senders (already compiled in: they become spores' to add), tax engin
    discovery; the host's environment for `Spore::new`; `TestApp::with_spores!` (§10);
    Cargo features for first-party spores in this workspace (§9).
 3. `hypha-spore` facade, the migration check (§5), `spore_routes!`, `SporeUi` and the
-   two-source UI discovery, core's `spore_settings` with sealed fields and the admin's
+   two-source UI discovery, core's `built_in_settings` with sealed fields and the admin's
    settings form for spores. *Done* (see "As built: step 3"), with step 2's leftovers:
    `SporeEnv`, enable/disable honoured by providers, handlers, routes and UI, and the
    route tests' `app_with_spores::<D>()`. Still left: the `missing` mark (Q7), Cargo
@@ -590,7 +590,7 @@ them, not in this list.
   prefix dropped. Only the current schema is read (other schemas may be other
   databases', as the route tests' are). Tested on Postgres with a well-behaved spore
   and four rogue ones.
-- **Settings (§8).** `spore_settings` (migration 0056: key, version, JSON), repository
+- **Settings (§8).** `built_in_settings` (migration 0056, named outside `spore_*`, which is spores' own: key, version, JSON), repository
   `SporeSettingsRepo` / `HasSporeSettings` in `hypha-apps` (contract scenario
   `spore_settings_repo`, in memory and on Postgres; no outbox events). The schema is a
   subset of JSON Schema, `hypha_apps::SettingsSchema`: an object of scalar fields

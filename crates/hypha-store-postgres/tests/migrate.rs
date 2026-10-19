@@ -700,3 +700,52 @@ async fn a_spore_dropping_a_core_table_is_refused() {
         "{problems:?}"
     );
 }
+
+#[tokio::test]
+async fn a_spore_changing_a_core_column_in_place_is_refused() {
+    let Some(problems) = refused(
+        "migrate_rogue_alter",
+        "ALTER TABLE products ALTER COLUMN title DROP NOT NULL;
+         ALTER TABLE products ALTER COLUMN handle SET DEFAULT 'spore';",
+    )
+    .await
+    else {
+        return;
+    };
+    // Postgres 18 also lists the dropped NOT NULL as a constraint; older ones don't.
+    for line in [
+        "column \"handle\" on \"products\" was changed, and it isn't the spore's",
+        "column \"title\" on \"products\" was changed, and it isn't the spore's",
+    ] {
+        assert!(problems.contains(&line.to_string()), "{problems:?}");
+    }
+}
+
+#[tokio::test]
+async fn core_creates_nothing_in_the_spores_namespace() {
+    let Some(mut client) = fresh_schema("migrate_core_namespace").await else {
+        return;
+    };
+    migrate(&mut client, &[CORE]).await.unwrap();
+    // `spore_*` is spores' own (their migration check counts it theirs): a core table,
+    // index, constraint or function there would be a spore's to clash with.
+    let rows = client
+        .query_typed(
+            "SELECT relname::text FROM pg_class
+              WHERE relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+                AND relname LIKE 'spore\\_%'
+             UNION ALL
+             SELECT conname::text FROM pg_constraint
+              WHERE connamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+                AND conname LIKE 'spore\\_%'
+             UNION ALL
+             SELECT proname::text FROM pg_proc
+              WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+                AND proname LIKE 'spore\\_%'",
+            &[],
+        )
+        .await
+        .unwrap();
+    let names: Vec<String> = rows.iter().map(|r| r.get(0)).collect();
+    assert!(names.is_empty(), "core objects named spore_*: {names:?}");
+}

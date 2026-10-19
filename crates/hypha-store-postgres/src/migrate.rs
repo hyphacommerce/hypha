@@ -301,8 +301,8 @@ pub const CORE: MigrationSet = MigrationSet {
         },
         Migration {
             version: 56,
-            name: "spore_settings",
-            sql: include_str!("../migrations/0056_spore_settings.sql"),
+            name: "built_in_settings",
+            sql: include_str!("../migrations/0056_built_in_settings.sql"),
         },
     ],
 };

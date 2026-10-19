@@ -18,7 +18,7 @@ impl<C: PgConnection> SporeSettingsRepo for PgStore<C> {
             .query_typed_opt(
                 &format!(
                     "SELECT version, settings::text AS settings, {}
-                     FROM spore_settings WHERE key = $1",
+                     FROM built_in_settings WHERE key = $1",
                     stamp_columns("")
                 ),
                 &[(&key.as_str(), Type::TEXT)],
@@ -63,19 +63,19 @@ fn json(settings: &SporeSettings) -> String {
 async fn insert(tx: &impl Queries, s: &SporeSettings) -> Result<(), RepoError> {
     let key = s.key().as_str();
     tx.query_typed(
-        "INSERT INTO spore_settings (key, version, settings) VALUES ($1, 1, $2::text::jsonb)",
+        "INSERT INTO built_in_settings (key, version, settings) VALUES ($1, 1, $2::text::jsonb)",
         &[(&key, Type::TEXT), (&json(s), Type::TEXT)],
     )
     .await
     .map_err(repo_error)?;
-    write_stamps(tx, "spore_settings", "key", &key, Type::TEXT, s.stamps()).await
+    write_stamps(tx, "built_in_settings", "key", &key, Type::TEXT, s.stamps()).await
 }
 
 async fn update(tx: &impl Queries, s: &SporeSettings) -> Result<Version, RepoError> {
     let key = s.key().as_str();
     let row = tx
         .query_typed_opt(
-            "UPDATE spore_settings SET version = version + 1, settings = $3::text::jsonb
+            "UPDATE built_in_settings SET version = version + 1, settings = $3::text::jsonb
              WHERE key = $1 AND version = $2 RETURNING version",
             &[
                 (&key, Type::TEXT),
@@ -87,6 +87,6 @@ async fn update(tx: &impl Queries, s: &SporeSettings) -> Result<Version, RepoErr
         .map_err(repo_error)?
         .ok_or(RepoError::StaleVersion)?;
     let version = version_from_db(col(&row, "version")?)?;
-    write_stamps(tx, "spore_settings", "key", &key, Type::TEXT, s.stamps()).await?;
+    write_stamps(tx, "built_in_settings", "key", &key, Type::TEXT, s.stamps()).await?;
     Ok(version)
 }

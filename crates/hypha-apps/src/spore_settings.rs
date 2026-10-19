@@ -420,7 +420,7 @@ impl Stamped for SporeSettings {
 /// Uniqueness rules, reported as `RepoError::Duplicate(key)`.
 pub mod keys {
     /// One record per spore.
-    pub const SPORE_SETTINGS: &str = "spore_settings_key";
+    pub const SPORE_SETTINGS: &str = "built_in_settings_key";
 }
 
 /// Spores' settings, by key. Records nothing in the outbox.
@@ -630,6 +630,16 @@ pub enum SettingsReadError {
     Repo(#[from] RepoError),
     #[error(transparent)]
     Seal(#[from] SealError),
+}
+
+impl hypha_core::ErrorCode for SettingsReadError {
+    fn code(&self) -> &'static str {
+        match self {
+            SettingsReadError::Repo(e) => e.code(),
+            // Another `HYPHA_SECRET_KEY` than sealed it: the operator's to fix.
+            SettingsReadError::Seal(_) => "internal_error",
+        }
+    }
 }
 
 /// A spore's settings in plain text, secrets opened, for the spore itself (as core
