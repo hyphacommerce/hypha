@@ -844,9 +844,11 @@ gaps; each is fixed as described.
 - **App → Hypha over the binding:** an app called through a binding sends no
   `CF-Connecting-IP`, and it isn't given the caller key (apps are untrusted, AP1). So
   `peer.rs` now gives a call with neither the key nor `CF-Connecting-IP` (only a
-  Service Binding's) the unspecified address, one rate-limit bucket for those calls,
-  instead of no peer at all (which made the public routes, `/oauth/token` included,
-  answer 500).
+  Service Binding's) one reserved address, `BOUND_APPS` (`100::1`, in RFC 6666's
+  discard prefix), one rate-limit bucket for those calls, instead of no peer at all
+  (which made the public routes, `/oauth/token` included, answer 500). It isn't the
+  address our own Workers' client-less calls share (`OUR_WORKERS`, `::`): limits key
+  IPv6 by its /64, so an app spending its limit can't spend theirs.
 - **A server:** the app's Node bundle is built here (`pnpm build:node`), then its own
   Dockerfile where the API's image is built (on the server over SSH, or here and
   copied with `--build-on here`). `compose.apps.yaml` (written every deploy, read after
@@ -869,3 +871,59 @@ gaps; each is fixed as described.
   the staff member approves on the consent page as for any app. `hypha apps install
   [name]` does the same later; `hypha apps status` shows each app's commit, URL,
   whether it answers and whether it's installed (exit 1 when one isn't).
+
+## As built: review fixes (2026-10-19)
+
+A review of the branch found these; each is fixed as described, with a test that
+would have caught it.
+
+- **Auto-approval changes nothing.** `/oauth/authorize` takes no credentials, so an app
+  asking for no scope beyond its grant gets a code for the scopes it asked for (its
+  tokens have them) and the app is left exactly as it was: no narrowed grant, no
+  manifest applied. Before, it narrowed the grant to the subset (and applied the
+  manifest), so anyone could shrink an app's grant by sending a browser there. §4.1's
+  "fewer scopes take effect at once" holds for a manifest refresh (`refresh_manifest`,
+  authenticated) and staff's `PATCH /admin/apps/{key}/grant`, not for `/oauth/authorize`.
+- **Approval checks the manifest URL.** Approving a request whose client ID isn't the
+  manifest URL the app under that key is installed (or was uninstalled) from is
+  refused: `409 app_installed_from_other_url` (`app_installed_from_url` for an upload,
+  as before). `authorize` refused such a request when the app was installed first;
+  this is the other order (two requests for one key from different manifests, both
+  pending), which could swap the installed manifest.
+- **Deliveries are checked again when sent.** `prepare` asks `App::wants_event` with the
+  app as it is now: a delivery queued or retrying for an app since uninstalled (but its
+  own `app.uninstalled`), whose grant no longer reads what the event is about, or no
+  longer subscribed to the type, fails for good at once with why ("app … is
+  uninstalled: …", "…'s grant no longer covers …", "… is no longer subscribed to …").
+  A disabled app's still wait on the schedule. Redaction already followed the grant at
+  send time (`HostWebhooks`).
+- **Checkout never fails after its commit.** `start` answers the next action or the
+  provider's error, nothing else: a reference that can't be stored (storage, or a
+  provider's reference the payment can't keep) is logged and left out, and the answer
+  shows the payment as stored. Starting the payment again (the same key) stores it.
+- **A refund counts once per provider refund ID.** A refund report's `reference` is the
+  provider's ID for that refund (Stripe's `re_…`), kept in the payment's
+  `refund_references` (migration 0054, `text[]`, oldest first), not as the payment's
+  reference, which stays the payment's (`pi_…`, what capture, void and refund send the
+  app). A refund reported again under an ID counted already changes nothing, whatever
+  its idempotency key or the payment's status now; an app must send it
+  (`422 refund_reference_required`); staff may record one without. `payment.refunded`
+  gained `refund` (this refund's ID). A payment app reports each provider refund under
+  its own ID (Stripe's: every refund of the charge, each with its amount, `refunded`
+  for the one that completes it), so a webhook delivered twice, or two raced, can't
+  count one twice.
+- **The issuer is configured.** `server.public_url` (`HYPHA_PUBLIC_URL`) is the API's
+  public base URL: the RFC 8414 metadata, the token answers' `issuer`, session tokens'
+  `iss` and a private app's `token_endpoint` (before, the internal address the admin
+  called). `hypha deploy` sets it (Cloudflare: the API Worker's vars; a server: `.env`'s
+  `API_URL`, read by `compose.yaml`; a `compose.yaml` from before needs `init --force`
+  to gain the line). Unset, it's derived from each request, now believing
+  `X-Forwarded-Host`/`-Proto` only from `server.trusted_proxies` (as `ClientIp` does
+  `X-Forwarded-For`), else the `Host` header (`hypha_http::routes::oauth::Issuer`).
+- **App domains in `hypha.json` are checked** as `apps add --domain` checks them
+  (lowercased; no scheme, port or path), so a hand-edited one can't reach the API
+  Worker's `HYPHA_APP_BINDINGS`, which refuses it and every request with it.
+- **One call-log helper:** `hypha_extensions::record_call` (`Finished`) records points'
+  calls and blocks', with the status the app answered and a saturating duration.
+- **Payment methods ask each provider once** per listing (`cart_payment_methods`), and
+  only for methods offered in the cart's market and channel.
