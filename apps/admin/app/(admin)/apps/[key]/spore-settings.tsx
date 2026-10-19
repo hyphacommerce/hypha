@@ -134,7 +134,11 @@ export function SporeSettingsForm({
               <TextInput
                 label={label}
                 type="password"
-                description={property.description ?? description}
+                // Whether it's set comes first: a spore's own description (where to find
+                // the key) mustn't hide it.
+                description={
+                  property.description ? `${description} ${property.description}` : description
+                }
                 placeholder={wasSet ? "••••••••" : undefined}
                 isRequired={required.has(name) && !wasSet}
                 isDisabled={isDisabled}
