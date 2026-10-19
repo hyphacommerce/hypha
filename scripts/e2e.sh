@@ -1622,7 +1622,10 @@ if [[ -n $UI_APP ]]; then
     step "the admin proxy" 201 - -X POST "$BASE/admin/apps/app_e2e_ui/proxy/settings?x=1" -H "$JSON" -d '{"a":1}'
     contains "forwards the path and the body" '"method":"POST","path":"/admin-api/settings?x=1"'
     contains "with the context, signed" '"hypha-path":"/settings?x=1"'
-    step "a path that climbs out" 400 invalid_proxy_path "$BASE/admin/apps/app_e2e_ui/proxy/a/%2e%2e/b"
+    # A backslash, encoded: refused the same on every host. (A `..` segment is refused too,
+    # tested in the route tests; workerd resolves `%2e%2e` before the Worker sees the URL,
+    # so on Workers it never reaches the check, and the request stays inside the proxy.)
+    step "a path with a backslash" 400 invalid_proxy_path "$BASE/admin/apps/app_e2e_ui/proxy/a%5cb"
 
     step "what apps add to a storefront" 200 - "$BASE/storefront/app-extensions"
     contains "its element, absolute" "\"tag\":\"e2e-pay\",\"module\":\"$UI_BASE/el.js\""
