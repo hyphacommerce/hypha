@@ -289,6 +289,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "session_details",
             sql: include_str!("../migrations/0053_session_details.sql"),
         },
+        Migration {
+            version: 54,
+            name: "payment_refund_references",
+            sql: include_str!("../migrations/0054_payment_refund_references.sql"),
+        },
     ],
 };
 

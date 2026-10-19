@@ -104,8 +104,10 @@ pub struct PaymentRefunded {
     /// Every refund so far, this one included.
     pub refunded: Money,
     pub status: &'static str,
-    /// The provider's ID for the payment (or this refund), when it gave one.
+    /// The provider's ID for the payment, when it gave one.
     pub reference: Option<String>,
+    /// The provider's ID for this refund, when it gave one (an app always does).
+    pub refund: Option<String>,
 }
 
 impl Event for PaymentRefunded {

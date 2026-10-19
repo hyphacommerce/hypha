@@ -841,7 +841,9 @@ impl From<hypha_order_actions::CommandError> for ApiError {
             E::OrderNotFound(_) | E::FulfillmentNotFound(_) | E::PaymentNotFound(_) => {
                 StatusCode::NOT_FOUND
             }
-            E::LocationNotFound(_) | E::AmountMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            E::LocationNotFound(_) | E::AmountMismatch { .. } | E::RefundReferenceRequired(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             // Another provider's payment: this app may not report on it.
             E::PaymentNotYours { .. } => StatusCode::FORBIDDEN,
             // The order's or its payments' state.

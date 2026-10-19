@@ -5927,9 +5927,11 @@ async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
         (StatusCode::CONFLICT, "payment_refused")
     );
     assert_eq!(json["details"], json!({"reason": "too late"}));
-    let partial = json!({"type": "partially_refunded", "amount": 100});
-    for _ in 0..2 {
-        let (status, json) = report(&app, &payment, "evt_3", partial.clone()).await;
+    // Twice under one key (a retry), then again under another (the provider's webhook
+    // delivered twice): the refund's own ID counts it once.
+    let partial = json!({"type": "partially_refunded", "amount": 100, "reference": "re_1"});
+    for key in ["evt_3", "evt_3", "evt_3b"] {
+        let (status, json) = report(&app, &payment, key, partial.clone()).await;
         assert_eq!(status, StatusCode::OK, "{json}");
         assert_eq!(json["financial_status"], "partially_refunded");
         assert_eq!(json["payment"]["refunded"]["amount"], 100);

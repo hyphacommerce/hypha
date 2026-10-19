@@ -175,6 +175,9 @@ pub struct Payment {
     refunded: Money,
     /// The provider's ID; for manual payments, what staff typed (a bank reference).
     reference: Option<String>,
+    /// The provider's IDs of the refunds counted in `refunded`, oldest first: a refund
+    /// reported again under one of them changes nothing (`refund`).
+    refund_references: Vec<String>,
     /// The method's instructions at checkout.
     instructions: Option<String>,
     paid_at: Option<Timestamp>,
@@ -224,6 +227,7 @@ impl Payment {
             status: PaymentStatus::Pending,
             refunded: Money::zero(currency),
             reference: None,
+            refund_references: Vec::new(),
             instructions: new.instructions,
             paid_at: None,
             voided_at: None,
@@ -352,12 +356,23 @@ impl Payment {
     /// `None`, leaving it `reported`: `refunded` must give back all that's left,
     /// `partially_refunded` less (`invalid_refund_amount` otherwise, as for a refund of
     /// nothing or of more than is left). Refused unless paid or partially refunded.
+    ///
+    /// `refund` is the provider's ID for this refund (not the payment's: `reference`
+    /// stays what it was). One counted already changes nothing (`Ok(false)`), whatever
+    /// the payment's status now: a provider's webhook delivered twice, or reported
+    /// again under another idempotency key, must not give the money back twice.
     pub fn refund(
         &mut self,
         amount: Option<Money>,
         reported: PaymentStatus,
-        reference: Option<String>,
-    ) -> Result<(), PaymentError> {
+        refund: Option<String>,
+    ) -> Result<bool, PaymentError> {
+        let refund = optional_text("refund reference", refund)?;
+        if let Some(refund) = &refund
+            && self.refund_references.contains(refund)
+        {
+            return Ok(false);
+        }
         if !matches!(
             reported,
             PaymentStatus::Refunded | PaymentStatus::PartiallyRefunded
@@ -397,12 +412,11 @@ impl Payment {
                 reported,
             });
         }
-        let reference = optional_text("reference", reference)?;
         let given = Money::new(amount, currency)?;
         self.refunded = Money::new(after, currency)?;
         self.status = reported;
-        if reference.is_some() {
-            self.reference = reference;
+        if let Some(refund) = &refund {
+            self.refund_references.push(refund.clone());
         }
         let refunded = PaymentRefunded {
             payment: self.id,
@@ -413,9 +427,10 @@ impl Payment {
             refunded: self.refunded,
             status: self.status.as_str(),
             reference: self.reference.clone(),
+            refund,
         };
         self.events.record(self.subject(), &refunded);
-        Ok(())
+        Ok(true)
     }
 
     /// Keeps the provider's ID for the payment (what its start answered); a blank one
@@ -466,6 +481,11 @@ impl Payment {
         self.reference.as_deref()
     }
 
+    /// The provider's IDs of the refunds counted so far, oldest first.
+    pub fn refund_references(&self) -> &[String] {
+        &self.refund_references
+    }
+
     pub fn instructions(&self) -> Option<&str> {
         self.instructions.as_deref()
     }
@@ -493,6 +513,7 @@ pub struct PaymentSnapshot {
     pub status: PaymentStatus,
     pub refunded: Money,
     pub reference: Option<String>,
+    pub refund_references: Vec<String>,
     pub instructions: Option<String>,
     pub paid_at: Option<Timestamp>,
     pub voided_at: Option<Timestamp>,
@@ -512,6 +533,7 @@ impl Payment {
             status: self.status,
             refunded: self.refunded,
             reference: self.reference.clone(),
+            refund_references: self.refund_references.clone(),
             instructions: self.instructions.clone(),
             paid_at: self.paid_at,
             voided_at: self.voided_at,
@@ -550,6 +572,18 @@ impl Payment {
             return Err(inconsistent("voided_at doesn't match the status"));
         }
         let instructions = instructions_text(s.instructions)?;
+        let mut refund_references = Vec::with_capacity(s.refund_references.len());
+        for refund in s.refund_references {
+            let refund = optional_text("refund reference", Some(refund))?
+                .ok_or(inconsistent("a blank refund reference"))?;
+            if refund_references.contains(&refund) {
+                return Err(inconsistent("a refund reference counted twice"));
+            }
+            refund_references.push(refund);
+        }
+        if !s.status.captured() && !refund_references.is_empty() {
+            return Err(inconsistent("refund references without a refund"));
+        }
         Ok(Self {
             id: s.id,
             version: s.version,
@@ -562,6 +596,7 @@ impl Payment {
             status: s.status,
             refunded: s.refunded,
             reference: optional_text("reference", s.reference)?,
+            refund_references,
             instructions,
             paid_at: s.paid_at,
             voided_at: s.voided_at,
@@ -817,20 +852,57 @@ mod tests {
         let mut p = paid(1, 1000);
         assert_eq!(
             p.refund(Some(eur(300)), PaymentStatus::PartiallyRefunded, None),
-            Ok(())
+            Ok(true)
         );
         assert_eq!(
             (p.status(), p.refunded()),
             (PaymentStatus::PartiallyRefunded, eur(300))
         );
         // The rest, without an amount.
-        assert_eq!(p.refund(None, PaymentStatus::Refunded, None), Ok(()));
+        assert_eq!(p.refund(None, PaymentStatus::Refunded, None), Ok(true));
         assert_eq!(
             (p.status(), p.refunded()),
             (PaymentStatus::Refunded, eur(1000))
         );
         assert_eq!(types(&mut p), ["payment.refunded", "payment.refunded"]);
         assert!(Payment::restore(p.snapshot()).is_ok());
+    }
+
+    #[test]
+    fn a_refund_counted_under_its_reference_counts_once() {
+        let mut p = paid(1, 1000);
+        let partly = PaymentStatus::PartiallyRefunded;
+        let re = |id: &str| Some(id.to_string());
+        assert_eq!(p.refund(Some(eur(300)), partly, re("re_1")), Ok(true));
+        // The same refund again: nothing, even with another amount or status.
+        assert_eq!(p.refund(Some(eur(300)), partly, re("re_1")), Ok(false));
+        assert_eq!(
+            p.refund(None, PaymentStatus::Refunded, re("re_1")),
+            Ok(false)
+        );
+        assert_eq!(p.refunded(), eur(300));
+        assert_eq!(
+            p.refund(Some(eur(700)), PaymentStatus::Refunded, re("re_2")),
+            Ok(true)
+        );
+        // Refunded wholly, an earlier refund reported again is still nothing.
+        assert_eq!(p.refund(Some(eur(300)), partly, re("re_1")), Ok(false));
+        assert_eq!(p.refund_references(), ["re_1", "re_2"]);
+        assert_eq!(p.reference(), None, "the payment's own reference stays");
+        assert_eq!(types(&mut p), ["payment.refunded", "payment.refunded"]);
+        assert_eq!(Payment::restore(p.snapshot()), Ok(p));
+    }
+
+    #[test]
+    fn a_refund_reference_counted_twice_or_on_an_uncaptured_payment_doesnt_restore() {
+        let mut twice = paid(1, 1000).snapshot();
+        twice.status = PaymentStatus::PartiallyRefunded;
+        twice.refunded = eur(300);
+        twice.refund_references = vec!["re_1".to_string(), "re_1".to_string()];
+        assert!(Payment::restore(twice).is_err());
+        let mut pending = new_payment(2, 1000).snapshot();
+        pending.refund_references = vec!["re_1".to_string()];
+        assert!(Payment::restore(pending).is_err());
     }
 
     #[test]
@@ -853,7 +925,7 @@ mod tests {
         assert_eq!(refused(1000, Partly), invalid(1000, Partly));
         assert_eq!(refused(999, All), invalid(999, All));
         assert_eq!(refused(1001, All), invalid(1001, All));
-        assert_eq!(refused(1000, All), Ok(()));
+        assert_eq!(refused(1000, All), Ok(true));
         let mut pending = new_payment(2, 1000);
         assert_eq!(
             pending.refund(None, All, None),

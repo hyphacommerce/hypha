@@ -43,7 +43,12 @@ pub struct PaymentEvent {
     /// left); for any other kind, absent or the payment's whole amount (no partial
     /// captures).
     pub amount: Option<i64>,
-    /// The provider's ID for the payment (or the refund), kept on it.
+    /// The provider's ID for the payment, kept on it; for a refund (`partially_refunded`,
+    /// `refunded`), the provider's ID for that refund, kept in the payment's
+    /// `refund_references` and not as its reference. A refund reported again under an
+    /// ID counted already changes nothing (a provider's webhook delivered twice, or
+    /// reported under another idempotency key). An app must send it for refunds
+    /// (`refund_reference_required`).
     pub reference: Option<String>,
     /// When it happened at the provider; absent is now. When it was paid or voided.
     pub occurred_at: Option<Timestamp>,
@@ -79,9 +84,11 @@ async fn check_reporter<S: HasApps>(
 /// Records what a payment's provider reports (`payments:write`), moving the payment
 /// (`payment.authorized`, `.paid`, `.failed`, `.voided`, `.refunded`) and its order's
 /// payment status (`order.paid` once paid) in one batch with the idempotency key,
-/// retried when another request changed them first. A report of the status the payment
-/// is in already changes nothing (a webhook delivered twice). Refused: an unknown
-/// payment (`payment_not_found`), another app's payment (`payment_not_yours`), a move
+/// retried when another request changed them first. A refund reported again under the
+/// provider's ID for it (`reference`) changes nothing, and an app must send that ID
+/// (`refund_reference_required`). A report of the status the payment is in already
+/// changes nothing (a webhook delivered twice). Refused: an unknown payment
+/// (`payment_not_found`), another app's payment (`payment_not_yours`), a move
 /// the status doesn't allow (`invalid_payment_transition`), an amount that doesn't fit
 /// (`invalid_refund_amount`, `payment_amount_mismatch`). A cancelled order still takes
 /// reports: they say where the money is.
@@ -131,6 +138,17 @@ async fn record_once<S: OrderActionPorts + HasApps>(
         ))
         .into());
     };
+    let refunding = matches!(
+        input.kind,
+        PaymentEventKind::PartiallyRefunded | PaymentEventKind::Refunded
+    );
+    let blank = input
+        .reference
+        .as_deref()
+        .is_none_or(|r| r.trim().is_empty());
+    if refunding && blank && matches!(ctx.actor(), Actor::App(_)) {
+        return Err(CommandError::RefundReferenceRequired(payment.id()));
+    }
     let when = input.occurred_at.unwrap_or_else(|| clock.now());
     if !apply(&mut payments[at], input, when)? {
         return Ok(OrderPayments { order, payments });
@@ -169,8 +187,10 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
         _ => Ok(()),
     };
     let refund = |payment: &mut Payment, status: PaymentStatus| {
+        // A refund counted already under its reference is nothing again
+        // (`Payment::refund`); without one, a payment refunded wholly takes a repeated
+        // `refunded` as nothing.
         if payment.status() == status && status == PaymentStatus::Refunded {
-            // Refunded already: a repeated report.
             return Ok::<bool, CommandError>(false);
         }
         let amount = input
@@ -178,8 +198,7 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
             .map(|a| Money::new(a, currency))
             .transpose()
             .map_err(PaymentError::from)?;
-        payment.refund(amount, status, reference.clone())?;
-        Ok(true)
+        Ok(payment.refund(amount, status, reference.clone())?)
     };
     Ok(match input.kind {
         PaymentEventKind::Authorized => {

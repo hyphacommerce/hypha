@@ -77,6 +77,12 @@ pub enum CommandError {
         expected: i64,
         reported: i64,
     },
+    /// An app reported a refund without its provider's ID for it (`reference`): the ID
+    /// is what makes a refund reported twice count once (design note 0029).
+    #[error(
+        "a refund reported on payment {0} by an app needs the provider's refund ID as its reference"
+    )]
+    RefundReferenceRequired(PaymentId),
     /// Cancelling an order with standing fulfilments: these, to cancel first (FU7).
     #[error("order {order} has {} standing fulfilments; cancel them first", .fulfillments.len())]
     HasFulfillments {
@@ -105,6 +111,7 @@ impl ErrorCode for CommandError {
             CommandError::PaymentNotFound(_) => "payment_not_found",
             CommandError::PaymentNotYours { .. } => "payment_not_yours",
             CommandError::AmountMismatch { .. } => "payment_amount_mismatch",
+            CommandError::RefundReferenceRequired(_) => "refund_reference_required",
         }
     }
 }

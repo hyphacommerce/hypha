@@ -1013,6 +1013,7 @@ fn stored_payment(world: &World, n: u128, amount: i64, status: PaymentStatus, re
         status,
         refunded: eur(refunded),
         reference: None,
+        refund_references: vec![],
         instructions: None,
         paid_at: status.captured().then_some(FixedClock::DEFAULT),
         voided_at: (status == PaymentStatus::Voided).then_some(FixedClock::DEFAULT),
@@ -1208,11 +1209,27 @@ impl World {
         amount: Option<i64>,
         idempotency: Option<IdempotencyRequest>,
     ) -> Result<hypha_core::Idempotent<OrderPayments>, CommandError> {
+        use hypha_order_actions::PaymentEventKind as K;
+        // A refund's reference is the refund's own ID: none here (staff may leave it).
+        let reference = match kind {
+            K::PartiallyRefunded | K::Refunded => None,
+            _ => Some("pi_1"),
+        };
+        self.report_ref(kind, amount, reference, idempotency)
+    }
+
+    fn report_ref(
+        &self,
+        kind: hypha_order_actions::PaymentEventKind,
+        amount: Option<i64>,
+        reference: Option<&str>,
+        idempotency: Option<IdempotencyRequest>,
+    ) -> Result<hypha_core::Idempotent<OrderPayments>, CommandError> {
         let input = hypha_order_actions::PaymentEvent {
             payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
             kind,
             amount,
-            reference: Some("pi_1".to_string()),
+            reference: reference.map(str::to_string),
             occurred_at: None,
             idempotency,
         };
@@ -1283,6 +1300,68 @@ fn a_report_with_its_key_replays() {
     let done = world.report(K::Refunded, None, None).unwrap().value;
     assert_eq!(done.payments[0].refunded(), eur(2000));
     assert_eq!(done.order.financial_status(), FinancialStatus::Refunded);
+}
+
+#[test]
+fn a_refund_reported_again_under_its_reference_counts_once() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    world.report(K::Paid, None, None).unwrap();
+    let first = world
+        .report_ref(K::PartiallyRefunded, Some(500), Some("re_1"), None)
+        .unwrap()
+        .value;
+    assert_eq!(first.payments[0].refunded(), eur(500));
+    let events = world.outbox.types().len();
+    // Delivered twice by the provider, reported under another key (or none): nothing.
+    let again = world
+        .report_ref(
+            K::PartiallyRefunded,
+            Some(500),
+            Some("re_1"),
+            key("other", 2),
+        )
+        .unwrap()
+        .value;
+    assert_eq!(again.payments[0].refunded(), eur(500));
+    assert_eq!(world.outbox.types().len(), events);
+    // Another refund counts; the payment keeps its own reference.
+    let done = world
+        .report_ref(K::Refunded, Some(1500), Some("re_2"), None)
+        .unwrap()
+        .value;
+    assert_eq!(done.payments[0].refunded(), eur(2000));
+    assert_eq!(done.payments[0].reference(), Some("pi_1"));
+    assert_eq!(done.payments[0].refund_references(), ["re_1", "re_2"]);
+    assert_eq!(done.order.financial_status(), FinancialStatus::Refunded);
+    // Refunded wholly, the first refund arriving late again is still nothing.
+    let late = world
+        .report_ref(K::PartiallyRefunded, Some(500), Some("re_1"), None)
+        .unwrap()
+        .value;
+    assert_eq!(late.payments[0].refunded(), eur(2000));
+}
+
+#[test]
+fn an_app_must_name_the_refund_it_reports() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    app_payment(&world, "app_pay", app_id(71));
+    let app = Actor::App(app_id(71));
+    assert_eq!(world.report_as(app, K::Paid), Ok(PaymentStatus::Paid));
+    assert_eq!(
+        world.report_as(app, K::Refunded),
+        Err(CommandError::RefundReferenceRequired(
+            hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001))
+        ))
+    );
+    // Staff may record a refund without the provider's ID.
+    let staff = Actor::User(hypha_core::UserId::from_uuid(Uuid::from_u128(9)));
+    assert_eq!(
+        world.report_as(staff, K::Refunded),
+        Ok(PaymentStatus::Refunded)
+    );
 }
 
 #[test]
