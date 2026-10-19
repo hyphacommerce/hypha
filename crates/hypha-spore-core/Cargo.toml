@@ -1,0 +1,21 @@
+[package]
+name = "hypha-spore-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "The Spore trait (design note 0030, §4): what a spore declares and contributes, and the set a host is built with."
+
+# Above the domain crates and the storage adapter whose types a spore names (its
+# migrations are a `MigrationSet`), below the hosts that list spores. Builds for wasm,
+# like every spore (SP8).
+[dependencies]
+hypha-core.workspace = true
+hypha-apps = { path = "../hypha-apps" }
+hypha-payments = { path = "../hypha-payments" }
+hypha-store-postgres = { path = "../hypha-store-postgres" }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
