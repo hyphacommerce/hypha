@@ -1599,7 +1599,9 @@ export interface paths {
          * Approves a request: installs the app (or replaces its grant) with the scopes asked
          *     for. The staff member needs `apps:write` and every scope requested
          *     (`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten
-         *     minutes, `oauth_request_decided` once answered. A private app's approval answers
+         *     minutes, `oauth_request_decided` once answered; `app_installed_from_other_url` (or,
+         *     for an upload, `app_installed_from_url`) when the key is an app installed from
+         *     another manifest URL since the request was made. A private app's approval answers
          *     with its `credentials` (and no `redirect_to`), shown this once.
          */
         post: operations["admin.oauth.approve_request"];
@@ -1845,8 +1847,8 @@ export interface paths {
          *     and its order's payment status in one batch, recording `payment.authorized`,
          *     `.paid`, `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the
          *     status a payment is in already changes nothing. Send an `Idempotency-Key` (the
-         *     provider's event ID): a retry with it answers as the first did, and a refund isn't
-         *     counted twice. A move the payment's status doesn't allow is `409
+         *     provider's event ID): a retry with it answers as the first did. A refund is counted
+         *     once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409
          *     invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
          */
         post: operations["admin.payments.report_event"];
@@ -4400,8 +4402,11 @@ export interface components {
             /** @description When it happened at the provider, RFC 3339; absent is now. */
             occurred_at?: string | null;
             /**
-             * @description The provider's ID for the payment (a PaymentIntent's `pi_…`), kept on it. Up to
-             *     255 characters.
+             * @description The provider's ID for the payment (a PaymentIntent's `pi_…`), kept on it. For a
+             *     refund (`partially_refunded`, `refunded`), the provider's ID for that refund
+             *     (Stripe's `re_…`), kept in the payment's refund list, not as its reference: a
+             *     refund reported again under an ID counted already changes nothing. An app must
+             *     send it for refunds (`422 refund_reference_required`). Up to 255 characters.
              */
             reference?: string | null;
             type: components["schemas"]["PaymentEventTypeDto"];
