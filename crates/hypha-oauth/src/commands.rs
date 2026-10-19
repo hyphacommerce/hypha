@@ -481,7 +481,7 @@ pub async fn exchange_code<S: OAuthPorts>(
     if !pkce::verify(&input.code_verifier, code.code_challenge()) {
         return Err(invalid("code_verifier doesn't match the code_challenge"));
     }
-    let app = installed_app(ports, code.app())
+    let mut app = installed_app(ports, code.app())
         .await?
         .ok_or_else(|| invalid("the app is not installed"))?;
     let scopes = within_grant(code.scopes(), &app);
@@ -490,6 +490,13 @@ pub async fn exchange_code<S: OAuthPorts>(
     let mut batch = ports.batch();
     batch.update_oauth_code(&mut code);
     batch.insert_oauth_token(&mut token);
+    // The app gets its secret with these tokens: only now can it verify deliveries, so
+    // `app.installed` is recorded here, not at approval.
+    if code.first_install() {
+        app.installed()
+            .map_err(|_| invalid("the app is not installed"))?;
+        batch.update_app(&mut app);
+    }
     match ports.commit(batch).await {
         // Another exchange of the same code won.
         Err(RepoError::StaleVersion) => return Err(invalid("the code was used already")),

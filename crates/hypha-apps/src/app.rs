@@ -237,7 +237,8 @@ impl App {
     }
 
     /// An app installed from its manifest with the scopes staff approved: its name,
-    /// webhook and subscriptions come from the manifest. Records `app.installed`.
+    /// webhook and subscriptions come from the manifest. `app.installed` waits for the
+    /// app's first code exchange (`installed`), which hands it the secret.
     pub fn install(
         id: AppId,
         secret: Sealed,
@@ -253,19 +254,12 @@ impl App {
             subscriptions: Vec::new(),
         })?;
         app.apply_manifest(manifest)?;
-        app.events.record(
-            app.subject(),
-            &AppInstalled {
-                app: app.key.to_string(),
-                scopes: grant.scopes().iter().map(|s| s.as_str()).collect(),
-            },
-        );
         app.grant = Some(grant);
         Ok(app)
     }
 
     /// Installs an app again after it was uninstalled (the same key): a new secret,
-    /// the manifest and the grant, enabled. Records `app.installed`.
+    /// the manifest and the grant, enabled. `app.installed` waits, as for `install`.
     pub fn reinstall(
         &mut self,
         secret: Sealed,
@@ -276,14 +270,21 @@ impl App {
         self.secret = secret;
         self.enabled = true;
         self.uninstalled_at = None;
-        self.events.record(
-            self.subject(),
-            &AppInstalled {
-                app: self.key.to_string(),
-                scopes: grant.scopes().iter().map(|s| s.as_str()).collect(),
-            },
-        );
         self.grant = Some(grant);
+        Ok(())
+    }
+
+    /// Records `app.installed`, with the grant's scopes: when the app has exchanged an
+    /// installation's first code, so it holds the secret that signs the delivery (design
+    /// note 0029, §4.1). Sent at approval, it would arrive before the app could verify
+    /// it.
+    pub fn installed(&mut self) -> Result<(), AppError> {
+        let grant = self.grant.as_ref().ok_or(AppError::NotInstalled)?;
+        let event = AppInstalled {
+            app: self.key.to_string(),
+            scopes: grant.scopes().iter().map(|s| s.as_str()).collect(),
+        };
+        self.events.record(self.subject(), &event);
         Ok(())
     }
 

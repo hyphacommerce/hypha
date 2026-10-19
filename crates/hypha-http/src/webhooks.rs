@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use hypha_apps::{App, open_secret};
 use hypha_core::{
-    Actor, AppId, CatalogId, Clock, CustomerId, Delivery, DeliveryId, EventId, InventoryItemId,
-    MarketId, OrderId, PriceListId, ProductId, ShippingZoneId, StoredEvent, TaxClassId,
-    TaxRegionId,
+    Actor, AppId, CatalogId, CategoryId, ChannelId, Clock, CustomerId, Delivery, DeliveryId,
+    EventId, FulfillmentId, InventoryItemId, LocationId, MarketId, OrderId, PaymentId, PriceListId,
+    ProductId, ShippingZoneId, StoreId, StoredEvent, TaxClassId, TaxRegionId,
 };
 use hypha_dispatch::WebhookSender;
 use serde::Serialize;
@@ -28,6 +28,9 @@ pub const EVENT_ID_HEADER: &str = "Hypha-Event-Id";
 pub const EVENT_TYPE_HEADER: &str = "Hypha-Event-Type";
 /// The delivery's ID (`dlv_…`): stable across retries, for de-duplicating.
 pub const DELIVERY_ID_HEADER: &str = "Hypha-Delivery-Id";
+/// The store the event is from (`store_…`), as extension calls name it: an app
+/// installed in several stores picks the secret to verify with before reading the body.
+pub use hypha_extensions::STORE_HEADER;
 
 /// An event as apps receive it (design note 0016, EV5), and as
 /// `GET /admin/events/{id}` shows it.
@@ -89,8 +92,8 @@ impl EventEnvelope {
     }
 }
 
-/// A subject's ID as the API spells it: prefixed for the kinds the catalog has, the
-/// bare UUID for any other (a spore's).
+/// A subject's ID as the API spells it: prefixed for every kind with an ID type, the
+/// bare UUID for any other (`search_settings`, a store's one set, is the nil UUID).
 fn subject_id(kind: &str, id: Uuid) -> String {
     let prefix = match kind {
         "product" => ProductId::PREFIX,
@@ -104,6 +107,11 @@ fn subject_id(kind: &str, id: Uuid) -> String {
         "order" => OrderId::PREFIX,
         "shipping_zone" => ShippingZoneId::PREFIX,
         "app" => AppId::PREFIX,
+        "channel" => ChannelId::PREFIX,
+        "category" => CategoryId::PREFIX,
+        "location" => LocationId::PREFIX,
+        "fulfillment" => FulfillmentId::PREFIX,
+        "payment" => PaymentId::PREFIX,
         _ => return id.to_string(),
     };
     format!("{prefix}_{}", id.simple())
@@ -128,6 +136,8 @@ pub struct HostWebhooks<'a> {
     pub outbound: OutboundPolicy,
     pub env: &'a HostEnv,
     pub clock: &'a HostClock,
+    /// Named in every delivery's `Hypha-Store`.
+    pub store: StoreId,
 }
 
 impl WebhookSender for HostWebhooks<'_> {
@@ -157,6 +167,7 @@ impl WebhookSender for HostWebhooks<'_> {
                 DELIVERY_ID_HEADER,
                 DeliveryId::from_uuid(delivery.id).to_string(),
             ),
+            (STORE_HEADER, self.store.to_string()),
         ];
         let call = SignedCall {
             method: Method::Post,
@@ -212,6 +223,49 @@ mod tests {
                 "occurred_at": "2027-01-15T08:00:00Z",
                 "data": {"handle": "mug"}
             })
+        );
+    }
+
+    #[test]
+    fn every_kind_with_an_id_type_is_prefixed() {
+        let id = Uuid::from_u128(2);
+        let kinds = [
+            (hypha_products::events::PRODUCT, ProductId::PREFIX),
+            (hypha_markets::events::CATALOG, CatalogId::PREFIX),
+            (hypha_markets::events::PRICE_LIST, PriceListId::PREFIX),
+            (hypha_markets::events::MARKET, MarketId::PREFIX),
+            (hypha_tax::events::TAX_CLASS, TaxClassId::PREFIX),
+            (hypha_tax::events::TAX_REGION, TaxRegionId::PREFIX),
+            (
+                hypha_inventory::events::INVENTORY_ITEM,
+                InventoryItemId::PREFIX,
+            ),
+            (hypha_inventory::events::LOCATION, LocationId::PREFIX),
+            (hypha_customers::events::CUSTOMER, CustomerId::PREFIX),
+            (hypha_orders::events::ORDER, OrderId::PREFIX),
+            (
+                hypha_fulfillment::events::FULFILLMENT,
+                FulfillmentId::PREFIX,
+            ),
+            (hypha_payments::events::PAYMENT, PaymentId::PREFIX),
+            (
+                hypha_shipping::events::SHIPPING_ZONE,
+                ShippingZoneId::PREFIX,
+            ),
+            (hypha_apps::APP, AppId::PREFIX),
+            (hypha_channels::events::CHANNEL, ChannelId::PREFIX),
+            (hypha_categories::events::CATEGORY, CategoryId::PREFIX),
+        ];
+        for (kind, prefix) in kinds {
+            assert_eq!(
+                subject_id(kind, id),
+                format!("{prefix}_00000000000000000000000000000002"),
+                "{kind}"
+            );
+        }
+        assert_eq!(
+            subject_id(hypha_search_index::SEARCH_SETTINGS, Uuid::nil()),
+            "00000000-0000-0000-0000-000000000000"
         );
     }
 

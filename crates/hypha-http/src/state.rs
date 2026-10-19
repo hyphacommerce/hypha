@@ -434,6 +434,7 @@ impl<S> AppState<S> {
             outbound: self.outbound(),
             env: &self.env,
             clock: &self.clock,
+            store: self.store,
         }
     }
 }

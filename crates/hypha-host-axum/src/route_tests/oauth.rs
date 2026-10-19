@@ -16,7 +16,8 @@ use super::*;
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
-/// What the app's webhook received: event types, oldest first.
+/// What the app's webhook received: the envelopes, oldest first, each with the
+/// delivery's `Hypha-Store` added as `_store`.
 type Received = Arc<Mutex<Vec<Value>>>;
 
 /// A local app: serves its manifest at `/hypha-app.json` (asking for `scopes`) and
@@ -54,12 +55,15 @@ async fn local_app(scopes: &[&str]) -> (String, Received) {
         )
         .route(
             "/hooks",
-            post(move |_: HeaderMap, body: Bytes| {
+            post(move |headers: HeaderMap, body: Bytes| {
                 let log = Arc::clone(&log);
                 async move {
-                    log.lock()
-                        .unwrap()
-                        .push(serde_json::from_slice(&body).unwrap_or(Value::Null));
+                    let mut envelope: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                    if let Some(fields) = envelope.as_object_mut() {
+                        let store = headers.get("hypha-store").and_then(|v| v.to_str().ok());
+                        fields.insert("_store".to_string(), json!(store));
+                    }
+                    log.lock().unwrap().push(envelope);
                     StatusCode::NO_CONTENT
                 }
             }),
@@ -216,6 +220,9 @@ async fn an_app_is_installed_acts_with_its_grant_and_is_uninstalled() {
         (status, code(&body)),
         (StatusCode::CONFLICT, "oauth_request_decided")
     );
+    // Approved but without its secret yet: the app hears nothing until it exchanges.
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(*received.lock().unwrap(), Vec::<Value>::new());
 
     // The code exchange: a wrong verifier first, then the right one.
     let client = format!("{base}/hypha-app.json");
@@ -249,10 +256,25 @@ async fn an_app_is_installed_acts_with_its_grant_and_is_uninstalled() {
             .unwrap()
             .starts_with("hypha_as_")
     );
+    let store = app.state.store.to_string();
+    assert_eq!(tokens["store"], store);
+    assert_eq!(tokens["issuer"], "http://localhost");
     let access = tokens["access_token"].as_str().unwrap().to_string();
     assert!(access.starts_with("hypha_at_"));
-    // The app hears it's installed.
+    // The app hears it's installed, now that it can verify the delivery.
     hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    {
+        let received = received.lock().unwrap();
+        let installed = received.first().expect("app.installed");
+        assert_eq!(installed["type"], "app.installed");
+        assert_eq!(installed["_store"], store);
+        assert!(
+            installed["subject"]["id"]
+                .as_str()
+                .unwrap()
+                .starts_with("appid_")
+        );
+    }
     let refresh = tokens["refresh_token"].as_str().unwrap().to_string();
 
     // The token acts as the app, with its grant.
@@ -288,6 +310,10 @@ async fn an_app_is_installed_acts_with_its_grant_and_is_uninstalled() {
     let (status, _, second) = raw(&app, "POST", "/oauth/token", Some(refreshed.clone())).await;
     assert_eq!(status, StatusCode::OK, "{second}");
     assert!(second.get("app_secret").is_none());
+    assert_eq!(
+        (&second["store"], &second["issuer"]),
+        (&json!(store), &json!("http://localhost"))
+    );
     let second_access = second["access_token"].as_str().unwrap().to_string();
     let (status, _, body) = raw(&app, "POST", "/oauth/token", Some(refreshed)).await;
     assert_eq!(

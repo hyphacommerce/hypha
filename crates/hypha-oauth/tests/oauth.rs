@@ -121,6 +121,8 @@ fn the_whole_dance_installs_the_app_and_its_tokens_act_as_it() {
     assert_eq!(param(&location, "state").as_deref(), Some("st4te"));
     let code = param(&location, "code").unwrap();
     assert!(code.starts_with("hypha_ac_"));
+    // The app has no secret yet: `app.installed` waits for the exchange.
+    assert_eq!(ports.outbox.events().len(), 0);
 
     let tokens = block_on(exchange_code(&ports, &env, exchange(&code))).unwrap();
     assert!(tokens.access_token.expose().starts_with("hypha_at_"));

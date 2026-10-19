@@ -196,7 +196,8 @@ pub struct TokenRequest {
 }
 
 /// RFC 6749 §5.1's answer. `app_secret` comes with the first installation's code
-/// exchange only: it verifies Hypha's webhook and extension-point signatures.
+/// exchange only: it verifies Hypha's webhook and extension-point signatures. `store`
+/// and `issuer` come with every answer, so an app keys the installation by them.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct TokenResponse {
     /// `hypha_at_…`: send as `Authorization: Bearer`. An hour.
@@ -210,20 +211,28 @@ pub struct TokenResponse {
     refresh_token: String,
     /// The granted scopes, space-separated.
     scope: String,
+    /// The store the tokens are for (`store_…`), as webhooks and extension calls name it
+    /// in `Hypha-Store`.
+    store: hypha_core::StoreId,
+    /// The API's base URL (as `/.well-known/oauth-authorization-server` names it): where
+    /// to call with the tokens, and where to refresh them.
+    issuer: String,
     /// `hypha_as_…`: the app's signing secret, shown this once.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     app_secret: Option<String>,
 }
 
-impl From<IssuedTokens> for TokenResponse {
-    fn from(t: IssuedTokens) -> Self {
+impl TokenResponse {
+    fn new(t: IssuedTokens, store: hypha_core::StoreId, issuer: String) -> Self {
         Self {
             access_token: t.access_token.expose().to_string(),
             token_type: "Bearer",
             expires_in: t.expires_in,
             refresh_token: t.refresh_token.expose().to_string(),
             scope: scope_string(&t.scopes),
+            store,
+            issuer,
             app_secret: t.app_secret,
         }
     }
@@ -300,6 +309,7 @@ fn required(value: Option<String>, name: &str) -> Result<String, TokenError> {
 pub async fn token_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
+    headers: HeaderMap,
     body: FormBody<TokenRequest>,
 ) -> Result<Response, ApiError> {
     enforce(&state.limiter, Rule::OAuthIp, &ip).await?;
@@ -332,7 +342,10 @@ pub async fn token_handler<S: Storage>(
     }
     .await;
     Ok(match issued {
-        Ok(tokens) => no_store(StatusCode::OK, Json(TokenResponse::from(tokens))),
+        Ok(tokens) => no_store(
+            StatusCode::OK,
+            Json(TokenResponse::new(tokens, state.store, issuer(&headers))),
+        ),
         Err(e) => oauth_error(e),
     })
 }
